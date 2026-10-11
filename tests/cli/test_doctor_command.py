@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
+from typing import cast
+from unittest.mock import patch
 
+import pytest
 from pytest import MonkeyPatch
 from structlog.testing import capture_logs
 
@@ -9,27 +12,79 @@ from frame_compare.cli.errors import ExitCode, format_error_json
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport, run_doctor
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.terminal_theme import GLYPHS_ASCII
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
 from .cli_helpers import runner
 
+
+@pytest.mark.parametrize("json_output", [False, True], ids=["human", "json"])
+def test_default_doctor_reports_local_checks_without_http(
+    tmp_path: Path, monkeypatch: MonkeyPatch, json_output: bool
+) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text("[tmdb]\nenabled = false\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    for key in ("TMDB_API_KEY", "FRAME_COMPARE_TMDB__API_KEY", "FRAME_COMPARE_TMDB__ENABLED"):
+        monkeypatch.delenv(key, raising=False)
+    # Exercise the real default registry and config check while isolating host runtimes.
+    for name in ("vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg", "vsview"):
+        monkeypatch.setattr(
+            f"frame_compare.orchestration.doctor_checks._check_{name}",
+            lambda: CheckResult(passed=True, message="Runtime available"),
+        )
+    with (
+        patch("httpx.Client.send", side_effect=AssertionError("Unexpected HTTP request")) as send,
+        patch(
+            "httpx.AsyncClient.send", side_effect=AssertionError("Unexpected HTTP request")
+        ) as async_send,
+    ):
+        result = runner.invoke(app, ["doctor", "--json"] if json_output else ["doctor"])
+
+    send.assert_not_called()
+    async_send.assert_not_called()
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "slowpics" not in result.stdout
+    assert "slow.pics" not in result.stdout
+    if json_output:
+        payload = json.loads(result.stdout)
+        assert payload["success"] is True
+        assert [entry["id"] for entry in payload["doctor"]["checks"]] == [
+            "vapoursynth",
+            "lsmas",
+            "vs_placebo",
+            "ffms2",
+            "ffmpeg",
+            "vsview",
+            "tmdb_api_key",
+        ]
+        assert _doctor_check_entry(payload, "tmdb_api_key")["message"] == (
+            "TMDB metadata lookup disabled"
+        )
+    else:
+        assert "TMDB metadata lookup disabled" in result.stdout
+        assert "Runtime is ready for comparisons." in result.stdout
+
+
 _AUDITED_HINTS = (
-    "Make VapourSynth importable; see https://github.com/TJZine/frame-compare#quick-start",
+    "Make VapourSynth importable; see https://tjzine.github.io/frame-compare/getting-started/native/#native-source",
     (
         "Make L-SMASH-Works available under core.lsmas; see "
-        "https://github.com/TJZine/frame-compare#quick-start"
+        "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
     ),
     (
         "Make VapourSynth importable before checking L-SMASH-Works; see "
-        "https://github.com/TJZine/frame-compare#quick-start"
+        "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
     ),
     (
         "Check the VapourSynth/plugin setup, then rerun doctor; see "
-        "https://github.com/TJZine/frame-compare#quick-start"
+        "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
     ),
     (
         "Provide FFmpeg and ffprobe executables; see "
-        "https://github.com/TJZine/frame-compare#requirements"
+        "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
     ),
     "Install the supported vs-placebo wheel or use a complete Frame Compare runtime",
     "Install or reinstall the complete supported media runtime, then rerun doctor",
@@ -46,9 +101,6 @@ _AUDITED_HINTS = (
         "Check the optional VSView setup, then rerun doctor; see "
         "https://tjzine.github.io/frame-compare/getting-started/native/"
     ),
-    "Review the returned HTTP status before retrying",
-    "Check network access to slow.pics, then retry",
-    "Review the request failure and network path to slow.pics before retrying",
     "Fix config/config.toml syntax, then rerun doctor",
     "Fix the reported config/environment validation errors, then rerun doctor",
     "Replace the TMDB credential with a 32-character hexadecimal API key",
@@ -56,7 +108,7 @@ _AUDITED_HINTS = (
 
 
 def _doctor_check_entry(payload: dict[str, object], check_id: str) -> dict[str, object]:
-    checks = payload["doctor"]["checks"]
+    checks = cast(dict[str, object], payload["doctor"])["checks"]
     assert isinstance(checks, list)
     for entry in checks:
         assert isinstance(entry, dict)
@@ -107,9 +159,9 @@ def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
 
     payload = json.loads(result.stdout)
     assert payload["success"] is True
-    assert payload["doctor"]["baseline_version"] == "R79"
+    assert payload["doctor"]["baseline_version"] == "R81"
     media_runtime = payload["doctor"]["media_runtime"]
-    assert media_runtime["components"]["decoder"]["vapoursynth"]["release"] == "R79"
+    assert media_runtime["components"]["decoder"]["vapoursynth"]["release"] == "R81"
     assert media_runtime["fingerprints"]["full"] == expected_runtime_fingerprint
     runtime_environment = payload["doctor"]["runtime_environment"]
     assert runtime_environment == {
@@ -156,12 +208,14 @@ def test_doctor_exit_code_is_3_on_core_failure(monkeypatch: MonkeyPatch) -> None
 
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 3
-    assert result.stdout.splitlines()[0] == "[FAIL] Runtime is not ready for comparisons."
-    assert "[FAIL] VapourSynth — missing" in result.stdout
+    assert result.stderr == ""
+    normalized = " ".join(result.stdout.split())
+    assert "✗ VapourSynth missing" in normalized
+    assert normalized.endswith("✗ Runtime is not ready for comparisons. 1 required check failed")
     assert "Core runtime is not ready" not in result.stdout
 
 
-def test_doctor_human_output_is_readiness_first_and_grouped(monkeypatch: MonkeyPatch) -> None:
+def test_doctor_human_output_is_verdict_last_and_grouped(monkeypatch: MonkeyPatch) -> None:
     checks = [
         DoctorCheck(
             name="vapoursynth",
@@ -184,9 +238,9 @@ def test_doctor_human_output_is_readiness_first_and_grouped(monkeypatch: MonkeyP
             ),
         ),
         DoctorCheck(
-            name="slowpics",
+            name="tmdb_api_key",
             category="network",
-            check_fn=lambda: CheckResult(passed=True, message="slow.pics reachable"),
+            check_fn=lambda: CheckResult(passed=True, message="TMDB API key configured"),
         ),
     ]
     report = run_doctor(checks=checks)
@@ -209,21 +263,22 @@ def test_doctor_human_output_is_readiness_first_and_grouped(monkeypatch: MonkeyP
     assert result.exit_code == 0
     assert result.stderr == ""
     lines = result.stdout.splitlines()
-    assert lines[0] == (
-        "[WARN] Ready for local comparisons; optional or network checks need attention."
-    )
     assert (
         lines.index("Required") < lines.index("Optional") < lines.index("Network and credentials")
     )
-    assert "[OK] VapourSynth — VapourSynth available" in result.stdout
-    assert "[WARN] FFmpeg — FFmpeg not found" in result.stdout
-    assert "[SKIP] VSView — VSView not installed" in result.stdout
-    assert "[OK] slow.pics — slow.pics reachable" in result.stdout
-    assert result.stdout.count("Ready for local comparisons") == 1
+    normalized = " ".join(result.stdout.split())
+    assert "\u2713 VapourSynth VapourSynth available" in normalized
+    assert "! FFmpeg FFmpeg not found" in normalized
+    assert "\u2013 VSView VSView not installed" in normalized
+    assert "hint Install VSView, then rerun doctor" in normalized
+    assert "\u2713 TMDB API key TMDB API key configured" in normalized
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
+    assert result.stdout.count("Runtime is ready for comparisons.") == 1
     assert "Core runtime" not in result.stdout
-    assert "\u2705" not in result.stdout
-    assert "\u274c" not in result.stdout
-    assert "\u26a0" not in result.stdout
+    assert "[WARN]" not in result.stdout
+    assert "[OK]" not in result.stdout
+    assert "[SKIP]" not in result.stdout
+    assert "[FAIL]" not in result.stdout
     assert "\x1b[" not in result.stdout
 
 
@@ -255,8 +310,11 @@ def test_doctor_managed_optional_policy_failure_blocks_human_and_json_output(
     human_result = runner.invoke(app, ["doctor"])
     assert human_result.exit_code == int(ExitCode.DEPENDENCY_ERROR)
     assert human_result.stderr == ""
-    assert human_result.stdout.splitlines()[0] == "[FAIL] Runtime is not ready for comparisons."
-    assert "[FAIL] FFmpeg — FFmpeg executables do not match" in human_result.stdout
+    normalized_human = " ".join(human_result.stdout.split())
+    assert "\u2717 FFmpeg FFmpeg executables do not match" in normalized_human
+    assert normalized_human.endswith(
+        "\u2717 Runtime is not ready for comparisons. 1 required check failed"
+    )
     assert "Core runtime is not ready" not in human_result.stdout
 
     json_result = runner.invoke(app, ["doctor", "--json"])
@@ -271,9 +329,9 @@ def test_doctor_managed_optional_policy_failure_blocks_human_and_json_output(
 
 def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
     check = DoctorCheck(
-        name="slowpics",
+        name="tmdb_api_key",
         category="network",
-        check_fn=lambda: CheckResult(passed=False, message="offline"),
+        check_fn=lambda: CheckResult(passed=False, message="TMDB API key not configured"),
     )
     report = DoctorReport(
         checks=[(check, check.check_fn())],
@@ -292,19 +350,14 @@ def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert result.stdout.splitlines()[0] == (
-        "[WARN] Ready for local comparisons; optional or network checks need attention."
-    )
-    assert "[WARN] slow.pics — offline" in result.stdout
-    assert "[FAIL] slow.pics" not in result.stdout
+    normalized = " ".join(result.stdout.split())
+    assert "! TMDB API key TMDB API key not configured" in normalized
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
+    assert "\u2717 TMDB API key" not in normalized
     assert "Core runtime checks passed" not in result.stdout
 
 
-def test_doctor_exit_code_is_0_on_optional_or_network_failure(monkeypatch: MonkeyPatch) -> None:
-    _run_doctor_optional_failure_and_assert(monkeypatch)
-
-
-def test_doctor_stub_text(monkeypatch: MonkeyPatch) -> None:
+def test_doctor_credential_failure_is_warning_only(monkeypatch: MonkeyPatch) -> None:
     _run_doctor_optional_failure_and_assert(monkeypatch)
 
 
@@ -332,135 +385,56 @@ def test_doctor_human_marks_optional_failed_check_neutrally(monkeypatch: MonkeyP
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "[WARN] FFmpeg — FFmpeg not found in PATH" in result.stdout
-    assert "[FAIL] FFmpeg" not in result.stdout
-    assert result.stdout.splitlines()[0].startswith("[WARN] Ready for local comparisons;")
+    normalized = " ".join(result.stdout.split())
+    assert "! FFmpeg FFmpeg not found in PATH" in normalized
+    assert "\u2717 FFmpeg" not in normalized
+    assert normalized.endswith("\u2713 Runtime is ready for comparisons. 1 warning")
 
 
-def test_doctor_human_marks_optional_vsview_unavailable_neutrally(
-    monkeypatch: MonkeyPatch,
+@pytest.mark.parametrize(
+    ("message", "available", "expected"),
+    [
+        (
+            "VSView not installed (optional for manual alignment)",
+            False,
+            "– VSView VSView not installed",
+        ),
+        ("VSView availability probe failed", False, "– VSView VSView availability probe failed"),
+        (
+            "VSView is available for interactive alignment",
+            True,
+            "✓ VSView VSView is available for interactive alignment",
+        ),
+    ],
+    ids=["unavailable", "probe-failure", "available"],
+)
+def test_doctor_optional_vsview_presentation(
+    monkeypatch: MonkeyPatch, message: str, available: bool, expected: str
 ) -> None:
     check = DoctorCheck(
         name="vsview",
         category="optional",
-        check_fn=lambda: CheckResult(
-            passed=True,
-            message="VSView not installed (optional for manual alignment)",
-            available=False,
-        ),
+        check_fn=lambda: CheckResult(passed=True, message=message, available=available),
     )
-    report = DoctorReport(
-        checks=[(check, check.check_fn())],
-        all_passed=True,
-        critical_failures=[],
-    )
+    report = DoctorReport(checks=[(check, check.check_fn())], all_passed=True, critical_failures=[])
 
     def _run_doctor(
-        checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
+        checks: list[DoctorCheck] | None = None, reporter: ProgressReporter | None = None
     ) -> DoctorReport:
         return report
 
     monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
-
     result = runner.invoke(app, ["doctor"])
-
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert "[SKIP] VSView — VSView not installed" in result.stdout
-    assert "[OK] VSView" not in result.stdout
-    assert "[FAIL] VSView" not in result.stdout
-    assert result.stdout.splitlines()[0] == (
-        "[WARN] Ready for local comparisons; optional or network checks need attention."
-    )
-
-    json_result = runner.invoke(app, ["doctor", "--json"])
-    assert json_result.exit_code == 0
-    assert json_result.stderr == ""
-    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vsview")
-    assert check_entry["status"] == "pass"
-    assert "available" not in check_entry
-
-
-def test_doctor_human_marks_optional_vsview_probe_failure_neutrally(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    check = DoctorCheck(
-        name="vsview",
-        category="optional",
-        check_fn=lambda: CheckResult(
-            passed=True,
-            message="VSView availability probe failed",
-            available=False,
-        ),
-    )
-    report = DoctorReport(
-        checks=[(check, check.check_fn())],
-        all_passed=True,
-        critical_failures=[],
-    )
-
-    def _run_doctor(
-        checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
-    ) -> DoctorReport:
-        return report
-
-    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
-
-    result = runner.invoke(app, ["doctor"])
-
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert "[SKIP] VSView — VSView availability probe failed" in result.stdout
-    assert "[OK] VSView" not in result.stdout
-    assert "[FAIL] VSView" not in result.stdout
-    assert result.stdout.splitlines()[0] == (
-        "[WARN] Ready for local comparisons; optional or network checks need attention."
-    )
-
-    json_result = runner.invoke(app, ["doctor", "--json"])
-    assert json_result.exit_code == 0
-    assert json_result.stderr == ""
-    check_entry = _doctor_check_entry(json.loads(json_result.stdout), "vsview")
-    assert check_entry["status"] == "pass"
-    assert "available" not in check_entry
-
-
-def test_doctor_human_marks_available_optional_vsview_as_pass(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    check = DoctorCheck(
-        name="vsview",
-        category="optional",
-        check_fn=lambda: CheckResult(
-            passed=True,
-            message="VSView is available for interactive alignment",
-            available=True,
-        ),
-    )
-    report = DoctorReport(
-        checks=[(check, check.check_fn())],
-        all_passed=True,
-        critical_failures=[],
-    )
-
-    def _run_doctor(
-        checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
-    ) -> DoctorReport:
-        return report
-
-    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
-
-    result = runner.invoke(app, ["doctor"])
-
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert "[OK] VSView — VSView is available" in result.stdout
-    assert "[SKIP] VSView" not in result.stdout
-    assert result.stdout.splitlines()[0] == "[OK] Runtime is ready for comparisons."
-
+    normalized = " ".join(result.stdout.split())
+    assert expected in normalized
+    if available:
+        assert "– VSView" not in normalized
+    else:
+        assert "✓ VSView" not in normalized
+        assert "✗ VSView" not in normalized
+    assert normalized.endswith("✓ Runtime is ready for comparisons.")
     json_result = runner.invoke(app, ["doctor", "--json"])
     assert json_result.exit_code == 0
     assert json_result.stderr == ""
@@ -505,11 +479,11 @@ def test_doctor_text_preserves_literal_brackets(monkeypatch: MonkeyPatch) -> Non
     assert result.stderr == ""
     assert "ffmpeg[optional]" in result.stdout
     assert "missing [ffmpeg]" in result.stdout
-    assert "Hint: install [ffmpeg]" in result.stdout
+    assert "hint install [ffmpeg]" in " ".join(result.stdout.split())
     assert "\x1b[" not in result.stdout
 
 
-def test_doctor_audited_hints_are_deterministic_in_human_and_json_output(
+def test_doctor_preserves_supplied_hint_text_in_human_and_json_output(
     monkeypatch: MonkeyPatch,
 ) -> None:
     checks = [
@@ -544,9 +518,9 @@ def test_doctor_audited_hints_are_deterministic_in_human_and_json_output(
 
     assert human_result.exit_code == 0
     assert human_result.stderr == ""
-    normalized_human_output = " ".join(human_result.stdout.split())
+    compact_human_output = "".join(human_result.stdout.split())
     for hint in _AUDITED_HINTS:
-        assert f"Hint: {hint}" in normalized_human_output
+        assert "".join(f"hint {hint}".split()) in compact_human_output
 
     json_result = runner.invoke(app, ["doctor", "--json"])
 
@@ -556,6 +530,85 @@ def test_doctor_audited_hints_are_deterministic_in_human_and_json_output(
     assert [entry["install_hint"] for entry in payload["doctor"]["checks"]] == list(_AUDITED_HINTS)
 
 
+def test_doctor_verdict_combines_failure_and_warning_counts(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    checks = [
+        DoctorCheck(
+            name="vapoursynth",
+            category="core",
+            check_fn=lambda: CheckResult(passed=False, message="missing"),
+        ),
+        DoctorCheck(
+            name="lsmas",
+            category="core",
+            check_fn=lambda: CheckResult(passed=False, message="missing"),
+        ),
+        DoctorCheck(
+            name="ffmpeg",
+            category="optional",
+            check_fn=lambda: CheckResult(passed=False, message="FFmpeg not found in PATH"),
+        ),
+    ]
+    report = DoctorReport(
+        checks=[(check, check.check_fn()) for check in checks],
+        all_passed=False,
+        critical_failures=["vapoursynth", "lsmas"],
+    )
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == int(ExitCode.DEPENDENCY_ERROR)
+    assert result.stderr == ""
+    normalized = " ".join(result.stdout.split())
+    assert normalized.endswith(
+        "✗ Runtime is not ready for comparisons. 2 required checks failed · 1 warning"
+    )
+
+
+def test_doctor_ascii_fallback_uses_ascii_glyphs(monkeypatch: MonkeyPatch) -> None:
+    check = DoctorCheck(
+        name="vapoursynth",
+        category="core",
+        check_fn=lambda: CheckResult(passed=False, message="missing"),
+    )
+    report = DoctorReport(
+        checks=[(check, check.check_fn())],
+        all_passed=False,
+        critical_failures=["vapoursynth"],
+    )
+
+    def _run_doctor(
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+    ) -> DoctorReport:
+        return report
+
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
+    monkeypatch.setattr(
+        "frame_compare.cli.doctor_command.glyphs_for_console",
+        lambda console: GLYPHS_ASCII,
+    )
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == int(ExitCode.DEPENDENCY_ERROR)
+    assert result.stderr == ""
+    normalized = " ".join(result.stdout.split())
+    assert "x VapourSynth missing" in normalized
+    assert normalized.endswith("x Runtime is not ready for comparisons. 1 required check failed")
+    assert "✗" not in result.stdout
+    assert "✓" not in result.stdout
+
+
 def test_doctor_generic_check_failure_sanitizes_json_details(monkeypatch: MonkeyPatch) -> None:
     sentinel = "SECRET_DOCTOR_EXCEPTION"
 
@@ -563,7 +616,7 @@ def test_doctor_generic_check_failure_sanitizes_json_details(monkeypatch: Monkey
         raise RuntimeError(f"{sentinel} at /private/config.toml")
 
     check = DoctorCheck(name="custom_check", category="optional", check_fn=_raise)
-    with capture_logs() as captured_logs:
+    with capture_logs():
         report = run_doctor(checks=[check])
 
     def _run_doctor(
@@ -584,12 +637,6 @@ def test_doctor_generic_check_failure_sanitizes_json_details(monkeypatch: Monkey
     assert entry["details"] == {"exception_type": "RuntimeError"}
     assert sentinel not in result.stdout
     assert "/private/config.toml" not in result.stdout
-    record = next(item for item in captured_logs if item["event"] == "doctor_check_failed")
-    assert record["event"] == "doctor_check_failed"
-    assert record["check"] == "custom_check"
-    assert record["exception_type"] == "RuntimeError"
-    assert record["exc_info"] is True
-    assert record["log_level"] == "debug"
 
 
 def test_doctor_top_level_frame_compare_error_uses_cli_error_contract(

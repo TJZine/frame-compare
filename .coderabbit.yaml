@@ -33,13 +33,13 @@ reviews:
   path_instructions:
     - path: "AGENTS.md"
       instructions: |
-        Review as the short agent entrypoint only. Flag contradictions with docs/ENGINEERING_RUNBOOK.md, docs/current-architecture.md, docs/current-cli-contract.md, importlinter.ini, pyproject.toml, .codex/config.toml, .agents/rules/general-guidelines.md, or repo-local skill routing. Do not request that AGENTS.md become a second runbook.
+        Review as the short agent entrypoint. Check consistency with .agents/project.md and the product/runtime authorities it references. Shared skills own generic methodology; do not recreate retired repo-local skill or model policy, or turn this file into a second runbook.
     - path: ".agents/rules/**/*.md"
       instructions: |
-        Review Antigravity rules as thin shims over AGENTS.md and the runbook. Flag stale workflow systems, obsolete generated-contract commands, duplicated runbook policy, conflicts with docs/ENGINEERING_RUNBOOK.md, and instructions that make .agents/rules a competing authority.
+        Review Antigravity rules as thin pointers to AGENTS.md and .agents/project.md. Flag stale discovery names, conflicting authority, and duplicated workflow policy.
     - path: "docs/ENGINEERING_RUNBOOK.md"
       instructions: |
-        Review as the canonical workflow, verification, planning, review, and production-quality authority. Check risk tiers, command canon, production guardrails, public-surface policy, Docker/Windows verification, and plan activation rules. Flag process gaps that would let agents claim unverified work or weaken code quality.
+        Review complete specialist verification and release procedures. Preserve required Docker, Windows, distribution, signing, and platform claims and their evidence. Generic methodology belongs to shared skills; local facts and test selection belong to .agents/project.md. Flag gaps that permit unverified claims or conflicting command ownership.
     - path: "docs/current-architecture.md"
       instructions: |
         Review as present-day architecture truth. Check composition roots, import layers, persistence owners, external integration owners, runtime phase ordering, and hotspot lists. Flag stale ownership claims, missing same-pass doc updates, or changes that would let hotspots absorb new responsibilities.
@@ -49,15 +49,12 @@ reviews:
     - path: "docs/plans/**/*.md"
       instructions: |
         Review tracked plans as scoped handoff memory, not global policy. Flag plans that lack explicit status, treat inactive or closed plans as current authority, duplicate runbook policy, or omit verification and rollback notes for active implementation work.
-    - path: ".agents/skills/**/*.md"
+    - path: ".agents/project.md"
       instructions: |
-        These are repo-local Frame Compare skills. Review for stale source-repo residue, trigger descriptions that are too broad or too narrow, conflicts with the runbook, weak verification routing, missing Python/CLI/test guidance, and rules that are overly restrictive compared with repo policy.
+        Review as the single repository profile for shared skills. Check current source/command facts, product obligations, relevant evidence routes, and explicit limits. Existing architecture can be deliberately redesigned; equal error output alone does not prove redundant tests. Do not add model bindings, mandatory role pipelines, or duplicate authorities.
     - path: ".codex/config.toml"
       instructions: |
-        Review delegated role definitions for clear read/write boundaries. Read-only roles must stay read-only; worker/planner roles must remain bounded and production-quality focused.
-    - path: ".codex/agents/*.toml"
-      instructions: |
-        Review agent role prompts for production-quality review and implementation behavior: correctness, architecture fit, maintainability, public-contract safety, no speculative abstractions, no unrelated edits, and no edits through read-only roles.
+        Review actual Codex host/runtime settings for installed-version compatibility and preserved permissions/tool behavior. Shared skills own delegation decisions. Do not recreate removed role registries or treat transitional runtime keys as permanent model policy.
     - path: ".coderabbit.yaml"
       instructions: |
         Review this configuration for valid CodeRabbit schema usage, focused path filters, non-duplicative path instructions, and alignment with Frame Compare's Python CLI/runtime workflow. Flag TypeScript/Lineup residue.
@@ -142,6 +139,7 @@ knowledge_base:
     enabled: true
     filePatterns:
       - "AGENTS.md"
+      - ".agents/project.md"
       - ".agents/rules/general-guidelines.md"
       - "docs/ENGINEERING_RUNBOOK.md"
       - "docs/current-architecture.md"
@@ -149,20 +147,3 @@ knowledge_base:
       - "importlinter.ini"
       - "pyproject.toml"
       - ".codex/config.toml"
-      - ".codex/agents/*.toml"
-      - ".agents/skills/architecture-boundaries/SKILL.md"
-      - ".agents/skills/bounded-worker-execution/SKILL.md"
-      - ".agents/skills/cli-contract-boundaries/SKILL.md"
-      - ".agents/skills/closeout-verification/SKILL.md"
-      - ".agents/skills/debugging-remediation/SKILL.md"
-      - ".agents/skills/execution-plan-authoring/SKILL.md"
-      - ".agents/skills/model-selection/SKILL.md"
-      - ".agents/skills/parallel-sidecars/SKILL.md"
-      - ".agents/skills/persistence-boundaries/SKILL.md"
-      - ".agents/skills/python-quality-boundaries/SKILL.md"
-      - ".agents/skills/python-test-design/SKILL.md"
-      - ".agents/skills/repo-production-review/SKILL.md"
-      - ".agents/skills/report-output-patterns/SKILL.md"
-      - ".agents/skills/review-request/SKILL.md"
-      - ".agents/skills/runtime-integration-boundaries/SKILL.md"
-      - ".agents/skills/verification-strategy/SKILL.md"

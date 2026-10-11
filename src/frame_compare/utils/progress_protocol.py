@@ -23,8 +23,13 @@ class ProgressPhaseStatus(StrEnum):
 class ProgressReporter(Protocol):
     """Protocol for reporting progress of long-running operations."""
 
-    def start_phase(self, name: str, total: int) -> None:
-        """Start a new phase of the operation."""
+    def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
+        """Start a new phase of the operation.
+
+        ``presentation`` selects reporter-specific styling for the live task
+        (for example the slow.pics upload bar). ``None`` keeps the reporter's
+        default presentation. Non-interactive reporters may ignore it.
+        """
         ...
 
     def start_indeterminate(self, name: str) -> None:
@@ -44,6 +49,8 @@ class ProgressReporter(Protocol):
         status: ProgressPhaseStatus = ProgressPhaseStatus.COMPLETED,
         *,
         retain: bool | None = None,
+        summary: str | None = None,
+        duration_text: str | None = None,
     ) -> None:
         """Mark the current phase as complete.
 
@@ -51,6 +58,10 @@ class ProgressReporter(Protocol):
         reporter's normal retention policy, ``True`` forces a durable line, and
         ``False`` suppresses a successful completion line. Non-interactive
         reporters may ignore the hint.
+        ``summary`` is a short human outcome shown on the durable line (only
+        the Rich reporter renders it; other reporters keep their current
+        content and ignore it). ``duration_text`` overrides the measured
+        duration on the durable line (likewise Rich-only).
         """
         ...
 

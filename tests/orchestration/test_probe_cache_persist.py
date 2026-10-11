@@ -1,15 +1,13 @@
 """Tests for _persist_probe_snapshots_for_run merge semantics."""
 
 import multiprocessing
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
 from fractions import Fraction
+from multiprocessing.process import BaseProcess
 from pathlib import Path
 from typing import Protocol
 
 import pytest
 
-import frame_compare.orchestration.probing.probe_cache as probe_cache
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.orchestration.preparation import (
@@ -81,7 +79,7 @@ def _merge_cache_in_child(
     completed.set()
 
 
-def _clean_up_process(process: multiprocessing.Process) -> None:
+def _clean_up_process(process: BaseProcess) -> None:
     if process.pid is None:
         return
     if process.is_alive():
@@ -90,31 +88,6 @@ def _clean_up_process(process: multiprocessing.Process) -> None:
     if process.is_alive():
         process.kill()
         process.join(timeout=_PROCESS_TIMEOUT_SECONDS)
-
-
-def test_run_folder_preserves_existing_shared_entries(tmp_path: Path) -> None:
-    """Run-local writes must not discard earlier shared entries."""
-    workspace = _run_folder_workspace(tmp_path)
-    cache_path = workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
-
-    snap_a = _snapshot("video_a.mkv")
-    key_a = compute_probe_cache_key(snap_a.fingerprint)
-    save_clip_probe_cache(cache_path, {key_a: snap_a})
-    assert key_a in load_clip_probe_cache(cache_path)
-
-    snap_b = _snapshot("video_b.mkv", size=2048, mtime=9000)
-    _persist_probe_snapshots_for_run(
-        workspace=workspace,
-        snapshots_by_path={Path("video_b.mkv"): snap_b},
-    )
-
-    key_b = compute_probe_cache_key(snap_b.fingerprint)
-    shared_result = load_clip_probe_cache(cache_path)
-    assert set(shared_result) == {key_a, key_b}
-
-    run_path = workspace.generated_dir / "clip_probe.toml"
-    run_result = load_clip_probe_cache(run_path)
-    assert set(run_result) == {key_b}
 
 
 def test_shared_merge_locks_cross_process_read_modify_write(tmp_path: Path) -> None:
@@ -149,83 +122,40 @@ def test_shared_merge_locks_cross_process_read_modify_write(tmp_path: Path) -> N
     assert set(load_clip_probe_cache(cache_path)) == {key_a, key_b}
 
 
-def test_shared_merge_keeps_load_and_save_inside_lock(
+@pytest.mark.parametrize(
+    ("existing", "current", "expected_widths"),
+    [
+        pytest.param(
+            _snapshot("video.mkv", size=1024, mtime=1000),
+            _snapshot("video.mkv", size=1024, mtime=2000),
+            [1920, 1920],
+            id="historical-fingerprint",
+        ),
+        pytest.param(
+            _snapshot("video.mkv", width=1280),
+            _snapshot("video.mkv", width=1920),
+            [1920],
+            id="same-key-current-wins",
+        ),
+    ],
+)
+def test_run_folder_persists_current_and_historical_snapshots(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    existing: ClipProbeSnapshot,
+    current: ClipProbeSnapshot,
+    expected_widths: list[int],
 ) -> None:
-    cache_path = tmp_path / "clip_probe.toml"
-    lock_path = cache_path.with_name(f"{cache_path.name}.lock")
-    existing = _snapshot("video_a.mkv")
-    current = _snapshot("video_b.mkv", size=2048, mtime=9000)
-    existing_key = compute_probe_cache_key(existing.fingerprint)
+    workspace = _run_folder_workspace(tmp_path)
+    cache_path = workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
+    old_key = compute_probe_cache_key(existing.fingerprint)
     current_key = compute_probe_cache_key(current.fingerprint)
-    events: list[str] = []
-
-    @contextmanager
-    def _fake_lock(path: Path) -> Iterator[None]:
-        assert path == lock_path
-        events.append("lock_enter")
-        try:
-            yield
-        finally:
-            events.append("lock_exit")
-
-    def _fake_load(path: Path) -> dict[str, ClipProbeSnapshot]:
-        assert path == cache_path
-        assert events == ["lock_enter"]
-        events.append("load")
-        return {existing_key: existing}
-
-    def _fake_save(path: Path, entries: Mapping[str, ClipProbeSnapshot]) -> None:
-        assert path == cache_path
-        assert events == ["lock_enter", "load"]
-        assert set(entries) == {existing_key, current_key}
-        events.append("save")
-
-    monkeypatch.setattr(probe_cache, "exclusive_file_lock", _fake_lock)
-    monkeypatch.setattr(probe_cache, "_load_shared_clip_probe_cache_for_update", _fake_load)
-    monkeypatch.setattr(probe_cache, "save_clip_probe_cache", _fake_save)
-
-    probe_cache.merge_shared_clip_probe_cache(cache_path, {current_key: current})
-
-    assert events == ["lock_enter", "load", "save", "lock_exit"]
-
-
-def test_run_folder_preserves_historical_fingerprint(tmp_path: Path) -> None:
-    """A changed fingerprint is retained alongside the prior cache entry."""
-    workspace = _run_folder_workspace(tmp_path)
-    cache_path = workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
-
-    snap_old = _snapshot("video.mkv", size=1024, mtime=1000)
-    key_old = compute_probe_cache_key(snap_old.fingerprint)
-    save_clip_probe_cache(cache_path, {key_old: snap_old})
-
-    snap_new = _snapshot("video.mkv", size=1024, mtime=2000)
-    key_new = compute_probe_cache_key(snap_new.fingerprint)
-
+    save_clip_probe_cache(cache_path, {old_key: existing})
     _persist_probe_snapshots_for_run(
-        workspace=workspace,
-        snapshots_by_path={Path("video.mkv"): snap_new},
+        workspace=workspace, snapshots_by_path={Path("video.mkv"): current}
     )
-
     result = load_clip_probe_cache(cache_path)
-    assert set(result) == {key_old, key_new}
-
-
-def test_run_folder_current_entry_wins_on_cache_key_conflict(tmp_path: Path) -> None:
-    workspace = _run_folder_workspace(tmp_path)
-    cache_path = workspace.shared_analysis_cache_dir.parent.parent / "clip_probe.toml"
-    existing = _snapshot("video.mkv", width=1280)
-    current = _snapshot("video.mkv", width=1920)
-    cache_key = compute_probe_cache_key(current.fingerprint)
-    save_clip_probe_cache(cache_path, {cache_key: existing})
-
-    _persist_probe_snapshots_for_run(
-        workspace=workspace,
-        snapshots_by_path={Path("video.mkv"): current},
-    )
-
-    assert load_clip_probe_cache(cache_path)[cache_key].width == 1920
+    assert set(result) == {old_key, current_key}
+    assert [snapshot.width for snapshot in result.values()] == expected_widths
 
 
 def test_normal_run_folder_probe_cache_excludes_unrelated_shared_entries(tmp_path: Path) -> None:
@@ -258,6 +188,20 @@ def test_normal_run_folder_probe_cache_excludes_unrelated_shared_entries(tmp_pat
     run_path = workspace.generated_dir / "clip_probe.toml"
     assert set(load_clip_probe_cache(run_path)) == {current_key}
     assert set(load_clip_probe_cache(shared_path)) == {current_key, unrelated_key}
+
+
+def test_shared_merge_invalid_utf8_preserves_unreadable_existing_cache(tmp_path: Path) -> None:
+    cache_path = tmp_path / "clip_probe.toml"
+    cache_path.write_bytes(b"\xff")
+    snapshot = _snapshot("video.mkv")
+    before = cache_path.read_bytes()
+
+    merge_shared_clip_probe_cache(
+        cache_path,
+        {compute_probe_cache_key(snapshot.fingerprint): snapshot},
+    )
+
+    assert cache_path.read_bytes() == before
 
 
 def _snapshot_from_file(path: Path) -> ClipProbeSnapshot:

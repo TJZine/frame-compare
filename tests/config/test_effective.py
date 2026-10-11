@@ -37,7 +37,7 @@ def test_load_effective_config_passes_base_overrides_through_loader_then_applies
     captured: dict[str, object] = {}
 
     def _fake_load_config(
-        config_path: Path | None,
+        config_path: Path | None = None,
         overrides: dict[str, object] | None = None,
     ):
         captured["config_path"] = config_path

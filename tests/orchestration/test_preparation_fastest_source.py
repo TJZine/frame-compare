@@ -100,73 +100,51 @@ class FakeBenchmarkVSLoader(FakeVSLoader):
         )
 
 
-def test_execute_prep_analysis_source_fastest_selects_lowest_timing_and_ties_by_order(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("delays", "frames", "expected", "diagnostic"),
+    [
+        pytest.param(
+            {"00-reference.mkv": 2.0, "01-fast.mkv": 1.0, "02-tie.mkv": 1.0},
+            {},
+            "01-fast.mkv",
+            "Analysis source: Comparison 1 | selected by fastest-source policy",
+            id="tie-by-order",
+        ),
+        pytest.param(
+            {"00-short-slow.mkv": 1.5, "01-long-fast.mkv": 1.0},
+            {"00-short-slow.mkv": 10, "01-long-fast.mkv": 100},
+            "01-long-fast.mkv",
+            None,
+            id="per-sample-time",
+        ),
+    ],
+)
+def test_execute_prep_analysis_source_fastest(
+    delays: dict[str, float],
+    frames: dict[str, int],
+    expected: str,
+    diagnostic: str | None,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_content = METRIC_CONFIG + '\n[sources]\nanalysis_source = "fastest"\n'
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-reference.mkv", "01-fast.mkv", "02-tie.mkv")
+    _create_video_files(input_dir, *delays)
     clock = [0.0]
     monkeypatch.setattr(
         "frame_compare.orchestration.analysis_source.perf_counter", lambda: clock[0]
     )
-    loader = FakeBenchmarkVSLoader(
-        delays_by_name={
-            "00-reference.mkv": 2.0,
-            "01-fast.mkv": 1.0,
-            "02-tie.mkv": 1.0,
-        },
-        clock=clock,
-    )
-
+    loader = FakeBenchmarkVSLoader(delays_by_name=delays, frames_by_name=frames, clock=clock)
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, loader)),
+            RunRequest(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
         )
     )
-
     assert prep.analysis_clip is not None
-    assert prep.analysis_clip.path.name == "01-fast.mkv"
-    assert (
-        "Analysis source: Comparison 1 | selected by fastest-source policy"
-        in prep.load_source_diagnostics
-    )
-
-
-def test_execute_prep_analysis_source_fastest_compares_per_sample_time(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config_content = METRIC_CONFIG + '\n[sources]\nanalysis_source = "fastest"\n'
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-short-slow.mkv", "01-long-fast.mkv")
-    clock = [0.0]
-    monkeypatch.setattr(
-        "frame_compare.orchestration.analysis_source.perf_counter", lambda: clock[0]
-    )
-    loader = FakeBenchmarkVSLoader(
-        delays_by_name={
-            "00-short-slow.mkv": 1.5,
-            "01-long-fast.mkv": 1.0,
-        },
-        frames_by_name={
-            "00-short-slow.mkv": 10,
-            "01-long-fast.mkv": 100,
-        },
-        clock=clock,
-    )
-
-    prep = asyncio.run(
-        preparation.execute_prep(
-            RunRequest(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, loader)),
-        )
-    )
-
-    assert prep.analysis_clip is not None
-    assert prep.analysis_clip.path.name == "01-long-fast.mkv"
+    assert prep.analysis_clip.path.name == expected
+    if diagnostic is not None:
+        assert diagnostic in prep.load_source_diagnostics
 
 
 def test_execute_prep_analysis_source_fastest_cache_only_rejects_before_probe(

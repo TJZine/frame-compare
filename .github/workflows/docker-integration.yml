@@ -2,19 +2,17 @@ name: Docker Integration (VS + FFmpeg)
 
 on:
   pull_request:
-    branches: [main, cleanup, staging]
     paths:
-      - Dockerfile
-      - docker-compose*.yml
+      - src/**
+      - tests/**
       - pyproject.toml
       - uv.lock
+      - Dockerfile
+      - docker-compose*.yml
       - tools/verify_docker_*.sh
-      - tests/workflows/**
-      - src/frame_compare/analysis/**
-      - src/frame_compare/render/**
-      - src/frame_compare/vs/**
-      - tests/integration/**
-      - tests/vs/**
+      - tools/checkout_source_commit.sh
+      - .dockerignore
+      - .github/workflows/docker-integration.yml
   workflow_dispatch:
 
 permissions:
@@ -35,3 +33,22 @@ jobs:
 
       - name: Run canonical Docker verification
         run: bash tools/verify_docker_integration.sh --no-cache
+
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docker-e2e-artifacts
+          path: generated/e2e
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Run opt-in alignment resource proof
+        run: >-
+          docker compose run --rm --no-deps
+          -e FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1
+          --entrypoint python
+          frame-compare-test
+          -m pytest
+          -o cache_dir=/tmp/frame-compare-resource-pytest-cache
+          tests/integration/test_alignment_streaming_resources.py -rsx -s

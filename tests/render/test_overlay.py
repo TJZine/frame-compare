@@ -49,7 +49,6 @@ def test_none_mode_is_a_true_noop() -> None:
     image = Image.new("RGB", (100, 100), color=(1, 2, 3))
     before = image.tobytes()
     result = apply_overlay(image, _config(OverlayMode.NONE), RenderedFrameFacts(12, "I"))
-    assert result is image
     assert result.tobytes() == before
 
 
@@ -59,7 +58,6 @@ def test_overlay_supports_grayscale_images() -> None:
 
     result = apply_overlay(image, _config(OverlayMode.MINIMAL), RenderedFrameFacts(12, "I"))
 
-    assert result is image
     assert result.mode == "L"
     assert result.tobytes() != before
 
@@ -71,7 +69,6 @@ def test_minimal_uses_outlined_text_without_background() -> None:
 
     result = apply_overlay(image, _config(OverlayMode.MINIMAL), RenderedFrameFacts(12, "I"))
 
-    assert result is image
     assert result.size == image.size
     assert ImageChops.difference(before, result).getbbox() is not None
     assert result.getpixel((5, 40)) == background

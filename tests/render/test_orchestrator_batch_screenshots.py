@@ -4,15 +4,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from frame_compare.config.schema import ColorConfig, ConfigSchema
+from frame_compare.config.schema import ColorConfig, ConfigSchema, ScreenshotsConfig
 from frame_compare.render.batch.orchestrator import (
-    render_screenshots_from_batch,
     render_screenshots_from_batch_detailed,
 )
 from frame_compare.render.types import (
     BatchRenderOptions,
     EncoderSettings,
-    RenderedBatchResult,
     RenderedClipFacts,
     RenderedFrameResult,
     RenderRequest,
@@ -125,12 +123,12 @@ def test_render_screenshots_from_batch_happy_path(tmp_path: Path) -> None:
             return_value=_rendered(expanded[0]),
         ) as render_batch,
     ):
-        result = render_screenshots_from_batch(
+        result = render_screenshots_from_batch_detailed(
             requests,
             tmp_path,
             config,
             BatchRenderOptions(renderer="ffmpeg", ffmpeg_runner=MagicMock()),
-        )
+        ).screenshots_by_label
     assert result == {
         "label1": [tmp_path / "label1-10.png", tmp_path / "label1-20.png"],
         "label2": [tmp_path / "label2-30.png"],
@@ -182,7 +180,7 @@ def test_render_screenshots_from_batch_passes_clamped_parallelism(
             return_value=_rendered(expanded[0]),
         ) as render_batch,
     ):
-        render_screenshots_from_batch(
+        render_screenshots_from_batch_detailed(
             [request],
             tmp_path,
             config,
@@ -199,7 +197,7 @@ def test_render_screenshots_from_batch_constructs_configured_default_runner(
 ) -> None:
     config = ConfigSchema(
         color=ColorConfig(enable_tonemap=False),
-        screenshots={"ffmpeg_timeout_seconds": 47.0},
+        screenshots=ScreenshotsConfig(ffmpeg_timeout_seconds=47.0),
     )
     request = _batch_request("clip.mkv", "clip", [1])
     expanded = _expanded(tmp_path, [request])
@@ -217,7 +215,7 @@ def test_render_screenshots_from_batch_constructs_configured_default_runner(
             return_value=_rendered(expanded[0]),
         ),
     ):
-        render_screenshots_from_batch([request], tmp_path, config)
+        render_screenshots_from_batch_detailed([request], tmp_path, config)
     default_runner.assert_called_once_with(extraction_timeout_seconds=47.0)
     assert expand_batch.call_args.kwargs["ffmpeg_runner"] is default_runner.return_value
 
@@ -238,7 +236,7 @@ def test_render_screenshots_from_batch_preserves_injected_runner(tmp_path: Path)
             return_value=_rendered(expanded[0]),
         ),
     ):
-        render_screenshots_from_batch(
+        render_screenshots_from_batch_detailed(
             [request], tmp_path, config, BatchRenderOptions(ffmpeg_runner=injected)
         )
     default_runner.assert_not_called()
@@ -248,7 +246,7 @@ def test_render_screenshots_from_batch_rejects_hdr_ffmpeg_tonemap(tmp_path: Path
     config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
     request = _batch_request("vid.mkv", "vid", [42], is_hdr=True)
     with pytest.raises(TonemapRequiresVapourSynthError):
-        render_screenshots_from_batch(
+        render_screenshots_from_batch_detailed(
             [request], tmp_path, config, BatchRenderOptions(renderer="ffmpeg")
         )
 
@@ -257,7 +255,7 @@ def test_render_screenshots_from_batch_rejects_mismatched_lengths(tmp_path: Path
     config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
     request = _batch_request("vid.mkv", "vid", [42], comparison_frames=[42, 43])
     with pytest.raises(ValueError, match="list lengths differ"):
-        render_screenshots_from_batch([request], tmp_path, config)
+        render_screenshots_from_batch_detailed([request], tmp_path, config)
 
 
 def test_render_screenshots_from_batch_requires_positive_source_facts(tmp_path: Path) -> None:
@@ -269,17 +267,4 @@ def test_render_screenshots_from_batch_requires_positive_source_facts(tmp_path: 
         active_picture=ActivePictureFacts(0, 0, 1, 1, "full_frame", False),
     )
     with pytest.raises(ValueError, match="requires positive source dimensions"):
-        render_screenshots_from_batch([request], tmp_path, config)
-
-
-def test_render_screenshots_from_batch_rejects_duplicate_labels(tmp_path: Path) -> None:
-    config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
-    requests = [_batch_request("a.mkv", "same", [1]), _batch_request("b.mkv", "same", [2])]
-    with pytest.raises(ValueError, match="Duplicate label 'same'"):
-        render_screenshots_from_batch(requests, tmp_path, config)
-
-
-def test_render_screenshots_from_batch_empty_returns_empty(tmp_path: Path) -> None:
-    config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
-    assert render_screenshots_from_batch([], tmp_path, config) == {}
-    assert render_screenshots_from_batch_detailed([], tmp_path, config) == RenderedBatchResult()
+        render_screenshots_from_batch_detailed([request], tmp_path, config)

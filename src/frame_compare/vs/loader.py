@@ -26,14 +26,17 @@ class VSLoader(Protocol):
 
 
 class DefaultVSLoader:
-    """Default VapourSynth loader implementation using LWLibavSource."""
+    """LWLibavSource loader with an optional frame-cache cap in MiB."""
 
-    def __init__(self) -> None:
+    def __init__(self, memory_limit_mb: int | None = None) -> None:
+        self._memory_limit_mb = memory_limit_mb
         self._core: vs.Core | None = None
 
     def ensure_core(self) -> vs.Core:
         if self._core is None:
             self._core = ensure_vs_environment()
+            if self._memory_limit_mb is not None:
+                self._core.max_cache_size = self._memory_limit_mb
         return self._core
 
     def load(self, path: Path) -> SourceInfo:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -29,19 +30,28 @@ from frame_compare.orchestration.phase_selection import (
     selection_timecode_for_frame,
     source_frames_for_reference_base_domain,
 )
+from frame_compare.orchestration.presentation import clip_role
 from frame_compare.services.alignment import (
     align_clips_from_request,
-    calculate_alignment_trims,
     format_rejected_alignment_warning,
 )
+from frame_compare.services.alignment_math import calculate_alignment_trims
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.release_identity import (
+    ShortNameSource,
     common_content_identity,
     format_compact_identity,
     format_content_identity,
+    format_micro_descriptor,
     format_release_descriptor,
+    short_source_names,
 )
-from frame_compare.services.types import AlignmentConfig
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentResult,
+    AlignmentReviewSummary,
+)
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
     AlignmentClipIdentity,
@@ -52,9 +62,18 @@ from frame_compare.utils.types import (
 
 log = structlog.get_logger()
 
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
-def run_align_phase(
-    ctx: RunContext, *, selected_frames: list[int], verbose: bool = False
+
+async def run_align_phase(
+    ctx: RunContext,
+    *,
+    selected_frames: list[int],
+    vs_loader: VSLoader | None = None,
+    verbose: bool = False,
+    quiet: bool = False,
+    json_output: bool = False,
 ) -> AlignPhaseOutput:
     if not ctx.comparisons:
         return AlignPhaseOutput(
@@ -64,28 +83,14 @@ def run_align_phase(
         )
     alignment_config = AlignmentConfig(
         enable=ctx.config.audio_alignment.enable,
-        sample_rate=ctx.config.audio_alignment.sample_rate,
-        max_offset_seconds=ctx.config.audio_alignment.max_offset_seconds,
+        memory_limit_mb=ctx.config.runtime.memory_limit_mb,
         use_vsview=ctx.config.audio_alignment.use_vsview,
         force_interactive=ctx.config.audio_alignment.force_interactive,
         cache_results=ctx.config.audio_alignment.cache_results,
-        correlation_mode=ctx.config.audio_alignment.correlation_mode,
-        preprocessing_mode=ctx.config.audio_alignment.preprocessing_mode,
-        channel_strategy=ctx.config.audio_alignment.channel_strategy,
-        confidence_threshold=ctx.config.audio_alignment.confidence_threshold,
-        ambiguity_peak_ratio=ctx.config.audio_alignment.ambiguity_peak_ratio,
-        window_length_seconds=ctx.config.audio_alignment.window_length_seconds,
-        window_stride_seconds=ctx.config.audio_alignment.window_stride_seconds,
-        minimum_valid_windows=ctx.config.audio_alignment.minimum_valid_windows,
-        consensus_minimum_ratio=ctx.config.audio_alignment.consensus_minimum_ratio,
-        refinement_mode=ctx.config.audio_alignment.refinement_mode,
-        refinement_sample_rate=ctx.config.audio_alignment.refinement_sample_rate,
-        reference_stream=ctx.config.audio_alignment.reference_stream,
-        comparison_streams=dict(ctx.config.audio_alignment.comparison_streams),
-        previous_offsets=ctx.config.audio_alignment.previous_offsets,
         no_color=ctx.no_color,
     )
     alignment_request = _alignment_request_from_context(ctx)
+    review_summary = AlignmentReviewSummary()
     log.debug(
         "alignment_request_prepared",
         comparisons=len(alignment_request.comparisons),
@@ -93,26 +98,29 @@ def run_align_phase(
         previous_offsets=alignment_request.previous_offsets,
         shared_alignment_cache_dir=str(alignment_request.shared_alignment_cache_dir),
     )
-    results = align_clips_from_request(
+    results = await align_clips_from_request(
         alignment_request,
         alignment_config,
         progress=ctx.reporter,
+        review_summary=review_summary,
         reference_fps=ctx.reference.effective_fps,
         frame_props_by_stem={
             ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
             **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},
         },
+        vs_loader=vs_loader,
         verbose=verbose,
+        quiet=quiet,
+        json_output=json_output,
     )
 
     updated_comparisons: list[ClipState] = []
-    warnings: list[str] = []
+    warnings: list[RunWarning] = []
     for comparison, result in zip(ctx.comparisons, results, strict=True):
         alignment = None
         if result.applied:
             frame_offset = result.frame_offset
-            if frame_offset is None:
-                raise AudioAlignmentError("Applied alignment result is missing frame offset.")
+            assert frame_offset is not None
             alignment = ClipAlignmentState(
                 reference_stem=Path(result.reference_clip).stem,
                 comparison_stem=Path(result.comparison_clip).stem,
@@ -120,29 +128,6 @@ def run_align_phase(
                 source=result.source,
                 stability=result.stability,
             )
-            if result.stability is not None and result.stability.classification in {
-                "possible_drift",
-                "possible_discontinuity",
-                "variable",
-            }:
-                detail = {
-                    "possible_drift": "may drift across the source",
-                    "possible_discontinuity": "varies across the source; possible edit discontinuity",
-                    "variable": "varies across the source",
-                }[result.stability.classification]
-                position = result.stability.change_position_seconds
-                if (
-                    position is not None
-                    and result.stability.classification == "possible_discontinuity"
-                ):
-                    seconds = round(position)
-                    detail += (
-                        f" near {seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
-                    )
-                warnings.append(
-                    f"align: {comparison.label} alignment {detail}. "
-                    "The applied constant offset was retained and should be verified."
-                )
         else:
             warnings.append(
                 format_rejected_alignment_warning(
@@ -154,14 +139,22 @@ def run_align_phase(
             replace(
                 comparison,
                 alignment=alignment,
+                audio_attempt=result.audio_attempt,
             )
         )
+    calculator_offsets = [
+        None
+        if comp.alignment is None
+        else (
+            comp.alignment.relative_offset_frames
+            - ctx.reference.trim.trim_start_frames
+            + comp.trim.trim_start_frames
+        )
+        for comp in updated_comparisons
+    ]
     ref_trim, comp_trims = calculate_alignment_trims(
         ref_num_frames=ctx.reference.effective_num_frames(),
-        comp_offsets=[
-            comp.alignment.relative_offset_frames if comp.alignment is not None else None
-            for comp in updated_comparisons
-        ],
+        comp_offsets=calculator_offsets,
         comp_num_frames=[comp.effective_num_frames() for comp in updated_comparisons],
     )
     reference = _compose_alignment_trim(ctx.reference, ref_trim)
@@ -195,8 +188,14 @@ def run_align_phase(
     normalized_selected_frames = normalized_selection.selected_frames
     if normalized_selection.dropped_user_source_frames:
         warnings.append(
-            "frame selection: dropped user frame(s) outside aligned renderable range: "
-            + ", ".join(str(frame) for frame in normalized_selection.dropped_user_source_frames)
+            RunWarning(
+                "frame selection",
+                "warning",
+                "frame selection: dropped user frame(s) outside aligned renderable range: "
+                + ", ".join(
+                    str(frame) for frame in normalized_selection.dropped_user_source_frames
+                ),
+            )
         )
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
@@ -273,24 +272,53 @@ def run_align_phase(
         selection_breakdown=selection_breakdown,
         selection_details_by_source_frame=selection_details_by_source_frame,
         warnings=warnings,
+        success_summary=_align_success_summary(
+            request=alignment_request,
+            results=results,
+            review=review_summary,
+        ),
+        review_seconds=review_summary.review_seconds,
+        review_unresolved=review_summary.review_unresolved,
     )
+
+
+def _align_success_summary(
+    *,
+    request: AlignmentRequest,
+    results: list[AlignmentResult],
+    review: AlignmentReviewSummary,
+) -> str:
+    """Build the durable Align phase summary from short names and review counts."""
+    if review.review_ran:
+        pairs = review.pairs_confirmed
+        summary = (
+            f"{pairs} pair confirmed in VSView"
+            if pairs == 1
+            else f"{pairs} pairs confirmed in VSView"
+        )
+        if review.comparisons_kept > 0:
+            summary += f" · {review.comparisons_kept} kept"
+        return summary
+    parts = [
+        (
+            f"{_request_short_name(comparison)} alignment applied"
+            if result.applied
+            else f"{_request_short_name(comparison)} needs visual confirmation"
+        )
+        for comparison, result in zip(request.comparisons, results, strict=True)
+    ]
+    return " · ".join(parts)
+
+
+def _request_short_name(comparison: AlignmentClipRequest) -> str:
+    """Return the comparison's short name with label/path fallbacks."""
+    return comparison.short_name or comparison.label or comparison.path.name
 
 
 def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
     settings = AlignmentCacheSettings(
-        sample_rate=ctx.config.audio_alignment.sample_rate,
         max_offset_seconds=ctx.config.audio_alignment.max_offset_seconds,
-        correlation_mode=ctx.config.audio_alignment.correlation_mode,
-        preprocessing_mode=ctx.config.audio_alignment.preprocessing_mode,
         channel_strategy=ctx.config.audio_alignment.channel_strategy,
-        confidence_threshold=ctx.config.audio_alignment.confidence_threshold,
-        ambiguity_peak_ratio=ctx.config.audio_alignment.ambiguity_peak_ratio,
-        window_length_seconds=ctx.config.audio_alignment.window_length_seconds,
-        window_stride_seconds=ctx.config.audio_alignment.window_stride_seconds,
-        minimum_valid_windows=ctx.config.audio_alignment.minimum_valid_windows,
-        consensus_minimum_ratio=ctx.config.audio_alignment.consensus_minimum_ratio,
-        refinement_mode=ctx.config.audio_alignment.refinement_mode,
-        refinement_sample_rate=ctx.config.audio_alignment.refinement_sample_rate,
     )
     clips = [ctx.reference, *ctx.comparisons]
     identities = [clip.release_identity for clip in clips]
@@ -307,11 +335,26 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         clip.path.name if not name or counts[name] > 1 else name
         for clip, name in zip(clips, presentation_names, strict=True)
     ]
+    compact_names = [_alignment_compact_name(clip) for clip in clips]
+    short_names = short_source_names(
+        [
+            ShortNameSource(
+                identity=clip.release_identity,
+                label=clip.label,
+                label_is_explicit=clip.label_is_explicit,
+            )
+            for clip in clips
+        ],
+        roles=[clip_role(index) for index in range(len(clips))],
+    )
+    short_names = [short or clip.path.name for short, clip in zip(short_names, clips, strict=True)]
     return AlignmentRequest(
         reference=_alignment_clip_request(
             ctx.reference,
             selected_audio_stream=ctx.config.audio_alignment.reference_stream,
             presentation_name=presentation_names[0],
+            compact_name=compact_names[0],
+            short_name=short_names[0],
         ),
         selected_reference_relationship=_selected_reference_relationship(ctx),
         comparisons=[
@@ -321,6 +364,8 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
                     comparison.path.stem
                 ),
                 presentation_name=presentation_names[index],
+                compact_name=compact_names[index],
+                short_name=short_names[index],
             )
             for index, comparison in enumerate(ctx.comparisons, start=1)
         ],
@@ -331,6 +376,8 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         presentation_content=(
             None if common_content is None else format_content_identity(common_content)
         ),
+        alignment_diagnostics_dir=ctx.workspace.alignment_diagnostics_dir,
+        alignment_diagnostics_root=ctx.workspace.generated_root,
     )
 
 
@@ -340,7 +387,15 @@ def _alignment_presentation_name(clip: ClipState, has_common_content: bool) -> s
     if clip.release_identity is None:
         return clip.path.name
     formatter = format_release_descriptor if has_common_content else format_compact_identity
-    return formatter(clip.release_identity) or clip.path.name
+    return formatter(clip.release_identity, separator=" · ") or clip.path.name
+
+
+def _alignment_compact_name(clip: ClipState) -> str:
+    if clip.label_is_explicit and clip.label.strip():
+        return clip.label.strip()
+    if clip.release_identity is None:
+        return clip.path.name
+    return format_micro_descriptor(clip.release_identity, separator=" · ") or clip.path.name
 
 
 def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedReferenceRelationship:
@@ -351,7 +406,12 @@ def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedRefere
 
 
 def _alignment_clip_request(
-    clip: ClipState, *, selected_audio_stream: int | None, presentation_name: str | None = None
+    clip: ClipState,
+    *,
+    selected_audio_stream: int | None,
+    presentation_name: str | None = None,
+    compact_name: str | None = None,
+    short_name: str | None = None,
 ) -> AlignmentClipRequest:
     fingerprint = clip.probe.fingerprint
     return AlignmentClipRequest(
@@ -366,10 +426,18 @@ def _alignment_clip_request(
         trim_end_frame_inclusive=clip.trim.trim_end_frame_inclusive,
         effective_fps_num=clip.effective_fps.numerator,
         effective_fps_den=clip.effective_fps.denominator,
+        source_fps_num=clip.source_fps.numerator,
+        source_fps_den=clip.source_fps.denominator,
         source_frame_count=clip.probe.num_frames,
         selected_audio_stream=selected_audio_stream,
+        active_rect_x=None if clip.active_rect is None else clip.active_rect.x,
+        active_rect_y=None if clip.active_rect is None else clip.active_rect.y,
+        active_rect_width=None if clip.active_rect is None else clip.active_rect.width,
+        active_rect_height=None if clip.active_rect is None else clip.active_rect.height,
         preserved_frame_props=dict(clip.probe.preserved_frame_props),
         presentation_name=presentation_name,
+        compact_name=compact_name,
+        short_name=short_name,
     )
 
 

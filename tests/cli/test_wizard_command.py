@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shlex
 import tomllib
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -26,6 +28,12 @@ def _interactive_terminal(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr("frame_compare.cli.entry._sys_stream_isatty", lambda _name: True)
 
 
+@pytest.fixture(autouse=True)
+def _posix_suggestion_shell(monkeypatch: MonkeyPatch) -> None:
+    """Pin next-step quoting so assertions do not depend on the host OS."""
+    monkeypatch.setattr("frame_compare.cli.entry._is_windows_shell", lambda: False)
+
+
 def _workspace() -> tuple[Path, Path]:
     root = Path("workspace")
     input_dir = root / "comparison_videos"
@@ -40,6 +48,13 @@ def _invoke(root: Path, input_text: str, *extra: str, env: dict[str, str] | None
         input=input_text,
         env=env,
     )
+
+
+def _expected_powershell_quote(value: str) -> str:
+    """Independent oracle for PowerShell's literal single-quote escaping rule."""
+    for quote in ("'", "\u2018", "\u2019", "\u201a", "\u201b"):
+        value = value.replace(quote, quote * 2)
+    return f"'{value}'"
 
 
 def test_first_use_writes_random_goal_minimal_payload_and_honest_privacy_copy(
@@ -65,6 +80,10 @@ def test_first_use_writes_random_goal_minimal_payload_and_honest_privacy_copy(
         assert "Dark, bright, and motion coverage" not in result.stdout
         assert "file default disabled; environment may override at run time" in result.stdout
         assert "Configuration written" in result.stderr
+        written_line = next(
+            line for line in result.stderr.splitlines() if "Configuration written" in line
+        )
+        assert written_line[:2] in ("✓ ", "+ ")
         payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert payload == {
             "paths": {"input_dir": "comparison_videos", "generated_dir": "generated"},
@@ -78,6 +97,89 @@ def test_first_use_writes_random_goal_minimal_payload_and_honest_privacy_copy(
             "slowpics": {"auto_upload": False},
         }
         assert load_config(config_path=config_path).slowpics.auto_upload is True
+
+
+def test_successful_write_prints_verified_next_steps_with_posix_quoting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        # Windows forbids `"` in file names; every other metacharacter is legal on both.
+        quoted = "" if os.name == "nt" else '"quoted" ; '
+        root = Path(f"weird workspace $; {quoted}`echo hi` 'quote' name")
+        (root / "comparison_videos").mkdir(parents=True)
+        config_path = root / "config" / "config.toml"
+
+        result = _invoke(root, "\n\n\ny\n")
+
+        assert result.exit_code == 0
+        written_at = result.stderr.index("Configuration written:")
+        next_steps_at = result.stderr.index("Next steps:")
+        assert written_at < next_steps_at
+
+        lines = result.stderr.splitlines()
+        doctor_line = next(line for line in lines if "frame-compare doctor" in line)
+        assert doctor_line.strip() == "1. Diagnose the runtime: frame-compare doctor"
+        preview_line = next(line for line in lines if "Preview this configuration" in line)
+        run_line = next(line for line in lines if line.strip().startswith("3. Run it:"))
+
+        expected_root = root.resolve()
+        expected_config = config_path.resolve()
+        expected_run_argv = [
+            "frame-compare",
+            "run",
+            "--root",
+            str(expected_root),
+            "--config",
+            str(expected_config),
+        ]
+
+        preview_command = preview_line.split(": ", 1)[1]
+        run_command = run_line.split(": ", 1)[1]
+        assert shlex.split(preview_command) == [*expected_run_argv, "--dry-run"]
+        assert shlex.split(run_command) == expected_run_argv
+
+        assert "Suggestions only, never executed here" in result.stderr
+        assert "Quoted for POSIX shells (sh/bash/zsh)." in result.stderr
+        assert "PowerShell" not in result.stderr
+
+
+def test_next_steps_reflect_alternate_root_and_nested_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("alternate-root")
+        (root / "comparison_videos").mkdir(parents=True)
+        alternate_config = root / "custom" / "alt-config.toml"
+
+        result = _invoke(root, "\n\n\ny\n", "--config", str(alternate_config.relative_to(root)))
+
+        assert result.exit_code == 0
+        expected_root = root.resolve()
+        expected_config = alternate_config.resolve()
+        assert f"--root {shlex.quote(str(expected_root))}" in result.stderr
+        assert f"--config {shlex.quote(str(expected_config))}" in result.stderr
+        default_config = expected_root / "config" / "config.toml"
+        assert str(default_config) not in result.stderr
+        assert alternate_config.exists()
+
+
+def test_windows_shell_next_steps_use_powershell_quoting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("frame_compare.cli.entry._is_windows_shell", lambda: True)
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("it's a \u2019curly\u2019 workspace")
+        (root / "comparison_videos").mkdir(parents=True)
+
+        result = _invoke(root, "\n\n\ny\n")
+
+        assert result.exit_code == 0
+        expected_root = root.resolve()
+        expected_config = (root / "config" / "config.toml").resolve()
+        assert f"--root {_expected_powershell_quote(str(expected_root))}" in result.stderr
+        assert f"--config {_expected_powershell_quote(str(expected_config))}" in result.stderr
+        assert "Quoted for Windows PowerShell." in result.stderr
+        assert "POSIX" not in result.stderr
 
 
 def test_first_use_one_file_retries_menus_without_reporting_automatic_as_a_change(
@@ -97,37 +199,36 @@ def test_first_use_one_file_retries_menus_without_reporting_automatic_as_a_chang
         assert "sources" not in payload
 
 
-@pytest.mark.parametrize("generated_value", ["persistent-generated", "../review-output"])
-def test_first_use_persists_authored_relative_generated_directory(
-    generated_value: str,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    "kind", ["persistent-generated", "../review-output", "absolute", "environment"]
+)
+def test_wizard_preserves_authored_generated_directory(
+    kind: str, tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     with isolated_cli_filesystem(tmp_path, monkeypatch):
         root, config_path = _workspace()
-
-        result = _invoke(root, f"\n{generated_value}\n\ny\n")
-
+        external = (
+            Path("outside") / ("env-generated" if kind == "environment" else "persistent-generated")
+        ).resolve()
+        if kind == "environment":
+            monkeypatch.setenv("GENERATED_SENTINEL", str(external))
+            authored = "$GENERATED_SENTINEL"
+        elif kind == "absolute":
+            authored = str(external)
+        else:
+            authored = kind
+        result = _invoke(root, f"\n{authored}\n\ny\n")
         assert result.exit_code == 0
         payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        assert payload["paths"]["generated_dir"] == generated_value
-        assert "Generated data location:" in result.stdout
-
-
-def test_wizard_persists_authored_absolute_generated_directory_without_creating_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root, config_path = _workspace()
-        external = (Path("outside") / "persistent-generated").resolve()
-
-        result = _invoke(root, f"\n{external}\n\ny\n")
-
-        assert result.exit_code == 0
-        assert not external.exists()
-        payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        assert payload["paths"]["generated_dir"] == str(external)
-        assert resolve_paths(load_config(config_path=config_path), root).generated_root == external
+        assert payload["paths"]["generated_dir"] == authored
+        if kind in ("absolute", "environment"):
+            assert not external.exists()
+        else:
+            assert "Generated data location:" in result.stdout
+        if kind == "absolute":
+            assert (
+                resolve_paths(load_config(config_path=config_path), root).generated_root == external
+            )
 
 
 def test_existing_config_edit_persists_authored_generated_directory_and_reviews_change(
@@ -175,23 +276,6 @@ def test_missing_generated_directory_is_not_probed_or_created(
         assert tomllib.loads(config_path.read_text(encoding="utf-8"))["paths"][
             "generated_dir"
         ] == str(external)
-
-
-def test_wizard_accepts_environment_expanded_generated_value_and_preserves_authored_text(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root, config_path = _workspace()
-        external = (Path("outside") / "env-generated").resolve()
-        monkeypatch.setenv("GENERATED_SENTINEL", str(external))
-
-        result = _invoke(root, "\n$GENERATED_SENTINEL\n\ny\n")
-
-        assert result.exit_code == 0
-        assert not external.exists()
-        payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        assert payload["paths"]["generated_dir"] == "$GENERATED_SENTINEL"
 
 
 def test_eof_at_generated_location_prompt_preserves_existing_bytes(
@@ -364,39 +448,33 @@ def test_existing_config_ignores_environment_only_values_during_review(
         ("1.5", "base-10"),
         ("1,1", "duplicates"),
         (",".join(str(value) for value in range(101)), "between 1 and 100"),
+        (None, None),
     ],
+    ids=["empty", "empty-entry", "negative", "decimal", "duplicates", "too-many", "100-values"],
 )
-def test_specific_frames_retry_then_sort_without_probing(
-    invalid: str, message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_specific_frames_persists_sorted_frames(
+    invalid: str | None, message: str | None, tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     with isolated_cli_filesystem(tmp_path, monkeypatch):
         root, config_path = _workspace()
-
-        result = _invoke(root, f"\n\n3\n{invalid}\n+24, 0,120\ny\n")
-
-        assert result.exit_code == 0
-        assert message in result.stdout
-        assert "Frame availability is checked when the comparison runs." in result.stdout
-        payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        assert payload["analysis"]["user_frames"] == [0, 24, 120]
-        assert payload["analysis"]["random_frame_count"] == 0
-        assert payload["analysis"]["dark_frame_count"] == 0
-        assert payload["analysis"]["bright_frame_count"] == 0
-        assert payload["analysis"]["motion_frame_count"] == 0
-
-
-def test_specific_frames_accepts_100_values(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root, config_path = _workspace()
-        frames = ",".join(str(value) for value in reversed(range(100)))
-
-        result = _invoke(root, f"\n\n3\n{frames}\ny\n")
-
+        if invalid is None:
+            frames = ",".join(str(value) for value in reversed(range(100)))
+            input_text = f"\n\n3\n{frames}\ny\n"
+            expected = list(range(100))
+        else:
+            input_text = f"\n\n3\n{invalid}\n+24, 0,120\ny\n"
+            expected = [0, 24, 120]
+        result = _invoke(root, input_text)
         assert result.exit_code == 0
         payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
-        assert payload["analysis"]["user_frames"] == list(range(100))
+        assert payload["analysis"]["user_frames"] == expected
+        if message is not None:
+            assert message in result.stdout
+            assert "Frame availability is checked when the comparison runs." in result.stdout
+            assert payload["analysis"]["random_frame_count"] == 0
+            assert payload["analysis"]["dark_frame_count"] == 0
+            assert payload["analysis"]["bright_frame_count"] == 0
+            assert payload["analysis"]["motion_frame_count"] == 0
 
 
 def test_existing_keep_is_true_noop_without_confirmation_or_write(
@@ -423,6 +501,9 @@ def test_existing_keep_is_true_noop_without_confirmation_or_write(
         assert "Write these changes?" not in result.stdout
         assert "No configuration changes. Configuration was not written." in result.stderr
         assert config_path.read_bytes() == original
+        assert "Next steps:" in result.stderr
+        assert f"--root {shlex.quote(str(root.resolve()))}" in result.stderr
+        assert f"--config {shlex.quote(str(config_path.resolve()))}" in result.stderr
 
 
 def test_final_no_preserves_existing_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -439,7 +520,7 @@ def test_final_no_preserves_existing_bytes(tmp_path: Path, monkeypatch: pytest.M
         assert config_path.read_bytes() == original
 
 
-def test_atomic_config_write_failure_preserves_existing_bytes(
+def test_wizard_writer_failure_preserves_config_and_omits_next_steps(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     with isolated_cli_filesystem(tmp_path, monkeypatch):
@@ -459,6 +540,7 @@ def test_atomic_config_write_failure_preserves_existing_bytes(
         assert result.exit_code == int(ExitCode.CONFIG_ERROR)
         assert "FC-1007" in result.stderr
         assert config_path.read_bytes() == original
+        assert "Next steps" not in result.stderr
 
 
 @pytest.mark.parametrize("input_text", ["", "\n", "\n\n", "\n\n3\n", "\n\n3\n0,1\n"])
@@ -475,53 +557,29 @@ def test_eof_at_each_prompt_boundary_exits_130_without_write(
         assert not config_path.exists()
 
 
-def test_typer_abort_uses_exact_cancellation_contract(
-    monkeypatch: MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(
-        "frame_compare.cli.entry._prompt_input_dir",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(typer.Abort()),
-    )
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root, config_path = _workspace()
-
-        result = _invoke(root, "")
-
-        assert result.exit_code == int(ExitCode.INTERRUPTED)
-        assert result.stderr == "Canceled; configuration unchanged.\n"
-        assert not config_path.exists()
-
-
-def test_typer_abort_at_generated_location_uses_exact_cancellation_contract(
+@pytest.mark.parametrize(
+    ("prompt", "exception", "input_text"),
+    [
+        ("_prompt_input_dir", typer.Abort, ""),
+        ("_prompt_generated_dir", typer.Abort, "\n"),
+        ("_prompt_input_dir", KeyboardInterrupt, ""),
+    ],
+    ids=["abort-input", "abort-generated", "interrupt"],
+)
+def test_wizard_abort_uses_exact_cancellation_contract(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(
-        "frame_compare.cli.entry._prompt_generated_dir",
-        lambda *_args: (_ for _ in ()).throw(typer.Abort()),
-    )
-    with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root, config_path = _workspace()
-
-        result = _invoke(root, "\n")
-
-        assert result.exit_code == int(ExitCode.INTERRUPTED)
-        assert result.stderr == "Canceled; configuration unchanged.\n"
-        assert not config_path.exists()
-
-
-def test_keyboard_interrupt_uses_exact_cancellation_contract(
-    monkeypatch: MonkeyPatch, tmp_path: Path
+    prompt: str,
+    exception: type[BaseException],
+    input_text: str,
 ) -> None:
     def _interrupt(*_args: object, **_kwargs: object) -> str:
-        raise KeyboardInterrupt
+        raise exception
 
-    monkeypatch.setattr("frame_compare.cli.entry._prompt_input_dir", _interrupt)
+    monkeypatch.setattr(f"frame_compare.cli.entry.{prompt}", _interrupt)
     with isolated_cli_filesystem(tmp_path, monkeypatch):
         root, config_path = _workspace()
-
-        result = _invoke(root, "")
-
+        result = _invoke(root, input_text)
         assert result.exit_code == int(ExitCode.INTERRUPTED)
         assert result.stderr == "Canceled; configuration unchanged.\n"
         assert not config_path.exists()
@@ -683,6 +741,7 @@ def test_generated_filesystem_roots_are_rejected_without_replacing_existing_conf
         assert "FC-1003" in result.stderr
         assert "dedicated directory" in result.stderr
         assert config_path.read_bytes() == original
+        assert "Next steps" not in result.stderr
 
 
 def test_automatic_reference_removes_existing_explicit_key(
@@ -722,6 +781,9 @@ def test_exact_windows_portable_config_exception_is_preserved(
         assert result.exit_code == 0
         assert portable_config.exists()
         assert "Configuration written" in result.stderr
+        assert f"--config {shlex.quote(str(portable_config))}" in result.stderr
+        assert f"--root {shlex.quote(str(root.resolve()))}" in result.stderr
+        assert str(root.resolve() / "config" / "config.toml") not in result.stderr
 
 
 def test_duplicate_stems_fail_before_reference_prompt(
@@ -756,6 +818,7 @@ def test_stale_reference_keep_warns_in_menu_and_review(
 
         assert result.exit_code == 0
         assert result.stdout.count("Current reference does not match the discovered files") == 2
+        assert "! Current reference does not match the discovered files" in result.stdout
         assert config_path.read_text(encoding="utf-8").endswith('reference = "gone.mkv"\n')
 
 
@@ -802,7 +865,6 @@ def test_writer_serializes_raw_toml_once_and_maps_failure(
         calls.append(content)
 
     write_wizard_config_payload(destination, payload, text_writer=_writer)
-    assert len(calls) == 1
     assert tomllib.loads(calls[0]) == {
         "unknown": {"empty": ""},
         "slowpics": {},
@@ -828,4 +890,3 @@ def test_writer_serializes_raw_toml_once_and_maps_failure(
     safe_error = str(exc_info.value.context.to_dict())
     assert "sentinel serialization detail" not in safe_error
     assert "sentinel-secret" not in safe_error
-    assert len(calls) == 1

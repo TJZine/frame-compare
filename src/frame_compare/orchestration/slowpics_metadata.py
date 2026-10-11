@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from frame_compare.config.schema_models import SlowpicsConfig
@@ -16,6 +16,7 @@ from frame_compare.services.types import (
     SlowpicsCollectionMetadata,
     TmdbMetadata,
 )
+from frame_compare.utils.run_warnings import RunWarning
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,7 @@ class SlowpicsMetadataResolution:
     """Resolved collection metadata plus sanitized policy warnings."""
 
     metadata: SlowpicsCollectionMetadata
-    warnings: tuple[str, ...] = ()
+    warnings: list[RunWarning] = field(default_factory=list[RunWarning])
 
 
 def resolve_slowpics_collection_metadata(
@@ -65,14 +66,16 @@ def resolve_slowpics_collection_metadata(
     )
     title = f"{base_title} {config.title_suffix}" if config.title_suffix else base_title
     warnings = (
-        (
-            (
+        [
+            RunWarning(
+                "slow.pics",
+                "warning",
                 "slow.pics: explicit TMDB association differs from resolved metadata; "
-                "automatic title metadata was not combined with the explicit association"
-            ),
-        )
+                "automatic title metadata was not combined with the explicit association",
+            )
+        ]
         if mismatch
-        else ()
+        else []
     )
     return SlowpicsMetadataResolution(
         metadata=SlowpicsCollectionMetadata(

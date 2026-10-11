@@ -8,11 +8,17 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, TypeGuard, cast
+from typing import Literal, TypeGuard, cast, get_args
 
+from frame_compare.utils.alignment_evidence import (
+    MAX_ALIGNMENT_EVIDENCE_BYTES,
+    AudioAlignmentAttempt,
+    evidence_from_payload,
+)
 from frame_compare.utils.atomic_write import write_text_atomic
 
-ALIGNMENT_REVIEW_SCHEMA_VERSION = 1
+ALIGNMENT_REVIEW_METADATA_VERSION = 5
+ALIGNMENT_REVIEW_RESULT_VERSION = 1
 ALIGNMENT_REVIEW_RESULT_SUFFIX = ".alignment-result.json"
 VSVIEW_SESSIONS_DIR_NAME = "vsview_sessions"
 
@@ -23,6 +29,7 @@ ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY = "frame_compare_comparison_ordinal"
 ALIGNMENT_REVIEW_METADATA_ROLE_KEY = "frame_compare_output_role"
 ALIGNMENT_REVIEW_METADATA_NAME_KEY = "frame_compare_presentation_name"
 ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY = "frame_compare_suggested_offset"
+ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY = "frame_compare_audio_review"
 ALIGNMENT_REVIEW_REFERENCE_METADATA_KEYS = frozenset(
     {
         ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
@@ -40,12 +47,26 @@ ALIGNMENT_REVIEW_COMPARISON_METADATA_KEYS = frozenset(
         ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
         ALIGNMENT_REVIEW_METADATA_NAME_KEY,
         ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
+        ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
     }
 )
 
 
 class AlignmentReviewContractError(ValueError):
     """Raised when an alignment review session or result is untrusted."""
+
+
+type _AuthorityOrigin = Literal[
+    "computed_this_run",
+    "shared_computed_offsets",
+    "interactive_confirmed_this_run",
+    "shared_previous_offsets",
+    "preexisting_manual_override",
+    "none",
+]
+type _EvidenceAvailabilityLiteral = Literal[
+    "current_attempt", "historical_details_unavailable", "not_computed"
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +112,19 @@ class AlignmentReviewReferenceMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class AlignmentReviewCurrentAuthority:
+    origin: _AuthorityOrigin
+    frame_offset: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentReviewAudioReview:
+    current_authority: AlignmentReviewCurrentAuthority
+    evidence_availability: _EvidenceAvailabilityLiteral
+    audio_attempt: AudioAlignmentAttempt | None
+
+
+@dataclass(frozen=True, slots=True)
 class AlignmentReviewComparisonMetadata:
     output_id: int
     source_frame_count: int
@@ -99,6 +133,7 @@ class AlignmentReviewComparisonMetadata:
     comparison_ordinal: int
     presentation_name: str
     suggested_offset: int | None
+    audio_review: AlignmentReviewAudioReview
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,10 +219,10 @@ type AlignmentReviewDecision = ConfirmedAlignmentReviewDecision | KeepCurrentAli
 class AlignmentReviewResult:
     session_id: str
     decisions: tuple[AlignmentReviewDecision, ...]
-    schema_version: Literal[1] = ALIGNMENT_REVIEW_SCHEMA_VERSION
+    schema_version: Literal[1] = ALIGNMENT_REVIEW_RESULT_VERSION
 
     def __post_init__(self) -> None:
-        if self.schema_version != ALIGNMENT_REVIEW_SCHEMA_VERSION:
+        if self.schema_version != ALIGNMENT_REVIEW_RESULT_VERSION:
             raise ValueError("unsupported alignment review result schema")
         _validated_session_id(self.session_id)
 
@@ -326,6 +361,13 @@ def _parse_output_metadata(
     if not _is_int(candidate.source_frame_count) or candidate.source_frame_count <= 0:
         raise AlignmentReviewContractError("alignment review output frame count must be positive")
     metadata = candidate.metadata
+    version = metadata.get(ALIGNMENT_REVIEW_METADATA_VERSION_KEY)
+    if not _is_int(version) or version != ALIGNMENT_REVIEW_METADATA_VERSION:
+        rendered = str(version) if _is_int(version) else "unknown"
+        raise AlignmentReviewContractError(
+            "Alignment review requires a newly generated session. "
+            f"This session uses metadata v{rendered}; this version requires v5."
+        )
     role = metadata.get(ALIGNMENT_REVIEW_METADATA_ROLE_KEY)
     if role == "reference":
         expected_keys = ALIGNMENT_REVIEW_REFERENCE_METADATA_KEYS
@@ -335,11 +377,8 @@ def _parse_output_metadata(
         raise AlignmentReviewContractError("alignment review output role is invalid")
     if set(metadata) != set(expected_keys):
         raise AlignmentReviewContractError("alignment review output metadata fields are invalid")
-    version = metadata[ALIGNMENT_REVIEW_METADATA_VERSION_KEY]
     session_id = metadata[ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY]
     name = metadata[ALIGNMENT_REVIEW_METADATA_NAME_KEY]
-    if not _is_int(version) or version != ALIGNMENT_REVIEW_SCHEMA_VERSION:
-        raise AlignmentReviewContractError("unsupported alignment review output metadata version")
     if not isinstance(session_id, str):
         raise AlignmentReviewContractError("alignment review output session identifier is invalid")
     session_id = _validated_session_id(session_id)
@@ -355,12 +394,18 @@ def _parse_output_metadata(
     comparison_key = metadata[ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY]
     ordinal = metadata[ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY]
     suggested_offset = metadata[ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY]
+    audio_review_raw = metadata[ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY]
     if not isinstance(comparison_key, str) or not comparison_key:
         raise AlignmentReviewContractError("alignment review output comparison key is invalid")
     if not _is_int(ordinal) or ordinal <= 0:
         raise AlignmentReviewContractError("alignment review output ordinal is invalid")
     if suggested_offset is not None and not _is_int(suggested_offset):
         raise AlignmentReviewContractError("alignment review suggested offset is invalid")
+    audio_review = _parse_audio_review(
+        audio_review_raw,
+        suggested_offset=suggested_offset,
+        comparison_ordinal=ordinal,
+    )
     return AlignmentReviewComparisonMetadata(
         output_id=candidate.output_id,
         source_frame_count=candidate.source_frame_count,
@@ -369,7 +414,116 @@ def _parse_output_metadata(
         comparison_ordinal=ordinal,
         presentation_name=name,
         suggested_offset=suggested_offset,
+        audio_review=audio_review,
     )
+
+
+_CURRENT_AUTHORITY_ORIGINS: frozenset[_AuthorityOrigin] = frozenset(
+    get_args(_AuthorityOrigin.__value__)
+)
+_EVIDENCE_AVAILABILITY: frozenset[_EvidenceAvailabilityLiteral] = frozenset(
+    get_args(_EvidenceAvailabilityLiteral.__value__)
+)
+
+
+def _is_authority_origin(value: object) -> TypeGuard[_AuthorityOrigin]:
+    return isinstance(value, str) and value in _CURRENT_AUTHORITY_ORIGINS
+
+
+def _is_evidence_availability(value: object) -> TypeGuard[_EvidenceAvailabilityLiteral]:
+    return isinstance(value, str) and value in _EVIDENCE_AVAILABILITY
+
+
+def _parse_audio_review(
+    raw: object, *, suggested_offset: int | None, comparison_ordinal: int
+) -> AlignmentReviewAudioReview:
+    if not isinstance(raw, str):
+        raise AlignmentReviewContractError("alignment review audio evidence is invalid")
+    try:
+        if len(raw.encode("utf-8")) > MAX_ALIGNMENT_EVIDENCE_BYTES:
+            raise AlignmentReviewContractError("alignment review audio evidence is invalid")
+        decoded = json.loads(raw, object_pairs_hook=_json_object_without_duplicates)
+    except AlignmentReviewContractError:
+        raise
+    except (RecursionError, ValueError) as exc:
+        raise AlignmentReviewContractError("alignment review audio evidence is invalid") from exc
+    root = _strict_dict(
+        decoded,
+        {"current_authority", "evidence_availability", "audio_attempt"},
+        "audio evidence",
+    )
+    authority_raw = _strict_dict(
+        root["current_authority"], {"origin", "frame_offset"}, "current authority"
+    )
+    origin = authority_raw["origin"]
+    frame_offset = authority_raw["frame_offset"]
+    if not _is_authority_origin(origin):
+        raise AlignmentReviewContractError("alignment review current authority origin is invalid")
+    if frame_offset is not None and not _is_int(frame_offset):
+        raise AlignmentReviewContractError("alignment review current authority offset is invalid")
+    if (origin == "none") != (frame_offset is None):
+        raise AlignmentReviewContractError("alignment review current authority is inconsistent")
+    if suggested_offset != frame_offset:
+        raise AlignmentReviewContractError("alignment review trusted offset is inconsistent")
+    availability = root["evidence_availability"]
+    if not _is_evidence_availability(availability):
+        raise AlignmentReviewContractError("alignment review evidence availability is invalid")
+    attempt_raw = root["audio_attempt"]
+    if availability == "current_attempt":
+        attempt = _parse_audio_attempt(
+            attempt_raw,
+            suggested_offset=suggested_offset,
+            authority_origin=origin,
+            comparison_ordinal=comparison_ordinal,
+        )
+    else:
+        if attempt_raw is not None:
+            raise AlignmentReviewContractError(
+                "historical alignment evidence must not invent an attempt"
+            )
+        if origin == "computed_this_run":
+            raise AlignmentReviewContractError(
+                "current computed authority requires its trusted attempt"
+            )
+        attempt = None
+    return AlignmentReviewAudioReview(
+        current_authority=AlignmentReviewCurrentAuthority(origin=origin, frame_offset=frame_offset),
+        evidence_availability=availability,
+        audio_attempt=attempt,
+    )
+
+
+def _parse_audio_attempt(
+    raw: object,
+    *,
+    suggested_offset: int | None,
+    authority_origin: _AuthorityOrigin,
+    comparison_ordinal: int,
+) -> AudioAlignmentAttempt:
+    """Parse the embedded v4 attempt through the shared evidence parser."""
+    try:
+        attempt = evidence_from_payload(AudioAlignmentAttempt, raw)
+    except ValueError as exc:
+        raise AlignmentReviewContractError(
+            f"alignment review audio attempt is invalid: {exc}"
+        ) from exc
+    if attempt.comparison_ordinal != comparison_ordinal:
+        raise AlignmentReviewContractError("alignment review attempt ordinal is inconsistent")
+    state = attempt.decision.state
+    if state != "trusted_automatic" and authority_origin in {
+        "computed_this_run",
+        "shared_computed_offsets",
+    }:
+        raise AlignmentReviewContractError("untrusted audio evidence became authoritative")
+    if state == "trusted_automatic":
+        candidate = attempt.decision.candidate
+        if (
+            authority_origin != "computed_this_run"
+            or candidate is None
+            or suggested_offset != candidate.frame_offset
+        ):
+            raise AlignmentReviewContractError("accepted audio evidence is inconsistent")
+    return attempt
 
 
 def _validated_session_id(value: str) -> str:

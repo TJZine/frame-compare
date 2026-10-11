@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import tomli_w
 
 from frame_compare.services.errors import HistoryAccessError, HistoryOpenError
 from frame_compare.services.run_result_record import (
@@ -22,6 +23,7 @@ from frame_compare.services.run_result_record import (
     serialize_run_result,
     write_run_result,
 )
+from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 
@@ -50,7 +52,7 @@ def _record(root: Path, run_dir: Path, *, seconds: int = 10) -> RunResultRecord:
             screenshot_dir=run_dir / "screenshots",
             clip_count=2,
             selected_frame_count=3,
-            warnings=("secret=/Users/private token=abc",),
+            warnings=[RunWarning("sources", "warning", "secret=/Users/private token=abc")],
             metrics_cache_status="hit",
             phase_timings={"render": 2.0, "align": 1.0},
             slowpics_url="https://slow.pics/c/safe",
@@ -59,6 +61,31 @@ def _record(root: Path, run_dir: Path, *, seconds: int = 10) -> RunResultRecord:
         started_at=started,
         completed_at=started + timedelta(seconds=seconds),
     )
+
+
+def test_completed_record_omits_memory_only_review_wait(tmp_path: Path) -> None:
+    from frame_compare.orchestration.run_result_lifecycle import record_completed_run_result
+    from frame_compare.orchestration.types import RunResult
+
+    run_dir = tmp_path / "generated" / "run"
+    run_dir.mkdir(parents=True)
+    started = datetime(2026, 7, 14, 12, tzinfo=UTC)
+    record_completed_run_result(
+        workspace=_workspace(tmp_path, run_dir),
+        result=RunResult(
+            success=True,
+            duration_seconds=60.0,
+            phase_timings={"align": 50.0},
+            vsview_review_seconds=42.5,
+        ),
+        started_at=started,
+        completed_at=started + timedelta(seconds=60),
+    )
+
+    from frame_compare.services.run_result_record import read_run_result
+
+    record = read_run_result(run_dir / "run_result.toml")
+    assert record.phase_timings == {"align": 50.0}
 
 
 def test_v1_round_trip_is_deterministic_and_redacted(tmp_path: Path) -> None:
@@ -84,10 +111,6 @@ def test_v1_round_trip_is_deterministic_and_redacted(tmp_path: Path) -> None:
     ("field", "value"),
     [
         ("version", 2),
-        ("status", "mystery"),
-        ("started_at", "yesterday"),
-        ("duration_seconds", -1),
-        ("clip_count", -1),
         ("report_path", "../escape.html"),
         ("report_path", ""),
         ("report_path", "."),
@@ -97,39 +120,28 @@ def test_v1_round_trip_is_deterministic_and_redacted(tmp_path: Path) -> None:
         ("report_path", "/tmp/report.html"),
         ("report_path", "C:\\reports\\report.html"),
         ("report_path", "\\\\server\\share\\report.html"),
+        ("duration_seconds", True),
+        ("phase_timings", {"render": True}),
+        ("slowpics.url", "http://slow.pics/c/nope"),
+        ("slowpics.url", "https://example.com/c/nope"),
+        ("slowpics.url", "https://slow.pics:444/c/nope"),
+        ("slowpics.url", "https://user:pass@slow.pics/c/nope"),
+        ("slowpics.url", "https://slow.pics/c/nope?token=secret"),
+        ("slowpics.url", "https://slow.pics/c/nope#secret"),
+        ("slowpics.url", "https://slow.pics/not-a-comparison"),
+        ("slowpics.url", "https://slow.pics/c/nope\nignored"),
     ],
 )
-def test_schema_rejects_unsupported_or_malformed_fields(
+def test_schema_rejects_malformed_fields_and_unsafe_urls(
     tmp_path: Path, field: str, value: object
 ) -> None:
     run_dir = tmp_path / "generated" / "run"
     run_dir.mkdir(parents=True)
     payload = tomllib.loads(serialize_run_result(_record(tmp_path, run_dir)))
-    payload[field] = value
-
-    with pytest.raises(ValueError):
-        parse_run_result(payload)
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "http://slow.pics/c/nope",
-        "https://example.com/c/nope",
-        "https://slow.pics:444/c/nope",
-        "https://user:pass@slow.pics/c/nope",
-        "https://slow.pics/c/nope?token=secret",
-        "https://slow.pics/c/nope#secret",
-        "https://slow.pics/not-a-comparison",
-        "https://slow.pics/c/nope\nignored",
-    ],
-)
-def test_schema_rejects_unsafe_slowpics_urls(tmp_path: Path, url: str) -> None:
-    run_dir = tmp_path / "generated" / "run"
-    run_dir.mkdir(parents=True)
-    payload = tomllib.loads(serialize_run_result(_record(tmp_path, run_dir)))
-    payload["slowpics"]["url"] = url
-
+    if field == "slowpics.url":
+        payload["slowpics"]["url"] = value
+    else:
+        payload[field] = value
     with pytest.raises(ValueError):
         parse_run_result(payload)
 
@@ -164,7 +176,7 @@ def test_naive_lifecycle_times_follow_existing_run_info_utc_convention(tmp_path:
             screenshot_dir=None,
             clip_count=1,
             selected_frame_count=1,
-            warnings=(),
+            warnings=[],
             metrics_cache_status="skipped",
             phase_timings={},
             slowpics_url=None,
@@ -183,15 +195,20 @@ def test_failed_record_preserves_only_bounded_generic_warning_facts(tmp_path: Pa
         error=RuntimeError("secret failure"),
         started_at=started,
         completed_at=started + timedelta(seconds=1),
-        facts=FailedRunFacts(warnings=("token=secret", "path=/Users/private")),
+        facts=FailedRunFacts(
+            warnings=[
+                RunWarning("sources", "warning", "token=secret"),
+                RunWarning("sources", "warning", "path=/Users/private"),
+            ]
+        ),
     )
 
-    serialized = serialize_run_result(record)
     assert record.warning_count == 2
     assert record.warning_summaries == (
         "A run warning was reported.",
         "A run warning was reported.",
     )
+    serialized = serialize_run_result(record)
     assert "token=secret" not in serialized
     assert "/Users/private" not in serialized
 
@@ -238,6 +255,31 @@ def test_history_lists_supported_and_malformed_records_independently(tmp_path: P
     assert entries[1].warning == "A run result record is unreadable or unsupported."
     assert not (legacy / "run_result.toml").exists()
     assert (broken / "run_result.toml").read_text(encoding="utf-8") == "version = 99\n"
+
+
+@pytest.mark.parametrize("field", ["duration_seconds", "phase_timings"])
+def test_history_isolates_oversized_numeric_record(tmp_path: Path, field: str) -> None:
+    generated = tmp_path / "generated"
+    valid = generated / "valid"
+    broken = generated / "broken"
+    valid.mkdir(parents=True)
+    broken.mkdir()
+    write_run_result(valid, _record(tmp_path, valid))
+
+    payload = tomllib.loads(serialize_run_result(_record(tmp_path, broken)))
+    if field == "duration_seconds":
+        payload[field] = 10**400
+    else:
+        payload[field] = {"render": 10**400}
+    (broken / "run_result.toml").write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+    entries = list_history(generated)
+
+    assert [(entry.name, entry.status) for entry in entries] == [
+        ("valid", "completed_with_warnings"),
+        ("broken", "unavailable"),
+    ]
+    assert entries[1].warning == "A run result record is unreadable or unsupported."
 
 
 def test_history_report_remains_available_when_screenshots_are_missing(tmp_path: Path) -> None:
@@ -348,7 +390,7 @@ def test_exact_run_name_validation_rejects_paths(tmp_path: Path, name: str) -> N
         resolve_run_directory(generated, name)
 
 
-def test_history_open_rejects_traversal_absolute_and_symlink_escape(tmp_path: Path) -> None:
+def test_history_rejects_noncanonical_report_path_and_traversal(tmp_path: Path) -> None:
     generated = tmp_path / "generated"
     run_dir = generated / "run"
     run_dir.mkdir(parents=True)
@@ -458,3 +500,116 @@ def test_history_ignores_contained_directory_symlink_alias(tmp_path: Path) -> No
     assert [entry.name for entry in list_history(generated)] == ["target"]
     with pytest.raises(HistoryAccessError):
         resolve_run_directory(generated, "alias")
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_run_record_interrupt_guard_allows_only_failure_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failed: bool,
+) -> None:
+    import asyncio
+
+    from frame_compare.services.run_result_record import RUN_RESULT_FILENAME
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    run_dir = tmp_path / "generated" / "run"
+    run_dir.mkdir(parents=True)
+    record = _record(tmp_path, run_dir)
+    if failed:
+        record = failed_record(
+            error=asyncio.CancelledError(),
+            started_at=record.started_at,
+            completed_at=record.completed_at,
+            facts=FailedRunFacts(),
+            workspace=_workspace(tmp_path, run_dir),
+        )
+    real_fsync = os.fsync
+
+    def cancel_at_fsync(fd: int) -> None:
+        real_fsync(fd)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", cancel_at_fsync)
+
+    async def publish() -> None:
+        if failed:
+            write_run_result(run_dir, record)
+        else:
+            with pytest.raises(_RunInterrupt):
+                write_run_result(run_dir, record)
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(publish())
+    target = run_dir / RUN_RESULT_FILENAME
+    assert target.exists() is failed
+    if failed:
+        assert read_run_result(target).status == "failed"
+    assert list(run_dir.glob(f".{RUN_RESULT_FILENAME}.*")) == []
+
+
+@pytest.mark.parametrize("failed", [False, True], ids=["completed", "failed"])
+@pytest.mark.parametrize(("count", "summary_count"), [(2, 2), (10, 8)])
+def test_warning_record_bytes_preserve_count_cap_and_sanitization(
+    tmp_path: Path,
+    failed: bool,
+    count: int,
+    summary_count: int,
+) -> None:
+    started = datetime(2026, 7, 14, 12, tzinfo=UTC)
+    warnings = [
+        RunWarning("sources", "warning", "token=secret /Users/private") for _ in range(count)
+    ]
+    if failed:
+        record = failed_record(
+            error=RuntimeError("secret failure"),
+            started_at=started,
+            completed_at=started + timedelta(seconds=1),
+            facts=FailedRunFacts(warnings=warnings),
+        )
+    else:
+        record = completed_record(
+            workspace=_workspace(tmp_path, tmp_path / "generated" / "run"),
+            facts=CompletedRunFacts(
+                report_path=None,
+                screenshot_dir=None,
+                clip_count=2,
+                selected_frame_count=3,
+                warnings=warnings,
+                metrics_cache_status="skipped",
+                phase_timings={},
+                slowpics_url=None,
+                slowpics_confirmation_status="not_applicable",
+            ),
+            started_at=started,
+            completed_at=started + timedelta(seconds=1),
+        )
+    # Exact V1 bytes captured from ec2fc6ca; producer text never enters the record.
+    expected = (
+        "version = 1\n"
+        + ('status = "failed"\n' if failed else 'status = "completed_with_warnings"\n')
+        + 'started_at = "2026-07-14T12:00:00Z"\n'
+        'completed_at = "2026-07-14T12:00:01Z"\nduration_seconds = 1.0\n'
+        + (
+            "clip_count = 0\nselected_frame_count = 0\n"
+            if failed
+            else "clip_count = 2\nselected_frame_count = 3\n"
+        )
+        + f"warning_count = {count}\nwarning_summaries = [\n"
+        + '    "A run warning was reported.",\n' * summary_count
+        + ']\nmetrics_cache_status = "skipped"\n\n[phase_timings]\n\n'
+        '[slowpics]\noutcome = "not_uploaded"\n'
+        + (
+            '\n[failure]\ncode = "FC-0001"\nname = "INTERNAL_ERROR"\n'
+            'category = "internal"\nmessage = "The run failed because of an internal error."\n'
+            if failed
+            else ""
+        )
+    )
+    assert serialize_run_result(record).encode("utf-8") == expected.encode("utf-8")
+    assert record.warning_count == count
+    assert len(record.warning_summaries) == summary_count
+    assert parse_run_result(tomllib.loads(expected)) == record

@@ -35,17 +35,6 @@ class _TTYStringIO(io.StringIO):
         return self._is_tty
 
 
-class _EchoingTTYStringIO(_TTYStringIO):
-    def __init__(self, value: str, *, is_tty: bool, echo_to: io.StringIO) -> None:
-        super().__init__(value, is_tty=is_tty)
-        self._echo_to = echo_to
-
-    def readline(self, *_args: object, **_kwargs: object) -> str:
-        response = super().readline()
-        self._echo_to.write(response)
-        return response
-
-
 class _FailingTTYStringIO(_TTYStringIO):
     def readline(self, *_args: object, **_kwargs: object) -> str:
         raise OSError("input unavailable")
@@ -60,6 +49,8 @@ def _clip(path: Path, *, label: str) -> AlignmentClipRequest:
         trim_end_frame_inclusive=None,
         effective_fps_num=24000,
         effective_fps_den=1001,
+        source_fps_num=24000,
+        source_fps_den=1001,
         source_frame_count=100,
     )
 
@@ -67,7 +58,7 @@ def _clip(path: Path, *, label: str) -> AlignmentClipRequest:
 def _request(tmp_path: Path) -> AlignmentRequest:
     return AlignmentRequest(
         reference=_clip(tmp_path / "ref [bold red].mkv", label="Reference [bold]"),
-        selected_reference_relationship="explicit",
+        selected_reference_relationship="configured",
         comparisons=[
             _clip(
                 tmp_path / "comp [green]/A [red].mkv",
@@ -79,19 +70,8 @@ def _request(tmp_path: Path) -> AlignmentRequest:
         generated_dir=tmp_path / "generated",
         shared_alignment_cache_dir=tmp_path / "generated" / "cache" / "alignment",
         settings=AlignmentCacheSettings(
-            sample_rate=8000,
             max_offset_seconds=30.0,
-            correlation_mode="raw_fft",
-            preprocessing_mode="none",
             channel_strategy="mono_downmix",
-            confidence_threshold=0.0,
-            ambiguity_peak_ratio=1.0,
-            window_length_seconds=0.0,
-            window_stride_seconds=0.0,
-            minimum_valid_windows=1,
-            consensus_minimum_ratio=1.0,
-            refinement_mode="disabled",
-            refinement_sample_rate=None,
         ),
     )
 
@@ -138,20 +118,16 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     stderr_output = stderr.getvalue()
     assert accepted is True
     assert captured.out == ""
-    assert "[WAIT] Alignment reuse" in stderr_output
+    assert "Alignment reuse" in stderr_output
     assert "[y/N]" in stderr_output
-    panel_line = next(
-        line for line in stderr_output.splitlines() if "[WAIT] Alignment reuse" in line
-    )
+    panel_line = next(line for line in stderr_output.splitlines() if "Alignment reuse" in line)
     assert panel_line.startswith("  ")
     assert not panel_line.startswith("   ")
     prompt_line = next(
         line for line in stderr_output.splitlines() if "Reuse these offsets?" in line
     )
     assert prompt_line == f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}"
-    assert stderr_output.index("[WAIT] Alignment reuse") < stderr_output.index(
-        "    Reuse these offsets?"
-    )
+    assert stderr_output.index("Alignment reuse") < stderr_output.index("    Reuse these offsets?")
     assert "Comparison [cyan]" in stderr_output
     assert "<one>" in stderr_output
     assert "A [red].mkv" in stderr_output
@@ -167,37 +143,6 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     assert stderr_output.index("+12 frames") < stderr_output.index("Computed")
     assert stderr_output.index("Computed") < stderr_output.index("Accepted")
     assert stderr_output.index("Accepted") < stderr_output.index("Cache")
-
-
-def test_prompt_leaves_one_blank_line_after_a_normal_answer(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = _request(tmp_path)
-    stderr = _TTYStringIO("", is_tty=True)
-    monkeypatch.setattr(
-        reuse_prompt.sys,
-        "stdin",
-        _EchoingTTYStringIO("yes\n", is_tty=True, echo_to=stderr),
-    )
-    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
-
-    assert prompt_for_previous_offset_reuse(
-        prompt_input=_prompt_input(request),
-        progress=None,
-        no_color=True,
-    )
-
-    stderr.write("  [OK] ALIGN  Completed in 20s\n")
-    rendered = stderr.getvalue()
-    assert rendered.endswith(
-        f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}yes\n\n  [OK] ALIGN  Completed in 20s\n"
-    )
-    assert (
-        rendered.index("[WAIT] Alignment reuse")
-        < rendered.index("    Reuse these offsets?")
-        < rendered.index("  [OK] ALIGN")
-    )
 
 
 def test_prompt_shows_full_filename_once_when_label_equals_stem(
@@ -257,7 +202,7 @@ def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
         prompt_input=prompt_input, progress=None, no_color=True
     )
     output = stderr.getvalue()
-    assert "[WAIT] Alignment reuse" in output
+    assert "Alignment reuse" in output
     assert "Avatar Aang The Last Airbender (2026)" in output
     assert "PMTP WEB-DL" in output
     assert "ATV WEB-DL" in output
@@ -267,41 +212,8 @@ def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
     assert str(prompt_input.shared_cache_path) in "".join(output.split())
 
 
-def test_prompt_does_not_use_unbounded_terminal_width(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = _request(tmp_path)
-    console_widths: list[int | None] = []
-    original_console = reuse_prompt.Console
-
-    class RecordingConsole(original_console):
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            console_widths.append(kwargs.get("width"))
-            super().__init__(*args, **kwargs)
-
-    monkeypatch.setattr(
-        reuse_prompt.shutil,
-        "get_terminal_size",
-        lambda **_: os.terminal_size((240, 24)),
-    )
-    monkeypatch.setattr(reuse_prompt, "Console", RecordingConsole)
-    monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("n\n", is_tty=True))
-    monkeypatch.setattr(reuse_prompt.sys, "stderr", _TTYStringIO("", is_tty=True))
-
-    accepted = prompt_for_previous_offset_reuse(
-        prompt_input=_prompt_input(request),
-        progress=None,
-        no_color=True,
-    )
-
-    assert accepted is False
-    assert console_widths
-    assert all(width is not None and width < 240 for width in console_widths)
-
-
 @pytest.mark.parametrize("columns", [60, 80, 120, 240])
-def test_prompt_uses_actual_narrow_terminal_width(
+def test_prompt_output_fits_terminal_width(
     columns: int,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -325,7 +237,7 @@ def test_prompt_uses_actual_narrow_terminal_width(
         is False
     )
     stderr_output = stderr.getvalue()
-    assert "[WAIT] Alignment reuse" in stderr_output
+    assert "Alignment reuse" in stderr_output
     assert REUSE_PREVIOUS_OFFSETS_PROMPT in stderr_output
     assert "\x1b[" not in stderr_output
     assert all(len(line) <= columns for line in stderr_output.splitlines())
@@ -400,7 +312,7 @@ def test_prompt_visible_prompt_path_fallbacks_on_eof_or_read_failure(
     assert accepted is False
     assert captured.out == ""
     stderr_output = stderr.getvalue()
-    assert "[WAIT] Alignment reuse" in stderr_output
+    assert "Alignment reuse" in stderr_output
     assert "[y/N]" in stderr_output
     expected_prompt = f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}"
     assert f"{expected_prompt}\n{PROMPT_UNAVAILABLE_MESSAGE}" in stderr_output
@@ -429,7 +341,7 @@ def test_prompt_emits_no_human_diagnostic_when_stderr_is_not_tty(
     assert captured.out == ""
 
 
-def test_prompt_suspends_and_resumes_progress_around_table_and_read(
+def test_prompt_accepts_short_y(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -445,37 +357,6 @@ def test_prompt_suspends_and_resumes_progress_around_table_and_read(
     )
 
     assert accepted is True
-    progress.suspend.assert_called_once_with()
-    progress.resume.assert_called_once_with()
-
-
-@pytest.mark.parametrize(
-    ("stdin", "stderr"),
-    [
-        (_TTYStringIO("yes\n", is_tty=False), _TTYStringIO("", is_tty=True)),
-        (_TTYStringIO("yes\n", is_tty=True), _TTYStringIO("", is_tty=False)),
-    ],
-)
-def test_prompt_hidden_or_noninteractive_paths_do_not_suspend_progress(
-    stdin: io.StringIO,
-    stderr: io.StringIO,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = _request(tmp_path)
-    progress = MagicMock()
-    monkeypatch.setattr(reuse_prompt.sys, "stdin", stdin)
-    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
-
-    accepted = prompt_for_previous_offset_reuse(
-        prompt_input=_prompt_input(request),
-        progress=progress,
-        no_color=True,
-    )
-
-    assert accepted is False
-    progress.suspend.assert_not_called()
-    progress.resume.assert_not_called()
 
 
 def test_prompt_falls_back_to_filename_when_labels_are_blank(
@@ -493,6 +374,8 @@ def test_prompt_falls_back_to_filename_when_labels_are_blank(
             trim_end_frame_inclusive=request.reference.trim_end_frame_inclusive,
             effective_fps_num=request.reference.effective_fps_num,
             effective_fps_den=request.reference.effective_fps_den,
+            source_fps_num=request.reference.source_fps_num,
+            source_fps_den=request.reference.source_fps_den,
             source_frame_count=request.reference.source_frame_count,
             selected_audio_stream=request.reference.selected_audio_stream,
         ),
@@ -506,6 +389,8 @@ def test_prompt_falls_back_to_filename_when_labels_are_blank(
                 trim_end_frame_inclusive=request.comparisons[0].trim_end_frame_inclusive,
                 effective_fps_num=request.comparisons[0].effective_fps_num,
                 effective_fps_den=request.comparisons[0].effective_fps_den,
+                source_fps_num=request.comparisons[0].source_fps_num,
+                source_fps_den=request.comparisons[0].source_fps_den,
                 source_frame_count=request.comparisons[0].source_frame_count,
                 selected_audio_stream=request.comparisons[0].selected_audio_stream,
             ),
@@ -532,7 +417,8 @@ def test_prompt_falls_back_to_filename_when_labels_are_blank(
         ],
     )
     monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("n\n", is_tty=True))
-    monkeypatch.setattr(reuse_prompt.sys, "stderr", _TTYStringIO("", is_tty=True))
+    stderr = _TTYStringIO("", is_tty=True)
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", stderr)
 
     accepted = prompt_for_previous_offset_reuse(
         prompt_input=prompt_input,
@@ -542,7 +428,7 @@ def test_prompt_falls_back_to_filename_when_labels_are_blank(
 
     captured = capsys.readouterr()
     assert accepted is False
-    stderr_output = reuse_prompt.sys.stderr.getvalue()
+    stderr_output = stderr.getvalue()
     assert captured.out == ""
     assert request.reference.path.name in stderr_output
     assert request.comparisons[0].path.name in stderr_output

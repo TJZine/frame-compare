@@ -168,30 +168,26 @@ def test_distribution_verifier_accepts_expected_artifacts(tmp_path: Path, repo_r
     assert result.stderr == ""
 
 
-def test_distribution_verifier_rejects_wheel_missing_bundled_font(
-    tmp_path: Path,
-    repo_root: Path,
+@pytest.mark.parametrize(
+    "case, diagnostic",
+    [
+        ("missing-font", "must contain exactly one bundled Inter font file"),
+        ("missing-license", "must contain exactly one bundled Inter OFL notice file"),
+        ("corrupt-font", "bundled Inter font SHA-256 mismatch"),
+    ],
+)
+def test_distribution_verifier_rejects_invalid_bundled_assets(
+    tmp_path: Path, repo_root: Path, case: str, diagnostic: str
 ) -> None:
-    _write_wheel(tmp_path, include_bundled_font=False)
-    _write_sdist(tmp_path)
-
+    _write_wheel(
+        tmp_path,
+        include_bundled_font=case != "missing-font",
+        bundled_font_bytes=b"corrupted font" if case == "corrupt-font" else None,
+    )
+    _write_sdist(tmp_path, include_bundled_license=case != "missing-license")
     result = _run_verifier(repo_root, tmp_path)
-
     assert result.returncode != 0
-    assert "must contain exactly one bundled Inter font file" in result.stderr
-
-
-def test_distribution_verifier_rejects_sdist_missing_bundled_license(
-    tmp_path: Path,
-    repo_root: Path,
-) -> None:
-    _write_wheel(tmp_path)
-    _write_sdist(tmp_path, include_bundled_license=False)
-
-    result = _run_verifier(repo_root, tmp_path)
-
-    assert result.returncode != 0
-    assert "must contain exactly one bundled Inter OFL notice file" in result.stderr
+    assert diagnostic in result.stderr
 
 
 def test_distribution_verifier_rejects_bundled_assets_outside_sdist_root(
@@ -205,19 +201,6 @@ def test_distribution_verifier_rejects_bundled_assets_outside_sdist_root(
 
     assert result.returncode != 0
     assert "must contain exactly one bundled Inter font file" in result.stderr
-
-
-def test_distribution_verifier_rejects_corrupted_bundled_font(
-    tmp_path: Path,
-    repo_root: Path,
-) -> None:
-    _write_wheel(tmp_path, bundled_font_bytes=b"corrupted font")
-    _write_sdist(tmp_path)
-
-    result = _run_verifier(repo_root, tmp_path)
-
-    assert result.returncode != 0
-    assert "bundled Inter font SHA-256 mismatch" in result.stderr
 
 
 def test_distribution_verifier_rejects_truncated_bundled_license(
@@ -254,22 +237,33 @@ def test_distribution_verifier_rejects_payload_modified_after_record_generation(
     assert "RECORD mismatch for 'frame_compare/__init__.py'" in result.stderr
 
 
-def test_distribution_verifier_rejects_stale_record_entry(
-    tmp_path: Path,
-    repo_root: Path,
+@pytest.mark.parametrize(
+    "case, diagnostic",
+    [
+        ("stale", "RECORD paths differ"),
+        ("malformed", "RECORD contains a malformed row"),
+        ("duplicate", "RECORD contains duplicate path"),
+    ],
+)
+def test_distribution_verifier_rejects_invalid_record_rows(
+    tmp_path: Path, repo_root: Path, case: str, diagnostic: str
 ) -> None:
     _write_wheel(tmp_path)
     _write_sdist(tmp_path)
     wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
     record_name = "frame_compare-0.1.0.dist-info/RECORD"
     record = _read_wheel_member(wheel, record_name)
-    _replace_wheel_member(wheel, record_name, f"{record}stale.py,sha256=unused,0\n")
-
+    row = {
+        "stale": "stale.py,sha256=unused,0",
+        "malformed": "malformed",
+        "duplicate": record.splitlines()[0],
+    }[case]
+    _replace_wheel_member(wheel, record_name, f"{record}{row}\n")
     result = _run_verifier(repo_root, tmp_path)
-
     assert result.returncode != 0
-    assert "RECORD paths differ" in result.stderr
-    assert "stale.py" in result.stderr
+    assert diagnostic in result.stderr
+    if case == "stale":
+        assert "stale.py" in result.stderr
 
 
 def test_distribution_verifier_rejects_incorrect_record_size(
@@ -310,41 +304,6 @@ def test_distribution_verifier_rejects_missing_record_entry(
     assert result.returncode != 0
     assert "RECORD paths differ" in result.stderr
     assert "frame_compare/__init__.py" in result.stderr
-
-
-def test_distribution_verifier_rejects_malformed_record_row(
-    tmp_path: Path,
-    repo_root: Path,
-) -> None:
-    _write_wheel(tmp_path)
-    _write_sdist(tmp_path)
-    wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
-    record_name = "frame_compare-0.1.0.dist-info/RECORD"
-    record = _read_wheel_member(wheel, record_name)
-    _replace_wheel_member(wheel, record_name, f"{record}malformed\n")
-
-    result = _run_verifier(repo_root, tmp_path)
-
-    assert result.returncode != 0
-    assert "RECORD contains a malformed row" in result.stderr
-
-
-def test_distribution_verifier_rejects_duplicate_record_path(
-    tmp_path: Path,
-    repo_root: Path,
-) -> None:
-    _write_wheel(tmp_path)
-    _write_sdist(tmp_path)
-    wheel = tmp_path / "frame_compare-0.1.0-py3-none-any.whl"
-    record_name = "frame_compare-0.1.0.dist-info/RECORD"
-    record = _read_wheel_member(wheel, record_name)
-    first_row = record.splitlines()[0]
-    _replace_wheel_member(wheel, record_name, f"{record}{first_row}\n")
-
-    result = _run_verifier(repo_root, tmp_path)
-
-    assert result.returncode != 0
-    assert "RECORD contains duplicate path" in result.stderr
 
 
 def test_distribution_verifier_rejects_duplicate_payload_member(
@@ -419,46 +378,28 @@ def test_distribution_verifier_rejects_duplicate_required_wheel_metadata(
     assert f"exactly one dist-info {member} file" in result.stderr
 
 
-@pytest.mark.parametrize("member", ["WHEEL", "RECORD", "LICENSE"])
-def test_distribution_verifier_rejects_mismatched_dist_info_directories(
-    tmp_path: Path,
-    repo_root: Path,
-    member: str,
+@pytest.mark.parametrize("member", ["WHEEL", "RECORD", "LICENSE", "nested"])
+def test_distribution_verifier_rejects_invalid_dist_info_locations(
+    tmp_path: Path, repo_root: Path, member: str
 ) -> None:
     dist_info = "frame_compare-0.1.0.dist-info"
-    other_dist_info = "other-0.1.0.dist-info"
+    metadata_root = f"nested/{dist_info}" if member == "nested" else dist_info
     _write_wheel(
         tmp_path,
-        wheel_dist_info=other_dist_info if member == "WHEEL" else dist_info,
-        record_dist_info=other_dist_info if member == "RECORD" else dist_info,
-        license_dist_info=other_dist_info if member == "LICENSE" else dist_info,
+        metadata_dist_info=metadata_root,
+        wheel_dist_info="other-0.1.0.dist-info" if member == "WHEEL" else metadata_root,
+        record_dist_info="other-0.1.0.dist-info" if member == "RECORD" else metadata_root,
+        license_dist_info="other-0.1.0.dist-info" if member == "LICENSE" else metadata_root,
     )
     _write_sdist(tmp_path)
-
     result = _run_verifier(repo_root, tmp_path)
-
     assert result.returncode != 0
-    assert f"{member} is not in the METADATA dist-info directory" in result.stderr
-
-
-def test_distribution_verifier_rejects_nested_dist_info_directory(
-    tmp_path: Path,
-    repo_root: Path,
-) -> None:
-    nested_dist_info = "nested/frame_compare-0.1.0.dist-info"
-    _write_wheel(
-        tmp_path,
-        metadata_dist_info=nested_dist_info,
-        wheel_dist_info=nested_dist_info,
-        record_dist_info=nested_dist_info,
-        license_dist_info=nested_dist_info,
+    diagnostic = (
+        "dist-info directory must be at the archive root"
+        if member == "nested"
+        else f"{member} is not in the METADATA dist-info directory"
     )
-    _write_sdist(tmp_path)
-
-    result = _run_verifier(repo_root, tmp_path)
-
-    assert result.returncode != 0
-    assert "dist-info directory must be at the archive root" in result.stderr
+    assert diagnostic in result.stderr
 
 
 @pytest.mark.parametrize(

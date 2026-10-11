@@ -3,29 +3,29 @@
   "bundle": {
     "platform": "windows",
     "arch": "x64",
-    "vs_ref": "R79",
-    "python_version": "3.13.15",
+    "vs_ref": "R81",
+    "python_version": "3.13.16",
     "ffmpeg_policy": "lgpl-only",
     "plugin_layout": "R74+ site-packages/vapoursynth/plugins only",
     "notes": "Deterministic Windows media runtime contract. VapourSynth plugins are installed only in the canonical site-packages/vapoursynth/plugins directory; native media components are not present in code-only update ZIPs, so installations crossing this runtime fingerprint require a complete portable bundle refresh. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
     "runtime_fingerprints": {
-      "analysis": "312f6703ff00e5f518f6c768d74bbe30c17fd07ee5f7079b71aec0f78e7ca039",
-      "probe": "2165b8dd875be09a5631f612a683c32106b65f74398db6eec68e37839e471c77",
-      "alignment": "9b678d58d2f9c339f3044c11c98591f6b09ad81d0769ad7853fd3da35e429d36",
-      "index": "56c451f754fda35c6f39c1ec4d698e596b580660ca08c6cf40f45114d15a7e1c",
-      "full": "27ad3029dcd6fb81cdc559aad1ba19afb13835b20aef16d232629d4c9e3624d7"
+      "analysis": "3155ae5b289b291dd4455618b90933bcd883548129686c33d036d9d7f71e36e3",
+      "probe": "da4ce68ddc665bbbb5b3afcbfcd07891b06139ab413f421027beb1af609f79fa",
+      "alignment": "4bee154435c566f007fa948c609ed6926ea3bdbf6cbe468c3c9b660503c3e858",
+      "index": "f125953022b6d62dd6aaf53f4b85bee51d206878100a51cf40c9e9e4afa879b1",
+      "full": "b47d64de188aab069cf3c3b9d51add6d0b3416c5ee175b4c0646b72436219320"
     }
   },
   "artifacts": [
     {
-      "id": "ffmpeg-btbn-win64-lgpl-8.1-2026-07-31",
+      "id": "ffmpeg-btbn-win64-lgpl-8.1-2026-09-30",
       "name": "FFmpeg (BtbN build, win64, LGPL-only)",
-      "version": "n8.1.2-34-g9b6c8969e0 (autobuild-2026-07-31-14-10)",
-      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-31-14-10/ffmpeg-n8.1.2-34-g9b6c8969e0-win64-lgpl-8.1.zip",
-      "source_url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b",
-      "build_source_url": "https://codeload.github.com/BtbN/FFmpeg-Builds/tar.gz/a99e8230eae00d1cee38f23076a7a1f55cd984e2",
-      "sha256": "089e4169e93b2b3f3acbfced3c0704d24276a225641bdda04d796d28b07a2a38",
-      "bytes": 145349121,
+      "version": "n8.1.3-9-g29e619e767 (autobuild-2026-09-30-13-08)",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-win64-lgpl-8.1.zip",
+      "source_url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/29e619e767cde9045a75c29bc9a8278ae7b3a98b",
+      "build_source_url": "https://codeload.github.com/BtbN/FFmpeg-Builds/tar.gz/6c9aec5fc9a72ec3abedd1fa84db141fa18cf52b",
+      "sha256": "4a7642b2264c03e8a0ce8a3825b933ee5580656f45695a086fe7e294045ffc0a",
+      "bytes": 170611883,
       "license": {
         "spdx": "LGPL-2.1-or-later",
         "url": "https://ffmpeg.org/legal.html",
@@ -34,27 +34,27 @@
       "install": {
         "type": "extract",
         "destination": "ffmpeg",
-        "strip_prefix": "ffmpeg-n8.1.2-34-g9b6c8969e0-win64-lgpl-8.1/"
+        "strip_prefix": "ffmpeg-n8.1.3-9-g29e619e767-win64-lgpl-8.1/"
       },
-      "release_date": "2026-07-31",
+      "release_date": "2026-09-30",
       "source_kind": "release",
-      "source_ref": "autobuild-2026-07-31-14-10",
-      "source_sha256": "7e779215eae16ad7e93ddad59bd82822bd3d34e4dc61f9996f9481b2c0605bc3",
-      "source_bytes": 16903934,
-      "build_source_commit": "a99e8230eae00d1cee38f23076a7a1f55cd984e2",
-      "build_source_sha256": "7deac4a5190b2be84d4d548db2885d05152f9e3d77069d0e34841a46efd95e2b",
-      "build_source_bytes": 101671,
+      "source_ref": "autobuild-2026-09-30-13-08",
+      "source_sha256": "8e4699bcb6a311772e8f513cc72ce27328891b82a598b82e7cff3dfe580875a0",
+      "source_bytes": 16922506,
+      "build_source_commit": "6c9aec5fc9a72ec3abedd1fa84db141fa18cf52b",
+      "build_source_sha256": "81da4f7c878dc0f60e6b8d0049a112e32178e20f025d468fe4e99e77b2dfe0ec",
+      "build_source_bytes": 107893,
       "notes": "Retained end-of-month BtbN Windows x64 LGPL-only artifact from FFmpeg's stable 8.1 release branch; no GPL or nonfree profile is permitted.",
-      "source_commit": "9b6c8969e05b4f0b29f0f85cd501be6b3e582e6b"
+      "source_commit": "29e619e767cde9045a75c29bc9a8278ae7b3a98b"
     },
     {
       "id": "python-embed-amd64",
       "name": "Python embeddable package (amd64)",
-      "version": "3.13.15",
-      "url": "https://www.python.org/ftp/python/3.13.15/python-3.13.15-embed-amd64.zip",
-      "source_url": "https://www.python.org/ftp/python/3.13.15/Python-3.13.15.tgz",
-      "sha256": "d1f04d990aee1253d8569e8e5104e30fa9f5fa830899f14843448872d936a2cf",
-      "bytes": 11009825,
+      "version": "3.13.16",
+      "url": "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip",
+      "source_url": "https://www.python.org/ftp/python/3.13.16/Python-3.13.16.tgz",
+      "sha256": "97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297",
+      "bytes": 11439094,
       "license": {
         "spdx": "Python-2.0",
         "url": "https://docs.python.org/3/license.html"
@@ -63,28 +63,28 @@
         "type": "extract",
         "destination": "python"
       },
-      "release_date": "2026-08-05",
+      "release_date": "2026-09-30",
       "source_kind": "release",
-      "source_ref": "3.13.15",
-      "source_sha256": "c28d9d213c09b5b5ab2c29812950e12f746999e099b82894231be954b26baed9",
-      "source_bytes": 30106468
+      "source_ref": "3.13.16",
+      "source_sha256": "cfac63bddf956deafb1172ca131ae5dcaafd6f95056086e233fca205593ed427",
+      "source_bytes": 30191781
     },
     {
-      "id": "vapoursynth-portable-r79",
+      "id": "vapoursynth-portable-r81",
       "name": "VapourSynth 64-bit portable",
-      "version": "R79",
-      "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R79/VapourSynth64-Portable-R79.zip",
-      "source_url": "https://codeload.github.com/vapoursynth/vapoursynth/tar.gz/acabf605b2205b32d65859bb2736405719d2fafd",
-      "sha256": "625b3410d903943107291592e90d6f521f829ebb8291d952ee91b8d674bbb153",
-      "bytes": 23160674,
+      "version": "R81",
+      "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R81/VapourSynth64-Portable-R81.zip",
+      "source_url": "https://codeload.github.com/vapoursynth/vapoursynth/tar.gz/dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a",
+      "sha256": "6d625bd3b4d68697a7664a886f3a5e2f1df1a4744b4811bf77bd944baed63436",
+      "bytes": 31797504,
       "license": {
         "spdx": "LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/acabf605b2205b32d65859bb2736405719d2fafd/COPYING.LESSER",
+        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a/COPYING.LESSER",
         "files": [
           {
             "path": "licenses/common/LGPL-2.1.txt",
             "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
-            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/acabf605b2205b32d65859bb2736405719d2fafd/COPYING.LESSER"
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a/COPYING.LESSER"
           }
         ]
       },
@@ -92,13 +92,13 @@
         "type": "extract",
         "destination": "vs/core"
       },
-      "notes": "R79 stable portable runtime with cache-cycle improvements, vspipe MKV output, and the zimg API-check fix. The selected Python wheel remains CPython 3.12 ABI3 and supports CPython 3.13; native builds require a C++20 compiler.",
-      "release_date": "2026-08-07",
+      "notes": "R81 stable portable runtime with core API R4.3, GPU transfer and memory-model fixes, Matroska muxer and logging fixes. Frame Compare keeps its CPU-frame path. The selected CPython 3.12 ABI3 wheel supports CPython 3.13; native builds require a C++20 compiler.",
+      "release_date": "2026-10-04",
       "source_kind": "release",
-      "source_ref": "R79",
-      "source_sha256": "042ce026e552a31c5c4b89f637fcb5841f69f807babc7e11f11f863a194d9da7",
-      "source_bytes": 657976,
-      "source_commit": "acabf605b2205b32d65859bb2736405719d2fafd"
+      "source_ref": "R81",
+      "source_sha256": "8b539506bba0fce6794d905da771a1b88a5cf2288a99ae0d32b8acd675240391",
+      "source_bytes": 1134224,
+      "source_commit": "dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a"
     },
     {
       "id": "vs-plugin-lsmas-1310.0.0.0-win-amd64-wheel",
@@ -120,7 +120,7 @@
           {
             "path": "licenses/common/LGPL-2.1.txt",
             "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
-            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/acabf605b2205b32d65859bb2736405719d2fafd/COPYING.LESSER"
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/732845793a1caf5838d4f7b94f6ce668a19c908e/COPYING.LESSER"
           },
           {
             "path": "licenses/lsmash-works/dependencies/FFmpeg-COPYING.LGPLv2.1.txt",
@@ -233,42 +233,43 @@
       "source_commit": "3cfd23f257ecb62b0cbd81eaaca092e18ae8e579"
     },
     {
-      "id": "vsview-0.10.3-wheel",
+      "id": "vsview-0.12.1-wheel",
       "name": "VSView",
-      "version": "0.10.3",
-      "url": "https://files.pythonhosted.org/packages/8a/62/04205cd1cd35c3beb1e3a2c2cf41d222e8ab1e657809894a5a6877a0817b/vsview-0.10.3-py3-none-any.whl",
-      "source_url": "https://files.pythonhosted.org/packages/0b/f8/b1b6160674b829f88afb5166bc02e58651875b04168ce893fd60b3b1194d/vsview-0.10.3.tar.gz",
-      "sha256": "e6a9d37c82a0f58db310c40b72ab38fc4a5879ec70ce45c2a8e80b95787bd223",
-      "bytes": 2260813,
+      "version": "0.12.1",
+      "url": "https://files.pythonhosted.org/packages/a4/e1/9179b6da07cb4153ec6818ee4ba256cf5fca15ccc1f6e3bdf6e4fd27e8cf/vsview-0.12.1-py3-none-any.whl",
+      "source_url": "https://files.pythonhosted.org/packages/e4/1c/e1eac58c9a8df00de8a91235e00921dbbd6116a0c68c50e4949c9e0d9081/vsview-0.12.1.tar.gz",
+      "sha256": "984b3cdce0e8743ada9e5b7677b91b4540c69f6790098579b13e0260766aeb64",
+      "bytes": 2279401,
       "license": {
         "spdx": "EUPL-1.2 AND MIT AND Apache-2.0 AND ISC AND OFL-1.1",
-        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.10.3/LICENSE",
+        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.12.1/LICENSE",
         "notes": "The wheel carries the application and bundled font/icon license texts under dist-info/licenses."
       },
       "install": { "type": "python_wheel" },
-      "release_date": "2026-08-16",
+      "release_date": "2026-10-09",
       "source_kind": "release",
-      "source_ref": "vsview/v0.10.3",
-      "source_sha256": "c1836271957961afd77a1adc97eb14eadbde705ea30fc49408cc61791e21714c",
-      "source_bytes": 13843222
+      "source_ref": "vsview/v0.12.1",
+      "source_sha256": "0c00a25539488fd059786c762ffec022c9e3c8dbf9ec5d1a1afac912b6963afc",
+      "source_bytes": 13883419
     },
     {
-      "id": "vsview-cli-1.2.0-win-amd64-wheel",
-      "name": "VSView CLI",
-      "version": "1.2.0",
-      "url": "https://files.pythonhosted.org/packages/e6/57/8ca0c04e08c8064ac88a499f222981ccfc5e4b5d87029f225659e623ea24/vsview_cli-1.2.0-cp312-abi3-win_amd64.whl",
-      "source_url": "https://files.pythonhosted.org/packages/0d/03/17c0c66ff7426d14c9fe33a8066774c97c7f6eb4c01ea07c1102e5656e3e/vsview_cli-1.2.0.tar.gz",
-      "sha256": "69a658baa5b2bb5acb9dbf07af0d93863a10af5fe9165feaee44bbab20b1c26a",
-      "bytes": 393807,
+      "id": "cyclopts-5.2.0-wheel",
+      "name": "Cyclopts",
+      "version": "5.2.0",
+      "url": "https://files.pythonhosted.org/packages/d4/dd/3f73d04c95f6acc6a54700011637e49362e337139b518be895edf4786f87/cyclopts-5.2.0-py3-none-any.whl",
+      "source_url": "https://files.pythonhosted.org/packages/28/c1/3debeeb6e0eb74a51d6f8cf1f273ed7c479e3321631cbf89fb9700e65e28/cyclopts-5.2.0.tar.gz",
+      "sha256": "5da2a5d65164e03008621fc4795946b88a722b881398b5dfa58afa6218342cff",
+      "bytes": 289196,
       "license": {
-        "spdx": "Unlicense",
-        "url": "https://pypi.org/project/vsview-cli/1.2.0/"
+        "spdx": "Apache-2.0",
+        "url": "https://github.com/BrianPugh/cyclopts/blob/v5.2.0/LICENSE"
       },
       "install": { "type": "python_wheel" },
       "source_kind": "release",
-      "source_ref": "1.2.0",
-      "source_sha256": "cb983f4436a36f0f561ebc2e5d06280d1c9247564c1bcafc9c53fdf2c9c5417c",
-      "source_bytes": 16801
+      "source_ref": "5.2.0",
+      "source_sha256": "b63c1b1beaadf3ead19214385a0f90b990f152c4107c174e1724c45dc71e9541",
+      "source_bytes": 246542,
+      "release_date": "2026-10-06"
     },
     {
       "id": "pyside6-6.11.2-win-amd64-wheel",
@@ -304,18 +305,16 @@
       "license": {
         "spdx": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
         "url": "https://doc.qt.io/qtforpython-6/licenses.html",
-        "files": [
-          {
-            "path": "licenses/common/LGPL-3.0.txt",
-            "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
-            "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz"
-          },
-          {
-            "path": "licenses/lsmash-works/dependencies/FFmpeg-COPYING.LGPLv2.1.txt",
-            "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
-            "source_url": "https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz"
-          }
-        ],
+        "files": [{
+          "path": "licenses/common/LGPL-3.0.txt",
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+          "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz"
+        },
+        {
+          "path": "licenses/lsmash-works/dependencies/FFmpeg-COPYING.LGPLv2.1.txt",
+          "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
+          "source_url": "https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz"
+        }],
         "notes": "The Windows wheel bundles Qt 6.11.2 multimedia and FFmpeg 7.1.5 DLLs; both corresponding sources and license texts are inventoried."
       },
       "install": { "type": "python_wheel" },
@@ -371,40 +370,41 @@
       "source_bytes": 18053248
     },
     {
-      "id": "vapoursynth-bestsource-21.0-win-amd64-wheel",
+      "id": "vapoursynth-bestsource-22-win-amd64-wheel",
       "name": "BestSource for VapourSynth",
-      "version": "21.0",
-      "url": "https://files.pythonhosted.org/packages/31/f9/148bcf3d22910b0b3c574aeb4fea522e585313c1998694662c61084622e5/vapoursynth_bestsource-21.0-py3-none-win_amd64.whl",
-      "source_url": "https://files.pythonhosted.org/packages/43/70/f409aebadadd6d0d983026ab069b91b9d834fd8789db46035df6cfb98efa/vapoursynth_bestsource-21.0.tar.gz",
-      "sha256": "f1003f5e610acc80ae1bd23752ba182455f807922c83db9958a299991f272ea4",
-      "bytes": 12315301,
+      "version": "22",
+      "url": "https://files.pythonhosted.org/packages/e1/01/8b65d43d73d6d3a5dab3aa79a65e98cf8fac33cfe24e94bdcad46ded390e/vapoursynth_bestsource-22-py3-none-win_amd64.whl",
+      "source_url": "https://files.pythonhosted.org/packages/a4/19/c0f06506a49815e79d6ab95193986686969531755ebccbb81e06bb99b541/vapoursynth_bestsource-22.tar.gz",
+      "sha256": "4dc2275d145128a2a86fa32efaab9fbab8e22582bfdf173b460f2ff33858c230",
+      "bytes": 15890493,
       "license": {
         "spdx": "MIT",
-        "url": "https://github.com/vapoursynth/bestsource/blob/R21/LICENSE"
+        "url": "https://github.com/vapoursynth/bestsource/blob/R22/LICENSE"
       },
       "install": { "type": "python_wheel" },
       "source_kind": "release",
-      "source_ref": "R21",
-      "source_sha256": "76ddfeeec6bb69ab18985a5c2e45b240f11fa40fc2f7f48a9e101c839bbcc7ba",
-      "source_bytes": 71648
+      "source_ref": "R22",
+      "source_sha256": "0a8ab1b06fb4df050a5d8943f48a69b85306781aeb91e81a340761a417107ba3",
+      "source_bytes": 126296
     },
     {
-      "id": "vspackrgb-1.4.0-win-amd64-wheel",
+      "id": "vspackrgb-2.0.0-win-amd64-wheel",
       "name": "vspackrgb",
-      "version": "1.4.0",
-      "url": "https://files.pythonhosted.org/packages/ad/8f/790546cecf4293d43d5c12ebc0cd440f3e02005ccd5fa3f9421c5a516b0d/vspackrgb-1.4.0-cp312-abi3-win_amd64.whl",
-      "source_url": "https://files.pythonhosted.org/packages/f4/7f/d487740b694d6e99522301bf594b80492730be77c5ea2902ff528d93122b/vspackrgb-1.4.0.tar.gz",
-      "sha256": "c21c56b1bae6eaae5b450a5e003e1e5af62f432b2e33ae66f7ef5916750db630",
-      "bytes": 74394,
+      "version": "2.0.0",
+      "url": "https://files.pythonhosted.org/packages/03/9c/06a753824fe4bcbdcbd0e4982ef37a5e1cd17794665bc988a619220b852c/vspackrgb-2.0.0-cp312-abi3-win_amd64.whl",
+      "source_url": "https://files.pythonhosted.org/packages/8c/31/b86c8da20ec38f49ef1ff57cb44785526e80fb2fd616d0ef3561b95e2fac/vspackrgb-2.0.0.tar.gz",
+      "sha256": "45718a39cfd3bd6a2aa01a9fc8ee73a3bd4a5f9d98d48bac059a6bac3fea474f",
+      "bytes": 122797,
       "license": {
         "spdx": "MIT",
-        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.10.3/src/vspackrgb/LICENSE"
+        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.12.0/src/vspackrgb/LICENSE"
       },
       "install": { "type": "python_wheel" },
       "source_kind": "release",
-      "source_ref": "1.4.0",
-      "source_sha256": "6f3a227e70c09d9dbc35c5f2500b0d23c7729de8197886c8e511d372d385a5b4",
-      "source_bytes": 12989
+      "source_ref": "2.0.0",
+      "source_sha256": "2325f436c00f943d182c233d73a3a529e050a3b03ff5144d56ac1f22e29f31d1",
+      "source_bytes": 23641,
+      "release_date": "2026-10-07"
     }
   ],
   "corresponding_sources": [

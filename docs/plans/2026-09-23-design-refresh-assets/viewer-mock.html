@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Viewer Design Refresh</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg-primary:#0b0b0b; --bg-surface:#141414; --bg-elevated:#202020; --bg-control:#101010;
+  --bg-hover:#292929; --bg-selected:#343434; --bg-floating:rgba(20,20,20,.96);
+  --signal:#d2ac6b; --signal-ink:#16120a; --signal-border:rgba(210,172,107,.5);
+  --text-primary:#ececea; --text-secondary:#bcbcb8; --text-muted:#93938f;
+  --border:rgba(255,255,255,.1); --border-hover:rgba(255,255,255,.22);
+  --warning:#e2b875;
+  --src-1:#7aa7d9; --src-2:#86c29a; --src-3:#d98b95; --src-4:#a996d9;
+  --src-5:#6fc2bf; --src-6:#d9a0c8; --src-7:#9fb86b; --src-8:#8fa3b8;
+  --font-sans:"Inter","SF Pro Text","Segoe UI Variable Text",system-ui,sans-serif;
+  --font-mono:"Cascadia Code","SF Mono","Segoe UI Mono",Consolas,monospace;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:#050505; color:var(--text-primary); font:14px/1.5 var(--font-sans); font-variant-numeric:tabular-nums; padding:32px 24px 80px; }
+.board-title { max-width:1440px; margin:0 auto 8px; font-size:22px; font-weight:600; }
+.board-lead { max-width:1440px; margin:0 auto 32px; color:var(--text-muted); }
+.frame { max-width:1440px; margin:0 auto 48px; }
+.frame > h2 { font-size:15px; font-weight:600; margin-bottom:4px; }
+.frame > p.cap { color:var(--text-muted); font-size:13px; margin-bottom:12px; max-width:1000px; }
+.frame > p.cap b { color:var(--text-secondary); }
+.art { background:var(--bg-primary); border:1px solid var(--border); border-radius:6px; overflow:hidden; position:relative; }
+body.solo { padding:0; background:var(--bg-primary); }
+body.solo .board-title, body.solo .board-lead, body.solo .frame > h2, body.solo .frame > p.cap { display:none; }
+body.solo .frame { margin:0; max-width:none; }
+body.solo .frame:not(.on) { display:none; }
+body.solo .art { border:0; border-radius:0; }
+.num { font-family:var(--font-mono); }
+.sw { display:inline-block; width:8px; height:8px; border-radius:2px; flex:none; }
+.chip { display:inline-flex; align-items:center; gap:5px; font-weight:600; color:var(--text-primary); }
+.chip .n { font-family:var(--font-mono); font-size:12px; }
+
+/* header + toolbar */
+.hdr { display:flex; justify-content:space-between; align-items:center; padding:8px 16px; background:var(--bg-surface); border-bottom:1px solid var(--border); min-height:52px; }
+.hdr h1 { font-size:18px; font-weight:600; letter-spacing:-.02em; line-height:1.25; }
+.hdr .meta { font-size:12px; color:var(--text-muted); }
+.hdr .right { display:flex; gap:8px; }
+.ibtn { height:28px; min-width:28px; padding:0 8px; display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid var(--border); border-radius:4px; background:transparent; color:var(--text-secondary); font:12px var(--font-sans); }
+.tb { display:flex; align-items:center; gap:12px; padding:6px 12px; background:var(--bg-surface); border-bottom:1px solid var(--border); font-size:13px; }
+.grp { display:flex; align-items:center; gap:6px; }
+.sel { height:28px; display:inline-flex; align-items:center; gap:8px; padding:0 8px 0 10px; background:var(--bg-control); border:1px solid var(--border); border-radius:4px; color:var(--text-primary); white-space:nowrap; }
+.sel::after { content:""; width:8px; height:8px; border-right:1.5px solid var(--text-muted); border-bottom:1.5px solid var(--text-muted); transform:rotate(45deg) translate(-2px,-2px); margin-left:4px; }
+.sel .dim { color:var(--text-muted); }
+.sel.src { max-width:20rem; } .sel.src .t { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.pos { white-space:nowrap; color:var(--text-muted); font-family:var(--font-mono); font-size:12px; margin-left:4px; }
+.seg { display:inline-flex; background:var(--bg-control); border:1px solid var(--border); border-radius:5px; padding:2px; gap:2px; }
+.seg span { padding:3px 10px; border-radius:3px; color:var(--text-secondary); font-size:13px; }
+.seg span.on { background:var(--signal); color:var(--signal-ink); font-weight:600; }
+.seg span kbd { font:11px var(--font-mono); color:var(--text-muted); margin-left:6px; }
+.seg span.on kbd { color:rgba(22,18,10,.6); }
+.swap { color:var(--text-muted); padding:0 2px; }
+.offset { white-space:nowrap; flex:none; display:inline-flex; gap:6px; align-items:center; height:28px; padding:0 10px; border:1px solid var(--border); border-radius:4px; font-size:12px; color:var(--text-muted); }
+.offset b { font:500 12px var(--font-mono); color:var(--text-secondary); }
+
+/* stage */
+.stage { position:relative; height:620px; overflow:hidden; background:#000; }
+.scene { position:absolute; inset:0 0 0 0; background:
+  radial-gradient(ellipse 30% 22% at 72% 30%, rgba(255,240,200,.35), transparent 70%),
+  linear-gradient(180deg, #7d8fa0 0%, #9fb0bd 28%, #6d7b58 52%, #44522f 70%, #2f3a21 100%); }
+.scene::before { content:""; position:absolute; left:14%; top:30%; width:34%; height:36%; background:linear-gradient(180deg,#c8b58f,#a8946d); box-shadow:inset 0 -40px 0 rgba(0,0,0,.18); border-radius:2px; }
+.scene::after { content:""; position:absolute; left:52%; top:36%; width:22%; height:30%; background:linear-gradient(180deg,#7d9585,#5f7466); border-radius:2px; }
+.scene.alt { filter:saturate(1.15) contrast(1.05) brightness(.97); }
+.split { position:absolute; inset:0; clip-path:inset(0 0 0 48%); }
+.divider { position:absolute; top:0; bottom:0; left:48%; width:2px; background:var(--signal); }
+.divider i { position:absolute; top:52%; left:-10px; width:22px; height:22px; border-radius:50%; border:2px solid var(--signal); background:rgba(0,0,0,.25); }
+.lab { position:absolute; top:12px; display:inline-flex; align-items:center; gap:8px; padding:4px 10px; background:rgba(12,12,12,.82); border:1px solid var(--border); border-radius:4px; font-size:12px; color:var(--text-primary); }
+.lab .side { font:600 10px var(--font-sans); letter-spacing:.08em; color:var(--text-muted); }
+.lab .dim { color:var(--text-muted); }
+.lab .n { font-family:var(--font-mono); }
+.framechip { position:absolute; left:12px; bottom:12px; padding:3px 9px; background:rgba(12,12,12,.82); border:1px solid var(--border); border-radius:4px; font-size:12px; }
+.framechip .dim { color:var(--text-muted); }
+.pal { position:absolute; display:flex; align-items:center; gap:2px; padding:4px; background:var(--bg-floating); border:1px solid var(--border); border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.24); font-size:12px; transition:opacity .15s; }
+.pal .pg { display:flex; align-items:center; gap:2px; padding:0 4px; border-left:1px solid var(--border); }
+.pal .pg:first-child { border-left:0; }
+.pb { height:28px; min-width:28px; padding:0 6px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; color:var(--text-secondary); }
+.pb.on { background:var(--bg-selected); color:var(--text-primary); box-shadow:inset 0 0 0 1px var(--border-hover); }
+.pb svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.range { width:72px; height:3px; background:var(--bg-hover); border-radius:2px; position:relative; margin:0 4px; }
+.range::after { content:""; position:absolute; left:28%; top:-5px; width:12px; height:12px; border-radius:50%; background:var(--text-primary); }
+.zv { font:11px var(--font-mono); color:var(--text-muted); width:40px; text-align:center; }
+.pal.ghost { opacity:.18; }
+.cursor { position:absolute; width:14px; height:20px; }
+.ring { position:absolute; width:34px; height:34px; border:2px solid var(--signal); border-radius:50%; box-shadow:0 0 0 1px rgba(0,0,0,.6); }
+.lens { position:absolute; width:210px; background:var(--bg-floating); border:1px solid var(--border-hover); border-radius:6px; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.lens .view { height:170px; background:
+  repeating-linear-gradient(90deg, #6b7d57 0 12px, #5b6b48 12px 24px),
+  repeating-linear-gradient(0deg, rgba(0,0,0,.15) 0 12px, transparent 12px 24px); background-blend-mode:multiply; image-rendering:pixelated; }
+.lens .cap { display:flex; align-items:center; gap:6px; padding:5px 8px; font-size:11px; border-top:1px solid var(--border); white-space:nowrap; overflow:hidden; }
+.lens .cap .t { overflow:hidden; text-overflow:ellipsis; color:var(--text-secondary); }
+.lens .grip { position:absolute; right:6px; top:6px; width:22px; height:22px; border-radius:4px; background:rgba(12,12,12,.8); color:var(--text-muted); display:flex; align-items:center; justify-content:center; font-size:12px; }
+.anno { position:absolute; font-size:12px; color:var(--signal); background:rgba(0,0,0,.72); border:1px dashed var(--signal-border); border-radius:4px; padding:4px 8px; max-width:260px; line-height:1.35; }
+.film { display:flex; justify-content:space-between; padding:6px 12px; border-top:1px solid var(--border); background:var(--bg-surface); font-size:12px; color:var(--text-secondary); }
+
+/* inspector */
+.split2 { display:grid; grid-template-columns:1fr 480px; min-height:760px; }
+.ghoststage { background:linear-gradient(180deg,#27302a,#12160f); position:relative; }
+.insp { background:var(--bg-surface); border-left:1px solid var(--border); display:flex; flex-direction:column; }
+.insp-h { display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid var(--border); font-weight:600; }
+.tabs { margin:10px 14px 4px; }
+.tabs.seg { display:flex; }
+.tabs.seg span { flex:1; text-align:center; }
+.sec { padding:12px 14px; }
+.sec h3 { font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); margin:6px 0 8px; }
+.kv { display:grid; grid-template-columns:110px 1fr; gap:4px 12px; font-size:13px; }
+.kv dt { color:var(--text-muted); }
+table.src { width:100%; border-collapse:collapse; font-size:13px; }
+table.src th { text-align:left; font-weight:500; font-size:11px; color:var(--text-muted); padding:6px 8px; border-bottom:1px solid var(--border); }
+table.src td { padding:7px 8px; border-bottom:1px solid var(--border); vertical-align:top; }
+table.src tr.vis td { background:rgba(210,172,107,.06); }
+table.src tr.vis td:first-child { box-shadow:inset 2px 0 0 var(--signal); }
+table.src .where { font-size:11px; color:var(--signal); display:block; }
+table.src .muted { color:var(--text-muted); }
+table.src td:nth-child(n+2), table.src th:nth-child(n+2) { white-space:nowrap; }
+.card { border:1px solid var(--border); border-radius:6px; padding:10px 12px; margin-bottom:10px; background:var(--bg-control); }
+.card .top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:2px; }
+.card .role { font-size:11px; color:var(--text-muted); }
+.card .name { font-weight:600; font-size:13px; margin-bottom:8px; }
+.card .file { font:11px var(--font-mono); color:var(--text-muted); word-break:break-all; margin-bottom:8px; }
+.badge { font:600 10px var(--font-sans); padding:1px 6px; border:1px solid var(--border-hover); border-radius:3px; color:var(--text-secondary); }
+.shared { font-size:12px; color:var(--text-muted); border:1px dashed var(--border); border-radius:6px; padding:8px 12px; margin-bottom:10px; }
+.shared b { color:var(--text-secondary); font-weight:500; }
+.note { font-size:12px; color:var(--text-muted); margin-top:6px; }
+
+/* modal */
+.modalwrap { background:rgba(0,0,0,.7); padding:32px; display:flex; justify-content:center; }
+.modal { width:980px; background:var(--bg-surface); border:1px solid var(--border); border-radius:8px; padding:20px 24px; }
+.modal h2 { font-size:17px; margin-bottom:14px; }
+.cols { display:grid; grid-template-columns:1fr 1fr; gap:28px; }
+.modal h3 { font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); border-bottom:1px solid var(--border); padding-bottom:6px; margin:4px 0 10px; }
+.copy { font-size:11px; color:var(--text-muted); border:1px solid var(--border); border-radius:3px; padding:0 5px; margin-left:6px; }
+.foot { display:flex; justify-content:flex-end; margin-top:16px; }
+
+/* popovers */
+.row { display:flex; gap:28px; align-items:flex-start; padding:28px; background:linear-gradient(180deg,#27302a,#12160f); }
+.pop { width:300px; background:var(--bg-floating); border:1px solid var(--border-hover); border-radius:8px; padding:12px; box-shadow:0 8px 24px rgba(0,0,0,.4); font-size:13px; }
+.pop .status { display:flex; gap:8px; align-items:baseline; padding:0 2px 10px; border-bottom:1px solid var(--border); margin-bottom:4px; font-size:13px; line-height:1.4; }
+.pop .status .sw { transform:translateY(-1px); }
+.pop .status .t { overflow-wrap:anywhere; }
+.pop legend, .pop .lg { font-size:12px; color:var(--text-muted); margin:10px 0 6px; display:block; }
+.pop .seg { display:flex; } .pop .seg span { flex:1; text-align:center; }
+.pop .selw { width:100%; justify-content:space-between; }
+.pop .btn { margin-top:12px; width:100%; height:30px; border:1px solid var(--border); border-radius:4px; display:flex; align-items:center; justify-content:center; color:var(--text-secondary); }
+.pop p { font-size:12px; color:var(--text-muted); margin-top:8px; }
+.vpal { position:static; flex-direction:column; width:auto; }
+.vpal .pg { flex-direction:column; border-left:0; border-top:1px solid var(--border); padding:4px 0; }
+.vpal .pg:first-child { border-top:0; }
+.vrange { width:3px; height:72px; background:var(--bg-hover); border-radius:2px; position:relative; margin:4px 0; }
+.vrange::after { content:""; position:absolute; top:62%; left:-5px; width:12px; height:12px; border-radius:50%; background:var(--text-primary); }
+.list { width:300px; background:var(--bg-elevated); border:1px solid var(--border-hover); border-radius:6px; padding:4px 0; font-size:13px; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.list .og { font-size:11px; font-weight:600; color:var(--text-muted); padding:6px 12px 2px; }
+.list .it { padding:3px 12px 3px 22px; }
+.list .it.on { background:var(--bg-selected); }
+.list .it .num { font-size:12px; }
+</style>
+</head>
+<body>
+<h1 class="board-title">Report viewer: design refresh mockups</h1>
+<p class="board-lead">Static mockups for B1 (source identity), B2 (palette fade), B3 (Inspector and Report Information), and A4 (lens and palette details). Built with the viewer's real colour tokens and fonts; the image is synthetic. Numbers match the reviewed report.</p>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-orient" viewBox="0 0 20 20"><rect x="3" y="6" width="14" height="8" rx="1"/><path d="M7 6v8M13 6v8"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 20 20"><path d="M5 10h10"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 20 20"><path d="M5 10h10M10 5v10"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 20 20"><path d="M4 8a6 6 0 1 1 0 5M4 3v5h5"/></symbol>
+    <symbol id="i-fith" viewBox="0 0 20 20"><path d="M10 3v14M7 6l3-3 3 3M7 14l3 3 3-3"/></symbol>
+    <symbol id="i-offset" viewBox="0 0 20 20"><path d="M10 3v14M3 10h14M10 3l-2 2M10 3l2 2M17 10l-2-2M17 10l-2 2"/></symbol>
+    <symbol id="i-full" viewBox="0 0 20 20"><path d="M7 3H3v4M13 3h4v4M17 13v4h-4M7 17H3v-4"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 20 20"><circle cx="10" cy="10" r="2.5"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 20 20"><path d="M3 4h8l6 6-6 6H3z"/><circle cx="7" cy="8" r="1"/></symbol>
+    <symbol id="i-lens" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5"/><path d="M12.5 12.5L17 17"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="1"/><path d="M12 3v14"/></symbol>
+  </defs>
+</svg>
+
+<!-- ============ 1. Viewer: Slider ============ -->
+<section class="frame" id="viewer">
+  <h2>1 · Viewer, Slider mode (B1, B2, A3, A4)</h2>
+  <p class="cap"><b>Toolbar:</b> the pair control is two source selects joined by swap (no "L:", "vs", "R:"); selects are capped at 20rem and end-truncate (the release group goes first; the full name is in the tooltip and the open list); the offset status uses the UI face for its label and mono for the value. <b>Stage labels:</b> the standard name, then resolution and size; the separate HDR/SDR word is dropped because the name already states the HDR format. <b>Palette:</b> distinct icons (offset arrows vs gear), no "Fixed" text; shown here in its <b>ghost</b> state because the pointer is far away.</p>
+  <div class="art">
+    <div class="hdr">
+      <div><h1>The End of Oak Street</h1><div class="meta">Generated 23 Sep 2026, 07:29 · 50 frames · 3 sources</div></div>
+      <div class="right"><span class="ibtn"><svg width="14" height="14" style="stroke:currentColor;fill:none;stroke-width:1.5"><use href="#i-panel"/></svg>Inspector</span><span class="ibtn">i</span><span class="ibtn">?</span></div>
+    </div>
+    <div class="tb">
+      <div class="grp"><span class="ibtn">←</span><span class="sel">Frame <span class="num">8987</span> <span class="dim">· Random</span></span><span class="ibtn">→</span></div>
+      <div class="seg" style="margin-left:auto"><span class="on">Slider</span><span>Single</span><span>Diff</span><span>Blink</span><span>Grid</span></div>
+      <div class="grp" style="margin-left:auto">
+        <span class="sel src" title="The End of Oak Street (2026) · 2160p · AMZN WEB-DL · HDR · SCOPE"><span class="t">2160p · AMZN WEB-DL · HDR · SCOPE</span></span>
+        <span class="swap" title="Swap (X)">⇄</span>
+        <span class="sel src" title="The End of Oak Street (2026) · 2160p · iT WEB-DL · DV HDR · ThisBlockHasProblems"><span class="t">2160p · iT WEB-DL · DV HDR · ThisBlockHasProblems</span></span>
+      </div>
+      <span class="offset">Offset <b>none</b></span>
+    </div>
+    <div class="stage">
+      <div class="scene"></div>
+      <div class="split"><div class="scene alt"></div></div>
+      <div class="divider"><i></i></div>
+      <div class="lab" style="left:12px">2160p · AMZN WEB-DL · HDR · SCOPE <span class="dim">· <span class="num">3840×1600</span> · <span class="num">10.83 GiB</span></span></div>
+      <div class="lab" style="right:12px">2160p · iT WEB-DL · DV HDR · ThisBlockHasProblems <span class="dim">· <span class="num">3840×1606</span> · <span class="num">17.49 GiB</span></span></div>
+      <div class="framechip">Frame <span class="num">8987</span> <span class="dim">· Random</span></div>
+      <div class="pal ghost" style="right:12px;bottom:12px">
+        <div class="pg"><span class="pb"><svg><use href="#i-orient"/></svg></span></div>
+        <div class="pg"><span class="pb"><svg><use href="#i-minus"/></svg></span><span class="range"></span><span class="pb"><svg><use href="#i-plus"/></svg></span><span class="pb"><svg><use href="#i-reset"/></svg></span><span class="zv">100%</span></div>
+        <div class="pg"><span class="pb on num">1:1</span><span class="pb"><svg><use href="#i-fith"/></svg></span></div>
+        <div class="pg"><span class="pb" title="Image offset settings"><svg><use href="#i-offset"/></svg></span><span class="pb"><svg><use href="#i-full"/></svg></span></div>
+        <div class="pg"><span class="pb on">Source labels</span><span class="pb">Lens</span></div>
+      </div>
+      <div class="anno" style="right:24px;bottom:62px">Ghost state (18% opacity): pointer is more than 160 px away. Within 96 px it returns to full opacity.</div>
+      <svg class="cursor" style="left:640px;top:250px" viewBox="0 0 14 20"><path d="M1 1v15l4-4 3 7 2-1-3-7h6z" fill="#fff" stroke="#000"/></svg>
+    </div>
+    <div class="film"><span>All (50) · Random (20) · Bright (10) · Motion (10) · Dark (10)</span><span>Compact · Normal · Large · Hide filmstrip</span></div>
+  </div>
+</section>
+
+<!-- ============ 2. Single + lens ============ -->
+<section class="frame" id="lens">
+  <h2>2 · Single mode with the lens (A4, B1, B2)</h2>
+  <p class="cap">The lens is a plain magnifier: no caption by default (the source labels already name what is on screen). The <b>Ring</b> sample marker is now the default, so the magnified area is anchored on the frame. The palette is <b>shown</b> because the pointer is near it; lens controls appear inline as today, without the "Fixed" status.</p>
+  <div class="art">
+    <div class="tb">
+      <div class="grp"><span class="ibtn">←</span><span class="sel">Frame <span class="num">8987</span> <span class="dim">· Random</span></span><span class="ibtn">→</span></div>
+      <div class="seg" style="margin-left:auto"><span>Slider</span><span class="on">Single</span><span>Diff</span><span>Blink</span><span>Grid</span></div>
+      <div class="grp" style="margin-left:auto"><span class="sel src" title="The End of Oak Street (2026) · 2160p · iT WEB-DL · DV HDR · ThisBlockHasProblems"><span class="t">2160p · iT WEB-DL · DV HDR · ThisBlockHasProblems</span></span></div>
+      <span class="offset">Offset <b>none</b></span>
+    </div>
+    <div class="stage" style="height:520px">
+      <div class="scene alt"></div>
+      <div class="ring" style="left:1062px;top:196px"></div>
+      <div class="lens" style="left:1150px;top:90px">
+        <div class="view"></div>
+        <span class="grip">⠿</span>
+      </div>
+      <div class="pal" style="right:12px;bottom:12px">
+        <div class="pg"><span class="pb"><svg><use href="#i-orient"/></svg></span></div>
+        <div class="pg"><span class="pb"><svg><use href="#i-minus"/></svg></span><span class="range"></span><span class="pb"><svg><use href="#i-plus"/></svg></span><span class="pb"><svg><use href="#i-reset"/></svg></span><span class="zv">100%</span></div>
+        <div class="pg"><span class="pb on num">1:1</span><span class="pb"><svg><use href="#i-fith"/></svg></span></div>
+        <div class="pg"><span class="pb"><svg><use href="#i-offset"/></svg></span><span class="pb"><svg><use href="#i-full"/></svg></span></div>
+        <div class="pg"><span class="pb">Source labels</span><span class="pb on">Lens</span><span class="pb"><svg><use href="#i-minus"/></svg></span><span class="zv">4×</span><span class="pb"><svg><use href="#i-plus"/></svg></span><span class="pb" title="Lens settings"><svg><use href="#i-gear"/></svg></span></div>
+      </div>
+      <svg class="cursor" style="right:120px;bottom:30px" viewBox="0 0 14 20"><path d="M1 1v15l4-4 3 7 2-1-3-7h6z" fill="#fff" stroke="#000"/></svg>
+      <div class="anno" style="right:24px;bottom:62px">Shown state: pointer within 96 px.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3. Inspector Frame ============ -->
+<section class="frame" id="inspector-frame">
+  <h2>3 · Inspector, Frame tab (B3)</h2>
+  <p class="cap">Tabs use the segmented style of the mode control. The filler rows are gone ("Detail: Selected comparison frame", "Shown: 1 of 50 shown"). <b>Source frames</b> lists every source; the ones currently on screen are highlighted and say where they are shown.</p>
+  <div class="art split2">
+    <div class="ghoststage"></div>
+    <aside class="insp">
+      <div class="insp-h">Inspector <span class="ibtn">Close</span></div>
+      <div class="tabs seg"><span class="on">Frame</span><span>Clips</span><span>Image offset</span><span>Review</span></div>
+      <div class="sec">
+        <dl class="kv"><dt>Frame</dt><dd><span class="num">8987</span> · Random</dd><dt>Position</dt><dd><span class="num">1 / 50</span> in All</dd></dl>
+      </div>
+      <div class="sec">
+        <h3>Source frames</h3>
+        <table class="src">
+          <thead><tr><th>Source</th><th>Frame</th><th>Type</th></tr></thead>
+          <tbody>
+            <tr class="vis"><td>AMZN WEB-DL · HDR · SCOPE<span class="where">Shown left</span></td><td class="num">8987 <span class="muted">/ 143487</span></td><td>B</td></tr>
+            <tr class="vis"><td>iT WEB-DL · DV HDR · ThisBlockHasProblems<span class="where">Shown right</span></td><td class="num">8987 <span class="muted">/ 143023</span></td><td>B · DV RPU</td></tr>
+            <tr><td>MA WEB-DL · DV HDR · TheEndOfTheFuckingWorld</td><td class="num">8987 <span class="muted">/ 143023</span></td><td>B · DV RPU</td></tr>
+          </tbody>
+        </table>
+        <p class="note">Frame is each source's own frame number after alignment. Spatial image offsets stay under Image offset.</p>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 4. Inspector Clips ============ -->
+<section class="frame" id="inspector-clips">
+  <h2>4 · Inspector, Clips tab (B3, A2)</h2>
+  <p class="cap">One clip card, reused in Report Information. Settings identical across every clip (presentation, fps) are shown once at the top. Placement replaces "View role: Active / Available". FPS is <span class="num">23.976</span> (not <span class="num">23.976023976023978</span>); active picture is written out.</p>
+  <div class="art split2">
+    <div class="ghoststage"></div>
+    <aside class="insp">
+      <div class="insp-h">Inspector <span class="ibtn">Close</span></div>
+      <div class="tabs seg"><span>Frame</span><span class="on">Clips</span><span>Image offset</span><span>Review</span></div>
+      <div class="sec">
+        <div class="shared">All sources: <b>23.976 fps (24000/1001)</b> · <b>Tonemapped, BT.2390 → 100 nits</b></div>
+        <div class="card"><div class="top"><span class="chip"><span class="role">Reference · shown left</span></span><span class="badge">HDR</span></div>
+          <div class="name">2160p · AMZN WEB-DL · HDR · SCOPE</div>
+          <div class="file">The.End.of.Oak.Street.2026.2160p.AMZN.WEB-DL.DDP5.1.HDR.H.265-SCOPE.mkv</div>
+          <dl class="kv"><dt>Picture</dt><dd><span class="num">3840×1600</span> · full frame</dd><dt>Length</dt><dd><span class="num">143,487</span> frames · <span class="num">1:39:44</span></dd><dt>Size</dt><dd><span class="num">10.83 GiB</span></dd><dt>Signal</dt><dd>HDR · BT.2020 / PQ / BT.2020nc · limited</dd></dl></div>
+        <div class="card"><div class="top"><span class="chip"><span class="role">Comparison · shown right</span></span><span class="badge">DV HDR</span></div>
+          <div class="name">2160p · iT WEB-DL · DV HDR · ThisBlockHasProblems</div>
+          <div class="file">The.End.of.Oak.Street.2026.2160p.iT.WEB-DL.DDP5.1.DV.HDR.H.265-ThisBlockHasProblems.mkv</div>
+          <dl class="kv"><dt>Picture</dt><dd><span class="num">3840×1606</span> · active <span class="num">3840×1600</span>, <span class="num">3</span> px top</dd><dt>Length</dt><dd><span class="num">143,023</span> frames · <span class="num">1:39:25</span></dd><dt>Size</dt><dd><span class="num">17.49 GiB</span></dd><dt>Signal</dt><dd>HDR · BT.2020 / PQ / BT.2020nc · limited · DV RPU</dd></dl></div>
+        <div class="card"><div class="top"><span class="chip"><span class="role">Comparison · not shown</span></span><span class="badge">DV HDR</span></div>
+          <div class="name">2160p · MA WEB-DL · DV HDR · TheEndOfTheFuckingWorld</div>
+          <div class="file">The.End.of.Oak.Street.2026.2160p.MA.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-TheEndOfTheFuckingWorld.mkv</div>
+          <dl class="kv"><dt>Picture</dt><dd><span class="num">3840×2160</span> · active <span class="num">3840×1600</span>, <span class="num">280</span> px top</dd><dt>Length</dt><dd><span class="num">143,023</span> frames · <span class="num">1:39:25</span></dd><dt>Size</dt><dd><span class="num">17.64 GiB</span></dd><dt>Signal</dt><dd>HDR · BT.2020 / PQ / BT.2020nc · limited · DV RPU</dd></dl></div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 5. Report information ============ -->
+<section class="frame" id="report-info">
+  <h2>5 · Report Information (B3, A2)</h2>
+  <p class="cap">Same clip card as the Clips tab (compact variant: no placement line). Localised timestamp with the exact ISO value on hover; Report ID gets a copy action only if you want it (deferred, drawn dashed). Tonemap settings use readable labels from the vs-placebo documentation.</p>
+  <div class="art modalwrap">
+    <div class="modal">
+      <h2>Report Information</h2>
+      <div class="cols">
+        <div>
+          <h3>General</h3>
+          <dl class="kv"><dt>Title</dt><dd>The End of Oak Street</dd><dt>Report ID</dt><dd class="num" style="font-size:12px">report_81f19d595f19a193b23362c70af60466</dd><dt>Generated</dt><dd>23 Sep 2026, 07:29 <span style="color:var(--text-muted)">(UTC 07:29:36)</span></dd><dt>Content</dt><dd><span class="num">50</span> frames · <span class="num">3</span> sources</dd><dt>Opens in</dt><dd>Single</dd><dt>Default pair</dt><dd>AMZN WEB-DL · HDR · SCOPE<br>iT WEB-DL · DV HDR · ThisBlockHasProblems</dd><dt>slow.pics</dt><dd style="color:var(--text-muted)">Not uploaded</dd></dl>
+          <h3 style="margin-top:22px">Rendering</h3>
+          <dl class="kv"><dt>Tonemap</dt><dd>Reference · BT.2390 · 100 nits</dd></dl>
+          <h3 style="margin-top:22px">Advanced tonemap settings</h3>
+          <dl class="kv" style="grid-template-columns:170px 1fr"><dt>Dynamic peak detection</dt><dd>On</dd><dt>Contrast recovery</dt><dd class="num">0.3</dd><dt>Gamma lift</dt><dd>Off</dd><dt>Source peak</dt><dd>Automatic</dd><dt>Destination minimum</dt><dd class="num">0.18</dd><dt>Knee offset</dt><dd class="num">0.5</dd><dt>Smoothing period</dt><dd><span class="num">45</span> frames</dd><dt>Percentile</dt><dd class="num">99.995</dd><dt>Scene threshold</dt><dd><span class="num">0.8</span> low · <span class="num">2.4</span> high</dd><dt>Gamut mapping</dt><dd>Perceptual</dd><dt>Metadata</dt><dd>Automatic selection</dd><dt>Dolby Vision metadata</dt><dd>Used</dd></dl>
+        </div>
+        <div>
+          <h3>Sources</h3>
+          <div class="card"><div class="top"><span class="chip"><span class="role">Reference</span></span><span class="badge">HDR</span></div><div class="name">2160p · AMZN WEB-DL · HDR · SCOPE</div><div class="file">The.End.of.Oak.Street.2026.2160p.AMZN.WEB-DL.DDP5.1.HDR.H.265-SCOPE.mkv</div><dl class="kv"><dt>Picture</dt><dd><span class="num">3840×1600</span> · full frame</dd><dt>Length</dt><dd><span class="num">143,487</span> frames · <span class="num">1:39:44</span></dd><dt>Size</dt><dd class="num">10.83 GiB</dd></dl></div>
+          <div class="card"><div class="top"><span class="chip"><span class="role">Comparison</span></span><span class="badge">DV HDR</span></div><div class="name">2160p · iT WEB-DL · DV HDR · ThisBlockHasProblems</div><div class="file">The.End.of.Oak.Street.2026.2160p.iT.WEB-DL.DDP5.1.DV.HDR.H.265-ThisBlockHasProblems.mkv</div><dl class="kv"><dt>Picture</dt><dd><span class="num">3840×1606</span> · active <span class="num">3840×1600</span>, <span class="num">3</span> px top</dd><dt>Length</dt><dd><span class="num">143,023</span> frames · <span class="num">1:39:25</span></dd><dt>Size</dt><dd class="num">17.49 GiB</dd></dl></div>
+          <div class="card"><div class="top"><span class="chip"><span class="role">Comparison</span></span><span class="badge">DV HDR</span></div><div class="name">2160p · MA WEB-DL · DV HDR · TheEndOfTheFuckingWorld</div><div class="file">The.End.of.Oak.Street.2026.2160p.MA.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-TheEndOfTheFuckingWorld.mkv</div><dl class="kv"><dt>Picture</dt><dd><span class="num">3840×2160</span> · active <span class="num">3840×1600</span>, <span class="num">280</span> px top</dd><dt>Length</dt><dd><span class="num">143,023</span> frames · <span class="num">1:39:25</span></dd><dt>Size</dt><dd class="num">17.64 GiB</dd></dl></div>
+          <div class="shared">All sources: <b>23.976 fps (24000/1001)</b></div>
+        </div>
+      </div>
+      <div class="foot"><span class="ibtn">Close</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 6. Popovers ============ -->
+<section class="frame" id="popovers">
+  <h2>6 · Lens settings, caption option, and vertical palette (A4)</h2>
+  <p class="cap"><b>Lens settings:</b> Size, Sample marker (Ring by default), and a new <b>Caption</b> option (Off by default) for people who hide the source labels; the caption shows service, source type, and release group only. The split comparison, comparison source, and current-source header are gone. The fixed-window behaviour (the reason the "Fixed" text existed) is explained in one line. <b>Vertical palette:</b> zoom-in at the top; Source labels and Lens become icon buttons (same accessible names and tooltips) so the column stays as narrow as the other controls.</p>
+  <div class="art row">
+    <div class="pop">
+      <span class="lg" style="margin-top:0">Size</span><div class="seg"><span>Small</span><span class="on">Medium</span><span>Large</span></div>
+      <span class="lg">Sample marker</span><div class="seg"><span>Off</span><span class="on">Ring</span><span>Brackets</span></div>
+      <span class="lg">Caption</span><div class="seg"><span class="on">Off</span><span>On</span></div>
+      <div class="btn">Reset lens settings and position</div>
+      <p>The lens window stays where you put it; drag its grip to move it. Settings are saved in this browser.</p>
+    </div>
+    <div class="pal vpal">
+      <div class="pg"><span class="pb"><svg><use href="#i-orient"/></svg></span></div>
+      <div class="pg"><span class="pb"><svg><use href="#i-plus"/></svg></span><span class="vrange"></span><span class="pb"><svg><use href="#i-minus"/></svg></span><span class="pb"><svg><use href="#i-reset"/></svg></span><span class="zv">95%</span></div>
+      <div class="pg"><span class="pb on num">1:1</span><span class="pb"><svg><use href="#i-fith"/></svg></span></div>
+      <div class="pg"><span class="pb"><svg><use href="#i-offset"/></svg></span><span class="pb"><svg><use href="#i-full"/></svg></span></div>
+      <div class="pg"><span class="pb on" title="Source labels (H)"><svg><use href="#i-tag"/></svg></span><span class="pb" title="Lens (L)"><svg><use href="#i-lens"/></svg></span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:12px;color:var(--text-muted)">Caption set to On</div>
+      <div class="lens" style="position:relative">
+        <div class="view"></div>
+        <span class="grip">⠿</span>
+        <div class="cap"><span class="t">iT WEB-DL · ThisBlockHasProblems</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+<script>
+const id = location.hash.slice(1);
+if (id && document.getElementById(id)) { document.body.classList.add('solo'); document.getElementById(id).classList.add('on'); }
+</script>
+</body>
+</html>

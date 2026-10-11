@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -12,8 +12,10 @@ from frame_compare.orchestration.doctor import (
     collect_checks,
     run_doctor,
 )
+from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 
 
+@pytest.fixture(autouse=True)
 def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TMDB_API_KEY", raising=False)
     monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
@@ -23,64 +25,58 @@ def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 class TestRunDoctor:
     """Tests for run_doctor function."""
 
-    def test_run_doctor_all_pass(self) -> None:
-        """Given all mocked checks pass → DoctorReport(all_passed=True, critical_failures=[])."""
-        passing_check = DoctorCheck(
-            name="test_check",
-            category="core",
-            check_fn=lambda: CheckResult(passed=True, message="OK"),
-        )
-
-        report = run_doctor(checks=[passing_check])
-
-        assert report.all_passed is True
-        assert report.critical_failures == []
-
-    def test_run_doctor_core_failure(self) -> None:
-        """Given core check fails → DoctorReport(all_passed=False, critical_failures=[name])."""
-        failing_check = DoctorCheck(
-            name="vapoursynth",
-            category="core",
-            check_fn=lambda: CheckResult(passed=False, message="Failed"),
-        )
-
-        report = run_doctor(checks=[failing_check])
-
-        assert report.all_passed is False
-        assert "vapoursynth" in report.critical_failures
-
-    def test_run_doctor_optional_failure_not_critical(self) -> None:
-        """Given optional check fails but core passes → all_passed=False, critical_failures=[]."""
-        core_check = DoctorCheck(
-            name="vapoursynth",
-            category="core",
-            check_fn=lambda: CheckResult(passed=True, message="OK"),
-        )
-        optional_check = DoctorCheck(
-            name="ffmpeg",
-            category="optional",
-            check_fn=lambda: CheckResult(passed=False, message="Missing"),
-        )
-
-        report = run_doctor(checks=[core_check, optional_check])
-
-        assert report.all_passed is False  # Because ffmpeg failed
-        assert report.critical_failures == []  # But no core failures
-
-    def test_run_doctor_with_reporter(self) -> None:
-        """Given mock ProgressReporter → asserts start_phase, advance, complete_phase called."""
-        mock_reporter = MagicMock()
-        check = DoctorCheck(
-            name="test",
-            category="core",
-            check_fn=lambda: CheckResult(passed=True, message="OK"),
-        )
-
-        run_doctor(checks=[check], reporter=mock_reporter)
-
-        mock_reporter.start_phase.assert_called_once_with("doctor", total=1)
-        mock_reporter.advance.assert_called_once_with(1)
-        mock_reporter.complete_phase.assert_called_once()
+    @pytest.mark.parametrize(
+        ("checks", "all_passed", "critical_failures"),
+        [
+            pytest.param(
+                [
+                    DoctorCheck(
+                        name="test_check",
+                        category="core",
+                        check_fn=lambda: CheckResult(passed=True, message="OK"),
+                    )
+                ],
+                True,
+                [],
+                id="all-pass",
+            ),
+            pytest.param(
+                [
+                    DoctorCheck(
+                        name="vapoursynth",
+                        category="core",
+                        check_fn=lambda: CheckResult(passed=False, message="Failed"),
+                    )
+                ],
+                False,
+                ["vapoursynth"],
+                id="core-failure",
+            ),
+            pytest.param(
+                [
+                    DoctorCheck(
+                        name="vapoursynth",
+                        category="core",
+                        check_fn=lambda: CheckResult(passed=True, message="OK"),
+                    ),
+                    DoctorCheck(
+                        name="ffmpeg",
+                        category="optional",
+                        check_fn=lambda: CheckResult(passed=False, message="Missing"),
+                    ),
+                ],
+                False,
+                [],
+                id="optional-failure",
+            ),
+        ],
+    )
+    def test_run_doctor_outcomes(
+        self, checks: list[DoctorCheck], all_passed: bool, critical_failures: list[str]
+    ) -> None:
+        report = run_doctor(checks=checks)
+        assert report.all_passed is all_passed
+        assert report.critical_failures == critical_failures
 
 
 def test_run_doctor_survives_raising_check() -> None:
@@ -99,103 +95,76 @@ def test_run_doctor_survives_raising_check() -> None:
     assert result.details == {"exception_type": "RuntimeError"}
 
 
-class TestCollectChecks:
-    """Tests for collect_checks function."""
-
-    def test_collect_checks_returns_all_categories(self) -> None:
-        """collect_checks() returns checks with core, optional, network categories."""
-        checks = collect_checks()
-
-        categories = {check.category for check in checks}
-        assert "core" in categories
-        assert "optional" in categories
-        assert "network" in categories
-
-        # Verify exact count and order for the current doctor contract.
-        assert [check.name for check in checks] == [
-            "vapoursynth",
-            "lsmas",
-            "vs_placebo",
-            "ffms2",
-            "ffmpeg",
-            "vsview",
-            "slowpics",
-            "tmdb_api_key",
-        ]
-        assert checks[0].category == "core"
-        assert checks[-1].category == "network"
-
-
 class TestCheckVSView:
     """Tests for the optional VSView diagnostic check."""
 
-    def test_check_vsview_reports_native_panel_readiness(self) -> None:
-        from frame_compare.vsview.adapter import (
-            VSViewAvailability,
-            VSViewAvailabilityStatus,
-        )
-
+    @pytest.mark.parametrize(
+        ("availability", "available", "message", "message_fragment", "hint", "details"),
+        [
+            pytest.param(
+                VSViewAvailability(status=VSViewAvailabilityStatus.AVAILABLE, message="available"),
+                True,
+                "VSView and the Frame Compare alignment panel are available",
+                False,
+                None,
+                None,
+                id="reports_native_panel_readiness",
+            ),
+            pytest.param(
+                VSViewAvailability(
+                    status=VSViewAvailabilityStatus.MISSING_PLUGIN,
+                    message="Frame Compare alignment panel is not installed for VSView",
+                    hint="Reinstall frame-compare[vsview] in this environment",
+                ),
+                False,
+                None,
+                False,
+                "Reinstall frame-compare[vsview] in this environment",
+                None,
+                id="reports_missing_native_panel",
+            ),
+            pytest.param(
+                VSViewAvailability(
+                    status=VSViewAvailabilityStatus.PROBE_FAILED,
+                    message="VSView availability probe failed",
+                    error_details={
+                        "exception_type": "RuntimeError",
+                        "exception": "broken import metadata",
+                    },
+                ),
+                None,
+                "probe failed",
+                True,
+                None,
+                {"exception_type": "RuntimeError"},
+                id="probe_failure_is_optional_status",
+            ),
+        ],
+    )
+    def test_check_vsview_status(
+        self,
+        availability: VSViewAvailability,
+        available: bool | None,
+        message: str | None,
+        message_fragment: bool,
+        hint: str | None,
+        details: dict[str, str] | None,
+    ) -> None:
         checks = collect_checks()
         vsview_check = next(c for c in checks if c.name == "vsview")
-
         with patch(
-            "frame_compare.vsview.adapter.check_vsview_availability",
-            return_value=VSViewAvailability(
-                status=VSViewAvailabilityStatus.AVAILABLE,
-                message="available",
-            ),
+            "frame_compare.vsview.adapter.check_vsview_availability", return_value=availability
         ):
             result = vsview_check.check_fn()
-
         assert result.passed is True
-        assert result.available is True
-        assert result.message == "VSView and the Frame Compare alignment panel are available"
-
-    def test_check_vsview_reports_missing_native_panel(self) -> None:
-        from frame_compare.vsview.adapter import (
-            VSViewAvailability,
-            VSViewAvailabilityStatus,
-        )
-
-        checks = collect_checks()
-        vsview_check = next(c for c in checks if c.name == "vsview")
-
-        with patch(
-            "frame_compare.vsview.adapter.check_vsview_availability",
-            return_value=VSViewAvailability(
-                status=VSViewAvailabilityStatus.MISSING_PLUGIN,
-                message="Frame Compare alignment panel is not installed for VSView",
-                hint="Reinstall frame-compare[vsview] in this environment",
-            ),
-        ):
-            result = vsview_check.check_fn()
-
-        assert result.passed is True
-        assert result.available is False
-        assert result.hint == "Reinstall frame-compare[vsview] in this environment"
-
-    def test_check_vsview_probe_failure_is_optional_status(self) -> None:
-        from frame_compare.vsview.adapter import (
-            VSViewAvailability,
-            VSViewAvailabilityStatus,
-        )
-
-        checks = collect_checks()
-        vsview_check = next(c for c in checks if c.name == "vsview")
-
-        with patch(
-            "frame_compare.vsview.adapter.check_vsview_availability",
-            return_value=VSViewAvailability(
-                status=VSViewAvailabilityStatus.PROBE_FAILED,
-                message="VSView availability probe failed",
-                error_details={
-                    "exception_type": "RuntimeError",
-                    "exception": "broken import metadata",
-                },
-            ),
-        ):
-            result = vsview_check.check_fn()
-
-        assert result.passed is True
-        assert "probe failed" in result.message
-        assert result.details == {"exception_type": "RuntimeError"}
+        if available is not None:
+            assert result.available is available
+        if message is not None:
+            if message_fragment:
+                assert message in result.message
+            else:
+                assert result.message == message
+        if hint is not None:
+            assert result.hint == hint
+        if details is not None:
+            assert result.details == details

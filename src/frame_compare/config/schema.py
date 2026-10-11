@@ -26,6 +26,7 @@ from frame_compare.config.schema_models import (
     LoggingConfig,
     PathsConfig,
     ReportConfig,
+    RuntimeConfig,
     ScreenshotsConfig,
     SlowpicsConfig,
     SourceActiveRectConfig,
@@ -33,7 +34,10 @@ from frame_compare.config.schema_models import (
     SourcesConfig,
     TmdbConfig,
 )
-from frame_compare.config.schema_sources import TomlConfigSettingsSourceNoBOM
+from frame_compare.config.schema_sources import (
+    EnvironmentSettingsSource,
+    TomlConfigSettingsSourceNoBOM,
+)
 
 # ─── Root Schema ───────────────────────────────────────────────────────────────
 
@@ -66,12 +70,13 @@ class ConfigSchema(BaseSettings):
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         return (
             init_settings,
-            env_settings,
+            EnvironmentSettingsSource(settings_cls),
             TomlConfigSettingsSourceNoBOM(settings_cls),
             file_secret_settings,
         )
 
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     audio_alignment: AudioAlignmentConfig = Field(default_factory=AudioAlignmentConfig)
@@ -95,6 +100,7 @@ __all__ = [
     "OverlayMode",
     "PathsConfig",
     "ReportConfig",
+    "RuntimeConfig",
     "ScreenshotsConfig",
     "SlowpicsConfig",
     "SourceActiveRectConfig",

@@ -1,28 +1,6 @@
 """Analysis-specific exception types for Frame Compare."""
 
-from pathlib import Path
-
-from frame_compare.errors import ErrorContext, InputError, JSONValue, ProcessingError
-
-
-class InsufficientFramesError(InputError):
-    """Video too short for requested frames (FC-3004)."""
-
-    def __init__(self, path: Path, count: int, required: int) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-3004",
-                name="INSUFFICIENT_FRAMES",
-                message=f"Video has {count} frames, need at least {required}",
-                hint="Use a longer video or reduce frame_count",
-                details={
-                    "path": str(path),
-                    "count": count,
-                    "required": required,
-                },
-            )
-        )
-        self.path = path
+from frame_compare.errors import ErrorContext, JSONValue, ProcessingError
 
 
 class SelectionError(ProcessingError):

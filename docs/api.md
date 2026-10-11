@@ -86,12 +86,6 @@ Utilities for Frame Compare.
 
 VapourSynth module for frame-compare.
 
-### apply_color_props
-
-`apply_color_props(clip: vs.VideoNode, props: ColorProps) -> vs.VideoNode`
-
-Apply color properties to all frames via std.SetFrameProps.
-
 ### apply_tonemap
 
 `apply_tonemap(clip: vs.VideoNode, settings: TonemapSettings, hdr_metadata: HDRMetadata | None = None) -> vs.VideoNode`
@@ -104,17 +98,11 @@ Apply HDR to SDR tonemapping.
 
 Apply frame trim to clip.
 
-### ColorProps
-
-`ColorProps`
-
-Color space properties extracted from frame.
-
 ### DefaultVSLoader
 
 `DefaultVSLoader`
 
-Default VapourSynth loader implementation using LWLibavSource.
+LWLibavSource loader with an optional frame-cache cap in MiB.
 
 ### detect_hdr
 
@@ -134,12 +122,6 @@ Detect available VapourSynth plugins.
 
 Initialize VapourSynth core with plugins.
 
-### expand_limited_rgb_to_full
-
-`expand_limited_rgb_to_full(clip: vs.VideoNode) -> vs.VideoNode`
-
-Expand limited-range integer RGB to full range.
-
 ### get_preset_settings
 
 `get_preset_settings(preset: TonemapPreset) -> TonemapSettings`
@@ -151,12 +133,6 @@ Get settings for named preset.
 `HDRMetadata`
 
 HDR metadata extracted from source.
-
-### infer_color_props
-
-`infer_color_props(clip: vs.VideoNode, props: ColorProps) -> ColorProps`
-
-Resolve missing/unspecified color properties for downstream conversions.
 
 ### is_vapoursynth_available
 
@@ -187,12 +163,6 @@ Ensure plugin is available, raising PluginNotFoundError if not.
 `SourceInfo`
 
 Video source metadata.
-
-### to_rgb24
-
-`to_rgb24(clip: vs.VideoNode, *, props: ColorProps, output_range: int = 0, expand_to_full: bool = True, dither_type: str = 'error_diffusion') -> vs.VideoNode`
-
-Convert clip to RGB24 for screenshot rendering.
 
 ### TonemapSettings
 

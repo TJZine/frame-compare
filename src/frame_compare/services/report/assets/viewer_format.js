@@ -16,7 +16,25 @@ const ViewerFormat = {
     formatFps(value) {
         const fps = Number(value);
         if (!Number.isFinite(fps)) return '';
-        return `${Number.isInteger(fps) ? fps : fps.toString()} fps`;
+        return `${Math.round(fps * 1000) / 1000} fps`;
+    },
+
+    formatRuntime(frameCount, fps) {
+        const frames = Number(frameCount);
+        const rate = Number(fps);
+        if (!Number.isFinite(frames) || !Number.isFinite(rate) || frames < 0 || rate <= 0) return '';
+        const totalSeconds = Math.floor(frames / rate);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    },
+
+    formatTimestamp(value) {
+        if (typeof value !== 'string' || !value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
     },
 
     formatFileSize(value) {
@@ -39,14 +57,31 @@ const ViewerFormat = {
         return `${width}×${height}`;
     },
 
-    sourceHudLabel(clip, profile = 'control') {
-        const isHdr = clip.signal?.is_hdr === true;
-        return [
-            this.clipDisplay(clip, profile),
+    stageDynamicRangeWords() {
+        return ['HDR', 'HDR10', 'HDR10+', 'DV', 'HLG', 'SDR'];
+    },
+
+    stageLabelNeedsRangeWord(name) {
+        const words = new Set(
+            String(name ?? '').split(/[^A-Za-z0-9+]+/).filter(Boolean),
+        );
+        return !this.stageDynamicRangeWords().some(word => words.has(word));
+    },
+
+    stageLabelSegments(clip, profile = 'control') {
+        const name = this.clipDisplay(clip, profile);
+        const meta = [
             this.formatResolution(clip.resolution),
-            isHdr ? 'HDR' : 'SDR',
+            this.stageLabelNeedsRangeWord(name) ? (clip.signal?.is_hdr === true ? 'HDR' : 'SDR') : '',
             this.formatFileSize(clip.size_bytes),
-        ].filter(Boolean).join(' • ');
+        ].filter(Boolean).join(' · ');
+        return { name, meta };
+    },
+
+    sourceHudLabel(clip, profile = 'control') {
+        const { name, meta } = this.stageLabelSegments(clip, profile);
+        if (!name) return meta;
+        return meta ? `${name} · ${meta}` : name;
     },
 
     signalCodeLabel(kind, value) {
@@ -99,10 +134,43 @@ const ViewerFormat = {
         return 'SDR';
     },
 
-    formatActivePicture(active) {
-        if (!active || active.is_full_frame) return '';
+    formatActivePicture(active, resolution) {
+        const frame = this.formatResolution(resolution);
+        if (!frame) return '';
+        if (!active) return `${frame} · full frame`;
+        const left = Number(active.x) ? `, ${active.x} px left` : '';
         const provenance = active.provenance === 'dolby_vision_l5' ? ' · DV L5' : '';
-        return `${active.width}×${active.height} @ ${active.x},${active.y}${provenance}`;
+        return `${frame} · active ${active.width}×${active.height}, ${active.y} px top${left}${provenance}`;
+    },
+
+    clipBadge(signal) {
+        if (signal?.dolby_vision_rpu === true && signal?.is_hdr === true) return 'DV HDR';
+        return signal?.is_hdr ? 'HDR' : 'SDR';
+    },
+
+    formatGroupedFrames(frameCount) {
+        const frames = Number(frameCount);
+        if (!Number.isFinite(frames) || frames < 0) return '';
+        const whole = Math.floor(frames);
+        return `${whole.toLocaleString('en-US')} ${whole === 1 ? 'frame' : 'frames'}`;
+    },
+
+    clipLengthText(clip) {
+        const frames = this.formatGroupedFrames(clip?.frame_count);
+        const runtime = this.formatRuntime(clip?.frame_count, clip?.fps);
+        return [frames, runtime].filter(Boolean).join(' · ');
+    },
+
+    clipFpsText(clip) {
+        return this.formatFps(clip?.fps);
+    },
+
+    sharedClipValues(clips) {
+        const list = Array.isArray(clips) ? clips : [];
+        const only = values => (values.size === 1 ? [...values][0] || null : null);
+        const fpsValues = new Set(list.map(clip => this.clipFpsText(clip)));
+        const presentationValues = new Set(list.map(clip => this.formatPresentation(clip)));
+        return { fps: only(fpsValues), presentation: only(presentationValues) };
     },
 
     formatTonemapSummary(tonemap) {
@@ -122,6 +190,6 @@ const ViewerFormat = {
 
     stableClipRole(index, referenceIndex) {
         if (index === referenceIndex) return 'Reference';
-        return `Comparison ${index < referenceIndex ? index + 1 : index}`;
+        return 'Comparison';
     },
 };

@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 
@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 import frame_compare.services.tmdb_resolution as tmdb_resolution
+from frame_compare.services.errors import TmdbRateLimitedError
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.tmdb_resolution import resolve_tmdb_match
@@ -21,7 +22,7 @@ type AsyncClientFactory = Callable[
 @asynccontextmanager
 async def _client_for_transport(
     transport: httpx.MockTransport,
-) -> AsyncIterator[httpx.AsyncClient]:
+) -> AsyncGenerator[httpx.AsyncClient]:
     async with httpx.AsyncClient(transport=transport) as client:
         yield client
 
@@ -53,8 +54,15 @@ def _movie_result(
 
 
 @pytest.mark.anyio
-async def test_resolve_metadata_prefers_vvitch_alias_release(
-    async_client_factory: AsyncClientFactory,
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "The.VVitch.A.New-England.Folktale.2015.2160p.mkv",
+        "The.Witch.2015.2160p.UHD.BDRip.DV.HDR10.x265.mkv",
+    ],
+)
+async def test_resolve_metadata_vvitch_alias(
+    async_client_factory: AsyncClientFactory, filename: str
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -104,7 +112,7 @@ async def test_resolve_metadata_prefers_vvitch_alias_release(
     config = MetadataConfig(api_key="a" * 32)
     async with async_client_factory(httpx.MockTransport(handler)) as client:
         result = await resolve_metadata(
-            ["The.VVitch.A.New-England.Folktale.2015.2160p.mkv"],
+            [filename],
             config,
             client,
         )
@@ -136,67 +144,6 @@ async def test_resolve_metadata_keeps_match_when_alias_enrichment_is_rate_limite
 
     assert result is not None
     assert result.tmdb_id == 329865
-
-
-@pytest.mark.anyio
-async def test_resolve_metadata_plain_title_alias_case_prefers_vvitch_release(
-    async_client_factory: AsyncClientFactory,
-) -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        path = request.url.path
-        if path.endswith("/search/multi"):
-            return httpx.Response(
-                200,
-                json={
-                    "results": [
-                        _movie_result(526667, "The Witch", "2015-01-23", popularity=35.0),
-                        _movie_result(310131, "The Witch", "2016-02-19", popularity=30.0),
-                    ]
-                },
-            )
-        if path.endswith("/search/movie"):
-            return httpx.Response(
-                200,
-                json={
-                    "results": [
-                        _movie_result(
-                            526667,
-                            "The Witch",
-                            "2015-01-23",
-                            media_type=None,
-                            popularity=35.0,
-                        ),
-                        _movie_result(
-                            310131,
-                            "The Witch",
-                            "2016-02-19",
-                            media_type=None,
-                            popularity=30.0,
-                        ),
-                    ]
-                },
-            )
-        if path.endswith("/search/tv"):
-            return httpx.Response(200, json={"results": []})
-        if path.endswith("/movie/310131/alternative_titles"):
-            return httpx.Response(
-                200,
-                json={"titles": [{"title": "The VVitch: A New-England Folktale"}]},
-            )
-        if path.endswith("/movie/526667/alternative_titles"):
-            return httpx.Response(200, json={"titles": [{"title": "The Witch"}]})
-        return httpx.Response(200, json={"results": []})
-
-    config = MetadataConfig(api_key="a" * 32)
-    async with async_client_factory(httpx.MockTransport(handler)) as client:
-        result = await resolve_metadata(
-            ["The.Witch.2015.2160p.UHD.BDRip.DV.HDR10.x265.mkv"],
-            config,
-            client,
-        )
-
-    assert result is not None
-    assert result.tmdb_id == 310131
 
 
 @pytest.mark.anyio
@@ -413,6 +360,63 @@ async def test_resolve_tmdb_match_searches_variants_with_bounded_concurrency(
     assert outcome.candidates == []
     assert request_count > tmdb_resolution.MAX_CONCURRENT_SEARCH_REQUESTS
     assert 1 < max_active_requests <= tmdb_resolution.MAX_CONCURRENT_SEARCH_REQUESTS
+
+
+@pytest.mark.anyio
+async def test_resolve_tmdb_match_preserves_results_when_search_variant_fails(
+    async_client_factory: AsyncClientFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warnings: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/search/movie"):
+            return httpx.Response(503)
+        if request.url.path.endswith("/search/tv"):
+            return httpx.Response(200, json={"results": []})
+        if request.url.path.endswith("/alternative_titles"):
+            return httpx.Response(200, json={"titles": []})
+        return httpx.Response(
+            200,
+            json={"results": [_movie_result(329865, "Arrival", "2016-11-10")]},
+        )
+
+    monkeypatch.setattr(
+        tmdb_resolution.log,
+        "warning",
+        lambda event, **fields: warnings.append({"event": event, **fields}),
+    )
+    config = MetadataConfig(api_key="a" * 32)
+    parsed = ParsedMetadata(title="Arrival", year=2016)
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
+        outcome = await resolve_tmdb_match(parsed, config, client)
+
+    assert outcome.selected is not None
+    assert outcome.selected.tmdb_id == 329865
+    assert [
+        {"event": entry["event"], "error_types": entry["error_types"]} for entry in warnings
+    ] == [
+        {
+            "event": "tmdb_search_variants_degraded",
+            "error_types": ["TmdbError"],
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_resolve_tmdb_match_raises_first_error_when_all_variants_fail(
+    async_client_factory: AsyncClientFactory,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/search/multi") and request.url.params.get("year"):
+            return httpx.Response(429)
+        return httpx.Response(503)
+
+    config = MetadataConfig(api_key="a" * 32)
+    parsed = ParsedMetadata(title="Arrival", year=2016)
+    async with async_client_factory(httpx.MockTransport(handler)) as client:
+        with pytest.raises(TmdbRateLimitedError):
+            await resolve_tmdb_match(parsed, config, client)
 
 
 @pytest.mark.anyio

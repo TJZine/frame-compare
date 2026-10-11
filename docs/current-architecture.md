@@ -28,6 +28,15 @@ Frame Compare is a CLI-first packaged Python app with importable internal module
 
 The CLI keeps VS-heavy imports lazy through proxy functions so help text and simple commands do not import the full runtime stack at module import time.
 
+Preparation creates the run's default `DefaultVSLoader` immediately after
+resolving effective config, before loading sources. Injected loaders remain
+caller-owned. `runtime.memory_limit_mb` is an optional frame-cache cap in MiB;
+`DefaultVSLoader.ensure_core` is the single in-process setter. Rendering and
+metric direct-call fallbacks pass the setting to that loader. VSView runs in a
+separate process, so its generated session sets the same core property after
+acquiring the core. Unset leaves the native default untouched. This controls
+frame caching, not total process memory or audio-alignment buffers.
+
 ## Runtime Flow
 
 The main run path is:
@@ -77,12 +86,48 @@ Current phase-family owners are intentionally explicit:
   overlay diagnostic metadata mapping
 - `frame_compare.orchestration.phase_post_render`: metadata, publish, report, confirmation, and cleanup phase bodies
 
+Run cancellation stays on the main task. `utils.cancellation` supplies synchronous
+admission/publication checks and asynchronous checkpoints; synchronous owners raise
+a private control-flow marker, and their async boundaries deliver task cancellation
+before awaited cleanup. `utils.terminal` temporarily restores interruptible input
+only for a main-thread TTY using the asyncio Runner's SIGINT handler, then restores
+that exact handler. Persistence owners pass guards to atomic writes and abort checks
+to lock polling; generic utilities do not inspect the ambient task. Failure records
+remain writable. Main-task metric, active-rectangle sampling and source-benchmark
+loops check before each frame request. Each parallel render batch owns one
+`threading.Event`: its main-thread 50 ms future-wait poll sets it on cancellation
+or a real failure, and workers check it before each render frame. Stopped units
+retain completed frame results as cleanup outcomes; real-failure ordering remains authoritative.
+The accepted admission bound is one poll interval plus 100 ms scheduling slack
+after main-thread interrupt observation; additional frame counts inside that
+window are observations rather than acceptance limits.
+FFmpeg batch extraction receives the event as an abort callable, stops staging
+promotion, and boundedly terminates and reaps its child. Sequential render frames
+also check admission. VSView polls its blocking waits and reaps owned work.
+A native frame request already in flight has no guaranteed finite drain deadline;
+see the CLI contract's Run Interruption section for that limit and the separately
+owned shared-TMDB response-cache exception.
+
+`frame_compare.utils.run_warnings` owns the immutable in-memory `RunWarning`
+record (typed source, severity, message, optional detail). Producers choose
+source and severity from the operation's outcome; labels and diagnostic text
+never determine them. Orchestration carries records and selects alignment and
+active-rect retry warnings by source. CLI output renders the fields and
+associates post-upload rows by warning-record equality. Successful run JSON
+still omits warnings, and run-result V1 still stores only bounded generic
+sanitized warning summaries.
+
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
 builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
 identity in schema v8 payload metadata, and orchestration only passes the effective
 analysis config, active-rect-aware selection-domain token, analysis-owned metric
 active rectangle, active-rect provenance, and exact source-frame metric range into
 the analysis/cache owner.
+`frame_compare.analysis.metrics.calculate_metrics` owns normal cache acquisition
+and returns a `MetricsAcquisition` containing the metrics and the actual `hit` or
+`computed` disposition. Analyze presentation consumes that result without a
+predictive cache read. Cache-only preparation still validates before reserving
+output, and cache-only analysis reads again without permission to compute.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
 `quality` is the default full-resolution VapourSynth PlaneStats behavior, while
 `performance` is an approximate temporal-sampling strategy over the same
@@ -239,26 +284,29 @@ recovery requirement.
   loading validates the same typed identity before reporting or accepting a hit,
   with a full-frame
   rectangle representing no crop.
-  Content-derived active rectangles from opt-in `auto` detection are final
+  Content-derived active rectangles from default `auto` detection are final
   prepared rectangles and are included in the same token/provenance fields. It excludes
   frame-selection counts, `user_frames`, random seed, and dark/bright quantile
   thresholds because those affect frame choice rather than metric computation.
 - `<resolved paths.generated_dir>/cache/alignment/alignment_reuse.toml`:
   shared previous alignment offset reuse cache owned by
-  `frame_compare.services.alignment_reuse_cache`. It stores accepted computed or
+  `frame_compare.services.alignment_reuse_cache`. It stores eligible computed or
   interactively confirmed offsets keyed by a typed source-set identity, source
   fingerprints, source trims, effective FPS values, selected reference
   relationship, selected audio streams, alignment settings that affect
-  computed offsets, and the scoped media-runtime alignment fingerprint. For the
+  computed offsets, an internal estimator-policy revision, and the scoped
+  media-runtime alignment fingerprint. For the
   managed Windows portable and Debian/Docker profiles, a selected standalone FFmpeg
   lineage change therefore misses cleanly rather than reusing offsets computed by a
-  different decoder/tool build. Interactively confirmed
+  different decoder/tool build. Because final authority depends on video frame
+  numbering, the alignment fingerprint also includes the selected VapourSynth and
+  L-SMASH-Works decoder identity. Interactively confirmed
   entries may also retain the computed
-  audio alignment result that produced the viewer suggestion so a later run can
-  decline the human-confirmed offset without rerunning deterministic audio
-  alignment. Cache schema v2 stores only `computed` and `interactive_confirmed`
+  audio alignment result that produced the viewer suggestion; provisional audio
+  candidates are never written as computed authority. Cache schema v2 stores only `computed` and
+  `interactive_confirmed`
   origins, requires a bounded scalar stability summary for computed entries and
-  embedded computed results, and persists no per-window evidence or audio. A v1
+  embedded computed results, and persists no per-chunk evidence or audio. A v1
   cache is ignored and recomputed; there is no v1 migration or compatibility reader.
   Unreadable, corrupt, unsupported-version, malformed source-table, or
   invalid-entry shared reuse data degrades to the normal alignment path with a
@@ -282,8 +330,8 @@ recovery requirement.
   data.
 - `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
-  `lsw1310-56c451f754fd` on managed/portable Windows,
-  `lsw1310-a619e5ff5505` on unmanaged Windows, and `lsw1310-b86875cb61bd`
+  `lsw1310-f125953022b6` on managed/portable Windows,
+  `lsw1310-1ec4b81a7724` on unmanaged Windows, and `lsw1310-877219813395`
   on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
   their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
   changes. Legacy adjacent `<media>.lwi` files are ignored,
@@ -313,13 +361,32 @@ recovery requirement.
 - `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache
 - `<run-folder>/generated/manual_overrides.toml`: persisted interactively confirmed
   manual alignment overrides for the current run
+- `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v4,
+  diagnostic-only audio evidence owned by
+  `frame_compare.services.alignment_diagnostics` and defined once in
+  `frame_compare.utils.alignment_evidence`. One shared 2 MiB per-comparison sanity
+  bound covers this file and native review metadata. The diagnostic retains
+  selected-stream facts with start-time compensation, contiguous chunk runs, plain
+  per-chunk columnar rows, the global lag, the sub-frame
+  estimate, paired collection summaries, the A4b authority recount, and the final
+  video/decision evidence. Video evidence includes the five-offset base checks,
+  targeted V5a checks, same-frame context, and bounded review check points. Each
+  target stores its authoritative `target_offset`, `credible`, `start_sample`, and
+  `end_sample`; `chunks.total_samples` preserves the analyzed span. The artifact is written
+  atomically before optional review. Current attempts retain
+  observed paired-collection facts; preanalysis rejections remain `not_observed`.
+  A final review outcome may replace the envelope once while preserving the canonical
+  original-attempt digest. These files are never read by alignment, trim, or
+  shared-cache owners and expire only when the run folder is removed.
 - `<run-folder>/generated/vsview_sessions/vsview_*.py`: generated VSView session
   scripts, with L-SMASH-Works remaining the source/index loader owned by Frame Compare
-  (VSView's BestSource workspace is not a Frame Compare source-loader change)
+  (VSView's BestSource workspace is not a Frame Compare source-loader change).
+  Frame Compare metadata in generated sessions is schema v5; older, unknown,
+  or mixed versions require regeneration.
 - `<run-folder>/generated/vsview_sessions/vsview_*.alignment-result.json`: the
   session-scoped native alignment-review result sidecar. It is written atomically by
-  the VSView panel only after one complete whole-set positions action or keep-current
-  action.
+  the VSView panel only after one complete whole-set confirm action (positions or
+  known offsets) or keep-current action.
   The sidecar remains result schema v1: one ordered decision per comparison, either
   confirmed raw source frames or `keep_current`. Frame Compare derives this sibling
   path from the trusted generated session script, checks the UUID/session identity and
@@ -404,19 +471,137 @@ per-source display strings as optional primitives for the reuse prompt; alignmen
 services do not parse filenames. These cache-identity DTOs use layer-neutral primitives or
 dependency-light shared utility types; `services` must not import
 orchestration-owned or analysis-owned identity types such as `ClipState`,
-`ClipIdentity`, or `ClipFingerprint`.
+`ClipIdentity`, or `ClipFingerprint`. The request is the sole owner of computation
+and cache facts: offset bounds, channel strategy, selected streams, and previous
+offset reuse policy. `AlignmentConfig` carries execution and presentation
+preferences rather than a second copy of those facts.
+
+Prepared identities remain frozen. Cached acceptance and persistence validate
+current path, size, and mtime against them; prompts and native review do not permit
+changed sources to authorize trims or newly saved offsets. Applied
+`AlignmentResult` values require both an integer frame offset and a finite time
+offset; unapplied results carry neither. Zero remains a valid applied offset,
+and historical cached/manual evidence remains distinct from fresh computation.
 
 `frame_compare.services.alignment` owns alignment entrypoint sequencing and
-precedence and carries diagnostic-only stability summaries without allowing them to
-change the applied constant offset or trims. `alignment_correlation` converts its raw
+precedence and carries the immutable original audio attempt and diagnostic-only
+stability summaries without allowing them to change the applied constant offset or
+trims. Its internal entrypoint is asynchronous: saved-offset reuse and prompts,
+diagnostic publication, native review, cache persistence, and presentation stay on
+the application execution context, while one owned worker thread performs only the
+blocking probe, collection, correlation, and bounded scoring work. Outer task
+cancellation sets one thread-safe event, waits through repeated cancellation for the
+worker and collector cleanup to finish, and then re-raises the original cancellation
+unless that cleanup failed; no partial worker result reaches phase-output application.
+Incomplete child, reader, pipe, or handle cleanup is a distinct fatal alignment error,
+including after cancellation, even when ordinary dependency or decode failures remain
+warning-only for optional alignment. Prepared-source identity invalidation is also
+fatal: after owned cleanup and cancellation handling, even unavailable audio results
+must pass source-currentness validation before downstream rendering can proceed.
+The attempt retains resolved pathless stream
+facts, per-chunk columnar evidence, contiguous chunk runs, the global lag, start
+compensation, the sub-frame estimate, the A4b authority recount, the video
+observation, and the final decision. Under the shipped
+`whole-track-chunked-phat-video-check-motion-20260929` policy, the audio-only decision is an
+internal `audio_only` seam. When a global lag exists, `alignment_video`
+checks the run's own L-SMASH sources in the same worker thread and
+`alignment_decision` combines the result. Only `trusted_automatic` with reason
+`audio_video_confirmed` is applied, trimmed, or written to the computed cache;
+provisional and unavailable results are evidence only.
+Manual confirmation replaces authority without replacing that
+original attempt. Immutable `ClipState` carries the attempt even when its applied
+`alignment` remains null. `alignment_correlation` converts its raw
 correlation lag into the signed `reference source frame - comparison source frame`
-contract before consensus results reach hints, caches, or trim calculation. Immutable
+contract before decision results reach hints, caches, or trim calculation. Immutable
 orchestration alignment state carries that summary to warning and human-report owners
 without a mutable diagnostics side channel. `frame_compare.services.alignment_previous_offsets` owns
-previous-offset reuse policy. Exact-match computed audio alignment cache hits are
-treated as deterministic and can be reused independently of the human
-confirmed-offset policy; `previous_offsets` governs only interactively confirmed
-offset reuse.
+previous-offset reuse policy. Validated
+human-confirmed authority continues to reuse through the `previous_offsets` policy;
+stale-policy shared entries miss and recompute.
+
+Computed alignment work runs whole-track chunked correlation over each selected audio
+stream. `alignment_audio` owns stream probing and deterministic selection, audio and
+video start-time probing with container-start compensation, and the canonical
+whole-track 8 kHz mono FFmpeg recipe. Without overrides, a non-commentary reference
+default with a known language switches to the best-ranked non-commentary reference
+stream in a known language shared by both sides when its language is missing from the
+comparison. Each source's audio is analysed on its
+effective timeline, so a retimed source's exact resample/relabel filters stretch
+its audio by `source_fps / effective_fps` before chunking. Reference chunks of length
+`C = clamp(floor(D/3), 5 s, 30 s)` (one chunk of length `D` when the shorter
+selected-stream duration `D` is below 5 s) are tiled from reference sample 0, each
+searched over lags `[-M, +M]` where `M = max_offset_seconds`; comparison samples
+outside the stream are zero. A final partial chunk is analyzed when it reaches at
+least `C / 2` and dropped otherwise. Requests whose per-chunk FFT would exceed
+2^22 points return the non-applied `analysis_budget_exceeded` result before any
+decode. The compensated offset is
+`lag / 8000 + (audio_start_ref - video_start_ref) - (audio_start_cmp - video_start_cmp)`,
+using ffprobe start times of the selected audio stream and the first non-`attached_pic`
+video stream; a missing start time counts as 0 and is recorded as `default_zero`.
+`alignment_streaming` is the adjacent, independently exercisable paired-collection
+owner. It decodes reference and comparison concurrently through one `_ChildStream`
+per side read in lockstep, with bounded memory (one reference chunk, one
+`chunk + 2M` comparison window, fixed-size pipe queues, FFT scratch), a 30 s
+no-progress watchdog, and a `120 s + 0.1 x longest known duration` total cap; it
+owns the two children, bounded stdout/stderr readers, typed transport failures,
+and deterministic cleanup. It imports neither alignment planning nor trust/cache
+policy. Accumulated correlation state becomes usable only after both children exit
+0, both readers finish, and cleanup completes; any failure discards it.
+Cancellation is checked before process creation, during bounded queue consumption,
+and between comparisons; a native NumPy FFT already in progress completes to its
+admitted safe boundary before cancellation is observed. No PCM survives into
+another comparison.
+`alignment_correlation` is pure numeric chunk estimation: per-chunk GCC-PHAT with
+full whitening, activity gating at -50 dBFS RMS on both sides, PSR credibility at
+`>= 25`, global lag as the argmax of summed active-chunk correlations, and
+agreement within 2 ms requiring at least `min(3, analyzed)` agreeing chunks and an
+80% agreeing share of credible chunks. Disagreement yields `no_single_offset`
+with contiguous chunk runs for edit/drift diagnosis; a global lag within 2 ms of
+`+/-M` is `search_edge` and is never applied. `alignment_correlation`
+converts the raw correlation lag to the
+public `reference source frame - comparison source frame` sign.
+That raw offset remains unchanged in results, diagnostics, manual review, and caches.
+At the orchestration application boundary, base trim starts are converted into the
+calculator coordinate with `calculator offset = raw offset - reference base trim +
+comparison base trim`; the calculator's relative trims are then composed onto the base
+domains. Consequently, the final reference raw-source start minus each authorized
+comparison raw-source start equals the stored raw offset, including zero when the two
+base trims differ. A missing offset remains missing and never becomes zero authority.
+`alignment_decision` maps the whole-track estimate, container-start compensation,
+A6 rounding, A4a competing runs, A4b frame-level authority recount, and the V5/V5a
+observation to the v4 decision. It owns the single V6 trusted predicate and ordered
+failure reasons. A trusted result is `trusted_automatic` /
+`audio_video_confirmed`; unresolved or video-confirmed alternatives are provisional
+with `competing_offset_confirmed_by_video`, `competing_offset`, or
+`unresolved_audio_disagreement`; a globally inconclusive or unreadable video check
+is provisional with `video_check_inconclusive` or `video_check_unavailable` when a
+candidate exists. Audio-stage failures remain unavailable unless video supplies a
+review hint; preanalysis and collection failures retain their existing unavailable
+reasons. Stability is derived from chunk runs (`stable` on agreement,
+`possible_discontinuity` for two or more credible runs at different lags,
+`possible_drift` for a sustained walk across three or more runs, `variable`
+otherwise, `insufficient_evidence` below three credible chunks), and the
+correlation score is the agreeing-over-credible fraction. The estimator-policy
+token is part of the shared source-set identity so older computed cache entries
+are not reused.
+`alignment_video` owns V1-V5a: bounded five-offset base scoring, targeted run/chunk
+hypothesis checks, L-SMASH loading through the injected run `VSLoader`, active-rect
+crop/downscale/rank scoring, cancellation and source-identity checks, and bounded
+review check-point construction. Base and examined-target positions are motion-selected
+from the reference alone (the highest-motion candidate per slot), never evenly spaced.
+It never falls back to FFMS2. A missing or failing loader becomes
+`video_check_unavailable`, not a run failure.
+`frame_compare.utils.alignment_evidence` is the single definition of the v4
+evidence schema: frozen dataclasses, one strict standard-library payload walker/parser,
+plain explicit records, and the shared per-comparison byte bound. Pure shared alignment
+math and vote policy live in `utils.alignment_policy`; the shared P4/P4a
+decision/region/check-point projection lives in `utils.alignment_review_projection`
+and is consumed by both terminal and panel renderers. `alignment_presentation`
+owns the terminal/Rich and structured-warning rendering of that projection;
+`alignment_review_panel` renders the same projection in VSView. Native metadata v5
+uses a bounded projection that omits all per-chunk row columns while retaining runs,
+`chunks.total_samples`, authoritative target facts, aggregate
+counts, video checks, and review check points.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
@@ -425,30 +610,42 @@ prompt/table helper, including TTY fallback behavior and no-color rendering.
 write-source provenance such as `computed_this_run`,
 `interactive_confirmed_this_run`, `shared_computed_offsets`,
 `shared_previous_offsets`, and
-`preexisting_manual_override`; shared-cache writes consume only current-run
-computed or interactively confirmed provenance rather than inferring eligibility from
-the final flattened `AlignmentResult.source`.
+`preexisting_manual_override`; shared-cache writes require at least one current-run
+computed or interactively confirmed result and otherwise admit only trusted current-run
+or shared-computed provenance rather than inferring eligibility from the final flattened
+`AlignmentResult.source`. Shared cache schema v2 remains
+accepted-authority-only and does not serialize the richer attempt. Warm cache entries
+therefore report historical stream/chunk details as unavailable rather than
+inventing them.
 
 Native alignment review is deliberately split across the existing owners. The
 `frame_compare.vsview.session_script` owner generates one `Reference` output and the
 complete ordered `Comparison N` output set, registering each source once and
-serializing role/key/ordinal/name/suggestion metadata as schema v1. The
+serializing role/key/ordinal/name, the authoritative integer/null offset, and bounded
+service-projected audio evidence as metadata schema v5. That projection omits
+per-chunk rows but retains target identity, bounds, credibility and offset, analyzed
+sample span, aggregate audio facts, and the complete bounded video/review evidence. The
 typed `frame_compare.vsview.alignment_review_contract` owns the session identity,
-strict v1 metadata/result topology, trusted sibling-sidecar path, atomic
+strict metadata-v5/result-v1 topology and primitive DTO validation, trusted
+sibling-sidecar path, atomic
 result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
 is the sole human review surface inside VSView: it remains inert for ordinary or
-rejected sessions, observes only public current-output/current-frame callbacks after
+rejected sessions, renders accepted/provisional/unavailable evidence without importing
+service policy, observes only public current-output/current-frame callbacks after
 activation, requires each source to be visited for the default viewer-position
 workflow, and writes only a complete typed
 sidecar through one whole-set action. The panel's manual source-frame and known-offset
-inputs feed that same result model; its secondary keep-audio action writes one
+inputs feed that same result model; its secondary keep-current action writes one
 `keep_current` decision per comparison. `alignment_vsview` owns availability policy,
 expected-comparison construction from raw source counts, result acceptance, and
 applying confirmed offsets; its service, persistence, override, cache, and CLI/config
 boundaries remain unchanged and it does not parse terminal input. The
 `frame_compare.vsview.adapter` remains the composition boundary for the current
 interpreter, exact panel entry point, bounded startup-readiness probe, and bounded
-child-process lifetime.
+child-process lifetime. `frame_compare.vsview.launcher` loads the selected VapourSynth
+environment before VSView on every runtime. For Qt's headless `offscreen` platform on
+Windows portable only, the launcher skips VSView's CJK font-cache warmup because that
+upstream worker stalls in the non-display Windows runtime; visible launches retain it.
 
 ## External Boundaries
 
@@ -473,7 +670,7 @@ Current Docker capability contract:
 | macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path only; Docker-based VSView GUI launch is unsupported beyond those backend features, and macOS Docker is not a native GPU or native Qt desktop surface |
 | Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` compose override/profile plus `tools/verify_docker_gpu.sh`; documented-only/unverified until separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; the verifier contract covers offscreen VSView/plugin/session/metadata/result proof, but this feature run has static contract proof only and execution plus visible X11 launch remain unavailable/unverified until separately proved on a compatible Linux X11 desktop host |
+| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; the 2026-10-07 dependency-refresh handoff records reported Linux-container offscreen proof on macOS Docker Desktop for a production-generated three-source session, panel, frame-0 outputs, sidecar, and cleanup. The current Linux X11 host wrapper, visible launch, and physical native acceptance remain unverified |
 | Native Windows portable | First-class native runtime with backend rendering, reports, and VSView GUI support outside Docker |
 
 Keep these integrations at their current owners:
@@ -488,7 +685,9 @@ Keep these integrations at their current owners:
 - browser auto-open for generated reports, slow.pics browser opening, clipboard
   copy, report-confirmed upload prompting, and report/slow.pics browser
   precedence rules:
-  `frame_compare.cli.entry`
+  `frame_compare.cli.run_command`; `frame_compare.cli.entry` owns registration and
+  dependency wiring, `frame_compare.cli.cli_helpers` owns browser/clipboard adapters,
+  and `frame_compare.cli.history_command` owns explicit recorded-report opening
 - host-side Docker report/URL opening helper for the default compose mount
   layout and `https://slow.pics/...` URLs:
   `tools/open_docker_host_target.py`
@@ -532,12 +731,16 @@ owners. Its explicit X11 contract is:
 The optional GUI proof is non-CI and non-default. Its verifier contract requires the
 `gui-linux` image to discover and load the exact Frame Compare VSView entry point,
 construct the panel in its inert ordinary-session state, load a production-generated
-L-SMASH session with VSView 0.10.3, register one `Reference` and ordered comparison
+L-SMASH session with VSView 0.12.1, register one `Reference` and ordered comparison
 outputs, render frame 0 for each output, exercise complete source readiness plus the
 whole-set positions and keep-current actions, and round-trip/validate the sibling
-result sidecar. This
-feature run has static contract proof only; execution remains unavailable/unverified
-until a compatible Linux/X11 host runs it. The contract covers dependency
+result sidecar. The 2026-10-07 dependency-refresh handoff records a reported
+inside-container offscreen pass on macOS Docker Desktop for this contract, including
+a production-generated three-source L-SMASH session, frame-0 rendering, sidecar
+round-trip, and cleanup. This is historical reported evidence for that refresh,
+not a current GUI run; raw historical logs were not independently authenticated
+in this checkout. Execution through the current Linux/X11 host wrapper remains
+unavailable/unverified until a compatible Linux/X11 host runs it. The contract covers dependency
 availability, plugin discovery, panel construction, generated metadata/result
 integration, named-output registration, and offscreen rendering without requiring a
 real desktop launch. It does not prove visible X11 launch, Qt ergonomics, native
@@ -621,6 +824,16 @@ bounded pre-send/5xx backoff, fails permanent certificate-verification errors,
 honors only short valid `Retry-After` rate-limit delays, and does not retry after
 request transmission when the delivery outcome is unknown so it does not knowingly
 create duplicate notifications.
+Default hostname resolution runs fixed standard-library code in an owned
+current-interpreter subprocess. Its Python runtime and packaged startup
+configuration are trusted: portable `._pth` configuration can enable `site` even
+with `-S`. The child environment excludes application configuration and secrets;
+only required operating-system startup values are retained. It receives the hostname and port,
+never the webhook URL or payload, and returns bounded address data for the parent's
+existing public-address validation. Resolution has a separate ten-second deadline;
+cancellation polls the stop signal and terminates, escalates, and boundedly reaps
+the resolver before the owning task returns. Injected callables remain caller-owned
+and must provide their own blocking-operation deadlines.
 Webhook failures are warning-only and redact configured URL details. Typed safe
 failure categories and optional HTTP status codes feed structured diagnostics without
 retaining the configured endpoint.
@@ -647,39 +860,89 @@ replacement remains owned by `frame_compare.utils.atomic_write`.
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, internal overlay mode presented to
 users as Single where appropriate, diff, and pair-based blink modes; frame/category
-navigation; a HUD toggle for stage labels and current-frame metadata; a primary
-toolbar plus floating viewport palette; a collapsible, compact/normal/large
-filmstrip bottom panel; a responsive inspector drawer with Frame, Clips, Align,
-Review, and Export tabs; fullscreen support; viewport pan, zoom,
-actual/width/height fit, reveal, and adjacent-frame preloading. The toolbar owner uses
-CSS Grid to keep frame, mode, and context/alignment zones stable at wide widths, then
+navigation; a source-labels toggle for stage labels and current-frame metadata; a
+primary toolbar plus floating viewport palette; a collapsible, compact/normal/large
+filmstrip bottom panel; a responsive inspector drawer with Frame, Clips, Image offset,
+and Review tabs; fullscreen support; viewport pan, zoom, actual size and fit height
+controls (plus continued support for a restored width-fit preference without a visible
+control), reveal, and adjacent-frame preloading. The toolbar owner uses
+CSS Grid to keep frame, mode, and context/offset zones stable at wide widths, then
 reflows them to two rows and a narrow stack without JavaScript measurement or DOM
 reordering. Frame arrow shortcuts select the adjacent visible frame while suppressing
 native document and filmstrip scrolling; the selected filmstrip item owns its roving
-tab stop. Custom view-mode, fit, timeline-size, and lens-option radio groups use
+tab stop. Custom view-mode, fit, filmstrip-size, and lens-option radio groups use
 standard arrow and Home/End selection. The header Help dialog is the single persistent
-shortcut reference; the timeline is the final visible report region. One responsive
+shortcut reference; the filmstrip is the final visible report region. One responsive
 Inspector width token owns both desktop drawer width and
 stage reservation; the existing tablet/phone overlay boundary keeps stage margin at
 zero.
 
+Viewer appearance remains owned by `assets/viewer.css`: neutral charcoal surfaces,
+readable text tiers, restrained brass comparison markers, and neutral utility states.
+The renderer supplies decorative inline SVG control icons and a frame-number/category
+caption overlay shared by all filmstrip sizes. Thumbnails use the full card interior;
+frame numbers and categories sit over a shallow bottom gradient. Category filters
+retain text and counts without colored dots or thumbnail stripes. Palette orientation
+rotates its existing icon through CSS, while the viewer updates the accessible action label. The floating
+palette omits a fit-width control; actual size and fit height remain, and a restored
+width-fit preference still computes zoom and keeps the fit radio group keyboard
+reachable when neither visible radio matches. The floating palette does not reserve
+stage height. On fine pointers the palette carries a `data-proximity` state driven
+by a throttled stage pointermove listener: near at or within 96 px of the palette
+rectangle, far at or beyond 160 px with hysteresis between, far on stage pointer
+leave, forced far during viewport or slider drags, forced near for 3000 ms after
+load and while either the image-offset or lens-settings popover is open, and always
+near on coarse pointers or when the fine-pointer media query stops matching.
+Far dims to 0.18 opacity over 150 ms (disabled under reduced motion) without
+disabling pointer events, and `:focus-within` keeps the focused palette visible. Spatial alignment status is labeled `Offset`, and its Inspector tab and
+palette settings are labeled Image offset, both stating the adjustment is spatial only
+and does not affect source-frame timing, to distinguish image translation from temporal
+source-frame alignment. View-mode controls and the Help dialog state each mode's purpose
+(reveal spatial differences, inspect one source, locate changed pixels, alternate the
+selected pair, scan sources together).
+Keyboard focus uses a neutral light outline, and the image canvas has no decorative
+shadow. The renderer emits the header generation timestamp as a `<time>` element
+carrying the exact ISO timestamp in `datetime` and `title`; the viewer localizes its
+text to medium date plus short time. The exact timestamp remains available in the
+tooltip, Report Information, and payload.
+Report Information is the single place for report metadata: title, report ID, generated
+timestamp, frame/clip counts, and the slow.pics link. The renderer alone builds that
+link's safe http(s) href; no viewer script re-derives it. The viewer's Inspector builds
+the Report Information source cards, Opens in, and Default pair at startup; renderer.py
+emits only their containers.
+
 Report payload v1.2 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
 provenance, shared formatters, stable roles, and set-level collision handling once per
-report. Report controls consume control or micro names, while Inspector/info and ARIA
-surfaces consume primary identity and exact filename. Canonical clip labels continue
+report, joining profile segments with `·` (slow.pics image names keep the `|`
+separator; burned-in screenshot text is the clip label and does not use release
+descriptors). Report controls consume control or micro names,
+while Inspector/info and ARIA surfaces consume primary identity and exact filename.
+Stage labels show the control name plus muted resolution and size, adding an
+HDR/SDR word only when the name has none; toolbar selects cap at `20rem` with an
+end ellipsis and carry the full name on each option. Canonical clip labels continue
 to own image mappings, geometry, browser state, and review JSON; payload identity
 shaping explicitly omits display profiles.
 
-The Clips inspector composes those profiles into stable Reference/Comparison cards.
-Primary and informative release identities wrap normally, exact filenames and long
-technical values may wrap anywhere, and drawer/panel overflow is constrained locally
-rather than masked at the document boundary.
-Visible Single, Slider, Diff, Blink, and Grid HUD labels reuse the payload's canonical
-container byte size through the shared IEC formatter; hiding the HUD hides that size
-with the source label, and no report payload or probing owner is duplicated.
+The Clips inspector and Report Information share one clip-card design built from
+those profiles: stable Reference/Comparison role headers (plus shown left/right/shown/not
+shown placement in the Clips tab), a DV HDR/HDR/SDR signal badge, the standard name,
+the exact filename, and Picture/Length/Size rows (plus Signal in the Clips tab, plus
+FPS/Presentation rows in the Clips tab only for values that differ between clips,
+plus an FPS row in Report Information only when fps differs). An `All sources:`
+line states the fps and presentation values identical across every clip — fps only in
+Report Information. The Frame tab shows a `number · category` identity (or the frame's
+own label), a `position / count in filter` row, a Detail row only for non-default
+notes, and an all-sources table (compact name, own frame number, picture type, shown
+marks for visible sources). Primary and informative release identities wrap normally,
+exact filenames and long technical values may wrap anywhere, and drawer/panel overflow
+is constrained locally rather than masked at the document boundary.
+Visible Single, Slider, Diff, Blink, and Grid source labels reuse the payload's canonical
+container byte size through the shared IEC formatter; hiding source labels hides that
+size too, and no report payload or probing owner is duplicated.
 Stage labels participate directly in accessible text, while Grid cell names retain
-primary identity and exact filename and append the same size only while the HUD is shown.
+primary identity and exact filename and append the same size only while source labels
+are shown.
 
 The ordinary report artifact does not claim presentation blindness. Source identity
 can be present in baked screenshot overlays, physical image filenames, and report
@@ -687,26 +950,43 @@ metadata, so viewer-only label hiding cannot provide an honest blind workflow. A
 future blind comparison must use an explicitly eligible clean artifact and a
 separately approved invocation, delivery, reveal, and publishing contract.
 
+The main stage uses Grid's missing-image wording in Slider, Single, Diff and
+Blink. A failed selected image is hidden, its pane is marked unavailable, and the
+existing stage-message and error-status surfaces identify the source with a Retry
+action. Source-label text remains available without presenting the failed image's
+badge as visible content. Navigation and successful retry clear the unavailable
+state; generation and retry-attempt checks reject stale image callbacks.
+
 #### Lens
 
 `assets/lens.js` is the focused owner for the optional
 floating image lens: normalized per-source mapping, fixed-window placement, dedicated
 edge-grip dragging, pending touch tap-versus-viewport-gesture ownership,
-160/240/320px sizing, 2x/3x/4x/6x/8x/12x magnification, Off/Ring/Brackets sample
-marking, and an optional Single-mode active/comparison split. The sample follows
+160/240/320px sizing, 2x/3x/4x/6x/8x/12x magnification, and an Off/Ring/Brackets
+sample marker that defaults to Ring. The sample follows
 pointer movement across the displayed source while the lens window stays fixed;
-only its grip can move the window. Diff uses separate aligned base and difference DOM
-images with CSS difference blending, while the viewer exposes one palette/lens chrome
-event boundary so bubbled pointer, wheel, and double-click input cannot mutate the
-viewport. Activation seeds a transient center point and retains the stable palette
-Lens group, which owns zoom, fixed status, and stage-clamped settings. The display-only
-lens body has no titlebar or controls. It uses compact mode-aware ACTIVE, COMPARE, and
-DIFF badges plus deterministic, stage-size-aware middle-ellipsized identity rails that
-preserve source name beginnings and suffixes; Lens Settings exposes the full wrapping
-current-source label. Report interaction highlights, including lens markers and its grip, share one
-Projection Brass signal token family while semantic status and frame-category colors
-remain separate. Grip pointer dragging uses capture, while its
-arrow-key operation supports a larger Shift step, clamps to the stage, persists the
+only its grip can move the window. There is no split comparison view: the lens
+is a plain magnifier over the sampled source. Diff uses separate aligned base
+and difference DOM images with CSS difference blending, while the viewer exposes
+one palette/lens chrome event boundary so bubbled pointer, wheel, and
+double-click input cannot mutate the viewport. Activation seeds a transient
+center point and retains the stable palette Lens group, which owns zoom and
+stage-clamped settings. The display-only lens body has no titlebar or controls.
+It carries a single caption row under the magnified image showing the compact
+source name in the UI face, wrapping within the lens width while the lens
+window grows to fit (two lines in Diff mode: the left source name, then `↔`
+and the right source name; the cell source under the pointer in Grid mode); the
+caption stays hidden until the Caption preference is turned on, while a
+loading/unavailable status notice covers the lens image when it cannot be
+shown. The lens keeps its full-name accessible description, without a source
+number prefix, for assistive technology. Stored lens state containing `comparisonEnabled` or
+`comparisonTarget` keys loads without error, and those keys are dropped on the
+next write. Lens Settings order is Size, Sample marker, Caption, then the reset
+button and the grip/persistence note. Direct image-inspection markers share one Projection Brass signal
+token family; utility controls and lens labels use neutral states, while semantic status
+colors remain separate. Frame categories use text labels. Grip pointer dragging uses
+capture, while its arrow-key operation supports a larger Shift step, clamps the full
+lens window including a wrapped caption to the stage, persists the
 position, and prevents viewer shortcuts. Touch sampling remains a deliberate tap;
 touch movement beyond its threshold returns ownership to viewport gestures.
 Context sync remaps or reseeds the target when frames, modes, sources, or Grid entries
@@ -734,12 +1014,13 @@ one normalized viewport center without changing pair-mode persistence semantics.
 
 `assets/viewer_format.js` is the dependency-free owner for clip display profiles,
 exact and accessible names, FPS and IEC sizes, signal/presentation/tonemap and
-active-picture labels, mode names, and stable clip roles. It does not read the DOM,
-storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
+active-picture labels (including ` · DV L5` provenance), mode names, stable clip
+roles, signal badges, clip length text, and shared fps/presentation values. It does
+not read the DOM, storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
 open/close focus and inert policy, tab selection and roving keyboard behavior, Frame,
-Clips, Align, and Export rendering, safe slow.pics link presentation, and lazy Review
-activation through the root viewer. Hidden Inspectors update only visibility and tab
-semantics; opening refreshes their content before focus moves into the drawer.
+Clips, and Image offset rendering, and lazy Review activation through the root viewer. Hidden
+Inspectors update only visibility and tab semantics; opening refreshes their content
+before focus moves into the drawer.
 
 `assets/viewport.js` owns zoom clamping and pointer anchoring, pan bounds and Grid
 normalization, fit/reset/reveal math, transient pointer/pinch mechanics, directional
@@ -753,30 +1034,38 @@ sequence rendering.
 
 `assets/review_state.js` owns the exact report-scoped local review schema, bounded
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
-V1 JSON export, strict import validation and preview, atomic merge/replace apply, and
+V1 JSON export, strict import validation, a selected merge/replace candidate shared by
+preview and atomic apply, stale-preview rejection, and
 the Review tab's dedicated edit/import/export interaction lifecycle. That controller is
 created on first visible Review use, keeps form rendering stable across unrelated viewer
 refreshes, and routes transition announcements through the existing shared polite live
-region. Its storage is
+region. A persistent status line states how many review records are saved in this
+browser (singular/plural and the zero count are each phrased truthfully) beside a static
+reminder that notes live in browser storage, not the report file; a storage-unavailable
+or failed-write state instead says changes are kept only for the session, and never
+claims persistence it did not achieve. Its storage is
 separate from viewport preferences and never writes into the report or run directory.
 `assets/viewer.js` caches the Review DOM and composes those focused owners with the
 existing canonical report, mode, viewport, alignment, and Inspector state
 rather than owning duplicate Inspector rendering/focus policy or
-coordinate conversions
-or grid mount policy. Grid remains outside the public report default-mode payload
+coordinate conversions or grid mount policy. Inspector owns rendering and focus;
+the root's `updateInspectorData()` forwards refreshes from Grid and viewport to
+that owner. Viewer modules use `ViewerFormat` for shared display formatting.
+Grid remains outside the public report default-mode payload
 enum and does not preload adjacent grid pages. Blink mode supports 0.3s/0.7s/1.2s speeds,
 pause/resume, keyboard speed controls, and reduced-motion handling that enters Blink
-paused.
+paused. The root viewer derives effective Blink pause from user intent and active
+viewport or Lens gestures; gesture completion or cancellation preserves user intent.
 
 #### Browser-Local State
 
 Browser-local
 viewer state is scoped by report identity and persists current frame, view mode,
-clip selection, viewport/zoom/reveal, pair alignments, HUD visibility, filmstrip
+clip selection, viewport/zoom/reveal, pair alignments, source-labels visibility, filmstrip
 collapsed/size, inspector open/tab, and blink speed. Lens preferences use a separate
-best-effort browser-global v2 key for magnification, size, and sample-marker style,
-whose default is Off. Report-scoped lens state stores enabled state, fixed normalized
-window position, and Single comparison selection. Grip drag end and keyboard movement
+best-effort browser-global v2 key for magnification, size, sample-marker style
+(default Ring), and caption (default Off). Report-scoped lens state stores only
+enabled state and fixed normalized window position. Grip drag end and keyboard movement
 persist that normalized position so size and responsive layout changes preserve its
 relative placement. Pointer/sample position and Blink paused state are
 transient. Storage failure leaves the lens usable for the current session and is
@@ -787,7 +1076,7 @@ Active-picture resolution is owned by `frame_compare.orchestration.active_rect`
 and optional `frame_compare.orchestration.active_rect_content` during
 preparation. Static resolution produces explicit, metadata, dimension-derived,
 aspect-ratio-derived, or full-frame rectangles from probe/config evidence.
-Opt-in `auto` content refinement runs only after the shared `SelectionWindow`
+Default `auto` content refinement runs only after the shared `SelectionWindow`
 exists, samples a bounded deterministic set of luma frames for unresolved
 full-frame clips, and can produce `content-derived` provenance. Analysis consumes
 the final prepared rectangle through analysis-owned `MetricActiveRect`; render
@@ -821,13 +1110,19 @@ Runtime ownership matrix:
 | Stable reference/comparison alignment key construction | `frame_compare.services.alignment_keys` |
 | Shared previous alignment offset reuse cache persistence | `frame_compare.services.alignment_reuse_cache` |
 | Previous-offset reuse prompt/table display | `frame_compare.services.alignment_reuse_prompt` |
-| Audio stream probing, deterministic stream selection, stream overrides, and FFmpeg/channel-aware extraction policy | `frame_compare.services.alignment_audio` |
-| Audio correlation, preprocessing, and refinement estimation | `frame_compare.services.alignment_correlation` |
-| Audio alignment window collection, weak-window rejection, consensus selection, and ambiguity gating | `frame_compare.services.alignment_consensus` |
+| Audio stream probing, deterministic stream selection, audio/video start probing with container-start compensation, and the canonical whole-track FFmpeg extraction recipe | `frame_compare.services.alignment_audio` |
+| Paired lockstep FFmpeg collection with one `_ChildStream` per side, bounded pipe drainage, watchdog/total time bounds, typed transport failure, cancellation, and cleanup | `frame_compare.services.alignment_streaming` |
+| Pure numeric chunked GCC-PHAT estimation: chunk planning, per-chunk prominence, global-lag accumulation, and agreement gating | `frame_compare.services.alignment_correlation` |
+| Audio/video authority decision: compensation and rounding, A4a/A4b classification and recount, V6 trusted predicate/reason ordering, stability, and agreement-fraction scoring | `frame_compare.services.alignment_decision` |
+| Bounded L-SMASH video confirmation, V3/V3a sampling, V5/V5a scoring, cancellation/identity checks, and review check points | `frame_compare.services.alignment_video` |
+| Single definition of diagnostic-v4 evidence, metadata-v5 projection facts, strict payload parsing, and the shared 2 MiB evidence bound | `frame_compare.utils.alignment_evidence` |
+| Shared compensation, sample/frame conversion, vote, and confirmation policy | `frame_compare.utils.alignment_policy` |
+| Shared P4/P4a terminal/panel presentation projection | `frame_compare.utils.alignment_review_projection` |
+| Terminal/Rich rendering and JSON review warning for the shared alignment presentation | `frame_compare.services.alignment_presentation` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
 | Native VSView alignment-review panel, public callback observation, source-lineup decisions, and marker lifecycle | `frame_compare.vsview.alignment_review_panel` |
-| VSView availability, launch adapter, and managed-Windows media-runtime preload | `frame_compare.vsview.adapter`, `frame_compare.vsview.launcher` |
+| VSView availability, launch adapter, and selected media-runtime preload | `frame_compare.vsview.adapter`, `frame_compare.vsview.launcher` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
 | Coordinated media component identity, scoped cache/index fingerprints, and deployment runtime comparison | `frame_compare.vs.runtime_contract` |
 | Doctor execution and diagnostic result mapping | `frame_compare.orchestration.doctor` |
@@ -841,7 +1136,8 @@ The repo exposes two kinds of externally visible surfaces today:
 - user-facing CLI/config/release-asset behavior
 - importable package modules and re-export namespaces used by tests and internal callers
 
-Compatibility policy for those surfaces is defined in the runbook rather than in this document.
+Compatibility policy for those surfaces is defined in
+the repository-root `.agents/project.md`, under “Product and change boundaries”.
 
 ## Current Hotspots
 
@@ -852,8 +1148,9 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/services/report/**`
 - `src/frame_compare/cli/entry.py`
 - `src/frame_compare/services/alignment.py` and its focused audio-alignment owners
-  (`alignment_audio.py`, `alignment_correlation.py`, `alignment_consensus.py`,
-  `alignment_vsview.py`)
+  (`alignment_audio.py`, `alignment_streaming.py`, `alignment_correlation.py`,
+  `alignment_decision.py`, `alignment_presentation.py`, `alignment_vsview.py`)
+  plus the single evidence definition in `src/frame_compare/utils/alignment_evidence.py`
 - `src/frame_compare/render/batch/orchestrator.py`
 - `src/frame_compare/orchestration/doctor.py` and its focused diagnostic owners
   (`doctor_checks.py`, `doctor_types.py`)
@@ -866,9 +1163,9 @@ Native alignment-review hotspot dispositions for the current implementation:
 
 | Hotspot | Disposition |
 | --- | --- |
-| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and schema-v1 metadata required by the panel. |
-| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict schema-v1 metadata/result validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape. |
-| `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, synchronization markers, and safe contract-rejection feedback. |
+| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v5 transport required by the panel. |
+| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict metadata-v5/result-v1 validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape; it validates the embedded audio attempt through the single `utils/alignment_evidence.py` parser instead of re-describing the schema. |
+| `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, validated evidence presentation, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, synchronization markers, and safe contract-rejection feedback. |
 | `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |
 | `src/frame_compare/services/alignment_vsview.py` | Responsibility reduced: it parses and validates the native result through the typed contract, accepts it, and applies existing offset/override policy; terminal confirmation parsing is no longer an owner. |
 | `src/frame_compare/orchestration/doctor_checks.py` | Responsibility unchanged: it reports the existing structured VSView/panel availability check and does not launch a review or own panel behavior. |
@@ -877,7 +1174,12 @@ Native alignment-review hotspot dispositions for the current implementation:
 
 - Keep CLI import time light; do not eagerly import VS-dependent runtime code in `cli/entry.py`.
 - Keep config/env loading centralized; do not add ad hoc env reads deep in domain logic.
-- The main pipeline passes HTTP clients from `runner` into orchestration, while diagnostics still create their own short-lived client for reachability checks.
+- The orchestration coordinator creates and closes the default shared HTTP client
+  when no client is injected through `RunDependencies`; injected clients remain
+  caller-owned. `runner` bridges sync callers to async orchestration. Doctor checks
+  runtime availability and local TMDB configuration without HTTP requests;
+  slow.pics connectivity belongs to the browser-compatible publishing flow.
+  Webhook delivery keeps its isolated pinned HTTPS transport.
 - Keep persistence deterministic: stable ordering, stable JSON/TOML output, atomic writes where owners already use them.
 - Respect the layered import contracts and sibling-domain independence.
 - Treat Docker and Windows portable flows as first-class runtime surfaces, not optional afterthoughts.

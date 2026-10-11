@@ -7,6 +7,26 @@ from typing import cast
 
 from frame_compare.errors import ErrorContext, FrameCompareError, JSONValue
 
+_SECRET_CONFIG_LOCATIONS = frozenset(
+    {
+        ("slowpics", "webhook_url"),
+        ("tmdb", "api_key"),
+    }
+)
+
+
+def _redact_config_input(value: JSONValue, location: tuple[str, ...]) -> JSONValue:
+    if any(location[: len(secret)] == secret for secret in _SECRET_CONFIG_LOCATIONS):
+        return "<redacted>"
+    if not any(secret[: len(location)] == location for secret in _SECRET_CONFIG_LOCATIONS):
+        return value
+    if isinstance(value, dict):
+        return {key: _redact_config_input(item, (*location, key)) for key, item in value.items()}
+    if isinstance(value, list):
+        # An invalid array of config tables still has its section's location.
+        return [_redact_config_input(item, location) for item in value]
+    return value
+
 
 class ConfigError(FrameCompareError):
     """Base class for configuration errors."""
@@ -54,8 +74,21 @@ class ConfigValidationError(ConfigError):
         message: str | None = None,
         hint: str = "Check field types and constraints",
     ) -> None:
+        sanitized_errors: list[dict[str, JSONValue]] = []
+        for error in errors:
+            sanitized_error = error.copy()
+            if "input" in sanitized_error:
+                raw_location = sanitized_error.get("loc")
+                location = (
+                    tuple(str(part) for part in raw_location)
+                    if isinstance(raw_location, list)
+                    else ()
+                )
+                sanitized_error["input"] = _redact_config_input(sanitized_error["input"], location)
+            sanitized_errors.append(sanitized_error)
+
         fields: list[str] = []
-        for e in errors:
+        for e in sanitized_errors:
             loc = e.get("loc")
             if isinstance(loc, list) and loc:
                 fields.append(str(loc[-1]))
@@ -63,7 +96,7 @@ class ConfigValidationError(ConfigError):
                 fields.append("unknown")
 
         # Cast to avoid invariance issues with list[dict[str, JSONValue]] vs list[JSONValue]
-        safe_errors = cast("JSONValue", errors)
+        safe_errors = cast("JSONValue", sanitized_errors)
 
         super().__init__(
             ErrorContext(
@@ -74,7 +107,7 @@ class ConfigValidationError(ConfigError):
                 details={"validation_errors": safe_errors},
             )
         )
-        self.validation_errors = errors
+        self.validation_errors = sanitized_errors
 
 
 class PresetNotFoundError(ConfigError):

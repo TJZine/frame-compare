@@ -121,46 +121,34 @@ def _run_contract(
     )
 
 
-def test_stable_release_contract_accepts_exact_final_state(
-    repo_root: Path,
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "channel, version, tag, message",
+    [
+        (
+            "stable",
+            "0.1.0",
+            "v0.1.0",
+            "Release contract valid: channel=stable version=0.1.0 tag=v0.1.0",
+        ),
+        ("rc", "0.1.0rc2", "v0.1.0-rc.2", "Release contract valid: channel=rc version=0.1.0rc2"),
+    ],
+)
+def test_release_contract_accepts_exact_channel_state(
+    repo_root: Path, tmp_path: Path, channel: str, version: str, tag: str, message: str
 ) -> None:
-    _write_release_state(tmp_path, version="0.1.0")
+    _write_release_state(tmp_path, version=version)
     sha = _commit_release_state(tmp_path)
-
     result = _run_contract(
         repo_root,
         tmp_path,
-        channel="stable",
-        version="0.1.0",
-        tag="v0.1.0",
+        channel=channel,
+        version=version,
+        tag=tag,
         expected_sha=sha,
-        main_sha=sha,
+        main_sha=sha if channel == "stable" else None,
     )
-
     assert result.returncode == 0, result.stderr
-    assert "Release contract valid: channel=stable version=0.1.0 tag=v0.1.0" in result.stdout
-
-
-def test_rc_release_contract_accepts_pep440_version_and_rc_tag(
-    repo_root: Path,
-    tmp_path: Path,
-) -> None:
-    _write_release_state(tmp_path, version="0.1.0rc2")
-    sha = _commit_release_state(tmp_path)
-
-    result = _run_contract(
-        repo_root,
-        tmp_path,
-        channel="rc",
-        version="0.1.0rc2",
-        tag="v0.1.0-rc.2",
-        expected_sha=sha,
-        main_sha=None,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert "Release contract valid: channel=rc version=0.1.0rc2" in result.stdout
+    assert message in result.stdout
 
 
 @pytest.mark.parametrize(
@@ -222,25 +210,28 @@ def test_release_contract_rejects_version_source_disagreement(
     assert "version sources disagree" in result.stderr
 
 
-def test_release_contract_rejects_non_main_stable_sha(
-    repo_root: Path,
-    tmp_path: Path,
+@pytest.mark.parametrize("mismatch", ["main", "checkout"])
+def test_release_contract_rejects_sha_mismatch(
+    repo_root: Path, tmp_path: Path, mismatch: str
 ) -> None:
     _write_release_state(tmp_path, version="0.1.0")
     sha = _commit_release_state(tmp_path)
-
     result = _run_contract(
         repo_root,
         tmp_path,
         channel="stable",
         version="0.1.0",
         tag="v0.1.0",
-        expected_sha=sha,
-        main_sha=OTHER_SHA,
+        expected_sha=OTHER_SHA if mismatch == "checkout" else sha,
+        main_sha=OTHER_SHA if mismatch == "main" else sha,
     )
-
     assert result.returncode != 0
-    assert "is not current main head" in result.stderr
+    message = (
+        "is not current main head"
+        if mismatch == "main"
+        else f"Checked-out HEAD {sha} does not equal expected SHA {OTHER_SHA}"
+    )
+    assert message in result.stderr
 
 
 def test_release_contract_rejects_temporary_bootstrap_fields_for_stable(
@@ -391,24 +382,3 @@ def test_release_contract_rejects_legacy_release_placeholder(
 
     assert result.returncode != 0
     assert "must not use the legacy release placeholder" in result.stderr
-
-
-def test_release_contract_rejects_checked_out_sha_mismatch(
-    repo_root: Path,
-    tmp_path: Path,
-) -> None:
-    _write_release_state(tmp_path, version="0.1.0")
-    sha = _commit_release_state(tmp_path)
-
-    result = _run_contract(
-        repo_root,
-        tmp_path,
-        channel="stable",
-        version="0.1.0",
-        tag="v0.1.0",
-        expected_sha=OTHER_SHA,
-        main_sha=sha,
-    )
-
-    assert result.returncode != 0
-    assert f"Checked-out HEAD {sha} does not equal expected SHA {OTHER_SHA}" in result.stderr

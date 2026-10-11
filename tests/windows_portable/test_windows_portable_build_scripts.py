@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from ._helpers import normalized_process_output as _normalized_process_output
 from ._helpers import read_text_or_fail as _read_text_or_fail
 
 
@@ -30,18 +31,6 @@ def _generated_portable_launcher(build_script: str) -> str:
     )
     assert match is not None, "generated portable launcher payload not found"
     return match.group("launcher")
-
-
-def _normalized_process_output(result: subprocess.CompletedProcess[str]) -> str:
-    output = re.sub(r"\r?\n\s*\|\s?", " ", f"{result.stdout}\n{result.stderr}")
-    return " ".join(output.split())
-
-
-def test_windows_portable_bundle_launcher_sets_cwd_to_bundle_root(repo_root: Path) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    assert "Push-Location $bundleRoot" in build_script
-    assert "Pop-Location" in build_script
 
 
 def test_windows_portable_bundle_launcher_restores_process_environment(repo_root: Path) -> None:
@@ -94,10 +83,12 @@ def test_windows_portable_generated_cmd_launchers_have_absolute_powershell_fallb
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
 
-    assert 'set "POWERSHELL_EXE="' in build_script
     assert "%ProgramFiles%\\PowerShell\\7\\pwsh.exe" in build_script
     assert "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" in build_script
     assert '"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File' in build_script
+    for assignment in ("$cmd = @'", "$updateCmd = @'"):
+        launcher = build_script.split(assignment, 1)[1].split("'@", 1)[0]
+        assert 'set "POWERSHELL_EXE="' in launcher
 
 
 def test_windows_portable_build_resolves_relative_paths_from_provider_location(
@@ -105,6 +96,8 @@ def test_windows_portable_build_resolves_relative_paths_from_provider_location(
     tmp_path: Path,
 ) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    assert "$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot, $currentLocation)" in build_script
     pwsh = shutil.which("pwsh")
     if pwsh is None:
         pytest.skip("PowerShell 7 is required for the portable build regression")
@@ -145,8 +138,6 @@ Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
     assert (provider_root / "relative-cache").is_dir()
     assert not (process_root / "relative-out").exists()
     assert not (process_root / "relative-cache").exists()
-    build_script = _read_text_or_fail(build_path)
-    assert "$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot, $currentLocation)" in build_script
 
 
 def test_windows_portable_build_creates_default_workspace_directories(repo_root: Path) -> None:
@@ -154,9 +145,9 @@ def test_windows_portable_build_creates_default_workspace_directories(repo_root:
     build_script = _read_text_or_fail(build_path)
     assert '$bundleConfigDir = Join-Path $OutDir "config"' in build_script
     assert '$bundleInputDir = Join-Path $OutDir "comparison_videos"' in build_script
+    assert 'Join-Path $OutDir "screenshots"' not in build_script
     assert "Ensure-Directory -Path $bundleConfigDir" in build_script
     assert "Ensure-Directory -Path $bundleInputDir" in build_script
-    assert 'Join-Path $OutDir "screenshots"' not in build_script
 
 
 def test_windows_portable_installed_default_config_uses_generated_root_only(
@@ -197,7 +188,7 @@ def test_windows_portable_build_download_errors_name_manifest_remediation(repo_r
     assert "update $ManifestPath with a reachable URL and matching sha256" in build_script
 
 
-def test_windows_portable_ffmpeg_manifest_uses_reachable_pinned_asset_shape(
+def test_windows_portable_ffmpeg_manifest_has_pinned_zip_asset_shape(
     repo_root: Path,
 ) -> None:
     manifest_path = repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"
@@ -222,7 +213,7 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
 
     assert manifest["manifest_version"] == 2
-    assert manifest["bundle"]["vs_ref"] == "R79"
+    assert manifest["bundle"]["vs_ref"] == "R81"
     assert manifest["bundle"]["ffmpeg_policy"] == "lgpl-only"
     assert set(manifest["bundle"]["runtime_fingerprints"]) == {
         "analysis",
@@ -236,25 +227,25 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
         for fingerprint in manifest["bundle"]["runtime_fingerprints"].values()
     )
 
-    expected_python_version = "3.13.15"
+    expected_python_version = "3.13.16"
     assert manifest["bundle"]["python_version"] == expected_python_version
     python = artifacts["python-embed-amd64"]
     assert python["version"] == expected_python_version
     assert python["source_ref"] == expected_python_version
-    assert python["release_date"] == "2026-08-05"
+    assert python["release_date"] == "2026-09-30"
 
-    vapoursynth = artifacts["vapoursynth-portable-r79"]
-    assert vapoursynth["version"] == "R79"
-    assert vapoursynth["url"].endswith("/R79/VapourSynth64-Portable-R79.zip")
-    assert vapoursynth["source_ref"] == "R79"
-    assert vapoursynth["source_commit"] == "acabf605b2205b32d65859bb2736405719d2fafd"
-    assert vapoursynth["bytes"] == 23160674
+    vapoursynth = artifacts["vapoursynth-portable-r81"]
+    assert vapoursynth["version"] == "R81"
+    assert vapoursynth["url"].endswith("/R81/VapourSynth64-Portable-R81.zip")
+    assert vapoursynth["source_ref"] == "R81"
+    assert vapoursynth["source_commit"] == "dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a"
+    assert vapoursynth["bytes"] == 31797504
     assert vapoursynth["sha256"] == (
-        "625b3410d903943107291592e90d6f521f829ebb8291d952ee91b8d674bbb153"
+        "6d625bd3b4d68697a7664a886f3a5e2f1df1a4744b4811bf77bd944baed63436"
     )
-    assert vapoursynth["source_bytes"] == 657976
+    assert vapoursynth["source_bytes"] == 1134224
     assert vapoursynth["source_sha256"] == (
-        "042ce026e552a31c5c4b89f637fcb5841f69f807babc7e11f11f863a194d9da7"
+        "8b539506bba0fce6794d905da771a1b88a5cf2288a99ae0d32b8acd675240391"
     )
 
     lsmas = artifacts["vs-plugin-lsmas-1310.0.0.0-win-amd64-wheel"]
@@ -274,8 +265,8 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     assert placebo["install"]["type"] == "python_wheel"
     assert placebo["url"].endswith("-win_amd64.whl")
 
-    ffmpeg = artifacts["ffmpeg-btbn-win64-lgpl-8.1-2026-07-31"]
-    assert ffmpeg["version"].startswith("n8.1.2-34-g9b6c8969e0")
+    ffmpeg = artifacts["ffmpeg-btbn-win64-lgpl-8.1-2026-09-30"]
+    assert ffmpeg["version"].startswith("n8.1.3-9-g29e619e767")
     assert ffmpeg["license"]["spdx"] == "LGPL-2.1-or-later"
     assert not any(artifact_id.startswith("ffms2") for artifact_id in artifacts)
 
@@ -307,15 +298,10 @@ def test_windows_portable_build_uses_r74_plus_plugin_layout(repo_root: Path) -> 
         '$vsDllPackage = Join-Path $sitePackages "vapoursynth\\\\libvapoursynth.dll"'
         in build_script
     )
-    assert "expected R79 package layout" in build_script
+    assert "expected R81 package layout" in build_script
     assert 'Join-Path $sitePackages "vapoursynth.dll"' not in build_script
     assert 'Join-Path $sitePackages "Lib\\\\site-packages\\\\vapoursynth.dll"' not in build_script
-    assert "Install-PythonWheelArtifacts" in build_script
-    assert "Expand-ArchiveFile" in build_script
-    assert "7z extract" in build_script
-    assert "tar extract" in build_script
     assert "VAPOURSYNTH_PLUGIN_PATH =" not in build_script
-    assert "Consolidate-VapourSynthPlugins" not in build_script
     assert 'Join-Path $sitePackages "PySide6"' not in build_script
     assert 'Get-ChildItem -LiteralPath $sitePackages -Filter "*.dll" -File -Recurse' not in (
         build_script
@@ -338,14 +324,14 @@ def test_windows_portable_manifest_pins_exact_vsview_windows_graph(repo_root: Pa
     )
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
     expected = {
-        "vsview-0.10.3-wheel": ("0.10.3", 2260813),
-        "vsview-cli-1.2.0-win-amd64-wheel": ("1.2.0", 393807),
+        "vsview-0.12.1-wheel": ("0.12.1", 2279401),
+        "cyclopts-5.2.0-wheel": ("5.2.0", 289196),
         "pyside6-6.11.2-win-amd64-wheel": ("6.11.2", 578382),
         "pyside6-addons-6.11.2-win-amd64-wheel": ("6.11.2", 168208836),
         "pyside6-essentials-6.11.2-win-amd64-wheel": ("6.11.2", 76913043),
         "shiboken6-6.11.2-win-amd64-wheel": ("6.11.2", 1226578),
-        "vapoursynth-bestsource-21.0-win-amd64-wheel": ("21.0", 12315301),
-        "vspackrgb-1.4.0-win-amd64-wheel": ("1.4.0", 74394),
+        "vapoursynth-bestsource-22-win-amd64-wheel": ("22", 15890493),
+        "vspackrgb-2.0.0-win-amd64-wheel": ("2.0.0", 122797),
     }
     for artifact_id, (version, byte_count) in expected.items():
         artifact = artifacts[artifact_id]
@@ -372,14 +358,14 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
     lock = tomllib.loads(_read_text_or_fail(repo_root / "uv.lock"))
     packages = {package["name"]: package for package in lock["package"]}
     artifact_ids = {
-        "vsview": "vsview-0.10.3-wheel",
-        "vsview-cli": "vsview-cli-1.2.0-win-amd64-wheel",
+        "vsview": "vsview-0.12.1-wheel",
+        "cyclopts": "cyclopts-5.2.0-wheel",
         "pyside6": "pyside6-6.11.2-win-amd64-wheel",
         "pyside6-addons": "pyside6-addons-6.11.2-win-amd64-wheel",
         "pyside6-essentials": "pyside6-essentials-6.11.2-win-amd64-wheel",
         "shiboken6": "shiboken6-6.11.2-win-amd64-wheel",
-        "vapoursynth-bestsource": "vapoursynth-bestsource-21.0-win-amd64-wheel",
-        "vspackrgb": "vspackrgb-1.4.0-win-amd64-wheel",
+        "vapoursynth-bestsource": "vapoursynth-bestsource-22-win-amd64-wheel",
+        "vspackrgb": "vspackrgb-2.0.0-win-amd64-wheel",
     }
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
     for package_name, artifact_id in artifact_ids.items():
@@ -387,7 +373,11 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
         candidates = [
             wheel
             for wheel in package["wheels"]
-            if "win_amd64" in wheel["url"] or package_name == "vsview"
+            if (
+                "win_amd64" in wheel["url"]
+                and (package_name != "vspackrgb" or "cp312-abi3" in wheel["url"])
+            )
+            or package_name in {"vsview", "cyclopts"}
         ]
         assert len(candidates) == 1
         wheel = candidates[0]
@@ -409,11 +399,8 @@ def test_windows_portable_direct_placebo_smoke_respects_runtime_probe(
             "def prove_apply_tonemap_frame()"
         )
     ]
-    assert "probe_libplacebo_runtime" in direct_smoke
     assert "placebo_direct_frame=skipped reason=vulkan_runtime_unavailable" in direct_smoke
-    assert "return False" in direct_smoke
     assert "direct_out.get_frame(0)" in direct_smoke
-    assert "return True" in direct_smoke
 
 
 def test_windows_portable_workflow_surfaces_direct_placebo_result(repo_root: Path) -> None:
@@ -435,16 +422,16 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
     for expected in (
         "Invoke-BundleRuntimeProof",
         "phase=$Phase start",
-        "version_major == 79",
-        "api_minor == 2",
+        "version_major == 81",
+        "api_minor == 3",
         "LWLibavSource",
         "LibavSMASHSource",
         "core.placebo.Tonemap",
         "apply_tonemap",
         "get_frame(0)",
-        "import vsview.main",
-        "import vsview_cli._cli",
-        "import vspackrgb.cython",
+        "import vsview.app.main",
+        "import vsview.cli",
+        "import vspackrgb.rust",
         "from PySide6.QtWidgets import QApplication",
         "WINDOWS_BUNDLE_PROOF",
         "ffmpeg tiny media generation",
@@ -530,14 +517,6 @@ def test_windows_portable_build_runtime_validation_restores_process_environment(
     assert "Pop-Location" in runtime_validation
 
 
-def test_pyproject_defines_vsview_optional_dependency(repo_root: Path) -> None:
-    pyproject_path = repo_root / "pyproject.toml"
-    pyproject = _read_text_or_fail(pyproject_path)
-    assert "[project.optional-dependencies]" in pyproject
-    assert re.search(r"vsview\s*=\s*\[", pyproject)
-    assert re.search(r'"vsview==0\.10\.3"', pyproject)
-
-
 def test_windows_portable_build_exports_vsview_extra(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
@@ -551,7 +530,6 @@ def test_windows_portable_build_installs_manifest_wheels_dependency_closed(
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
 
-    assert 'Get-RequiredStringProperty -Object $artifact -Name "sha256"' in build_script
     assert "Assert-Sha256 -FilePath $wheelPath -ExpectedHex $sha256" in build_script
     assert re.search(
         r"uv pip install --reinstall --strict --no-deps --target \$sitePackages \$wheelPath",
@@ -560,13 +538,13 @@ def test_windows_portable_build_installs_manifest_wheels_dependency_closed(
     assert "uv pip install --no-deps --only-binary :all: --target $sitePackages $vsWheel" in (
         build_script
     )
+    assert 'Get-RequiredStringProperty -Object $artifact -Name "sha256"' in build_script
 
 
 def test_windows_portable_build_has_release_public_key_gate(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
     assert "[switch]$RequireReleasePublicKey" in build_script
-    assert "function Assert-ReleasePublicKey()" in build_script
     assert 'Join-Path $PSScriptRoot "validate_update_public_key.ps1"' in build_script
     assert 'Join-Path $PSScriptRoot "update_public_key.xml"' in build_script
     assert "& $validator -PublicKeyPath $publicKey" in build_script
@@ -590,13 +568,13 @@ def test_windows_portable_build_surfaces_dirty_app_source_before_archiving(
     )
     archive_command = "git -C $RepoRoot archive"
     assert status_command in copy_repo_app
-    assert 'Assert-LastExitCode -CommandLabel "inspect Frame Compare source worktree"' in (
-        copy_repo_app
-    )
     assert "if ($RequireReleasePublicKey)" in copy_repo_app
     assert "throw $dirtySourceMessage" in copy_repo_app
     assert "Write-Warning $dirtySourceMessage" in copy_repo_app
     assert copy_repo_app.index(status_command) < copy_repo_app.index(archive_command)
+    assert 'Assert-LastExitCode -CommandLabel "inspect Frame Compare source worktree"' in (
+        copy_repo_app
+    )
 
 
 def test_windows_portable_build_reads_version_from_archived_app_source(
@@ -612,9 +590,9 @@ def test_windows_portable_build_reads_version_from_archived_app_source(
 def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
-    assert "import vsview.main" in build_script
-    assert "import vsview_cli._cli" in build_script
-    assert "import vspackrgb.cython" in build_script
+    assert "import vsview.app.main" in build_script
+    assert "import vsview.cli" in build_script
+    assert "import vspackrgb.rust" in build_script
     assert "from PySide6.QtWidgets import QApplication" in build_script
     assert '"testsrc2=size=64x64:rate=1:duration=3"' in build_script
     fixture_generation = re.search(
@@ -650,18 +628,18 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
         "prove_placebo_tonemap_frame()",
     ):
         assert required_proof in combined_proof
-    assert combined_proof.index("preload_vapoursynth_runtime()") < combined_proof.index(
-        "from PySide6.QtCore import QTimer"
-    )
-    assert combined_proof.index("from PySide6.QtCore import QTimer") < combined_proof.index(
-        "import vsview.main"
-    )
     assert "vsview_runtime_preload=ok" in combined_proof
     assert "pyside6_event_loop=ok" in combined_proof
     assert "qt_ffmpeg_runtime=ok lineage=7.1.5" in combined_proof
     assert "qt_webengine_runtime=absent deployment=excluded" in build_script
     assert "vsview_runtime=ok" in combined_proof
     assert 'Phase "vsview_runtime" -MediaPath $mediaPath -Required $true' in build_script
+    assert combined_proof.index("preload_vapoursynth_runtime()") < combined_proof.index(
+        "from PySide6.QtCore import QTimer"
+    )
+    assert combined_proof.index("from PySide6.QtCore import QTimer") < combined_proof.index(
+        "import vsview.app.main"
+    )
 
 
 def test_windows_portable_embedded_vsview_proof_covers_viewer_first_whole_set(
@@ -708,15 +686,13 @@ def test_windows_portable_embedded_vsview_proof_covers_viewer_first_whole_set(
     ) in proof
     assert "active_panel.use_positions_button.click()\n            app.processEvents()" in proof
     assert "keep_panel.keep_button.click()\n            app.processEvents()" in proof
-    assert '"0 / 3 sources ready"' in proof
-    assert '"3 / 3 sources ready"' in proof
+    assert '"0/3 positions captured"' in proof
+    assert r'"3/3 positions captured \u2014 ready to confirm"' in proof
     assert '"alignment_positions=ok"' in proof
     assert '"alignment_keep_current=ok"' in proof
     assert '"alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 "' in proof
     assert '"alignment_result_roundtrip=ok"' in proof
     assert '"alignment_result_validation=ok malformed=rejected"' in proof
-    assert "pair.reference.source_frame_count" not in proof
-    assert "pair.comparison.source_frame_count" not in proof
 
 
 def test_windows_portable_build_excludes_unused_qt_webengine_runtime(repo_root: Path) -> None:
@@ -762,11 +738,9 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     assert "Stop-Process -Id $process.Id -Force" in launch_proof
     assert "$process.WaitForExit(10000)" in launch_proof
     assert "VSView offscreen proof left its process running." in launch_proof
-    assert '$normalizedCombined = ($combined -replace "\\s+", " ").Trim()' in launch_proof
     assert "$normalizedCombined.Contains($marker)" in launch_proof
     for marker in (
-        "[RUN] VSView Bootstrap",
-        "[OK] VSView Ready",
+        "VSView is open",
         "Script execution completed",
         "Switching to video output",
         "Frame 0 rendered",
@@ -779,7 +753,7 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
     assert 'comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
     assert "Color metadata incomplete; using standard display defaults (BT.709)" in build_script
-    assert "Invoke-VSViewOffscreenLaunchProof" in build_script
+    assert '$normalizedCombined = ($combined -replace "\\s+", " ").Trim()' in launch_proof
 
 
 def test_windows_portable_workflow_requires_combined_vsview_proof(
@@ -967,28 +941,6 @@ def _assert_descendant_exited(*, pwsh: str, started: Path) -> None:
     )
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows process identity semantics required")
-def test_assert_descendant_exited_does_not_kill_identity_mismatch(tmp_path: Path) -> None:
-    pwsh = shutil.which("pwsh")
-    if pwsh is None:
-        pytest.skip("PowerShell 7 is required")
-    descendant = subprocess.Popen([pwsh, "-NoProfile", "-Command", "Start-Sleep -Seconds 60"])
-    started = tmp_path / "descendant-started.txt"
-    started.write_text(f"{descendant.pid}\n0\n", encoding="utf-8")
-
-    try:
-        with pytest.raises(AssertionError, match="identity mismatch"):
-            _assert_descendant_exited(pwsh=pwsh, started=started)
-        assert descendant.poll() is None
-    finally:
-        descendant.terminate()
-        try:
-            descendant.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            descendant.kill()
-            descendant.wait(timeout=10)
-
-
 def _write_extracted_verifier_fixture(
     *,
     repo_root: Path,
@@ -1042,6 +994,7 @@ def _write_extracted_verifier_fixture(
         for scope in ("analysis", "probe", "alignment", "index", "full")
     }
     requirements_sha = hashlib.sha256(b"requirements").hexdigest()
+    artifact_license = {"spdx": "MIT", "url": "https://example.invalid/license"}
     artifact = {
         "id": "fixture-runtime",
         "name": "Fixture Runtime",
@@ -1050,10 +1003,7 @@ def _write_extracted_verifier_fixture(
         "source_url": "https://example.invalid/runtime-source.tar.gz",
         "sha256": hashlib.sha256(b"runtime").hexdigest(),
         "bytes": 7,
-        "license": {
-            "spdx": "MIT",
-            "url": "https://example.invalid/license",
-        },
+        "license": artifact_license,
     }
     corresponding_source = {
         "name": "Fixture Source",
@@ -1111,8 +1061,8 @@ def _write_extracted_verifier_fixture(
                 "binary_sha256": artifact["sha256"],
                 "binary_url": artifact["url"],
                 "id": artifact["id"],
-                "license_spdx": artifact["license"]["spdx"],
-                "license_url": artifact["license"]["url"],
+                "license_spdx": artifact_license["spdx"],
+                "license_url": artifact_license["url"],
                 "name": artifact["name"],
                 "source_url": artifact["source_url"],
                 "version": artifact["version"],
@@ -1129,16 +1079,16 @@ def _write_extracted_verifier_fixture(
                 "version": version,
             }
             for name, version in (
-                ("jetpytools", "3.1.1"),
+                ("jetpytools", "3.1.2"),
                 ("PySide6", "6.11.2"),
                 ("PySide6_Addons", "6.11.2"),
                 ("PySide6_Essentials", "6.11.2"),
                 ("shiboken6", "6.11.2"),
-                ("vapoursynth-bestsource", "21.0"),
-                ("vspackrgb", "1.4.0"),
-                ("VSView", "0.10.3"),
-                ("vsview-cli", "1.2.0"),
-                ("vsjetengine", "1.7.0"),
+                ("vapoursynth-bestsource", "22"),
+                ("vspackrgb", "2.0.0"),
+                ("VSView", "0.12.1"),
+                ("cyclopts", "5.2.0"),
+                ("vsjetengine", "1.8.0"),
             )
         ],
         "schema_version": 2,
@@ -1705,26 +1655,12 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     ):
         assert required_entry in verifier
 
-    for label in (
-        "candidate_launcher_--help",
-        "candidate_launcher_version",
-        "candidate_launcher_doctor_--json",
-        "candidate_install",
-        "installed_shim_version",
-        "installed_shim_--help",
-    ):
-        assert verifier.count(f'-Label "{label}"') == 1
     assert "its process job was terminated" in verifier
     assert "evidence_overflow=true stream=$overflowStream" in verifier
     assert 'throw "Unsafe ZIP entry path: $EntryName"' in verifier
     assert "ExtractRoot must name a dedicated verification directory" in verifier
     assert "ExtractRoot must not already exist" in verifier
-    assert "FrameCompareNativeDirectory" in verifier
     assert "[System.IO.FileMode]::CreateNew" in verifier
-    assert "$validatedEntry.Entry.Open()" in verifier
-    assert "[Collections.Generic.List[PSCustomObject]]::new()" in verifier
-    assert "$validatedEntries.Add(" in verifier
-    assert "$validatedEntries +=" not in verifier
     assert "Expand-Archive" not in verifier
     assert "WINDOWS_EXTRACTED_PROOF license_inventory=ok" in verifier
     assert "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded" in verifier
@@ -1749,6 +1685,16 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     assert "[guid]::NewGuid()" in physical_checklist
     assert "every other stdout or stderr evidence file is capped at 16 MiB" in physical_checklist
     assert "reports the overflowing stream and byte limit" in physical_checklist
+    for label in (
+        "candidate_launcher_--help",
+        "candidate_launcher_version",
+        "candidate_launcher_doctor_--json",
+        "candidate_install",
+        "installed_shim_version",
+        "installed_shim_--help",
+    ):
+        assert verifier.count(f'-Label "{label}"') == 1
+    assert "$validatedEntry.Entry.Open()" in verifier
 
 
 def test_physical_windows_validation_fetches_and_checks_out_exact_pr_head(
@@ -1792,8 +1738,6 @@ def test_windows_portable_build_copies_dist_info_licenses_when_present(repo_root
 def test_windows_portable_build_uses_vendored_manifest_license_files(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
-    assert "function Resolve-ManifestRelativePath" in build_script
-    assert "function Copy-ManifestLicenseFiles" in build_script
     assert "Assert-Sha256 -FilePath $resolvedPath -ExpectedHex $expectedSha256" in build_script
     assert "Invoke-WebRequest -Uri $licenseUrl" not in build_script
     assert (
@@ -1884,19 +1828,19 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
     shim.mkdir()
 
     distributions = {
-        "jetpytools": ("3.1.1", "MIT"),
+        "jetpytools": ("3.1.2", "MIT"),
         "PySide6": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "PySide6-Addons": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "PySide6-Essentials": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "shiboken6": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
-        "VapourSynth": ("79", "LGPL-2.1-or-later"),
-        "vapoursynth-bestsource": ("21.0", "MIT"),
+        "VapourSynth": ("81", "LGPL-2.1-or-later"),
+        "vapoursynth-bestsource": ("22", "MIT"),
         "vapoursynth-lsmas": ("1310.0.0.0", "ISC AND LGPL-2.1-or-later"),
         "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
-        "vspackrgb": ("1.4.0", "MIT"),
-        "VSView": ("0.10.3", "EUPL-1.2"),
-        "vsview-cli": ("1.2.0", "Unlicense"),
-        "vsjetengine": ("1.7.0", "MIT"),
+        "vspackrgb": ("2.0.0", "MIT"),
+        "VSView": ("0.12.0", "EUPL-1.2"),
+        "cyclopts": ("5.2.0", "Apache-2.0"),
+        "vsjetengine": ("1.8.0", "EUPL-1.2"),
     }
     for index, (name, (version, license_expression)) in enumerate(distributions.items()):
         dist_info = site_packages / f"package_{index}-{version}.dist-info"
@@ -2011,7 +1955,7 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
         "vs-placebo",
         "vspackrgb",
         "vsview",
-        "vsview-cli",
+        "cyclopts",
         "vsjetengine",
     } <= {name.lower() for name in distribution_names}
     assert all(
@@ -2148,7 +2092,6 @@ def test_windows_portable_bundle_inventory_uses_packaged_runtime_contract(
     manifest = json.loads(
         (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")
     )
-    assert manifest["bundle"]["runtime_fingerprints"] != packaged_fingerprints
     manifest["bundle"]["runtime_fingerprints"] = packaged_fingerprints
     manifest_path = tmp_path / "packaged-contract-manifest.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")

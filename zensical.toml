@@ -9,43 +9,43 @@ site_dir = "site"
 extra_css = ["stylesheets/extra.css"]
 nav = [
   { "Home" = "index.md" },
-  { "Get Started" = [
-    { "Choose an Installation" = "getting-started/index.md" },
-    { "Windows Portable" = "windows-portable.md" },
+  { "Get started" = [
+    { "Choose an installation" = "getting-started/index.md" },
+    { "Windows portable" = "windows-portable.md" },
     { "Docker" = "getting-started/docker.md" },
-    { "Native Source" = "getting-started/native.md" },
-    { "Compare Installation Routes" = "getting-started/route-comparison.md" },
-    { "Your First Comparison" = "guides/first-comparison.md" },
+    { "Docker profiles" = "getting-started/docker-profiles.md" },
+    { "Native source" = "getting-started/native.md" },
+    { "Your first comparison" = "guides/first-comparison.md" },
   ] },
-  { "User Guide" = [
-    { "How Frame Compare Works" = "guides/how-it-works.md" },
-    { "Sources, References, and Labels" = "guides/sources-and-labels.md" },
-    { "Frame Selection and Analysis" = "guides/analysis-modes.md" },
-    { "Audio Alignment and VSView" = "guides/audio-alignment.md" },
-    { "HDR and Tonemapping" = "guides/hdr-tonemapping.md" },
-    { "Reports and Overlays" = "guides/reports-and-overlays.md" },
-    { "Presets, History, and Generated Data" = "guides/presets-history-generated-data.md" },
-    { "Configuration Recipes" = "guides/configuration-recipes.md" },
-    { "Publishing and Webhooks" = "guides/publishing-and-webhooks.md" },
+  { "User guide" = [
+    { "How Frame Compare works" = "guides/how-it-works.md" },
+    { "Sources, references, and labels" = "guides/sources-and-labels.md" },
+    { "Frame selection and analysis" = "guides/analysis-modes.md" },
+    { "Audio alignment" = "guides/audio-alignment.md" },
+    { "VSView alignment review" = "guides/vsview-review.md" },
+    { "HDR and tonemapping" = "guides/hdr-tonemapping.md" },
+    { "Reports and overlays" = "guides/reports-and-overlays.md" },
+    { "Presets, history, and generated data" = "guides/presets-history-generated-data.md" },
+    { "Publishing and webhooks" = "guides/publishing-and-webhooks.md" },
     { "Troubleshooting" = "guides/troubleshooting.md" },
-    { "Advanced Docker Environments" = "docker-environments.md" },
   ] },
   { "Reference" = [
-    { "Commands and Configuration" = "reference/commands-and-configuration.md" },
-    { "Output Layout" = "reference/output-layout.md" },
-    { "Supported Media Runtime" = "supported-media-runtime.md" },
-    { "CLI Behavioral Contract" = "current-cli-contract.md" },
+    { "Commands" = "reference/commands.md" },
+    { "Configuration" = "reference/configuration.md" },
+    { "Output layout" = "reference/output-layout.md" },
+    { "Supported media runtime" = "supported-media-runtime.md" },
+    { "CLI behavioral contract" = "current-cli-contract.md" },
   ] },
   { "Project" = [
     { "Internal Python API" = "api.md" },
-    { "Current Architecture" = "current-architecture.md" },
-    { "Engineering Runbook" = "ENGINEERING_RUNBOOK.md" },
-    { "Physical Windows Runtime Validation" = "media-runtime-windows-validation.md" },
-    { "Performance Evidence" = [
-      { "Analysis Performance Validation" = "analysis-performance-validation.md" },
-      { "Analysis Benchmark History" = "analysis-benchmark-history.md" },
+    { "Current architecture" = "current-architecture.md" },
+    { "Engineering runbook" = "ENGINEERING_RUNBOOK.md" },
+    { "Physical Windows runtime validation" = "media-runtime-windows-validation.md" },
+    { "Performance evidence" = [
+      { "Analysis performance validation" = "analysis-performance-validation.md" },
+      { "Analysis benchmark history" = "analysis-benchmark-history.md" },
     ] },
-    { "Historical Decisions" = "DECISIONS.md" },
+    { "Historical decisions" = "DECISIONS.md" },
     { "Contributing" = "https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md" },
   ] },
 ]
@@ -71,12 +71,18 @@ features = [
 ]
 
 [[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
 scheme = "default"
+primary = "custom"
+accent = "custom"
 toggle.icon = "lucide/sun"
 toggle.name = "Switch to dark mode"
 
 [[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
 scheme = "slate"
+primary = "custom"
+accent = "custom"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
 

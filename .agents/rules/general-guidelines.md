@@ -2,7 +2,7 @@
 trigger: always_on
 ---
 
-# Antigravity Rules
+# Antigravity entrypoint
 
-Read `AGENTS.md` first and follow its pointers to the engineering runbook and
-surface-specific authority. Those files take precedence over this Antigravity shim.
+Read `AGENTS.md` and follow its pointers to `.agents/project.md` and the relevant
+product or runtime authority. This shim adds no independent workflow policy.

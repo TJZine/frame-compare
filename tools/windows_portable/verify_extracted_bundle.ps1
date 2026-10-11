@@ -758,16 +758,16 @@ foreach ($collectionName in @("corresponding_sources", "python_distributions")) 
 }
 
 $requiredVsViewDistributions = [ordered]@{
-  "jetpytools" = "3.1.1"
+  "jetpytools" = "3.1.2"
   "pyside6" = "6.11.2"
   "pyside6-addons" = "6.11.2"
   "pyside6-essentials" = "6.11.2"
   "shiboken6" = "6.11.2"
-  "vapoursynth-bestsource" = "21.0"
-  "vspackrgb" = "1.4.0"
-  "vsview" = "0.10.3"
-  "vsview-cli" = "1.2.0"
-  "vsjetengine" = "1.7.0"
+  "vapoursynth-bestsource" = "22"
+  "vspackrgb" = "2.0.0"
+  "vsview" = "0.12.1"
+  "cyclopts" = "5.2.0"
+  "vsjetengine" = "1.8.0"
 }
 $inventoryDistributionVersions = [Collections.Generic.Dictionary[string, string]]::new(
   [System.StringComparer]::OrdinalIgnoreCase

@@ -1,19 +1,15 @@
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass
 from typing import Literal
+
+from frame_compare.utils.alignment_evidence import (
+    AlignmentStabilitySummary,
+    AudioAlignmentAttempt,
+)
 
 type AlignmentSource = Literal["manual", "computed", "cached"]
 type AlignmentAlgorithm = Literal["cross_correlation"]
-type AlignmentCorrelationMode = Literal["raw_fft", "gcc_phat"]
-type AlignmentPreprocessingMode = Literal["none", "standard"]
 type AlignmentChannelStrategy = Literal["mono_downmix", "best_channel"]
-type AlignmentRefinementMode = Literal["disabled", "local"]
-type AlignmentStabilityClassification = Literal[
-    "stable",
-    "possible_drift",
-    "possible_discontinuity",
-    "variable",
-    "insufficient_evidence",
-]
 type PreviousOffsetReusePolicy = Literal["disabled", "prompt", "always"]
 type AlignmentReuseCacheOrigin = Literal["computed", "interactive_confirmed"]
 type AlignmentWriteProvenance = Literal[
@@ -23,31 +19,19 @@ type AlignmentWriteProvenance = Literal[
     "shared_previous_offsets",
     "preexisting_manual_override",
 ]
+type AlignmentEvidenceAvailability = Literal[
+    "current_attempt",
+    "historical_details_unavailable",
+    "not_computed",
+]
 
 
-@dataclass(frozen=True)
-class AlignmentWindowEvidence:
-    """One bounded correlation estimate used only for stability diagnostics."""
-
-    start_sample: int
-    end_sample: int
-    sample_offset: int
-    score: float
-    peak_ratio: float
-
-
-@dataclass(frozen=True)
-class AlignmentStabilitySummary:
-    """Compact diagnostic classification of offset variation over time."""
-
-    classification: AlignmentStabilityClassification
-    valid_windows: int
-    offset_min_frames: int | None
-    offset_max_frames: int | None
-    first_offset_frames: int | None
-    last_offset_frames: int | None
-    largest_adjacent_jump_frames: int | None
-    change_position_seconds: float | None
+def _require_int(name: str, value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    return value
 
 
 @dataclass(frozen=True)
@@ -64,6 +48,38 @@ class AlignmentResult:
     applied: bool = True
     diagnostic: str | None = None
     stability: AlignmentStabilitySummary | None = None
+    audio_attempt: AudioAlignmentAttempt | None = None
+
+    def __post_init__(self) -> None:
+        _require_int("frame_offset", self.frame_offset)
+        if self.applied:
+            if self.frame_offset is None or self.time_offset_seconds is None:
+                raise ValueError("applied alignment requires frame and time offsets")
+            if isinstance(self.time_offset_seconds, bool) or not math.isfinite(
+                self.time_offset_seconds
+            ):
+                raise ValueError("applied alignment requires a finite time offset")
+        elif self.frame_offset is not None or self.time_offset_seconds is not None:
+            raise ValueError("unapplied alignment cannot carry offsets")
+        if self.audio_attempt is None or self.source != "computed":
+            return
+        decision = self.audio_attempt.decision
+        if decision.state != "trusted_automatic":
+            if (
+                self.applied
+                or self.frame_offset is not None
+                or self.time_offset_seconds is not None
+            ):
+                raise ValueError("untrusted audio evidence cannot authorize an applied result")
+            return
+        candidate = decision.candidate
+        if (
+            not self.applied
+            or candidate is None
+            or self.frame_offset != candidate.frame_offset
+            or self.time_offset_seconds != candidate.time_offset_seconds
+        ):
+            raise ValueError("trusted automatic evidence must match the applied result")
 
 
 @dataclass(frozen=True)
@@ -74,6 +90,7 @@ class AlignmentProvenance:
     comparison_cache_key: str
     provenance: AlignmentWriteProvenance
     computed_result: AlignmentResult | None = None
+    evidence_availability: AlignmentEvidenceAvailability = "not_computed"
 
 
 @dataclass(frozen=True)
@@ -86,30 +103,33 @@ class ReusableAlignmentEntry:
     computed_result: AlignmentResult | None = None
 
 
+@dataclass
+class AlignmentReviewSummary:
+    """Aggregate native-review outcome for human summaries (memory only).
+
+    This carrier is filled during alignment review and read back by the
+    orchestration layer for terminal summaries. It is never persisted to the
+    run record, ``phase_timings``, or JSON output.
+    """
+
+    review_ran: bool = False
+    pairs_confirmed: int = 0
+    comparisons_kept: int = 0
+    review_seconds: float = 0.0
+    # Set when review was pending but VSView never ran, so the durable Align
+    # line warns instead of showing success.
+    review_unresolved: bool = False
+
+
 @dataclass(frozen=True)
 class AlignmentConfig:
     """Configuration for audio alignment."""
 
     enable: bool = True
-    sample_rate: int = 8000
-    max_offset_seconds: float = 30.0
     use_vsview: bool = False
     force_interactive: bool = False
     cache_results: bool = True
-    previous_offsets: PreviousOffsetReusePolicy = "disabled"
-    correlation_mode: AlignmentCorrelationMode = "raw_fft"
-    preprocessing_mode: AlignmentPreprocessingMode = "none"
-    channel_strategy: AlignmentChannelStrategy = "mono_downmix"
-    confidence_threshold: float = 0.0
-    ambiguity_peak_ratio: float = 1.0
-    window_length_seconds: float = 0.0
-    window_stride_seconds: float = 0.0
-    minimum_valid_windows: int = 1
-    consensus_minimum_ratio: float = 1.0
-    refinement_mode: AlignmentRefinementMode = "disabled"
-    refinement_sample_rate: int | None = None
-    reference_stream: int | None = None
-    comparison_streams: dict[str, int] = field(default_factory=dict[str, int])
+    memory_limit_mb: int | None = None
     no_color: bool = False
 
 

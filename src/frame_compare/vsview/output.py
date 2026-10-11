@@ -10,15 +10,22 @@ from rich.table import Table
 from rich.text import Text
 
 from frame_compare.utils.terminal import no_color_requested
+from frame_compare.utils.terminal_theme import (
+    ACCENT,
+    OK,
+    WARN,
+    glyphs_for_console,
+    human_console,
+)
 
-STYLE_KEY = "blue"
+STYLE_KEY = "dim"
 STYLE_PATH = "dim"
-STYLE_HEADER = "bold cyan"
+STYLE_HEADER = f"bold {ACCENT}"
 _STARTUP_STDERR_LIMIT = 4000
 
 
 def _console(*, no_color: bool) -> Console:
-    return Console(stderr=True, no_color=no_color_requested(explicit_no_color=no_color))
+    return human_console(stderr=True, no_color=no_color_requested(explicit_no_color=no_color))
 
 
 def _group_table() -> Table:
@@ -28,8 +35,8 @@ def _group_table() -> Table:
     return table
 
 
-def _status_text(marker: str, message: str, *, style: str) -> Text:
-    return Text.assemble("  ", Text(marker, style=style), " ", message)
+def _status_text(glyph: str, message: str, *, style: str) -> Text:
+    return Text.assemble("  ", Text(glyph, style=style), " ", message)
 
 
 def print_vsview_session(
@@ -57,8 +64,9 @@ def print_vsview_unavailable(
 ) -> None:
     """Print the single normal human warning for optional verification failure."""
     console = _console(no_color=no_color)
+    glyphs = glyphs_for_console(console)
     console.print()
-    console.print(_status_text("[WARN]", "VSView alignment review unavailable", style="yellow"))
+    console.print(_status_text(glyphs.warning, "VSView alignment review unavailable", style=WARN))
     console.print(f"       {escape(reason)}")
     console.print("       Continuing with the current alignment offsets.")
     console.print("       Hint: Check the VSView setup with frame-compare doctor.")
@@ -92,9 +100,10 @@ def print_vsview_review_result(
     no_color: bool = False,
 ) -> None:
     """Print one bounded native-review result diagnostic to stderr."""
-    marker = "[OK]" if accepted else "[WARN]"
-    style = "green" if accepted else "yellow"
     console = _console(no_color=no_color)
+    glyphs = glyphs_for_console(console)
+    glyph = glyphs.ok if accepted else glyphs.warning
+    style = OK if accepted else WARN
     console.print()
-    console.print(_status_text(marker, "VSView alignment review", style=style))
+    console.print(_status_text(glyph, "VSView alignment review", style=style))
     console.print(f"       {escape(message)}")

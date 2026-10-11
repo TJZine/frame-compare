@@ -13,6 +13,7 @@ from typing import cast
 JsonObject = dict[str, object]
 
 REQUIRED_DISTRIBUTIONS = {
+    "cyclopts",
     "jetpytools",
     "pyside6",
     "pyside6-addons",
@@ -25,7 +26,6 @@ REQUIRED_DISTRIBUTIONS = {
     "vsjetengine",
     "vspackrgb",
     "vsview",
-    "vsview-cli",
 }
 SOURCE_SCRIPTS = (
     ".github/workflows/windows-portable-build.yml",

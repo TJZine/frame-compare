@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, CancelledError, Future, ThreadPoolExecutor, wait
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock
 from typing import TYPE_CHECKING
 
 from frame_compare.render.batch.expansion import (
@@ -26,10 +26,15 @@ from frame_compare.render.types import (
     RenderRequest,
     ScreenshotBatchRequest,
 )
+from frame_compare.utils.cancellation import is_cancelling, raise_if_cancelling
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.utils.subproc import SubprocessAborted
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
+
+
+_RENDER_POLL_INTERVAL_SECONDS = 0.05
 
 
 def _render_description(request: RenderRequest) -> str:
@@ -84,9 +89,18 @@ def _render_work_units(
     return units
 
 
+class _RenderStopped(Exception):
+    """A unit drained its in-flight frame and retained its completed results."""
+
+    def __init__(self, rendered: list[RenderedFrameResult]) -> None:
+        super().__init__("render unit stopped")
+        self.rendered = rendered
+
+
 def _render_work_unit(
     requests: tuple[RenderRequest, ...],
     on_progress: Callable[[int], None] | None = None,
+    stop: Event | None = None,
 ) -> list[RenderedFrameResult]:
     """Render one logical unit, batching FFmpeg or serializing its other frames."""
     request_list = list(requests)
@@ -97,10 +111,22 @@ def _render_work_unit(
     )
     rendered: list[RenderedFrameResult]
     if is_ffmpeg_batch:
-        rendered = render_ffmpeg_batch_detailed(request_list)
+        try:
+            rendered = render_ffmpeg_batch_detailed(
+                request_list, abort=is_cancelling if stop is None else stop.is_set
+            )
+        except SubprocessAborted:
+            if stop is None:
+                raise_if_cancelling()
+                raise
+            raise _RenderStopped([]) from None
     else:
         rendered = []
         for request in request_list:
+            if stop is None:
+                raise_if_cancelling()
+            elif stop.is_set():
+                raise _RenderStopped(rendered)
             rendered.append(render_frame_detailed(request))
             if on_progress is not None:
                 on_progress(1)
@@ -116,8 +142,8 @@ def _store_work_unit_results(
     rendered: list[RenderedFrameResult],
     results: list[RenderedFrameResult | None],
 ) -> None:
-    start, requests = unit
-    for offset, (_request, result) in enumerate(zip(requests, rendered, strict=True)):
+    start, _requests = unit
+    for offset, result in enumerate(rendered):
         results[start + offset] = result
 
 
@@ -141,9 +167,10 @@ def _submit_render_work_unit(
     futures: dict[Future[list[RenderedFrameResult]], _RenderWorkUnit],
     index: int,
     on_progress: Callable[[int], None] | None,
+    stop: Event,
 ) -> None:
     unit = units[index]
-    futures[executor.submit(_render_work_unit, unit[1], on_progress)] = unit
+    futures[executor.submit(_render_work_unit, unit[1], on_progress, stop)] = unit
 
 
 def _render_batch_sequential(
@@ -155,6 +182,7 @@ def _render_batch_sequential(
 ) -> None:
     next_progress_index = 0
     for unit in _render_work_units(requests, work_unit_ranges):
+        raise_if_cancelling()
         _store_work_unit_results(
             unit,
             _render_work_unit(unit[1], on_progress),
@@ -167,6 +195,8 @@ def _render_batch_sequential(
                 reporter,
                 next_progress_index,
             )
+
+    raise_if_cancelling()
 
 
 def _ffmpeg_batch_end(requests: list[RenderRequest], start: int) -> int:
@@ -205,23 +235,46 @@ def _render_batch_parallel(
     futures: dict[Future[list[RenderedFrameResult]], _RenderWorkUnit] = {}
     next_unit_index = 0
     next_progress_index = 0
-    first_exception: Exception | None = None
+    first_exception: tuple[int, Exception] | None = None
+    stop = Event()
 
     with ThreadPoolExecutor(max_workers=parallelism) as executor:
         while next_unit_index < min(parallelism, len(units)):
-            _submit_render_work_unit(executor, units, futures, next_unit_index, on_progress)
+            if is_cancelling():
+                stop.set()
+                break
+            _submit_render_work_unit(executor, units, futures, next_unit_index, on_progress, stop)
             next_unit_index += 1
 
         while futures:
-            done, _ = wait(futures.keys(), return_when=FIRST_COMPLETED)
+            if is_cancelling():
+                stop.set()
+            done, _ = wait(
+                futures.keys(), timeout=_RENDER_POLL_INTERVAL_SECONDS, return_when=FIRST_COMPLETED
+            )
+            if is_cancelling():
+                stop.set()
             completed: list[tuple[_RenderWorkUnit, list[RenderedFrameResult]]] = []
             for future in done:
                 unit = futures.pop(future)
                 try:
                     completed.append((unit, future.result()))
+                except _RenderStopped as exc:
+                    completed.append((unit, exc.rendered))
+                except CancelledError as exc:
+                    if future.cancelled():
+                        # Cancellation is cleanup after a real sibling failure, not
+                        # a competing render error.
+                        continue
+                    failure = (unit[0], exc)
+                    if first_exception is None or failure[0] < first_exception[0]:
+                        first_exception = failure
+                    stop.set()
                 except Exception as exc:
-                    if first_exception is None:
-                        first_exception = exc
+                    failure = (unit[0], exc)
+                    if first_exception is None or failure[0] < first_exception[0]:
+                        first_exception = failure
+                    stop.set()
 
             for unit, rendered in sorted(completed, key=lambda item: item[0][0]):
                 _store_work_unit_results(unit, rendered, results)
@@ -233,19 +286,22 @@ def _render_batch_parallel(
                     next_progress_index,
                 )
 
-            if first_exception is not None:
-                # Do not start new work after a failure. Cancel any futures that
-                # have not begun; running renders are allowed to finish so the
-                # executor has one deterministic cleanup path.
+            if first_exception is not None or is_cancelling():
+                stop.set()
+                # Drain in-flight frames and cancel units that have not begun.
                 for future in futures:
                     future.cancel()
 
             while (
                 first_exception is None
+                and not stop.is_set()
+                and not is_cancelling()
                 and next_unit_index < len(units)
                 and len(futures) < parallelism
             ):
-                _submit_render_work_unit(executor, units, futures, next_unit_index, on_progress)
+                _submit_render_work_unit(
+                    executor, units, futures, next_unit_index, on_progress, stop
+                )
                 next_unit_index += 1
 
     if first_exception is not None:
@@ -253,30 +309,8 @@ def _render_batch_parallel(
             for index in range(next_progress_index, len(results)):
                 if results[index] is not None:
                     _record_render_progress(reporter, requests[index])
-        raise first_exception
-
-
-def render_batch(
-    requests: list[RenderRequest], parallelism: int = 1, reporter: ProgressReporter | None = None
-) -> list[Path]:
-    """
-    Execute a batch of render requests.
-
-    Args:
-        requests: List of requests to process
-        parallelism: Number of concurrent threads
-        reporter: Optional progress reporter
-
-    Returns:
-        List of paths to rendered files in input order
-
-    Raises:
-        Exception: The first exception encountered during rendering (fail-fast).
-            Once a failure occurs, no new tasks are scheduled. Any work already
-            submitted to the executor is allowed to finish before the first
-            exception is re-raised.
-    """
-    return [result.path for result in render_batch_detailed(requests, parallelism, reporter)]
+        raise first_exception[1]
+    raise_if_cancelling()
 
 
 def render_batch_detailed(
@@ -332,7 +366,7 @@ def render_batch_detailed(
                 work_unit_ranges,
                 completion_callback,
             )
-    except Exception:
+    except BaseException:
         phase_status = ProgressPhaseStatus.FAILED
         raise
     finally:
@@ -345,28 +379,6 @@ def render_batch_detailed(
             raise RuntimeError("render batch completed without a rendered result")
         completed.append(result)
     return completed
-
-
-def render_screenshots_from_batch(
-    batch_requests: list[ScreenshotBatchRequest],
-    output_dir: Path,
-    config: ConfigSchema,
-    options: BatchRenderOptions | None = None,
-) -> dict[str, list[Path]]:
-    """Render screenshots from batch requests, choosing FFmpeg or VapourSynth path accordingly.
-
-    Args:
-        batch_requests: List of ScreenshotBatchRequest
-        output_dir: Output directory
-        config: Configuration
-        options: Renderer, overlay, FFmpeg, and progress options
-
-    Returns:
-        Dict mapping label -> list of rendered screenshot paths
-    """
-    return render_screenshots_from_batch_detailed(
-        batch_requests, output_dir, config, options
-    ).screenshots_by_label
 
 
 def render_screenshots_from_batch_detailed(

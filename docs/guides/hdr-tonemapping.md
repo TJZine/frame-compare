@@ -35,20 +35,40 @@ VapourSynth, source-plugin, or vs-placebo change.
 
 ## Configure the result
 
-The wizard is the safest way to select a tonemapping preset and target luminance. For a
-manual configuration, use the fields documented in the
-[color and tonemapping contract](../current-cli-contract.md#tonemap-preset-and-target-resolution).
+The wizard does not configure tonemapping. Choose a preset in `[color]`, save it in a
+preset, or override it for one run with `--tm-preset`, `--tm-target`, and `--tm-curve`.
 
-A representative shape is:
+The preset sets every value; `target_nits`, `tone_curve`, `gamma_lift`, and
+`contrast_recovery` override it only when explicitly supplied in the configuration file
+or environment variables. `--tm-target` and `--tm-curve` take precedence for one run;
+`--tm-preset` replaces only the preset, and explicitly supplied configuration values
+still override it (source: `src/frame_compare/render/prepare.py:37-74`).
+
+| Preset | Curve | Target | Gamma lift |
+| --- | --- | --- | --- |
+| `reference` (default) | `bt2390` | 100 nits | Off |
+| `bt2390_spec` | `bt2390` | 100 nits | Off |
+| `filmic` | `spline` | 203 nits | Off |
+| `spline` | `spline` | 203 nits | Off |
+| `contrast` | `reinhard` | 203 nits | Off |
+| `highlight_guard` | `spline` | 180 nits | Off |
+| `bright_lift` | `bt2390` | 250 nits | On |
 
 ```toml
 [color]
-enable_tonemap = true
-target_nits = 203
+preset = "filmic"
+target_nits = 160
 ```
 
+This keeps the `filmic` curve and replaces only its target.
+
+`enable_tonemap = false` renders HDR sources without conversion; the FFmpeg screenshot
+path (`screenshots.use_ffmpeg = true`) requires it for HDR sources (source:
+`src/frame_compare/render/prepare.py:283`, `src/frame_compare/vs/errors.py:63`).
+
 Use one consistent target and preset for every source in a comparison unless the goal is
-specifically to study different conversions.
+specifically to study different conversions. See the
+[Configuration](../reference/configuration.md#color) reference.
 
 ## HDR versus SDR sources
 
@@ -67,7 +87,7 @@ output contract says otherwise.
 
 ## Dolby Vision considerations
 
-The conservative supported presentation records clip-level DV RPU presence on the
+The conservative supported presentation records source-level DV RPU presence on the
 Signal line, exact selected-frame RPU presence in the Frame inspector when the
 VapourSynth source exposes it, and a DV L5-derived active picture as `DV L5` in
 geometry. It does not present L1, L2, or L6 values from a frame-0 probe snapshot as
@@ -89,18 +109,14 @@ For publication-bound comparisons:
 ## Overlays and measurements
 
 `diagnostic` overlays can include observed mastering metadata, MaxCLL/MaxFALL, source
-color evidence, clip-level RPU presence, DV L5 geometry provenance, applied tonemap
+color evidence, source-level RPU presence, DV L5 geometry provenance, applied tonemap
 settings, and selection context. Exact-frame RPU presence stays in the Frame inspector
 to keep baked overlays concise. Dynamic Dolby Vision values require exact selected-frame
 provenance. Missing values compose away without placeholders or fabricated defaults.
 
-The tracked [documentation image capture record](../images/README.md#provenance-record)
-records this asset's physical-Windows host, portable runtime, selected frame, and
-`bt2390`/100-nit diagnostic transform.
-
-<figure class="fc-doc-figure">
-  <img src="../images/hdr-diagnostic-overlay.webp" alt="Physical-Windows HDR diagnostic frame from EBU DVB HLG10 Comparison at frame 1000, showing HLG and BT.2020 metadata, limited range, bt2390 tonemapping at 100 nits, and the vs-placebo runtime proof.">
-  <figcaption>This physical-Windows diagnostic render shows only the HLG, BT.2020, limited-range, frame-selection, bt2390/100-nit, and vs-placebo facts proved by the source and runtime. It is a tonemapped SDR presentation for browser review, not a calibrated luminance measurement or untonemapped native-HDR claim.</figcaption>
+<figure class="fc-figure">
+  <img src="../images/hdr-diagnostic-overlay.webp" alt="Diagnostic overlay on the EBU DVB HLG10 comparison at frame 1000, listing the source, geometry, HLG BT.2020 signal, and BT.2390 tonemap at 100 nits." width="1920" height="1080" loading="lazy">
+  <figcaption>A diagnostic overlay bakes the observed signal and the applied tonemap into the screenshot. The target nits describe the output transform, not measured luminance. Footage © EBU, CC BY 4.0.</figcaption>
 </figure>
 
 Selection scores are useful for explaining why a frame was chosen. They are not a
@@ -121,4 +137,4 @@ luminance.
 | Docker output differs from Windows | Remember that the routes use different Vulkan implementations and may not be pixel-identical |
 
 The authoritative component matrix and profile policy are in
-[Supported Media Runtime](../supported-media-runtime.md).
+[Supported media runtime](../supported-media-runtime.md).

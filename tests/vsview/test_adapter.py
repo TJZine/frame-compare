@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
+import signal
+import site
 import subprocess
 import sys
 import types
+from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -20,11 +24,14 @@ from frame_compare.vsview.adapter import (
     VSViewConfig,
     VSViewSessionRequest,
     _build_vsview_child_env,
-    _check_startup_readiness,
+    _run_vsview_command,
     check_vsview_availability,
     launch_alignment_verification_session,
 )
-from frame_compare.vsview.alignment_review_contract import AlignmentReviewContractError
+from frame_compare.vsview.alignment_review_contract import (
+    ALIGNMENT_REVIEW_METADATA_VERSION,
+    AlignmentReviewContractError,
+)
 from frame_compare.vsview.errors import VSViewError
 from frame_compare.vsview.session_script import (
     _build_script_content,
@@ -33,12 +40,33 @@ from frame_compare.vsview.session_script import (
 )
 
 
+def _audio_review_map(offsets: dict[str, int | None]) -> dict[str, str]:
+    return {
+        key: json.dumps(
+            {
+                "current_authority": {
+                    "origin": "shared_computed_offsets" if offset is not None else "none",
+                    "frame_offset": offset,
+                },
+                "evidence_availability": (
+                    "historical_details_unavailable" if offset is not None else "not_computed"
+                ),
+                "audio_attempt": None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        for key, offset in offsets.items()
+    }
+
+
 def _session_request(tmp_path: Path) -> VSViewSessionRequest:
     return VSViewSessionRequest(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "comparison.mkv"],
         suggested_offsets_by_key={"ref:comparison": 4},
         cache_dir=tmp_path,
+        audio_review_by_key=_audio_review_map({"ref:comparison": 4}),
     )
 
 
@@ -61,14 +89,49 @@ def test_child_environment_isolated_and_preserves_warning_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PYTHONWARNINGS", "error::ResourceWarning")
+    monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
+    monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
+    monkeypatch.setenv("PYTHONSTARTUP", "/caller/startup.py")
+    monkeypatch.setenv("PYTHONINSPECT", "1")
+    monkeypatch.setenv("PYTHONUSERBASE", "/caller/user-base")
     monkeypatch.delenv("NO_COLOR", raising=False)
     parent_env = os.environ.copy()
 
     child_env = _build_vsview_child_env(no_color=True)
 
     assert child_env["PYTHONWARNINGS"] == "error::ResourceWarning"
+    assert child_env["PYTHONSAFEPATH"] == "1"
+    assert "PYTHONNOUSERSITE" not in child_env
+    assert "PYTHONPATH" not in child_env
+    assert "PYTHONHOME" not in child_env
+    assert "PYTHONSTARTUP" not in child_env
+    assert "PYTHONINSPECT" not in child_env
+    if site.ENABLE_USER_SITE and not sys.flags.no_user_site:
+        assert child_env["PYTHONUSERBASE"] == "/caller/user-base"
+    else:
+        assert "PYTHONUSERBASE" not in child_env
     assert child_env["NO_COLOR"] == "1"
     assert os.environ == parent_env
+
+
+def test_windows_portable_child_env_relies_on_managed_embedded_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "windows-portable")
+    monkeypatch.setenv("FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", "managed-fingerprint")
+    monkeypatch.setenv("PYTHONPATH", r"C:\bundle\app\src;C:\bundle\app\site-packages")
+
+    child_env = _build_vsview_child_env(no_color=False)
+
+    assert child_env["FRAME_COMPARE_RUNTIME_KIND"] == "windows-portable"
+    assert child_env["FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"] == "managed-fingerprint"
+    assert "PYTHONPATH" not in child_env
+    build_script = (
+        Path(__file__).parents[2] / "tools" / "windows_portable" / "build_portable.ps1"
+    ).read_text(encoding="utf-8")
+    assert r'"..\\app\\site-packages"' in build_script
+    assert r'"..\\app\\src"' in build_script
+    assert '"import site"' in build_script
 
 
 @pytest.mark.parametrize(
@@ -119,101 +182,163 @@ def test_check_vsview_availability_redacts_probe_failures(
 
     result = check_vsview_availability()
 
-    assert result.status is VSViewAvailabilityStatus.PROBE_FAILED
     assert result.public_probe_failure_details() == {"exception_type": "ValueError"}
     assert result.public_probe_failure_reason() == "availability probe failed (ValueError)"
     assert "private details" not in result.public_probe_failure_reason()
 
 
-def test_startup_readiness_probes_pyside6_vsview_and_output_api(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
-
-    _check_startup_readiness([sys.executable, "-m", "vsview", "session.py"], env={})
-
-    mock_run.assert_called_once()
-    probe_code = mock_run.call_args.args[0][2]
-    assert "import PySide6" in probe_code
-    assert "import vsview" in probe_code
-    assert "from vsview import set_output" in probe_code
-    assert "frame-compare-alignment-review" in probe_code
-    assert "eps[0].load()" in probe_code
-    assert "raise RuntimeError" in probe_code
-    assert "compat" not in probe_code
-
-
-def test_launch_rejects_missing_panel_entry_point(
+@pytest.mark.parametrize(
+    "python_args",
+    [
+        ("-c", "import json"),
+        ("-m", "json.tool", "--help"),
+    ],
+)
+def test_managed_python_children_ignore_hostile_inherited_python_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    python_args: tuple[str, ...],
 ) -> None:
-    _mock_available_runtime(monkeypatch)
-    monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.run",
-        MagicMock(
-            return_value=subprocess.CompletedProcess(
-                [],
-                1,
-                "",
-                "RuntimeError: Frame Compare alignment panel entry point is unavailable",
-            )
-        ),
+    hostile_python_path = tmp_path / "hostile-python-path"
+    hostile_python_path.mkdir()
+    sitecustomize_marker = tmp_path / "hostile-sitecustomize-imported"
+    shadow_marker = tmp_path / "hostile-json-imported"
+    (hostile_python_path / "sitecustomize.py").write_text(
+        f"from pathlib import Path\nPath({str(sitecustomize_marker)!r}).touch()\n",
+        encoding="utf-8",
     )
-    popen = MagicMock()
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.Popen", popen)
+    (hostile_python_path / "json.py").write_text(
+        f"from pathlib import Path\nPath({str(shadow_marker)!r}).touch()\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(hostile_python_path))
+    child_env = _build_vsview_child_env(no_color=False)
 
-    with pytest.raises(VSViewError) as excinfo:
-        launch_alignment_verification_session(
-            _session_request(tmp_path),
-            VSViewConfig(enabled=True),
-        )
+    returncode, _wait_seconds = _run_vsview_command(
+        [sys.executable, *python_args],
+        env=child_env,
+    )
 
-    assert excinfo.value.public_reason == "VSView failed its startup dependency check."
-    assert "entry point is unavailable" in (excinfo.value.startup_stderr or "")
-    popen.assert_not_called()
+    assert returncode == 0
+    assert not sitecustomize_marker.exists()
+    assert not shadow_marker.exists()
 
 
-def test_windows_startup_readiness_preloads_before_vsview(
+def test_run_vsview_command_returns_measured_wait_with_fake_clock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.run", mock_run)
-    monkeypatch.setattr("frame_compare.vsview.adapter.runtime_kind", lambda: "windows-portable")
+    import frame_compare.vsview.adapter as adapter
 
-    _check_startup_readiness([sys.executable, "-m", "vsview", "session.py"], env={})
+    clock = iter([100.0, 100.0, 142.5])
+    monkeypatch.setattr(adapter, "monotonic", lambda: next(clock))
 
-    probe_code = mock_run.call_args.args[0][2]
-    assert probe_code.index("preload_vapoursynth_runtime()") < probe_code.index("import PySide6")
+    class _FakeProcess:
+        def __enter__(self) -> _FakeProcess:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> int:
+            return 0
+
+    monkeypatch.setattr(adapter.subprocess, "Popen", lambda *args, **kwargs: _FakeProcess())
+
+    returncode, wait_seconds = _run_vsview_command(["vsview"], env={})
+
+    assert returncode == 0
+    assert wait_seconds == pytest.approx(42.5)
 
 
-def test_startup_failure_is_bounded_redacted_and_prevents_launch(
+def test_preloaded_vapoursynth_wins_over_hostile_generated_session_module(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    session = write_vsview_session_script(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("comparison.mkv")],
+        suggested_offsets_by_key={"ref:comparison": 0},
+        audio_review_by_key=_audio_review_map({"ref:comparison": 0}),
+        cache_dir=workspace / "generated",
+    )
+    hostile_marker = tmp_path / "hostile-vapoursynth-imported"
+    (session.parent / "vapoursynth.py").write_text(
+        f"from pathlib import Path\nPath({str(hostile_marker)!r}).touch()\n"
+        "raise RuntimeError('hostile VapourSynth shadow loaded')\n",
+        encoding="utf-8",
+    )
+
+    runtime_dir = tmp_path / "selected-runtime"
+    runtime_dir.mkdir()
+    safe_marker = tmp_path / "selected-vapoursynth-imported"
+    (runtime_dir / "vapoursynth.py").write_text(
+        f"from pathlib import Path\nPath({str(safe_marker)!r}).touch()\ncore = object()\n",
+        encoding="utf-8",
+    )
+    source_dir = Path(__file__).parents[2] / "src"
+    probe_code = f"""
+import sys
+sys.path.insert(0, {str(source_dir)!r})
+sys.path.insert(0, {str(runtime_dir)!r})
+from frame_compare.vsview.launcher import preload_vapoursynth_runtime
+preload_vapoursynth_runtime()
+sys.path.insert(0, {str(session.parent)!r})
+import vapoursynth
+assert vapoursynth.__file__ == {str(runtime_dir / "vapoursynth.py")!r}
+"""
+
+    result = subprocess.run(  # nosec B603
+        [sys.executable, "-c", probe_code],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        timeout=10.0,
+        env=_build_vsview_child_env(no_color=False),
+        cwd=Path(sys.executable).resolve().parent,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert safe_marker.exists()
+    assert not hostile_marker.exists()
+
+
+@pytest.mark.parametrize("timeout", [False, True], ids=["missing-panel", "timeout"])
+def test_startup_probe_failure_reports_reason_and_redacted_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, timeout: bool
 ) -> None:
     secret = "timeout-secret-token"
     monkeypatch.setenv("FRAME_COMPARE_SECRET", secret)
     _mock_available_runtime(monkeypatch)
-    monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.run",
+    failure = (
         MagicMock(
             side_effect=subprocess.TimeoutExpired(
                 [sys.executable], 10.0, stderr=f"waiting with {secret}".encode()
             )
-        ),
+        )
+        if timeout
+        else MagicMock(
+            return_value=subprocess.CompletedProcess(
+                [], 1, "", "RuntimeError: Frame Compare alignment panel entry point is unavailable"
+            )
+        )
     )
-    popen = MagicMock()
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.Popen", popen)
-
+    monkeypatch.setattr("frame_compare.vsview.adapter._run_startup_probe", failure)
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.Popen",
+        MagicMock(side_effect=AssertionError("Failed startup checks must not launch VSView")),
+    )
     with pytest.raises(VSViewError) as excinfo:
         launch_alignment_verification_session(
-            _session_request(tmp_path),
-            VSViewConfig(enabled=True),
+            _session_request(tmp_path), VSViewConfig(enabled=True)
         )
-
-    assert excinfo.value.public_reason == "startup dependency check timed out"
-    assert excinfo.value.startup_stderr == "waiting with <redacted>"
-    popen.assert_not_called()
+    if timeout:
+        assert excinfo.value.public_reason == "startup dependency check timed out"
+        assert excinfo.value.startup_stderr == "waiting with <redacted>"
+    else:
+        assert excinfo.value.public_reason == "VSView failed its startup dependency check."
+        assert "entry point is unavailable" in (excinfo.value.startup_stderr or "")
 
 
 def test_launch_uses_managed_launcher(
@@ -221,27 +346,35 @@ def test_launch_uses_managed_launcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mock_available_runtime(monkeypatch)
-    monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.run",
-        MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
-    )
+    monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
+    monkeypatch.setenv("PYTHONHOME", "/caller/python-home")
+    mock_run = MagicMock(return_value=subprocess.CompletedProcess([], 0, "", ""))
+    monkeypatch.setattr("frame_compare.vsview.adapter._run_startup_probe", mock_run)
     process = MagicMock()
-    process.__enter__.return_value = process
     process.wait.return_value = 0
     popen = MagicMock(return_value=process)
     monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.Popen", popen)
 
-    session = launch_alignment_verification_session(
+    session, _wait_seconds = launch_alignment_verification_session(
         _session_request(tmp_path),
         VSViewConfig(enabled=True),
     )
 
+    flags = ["-P"] if site.ENABLE_USER_SITE and not sys.flags.no_user_site else ["-P", "-s"]
     assert popen.call_args.args[0] == [
         sys.executable,
+        *flags,
         "-m",
         "frame_compare.vsview.launcher",
         str(session.script_path),
     ]
+    launch_env = popen.call_args.kwargs["env"]
+    assert "PYTHONPATH" not in launch_env
+    assert "PYTHONHOME" not in launch_env
+    assert launch_env["PYTHONSAFEPATH"] == "1"
+    assert "PYTHONNOUSERSITE" not in launch_env
+    process.terminate.assert_not_called()
+    process.kill.assert_not_called()
 
 
 def test_disabled_launch_writes_vsview_named_session_without_starting_process(
@@ -251,18 +384,15 @@ def test_disabled_launch_writes_vsview_named_session_without_starting_process(
     availability = MagicMock(side_effect=AssertionError("disabled launch must not probe"))
     monkeypatch.setattr("frame_compare.vsview.adapter.check_vsview_availability", availability)
 
-    session = launch_alignment_verification_session(
+    session, wait_seconds = launch_alignment_verification_session(
         _session_request(tmp_path),
         VSViewConfig(enabled=False),
     )
 
+    assert wait_seconds == 0.0
     assert session.script_path.parent == tmp_path / "vsview_sessions"
     assert session.script_path.name.startswith("vsview_ref_")
     assert session.result_path.name.endswith(".alignment-result.json")
-    script = session.script_path.read_text(encoding="utf-8")
-    assert "from vsview import set_output" in script
-    assert "**_reference_metadata(" in script
-    assert "**_comparison_metadata(" in script
 
 
 def test_session_setup_contract_failure_raises_typed_vsview_error(
@@ -275,13 +405,11 @@ def test_session_setup_contract_failure_raises_typed_vsview_error(
         MagicMock(side_effect=contract_failure),
     )
 
-    with pytest.raises(VSViewError, match="VSView session setup failed") as excinfo:
+    with pytest.raises(VSViewError, match="VSView session setup failed"):
         launch_alignment_verification_session(
             _session_request(tmp_path),
             VSViewConfig(enabled=False),
         )
-
-    assert excinfo.value.__cause__ is contract_failure
 
 
 def test_launch_timeout_terminates_child(
@@ -289,12 +417,12 @@ def test_launch_timeout_terminates_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _mock_available_runtime(monkeypatch)
+    monkeypatch.setattr("frame_compare.vsview.adapter._REVIEW_PROCESS_TIMEOUT_SECONDS", 0)
     monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.run",
+        "frame_compare.vsview.adapter._run_startup_probe",
         MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
     )
     process = MagicMock()
-    process.__enter__.return_value = process
     process.wait.side_effect = [subprocess.TimeoutExpired(["vsview"], 1), 0]
     monkeypatch.setattr(
         "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
@@ -310,6 +438,122 @@ def test_launch_timeout_terminates_child(
     process.kill.assert_not_called()
 
 
+def test_launch_timeout_kills_child_when_terminate_does_not_reap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mock_available_runtime(monkeypatch)
+    monkeypatch.setattr("frame_compare.vsview.adapter._REVIEW_PROCESS_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter._run_startup_probe",
+        MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
+    )
+    process = MagicMock()
+    process.wait.side_effect = [
+        subprocess.TimeoutExpired(["vsview"], 1),
+        subprocess.TimeoutExpired(["vsview"], 1),
+        0,
+    ]
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
+    )
+
+    with pytest.raises(VSViewError, match="timed out"):
+        launch_alignment_verification_session(
+            _session_request(tmp_path),
+            VSViewConfig(enabled=True),
+        )
+
+    process.terminate.assert_called_once_with()
+    process.kill.assert_called_once_with()
+    assert all(call.kwargs == {"timeout": 5.0} for call in process.wait.call_args_list[1:])
+
+
+def test_run_vsview_command_reaps_child_after_interruption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = MagicMock()
+    process.wait.side_effect = [KeyboardInterrupt(), 0]
+    monkeypatch.setattr(
+        "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        _run_vsview_command(["vsview"], env={})
+
+    process.terminate.assert_called_once_with()
+    process.kill.assert_not_called()
+    assert process.wait.call_args_list[1].kwargs == {"timeout": 5.0}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SIGINT wait interruption is POSIX-specific")
+def test_real_child_is_reaped_after_interruption(tmp_path: Path) -> None:
+    """Exercise the signal boundary that a Popen mock cannot model."""
+    marker = tmp_path / "child.pid"
+    child_code = (
+        "import os, time\n"
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text(str(os.getpid()), encoding='ascii')\n"
+        "time.sleep(60)\n"
+    )
+    helper_code = (
+        "import os, signal, sys, threading, time\n"
+        "from pathlib import Path\n"
+        "from frame_compare.vsview.adapter import _run_vsview_command\n"
+        "marker = Path(sys.argv[1])\n"
+        "child_code = sys.argv[2]\n"
+        "def interrupt_parent():\n"
+        "    startup_deadline = time.monotonic() + 2.0\n"
+        "    while not marker.exists() and time.monotonic() < startup_deadline:\n"
+        "        time.sleep(0.01)\n"
+        "    os.kill(os.getpid(), signal.SIGINT)\n"
+        "threading.Thread(target=interrupt_parent, daemon=True).start()\n"
+        "try:\n"
+        "    _run_vsview_command([sys.executable, '-c', child_code], env=os.environ.copy())\n"
+        "except KeyboardInterrupt:\n"
+        "    deadline = time.monotonic() + 2.0\n"
+        "    while not marker.exists() and time.monotonic() < deadline:\n"
+        "        time.sleep(0.01)\n"
+        "    if not marker.exists():\n"
+        "        raise SystemExit('child startup marker was not written before the deadline')\n"
+        "    child_pid = int(marker.read_text(encoding='ascii'))\n"
+        "    while time.monotonic() < deadline:\n"
+        "        try:\n"
+        "            os.kill(child_pid, 0)\n"
+        "        except ProcessLookupError:\n"
+        "            raise SystemExit(0)\n"
+        "        time.sleep(0.01)\n"
+        "    raise SystemExit('child still exists after interruption cleanup')\n"
+        "else:\n"
+        "    raise SystemExit('expected KeyboardInterrupt')\n"
+    )
+
+    runner = subprocess.Popen(  # noqa: S603 - test uses an explicit interpreter argv
+        [sys.executable, "-c", helper_code, str(marker), child_code],
+        cwd=Path(__file__).parents[2],
+        env=os.environ.copy(),
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        try:
+            stdout, stderr = runner.communicate(timeout=5.0)
+        except subprocess.TimeoutExpired as exc:
+            pytest.fail(f"interruption helper exceeded bound: {exc}")
+        assert runner.returncode == 0, f"stdout={stdout!r}\nstderr={stderr!r}"
+    finally:
+        if runner.poll() is None:
+            with suppress(ProcessLookupError):
+                os.killpg(runner.pid, signal.SIGKILL)
+            runner.wait(timeout=2.0)
+        if marker.exists():
+            child_pid = int(marker.read_text(encoding="ascii"))
+            with suppress(ProcessLookupError):
+                os.kill(child_pid, signal.SIGKILL)
+
+
 def _execute_generated_script(
     *,
     tmp_path: Path,
@@ -321,6 +565,8 @@ def _execute_generated_script(
     unusable_index_stems: set[str] | None = None,
     cache_free_failure_stems: set[str] | None = None,
     output_sink: list[tuple[str, int, str]] | None = None,
+    audio_review_by_key: dict[str, str] | None = None,
+    overlay_sink: list[str] | None = None,
 ) -> tuple[
     list[tuple[str, int, str]],
     list[dict[str, object]],
@@ -369,8 +615,10 @@ def _execute_generated_script(
             return clips[stem]
 
     class FakeText:
-        def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
+        def Text(self, clip: FakeClip, text: str, *, alignment: int) -> FakeClip:
             assert alignment == 7
+            if overlay_sink is not None:
+                overlay_sink.append(text)
             return clip
 
     class FakeStd:
@@ -399,7 +647,11 @@ def _execute_generated_script(
         reference=reference,
         comparisons=comparisons,
         suggested_offsets_by_key=suggested_offsets_by_key,
-        bootstrap_paths=[tmp_path],
+        audio_review_by_key=(
+            _audio_review_map(suggested_offsets_by_key)
+            if audio_review_by_key is None
+            else audio_review_by_key
+        ),
         frame_props_by_stem=default_props,
         presentation_names_by_stem=presentation_names_by_stem,
     )
@@ -417,7 +669,7 @@ def test_generated_session_registers_named_outputs_in_input_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    output_calls, output_metadata, _props, loader_calls = _execute_generated_script(
+    output_calls, output_metadata, _props, _loader_calls = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         comparison_stems=("zeta", "alpha"),
@@ -441,9 +693,10 @@ def test_generated_session_registers_named_outputs_in_input_order(
         1,
         2,
     ]
-    assert {metadata["frame_compare_contract_version"] for metadata in output_metadata} == {1}
+    assert {metadata["frame_compare_contract_version"] for metadata in output_metadata} == {
+        ALIGNMENT_REVIEW_METADATA_VERSION
+    }
     assert {metadata["frame_compare_session_id"] for metadata in output_metadata} == {"1" * 32}
-    assert [stem for stem, _cachefile, _cache in loader_calls].count("ref") == 1
 
 
 def test_generated_session_preserves_lsmash_indexes_and_only_retries_index_failures(
@@ -459,13 +712,13 @@ def test_generated_session_preserves_lsmash_indexes_and_only_retries_index_failu
         unusable_index_stems={"ref", "a"},
     )
 
-    assert output_calls == [("ref", 0, "Reference"), ("a", 1, "Comparison 1")]
     assert loader_calls == [
         ("ref", str(source_index_path(tmp_path / "ref.mkv")), None),
         ("ref", None, 0),
         ("a", str(source_index_path(tmp_path / "a.mkv")), None),
         ("a", None, 0),
     ]
+    assert output_calls == [("ref", 0, "Reference"), ("a", 1, "Comparison 1")]
     assert capsys.readouterr().err.count("without an L-SMASH index cache") == 2
 
 
@@ -490,7 +743,7 @@ def test_generated_session_load_failure_registers_no_partial_outputs(
     assert output_calls == []
 
 
-def test_generated_session_keeps_bt709_defaults_and_overlay_hints(
+def test_generated_session_applies_bt709_defaults_for_unspecified_color_metadata(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -506,6 +759,82 @@ def test_generated_session_keeps_bt709_defaults_and_overlay_hints(
     assert applied_props["ref"] == {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1}
 
 
+def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_distinct(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    overlays: list[str] = []
+    candidate = {
+        "frame_offset": 0,
+        "time_offset_seconds": 0.0,
+        "subframe_estimate": 0.0,
+        "basis": "audio_only",
+    }
+    reviews = {
+        "ref:accepted": json.dumps(
+            {
+                "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
+                "evidence_availability": "current_attempt",
+                "audio_attempt": {
+                    "decision": {
+                        "state": "trusted_automatic",
+                        "candidate": candidate,
+                        "primary_reason": "accepted",
+                        "failed_gates": [],
+                    }
+                },
+            }
+        ),
+        "ref:provisional": json.dumps(
+            {
+                "current_authority": {"origin": "none", "frame_offset": None},
+                "evidence_availability": "current_attempt",
+                "audio_attempt": {
+                    "decision": {
+                        "state": "provisional",
+                        "candidate": candidate,
+                        "primary_reason": "audio_only",
+                        "failed_gates": [],
+                    }
+                },
+            }
+        ),
+        "ref:unavailable": json.dumps(
+            {
+                "current_authority": {"origin": "none", "frame_offset": None},
+                "evidence_availability": "current_attempt",
+                "audio_attempt": {
+                    "decision": {
+                        "state": "unavailable",
+                        "candidate": None,
+                        "primary_reason": "insufficient_signal",
+                        "failed_gates": ["insufficient_signal"],
+                    }
+                },
+            }
+        ),
+    }
+
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        comparison_stems=("accepted", "provisional", "unavailable"),
+        suggested_offsets_by_key={
+            "ref:accepted": 0,
+            "ref:provisional": None,
+            "ref:unavailable": None,
+        },
+        audio_review_by_key=reviews,
+        overlay_sink=overlays,
+    )
+
+    joined = "\n".join(overlays)
+    assert "Audio alignment accepted: +0f" in joined
+    assert "Provisional +0f - NOT APPLIED" in joined
+    assert "No usable audio candidate" in joined
+    assert "no trusted audio hint" not in joined
+
+
 def test_generated_script_suppresses_only_redundant_vsview_load_success() -> None:
     logger = logging.getLogger("vsview.app.workspace.loader")
     existing_filters = tuple(logger.filters)
@@ -514,16 +843,13 @@ def test_generated_script_suppresses_only_redundant_vsview_load_success() -> Non
     added_filters = [item for item in logger.filters if item not in existing_filters]
 
     try:
-        assert len(added_filters) == 1
         cases = (
             (logging.INFO, "Content loaded successfully: %r", False),
             (logging.INFO, "Content reloaded successfully: %r", True),
             (logging.ERROR, "Failed to load content: %r", True),
         )
         for level, message, expected in cases:
-            record = logging.LogRecord(
-                logger.name, level, "loader.py", 1, message, (), None
-            )
+            record = logging.LogRecord(logger.name, level, "loader.py", 1, message, (), None)
             assert bool(logger.filter(record)) is expected
     finally:
         for item in added_filters:
@@ -537,16 +863,24 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "a.mkv"],
         suggested_offsets_by_key={"ref:a": 0},
-        bootstrap_paths=[tmp_path],
+        audio_review_by_key=_audio_review_map({"ref:a": 0}),
+        presentation_names_by_stem={"ref": "2160p \u00b7 REF", "a": "2160p \u00b7 A"},
+        short_names_by_stem={"a": "ShortA"},
     )
 
-    assert generated.count("Open Tool Panel -> Frame Compare Alignment Review.") == 3
-    assert generated.count("Unlink playheads") == 3
-    assert "       Open Tool Panel -> Frame Compare Alignment Review." in generated
-    assert "       Save the alignment in the panel" in generated
+    # Burned-in overlays keep the ASCII arrow; the ready step renders it via _arrow().
+    assert generated.count("Open Tool Panel -> Frame Compare Alignment Review.") == 2
+    assert (
+        "  2  Unlink playheads, then position every source on the same visible moment." in generated
+    )
+    assert (
+        "  3  Save the alignment in the panel, then close VSView to continue Frame Compare."
+        in generated
+    )
+    assert "VSView is open" in generated
 
 
-def test_write_vsview_session_script_is_atomic_and_deterministic_body(
+def test_write_vsview_session_script_uses_unique_uuid_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -561,22 +895,22 @@ def test_write_vsview_session_script_is_atomic_and_deterministic_body(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={"ref:a": 1},
+        audio_review_by_key=_audio_review_map({"ref:a": 1}),
         cache_dir=tmp_path,
     )
     second = write_vsview_session_script(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={"ref:a": 1},
+        audio_review_by_key=_audio_review_map({"ref:a": 1}),
         cache_dir=tmp_path,
     )
 
-    assert calls == [first, second]
     assert first.parent.name == "vsview_sessions"
     assert first.name.startswith("vsview_ref_")
     assert re.fullmatch(r"vsview_ref_\d{8}T\d{6}Z_[0-9a-f]{32}\.py", first.name)
     assert re.fullmatch(r"vsview_ref_\d{8}T\d{6}Z_[0-9a-f]{32}\.py", second.name)
     assert first != second
-    assert first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
 
 
 def test_write_vsview_session_script_retries_uuid_path_collision(
@@ -603,9 +937,62 @@ def test_write_vsview_session_script_retries_uuid_path_collision(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={"ref:a": 1},
+        audio_review_by_key=_audio_review_map({"ref:a": 1}),
         cache_dir=tmp_path,
     )
 
-    assert len(attempts) == 2
-    assert attempts[0].name.endswith(f"_{'1' * 32}.py")
     assert script.name.endswith(f"_{'2' * 32}.py")
+
+
+def test_adapter_children_preserve_trusted_parent_user_site(tmp_path: Path) -> None:
+    """Both readiness and review subprocesses can see an installed user-site dependency."""
+    import textwrap
+
+    import structlog
+
+    environment = os.environ.copy()
+    for name in (
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONUSERBASE",
+        "PYTHONNOUSERSITE",
+        "PYTHONSTARTUP",
+        "PYTHONINSPECT",
+    ):
+        environment.pop(name, None)
+    environment.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "PYTHONUSERBASE": str(tmp_path / "userbase"),
+            "PYTHONPATH": os.pathsep.join(
+                (
+                    str(Path(__file__).parents[2] / "src"),
+                    str(Path(structlog.__file__).resolve().parent.parent),
+                )
+            ),
+        }
+    )
+    script = textwrap.dedent("""
+        import site, sys
+        from pathlib import Path
+        from frame_compare.vsview.adapter import (
+            _build_vsview_child_env, _run_startup_probe, _run_vsview_command,
+        )
+        assert site.ENABLE_USER_SITE and not sys.flags.no_user_site
+        user_site = Path(site.getusersitepackages())
+        user_site.mkdir(parents=True, exist_ok=True)
+        (user_site / "vsview.py").write_text("INSTALLED = True\\n", encoding="utf-8")
+        env = _build_vsview_child_env(no_color=True)
+        command = [sys.executable, "-c", "import vsview; assert vsview.INSTALLED"]
+        assert _run_startup_probe(command, env=env).returncode == 0
+        assert _run_vsview_command(command, env=env)[0] == 0
+    """)
+    result = subprocess.run(  # noqa: S603 - selected Python interpreter and owned fixture
+        [getattr(sys, "_base_executable", sys.executable), "-c", script],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr

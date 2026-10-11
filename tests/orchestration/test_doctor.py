@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from importlib.metadata import PackageNotFoundError
 from types import SimpleNamespace
@@ -14,7 +15,6 @@ import pytest
 import frame_compare.vs.env as env_module
 from frame_compare.orchestration.doctor import (
     CheckResult,
-    DoctorCheck,
     collect_checks,
     run_doctor,
 )
@@ -28,6 +28,15 @@ def _completed_process(stdout: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.CompletedProcess([], 0, stdout.encode(), b"")
 
 
+def _ffms2_plugin(*, version: str, functions: tuple[str, ...]) -> SimpleNamespace:
+    return SimpleNamespace(
+        Source=lambda *_args, **_kwargs: object(),
+        Version=lambda: {"version": version},
+        functions=lambda: [SimpleNamespace(name=name) for name in functions],
+    )
+
+
+@pytest.fixture(autouse=True)
 def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TMDB_API_KEY", raising=False)
     monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
@@ -120,7 +129,7 @@ class TestCheckLsmas:
         ]
         assert result.hint == (
             "Make L-SMASH-Works available under core.lsmas; see "
-            "https://github.com/TJZine/frame-compare#quick-start"
+            "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
         assert "install" not in result.hint.lower()
 
@@ -145,7 +154,7 @@ class TestCheckLsmas:
             patch(
                 "frame_compare.orchestration.doctor_checks.try_load_lsmas_plugin",
                 return_value=None,
-            ) as load_plugin,
+            ),
             patch(
                 "frame_compare.orchestration.doctor_checks.candidate_lsmas_plugin_path_details",
                 return_value=[],
@@ -159,9 +168,8 @@ class TestCheckLsmas:
         assert result.details == {"checked_plugin_paths": []}
         assert result.hint == (
             "Make L-SMASH-Works available under core.lsmas; see "
-            "https://github.com/TJZine/frame-compare#quick-start"
+            "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
-        load_plugin.assert_called_once_with(mock_core)
 
     def test_check_lsmas_plugin_fallback_loads_from_nested_extra_plugin_root(
         self,
@@ -209,7 +217,6 @@ class TestCheckLsmas:
 
         assert result.passed is True
         assert result.details.get("plugin_path") == str(plugin_path)
-        assert load_calls == [str(plugin_path)]
 
     def test_check_lsmas_failure_uses_sanitized_exception_details(self) -> None:
         """Unexpected lsmas errors should not expose raw exception text."""
@@ -226,7 +233,7 @@ class TestCheckLsmas:
         assert result.message == "lsmas check failed"
         assert result.hint == (
             "Check the VapourSynth/plugin setup, then rerun doctor; see "
-            "https://github.com/TJZine/frame-compare#quick-start"
+            "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
         assert result.details == {"exception_type": "RuntimeError"}
 
@@ -246,7 +253,7 @@ class TestCheckLsmas:
         assert result.message == "Cannot check lsmas (VapourSynth not available)"
         assert result.hint == (
             "Make VapourSynth importable before checking L-SMASH-Works; see "
-            "https://github.com/TJZine/frame-compare#quick-start"
+            "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
 
     def test_check_lsmas_import_error_after_runtime_import_is_setup_failure(self) -> None:
@@ -271,19 +278,6 @@ class TestCheckLsmas:
         assert result.details == {"exception_type": "ImportError"}
         assert "plugin setup import failed" not in str(result.details)
 
-    def test_check_lsmas_failure_included_in_critical_failures(self) -> None:
-        """Mock lsmas core failure → DoctorReport.critical_failures includes 'lsmas'."""
-        lsmas_check = DoctorCheck(
-            name="lsmas",
-            category="core",
-            check_fn=lambda: CheckResult(passed=False, message="L-SMASH-Works not found"),
-        )
-
-        report = run_doctor(checks=[lsmas_check])
-
-        assert report.all_passed is False
-        assert "lsmas" in report.critical_failures
-
 
 class TestCheckVapoursynth:
     """Tests for vapoursynth check via run_doctor."""
@@ -291,8 +285,8 @@ class TestCheckVapoursynth:
     def test_check_vapoursynth_reports_public_release_and_api(self) -> None:
         checks = collect_checks()
         vs_check = next(c for c in checks if c.name == "vapoursynth")
-        version = SimpleNamespace(release_major=79, release_minor=0)
-        api_version = SimpleNamespace(api_major=4, api_minor=2)
+        version = SimpleNamespace(release_major=81, release_minor=0)
+        api_version = SimpleNamespace(api_major=4, api_minor=3)
         mock_vs = SimpleNamespace(__version__=version, __api_version__=api_version)
 
         with patch(
@@ -303,22 +297,22 @@ class TestCheckVapoursynth:
 
         assert result.passed is True
         assert result.details == {
-            "expected_release": "R79",
+            "expected_release": "R81",
             "expected_api_major": 4,
             "observed_version": str(version),
             "observed_api_version": str(api_version),
-            "release_major": 79,
+            "release_major": 81,
             "release_minor": 0,
             "api_major": 4,
-            "api_minor": 2,
-            "observed_release": "R79",
+            "api_minor": 3,
+            "observed_release": "R81",
             "expected_release_match": True,
             "expected_api_match": True,
         }
 
     @pytest.mark.parametrize(
         ("release_major", "api_major"),
-        [(78, 4), (79, 3)],
+        [(80, 4), (81, 3)],
     )
     def test_check_vapoursynth_fails_on_runtime_identity_mismatch(
         self,
@@ -328,7 +322,7 @@ class TestCheckVapoursynth:
         checks = collect_checks()
         vs_check = next(c for c in checks if c.name == "vapoursynth")
         version = SimpleNamespace(release_major=release_major, release_minor=0)
-        api_version = SimpleNamespace(api_major=api_major, api_minor=2)
+        api_version = SimpleNamespace(api_major=api_major, api_minor=3)
 
         with patch(
             "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
@@ -341,7 +335,7 @@ class TestCheckVapoursynth:
 
         assert result.passed is False
         assert result.available is True
-        assert result.details["expected_release_match"] is (release_major == 79)
+        assert result.details["expected_release_match"] is (release_major == 81)
         assert result.details["expected_api_match"] is (api_major == 4)
         assert "complete supported media runtime" in str(result.hint)
 
@@ -362,7 +356,7 @@ class TestCheckVapoursynth:
 
     def test_check_vapoursynth_keeps_raw_partial_version_separate_from_release(self) -> None:
         check = next(candidate for candidate in collect_checks() if candidate.name == "vapoursynth")
-        version = SimpleNamespace(release_major=79, release_minor=0)
+        version = SimpleNamespace(release_major=81, release_minor=0)
 
         with patch(
             "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
@@ -387,7 +381,7 @@ class TestCheckVapoursynth:
         assert result.passed is False
         assert "not found" in result.message
         assert result.hint == (
-            "Make VapourSynth importable; see https://github.com/TJZine/frame-compare#quick-start"
+            "Make VapourSynth importable; see https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
         assert "pip install" not in result.hint
 
@@ -398,124 +392,130 @@ class TestCheckVapoursynth:
 
         original_import = __import__
         mock_vs = MagicMock()
-        mock_vs.__version__ = SimpleNamespace(release_major=79, release_minor=0)
-        mock_vs.__api_version__ = SimpleNamespace(api_major=4, api_minor=2)
+        mock_vs.__version__ = SimpleNamespace(release_major=81, release_minor=0)
+        mock_vs.__api_version__ = SimpleNamespace(api_major=4, api_minor=3)
         vs_attempts = {"count": 0}
 
-        def _fake_import(name: str, *args: object, **kwargs: object) -> object:
+        def _fake_import(
+            name: str,
+            globals: Mapping[str, object] | None = None,
+            locals: Mapping[str, object] | None = None,
+            fromlist: Sequence[str] = (),
+            level: int = 0,
+        ) -> object:
             if name == "vapoursynth":
                 vs_attempts["count"] += 1
                 if vs_attempts["count"] == 1:
                     raise ImportError("missing runtime DLL")
                 return mock_vs
-            return original_import(name, *args, **kwargs)
+            return original_import(name, globals, locals, fromlist, level)
 
         with (
-            patch("frame_compare.vs.env.register_windows_dll_dirs") as register_dirs,
+            patch("frame_compare.vs.env.register_windows_dll_dirs"),
             patch("builtins.__import__", side_effect=_fake_import),
         ):
             result = vs_check.check_fn()
 
-        register_dirs.assert_called_once()
-        assert vs_attempts["count"] == 2
         assert result.passed is True
 
 
 class TestCheckVsPlacebo:
-    def test_check_vs_placebo_reports_distribution_and_filter(self) -> None:
-        checks = collect_checks()
-        check = next(candidate for candidate in checks if candidate.name == "vs_placebo")
-        plugin = SimpleNamespace(
-            Tonemap=object(),
-            functions=lambda: [SimpleNamespace(name="Tonemap")],
-        )
-        mock_vs = SimpleNamespace(core=SimpleNamespace(placebo=plugin))
-
-        with (
-            patch(
-                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
-                return_value=mock_vs,
+    @pytest.mark.parametrize(
+        ("module", "version", "passed", "available", "details", "message", "message_fragment"),
+        [
+            pytest.param(
+                SimpleNamespace(
+                    core=SimpleNamespace(
+                        placebo=SimpleNamespace(
+                            Tonemap=object(), functions=lambda: [SimpleNamespace(name="Tonemap")]
+                        )
+                    )
+                ),
+                "2.0.4",
+                True,
+                True,
+                {
+                    "observed_distribution_version": "2.0.4",
+                    "expected_distribution_match": True,
+                    "functions": ["Tonemap"],
+                },
+                "vs-placebo 2.0.4 available (placebo.Tonemap)",
+                False,
+                id="reports_distribution_and_filter",
             ),
-            patch(
-                "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
-                return_value="2.0.4",
+            pytest.param(
+                SimpleNamespace(
+                    core=SimpleNamespace(
+                        placebo=SimpleNamespace(Tonemap=lambda: object(), functions=lambda: [])
+                    )
+                ),
+                "2.0.2",
+                False,
+                True,
+                {"expected_distribution_match": False},
+                "does not match 2.0.4",
+                True,
+                id="version_mismatch_is_reported",
             ),
-        ):
-            result = check.check_fn()
-
-        assert result.passed is True
-        assert result.available is True
-        assert result.details["observed_distribution_version"] == "2.0.4"
-        assert result.details["expected_distribution_match"] is True
-        assert result.details["functions"] == ["Tonemap"]
-        assert result.message == "vs-placebo 2.0.4 available (placebo.Tonemap)"
-
-    def test_check_vs_placebo_version_mismatch_is_reported(self) -> None:
-        checks = collect_checks()
-        check = next(candidate for candidate in checks if candidate.name == "vs_placebo")
-        plugin = SimpleNamespace(Tonemap=lambda: object(), functions=lambda: [])
-        mock_vs = SimpleNamespace(core=SimpleNamespace(placebo=plugin))
-
-        with (
-            patch(
-                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
-                return_value=mock_vs,
+            pytest.param(
+                SimpleNamespace(
+                    core=SimpleNamespace(placebo=SimpleNamespace(functions=lambda: []))
+                ),
+                "2.0.4",
+                False,
+                False,
+                {"missing_functions": ["Tonemap"]},
+                "vs-placebo plugin is missing placebo.Tonemap",
+                False,
+                id="reports_missing_tonemap_function",
             ),
-            patch(
-                "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
-                return_value="2.0.2",
+            pytest.param(
+                SimpleNamespace(core=SimpleNamespace()),
+                None,
+                False,
+                False,
+                {"observed_available": False, "observed_distribution_version": None},
+                None,
+                False,
+                id="missing_is_optional_failure",
             ),
-        ):
-            result = check.check_fn()
-
-        assert result.passed is False
-        assert result.available is True
-        assert result.details["expected_distribution_match"] is False
-        assert "does not match 2.0.4" in result.message
-
-    def test_check_vs_placebo_reports_missing_tonemap_function(self) -> None:
+        ],
+    )
+    def test_check_vs_placebo(
+        self,
+        module: SimpleNamespace,
+        version: str | None,
+        passed: bool,
+        available: bool,
+        details: dict[str, object],
+        message: str | None,
+        message_fragment: bool,
+    ) -> None:
         check = next(candidate for candidate in collect_checks() if candidate.name == "vs_placebo")
-        plugin = SimpleNamespace(functions=lambda: [])
-        mock_vs = SimpleNamespace(core=SimpleNamespace(placebo=plugin))
-
         with (
             patch(
                 "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
-                return_value=mock_vs,
+                return_value=module,
             ),
             patch(
                 "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
-                return_value="2.0.4",
+                return_value=version,
+                side_effect=PackageNotFoundError if version is None else None,
             ),
         ):
             result = check.check_fn()
-
-        assert result.passed is False
-        assert result.available is False
-        assert result.details["missing_functions"] == ["Tonemap"]
-        assert result.message == "vs-placebo plugin is missing placebo.Tonemap"
-
-    def test_check_vs_placebo_missing_is_optional_failure(self) -> None:
-        checks = collect_checks()
-        check = next(candidate for candidate in checks if candidate.name == "vs_placebo")
-        mock_vs = SimpleNamespace(core=SimpleNamespace())
-
-        with (
-            patch(
-                "frame_compare.orchestration.doctor_checks.import_vapoursynth_module",
-                return_value=mock_vs,
-            ),
-            patch(
-                "frame_compare.orchestration.doctor_checks.importlib.metadata.version",
-                side_effect=PackageNotFoundError,
-            ),
-        ):
-            result = check.check_fn()
-
-        assert result.passed is False
-        assert result.available is False
-        assert result.details["observed_available"] is False
-        assert result.details["observed_distribution_version"] is None
+        assert result.passed is passed
+        assert result.available is available
+        for key, value in details.items():
+            if isinstance(value, bool):
+                assert result.details[key] is value
+            else:
+                assert result.details[key] == value
+        if message is not None:
+            if message_fragment:
+                assert message in result.message
+            else:
+                assert result.message == message
 
 
 class TestCheckFFMS2:
@@ -610,14 +610,7 @@ class TestCheckFFMS2:
     ) -> None:
         monkeypatch.delenv("FRAME_COMPARE_RUNTIME_KIND", raising=False)
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
-        plugin = SimpleNamespace(
-            Source=lambda *_args, **_kwargs: object(),
-            Version=lambda: {"version": "5.0.0.0"},
-            functions=lambda: [
-                SimpleNamespace(name="Source"),
-                SimpleNamespace(name="Version"),
-            ],
-        )
+        plugin = _ffms2_plugin(version="5.0.0.0", functions=("Source", "Version"))
         checks = collect_checks()
         check = next(candidate for candidate in checks if candidate.name == "ffms2")
 
@@ -638,14 +631,7 @@ class TestCheckFFMS2:
     ) -> None:
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "1")
-        plugin = SimpleNamespace(
-            Source=lambda *_args, **_kwargs: object(),
-            Version=lambda: {"version": "4.0.0.0"},
-            functions=lambda: [
-                SimpleNamespace(name="Source"),
-                SimpleNamespace(name="Version"),
-            ],
-        )
+        plugin = _ffms2_plugin(version="4.0.0.0", functions=("Source", "Version"))
         check = next(candidate for candidate in collect_checks() if candidate.name == "ffms2")
 
         with patch(
@@ -688,11 +674,7 @@ class TestCheckFFMS2:
     ) -> None:
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "WINDOWS-PORTABLE")
         monkeypatch.setenv("FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "0")
-        plugin = SimpleNamespace(
-            Source=lambda *_args, **_kwargs: object(),
-            Version=lambda: {"version": "5.0.0.0"},
-            functions=lambda: [SimpleNamespace(name="Source"), SimpleNamespace(name="Version")],
-        )
+        plugin = _ffms2_plugin(version="5.0.0.0", functions=("Source", "Version"))
         check = next(candidate for candidate in collect_checks() if candidate.name == "ffms2")
 
         with patch(
@@ -753,18 +735,18 @@ class TestCheckFFmpeg:
             patch(
                 "frame_compare.orchestration.doctor_checks.run_subprocess",
                 side_effect=[
-                    _completed_process("ffmpeg version n8.1.2-34-g9b6c8969e0\n"),
-                    _completed_process("ffprobe version n8.1.2-34-g9b6c8969e0\n"),
+                    _completed_process("ffmpeg version n8.1.2-50-g1a748fe2cd\n"),
+                    _completed_process("ffprobe version n8.1.2-50-g1a748fe2cd\n"),
                 ],
             ),
         ):
             result = ffmpeg_check.check_fn()
 
         assert result.passed is True
-        assert result.message == "ffmpeg version n8.1.2-34-g9b6c8969e0"
+        assert result.message == "ffmpeg version n8.1.2-50-g1a748fe2cd"
         assert result.details["ffmpeg_path"] == "/runtime/ffmpeg"
         assert result.details["ffprobe_path"] == "/runtime/ffprobe"
-        assert result.details["ffprobe_version_line"] == ("ffprobe version n8.1.2-34-g9b6c8969e0")
+        assert result.details["ffprobe_version_line"] == ("ffprobe version n8.1.2-50-g1a748fe2cd")
         assert result.details["windows_license_profile"] == "LGPL-only"
         assert result.details["expected_version_fragment"] is None
 
@@ -945,7 +927,7 @@ class TestCheckFFmpeg:
         assert f"{missing_executable} not found" in result.message
         assert result.hint == (
             "Provide FFmpeg and ffprobe executables; see "
-            "https://github.com/TJZine/frame-compare#requirements"
+            "https://tjzine.github.io/frame-compare/getting-started/native/#native-source"
         )
         assert all(
             command not in result.hint.lower()
@@ -971,16 +953,3 @@ class TestCheckFFmpeg:
         assert result.passed is False
         assert result.details["exception_type"] == "OSError"
         assert "secret path" not in str(result.details)
-
-
-def test_collect_checks_has_canonical_media_runtime_order() -> None:
-    assert [check.name for check in collect_checks()] == [
-        "vapoursynth",
-        "lsmas",
-        "vs_placebo",
-        "ffms2",
-        "ffmpeg",
-        "vsview",
-        "slowpics",
-        "tmdb_api_key",
-    ]

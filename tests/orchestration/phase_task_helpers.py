@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
+from collections.abc import Sequence
 from fractions import Fraction
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
 from PIL import Image
 
+from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema
@@ -16,7 +22,7 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.execution_types import RenderArtifacts
+from frame_compare.orchestration.execution_types import AlignPhaseOutput, RenderArtifacts
 from frame_compare.render.types import RenderedClipFacts
 from frame_compare.services.release_identity import ReleaseIdentity
 from frame_compare.utils.media_facts import (
@@ -27,6 +33,17 @@ from frame_compare.utils.media_facts import (
     SourceSignalFacts,
 )
 from frame_compare.utils.types import WorkspacePaths
+
+__all__ = [
+    "_run_align_phase",
+    "_RenderRunner",
+    "_render_artifacts",
+    "_workspace",
+    "_create_config",
+    "_clip",
+    "_context",
+    "_frame_metrics",
+]
 
 MINIMAL_CONFIG = """\
 [paths]
@@ -40,22 +57,11 @@ random_seed = 7
 
 [audio_alignment]
 enable = true
-sample_rate = 12000
 max_offset_seconds = 4.5
 use_vsview = true
 force_interactive = false
 cache_results = false
-correlation_mode = "gcc_phat"
-preprocessing_mode = "standard"
 channel_strategy = "best_channel"
-confidence_threshold = 0.25
-ambiguity_peak_ratio = 1.5
-window_length_seconds = 8.0
-window_stride_seconds = 2.0
-minimum_valid_windows = 2
-consensus_minimum_ratio = 0.75
-refinement_mode = "local"
-refinement_sample_rate = 16000
 reference_stream = 1
 comparison_streams = { encode = 2 }
 
@@ -65,6 +71,25 @@ use_ffmpeg = true
 [report]
 enable = false
 """
+
+
+def _run_align_phase(*args: Any, **kwargs: Any) -> AlignPhaseOutput:
+    """Run the async phase while adapting existing synchronous test doubles."""
+
+    async def invoke() -> AlignPhaseOutput:
+        from frame_compare.orchestration import phase_alignment
+
+        collaborator = phase_alignment.align_clips_from_request
+        if inspect.iscoroutinefunction(collaborator):
+            return await phase_alignment.run_align_phase(*args, **kwargs)
+
+        async def async_collaborator(*inner_args: Any, **inner_kwargs: Any) -> Any:
+            return collaborator(*inner_args, **inner_kwargs)
+
+        with patch.object(phase_alignment, "align_clips_from_request", async_collaborator):
+            return await phase_alignment.run_align_phase(*args, **kwargs)
+
+    return asyncio.run(invoke())
 
 
 class _RenderRunner:
@@ -119,16 +144,23 @@ def _render_artifacts(
     )
 
 
-def _workspace(tmp_path: Path) -> WorkspacePaths:
+def _workspace(
+    tmp_path: Path,
+    *,
+    input_subdir: str = "comparison_videos",
+    run_subdir: str | None = "run",
+    screenshots_subdir: str = "screenshots",
+    config_filename: str | None = "config.toml",
+) -> WorkspacePaths:
     return WorkspacePaths(
         root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
+        input_dir=tmp_path / input_subdir,
         generated_root=tmp_path / "generated",
-        run_dir=tmp_path / "run",
-        screenshots_dir=tmp_path / "screenshots",
+        run_dir=None if run_subdir is None else tmp_path / run_subdir,
+        screenshots_dir=tmp_path / screenshots_subdir,
         generated_dir=tmp_path / "generated",
         config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
+        config_file=None if config_filename is None else tmp_path / "config" / config_filename,
     )
 
 
@@ -181,4 +213,35 @@ def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> R
         analysis_selection_domain="test-selection-domain",
         selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
         analysis_clip=reference,
+    )
+
+
+def _frame_metrics(
+    *,
+    luminance: Sequence[float],
+    motion: Sequence[float],
+    frame_count: int,
+    fps: Fraction,
+    config_fingerprint: str = "test",
+    clips: Sequence[ClipIdentity] | None = None,
+    source_frame_count: int = -1,
+    metric_source_start: int = 0,
+    metric_source_end_exclusive: int = -1,
+    performance_mode: str = "quality",
+    sampled_source_frames: Sequence[int] | None = None,
+) -> FrameMetrics:
+    return FrameMetrics(
+        luminance=luminance,
+        motion=motion,
+        metadata=MetricsMetadata(
+            frame_count=frame_count,
+            fps=fps,
+            config_fingerprint=config_fingerprint,
+            clips=[] if clips is None else clips,
+            source_frame_count=source_frame_count,
+            metric_source_start=metric_source_start,
+            metric_source_end_exclusive=metric_source_end_exclusive,
+            performance_mode=performance_mode,
+        ),
+        sampled_source_frames=sampled_source_frames,
     )

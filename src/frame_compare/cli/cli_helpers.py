@@ -12,7 +12,6 @@ from typing import Any, Protocol
 import tomli_w
 import typer
 import typer.rich_utils as typer_rich_utils
-from rich.console import Console
 from typer.core import TyperGroup
 
 from frame_compare.cli.errors import ExitCode, format_error_console, get_exit_code
@@ -21,6 +20,7 @@ from frame_compare.config.persistence import dump_config_for_persistence
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import FrameCompareError
 from frame_compare.utils.terminal import no_color_requested
+from frame_compare.utils.terminal_theme import human_console
 
 
 class TextWriter(Protocol):
@@ -132,7 +132,7 @@ def handle_error(
             verbose=verbose,
             verbose_hint=verbose_hint,
         )
-        console = Console(stderr=True, no_color=no_color)
+        console = human_console(stderr=True, no_color=no_color)
         console.print(message)
         return int(get_exit_code(error))
     typer.echo("Unexpected error: please report this bug.", err=True)

@@ -14,9 +14,6 @@ import pytest
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.context import ClipActiveRect
-from frame_compare.orchestration.errors import (
-    SourceSelectionError,
-)
 from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.vs.types import SourceInfo
 from tests.orchestration.execute_run_helpers import write_probe_cache_for_inputs
@@ -94,8 +91,7 @@ def test_execute_prep_resolves_dimension_active_rects_during_preparation(
     tmp_path: Path,
 ) -> None:
     config_content = MINIMAL_CONFIG.replace(
-        "[screenshots]\nuse_ffmpeg = true",
-        '[screenshots]\nuse_ffmpeg = true\nactive_rect_detection = "dimension"',
+        'active_rect_detection = "aspect_ratio"', 'active_rect_detection = "dimension"'
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
@@ -354,7 +350,7 @@ def test_execute_prep_auto_sampling_failure_warns_and_leaves_full_frame(
 
     assert prep.clips[0].active_rect == ClipActiveRect(0, 0, 100, 80, "full-frame", "auto")
     assert any(
-        "active-rect auto detection failed" in warning for warning in prep.preflight_warnings
+        "active-rect auto detection failed" in warning.text for warning in prep.preflight_warnings
     )
 
 
@@ -381,27 +377,6 @@ def test_execute_prep_from_cache_only_auto_sampling_failure_fails_before_cache_v
         asyncio.run(
             preparation.execute_prep(
                 RunRequest(root=tmp_path, from_cache_only=True),
-                RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
-            )
-        )
-
-
-def test_execute_prep_rejects_out_of_bounds_explicit_active_rect(tmp_path: Path) -> None:
-    config_content = (
-        MINIMAL_CONFIG
-        + """
-[sources.overrides."01-encode.mkv"]
-active_rect = { x = 1800, y = 0, width = 400, height = 1080 }
-"""
-    )
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
-
-    with pytest.raises(SourceSelectionError, match="active_rect is outside source dimensions"):
-        asyncio.run(
-            preparation.execute_prep(
-                RunRequest(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
             )
         )

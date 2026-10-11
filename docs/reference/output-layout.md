@@ -15,12 +15,15 @@ sharing only explicitly reusable cache state across runs.
 │   │   └── alignment_reuse.toml
 │   └── tmdb.toml
 ├── clip_probe.toml
-└── <reserved-run-name>/
+└── <run-name>/
     ├── report.html
     ├── screenshots/
-    │   └── <frame-and-source>.png
+    │   └── <frame> - <source-stem>.png
+    ├── alignment_diagnostics/
+    │   └── comparison-<n>.json
     ├── generated/
-    │   └── <run-local intermediates>
+    │   ├── clip_probe.toml
+    │   └── vsview_sessions/
     ├── run_info.toml
     └── run_result.toml
 ```
@@ -39,12 +42,21 @@ rely only on documented artifacts rather than assuming every internal file is st
 | `<run>/report.html` | Canonical offline report entry point |
 | `<run>/screenshots/` | Rendered comparison images referenced by the normal report |
 | `<run>/generated/` | Run-local generated state and intermediates |
+| `<run>/alignment_diagnostics/` | Per-comparison alignment evidence; diagnostic only |
+| `<run>/generated/vsview_sessions/` | Generated VSView sessions and their saved panel results |
 | `<run>/run_info.toml` | Write-only run identity and provenance recorded at reservation |
 | `<run>/run_result.toml` | Completed or failed lifecycle record used by history |
+
+Files ending in `.lock` coordinate concurrent writers; leave them alone.
 
 Frame Compare-owned L-SMASH-Works `.lwi` indexes are adjacent to the media source rather
 than beneath this root. Their filename includes a runtime-scoped token. Ambiguous legacy
 `<media>.lwi` files are not silently adopted.
+
+When media is mounted read-only, as on the default Docker route, no index file can be
+written. A usable existing Frame Compare-owned index can still be reused. If no usable
+index is available and index construction fails, the cache-free fallback rebuilds it
+in memory each time the source loads; see [Docker](../getting-started/docker.md#the-index-warning).
 
 ## Portability
 
@@ -87,5 +99,5 @@ than hashing the full media file. A replacement that preserves all three is inte
 considered the same source. Advance the modification time or clear the relevant cache
 when such a replacement occurs.
 
-For exact schemas and persistence behavior, see [Current Architecture](../current-architecture.md)
-and the [CLI Behavioral Contract](../current-cli-contract.md).
+For exact schemas and persistence behavior, see [Current architecture](../current-architecture.md)
+and the [CLI behavioral contract](../current-cli-contract.md).

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
 from functools import partial
@@ -19,6 +20,7 @@ from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.execution_types import (
+    AlignPhaseOutput,
     ConfirmSlowpicsUploadPhaseOutput,
     ExecutionPhasePlan,
     ExecutionState,
@@ -51,6 +53,14 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationFn,
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
+from frame_compare.services.errors import AlignmentSourceIdentityError, AudioAlignmentCleanupError
+from frame_compare.utils.cancellation import (
+    _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
+    cancellation_checkpoint,
+)
+from frame_compare.utils.progress import align_phase_duration_text
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+from frame_compare.utils.run_warnings import RunWarning, WarningSource
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = [
@@ -62,6 +72,19 @@ __all__ = [
 ]
 
 
+_PHASE_WARNING_SOURCES: dict[str, WarningSource] = {
+    "frame_plan": "frame selection",
+    "analyze": "analysis",
+    "align": "alignment",
+    "render": "render",
+    "metadata": "sources",
+    "publish": "slow.pics",
+    "report": "render",
+    "confirm_slowpics_upload": "slow.pics",
+    "post_report_cleanup": "cleanup",
+}
+
+
 def _create_timed_phase(
     name: str,
     timing_key: str,
@@ -70,7 +93,7 @@ def _create_timed_phase(
     state: ExecutionState,
     monotonic_timer: Callable[[], float],
     phase_timings: dict[str, float],
-    warnings: list[str],
+    warnings: list[RunWarning],
     *,
     warn_only: bool = False,
     fatal_exceptions: tuple[type[BaseException], ...] = (),
@@ -83,24 +106,52 @@ def _create_timed_phase(
 
     async def _execute(ctx: RunContext) -> None:
         start = monotonic_timer()
+        align_output: AlignPhaseOutput | None = None
         try:
+            await cancellation_checkpoint()
             maybe_awaitable = executor(ctx)
             if inspect.isawaitable(maybe_awaitable):
                 output = await maybe_awaitable
             else:
                 output = maybe_awaitable
+            await cancellation_checkpoint()
             apply_phase_output(ctx=ctx, state=state, output=output)
+            summary = getattr(output, "success_summary", None)
+            if isinstance(summary, str):
+                if phase is None:
+                    raise RuntimeError("timed phase was not initialized")
+                phase.success_summary = summary
+            if timing_key == "align" and isinstance(output, AlignPhaseOutput):
+                align_output = output
+                if output.review_unresolved:
+                    if phase is None:
+                        raise RuntimeError("timed phase was not initialized")
+                    phase.success_status = ProgressPhaseStatus.WARNED
             if retain_if is not None:
                 if phase is None:
                     raise RuntimeError("timed phase was not initialized")
                 phase.retain_on_success = retain_if(output)
+        except _RunInterrupt:
+            await cancellation_checkpoint()
+            raise asyncio.CancelledError() from None
         except Exception as exc:
             if warn_only:
-                warnings.append(f"{name}: {exc}")
+                warnings.append(
+                    RunWarning(_PHASE_WARNING_SOURCES[name], "warning", f"{name}: {exc}")
+                )
                 raise
             raise
         finally:
             phase_timings[timing_key] = max(0.0, monotonic_timer() - start)
+            if align_output is not None:
+                if phase is None:
+                    raise RuntimeError("timed phase was not initialized")
+                duration_text = align_phase_duration_text(
+                    align_seconds=phase_timings[timing_key],
+                    review_seconds=align_output.review_seconds,
+                )
+                if duration_text is not None:
+                    phase.duration_text = duration_text
 
     phase = Phase(
         name=name,
@@ -118,6 +169,7 @@ def _create_timed_phase(
 def build_phases_before_align(
     *,
     request: RunRequest,
+    config: ConfigSchema,
     monotonic_timer: Callable[[], float],
     state: ExecutionState,
     input_videos: list[Path],
@@ -162,14 +214,21 @@ def build_phases_before_align(
             partial(
                 run_align_phase,
                 selected_frames=state.selected_frames,
+                vs_loader=vs_loader,
                 verbose=request.verbose,
+                quiet=request.quiet,
+                json_output=request.json_output,
             ),
             state=state,
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
-            warn_only=True,
-            fatal_exceptions=(ExclusionRecoverySelectionError,),
+            warn_only=not config.audio_alignment.force_interactive,
+            fatal_exceptions=(
+                ExclusionRecoverySelectionError,
+                AudioAlignmentCleanupError,
+                AlignmentSourceIdentityError,
+            ),
             progress_total=max(1, len(input_videos)),
             skip_detail="Disabled",
         ),
@@ -363,6 +422,7 @@ def build_execution_phase_plan(
     """
     before_align = build_phases_before_align(
         request=request,
+        config=prep.config,
         monotonic_timer=deps.monotonic_timer,
         state=state,
         input_videos=prep.input_videos,

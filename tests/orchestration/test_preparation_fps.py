@@ -19,6 +19,7 @@ from frame_compare.vs.types import SourceInfo
 from tests.orchestration.preparation_test_support import (
     METRIC_CONFIG,
     MINIMAL_CONFIG,
+    source_override_config,
 )
 from tests.orchestration.preparation_test_support import (
     create_config as _create_config,
@@ -70,145 +71,78 @@ class FakeVSLoader:
         raise AssertionError("Preparation probing should not request the VS core directly")
 
 
-def test_execute_prep_applies_effective_fps_overrides_without_changing_source_fps(
+@pytest.mark.parametrize(
+    ("config_content", "fps_by_name", "source_fps", "effective_fps", "reference", "domain_fps"),
+    [
+        pytest.param(
+            MINIMAL_CONFIG
+            + '\n[sources.overrides."01-encode.mkv"]\neffective_fps = "24000/1001"\n',
+            {"00-reference.mkv": Fraction(24000, 1001), "01-encode.mkv": Fraction(30000, 1001)},
+            [Fraction(24000, 1001), Fraction(30000, 1001)],
+            [Fraction(24000, 1001), Fraction(24000, 1001)],
+            None,
+            None,
+            id="applies_effective_fps_overrides_without_changing_source_fps",
+        ),
+        pytest.param(
+            MINIMAL_CONFIG
+            + '\n[sources]\nreference = "00-reference.mkv"\nmatch_fps = "assume_reference"\n',
+            {
+                "00-reference.mkv": Fraction(24000, 1001),
+                "01-source-24.mkv": Fraction(24, 1),
+                "02-source-ntsc-ish.mkv": Fraction(13978, 583),
+            },
+            [Fraction(24000, 1001), Fraction(24, 1), Fraction(13978, 583)],
+            [Fraction(24000, 1001), Fraction(24000, 1001), Fraction(24000, 1001)],
+            None,
+            None,
+            id="match_fps_assumes_reference_for_unoverridden_comparisons",
+        ),
+        pytest.param(
+            METRIC_CONFIG
+            + '\n[sources]\nreference = "02-reference-ntsc.mkv"\nmatch_fps = "assume_reference"\n',
+            {"00-default-24.mkv": Fraction(24, 1), "02-reference-ntsc.mkv": Fraction(30000, 1001)},
+            [Fraction(30000, 1001), Fraction(24, 1)],
+            [Fraction(30000, 1001), Fraction(30000, 1001)],
+            "02-reference-ntsc.mkv",
+            [{"numerator": 30000, "denominator": 1001}, {"numerator": 30000, "denominator": 1001}],
+            id="match_fps_uses_selected_reference_before_matching",
+        ),
+    ],
+)
+def test_execute_prep_effective_fps(
+    config_content: str,
+    fps_by_name: dict[str, Fraction],
+    source_fps: list[Fraction],
+    effective_fps: list[Fraction],
+    reference: str | None,
+    domain_fps: list[dict[str, int]] | None,
     tmp_path: Path,
 ) -> None:
-    config_content = (
-        MINIMAL_CONFIG
-        + """
-[sources.overrides."01-encode.mkv"]
-effective_fps = "24000/1001"
-"""
-    )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
-    loader = FakeVSLoader(
-        fps_by_name={
-            "00-reference.mkv": Fraction(24000, 1001),
-            "01-encode.mkv": Fraction(30000, 1001),
-        }
-    )
-
+    _create_video_files(input_dir, *fps_by_name)
+    loader = FakeVSLoader(fps_by_name=fps_by_name)
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, loader)),
+            RunRequest(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
         )
     )
-
-    assert prep.clips[0].source_fps == Fraction(24000, 1001)
-    assert prep.clips[0].effective_fps == Fraction(24000, 1001)
-    assert prep.clips[1].source_fps == Fraction(30000, 1001)
-    assert prep.clips[1].effective_fps == Fraction(24000, 1001)
-
-
-def test_execute_prep_match_fps_assumes_reference_for_unoverridden_comparisons(
-    tmp_path: Path,
-) -> None:
-    config_content = (
-        MINIMAL_CONFIG
-        + """
-[sources]
-reference = "00-reference.mkv"
-match_fps = "assume_reference"
-"""
-    )
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(
-        input_dir,
-        "00-reference.mkv",
-        "01-source-24.mkv",
-        "02-source-ntsc-ish.mkv",
-    )
-    loader = FakeVSLoader(
-        fps_by_name={
-            "00-reference.mkv": Fraction(24000, 1001),
-            "01-source-24.mkv": Fraction(24, 1),
-            "02-source-ntsc-ish.mkv": Fraction(13978, 583),
-        }
-    )
-
-    prep = asyncio.run(
-        preparation.execute_prep(
-            RunRequest(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, loader)),
-        )
-    )
-
-    assert [clip.source_fps for clip in prep.clips] == [
-        Fraction(24000, 1001),
-        Fraction(24, 1),
-        Fraction(13978, 583),
-    ]
-    assert [clip.effective_fps for clip in prep.clips] == [
-        Fraction(24000, 1001),
-        Fraction(24000, 1001),
-        Fraction(24000, 1001),
-    ]
-
-
-def test_execute_prep_match_fps_uses_selected_reference_before_matching(
-    tmp_path: Path,
-) -> None:
-    config_content = (
-        METRIC_CONFIG
-        + """
-[sources]
-reference = "02-reference-ntsc.mkv"
-match_fps = "assume_reference"
-"""
-    )
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-default-24.mkv", "02-reference-ntsc.mkv")
-    loader = FakeVSLoader(
-        fps_by_name={
-            "00-default-24.mkv": Fraction(24, 1),
-            "02-reference-ntsc.mkv": Fraction(30000, 1001),
-        }
-    )
-
-    prep = asyncio.run(
-        preparation.execute_prep(
-            RunRequest(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, loader)),
-        )
-    )
-
-    assert [clip.path for clip in prep.clips] == [
-        input_dir / "02-reference-ntsc.mkv",
-        input_dir / "00-default-24.mkv",
-    ]
-    assert [clip.source_fps for clip in prep.clips] == [
-        Fraction(30000, 1001),
-        Fraction(24, 1),
-    ]
-    assert [clip.effective_fps for clip in prep.clips] == [
-        Fraction(30000, 1001),
-        Fraction(30000, 1001),
-    ]
-    selection_domain = json.loads(prep.analysis_selection_domain)
-    assert selection_domain["reference_path"] == (input_dir / "02-reference-ntsc.mkv").as_posix()
-    assert [clip["effective_fps"] for clip in selection_domain["clips"]] == [
-        {"numerator": 30000, "denominator": 1001},
-        {"numerator": 30000, "denominator": 1001},
-    ]
+    assert [clip.source_fps for clip in prep.clips] == source_fps
+    assert [clip.effective_fps for clip in prep.clips] == effective_fps
+    if reference is not None:
+        selection_domain = json.loads(prep.analysis_selection_domain)
+        assert selection_domain["reference_path"] == (input_dir / reference).as_posix()
+        assert [clip["effective_fps"] for clip in selection_domain["clips"]] == domain_fps
 
 
 def test_execute_prep_match_fps_preserves_explicit_comparison_effective_fps(
     tmp_path: Path,
 ) -> None:
-    config_content = (
-        MINIMAL_CONFIG
-        + """
-[sources]
-match_fps = "assume_reference"
-
-[sources.overrides."01-source-25.mkv"]
-effective_fps = "25/1"
-"""
+    config_content = source_override_config(
+        base=MINIMAL_CONFIG + '\n[sources]\nmatch_fps = "assume_reference"\n',
+        selector="01-source-25.mkv",
+        fields='effective_fps = "25/1"',
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
@@ -228,129 +162,120 @@ effective_fps = "25/1"
             )
         )
 
+    assert exc_info.value.context.details is not None
     assert exc_info.value.context.details["comparison_fps"] == "25"
 
 
-def test_execute_prep_match_fps_majority_matches_outlier_and_preserves_source_fps(
+@pytest.mark.parametrize(
+    (
+        "names",
+        "fps_by_name",
+        "source_fps",
+        "effective_fps",
+        "diagnostic",
+        "no_diagnostics",
+        "warning_fragment",
+        "no_warnings",
+    ),
+    [
+        pytest.param(
+            ["00-reference.mkv", "01-majority.mkv", "02-outlier.mkv"],
+            {
+                "00-reference.mkv": Fraction(24000, 1001),
+                "01-majority.mkv": Fraction(24000, 1001),
+                "02-outlier.mkv": Fraction(24, 1),
+            },
+            [Fraction(24000, 1001), Fraction(24000, 1001), Fraction(24, 1)],
+            [Fraction(24000, 1001)] * 3,
+            "FPS target: 24000/1001 (majority)",
+            False,
+            None,
+            True,
+            id="_matches_outlier_and_preserves_source_fps",
+        ),
+        pytest.param(
+            ["00-reference.mkv", "01-a.mkv", "02-b.mkv"],
+            {
+                "00-reference.mkv": Fraction(24000, 1001),
+                "01-a.mkv": Fraction(24, 1),
+                "02-b.mkv": Fraction(25, 1),
+            },
+            None,
+            [Fraction(24000, 1001)] * 3,
+            "FPS target: 24000/1001 (reference fallback; no FPS majority)",
+            False,
+            "reference fallback; no FPS majority",
+            None,
+            id="_falls_back_to_reference_without_majority",
+        ),
+        pytest.param(
+            ["00-reference.mkv", "01-encode.mkv"],
+            {},
+            None,
+            None,
+            None,
+            True,
+            None,
+            True,
+            id="_noop_has_no_diagnostic_noise",
+        ),
+        pytest.param(
+            ["00-reference-outlier.mkv", "01-majority.mkv", "02-majority.mkv"],
+            {
+                "00-reference-outlier.mkv": Fraction(24, 1),
+                "01-majority.mkv": Fraction(24000, 1001),
+                "02-majority.mkv": Fraction(24000, 1001),
+            },
+            [Fraction(24, 1), Fraction(24000, 1001), Fraction(24000, 1001)],
+            [Fraction(24000, 1001)] * 3,
+            None,
+            False,
+            None,
+            None,
+            id="_can_change_reference_outlier",
+        ),
+    ],
+)
+def test_execute_prep_majority_fps(
+    names: list[str],
+    fps_by_name: dict[str, Fraction],
+    source_fps: list[Fraction] | None,
+    effective_fps: list[Fraction] | None,
+    diagnostic: str | None,
+    no_diagnostics: bool,
+    warning_fragment: str | None,
+    no_warnings: bool | None,
     tmp_path: Path,
 ) -> None:
-    config_content = MINIMAL_CONFIG + '\n[sources]\nmatch_fps = "majority"\n'
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-reference.mkv", "01-majority.mkv", "02-outlier.mkv")
-    loader = FakeVSLoader(
-        fps_by_name={
-            "00-reference.mkv": Fraction(24000, 1001),
-            "01-majority.mkv": Fraction(24000, 1001),
-            "02-outlier.mkv": Fraction(24, 1),
-        }
-    )
-
+    _create_config(tmp_path, content=MINIMAL_CONFIG + '\n[sources]\nmatch_fps = "majority"\n')
+    _create_video_files(tmp_path / "comparison_videos", *names)
+    loader = FakeVSLoader(fps_by_name=fps_by_name)
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, loader)),
+            RunRequest(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
         )
     )
-
-    assert [clip.source_fps for clip in prep.clips] == [
-        Fraction(24000, 1001),
-        Fraction(24000, 1001),
-        Fraction(24, 1),
-    ]
-    assert [clip.effective_fps for clip in prep.clips] == [Fraction(24000, 1001)] * 3
-    assert "FPS target: 24000/1001 (majority)" in prep.load_source_diagnostics
-    assert not prep.preflight_warnings
-
-
-def test_execute_prep_match_fps_majority_falls_back_to_reference_without_majority(
-    tmp_path: Path,
-) -> None:
-    config_content = MINIMAL_CONFIG + '\n[sources]\nmatch_fps = "majority"\n'
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-reference.mkv", "01-a.mkv", "02-b.mkv")
-    loader = FakeVSLoader(
-        fps_by_name={
-            "00-reference.mkv": Fraction(24000, 1001),
-            "01-a.mkv": Fraction(24, 1),
-            "02-b.mkv": Fraction(25, 1),
-        }
-    )
-
-    prep = asyncio.run(
-        preparation.execute_prep(
-            RunRequest(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, loader)),
-        )
-    )
-
-    assert [clip.effective_fps for clip in prep.clips] == [Fraction(24000, 1001)] * 3
-    assert "FPS target: 24000/1001 (reference fallback; no FPS majority)" in (
-        prep.load_source_diagnostics
-    )
-    assert any(
-        "reference fallback; no FPS majority" in warning for warning in prep.preflight_warnings
-    )
-
-
-def test_execute_prep_match_fps_majority_noop_has_no_diagnostic_noise(
-    tmp_path: Path,
-) -> None:
-    config_content = MINIMAL_CONFIG + '\n[sources]\nmatch_fps = "majority"\n'
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-reference.mkv", "01-encode.mkv")
-
-    prep = asyncio.run(
-        preparation.execute_prep(
-            RunRequest(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
-        )
-    )
-
-    assert prep.load_source_diagnostics == []
-    assert prep.preflight_warnings == []
-
-
-def test_execute_prep_match_fps_majority_can_change_reference_outlier(
-    tmp_path: Path,
-) -> None:
-    config_content = MINIMAL_CONFIG + '\n[sources]\nmatch_fps = "majority"\n'
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-reference-outlier.mkv", "01-majority.mkv", "02-majority.mkv")
-    loader = FakeVSLoader(
-        fps_by_name={
-            "00-reference-outlier.mkv": Fraction(24, 1),
-            "01-majority.mkv": Fraction(24000, 1001),
-            "02-majority.mkv": Fraction(24000, 1001),
-        }
-    )
-
-    prep = asyncio.run(
-        preparation.execute_prep(
-            RunRequest(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, loader)),
-        )
-    )
-
-    assert prep.clips[0].source_fps == Fraction(24, 1)
-    assert prep.clips[0].effective_fps == Fraction(24000, 1001)
+    if source_fps is not None:
+        assert [clip.source_fps for clip in prep.clips] == source_fps
+    if effective_fps is not None:
+        assert [clip.effective_fps for clip in prep.clips] == effective_fps
+    if diagnostic is not None:
+        assert diagnostic in prep.load_source_diagnostics
+    if no_diagnostics:
+        assert prep.load_source_diagnostics == []
+    if warning_fragment is not None:
+        assert any(warning_fragment in warning.text for warning in prep.preflight_warnings)
+    if no_warnings:
+        assert prep.preflight_warnings == []
 
 
 def test_execute_prep_match_fps_majority_preserves_explicit_override_and_can_still_fail(
     tmp_path: Path,
 ) -> None:
-    config_content = (
-        MINIMAL_CONFIG
-        + """
-[sources]
-match_fps = "majority"
-
-[sources.overrides."02-explicit.mkv"]
-effective_fps = "25/1"
-"""
+    config_content = source_override_config(
+        base=MINIMAL_CONFIG + '\n[sources]\nmatch_fps = "majority"\n',
+        selector="02-explicit.mkv",
+        fields='effective_fps = "25/1"',
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
@@ -371,6 +296,7 @@ effective_fps = "25/1"
             )
         )
 
+    assert exc_info.value.context.details is not None
     assert exc_info.value.context.details["comparison_fps"] == "25"
 
 
@@ -403,4 +329,3 @@ def test_execute_prep_rejects_mixed_source_fps_before_downstream_work(tmp_path: 
         "comparison_path": str(input_dir / "b_comparison.mkv"),
         "comparison_fps": "30000/1001",
     }
-    assert loader.loaded == [input_dir / "a_reference.mkv", input_dir / "b_comparison.mkv"]

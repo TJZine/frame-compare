@@ -5,26 +5,40 @@ from pydantic import ValidationError
 
 from frame_compare.config.schema_models import SlowpicsConfig, SourceOverrideConfig
 from frame_compare.config.slowpics import (
-    SLOWPICS_TITLE_TEMPLATE_FIELDS,
     render_slowpics_title_template,
     validate_slowpics_title_template,
 )
 
 
-def test_renderer_supports_every_allowed_placeholder_and_missing_values() -> None:
-    context = {name: name.lower() for name in SLOWPICS_TITLE_TEMPLATE_FIELDS}
-    template = "|".join(f"${{{name}}}" for name in sorted(SLOWPICS_TITLE_TEMPLATE_FIELDS))
-
-    assert render_slowpics_title_template(template, context) == "|".join(
-        name.lower() for name in sorted(SLOWPICS_TITLE_TEMPLATE_FIELDS)
-    )
-    assert render_slowpics_title_template("${Title}/${Year}", {}) == "/"
-
-
-def test_renderer_supports_literal_text_and_escaped_dollar() -> None:
-    assert render_slowpics_title_template("Cost $$5: ${Title}", {"Title": "Example"}) == (
-        "Cost $5: Example"
-    )
+@pytest.mark.parametrize(
+    ("template", "context", "expected"),
+    [
+        (
+            "${FileName}|${Filename}|${Label}|${OriginalLanguage}|${OriginalTitle}|"
+            "${TMDBCategory}|${TMDBId}|${Title}|${Year}",
+            {
+                "FileName": "filename",
+                "Filename": "filename",
+                "Label": "label",
+                "OriginalLanguage": "originallanguage",
+                "OriginalTitle": "originaltitle",
+                "TMDBCategory": "tmdbcategory",
+                "TMDBId": "tmdbid",
+                "Title": "title",
+                "Year": "year",
+            },
+            "filename|filename|label|originallanguage|originaltitle|tmdbcategory|tmdbid|title|year",
+        ),
+        ("${Title}/${Year}", {}, "/"),
+        ("Cost $$5: ${Title}", {"Title": "Example"}, "Cost $5: Example"),
+        ("${Title}", {"Title": "Good", "Unused": "bad\n"}, "Good"),
+    ],
+    ids=["all-placeholders", "missing-values", "escaped-dollar", "unused-control"],
+)
+def test_renderer_substitutes_only_used_template_values(
+    template: str, context: dict[str, str], expected: str
+) -> None:
+    assert render_slowpics_title_template(template, context) == expected
 
 
 @pytest.mark.parametrize("control", ["\x00", "\n", "\u0085"])
@@ -39,19 +53,38 @@ def test_template_helpers_reject_unicode_control_characters(control: str) -> Non
         render_slowpics_title_template("${Title}", {"Title": f"bad{control}context"})
 
 
-def test_renderer_ignores_control_characters_in_unused_context_values() -> None:
-    assert render_slowpics_title_template("${Title}", {"Title": "Good", "Unused": "bad\n"}) == (
-        "Good"
-    )
-
-
 @pytest.mark.parametrize(
-    "template",
-    ["$", "$Title", "${Title", "${}", "${Unknown}", "${Title.value}", "${Title[0]}"],
+    "payload",
+    [
+        {"title_template": "$"},
+        {"title_template": "$Title"},
+        {"title_template": "${Title"},
+        {"title_template": "${}"},
+        {"title_template": "${Unknown}"},
+        {"title_template": "${Title.value}"},
+        {"title_template": "${Title[0]}"},
+        {"remove_after_days": True},
+        {"remove_after_days": "1"},
+        {"remove_after_days": -1},
+        {"remove_after_days": 1_000_000},
+        {"is_hentai": "true"},
+        {"is_hentai": "false"},
+        {"is_hentai": "yes"},
+        {"is_hentai": "off"},
+        {"is_hentai": 0},
+        {"is_hentai": 1},
+        {"tmdb_id": 1},
+        {"tmdb_media_type": "movie"},
+        {"tmdb_id": True, "tmdb_media_type": "movie"},
+        {"tmdb_id": "1", "tmdb_media_type": "movie"},
+        {"tmdb_id": 0, "tmdb_media_type": "movie"},
+        {"tmdb_id": -1, "tmdb_media_type": "tv"},
+        {"collection_name": "legacy"},
+    ],
 )
-def test_slowpics_config_rejects_unknown_or_malformed_templates(template: str) -> None:
+def test_slowpics_config_rejects_invalid_payloads(payload: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        SlowpicsConfig(title_template=template)
+        SlowpicsConfig.model_validate(payload)
 
 
 def test_slowpics_config_trims_title_fields_and_rejects_conflicts_and_controls() -> None:
@@ -67,30 +100,6 @@ def test_slowpics_config_trims_title_fields_and_rejects_conflicts_and_controls()
                 SlowpicsConfig.model_validate({field_name: value})
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"tmdb_id": 1},
-        {"tmdb_media_type": "movie"},
-        {"tmdb_id": True, "tmdb_media_type": "movie"},
-        {"tmdb_id": "1", "tmdb_media_type": "movie"},
-        {"tmdb_id": 0, "tmdb_media_type": "movie"},
-        {"tmdb_id": -1, "tmdb_media_type": "tv"},
-    ],
-)
-def test_slowpics_config_requires_strict_positive_paired_tmdb_values(
-    payload: dict[str, object],
-) -> None:
-    with pytest.raises(ValidationError):
-        SlowpicsConfig.model_validate(payload)
-
-
-@pytest.mark.parametrize("value", [True, "1", -1, 1_000_000])
-def test_slowpics_config_rejects_invalid_remote_retention(value: object) -> None:
-    with pytest.raises(ValidationError):
-        SlowpicsConfig.model_validate({"remove_after_days": value})
-
-
 def test_slowpics_config_accepts_remote_retention_bounds_and_timeout_floor() -> None:
     assert SlowpicsConfig(remove_after_days=0).remove_after_days == 0
     assert SlowpicsConfig(remove_after_days=999999).remove_after_days == 999999
@@ -98,19 +107,8 @@ def test_slowpics_config_accepts_remote_retention_bounds_and_timeout_floor() -> 
         SlowpicsConfig(image_upload_timeout_seconds=9.99)
 
 
-@pytest.mark.parametrize("value", ["true", "false", "yes", "off", 0, 1])
-def test_slowpics_config_requires_strict_hentai_boolean(value: object) -> None:
-    with pytest.raises(ValidationError):
-        SlowpicsConfig.model_validate({"is_hentai": value})
-
-
 def test_source_override_label_is_trimmed_and_strict() -> None:
     assert SourceOverrideConfig(label="  Reference Source  ").label == "Reference Source"
     for value in ("", "   ", "bad\tlabel", "\nwrapped\n", "\twrapped\r"):
         with pytest.raises(ValidationError):
             SourceOverrideConfig(label=value)
-
-
-def test_slowpics_nested_unknown_key_remains_rejected() -> None:
-    with pytest.raises(ValidationError):
-        SlowpicsConfig.model_validate({"collection_name": "legacy"})

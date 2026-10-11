@@ -29,6 +29,7 @@ from frame_compare.analysis.types import (
     MetricActiveRect,
     MetricCacheRequest,
     MetricFrameRange,
+    MetricsAcquisition,
     MetricsMetadata,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -67,13 +68,12 @@ def _clip_identities(video_paths: list[Path]) -> list[ClipIdentity]:
 def _cached_metrics(
     cache_dir: Path,
     fingerprint: str,
-    clips: list[ClipIdentity],
     reporter: ProgressReporter | None,
     request: MetricCacheRequest,
     timing_recorder: AnalysisTimingRecorder | None,
 ) -> FrameMetrics | None:
     with record_span(timing_recorder, "cache_lookup"):
-        cache_result = load_cached_metrics_for_request(cache_dir, fingerprint, clips, request)
+        cache_result = load_cached_metrics_for_request(cache_dir, fingerprint, request)
     if not (cache_result.success and cache_result.metrics):
         if timing_recorder is not None:
             timing_recorder.cache_state = "miss"
@@ -87,8 +87,10 @@ def _cached_metrics(
     return cache_result.metrics
 
 
-def _load_analysis_source(source_path: Path, vs_loader: VSLoader | None) -> SourceInfo:
-    loader = vs_loader or DefaultVSLoader()
+def _load_analysis_source(
+    source_path: Path, vs_loader: VSLoader | None, memory_limit_mb: int | None
+) -> SourceInfo:
+    loader = vs_loader or DefaultVSLoader(memory_limit_mb=memory_limit_mb)
     try:
         return loader.load(source_path)
     except (PluginNotFoundError, SourceLoadError):
@@ -185,9 +187,10 @@ def calculate_metrics(
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
     active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
     timing_recorder: AnalysisTimingRecorder | None = None,
-) -> FrameMetrics:
+    memory_limit_mb: int | None = None,
+) -> MetricsAcquisition:
     """
-    Calculate frame metrics for the given clips.
+    Acquire frame metrics for the given clips.
 
     Uses cached values if valid cache exists and config matches.
     Only the selected analysis source is analyzed.
@@ -199,6 +202,7 @@ def calculate_metrics(
         config: Analysis configuration
         cache_dir: Directory for cache files
         reporter: Optional progress reporter
+        memory_limit_mb: Optional VapourSynth frame-cache cap in MiB for the default loader.
         vs_loader: Optional VapourSynth clip loader seam
         selection_domain: Optional selection-domain token included in
             the analysis cache key when source overrides affect reference
@@ -219,7 +223,7 @@ def calculate_metrics(
             ``"active_rect_resolution_v2"``.
 
     Returns:
-        FrameMetrics with luminance and motion arrays
+        Metrics with the actual cache-hit or computed acquisition disposition
 
     Raises:
         MetricsCalculationError (FC-4002): If frame extraction or metric
@@ -246,22 +250,21 @@ def calculate_metrics(
         selection_domain=selection_domain,
         metric_request=cache_request,
     )
-    clips = _clip_identities(video_paths)
-
     cached = _cached_metrics(
         cache_dir,
         fingerprint,
-        clips,
         reporter,
         cache_request,
         timing_recorder,
     )
     if cached:
-        return cached
+        return MetricsAcquisition(metrics=cached, disposition="hit")
+
+    clips = _clip_identities(video_paths)
 
     # Cache miss or invalid - compute metrics for the selected analysis source only.
     with record_span(timing_recorder, "source_load"):
-        source = _load_analysis_source(source_path, vs_loader)
+        source = _load_analysis_source(source_path, vs_loader, memory_limit_mb)
     try:
         resolved_range = _resolved_metric_frame_range(source, metric_frame_range)
         strategy_result = calculate_metric_strategy(
@@ -292,7 +295,7 @@ def calculate_metrics(
 
     if reporter:
         reporter.advance(1)
-    return metrics
+    return MetricsAcquisition(metrics=metrics, disposition="computed")
 
 
 def _resolved_metric_frame_range(

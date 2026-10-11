@@ -7,22 +7,17 @@ from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
 from frame_compare.services.alignment_audio import (
     AudioStreamInfo,
-    select_matching_audio_stream,
-    select_reference_audio_stream,
-)
-from frame_compare.services.alignment_audio import (
-    extract_audio as _extract_audio,
-)
-from frame_compare.services.alignment_audio import (
-    extract_matching_audio as _extract_matching_audio,
-)
-from frame_compare.services.alignment_audio import (
-    extract_reference_audio as _extract_reference_audio,
+    AudioStreamTimeline,
+    ProbedStreams,
+    VideoStreamStart,
+    collection_argv,
+    probe_streams,
+    retime_rates,
+    select_audio_pair,
 )
 from frame_compare.services.alignment_audio import (
     probe_fps as _probe_fps,
@@ -31,44 +26,33 @@ from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 
 
+@pytest.mark.parametrize(
+    "stdout, expected",
+    [
+        pytest.param(b"24000/1001\n", Fraction(24000, 1001), id="probe_fps_fraction"),
+        pytest.param(
+            b"24000/1001,\r\n", Fraction(24000, 1001), id="probe_fps_accepts_single_trailing_comma"
+        ),
+        pytest.param(b"24\n", Fraction(24, 1), id="probe_fps_integer"),
+    ],
+)
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_fraction(mock_run: MagicMock):
-    """Test probing FPS when it returns a fraction."""
-    mock_run.return_value.stdout = b"24000/1001\n"
-    res = _probe_fps(Path("test.mkv"))
-    assert res == Fraction(24000, 1001)
-    mock_run.assert_called_once_with(
-        [
-            "ffprobe",
-            "-v",
-            "quiet",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=avg_frame_rate",
-            "-of",
-            "csv=p=0",
-            "test.mkv",
-        ],
-        timeout_seconds=15.0,
-    )
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_accepts_single_trailing_comma(mock_run: MagicMock) -> None:
-    mock_run.return_value.stdout = b"24000/1001,\r\n"
-
-    res = _probe_fps(Path("test.mkv"))
-
-    assert res == Fraction(24000, 1001)
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_integer(mock_run: MagicMock):
-    """Test probing FPS when it returns an integer."""
-    mock_run.return_value.stdout = b"24\n"
-    res = _probe_fps(Path("test.mkv"))
-    assert res == Fraction(24, 1)
+def test_probe_fps_success(mock_run: MagicMock, stdout: bytes, expected: Fraction) -> None:
+    mock_run.return_value.stdout = stdout
+    assert _probe_fps(Path("test.mkv")) == expected
+    assert mock_run.call_args.args[0] == [
+        "ffprobe",
+        "-v",
+        "quiet",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=avg_frame_rate",
+        "-of",
+        "csv=p=0",
+        "test.mkv",
+    ]
+    assert mock_run.call_args.kwargs["timeout_seconds"] == 15.0
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
@@ -95,210 +79,77 @@ def test_probe_fps_malformed_output_is_alignment_parse_error(
     assert stdout.decode("utf-8").strip() in str(exc_info.value.context.details)
 
 
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_not_found_raises(mock_run: MagicMock):
-    """Test probing FPS when ffprobe is missing."""
-    mock_run.side_effect = FileNotFoundError()
-    with pytest.raises(FFmpegNotFoundError):
-        _probe_fps(Path("test.mkv"))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_nonzero_exit_raises(mock_run: MagicMock):
-    """Test probing FPS when ffprobe fails."""
-    mock_run.side_effect = CalledProcessError(1, ["ffprobe"], stderr=b"error")
-    with pytest.raises(FFmpegError):
-        _probe_fps(Path("test.mkv"))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_oserror_raises_ffmpeg_error(mock_run: MagicMock) -> None:
-    mock_run.side_effect = OSError("permission denied")
-
-    with pytest.raises(FFmpegError) as exc_info:
-        _probe_fps(Path("test.mkv"))
-
-    assert "traceback" not in str(exc_info.value).lower()
-    assert exc_info.value.context.details is not None
-    message = str(exc_info.value.context.details).lower()
-    assert "ffprobe" in message
-    assert "could not start" in message
-    assert "permission denied" in message
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_non_utf8_stderr_is_replaced(mock_run: MagicMock) -> None:
-    mock_run.side_effect = CalledProcessError(1, ["ffprobe"], stderr=b"\xfferror")
-
-    with pytest.raises(FFmpegError) as exc_info:
-        _probe_fps(Path("test.mkv"))
-
-    assert "\ufffderror" in str(exc_info.value.context.details)
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_ffmpeg_not_found(mock_run: MagicMock):
-    """Test audio extraction when ffmpeg is missing."""
-    mock_run.side_effect = FileNotFoundError()
-    with pytest.raises(FFmpegNotFoundError):
-        _extract_audio(Path("test.mkv"), 8000, audio_stream_index=0)
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_timeout_raises(mock_run: MagicMock):
-    """Test probing FPS timeout surfaces as FFmpegError."""
-    mock_run.side_effect = TimeoutExpired(cmd=["ffprobe"], timeout=15.0)
-    with pytest.raises(FFmpegError) as exc_info:
-        _probe_fps(Path("test.mkv"))
-    assert exc_info.value.context.details is not None
-    assert exc_info.value.context.details.get("returncode") == 124
-    assert "timed out" in str(exc_info.value.context.details.get("stderr", ""))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_ffmpeg_fails(mock_run: MagicMock):
-    """Test audio extraction when ffmpeg fails."""
-    mock_run.side_effect = CalledProcessError(1, ["ffmpeg"], stderr=b"error")
-    with pytest.raises(FFmpegError):
-        _extract_audio(Path("test.mkv"), 8000, audio_stream_index=0)
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_non_utf8_stderr_is_replaced(mock_run: MagicMock) -> None:
-    mock_run.side_effect = CalledProcessError(1, ["ffmpeg"], stderr=b"\xfferror")
-
-    with pytest.raises(FFmpegError) as exc_info:
-        _extract_audio(Path("test.mkv"), 8000, audio_stream_index=0)
-
-    assert "\ufffderror" in str(exc_info.value.context.details)
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_timeout_raises(mock_run: MagicMock):
-    """Test audio extraction timeout surfaces as FFmpegError."""
-    mock_run.side_effect = TimeoutExpired(cmd=["ffmpeg"], timeout=120.0)
-    with pytest.raises(FFmpegError) as exc_info:
-        _extract_audio(Path("test.mkv"), 8000, audio_stream_index=0)
-    assert exc_info.value.context.details is not None
-    assert exc_info.value.context.details.get("returncode") == 124
-    assert "timed out" in str(exc_info.value.context.details.get("stderr", ""))
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_oserror_raises_ffmpeg_error(mock_run: MagicMock) -> None:
-    mock_run.side_effect = OSError("permission denied")
-
-    with pytest.raises(FFmpegError) as exc_info:
-        _extract_audio(Path("test.mkv"), 8000, audio_stream_index=0)
-
-    assert "could not start" in str(exc_info.value.context.details)
-    assert "permission denied" in str(exc_info.value.context.details)
-    assert exc_info.value.context.details is not None
-    assert exc_info.value.context.details.get("returncode") == 1
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_unexpected_exceptions_propagate(mock_run: MagicMock) -> None:
-    mock_run.side_effect = RuntimeError("unexpected bug")
-
-    with pytest.raises(RuntimeError, match="unexpected bug"):
-        _extract_audio(Path("test.mkv"), 8000, audio_stream_index=0)
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_empty_raises(mock_run: MagicMock):
-    """Test audio extraction when output is empty."""
-    mock_run.return_value.stdout = b""
-    with pytest.raises(AudioAlignmentError, match="empty audio"):
-        _extract_audio(Path("test.mkv"), 8000, audio_stream_index=1)
-    mock_run.assert_called_once_with(
-        [
-            "ffmpeg",
-            "-i",
-            "test.mkv",
-            "-map",
-            "0:a:1",
-            "-vn",
-            "-ac",
-            "1",
-            "-ar",
-            "8000",
-            "-f",
-            "f32le",
-            "-",
-        ],
-        timeout_seconds=120.0,
-    )
-
-
 @pytest.mark.parametrize(
-    ("channels", "channel_layout", "expected_filter"),
+    "failure, expected_error, details, no_traceback, returncode",
     [
-        (1, "mono", "pan=mono|c0=c0"),
-        (2, "stereo", "pan=mono|c0=FL"),
-        (6, "5.1", "pan=mono|c0=FC"),
+        pytest.param(
+            FileNotFoundError(),
+            FFmpegNotFoundError,
+            (),
+            False,
+            None,
+            id="probe_fps_not_found_raises",
+        ),
+        pytest.param(
+            CalledProcessError(1, ["ffprobe"], stderr=b"error"),
+            FFmpegError,
+            (),
+            False,
+            None,
+            id="probe_fps_nonzero_exit_raises",
+        ),
+        pytest.param(
+            OSError("permission denied"),
+            FFmpegError,
+            ("ffprobe", "could not start", "permission denied"),
+            True,
+            None,
+            id="probe_fps_oserror_raises_ffmpeg_error",
+        ),
+        pytest.param(
+            CalledProcessError(1, ["ffprobe"], stderr=b"\xfferror"),
+            FFmpegError,
+            ("\ufffderror",),
+            False,
+            None,
+            id="probe_fps_non_utf8_stderr_is_replaced",
+        ),
+        pytest.param(
+            TimeoutExpired(cmd=["ffprobe"], timeout=15.0),
+            FFmpegError,
+            ("timed out",),
+            False,
+            124,
+            id="probe_fps_timeout_raises",
+        ),
     ],
 )
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_best_channel_uses_explicit_map_and_deterministic_channel(
+def test_probe_fps_failure(
     mock_run: MagicMock,
-    channels: int,
-    channel_layout: str,
-    expected_filter: str,
+    failure: Exception,
+    expected_error: type[FFmpegError],
+    details: tuple[str, ...],
+    no_traceback: bool,
+    returncode: int | None,
 ) -> None:
-    mock_run.return_value.stdout = np.array([0.1], dtype=np.float32).tobytes()
-    stream = AudioStreamInfo(
-        audio_stream_index=2,
-        absolute_stream_index=7,
-        codec_name="aac",
-        channels=channels,
-        channel_layout=channel_layout,
-        sample_rate=48000,
-        language="eng",
-        is_default=True,
-        is_original=False,
-        is_commentary=False,
-    )
-
-    audio = _extract_audio(
-        Path("test.mkv"),
-        8000,
-        audio_stream_index=2,
-        channel_strategy="best_channel",
-        stream=stream,
-    )
-
-    assert audio.tolist() == pytest.approx([0.1])
-    mock_run.assert_called_once_with(
-        [
-            "ffmpeg",
-            "-i",
-            "test.mkv",
-            "-map",
-            "0:a:2",
-            "-vn",
-            "-af",
-            expected_filter,
-            "-ar",
-            "8000",
-            "-f",
-            "f32le",
-            "-",
-        ],
-        timeout_seconds=120.0,
-    )
+    mock_run.side_effect = failure
+    with pytest.raises(expected_error) as exc_info:
+        _probe_fps(Path("test.mkv"))
+    if no_traceback:
+        assert "traceback" not in str(exc_info.value).lower()
+    if details:
+        assert exc_info.value.context.details is not None
+        for detail in details:
+            assert detail in str(exc_info.value.context.details).lower()
+    if returncode is not None:
+        assert exc_info.value.context.details is not None
+        assert exc_info.value.context.details.get("returncode") == returncode
+        assert "timed out" in str(exc_info.value.context.details.get("stderr", ""))
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_audio_invalid_float32_payload_raises(mock_run: MagicMock) -> None:
-    mock_run.return_value.stdout = b"abc"
-
-    with pytest.raises(AudioAlignmentError, match="test.mkv.*3 bytes"):
-        _extract_audio(Path("test.mkv"), 8000, audio_stream_index=0)
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_select_reference_audio_stream_prefers_non_commentary_default_then_channels(
+def test_select_audio_pair_prefers_non_commentary_default_then_channels(
     mock_run: MagicMock,
 ) -> None:
     mock_run.return_value.stdout = b"""
@@ -306,6 +157,7 @@ def test_select_reference_audio_stream_prefers_non_commentary_default_then_chann
       "streams": [
         {
           "index": 1,
+          "codec_type": "audio",
           "codec_name": "aac",
           "channels": 6,
           "channel_layout": "5.1",
@@ -315,6 +167,7 @@ def test_select_reference_audio_stream_prefers_non_commentary_default_then_chann
         },
         {
           "index": 2,
+          "codec_type": "audio",
           "codec_name": "aac",
           "channels": 2,
           "channel_layout": "stereo",
@@ -324,6 +177,7 @@ def test_select_reference_audio_stream_prefers_non_commentary_default_then_chann
         },
         {
           "index": 3,
+          "codec_type": "audio",
           "codec_name": "aac",
           "channels": 6,
           "channel_layout": "5.1",
@@ -335,20 +189,28 @@ def test_select_reference_audio_stream_prefers_non_commentary_default_then_chann
     }
     """
 
-    selected = select_reference_audio_stream(Path("ref.mkv"))
+    probed = probe_streams(Path("ref.mkv"))
+    selected, _ = select_audio_pair(
+        probed,
+        probed,
+        reference_path=Path("ref.mkv"),
+        comparison_path=Path("ref.mkv"),
+        reference_override=None,
+        comparison_override=None,
+    )
 
-    assert selected.audio_stream_index == 2
-    assert selected.absolute_stream_index == 3
+    assert selected.stream.audio_stream_index == 2
+    assert selected.stream.absolute_stream_index == 3
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_select_reference_audio_stream_ffprobe_oserror_raises_ffmpeg_error(
+def test_probe_streams_ffprobe_oserror_raises_ffmpeg_error(
     mock_run: MagicMock,
 ) -> None:
     mock_run.side_effect = OSError("permission denied")
 
     with pytest.raises(FFmpegError) as exc_info:
-        select_reference_audio_stream(Path("reference.mkv"))
+        probe_streams(Path("reference.mkv"))
 
     assert "traceback" not in str(exc_info.value).lower()
     assert exc_info.value.context.details is not None
@@ -358,51 +220,32 @@ def test_select_reference_audio_stream_ffprobe_oserror_raises_ffmpeg_error(
     assert "permission denied" in message
 
 
-@pytest.mark.parametrize("stdout", [b"[]", b"null", b'"oops"'])
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_select_reference_audio_stream_rejects_non_object_ffprobe_json(
-    mock_run: MagicMock,
-    stdout: bytes,
-) -> None:
-    mock_run.return_value = MagicMock(stdout=stdout, returncode=0)
-
-    with pytest.raises(FFmpegError) as exc_info:
-        select_reference_audio_stream(Path("reference.mkv"))
-
-    assert exc_info.value.context.details is not None
-    message = str(exc_info.value.context.details).lower()
-    assert "ffprobe" in message
-    assert "invalid json" in message
-    assert "object" in message
-
-
 @pytest.mark.parametrize(
     "stdout, expected",
     [
-        (b'{"streams": {}}', "stream list"),
-        (b'{"streams": [null]}', "stream data"),
-        (b'{"streams": [{}]}', "without index"),
+        pytest.param(b"[]", ("invalid json", "object"), id="non-object-list"),
+        pytest.param(b"null", ("invalid json", "object"), id="non-object-null"),
+        pytest.param(b'"oops"', ("invalid json", "object"), id="non-object-string"),
+        pytest.param(b'{"streams": {}}', ("stream list",), id="malformed-stream-list"),
+        pytest.param(b'{"streams": [null]}', ("stream data",), id="malformed-stream-data"),
     ],
 )
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_select_reference_audio_stream_rejects_malformed_object_ffprobe_json(
-    mock_run: MagicMock,
-    stdout: bytes,
-    expected: str,
+def test_probe_streams_rejects_invalid_json(
+    mock_run: MagicMock, stdout: bytes, expected: tuple[str, ...]
 ) -> None:
     mock_run.return_value = MagicMock(stdout=stdout, returncode=0)
-
     with pytest.raises(FFmpegError) as exc_info:
-        select_reference_audio_stream(Path("reference.mkv"))
-
+        probe_streams(Path("reference.mkv"))
     assert exc_info.value.context.details is not None
     message = str(exc_info.value.context.details).lower()
     assert "ffprobe" in message
-    assert expected in message
+    for detail in expected:
+        assert detail in message
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_select_reference_audio_stream_treats_text_commentary_tag_as_commentary(
+def test_select_audio_pair_treats_text_commentary_tag_as_commentary(
     mock_run: MagicMock,
 ) -> None:
     mock_run.return_value.stdout = b"""
@@ -410,6 +253,7 @@ def test_select_reference_audio_stream_treats_text_commentary_tag_as_commentary(
       "streams": [
         {
           "index": 1,
+          "codec_type": "audio",
           "codec_name": "aac",
           "channels": 6,
           "channel_layout": "5.1",
@@ -419,6 +263,7 @@ def test_select_reference_audio_stream_treats_text_commentary_tag_as_commentary(
         },
         {
           "index": 2,
+          "codec_type": "audio",
           "codec_name": "aac",
           "channels": 2,
           "channel_layout": "stereo",
@@ -430,14 +275,22 @@ def test_select_reference_audio_stream_treats_text_commentary_tag_as_commentary(
     }
     """
 
-    selected = select_reference_audio_stream(Path("ref.mkv"))
+    probed = probe_streams(Path("ref.mkv"))
+    selected, _ = select_audio_pair(
+        probed,
+        probed,
+        reference_path=Path("ref.mkv"),
+        comparison_path=Path("ref.mkv"),
+        reference_override=None,
+        comparison_override=None,
+    )
 
-    assert selected.audio_stream_index == 1
-    assert selected.absolute_stream_index == 2
+    assert selected.stream.audio_stream_index == 1
+    assert selected.stream.absolute_stream_index == 2
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_select_reference_audio_stream_override_uses_audio_ordinal_not_absolute_index(
+def test_select_audio_pair_override_uses_audio_ordinal_not_absolute_index(
     mock_run: MagicMock,
 ) -> None:
     mock_run.return_value.stdout = b"""
@@ -445,6 +298,7 @@ def test_select_reference_audio_stream_override_uses_audio_ordinal_not_absolute_
       "streams": [
         {
           "index": 5,
+          "codec_type": "audio",
           "codec_name": "aac",
           "channels": 2,
           "channel_layout": "stereo",
@@ -454,6 +308,7 @@ def test_select_reference_audio_stream_override_uses_audio_ordinal_not_absolute_
         },
         {
           "index": 6,
+          "codec_type": "audio",
           "codec_name": "aac",
           "channels": 6,
           "channel_layout": "5.1",
@@ -465,14 +320,22 @@ def test_select_reference_audio_stream_override_uses_audio_ordinal_not_absolute_
     }
     """
 
-    selected = select_reference_audio_stream(Path("ref.mkv"), stream_override=1)
+    probed = probe_streams(Path("ref.mkv"))
+    selected, _ = select_audio_pair(
+        probed,
+        probed,
+        reference_path=Path("ref.mkv"),
+        comparison_path=Path("ref.mkv"),
+        reference_override=1,
+        comparison_override=None,
+    )
 
-    assert selected.audio_stream_index == 1
-    assert selected.absolute_stream_index == 6
+    assert selected.stream.audio_stream_index == 1
+    assert selected.stream.absolute_stream_index == 6
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_select_reference_audio_stream_override_rejects_absolute_index(
+def test_select_audio_pair_override_rejects_absolute_index(
     mock_run: MagicMock,
 ) -> None:
     mock_run.return_value.stdout = b"""
@@ -480,6 +343,7 @@ def test_select_reference_audio_stream_override_rejects_absolute_index(
       "streams": [
         {
           "index": 5,
+          "codec_type": "audio",
           "codec_name": "aac",
           "channels": 2,
           "channel_layout": "stereo",
@@ -492,11 +356,19 @@ def test_select_reference_audio_stream_override_rejects_absolute_index(
     """
 
     with pytest.raises(AudioAlignmentError, match="available audio stream ordinals: 0"):
-        select_reference_audio_stream(Path("ref.mkv"), stream_override=5)
+        probed = probe_streams(Path("ref.mkv"))
+        select_audio_pair(
+            probed,
+            probed,
+            reference_path=Path("ref.mkv"),
+            comparison_path=Path("ref.mkv"),
+            reference_override=5,
+            comparison_override=None,
+        )
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_select_matching_audio_stream_matches_reference_metadata_over_default_flag(
+def test_select_audio_pair_matches_reference_metadata_over_default_flag(
     mock_run: MagicMock,
 ) -> None:
     mock_run.side_effect = [
@@ -506,6 +378,7 @@ def test_select_matching_audio_stream_matches_reference_metadata_over_default_fl
               "streams": [
                 {
                   "index": 1,
+                  "codec_type": "audio",
                   "codec_name": "aac",
                   "channels": 2,
                   "channel_layout": "stereo",
@@ -523,6 +396,7 @@ def test_select_matching_audio_stream_matches_reference_metadata_over_default_fl
               "streams": [
                 {
                   "index": 7,
+                  "codec_type": "audio",
                   "codec_name": "aac",
                   "channels": 2,
                   "channel_layout": "stereo",
@@ -532,6 +406,7 @@ def test_select_matching_audio_stream_matches_reference_metadata_over_default_fl
                 },
                 {
                   "index": 8,
+                  "codec_type": "audio",
                   "codec_name": "aac",
                   "channels": 2,
                   "channel_layout": "stereo",
@@ -545,19 +420,24 @@ def test_select_matching_audio_stream_matches_reference_metadata_over_default_fl
         ),
     ]
 
-    reference_stream = select_reference_audio_stream(Path("reference.mkv"))
-    selected = select_matching_audio_stream(
-        Path("comparison.mkv"),
-        reference_stream=reference_stream,
+    reference_probe = probe_streams(Path("reference.mkv"))
+    comparison_probe = probe_streams(Path("comparison.mkv"))
+    reference_stream, selected = select_audio_pair(
+        reference_probe,
+        comparison_probe,
+        reference_path=Path("reference.mkv"),
+        comparison_path=Path("comparison.mkv"),
+        reference_override=None,
+        comparison_override=None,
     )
 
-    assert reference_stream.language == "eng"
-    assert selected.audio_stream_index == 1
-    assert selected.absolute_stream_index == 8
+    assert reference_stream.stream.language == "eng"
+    assert selected.stream.audio_stream_index == 1
+    assert selected.stream.absolute_stream_index == 8
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_select_matching_audio_stream_override_wins_over_metadata_match(
+def test_select_audio_pair_override_wins_over_metadata_match(
     mock_run: MagicMock,
 ) -> None:
     mock_run.side_effect = [
@@ -567,6 +447,7 @@ def test_select_matching_audio_stream_override_wins_over_metadata_match(
               "streams": [
                 {
                   "index": 1,
+                  "codec_type": "audio",
                   "codec_name": "aac",
                   "channels": 2,
                   "channel_layout": "stereo",
@@ -584,6 +465,7 @@ def test_select_matching_audio_stream_override_wins_over_metadata_match(
               "streams": [
                 {
                   "index": 7,
+                  "codec_type": "audio",
                   "codec_name": "aac",
                   "channels": 2,
                   "channel_layout": "stereo",
@@ -593,6 +475,7 @@ def test_select_matching_audio_stream_override_wins_over_metadata_match(
                 },
                 {
                   "index": 8,
+                  "codec_type": "audio",
                   "codec_name": "aac",
                   "channels": 6,
                   "channel_layout": "5.1",
@@ -606,19 +489,23 @@ def test_select_matching_audio_stream_override_wins_over_metadata_match(
         ),
     ]
 
-    reference_stream = select_reference_audio_stream(Path("reference.mkv"))
-    selected = select_matching_audio_stream(
-        Path("comparison.mkv"),
-        reference_stream=reference_stream,
-        stream_override=1,
+    reference_probe = probe_streams(Path("reference.mkv"))
+    comparison_probe = probe_streams(Path("comparison.mkv"))
+    _reference_stream, selected = select_audio_pair(
+        reference_probe,
+        comparison_probe,
+        reference_path=Path("reference.mkv"),
+        comparison_path=Path("comparison.mkv"),
+        reference_override=None,
+        comparison_override=1,
     )
 
-    assert selected.audio_stream_index == 1
-    assert selected.absolute_stream_index == 8
+    assert selected.stream.audio_stream_index == 1
+    assert selected.stream.absolute_stream_index == 8
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_select_matching_audio_stream_matches_commentary_reference(
+def test_select_audio_pair_matches_commentary_reference(
     mock_run: MagicMock,
 ) -> None:
     mock_run.side_effect = [
@@ -628,6 +515,7 @@ def test_select_matching_audio_stream_matches_commentary_reference(
               "streams": [
                 {
                   "index": 1,
+                  "codec_type": "audio",
                   "codec_name": "aac",
                   "channels": 2,
                   "channel_layout": "stereo",
@@ -645,6 +533,7 @@ def test_select_matching_audio_stream_matches_commentary_reference(
               "streams": [
                 {
                   "index": 7,
+                  "codec_type": "audio",
                   "codec_name": "aac",
                   "channels": 2,
                   "channel_layout": "stereo",
@@ -654,6 +543,7 @@ def test_select_matching_audio_stream_matches_commentary_reference(
                 },
                 {
                   "index": 8,
+                  "codec_type": "audio",
                   "codec_name": "aac",
                   "channels": 2,
                   "channel_layout": "stereo",
@@ -667,171 +557,333 @@ def test_select_matching_audio_stream_matches_commentary_reference(
         ),
     ]
 
-    reference_stream = select_reference_audio_stream(Path("reference.mkv"))
-    selected = select_matching_audio_stream(
-        Path("comparison.mkv"),
-        reference_stream=reference_stream,
+    reference_probe = probe_streams(Path("reference.mkv"))
+    comparison_probe = probe_streams(Path("comparison.mkv"))
+    reference_stream, selected = select_audio_pair(
+        reference_probe,
+        comparison_probe,
+        reference_path=Path("reference.mkv"),
+        comparison_path=Path("comparison.mkv"),
+        reference_override=None,
+        comparison_override=None,
     )
 
-    assert reference_stream.is_commentary
-    assert selected.is_commentary
-    assert selected.audio_stream_index == 1
-    assert selected.absolute_stream_index == 8
+    assert reference_stream.stream.is_commentary
+    assert selected.stream.is_commentary
+    assert selected.stream.audio_stream_index == 1
+    assert selected.stream.absolute_stream_index == 8
 
 
-@patch("frame_compare.services.alignment_audio.extract_audio")
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_reference_audio_returns_selected_stream(
+def test_select_audio_pair_skips_non_audio_streams(
     mock_run: MagicMock,
-    mock_extract_audio: MagicMock,
 ) -> None:
     mock_run.return_value.stdout = b"""
     {
       "streams": [
         {
-          "index": 5,
-          "codec_name": "aac",
-          "channels": 2,
-          "channel_layout": "stereo",
-          "sample_rate": "48000",
-          "disposition": {"default": 1, "original": 0, "comment": 0},
-          "tags": {"language": "eng"}
-        }
-      ]
-    }
-    """
-    mock_extract_audio.return_value = "audio"
-
-    audio, stream = _extract_reference_audio(Path("ref.mkv"), 8000)
-
-    assert audio == "audio"
-    assert stream.audio_stream_index == 0
-    mock_extract_audio.assert_called_once_with(
-        Path("ref.mkv"),
-        8000,
-        audio_stream_index=0,
-        channel_strategy="mono_downmix",
-        stream=stream,
-    )
-
-
-@patch("frame_compare.services.alignment_audio.extract_audio")
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_reference_audio_applies_override_and_channel_strategy(
-    mock_run: MagicMock,
-    mock_extract_audio: MagicMock,
-) -> None:
-    mock_run.return_value.stdout = b"""
-    {
-      "streams": [
-        {
-          "index": 5,
-          "codec_name": "aac",
-          "channels": 2,
-          "channel_layout": "stereo",
-          "sample_rate": "48000",
-          "disposition": {"default": 1, "original": 0, "comment": 0},
-          "tags": {"language": "eng"}
+          "index": 0,
+          "codec_type": "video",
+          "codec_name": "h264",
+          "start_time": "0.000000",
+          "disposition": {"attached_pic": 0}
         },
         {
-          "index": 6,
+          "index": 1,
+          "codec_type": "audio",
           "codec_name": "aac",
-          "channels": 6,
-          "channel_layout": "5.1",
+          "channels": 2,
+          "channel_layout": "stereo",
           "sample_rate": "48000",
-          "disposition": {"default": 0, "original": 0, "comment": 0},
-          "tags": {"language": "jpn"}
+          "disposition": {"default": 1, "original": 0, "comment": 0},
+          "tags": {"language": "eng"}
         }
       ]
     }
     """
-    mock_extract_audio.return_value = "audio"
 
-    audio, stream = _extract_reference_audio(
-        Path("ref.mkv"),
-        8000,
-        stream_override=1,
-        channel_strategy="best_channel",
+    probed = probe_streams(Path("ref.mkv"))
+    selected, _ = select_audio_pair(
+        probed,
+        probed,
+        reference_path=Path("ref.mkv"),
+        comparison_path=Path("ref.mkv"),
+        reference_override=None,
+        comparison_override=None,
     )
 
-    assert audio == "audio"
-    assert stream.audio_stream_index == 1
-    mock_extract_audio.assert_called_once_with(
-        Path("ref.mkv"),
-        8000,
-        audio_stream_index=1,
-        channel_strategy="best_channel",
-        stream=stream,
-    )
+    assert selected.stream.audio_stream_index == 0
+    assert selected.stream.absolute_stream_index == 1
+    assert selected.video_start.start_time == Fraction(0)
+    assert selected.video_start.basis == "metadata"
 
 
-@patch("frame_compare.services.alignment_audio.extract_audio")
+@pytest.mark.parametrize(
+    "stdout, filename, expected",
+    [
+        pytest.param(
+            b'\n    {\n      "streams": [\n        {\n          "index": 0,\n          "codec_type": "video",\n          "codec_name": "h264",\n          "start_time": "0.041708",\n          "disposition": {"attached_pic": 0}\n        },\n        {\n          "index": 1,\n          "codec_type": "audio",\n          "codec_name": "aac",\n          "channels": 2,\n          "channel_layout": "stereo",\n          "sample_rate": "48000",\n          "start_time": "0.021333",\n          "disposition": {"default": 1, "original": 0, "comment": 0},\n          "tags": {"language": "eng"}\n        }\n      ],\n      "format": {"start_time": "0.000000"}\n    }\n    ',
+            "ref.mkv",
+            {
+                "video_start": Fraction("0.041708"),
+                "video_basis": "metadata",
+                "audio_start": Fraction("0.021333"),
+                "audio_basis": "metadata",
+            },
+            id="probe_reads_video_start_time_in_the_same_call",
+        ),
+        pytest.param(
+            b'\n    {\n      "streams": [\n        {\n          "index": 0,\n          "codec_type": "video",\n          "codec_name": "mjpeg",\n          "start_time": "0.500000",\n          "disposition": {"attached_pic": 1}\n        },\n        {\n          "index": 1,\n          "codec_type": "video",\n          "codec_name": "h264",\n          "disposition": {"attached_pic": 0}\n        },\n        {\n          "index": 2,\n          "codec_type": "audio",\n          "codec_name": "aac",\n          "channels": 1,\n          "channel_layout": "mono",\n          "sample_rate": "48000",\n          "disposition": {"default": 0, "original": 0, "comment": 0},\n          "tags": {}\n        }\n      ]\n    }\n    ',
+            "ref.mkv",
+            {"video_start": Fraction(0), "video_basis": "default_zero"},
+            id="probe_skips_attached_pic_and_defaults_missing_video_start",
+        ),
+        pytest.param(
+            b'\n    {\n      "streams": [\n        {\n          "index": 0,\n          "codec_type": "audio",\n          "codec_name": "aac",\n          "channels": 2,\n          "channel_layout": "stereo",\n          "sample_rate": "48000",\n          "disposition": {"default": 0, "original": 0, "comment": 0},\n          "tags": {}\n        }\n      ]\n    }\n    ',
+            "ref.mkv",
+            {"video_start": Fraction(0), "video_basis": "default_zero"},
+            id="probe_without_video_stream_defaults_video_start",
+        ),
+        pytest.param(
+            b'{"streams":[{"index":1,"codec_type":"audio","time_base":"1/48000","duration_ts":1440000,"duration":"30.0"}],"format":{"duration":"600.0"}}',
+            "short-audio.mkv",
+            {"duration": Fraction(30), "duration_basis": "duration_ts"},
+            id="stream_probe_prefers_selected_stream_duration_over_container",
+        ),
+        pytest.param(
+            b'{"streams":[{"index":1,"codec_type":"audio","time_base":"1/48000"}],"format":{"duration":"7200.0"}}',
+            "unknown-audio.mkv",
+            {"duration": None, "duration_basis": "unavailable"},
+            id="stream_probe_does_not_substitute_long_container_duration",
+        ),
+        pytest.param(
+            b'{"streams":[{"index":1,"codec_type":"audio","start_time":"-1.25","time_base":"1/48000","duration_ts":192000}]}',
+            "negative-start.mkv",
+            {"audio_start": Fraction(-5, 4), "duration": Fraction(4)},
+            id="stream_probe_preserves_negative_selected_stream_start",
+        ),
+        pytest.param(
+            b'{"streams":[{"index":1,"codec_type":"audio","start_time":"Infinity","duration":"Infinity","time_base":"1/48000"}]}',
+            "invalid-time.mkv",
+            {"audio_start": Fraction(0), "duration": None},
+            id="stream_probe_ignores_non_finite_timing_metadata",
+        ),
+    ],
+)
 @patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_extract_matching_audio_uses_reference_matched_stream(
-    mock_run: MagicMock,
-    mock_extract_audio: MagicMock,
+def test_probe_stream_timing(
+    mock_run: MagicMock, stdout: bytes, filename: str, expected: dict[str, Fraction | str | None]
 ) -> None:
-    mock_run.side_effect = [
-        MagicMock(
-            stdout=b"""
-            {
-              "streams": [
-                {
-                  "index": 1,
-                  "codec_name": "aac",
-                  "channels": 2,
-                  "channel_layout": "stereo",
-                  "sample_rate": "48000",
-                  "disposition": {"default": 1, "original": 0, "comment": 0},
-                  "tags": {"language": "eng"}
-                }
-              ]
-            }
-            """
-        ),
-        MagicMock(
-            stdout=b"""
-            {
-              "streams": [
-                {
-                  "index": 5,
-                  "codec_name": "aac",
-                  "channels": 2,
-                  "channel_layout": "stereo",
-                  "sample_rate": "48000",
-                  "disposition": {"default": 1, "original": 0, "comment": 0},
-                  "tags": {"language": "jpn"}
-                },
-                {
-                  "index": 6,
-                  "codec_name": "aac",
-                  "channels": 2,
-                  "channel_layout": "stereo",
-                  "sample_rate": "48000",
-                  "disposition": {"default": 0, "original": 0, "comment": 0},
-                  "tags": {"language": "eng"}
-                }
-              ]
-            }
-            """
-        ),
-    ]
-    mock_extract_audio.return_value = "audio"
-    reference_stream = select_reference_audio_stream(Path("reference.mkv"))
+    mock_run.return_value.stdout = stdout
+    probed = probe_streams(Path(filename))
+    timeline = probed.audio[0].timeline
+    actual = {
+        "video_start": probed.video_start.start_time,
+        "video_basis": probed.video_start.basis,
+        "audio_start": timeline.start_time,
+        "audio_basis": timeline.start_time_basis,
+        "duration": timeline.duration,
+        "duration_basis": timeline.duration_basis,
+    }
+    assert {key: actual[key] for key in expected} == expected
 
-    audio = _extract_matching_audio(
-        Path("comparison.mkv"),
-        8000,
-        reference_stream=reference_stream,
-    )
 
-    assert audio == "audio"
-    called_stream = mock_extract_audio.call_args.kwargs["stream"]
-    assert called_stream.audio_stream_index == 1
-    mock_extract_audio.assert_called_once_with(
+def test_probe_with_no_audio_streams_is_alignment_error() -> None:
+    with patch("frame_compare.services.alignment_audio.run_subprocess") as mock_run:
+        mock_run.return_value.stdout = b'{"streams": [{}]}'
+        with pytest.raises(AudioAlignmentError, match="no audio streams found"):
+            probe_streams(Path("ref.mkv"))
+
+
+def test_collection_argv_is_whole_track_mono_8khz() -> None:
+    downmix = collection_argv(
         Path("comparison.mkv"),
-        8000,
-        audio_stream_index=1,
+        _test_stream(),
         channel_strategy="mono_downmix",
-        stream=called_stream,
+        timeline_scale=Fraction(1),
     )
+    assert downmix[:3] == ["ffmpeg", "-i", "comparison.mkv"]
+    assert downmix[3:6] == ["-map", "0:a:2", "-vn"]
+    assert "-ac" in downmix and "1" in downmix
+    assert "aresample=8000" in downmix[downmix.index("-af") + 1]
+    assert downmix[-3:] == ["-f", "f32le", "-"]
+    assert "atrim" not in " ".join(downmix)
+
+    best = collection_argv(
+        Path("comparison.mkv"),
+        _test_stream(),
+        channel_strategy="best_channel",
+        timeline_scale=Fraction(1),
+    )
+    assert "-ac" not in best
+    assert "pan=mono" in best[best.index("-af") + 1]
+    assert "aresample=8000" in best[best.index("-af") + 1]
+
+
+@pytest.mark.parametrize(
+    ("scale", "expected"),
+    [
+        (Fraction(1), None),
+        (Fraction(1001, 1000), (8008, 8000)),
+        (Fraction(25, 24), (8350, 8016)),
+        (Fraction(25025, 24000), (9009, 8640)),
+        (Fraction(1001, 1200), (8008, 9600)),
+        (Fraction(400001, 400000), "unsupported"),
+    ],
+)
+def test_retime_rates_are_exact(scale: Fraction, expected: tuple[int, int] | None | str) -> None:
+    if expected == "unsupported":
+        with pytest.raises(AudioAlignmentError) as exc_info:
+            retime_rates(scale)
+        assert exc_info.value.category == "selected_audio_timeline_unavailable"
+        return
+    assert retime_rates(scale) == expected
+
+
+def test_collection_argv_retime_filters_stretch_audio_time() -> None:
+    argv = collection_argv(
+        Path("comparison.mkv"),
+        _test_stream(),
+        channel_strategy="mono_downmix",
+        timeline_scale=Fraction(1001, 1000),
+    )
+    assert argv[argv.index("-af") + 1].endswith("aresample=8008,asetrate=8000,aresample=8000")
+
+
+def _test_stream() -> AudioStreamInfo:
+    return AudioStreamInfo(
+        audio_stream_index=2,
+        absolute_stream_index=3,
+        codec_name="aac",
+        channels=2,
+        channel_layout="stereo",
+        sample_rate=48000,
+        language="eng",
+        is_default=True,
+        is_original=False,
+        is_commentary=False,
+        timeline=AudioStreamTimeline(
+            start_time=Fraction(0),
+            duration=Fraction(20),
+            time_base=Fraction(1, 48000),
+            duration_basis="stream_duration",
+        ),
+    )
+
+
+def _pair_stream(
+    index: int,
+    language: str | None,
+    *,
+    default: bool = False,
+    commentary: bool = False,
+) -> AudioStreamInfo:
+    return AudioStreamInfo(
+        audio_stream_index=index,
+        absolute_stream_index=index + 1,
+        codec_name="aac",
+        channels=2,
+        channel_layout="stereo",
+        sample_rate=48000,
+        language=language,
+        is_default=default,
+        is_original=False,
+        is_commentary=commentary,
+    )
+
+
+def _pair_probe(*languages: tuple[str | None, bool, bool]) -> ProbedStreams:
+    return ProbedStreams(
+        audio=tuple(
+            _pair_stream(index, language, default=default, commentary=commentary)
+            for index, (language, default, commentary) in enumerate(languages)
+        ),
+        video_start=VideoStreamStart(start_time=Fraction(0), basis="default_zero"),
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "reference",
+        "comparison",
+        "reference_override",
+        "comparison_override",
+        "expected",
+    ),
+    [
+        pytest.param(
+            (("jpn", True, False), ("eng", False, False)),
+            (("eng", False, False),),
+            None,
+            None,
+            ("eng", "eng"),
+            id="shared-language-wins",
+        ),
+        pytest.param(
+            (("jpn", True, False), ("eng", False, False)),
+            (("jpn", False, False), ("eng", False, False)),
+            None,
+            None,
+            ("jpn", "jpn"),
+            id="default-language-is-shared",
+        ),
+        pytest.param(
+            ((None, True, False), ("eng", False, False)),
+            (("eng", False, False),),
+            None,
+            None,
+            (None, "eng"),
+            id="unknown-default-language-keeps-default",
+        ),
+        pytest.param(
+            (("jpn", True, False),),
+            (("eng", False, False),),
+            None,
+            None,
+            ("jpn", "eng"),
+            id="no-shared-language-keeps-default",
+        ),
+        pytest.param(
+            (("jpn", True, False), ("eng", False, False)),
+            (("eng", False, False),),
+            0,
+            None,
+            ("jpn", "eng"),
+            id="reference-override-disables-exception",
+        ),
+        pytest.param(
+            (("jpn", True, False), ("eng", False, False)),
+            (("jpn", False, False), ("eng", False, False)),
+            None,
+            1,
+            ("eng", "eng"),
+            id="comparison-override-narrows-shared-set",
+        ),
+        pytest.param(
+            (("jpn", True, False), ("eng", False, True)),
+            (("eng", False, False),),
+            None,
+            None,
+            ("jpn", "eng"),
+            id="commentary-is-not-shared",
+        ),
+    ],
+)
+def test_select_audio_pair_prefers_a_shared_language(
+    reference: tuple[tuple[str | None, bool, bool], ...],
+    comparison: tuple[tuple[str | None, bool, bool], ...],
+    reference_override: int | None,
+    comparison_override: int | None,
+    expected: tuple[str | None, str | None],
+) -> None:
+    reference_selection, comparison_selection = select_audio_pair(
+        _pair_probe(*reference),
+        _pair_probe(*comparison),
+        reference_path=Path("reference.mkv"),
+        comparison_path=Path("comparison.mkv"),
+        reference_override=reference_override,
+        comparison_override=comparison_override,
+    )
+
+    assert reference_selection.stream.language == expected[0]
+    assert comparison_selection.stream.language == expected[1]

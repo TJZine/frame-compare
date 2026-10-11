@@ -20,6 +20,8 @@ from frame_compare.vs import (  # noqa: E402
     detect_plugins,
     is_vapoursynth_available,
 )
+from frame_compare.vs.env import ensure_vs_environment  # noqa: E402
+from frame_compare.vs.loader import DefaultVSLoader  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -87,7 +89,7 @@ def test_libplacebo_tonemap_succeeds_in_docker():
     """Exercise tonemap in Docker; require libplacebo only when configured.
 
     By default, Docker Desktop environments (macOS/Windows) may not have a usable
-    Vulkan device. In that case, `_apply_libplacebo` may return None and
+    Vulkan device. In that case, `apply_libplacebo` may return None and
     `apply_tonemap` must fall back without raising.
 
     Set `FRAME_COMPARE_REQUIRE_LIBPLACEBO=1` to require libplacebo to succeed.
@@ -108,7 +110,8 @@ def test_libplacebo_tonemap_succeeds_in_docker():
         import vapoursynth as vs
 
         from frame_compare.vs import HDRMetadata, TonemapSettings, apply_tonemap
-        from frame_compare.vs.tonemap import _apply_libplacebo, detect_plugins
+        from frame_compare.vs.env import detect_plugins
+        from frame_compare.vs.tonemap_libplacebo import apply_libplacebo
 
         core = vs.core
         require_libplacebo = os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1"
@@ -144,9 +147,9 @@ def test_libplacebo_tonemap_succeeds_in_docker():
         )
 
         if require_libplacebo:
-            libplacebo_out = _apply_libplacebo(clip, settings, core, hdr_metadata)
+            libplacebo_out = apply_libplacebo(clip, settings, core, hdr_metadata)
             assert libplacebo_out is not None, (
-                "_apply_libplacebo returned None while FRAME_COMPARE_REQUIRE_LIBPLACEBO=1; "
+                "apply_libplacebo returned None while FRAME_COMPARE_REQUIRE_LIBPLACEBO=1; "
                 "Vulkan/libplacebo backend is not usable in this environment."
             )
             _ = libplacebo_out.get_frame(0)
@@ -161,3 +164,15 @@ def test_libplacebo_tonemap_succeeds_in_docker():
         """
     )
     _assert_vs_process_ok(result)
+
+
+@pytest.mark.vs_required
+def test_real_loader_sets_cache_and_unset_loader_preserves_it() -> None:
+    core = ensure_vs_environment()
+    original = core.max_cache_size
+    try:
+        assert DefaultVSLoader(memory_limit_mb=1024).ensure_core().max_cache_size == 1024
+        core.max_cache_size = 1536
+        assert DefaultVSLoader().ensure_core().max_cache_size == 1536
+    finally:
+        core.max_cache_size = original

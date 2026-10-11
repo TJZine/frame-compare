@@ -9,11 +9,12 @@ A version shown here is supported only as part of the complete profile described
 
 | Component | Previous baseline | Selected component | Upstream date | Selection kind | Why this selection |
 | --- | --- | --- | --- | --- | --- |
-| VapourSynth | R78 | **R79**, commit `acabf605b2205b32d65859bb2736405719d2fafd` | 2026-08-07 | Formal stable release | Latest non-prerelease release. It supplies CPython 3.13-compatible ABI3 wheels, keeps API R4.2, and improves cache cycling, `vspipe` MKV output, and zimg API validation. |
-| VSView | Previous viewer integration | **0.10.3** | 2026-08-16 | Stable Python release | Maintained native viewer. Frame Compare uses its documented `set_output` API and named outputs plus the packaged native alignment panel; the `recommended`/`full` extras are not part of the supported graph. |
+| Python | 3.13.15 | **3.13.16** | 2026-09-30 | Stable maintenance release | Security and maintenance fixes; Docker and Windows retain CPython 3.13. |
+| VapourSynth | R80 | **R81**, commit `dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a` | 2026-10-04 | Formal stable release | Fixes GPU memory sharing, Matroska muxer access violations, logging deadlocks, and frame-request handling. Retains CPython 3.12 ABI3 wheels and API R4.3; Frame Compare keeps its CPU-frame path. |
+| VSView | 0.12.0 | **0.12.1** | 2026-10-09 | Stable Python release | Maintained native viewer; 0.12.1 fixes non-contiguous buffers for clips whose dimensions are not 64-aligned and CLI `--arg`/`--qt-arg` parsing. Frame Compare uses its documented `set_output` API and named outputs plus the packaged native alignment panel; the `recommended`/`full` extras are not part of the supported graph. |
 | PySide6 | Previous Qt binding | **6.11.2** | Resolved 2026-08-30 | Locked Python resolution | VSView's documented Qt backend. The portable bundle pins the matching Qt runtime and requires native startup proof before release. |
-| VSJetEngine | 1.2.0 | **1.7.0** | 2026-08-21 | Stable Python release | Current locked VSView dependency resolution. |
-| VSView support graph | Previous viewer dependency graph | **jetpytools 3.1.1; vsjetengine 1.7.0; BestSource 21.0; vspackrgb 1.4.0** | Resolved 2026-08-30 | Locked Python resolution | Accepted base VSView dependency graph; these packages serve the viewer/UI runtime and are hash-locked on every supported Python platform. |
+| VSJetEngine | 1.7.0 | **1.8.0** | 2026-09-25 | Stable Python release | Current locked VSView dependency resolution; 1.8.0 fixes frame-index tagging during out-of-order rendering and thread-safety races. |
+| VSView support graph | jetpytools 3.1.1; vspackrgb 1.4.0; vsview-cli 1.2.0 | **Cyclopts 5.2.0; jetpytools 3.1.2; vsjetengine 1.8.0; BestSource 22 (tag `R22`, commit `a0fab5708b28920957679825797692f6e4a23674`); vspackrgb 2.0.0** | BestSource 2026-09-16 | Locked Python resolution | Selected base VSView dependency graph; these packages serve the viewer/UI runtime and are hash-locked on every supported Python platform. BestSource 22 requires VapourSynth R80. |
 | L-SMASH-Works | 1296.0.0.0 | **1310.0.0.0**, commit `7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67` | 2026-08-23 | Formal native release | Latest stable native release. It preserves the API 4 video source surface and adds audio source filters plus audio-gap corrections. |
 | Windows L-SMASH-Works package | 1296.0.0.1 | **vapoursynth-lsmas 1310.0.0.0** | 2026-08-23 | Non-yanked official PyPI wheel | Official wheel for the 1310 native lineage. Its plugin DLL imports only Windows/UCRT system libraries; unlike the release archive DLL, it does not require external MSVCP140 or VCRUNTIME140 DLLs. |
 | L-SMASH | commit `84740c5d960ab622f4c08b971dc59192bc27ef74` | commit **`d186eb95388710a7a91f6fd353169b457ebbb9db`** | 2026-07-28 | Pinned maintainer-fork commit, not a release | Exact L-SMASH revision selected and tested by L-SMASH-Works 1310. No newer appropriate formal stable tag supersedes it. |
@@ -22,7 +23,7 @@ A version shown here is supported only as part of the complete profile described
 | vs-placebo | 2.0.2 | **2.0.4**, commit `3cfd23f257ecb62b0cbd81eaaca092e18ae8e579` | 2026-07-14 | Non-yanked stable release | Latest non-yanked stable wheel; 2.0.3 is yanked. Requires Python 3.12+ and VapourSynth R74+. |
 | libplacebo used by vs-placebo | older 2.0.2 lineage | commit **`a7a18af88ff0a17c04840dcb3246047bb6b46df3`** | 2026-07-08 | Upstream-pinned commit | Revision selected by the vs-placebo 2.0.4 wheel build. It includes a correction for luminance clipping when no tone mapping is needed. |
 | libdovi used by vs-placebo | older wheel lineage | **3.3.2**, commit `4fd2b2235c9f93582dd4a00e65ee34a07800afd7` | 2025-06-04 | Upstream-pinned tag | Tag selected by the vs-placebo 2.0.4 wheel build for Dolby Vision metadata handling. |
-| Windows FFmpeg | earlier retained 8.1 build | **`n8.1.2-34-g9b6c8969e0`**, BtbN build `autobuild-2026-07-31-14-10` | 2026-07-31 | Immutable retained release artifact | Newest selected end-of-month Windows x64 LGPL-only artifact from the stable FFmpeg 8.1 branch. It is not a master snapshot. |
+| Windows FFmpeg | `n8.1.2-50-g1a748fe2cd` (August 2026 build) | **`n8.1.3-9-g29e619e767`**, BtbN build `autobuild-2026-09-30-13-08` | 2026-09-30 | Immutable retained release artifact | End-of-month Windows x64 LGPL-only artifact from the stable FFmpeg 8.1 branch. Preserves the archive layout and license profile; does not adopt FFmpeg 9. |
 | Linux FFmpeg | Debian Trixie packages | **`7:7.1.5-0+deb13u1`** | Resolved during validation | GPL-enabled Debian package | Runtime and development packages remain aligned to Debian Trixie. Required Docker fixtures use the packaged `libx264` and `libx265` encoders; Frame Compare does not replace Debian FFmpeg with a custom upstream build. |
 
 Primary upstream evidence is recorded in `Dockerfile` and
@@ -31,6 +32,13 @@ Primary upstream evidence is recorded in `Dockerfile` and
 tree; it does not rely on GitHub-generated archive bytes as an immutable boundary.
 Windows binary/source artifacts remain fail-closed on exact downloaded byte size and
 SHA-256. Both surfaces record source revisions and license metadata.
+
+The official L-SMASH-Works, vs-placebo, and PySide6 wheels keep the library
+versions actually used by their upstream builds. New standalone dav1d, libxml2,
+libvpx, xxHash, nv-codec-headers, or libdovi releases do not change those binaries;
+only a new verified upstream wheel can refresh their corresponding-source records.
+Qt 6.12 source availability likewise does not change the selected PySide6 6.11.2
+wheel graph. Physical Windows acceptance for this candidate remains required.
 
 ## Runtime profiles
 
@@ -47,12 +55,13 @@ and Frame Compare-owned indexes before reuse.
 
 ### Windows x64 portable
 
-- VapourSynth R79 portable runtime and CPython 3.13 wheel layout.
+- CPython 3.13.16 embeddable runtime.
+- VapourSynth R81 portable runtime and CPython 3.13 wheel layout.
 - L-SMASH-Works 1310 through the official `vapoursynth-lsmas 1310.0.0.0`
   Windows wheel.
 - vs-placebo 2.0.4 Windows wheel with its selected libplacebo and libdovi
   lineages.
-- VSView 0.10.3 with its base dependency graph, PySide6 6.11.2, BestSource,
+- VSView 0.12.1 with its base dependency graph, PySide6 6.11.2, BestSource,
   vspackrgb, and the packaged `frame-compare-alignment-review` panel entry point
   for optional native interactive review. The runtime and panel metadata must come
   from the same environment; a PATH-only VSView executable is unsupported. BestSource
@@ -65,7 +74,8 @@ and Frame Compare-owned indexes before reuse.
 
 ### Debian Trixie / Docker
 
-- VapourSynth R79 manylinux wheel.
+- CPython 3.13.16 slim-trixie image, with uv 0.13.0 pinned by image digest.
+- VapourSynth R81 manylinux wheel.
 - L-SMASH-Works 1310 built from source against VapourSynth API 4 and the Debian
   FFmpeg development ABI.
 - OBUParse built as `libobuparse.so.2` from the pinned commit required by the
@@ -98,13 +108,51 @@ from the active pull request and the corresponding `SOURCES.json` provenance art
 
 ## Relevant compatibility changes
 
-### VapourSynth R79
+### VapourSynth R81
 
-R79 keeps API R4.2 and adds cache-cycle improvements, Matroska output support in
-`vspipe`, and a fix for the zimg API check. The refresh also preserves the R78-era
-CPython 3.13-compatible ABI3 wheel and C++20 native-build requirements. Runtime
-diagnostics read the public release identity from `vapoursynth.__version__` and the
-API identity separately from `vapoursynth.__api_version__`.
+R81 replaces the R80 baseline. It improves upstream GPU-frame transfer and sharing,
+fixes an access violation in the Matroska muxer, reduces logging deadlocks, and
+clamps negative frame requests instead of raising a fatal error. Frame Compare
+continues to validate its own requested frame bounds.
+
+Runtime diagnostics read the public release identity
+from `vapoursynth.__version__` and the API identity separately from
+`vapoursynth.__api_version__`; R81 reports API R4.3. The API major version remains 4,
+so the plugin contract is unchanged: L-SMASH-Works 1310, FFMS2 5.0, and vs-placebo
+2.0.4 continue to build or load against API 4 without opting into R4.3 features, and
+the media-runtime fingerprints continue to record only the API major version.
+The refresh preserves the CPython 3.12 ABI3 wheel used by CPython 3.13 and the
+C++20 native-build requirement.
+
+- Vulkan 1.4 GPU-frame support exists upstream. Frame Compare does not add a
+  GPU-frame execution path, option, or runtime profile; the CPU-frame path and the
+  software-Vulkan validation used by vs-placebo are unchanged.
+- Upstream now publishes free-threaded CPython wheels. The packaged runtimes remain
+  on the existing CPython 3.13 ABI3 layout.
+- Nodes and function types can no longer be stored as frame properties. Frame
+  Compare writes only scalar frame properties, so its property handling is
+  unaffected.
+- The R80 source tree no longer ships the legacy API 3 headers (`VapourSynth.h`,
+  `VSHelper.h`). The Docker build installs only the API 4 headers, which are the
+  only VapourSynth headers the selected L-SMASH-Works and FFMS2 sources include.
+
+### VSView 0.12 and vspackrgb 2.0
+
+VSView 0.12 replaces the separate `vsview-cli` distribution with Cyclopts. The
+portable inventory follows the resolved graph and verifies its native `vsview.cli`
+entry point. vspackrgb 2.0 replaces its Cython extension with `vspackrgb.rust`;
+packaged native-extension verification must load that module. The public
+Frame Compare launcher still runs VSView inside the managed interpreter.
+The release adds workspace lifecycle hooks and serializes script execution;
+plugin discovery, panel callbacks, frame-0 rendering, and visible Windows review
+require candidate-specific acceptance.
+
+### BestSource R22
+
+BestSource R22 reworks GPU decoding around Vulkan and is not source compatible with
+R21. It remains a VSView/UI dependency only: Frame Compare sessions, analysis, probe,
+render, index, and cache-key source loading continue to use L-SMASH-Works, and
+BestSource is not part of any media-runtime fingerprint scope.
 
 ### L-SMASH-Works 1310
 
@@ -150,13 +198,19 @@ fingerprints for:
 | --- | --- | --- |
 | `analysis` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker | vs-placebo and standalone FFmpeg |
 | `probe` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, including OBUParse on Docker, plus profile-specific standalone FFmpeg/ffprobe | vs-placebo |
-| `alignment` | Profile-specific standalone FFmpeg lineage | VapourSynth and tone mapping |
+| `alignment` | VapourSynth and the profile-specific L-SMASH-Works decoder lineage, plus profile-specific standalone FFmpeg/ffprobe | vs-placebo and tone mapping |
 | `index` | L-SMASH-Works, L-SMASH, profile-specific decoder FFmpeg, Docker OBUParse, and index policy | standalone FFmpeg and tone mapping |
 | `full` | Complete supported deployment profile | None |
 
 This avoids both unsafe reuse and unnecessary invalidation. A tone-mapping-only update
 does not discard metric arrays; a standalone FFmpeg update invalidates alignment reuse
 without discarding L-SMASH-Works indexes.
+
+The R81 refresh changes the VapourSynth decoder identity for every profile, so
+`analysis`, `probe`, `alignment`, `index`, and `full` fingerprints change everywhere.
+The Windows portable `alignment` fingerprint also changes because the retained BtbN
+FFmpeg artifact moved to the September 2026 build. Existing entries and indexes under the previous
+fingerprints miss and rebuild under the normal cache policy; there is no migration.
 
 The shared alignment reuse cache is schema v2 after the viewer migration. It stores
 neutral `computed` and `interactive_confirmed` origins. Existing schema-v1 entries are
@@ -170,9 +224,9 @@ Frame Compare-owned L-SMASH-Works indexes use a profile-scoped filename:
 <media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi
 ```
 
-The current managed/portable Windows token is `lsw1310-56c451f754fd`; the unmanaged
-Windows token is `lsw1310-a619e5ff5505`; and the Debian/Docker token is
-`lsw1310-b86875cb61bd`. Legacy `<media>.lwi` files adjacent to the media file
+The current managed/portable Windows token is `lsw1310-f125953022b6`; the unmanaged
+Windows token is `lsw1310-1ec4b81a7724`; and the Debian/Docker token is
+`lsw1310-877219813395`. Legacy `<media>.lwi` files adjacent to the media file
 are ignored rather than deleted. A corrupt Frame Compare-owned index is removed and
 rebuilt once, with a warning when removal or rebuilding fails and a cache-free source
 open as the last recovery path for an unusable index location.
@@ -240,14 +294,16 @@ deterministic layout. For generated HDR fixtures, `ffprobe` is the encoded
 stream-signal authority;
 the Docker gate separately proves that both source plugins retain at least 10-bit
 decoded precision because L-SMASH-Works does not expose every stream color tag as a
-frame property. The Linux GUI verifier contract requires the VSView 0.10.3 image to
+frame property. The Linux GUI verifier contract requires the VSView 0.12.1 image to
 discover and load the exact native panel entry point, construct its inactive panel
 offscreen, load a production-generated L-SMASH session, register named
 `Reference`/`Comparison 1` outputs, render frame 0 for both outputs, and round-trip a
-typed sibling result while rejecting malformed data. This feature run has static
-contract proof only; execution remains unavailable/unverified until a compatible
-Linux/X11 host runs it. That contract is not visible X11 desktop proof and does not
-replace final validation on the supported physical Windows system.
+typed sibling result while rejecting malformed data. The R81 dependency refresh
+passed the inside-container offscreen proof with real L-SMASH media on macOS
+Docker Desktop; its evidence is recorded in the
+[Windows 10 handoff](plans/2026-10-07-dependency-refresh-windows10-handoff.md).
+The Linux X11 host wrapper and visible desktop launch remain unverified.
+Offscreen proof does not replace final validation on the supported physical Windows system.
 macOS offscreen or synthetic-panel proof exercises the Python/Qt/plugin contract only;
 when the host does not provide `core.lsmas`, it is not native L-SMASH media proof and
 must not be reported as such.

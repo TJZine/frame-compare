@@ -11,15 +11,14 @@ from frame_compare.orchestration import preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 
 from .execute_run_helpers import (
-    RUN_FOLDERS_CONFIG,
     FakeFFmpegRunner,
     FakeVSLoader,
-    create_config,
     create_video_files,
 )
+from .preparation_test_support import MINIMAL_CONFIG, create_config
 
 TMDB_RUN_FOLDERS_CONFIG = (
-    RUN_FOLDERS_CONFIG
+    MINIMAL_CONFIG
     + """
 [tmdb]
 enabled = true

@@ -17,24 +17,26 @@ flowchart TD
     I --> J["Dark, bright, and motion selection"]
     G --> K["Audio alignment"]
     J --> K
-    K --> L{"Reusable accepted offset available?"}
-    L -->|Yes| M["Apply accepted alignment"]
-    L -->|No| N["Audio correlation"]
-    N --> O{"Native VSView review enabled or required?"}
-    O -->|Yes| P["Native VSView alignment panel"]
-    O -->|No| Q["Apply computed alignment"]
-    P --> R["Apply verified alignment"]
-    M --> S["Finalize shared aligned overlap and frame mapping"]
-    Q --> S
-    R --> S
+    K --> L{"Accepted offset reusable?"}
+    L -->|Yes| M["Reuse the accepted offset"]
+    L -->|No| N["Audio correlation and video confirmation"]
+    N --> O{"Automatic authority checks pass?"}
+    O -->|Yes| Q["Apply the automatic offset"]
+    O -->|No| P["Keep the current alignment"]
+    M --> V{"VSView review enabled?"}
+    Q --> V
+    P --> V
+    V -->|Yes| W["VSView alignment panel"]
+    V -->|No| S["Finalize shared aligned overlap and frame mapping"]
+    W --> S
     S --> T{"HDR tonemapping required?"}
     T -->|No| U["Render SDR screenshots and overlays"]
-    T -->|Yes| V["VapourSynth and vs-placebo tonemapping"]
-    V --> U
-    U --> W["Run metadata and offline HTML report"]
-    W --> X{"Publishing enabled?"}
-    X -->|No| Y["Local result"]
-    X -->|Yes| Z["Optional slow.pics upload and webhook"]
+    T -->|Yes| X["VapourSynth and vs-placebo tonemapping"]
+    X --> U
+    U --> Y["Run metadata and offline HTML report"]
+    Y --> Z{"Publishing enabled?"}
+    Z -->|No| AA["Local result"]
+    Z -->|Yes| AB["Optional slow.pics upload and webhook"]
 ```
 
 ## 1. Discovery and validation
@@ -71,16 +73,24 @@ arrays. Selection counts and quantile choices are applied after metrics are avai
 
 ## 4. Alignment
 
-The initial source-frame plan is normalized into the aligned comparison domain.
-Automatic audio correlation can estimate offsets when sources begin at different times
-or contain different trims. Previously accepted offsets can be reused, and the
-native VSView alignment panel can open when verification is enabled or required. The
-panel is available only from the same environment as Frame Compare and is inert for
-ordinary VSView sessions.
+The frame plan is mapped into the aligned comparison domain. Audio correlation proposes
+an offset. Frame Compare applies a fresh automatic offset only when decoded video
+confirms the frame offset, the audio authority recount passes, competing runs and
+credible chunk disagreements are resolved, and no alternative offset is confirmed.
+A candidate remains `NOT APPLIED` if any authority check fails, even when video
+confirms it; the current alignment stays.
+
+An offset accepted in an earlier run is reused while the sources and settings still
+match. With VSView review enabled, the panel opens after alignment unless a complete set
+of previously confirmed offsets was reused. The panel works only from the same
+environment as Frame Compare.
 
 Correlation is evidence, not certainty. Silence, replaced music, substantially different
 edits, or unrelated audio streams can produce weak or misleading matches. Review motion,
 cuts, and dialogue in the final report.
+
+For details, see [Audio alignment](audio-alignment.md) and
+[VSView alignment review](vsview-review.md).
 
 ## 5. Rendering and tonemapping
 
@@ -107,13 +117,14 @@ A local comparison does not require either integration.
 | --- | --- |
 | Analysis cache | Reuse luminance and motion metrics when the relevant source, window, active picture, algorithm, and runtime identity still match |
 | Probe cache | Reuse validated source properties for compatible sources and runtime identity |
-| Alignment reuse cache | Reuse accepted computed or interactively confirmed source offsets; schema-v1 entries are ignored after the VSView migration |
+| Alignment reuse cache | Reuse accepted computed or confirmed offsets while sources and settings match |
+| `alignment_diagnostics/` | Record each comparison's alignment evidence for review; never changes trims |
 | Frame Compare-owned `.lwi` index | Isolate L-SMASH-Works indexes by selected runtime lineage instead of trusting ambiguous legacy sidecars |
 | `run_info.toml` | Record the reserved run identity and runtime provenance |
 | `run_result.toml` | Record the completed or failed lifecycle result used by history commands |
 | `report.html` and `screenshots/` | Preserve the reviewable comparison |
-| Native alignment result sidecar | Store the typed, session-bound panel decision beside the generated VSView script; malformed, stale, mixed, duplicate, incomplete, and out-of-bounds results are rejected |
+| Native alignment result sidecar | Store the saved panel decision beside the generated VSView session; see [VSView alignment review](vsview-review.md) |
 
 For implementation ownership and exact phase boundaries, see
-[Current Architecture](../current-architecture.md). For exact command, configuration,
-and persistence behavior, see the [CLI Behavioral Contract](../current-cli-contract.md).
+[Current architecture](../current-architecture.md). For exact command, configuration,
+and persistence behavior, see the [CLI behavioral contract](../current-cli-contract.md).

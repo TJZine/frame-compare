@@ -16,6 +16,7 @@ from frame_compare.vs.types import SourceInfo
 from tests.orchestration.preparation_test_support import (
     ALIGNMENT_CONFIG,
     METRIC_CONFIG,
+    source_override_config,
 )
 from tests.orchestration.preparation_test_support import (
     create_config as _create_config,
@@ -30,11 +31,16 @@ import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.orchestration.active_rect import metric_cache_request_for_clip
+from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.orchestration.execution_types import PrepState
+from frame_compare.orchestration.probing.probe_cache import (
+    compute_probe_cache_key,
+    save_clip_probe_cache,
+)
 from frame_compare.services.alignment_manual_overrides import MANUAL_OVERRIDES_FILE
 from tests.orchestration.execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
-    metric_cache_request_for_cache_inputs,
+    metric_cache_fingerprint,
     write_metrics_cache,
     write_probe_cache_for_inputs,
 )
@@ -84,7 +90,7 @@ def _prepared_metric_cache_fingerprint(source_paths: list[Path], *, prep: PrepSt
 def test_execute_prep_rejects_mutually_exclusive_cache_flags(tmp_path: Path) -> None:
     request = RunRequest(root=tmp_path, no_cache=True, from_cache_only=True)
 
-    with pytest.raises(MetricsCalculationError, match="mutually exclusive"):
+    with pytest.raises(ConfigValidationError, match="mutually exclusive"):
         asyncio.run(preparation.execute_prep(request, RunDependencies()))
 
 
@@ -118,14 +124,13 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     alignment_cache_path.parent.mkdir(parents=True, exist_ok=True)
     alignment_cache_path.write_text("preserve me\n", encoding="utf-8")
 
-    prep = asyncio.run(
+    asyncio.run(
         preparation.execute_prep(
             RunRequest(root=tmp_path, no_cache=True),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
 
-    assert prep.clips[0].label == "source"
     assert not metrics_path.exists()
     assert other_metrics_path.exists()
     assert manual_overrides_path.exists()
@@ -133,12 +138,10 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
 
 
 def test_execute_prep_no_cache_uses_analysis_active_rect_fingerprint(tmp_path: Path) -> None:
-    config_content = (
-        METRIC_CONFIG
-        + """
-[sources.overrides."source.mkv"]
-active_rect = { x = 10, y = 20, width = 300, height = 200 }
-"""
+    config_content = source_override_config(
+        base=METRIC_CONFIG,
+        selector="source.mkv",
+        fields="active_rect = { x = 10, y = 20, width = 300, height = 200 }",
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
@@ -256,6 +259,40 @@ def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs
         )
 
 
+def test_execute_prep_reprobes_snapshot_with_mismatched_persisted_identity(
+    tmp_path: Path,
+) -> None:
+    _create_config(tmp_path, content=METRIC_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    source_path = _create_video_files(input_dir, "source.mkv")[0]
+    stats = source_path.stat()
+    current_fingerprint = ClipFingerprint(source_path, stats.st_size, stats.st_mtime_ns)
+    stale_snapshot = ClipProbeSnapshot(
+        fingerprint=ClipFingerprint(
+            source_path.with_name("different.mkv"), stats.st_size, stats.st_mtime_ns
+        ),
+        width=1920,
+        height=1080,
+        num_frames=100,
+        fps=Fraction(24, 1),
+        is_hdr=False,
+    )
+    save_clip_probe_cache(
+        tmp_path / "generated" / "clip_probe.toml",
+        {compute_probe_cache_key(current_fingerprint): stale_snapshot},
+    )
+    loader = FakeVSLoader()
+
+    asyncio.run(
+        preparation.execute_prep(
+            RunRequest(root=tmp_path),
+            RunDependencies(vs_loader=cast(Any, loader)),
+        )
+    )
+
+    assert loader.loaded == [source_path]
+
+
 def test_execute_prep_cache_only_rejects_metadata_mismatch_before_run_folder_reservation(
     tmp_path: Path,
 ) -> None:
@@ -269,11 +306,8 @@ def test_execute_prep_cache_only_rejects_metadata_mismatch_before_run_folder_res
     cache_dir = generated_dir / "cache" / "analysis"
     write_metrics_cache(cache_dir, source_path=source_path, config=config)
     selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = cache_io.compute_cache_key(
-        [source_path],
-        config.analysis,
-        selection_domain=selection_domain,
-        metric_request=metric_cache_request_for_cache_inputs([source_path], config),
+    fingerprint = metric_cache_fingerprint(
+        video_paths=[source_path], config=config, selection_domain=selection_domain
     )
     cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
     assert cache_path is not None
@@ -311,7 +345,7 @@ def test_execute_prep_rejects_skip_analysis_with_metric_frame_selection(tmp_path
     assert exc_info.value.validation_errors[0]["loc"] == ["analysis", "dark_frame_count"]
 
 
-def test_execute_prep_from_cache_only_misses_when_selected_reference_differs(
+def test_execute_prep_from_cache_only_rejects_missing_probe_snapshot_for_selected_reference(
     tmp_path: Path,
 ) -> None:
     config_content = METRIC_CONFIG + '\n[sources]\nreference = "b-reference.mkv"\n'
@@ -324,38 +358,6 @@ def test_execute_prep_from_cache_only_misses_when_selected_reference_differs(
     metrics_dir = tmp_path / "generated" / "cache" / "analysis"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     (metrics_dir / cache_io.metrics_cache_filename(default_order, fingerprint)).write_text(
-        "{}",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
-        asyncio.run(
-            preparation.execute_prep(
-                RunRequest(root=tmp_path, from_cache_only=True),
-                RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
-            )
-        )
-
-
-def test_execute_prep_from_cache_only_misses_when_reference_effective_fps_differs(
-    tmp_path: Path,
-) -> None:
-    config_content = (
-        METRIC_CONFIG
-        + """
-[sources.overrides."a-default.mkv"]
-effective_fps = "24000/1001"
-"""
-    )
-    _create_config(tmp_path, content=config_content)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "a-default.mkv", "b-encode.mkv")
-    config = preparation.prepare_preflight(root=tmp_path).config
-    input_order = [input_dir / "a-default.mkv", input_dir / "b-encode.mkv"]
-    source_fps_fingerprint = cache_io.compute_cache_key(input_order, config.analysis)
-    metrics_dir = tmp_path / "generated" / "cache" / "analysis"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
-    (metrics_dir / cache_io.metrics_cache_filename(input_order, source_fps_fingerprint)).write_text(
         "{}",
         encoding="utf-8",
     )
@@ -410,12 +412,10 @@ enable = false
 def test_execute_prep_preserves_explicit_reference_effective_fps_cache_domain_when_equal_to_source(
     tmp_path: Path,
 ) -> None:
-    config_content = (
-        METRIC_CONFIG
-        + """
-[sources.overrides."00-reference.mkv"]
-effective_fps = "24/1"
-"""
+    config_content = source_override_config(
+        base=METRIC_CONFIG,
+        selector="00-reference.mkv",
+        fields='effective_fps = "24/1"',
     )
     _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"

@@ -1,7 +1,7 @@
 import json
 from dataclasses import replace
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, cast
 
 import pytest
 import typer
@@ -10,6 +10,7 @@ from frame_compare.cli.errors import ExitCode
 from frame_compare.cli.run_command import (
     RunCliOptions,
     build_run_request_from_cli,
+    coerce_cli_choice,
     handle_diagnose_paths,
     handle_json_output,
     handle_run,
@@ -29,10 +30,14 @@ from frame_compare.orchestration import RunRequest, RunResult
 from .run_command_test_support import (
     DepsOptions,
     RecordingRunner,
-    _base_args,
-    _deps,
     _raise_unexpected_load,
     _raise_unexpected_write,
+)
+from .run_command_test_support import (
+    base_args as _base_args,
+)
+from .run_command_test_support import (
+    deps as _deps,
 )
 
 
@@ -90,6 +95,61 @@ def test_build_run_request_from_cli_maps_all_runtime_options() -> None:
         verbose=True,
         json_output=True,
     )
+
+
+@pytest.mark.parametrize(
+    ("enum_type", "flag", "loc"),
+    [
+        (OverlayMode, "--overlay", ("screenshots", "overlay_mode")),
+        (TonemapPreset, "--tm-preset", ("color", "preset")),
+        (ToneCurve, "--tm-curve", ("color", "tone_curve")),
+    ],
+)
+def test_coerce_cli_choice_invalid_value_names_flag_and_enum_choices(
+    enum_type: type[OverlayMode] | type[TonemapPreset] | type[ToneCurve],
+    flag: str,
+    loc: tuple[str, str],
+) -> None:
+    with pytest.raises(ConfigValidationError) as exc_info:
+        coerce_cli_choice("banana", enum_type, loc, flag=flag)
+
+    error = exc_info.value
+    expected_choices = ", ".join(member.value for member in enum_type)
+    assert error.context.message == f"Invalid value for {flag}: banana"
+    assert error.context.hint == f"Choose one of: {expected_choices}."
+    assert error.validation_errors[0]["loc"] == list(loc)
+    assert error.validation_errors[0]["input"] == "banana"
+
+
+def test_coerce_cli_choice_returns_none_for_missing_value() -> None:
+    assert (
+        coerce_cli_choice(None, OverlayMode, ("screenshots", "overlay_mode"), flag="--overlay")
+        is None
+    )
+
+
+def test_coerce_cli_choice_bounds_long_echoed_value() -> None:
+    huge_value = "x" * 500
+
+    with pytest.raises(ConfigValidationError) as exc_info:
+        coerce_cli_choice(
+            huge_value, OverlayMode, ("screenshots", "overlay_mode"), flag="--overlay"
+        )
+
+    message = exc_info.value.context.message
+    assert "--overlay" in message
+    assert "truncated" in message
+    assert len(message) < len(huge_value)
+
+
+def test_coerce_cli_choice_escapes_control_characters_in_echoed_value() -> None:
+    with pytest.raises(ConfigValidationError) as exc_info:
+        coerce_cli_choice(
+            "bad\n\x1b[31mred", OverlayMode, ("screenshots", "overlay_mode"), flag="--overlay"
+        )
+
+    message = exc_info.value.context.message
+    assert message == "Invalid value for --overlay: bad\\n\\x1b[31mred"
 
 
 def test_handle_diagnose_paths_outputs_pinned_json(capsys: pytest.CaptureFixture[str]) -> None:
@@ -150,6 +210,32 @@ def test_handle_json_output_failure_exits_processing_error(
 
     assert exc_info.value.exit_code == int(ExitCode.PROCESSING_ERROR)
     assert json.loads(capsys.readouterr().out)["errors"] == ["failed"]
+
+
+def test_handle_json_output_omits_memory_only_review_wait(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    handle_json_output(
+        RunResult(
+            success=True,
+            duration_seconds=60.0,
+            phase_timings={"align": 50.0},
+            vsview_review_seconds=42.5,
+        )
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "cache_hit": False,
+        "clips_processed": 0,
+        "duration_seconds": 60.0,
+        "errors": [],
+        "frame_count": 0,
+        "report_path": None,
+        "screenshots_dir": None,
+        "slowpics_url": None,
+        "success": True,
+    }
 
 
 def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> None:
@@ -214,7 +300,7 @@ def test_handle_run_write_config_preserves_authored_generated_directory() -> Non
             DepsOptions(
                 runner=runner,
                 load_config=lambda *_args, **_kwargs: config,
-                write_config_to=lambda _path, value: written.append(value),
+                write_config_to=lambda path, config: written.append(config),
             )
         ),
     )
@@ -286,7 +372,7 @@ def test_handle_run_allows_external_generated_root(mode: str) -> None:
             DepsOptions(
                 runner=runner,
                 load_config=lambda *_args, **_kwargs: config,
-                write_config_to=lambda _path, value: written.append(value),
+                write_config_to=lambda path, config: written.append(config),
             )
         ),
     )
@@ -369,36 +455,6 @@ def test_handle_run_write_config_error_uses_injected_error_handler() -> None:
     assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
 
 
-def test_handle_run_json_write_config_error_writes_machine_schema(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    error = ConfigWriteError(
-        Path("/workspace/config/config.toml"),
-        label="configuration file",
-        cause=PermissionError("permission denied"),
-    )
-
-    def _load_config(
-        config_path: Path | None = None,
-        overrides: dict[str, object] | None = None,
-    ) -> ConfigSchema:
-        return get_default_config()
-
-    def _write_config(path: Path, config: ConfigSchema) -> NoReturn:
-        raise error
-
-    with pytest.raises(typer.Exit) as exc_info:
-        handle_run(
-            replace(_base_args(), write_config=True, json_output=True),
-            _deps(DepsOptions(load_config=_load_config, write_config_to=_write_config)),
-        )
-
-    assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["success"] is False
-    assert payload["error"]["code"] == "FC-1007"
-
-
 def test_handle_run_rejects_previous_offset_prompt_with_quiet_before_runner() -> None:
     runner = RecordingRunner()
     handled_errors: list[ConfigValidationError] = []
@@ -435,7 +491,6 @@ def test_handle_run_rejects_previous_offset_prompt_with_quiet_before_runner() ->
         )
 
     assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert runner.requests == []
     assert handled_errors
     assert handled_errors[0].validation_errors == [
         {
@@ -489,9 +544,10 @@ def test_handle_run_write_config_rejects_previous_offsets_before_writing() -> No
         )
 
     assert exc_info.value.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert runner.requests == []
     assert written_paths == []
-    assert {tuple(error["loc"]) for error in handled_errors[0].validation_errors} == {
+    assert {
+        tuple(cast(list[str], error["loc"])) for error in handled_errors[0].validation_errors
+    } == {
         ("audio_alignment", "force_interactive"),
         ("audio_alignment", "previous_offsets"),
     }

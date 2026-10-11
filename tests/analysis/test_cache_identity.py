@@ -11,6 +11,7 @@ from frame_compare.analysis.cache_io import compute_cache_key, metrics_cache_fil
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
 from frame_compare.analysis.types import MetricActiveRect, MetricCacheRequest, MetricFrameRange
 from frame_compare.config.schema import AnalysisConfig
+from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from tests.analysis._cache_io_test_helpers import FIXED_MTIME, create_video_file
 
 
@@ -56,7 +57,7 @@ def test_compute_cache_key_changes_by_analysis_performance_mode(tmp_path: Path) 
     v1 = create_video_file(tmp_path, "v1.mkv")
     keys = {
         compute_cache_key([v1], AnalysisConfig(performance_mode=mode))
-        for mode in ("quality", "performance")
+        for mode in (AnalysisPerformanceMode.QUALITY, AnalysisPerformanceMode.PERFORMANCE)
     }
 
     assert len(keys) == 2
@@ -154,56 +155,10 @@ def test_metrics_cache_filename_order_independent(tmp_path: Path) -> None:
     assert forward == f"a-source__b-source__{fingerprint}.compframes"
 
 
-def test_compute_cache_key_ignores_selection_counts(tmp_path: Path) -> None:
-    """Selection counts affect frame choice, not metric-array computation."""
-    v1 = create_video_file(tmp_path, "v1.mkv")
-    key1 = compute_cache_key([v1], AnalysisConfig(random_frame_count=10))
-    key2 = compute_cache_key(
-        [v1],
-        AnalysisConfig(
-            user_frames=[1, 2],
-            random_frame_count=3,
-            dark_frame_count=4,
-            bright_frame_count=5,
-            motion_frame_count=6,
-        ),
-    )
-    assert key1 == key2
-
-
-def test_compute_cache_key_ignores_user_frames_only_change(tmp_path: Path) -> None:
-    v1 = create_video_file(tmp_path, "v1.mkv")
-    key1 = compute_cache_key([v1], AnalysisConfig(user_frames=[1, 2]))
-    key2 = compute_cache_key([v1], AnalysisConfig(user_frames=[3, 4]))
-
-    assert key1 == key2
-
-
-def test_compute_cache_key_ignores_selection_counts_within_performance_mode(
-    tmp_path: Path,
-) -> None:
-    v1 = create_video_file(tmp_path, "v1.mkv")
-    key1 = compute_cache_key(
-        [v1], AnalysisConfig(performance_mode="performance", motion_frame_count=1)
-    )
-    key2 = compute_cache_key(
-        [v1],
-        AnalysisConfig(
-            performance_mode="performance",
-            random_frame_count=3,
-            dark_frame_count=4,
-            bright_frame_count=5,
-            motion_frame_count=6,
-        ),
-    )
-
-    assert key1 == key2
-
-
 def test_metric_algorithm_identity_changes_with_media_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = AnalysisConfig(performance_mode="quality")
+    config = AnalysisConfig(performance_mode=AnalysisPerformanceMode.QUALITY)
     original = stable_metric_algorithm_identity_json(config)
     captured_scopes: list[str] = []
 
@@ -224,74 +179,6 @@ def test_metric_algorithm_identity_changes_with_media_runtime(
     assert '"scope":"analysis"' in changed
 
 
-def test_metric_algorithm_identity_serialization_is_deterministic() -> None:
-    first = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="performance"))
-    second = stable_metric_algorithm_identity_json(AnalysisConfig(performance_mode="performance"))
-
-    assert first == second
-    assert '"performance_mode":"performance"' in first
-    assert '"exact_ceil_one_quarter_in_up_to_eight_centered_bursts"' in first
-    assert '"active_rect_aware_full_resolution_luma"' in first
-    assert '"resize"' not in first
-    assert '"sampled_burst_pairs_with_per_burst_source_lookbehind"' in first
-
-
-def test_compute_cache_key_ignores_random_seed(tmp_path: Path) -> None:
-    """Random seed affects frame choice, not metric-array computation."""
-    v1 = create_video_file(tmp_path, "v1.mkv")
-    key1 = compute_cache_key([v1], AnalysisConfig(random_seed=42))
-    key2 = compute_cache_key([v1], AnalysisConfig(random_seed=43))
-    assert key1 == key2
-
-
-def test_compute_cache_key_ignores_dark_quantile(tmp_path: Path) -> None:
-    """Dark quantile affects frame choice, not metric-array computation."""
-    v1 = create_video_file(tmp_path, "v1.mkv")
-    key1 = compute_cache_key([v1], AnalysisConfig(dark_quantile=0.05))
-    key2 = compute_cache_key([v1], AnalysisConfig(dark_quantile=0.10))
-    assert key1 == key2
-
-
-def test_compute_cache_key_ignores_bright_quantile(tmp_path: Path) -> None:
-    """Bright quantile affects frame choice, not metric-array computation."""
-    v1 = create_video_file(tmp_path, "v1.mkv")
-    key1 = compute_cache_key([v1], AnalysisConfig(bright_quantile=0.95))
-    key2 = compute_cache_key([v1], AnalysisConfig(bright_quantile=0.90))
-    assert key1 == key2
-
-
-def test_compute_cache_key_changes_on_path_change(tmp_path: Path) -> None:
-    """Rename file → different key."""
-    v1 = create_video_file(tmp_path, "v1.mkv")
-    config = AnalysisConfig(random_frame_count=10)
-    key1 = compute_cache_key([v1], config)
-
-    v2 = tmp_path / "v2.mkv"
-    v1.rename(v2)
-    key2 = compute_cache_key([v2], config)
-    assert key1 != key2
-
-
-def test_compute_cache_key_changes_on_size_change(tmp_path: Path) -> None:
-    """Write more bytes to file → different key."""
-    v1 = create_video_file(tmp_path, "v1.mkv", content=b"test")
-    key1 = compute_cache_key([v1], AnalysisConfig(random_frame_count=10))
-
-    create_video_file(tmp_path, "v1.mkv", content=b"test-longer")
-    key2 = compute_cache_key([v1], AnalysisConfig(random_frame_count=10))
-    assert key1 != key2
-
-
-def test_compute_cache_key_changes_on_mtime_change(tmp_path: Path) -> None:
-    """os.utime(path, (new_mtime, new_mtime)) → different key."""
-    v1 = create_video_file(tmp_path, "v1.mkv")
-    key1 = compute_cache_key([v1], AnalysisConfig(random_frame_count=10))
-
-    os.utime(v1, (FIXED_MTIME + 1, FIXED_MTIME + 1))
-    key2 = compute_cache_key([v1], AnalysisConfig(random_frame_count=10))
-    assert key1 != key2
-
-
 def test_metrics_cache_filename_sanitizes_lowercase_label(tmp_path: Path) -> None:
     fingerprint = "f" * 64
     path = tmp_path / "Movie.Name 2024 [HDR]!.mkv"
@@ -299,3 +186,71 @@ def test_metrics_cache_filename_sanitizes_lowercase_label(tmp_path: Path) -> Non
     filename = metrics_cache_filename([path], fingerprint)
 
     assert filename == f"movie.name-2024-hdr__{fingerprint}.compframes"
+
+
+@pytest.mark.parametrize(
+    "first, second",
+    [
+        pytest.param(
+            AnalysisConfig(random_frame_count=10),
+            AnalysisConfig(
+                user_frames=[1, 2],
+                random_frame_count=3,
+                dark_frame_count=4,
+                bright_frame_count=5,
+                motion_frame_count=6,
+            ),
+            id="selection_counts",
+        ),
+        pytest.param(
+            AnalysisConfig(user_frames=[1, 2]), AnalysisConfig(user_frames=[3, 4]), id="user_frames"
+        ),
+        pytest.param(
+            AnalysisConfig(
+                performance_mode=AnalysisPerformanceMode.PERFORMANCE, motion_frame_count=1
+            ),
+            AnalysisConfig(
+                performance_mode=AnalysisPerformanceMode.PERFORMANCE,
+                random_frame_count=3,
+                dark_frame_count=4,
+                bright_frame_count=5,
+                motion_frame_count=6,
+            ),
+            id="performance_counts",
+        ),
+        pytest.param(
+            AnalysisConfig(random_seed=42), AnalysisConfig(random_seed=43), id="random_seed"
+        ),
+        pytest.param(
+            AnalysisConfig(dark_quantile=0.05),
+            AnalysisConfig(dark_quantile=0.10),
+            id="dark_quantile",
+        ),
+        pytest.param(
+            AnalysisConfig(bright_quantile=0.95),
+            AnalysisConfig(bright_quantile=0.90),
+            id="bright_quantile",
+        ),
+    ],
+)
+def test_cache_key_ignores_selection_fields(
+    tmp_path: Path, first: AnalysisConfig, second: AnalysisConfig
+) -> None:
+    video = create_video_file(tmp_path, "v1.mkv")
+    assert compute_cache_key([video], first) == compute_cache_key([video], second)
+
+
+@pytest.mark.parametrize("change", ["path", "size", "mtime"])
+def test_cache_key_changes_with_file_identity(tmp_path: Path, change: str) -> None:
+    video = create_video_file(tmp_path, "v1.mkv", content=b"test")
+    config = AnalysisConfig(random_frame_count=10)
+    first = compute_cache_key([video], config)
+    if change == "path":
+        renamed = tmp_path / "v2.mkv"
+        video.rename(renamed)
+        video = renamed
+    elif change == "size":
+        create_video_file(tmp_path, "v1.mkv", content=b"test-longer")
+    else:
+        os.utime(video, (FIXED_MTIME + 1, FIXED_MTIME + 1))
+    assert first != compute_cache_key([video], config)

@@ -13,7 +13,7 @@ import hashlib
 import json
 import re
 import tomllib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -255,9 +255,9 @@ def _bounded_entries(entries: Mapping[str, _StoredEntry]) -> tuple[dict[str, _St
 class TmdbCache:
     """Owner for one shared durable TMDB cache file."""
 
-    def __init__(self, path: Path, *, clock: Callable[[], datetime] = _utc_now) -> None:
+    def __init__(self, path: Path) -> None:
         self.path = path
-        self._clock = clock
+        self._clock = _utc_now
         self._state_lock = Lock()
         self._loaded = False
         self._entries: dict[str, _StoredEntry] | None = None

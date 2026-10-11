@@ -96,85 +96,48 @@ def ok_func() -> None:
     _write_file(root / "src/frame_compare/services/__init__.py", services_text)
 
 
-def test_symbols_order_case_insensitive(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    gen = _load_generator_module(repo_root)
-
+@pytest.mark.parametrize("ordering", [True, False], ids=["symbol-order", "string-constant"])
+def test_api_docs_symbol_order_and_constant_rendering(tmp_path: Path, ordering: bool) -> None:
+    gen = _load_generator_module(Path(__file__).resolve().parents[1])
     _write_fixture_project(root=tmp_path, missing_docstring=False)
     output = tmp_path / "docs" / "api.md"
-
-    exit_code = gen.main(["--project-root", str(tmp_path), "--output", str(output)])
-    assert exit_code == 0
-
+    assert gen.main(["--project-root", str(tmp_path), "--output", str(output)]) == 0
     text = output.read_text(encoding="utf-8")
-    utils_section = text.split("## frame_compare.utils", 1)[1]
-
-    idx_a = utils_section.find("### a_func")
-    idx_b = utils_section.find("### BClass")
-    idx_c = utils_section.find("### CONST_STR")
-
-    assert idx_a != -1
-    assert idx_b != -1
-    assert idx_c != -1
-    assert idx_a < idx_b < idx_c
+    if ordering:
+        section = text.split("## frame_compare.utils", 1)[1]
+        indices = [section.find(f"### {name}") for name in ("a_func", "BClass", "CONST_STR")]
+        for index in indices:
+            assert index != -1
+        assert indices[0] < indices[1] < indices[2]
+    else:
+        assert "`CONST_STR` — constant (str)" in text
 
 
-def test_constant_str_rendered_as_constant_str(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    gen = _load_generator_module(repo_root)
-
-    _write_fixture_project(root=tmp_path, missing_docstring=False)
+@pytest.mark.parametrize(
+    ("missing_docstring", "existing_output", "expected_code", "message"),
+    [(True, False, 3, "missing_func"), (False, True, 2, "STALE:"), (False, False, 2, "MISSING:")],
+)
+def test_api_docs_check_refuses_missing_docs_or_stale_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    missing_docstring: bool,
+    existing_output: bool,
+    expected_code: int,
+    message: str,
+) -> None:
+    gen = _load_generator_module(Path(__file__).resolve().parents[1])
+    _write_fixture_project(root=tmp_path, missing_docstring=missing_docstring)
     output = tmp_path / "docs" / "api.md"
-
-    exit_code = gen.main(["--project-root", str(tmp_path), "--output", str(output)])
-    assert exit_code == 0
-
-    text = output.read_text(encoding="utf-8")
-    assert "`CONST_STR` — constant (str)" in text
-
-
-def test_check_exits_3_and_reports_missing_docstrings(tmp_path: Path, capsys) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    gen = _load_generator_module(repo_root)
-
-    _write_fixture_project(root=tmp_path, missing_docstring=True)
-    output = tmp_path / "docs" / "api.md"
-
-    exit_code = gen.main(["--project-root", str(tmp_path), "--output", str(output), "--check"])
-    assert exit_code == 3
-
-    captured = capsys.readouterr()
-    assert "missing_func" in captured.err
-
-
-def test_check_exits_2_on_drift(tmp_path: Path, capsys) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    gen = _load_generator_module(repo_root)
-
-    _write_fixture_project(root=tmp_path, missing_docstring=False)
-    output = tmp_path / "docs" / "api.md"
-
-    _write_file(output, "# not the generated output\n")
-    exit_code = gen.main(["--project-root", str(tmp_path), "--output", str(output), "--check"])
-    assert exit_code == 2
-
-    captured = capsys.readouterr()
-    assert "STALE:" in captured.err
-
-
-def test_check_exits_2_when_output_missing(tmp_path: Path, capsys) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    gen = _load_generator_module(repo_root)
-
-    _write_fixture_project(root=tmp_path, missing_docstring=False)
-    output = tmp_path / "docs" / "api.md"
-    assert not output.exists()
-
-    exit_code = gen.main(["--project-root", str(tmp_path), "--output", str(output), "--check"])
-    assert exit_code == 2
-
-    captured = capsys.readouterr()
-    assert f"MISSING: {output}" in captured.err
+    if existing_output:
+        _write_file(output, "# not the generated output\n")
+    else:
+        assert not output.exists()
+    assert (
+        gen.main(["--project-root", str(tmp_path), "--output", str(output), "--check"])
+        == expected_code
+    )
+    expected = f"MISSING: {output}" if message == "MISSING:" else message
+    assert expected in capsys.readouterr().err
 
 
 def test_generation_preserves_existing_output_mode(tmp_path: Path) -> None:
