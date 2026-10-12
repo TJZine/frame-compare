@@ -559,11 +559,12 @@ Canonical verification path:
 Current CI ownership:
 
 - Every signed caller explicitly passes `WINDOWS_UPDATE_SIGNING_KEY_XML` through
-  each reusable-workflow boundary. The final build job's protected environment
-  supplies the environment value after approval; unsigned PR calls pass no signing
-  secret. An environment binding alone does not make an omitted secret available
-  inside a reusable workflow. Keep named forwarding when removing the legacy
-  repository secret; do not replace it with broad `secrets: inherit`.
+  each reusable-workflow boundary. The final build job keeps its protected
+  environment and required approval. The existing repository key works during
+  migration; an environment key of the same name takes precedence when configured.
+  Unsigned PR calls pass no signing secret. Keep named forwarding at every boundary;
+  an environment binding alone does not supply an omitted secret in a reusable
+  workflow. Do not replace the explicit mapping with broad `secrets: inherit`.
 - `.github/workflows/release-on-merge.yml` observes pushes to `main`. A changed
   stable manifest version starts publication only when GitHub identifies that exact
   pushed commit as the merge commit of a release PR targeting this repository's
