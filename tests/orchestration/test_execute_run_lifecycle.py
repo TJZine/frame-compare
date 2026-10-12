@@ -11,6 +11,7 @@ import pytest
 
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigNotFoundError
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.context import RunContext
@@ -56,7 +57,7 @@ def test_execute_run_returns_success_and_records_preflight_timing(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -456,7 +457,7 @@ def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeHDRVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -496,14 +497,16 @@ enable = false
 
     request = RunRequest(
         root=tmp_path,
-        tm_preset=TonemapPreset.FILMIC,
-        tm_target_nits=203,
-        overlay_mode=OverlayMode.DIAGNOSTIC,
-        seed=123,
-        no_upload=True,
-        force_interactive_alignment=True,
         skip_analysis=True,
         skip_metadata=True,
+        config_overrides=CLIConfigOverrides(
+            tm_preset=TonemapPreset.FILMIC,
+            tm_target_nits=203,
+            overlay_mode=OverlayMode.DIAGNOSTIC,
+            seed=123,
+            no_upload=True,
+            force_interactive_alignment=True,
+        ),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -569,7 +572,7 @@ enable = false
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        no_upload=False,
+        config_overrides=CLIConfigOverrides(no_upload=False),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -591,7 +594,7 @@ def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: 
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
 
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -644,7 +647,7 @@ def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=MixedFpsVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -914,7 +917,7 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
                     quiet=True,
                     skip_analysis=True,
                     skip_metadata=True,
-                    no_upload=True,
+                    config_overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 RunDependencies(vs_loader=InterruptedLoader(), ffmpeg_runner=FakeFFmpegRunner()),
             )
@@ -983,7 +986,7 @@ def test_reservation_is_captured_before_interrupted_run_info_writer(
                     quiet=True,
                     skip_analysis=True,
                     skip_metadata=True,
-                    no_upload=True,
+                    config_overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
             )

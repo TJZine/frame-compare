@@ -190,9 +190,9 @@ def _resolve_preview_tonemap_settings(config: ConfigSchema, request: RunRequest)
     from frame_compare.render.prepare import resolve_tonemap_settings
 
     overrides: TonemapCliOverrides = {
-        "tm_preset": request.tm_preset,
-        "tm_target": request.tm_target_nits,
-        "tm_curve": request.tm_curve,
+        "tm_preset": request.config_overrides.tm_preset,
+        "tm_target": request.config_overrides.tm_target_nits,
+        "tm_curve": request.config_overrides.tm_curve,
     }
     return resolve_tonemap_settings(config, overrides)
 
@@ -212,11 +212,12 @@ def print_at_a_glance(
     from frame_compare.orchestration.preflight import resolve_paths
 
     workspace = resolve_paths(config, root)
+    overrides = request.config_overrides
 
     vsview_status: str | None = None
-    use_vsview = config.audio_alignment.use_vsview or request.force_interactive_alignment
+    use_vsview = config.audio_alignment.use_vsview or overrides.force_interactive_alignment
     force_interactive = (
-        config.audio_alignment.force_interactive or request.force_interactive_alignment
+        config.audio_alignment.force_interactive or overrides.force_interactive_alignment
     )
     if use_vsview or force_interactive:
         from frame_compare.vsview.adapter import (
@@ -242,30 +243,32 @@ def print_at_a_glance(
     else:
         ffmpeg_available = True
     workspace_root = root.resolve()
-    input_path = request.input_dir if request.input_dir is not None else workspace.input_dir
+    input_path = overrides.input_dir if overrides.input_dir is not None else workspace.input_dir
     analysis = config.analysis
-    user_frames = request.user_frames if request.user_frames is not None else analysis.user_frames
+    user_frames = (
+        overrides.user_frames if overrides.user_frames is not None else analysis.user_frames
+    )
     random_frame_count = (
-        request.random_frame_count
-        if request.random_frame_count is not None
+        overrides.random_frame_count
+        if overrides.random_frame_count is not None
         else analysis.random_frame_count
     )
     dark_frame_count = (
-        request.dark_frame_count
-        if request.dark_frame_count is not None
+        overrides.dark_frame_count
+        if overrides.dark_frame_count is not None
         else analysis.dark_frame_count
     )
     bright_frame_count = (
-        request.bright_frame_count
-        if request.bright_frame_count is not None
+        overrides.bright_frame_count
+        if overrides.bright_frame_count is not None
         else analysis.bright_frame_count
     )
     motion_frame_count = (
-        request.motion_frame_count
-        if request.motion_frame_count is not None
+        overrides.motion_frame_count
+        if overrides.motion_frame_count is not None
         else analysis.motion_frame_count
     )
-    random_seed = request.seed if request.seed is not None else analysis.random_seed
+    random_seed = overrides.seed if overrides.seed is not None else analysis.random_seed
     requested_total = (
         len(user_frames)
         + random_frame_count
@@ -273,10 +276,10 @@ def print_at_a_glance(
         + bright_frame_count
         + motion_frame_count
     )
-    overlay_mode = request.overlay_mode or config.screenshots.overlay_mode
+    overlay_mode = overrides.overlay_mode or config.screenshots.overlay_mode
     tonemap_enabled = config.color.enable_tonemap
     alignment_enabled = config.audio_alignment.enable
-    upload_enabled = config.slowpics.auto_upload and not request.no_upload
+    upload_enabled = config.slowpics.auto_upload and not overrides.no_upload
     report_confirmed_upload = upload_enabled and config.slowpics.confirm_upload_after_report
     glyphs = glyphs_for_console(console)
 
@@ -347,7 +350,7 @@ def print_at_a_glance(
     metadata_text = "TMDB lookup" if not request.skip_metadata else "disabled"
     if not upload_enabled:
         publishing_text = _styled_value(
-            "disabled by --no-upload" if request.no_upload else "disabled"
+            "disabled by --no-upload" if overrides.no_upload else "disabled"
         )
     elif report_confirmed_upload:
         publishing_text = _dot_join(

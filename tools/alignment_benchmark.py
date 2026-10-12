@@ -39,6 +39,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Literal, cast
 
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.context import ClipActiveRect, RunContext
 from frame_compare.orchestration.phase_alignment import run_align_phase
@@ -266,7 +267,7 @@ async def _prepare_pair(
             root=workspace_root,
             skip_analysis=True,
             skip_metadata=True,
-            no_upload=True,
+            config_overrides=CLIConfigOverrides(no_upload=True),
         ),
         RunDependencies(vs_loader=loader),
     )

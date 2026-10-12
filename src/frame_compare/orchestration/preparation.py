@@ -541,13 +541,13 @@ async def execute_prep(
     preflight = prepare_preflight(
         root=request.root,
         config_path=request.config_path,
-        overrides=build_preflight_input_dir_override(request.input_dir),
+        overrides=build_preflight_input_dir_override(request.config_overrides.input_dir),
     )
     preflight_duration = max(0.0, deps.monotonic_timer() - preflight_start)
 
     load_sources_start = deps.monotonic_timer()
     workspace = preflight.workspace
-    config = resolve_effective_config(preflight.config, request.cli_config_overrides())
+    config = resolve_effective_config(preflight.config, request.config_overrides)
     if deps.vs_loader is None:
         from frame_compare.vs.loader import DefaultVSLoader
 

@@ -303,3 +303,66 @@ def test_config_environment_aliases(
         monkeypatch.setenv(key, value)
     config = load_config()
     assert getattr(getattr(config, section), field) == expected
+
+
+@pytest.mark.parametrize("raw", [False, True])
+def test_config_acquisition_rejects_directories_and_sanitizes_read_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: bool
+) -> None:
+    load = load_raw_config if raw else load_config
+    with pytest.raises(ConfigParseError, match="regular file"):
+        load(tmp_path)
+
+    path = tmp_path / "config.toml"
+    path.write_text("[analysis]\nrandom_frame_count = 12\n")
+
+    def denied(*_args: object, **_kwargs: object) -> str:
+        raise PermissionError("sentinel-sensitive-read-detail")
+
+    monkeypatch.setattr(Path, "read_text" if raw else "read_bytes", denied)
+    with pytest.raises(ConfigParseError) as exc_info:
+        load(path)
+    error = exc_info.value
+    assert "sentinel-sensitive-read-detail" not in str(error.context.to_dict())
+    assert error.__suppress_context__
+    assert error.__cause__ is None
+
+
+@pytest.mark.parametrize("raw", [False, True])
+def test_config_acquisition_follows_regular_file_symlink(tmp_path: Path, raw: bool) -> None:
+    target = tmp_path / "target.toml"
+    target.write_text("[analysis]\nrandom_frame_count = 12\n")
+    link = tmp_path / "config.toml"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("file symlinks unavailable on this host")
+    loaded = load_raw_config(link).config if raw else load_config(link)
+    assert loaded.analysis.random_frame_count == 12
+
+
+@pytest.mark.parametrize(
+    "variable",
+    ["FRAME_COMPARE_SLOWPICS", "FRAME_COMPARE_ANALYSIS__USER_FRAMES"],
+)
+def test_malformed_environment_json_is_sanitized_typed_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("")
+    monkeypatch.setenv(variable, '{"webhook_url":"sentinel-environment-secret"')
+    with pytest.raises(ConfigValidationError) as exc_info:
+        load_config(path)
+    error = exc_info.value
+    assert "sentinel-environment-secret" not in str(error.context.to_dict())
+    assert error.__suppress_context__
+    assert error.__cause__ is None
+
+
+def test_default_config_location_directory_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config" / "config.toml").mkdir(parents=True)
+    with pytest.raises(ConfigParseError, match="regular file"):
+        load_config()

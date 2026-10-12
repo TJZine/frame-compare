@@ -25,7 +25,7 @@ from frame_compare.cli.output import (
 )
 from frame_compare.config.effective import load_effective_config
 from frame_compare.config.errors import ConfigValidationError
-from frame_compare.config.overrides import cli_config_overrides_from
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import (
     ConfigSchema,
     OverlayMode,
@@ -192,23 +192,11 @@ class RunCliOptions:
 
     root: Path
     config_path: Path
-    input_dir: Path | None
+    config_overrides: CLIConfigOverrides
     no_cache: bool
     from_cache_only: bool
-    no_upload: bool
-    tm_preset: TonemapPreset | None
-    tm_target_nits: int | None
-    tm_curve: ToneCurve | None
-    user_frames: list[int] | None
-    random_frame_count: int | None
-    dark_frame_count: int | None
-    bright_frame_count: int | None
-    motion_frame_count: int | None
-    seed: int | None
-    overlay_mode: OverlayMode | None
     skip_analysis: bool
     skip_metadata: bool
-    force_interactive_alignment: bool
     json_output: bool
     no_color: bool
     quiet: bool
@@ -222,23 +210,11 @@ def build_run_request_from_cli(options: RunCliOptions) -> RunRequest:
     return RunRequest(
         root=options.root,
         config_path=options.config_path,
-        input_dir=options.input_dir,
+        config_overrides=options.config_overrides,
         no_cache=options.no_cache,
         from_cache_only=options.from_cache_only,
-        no_upload=options.no_upload,
-        tm_preset=options.tm_preset,
-        tm_target_nits=options.tm_target_nits,
-        tm_curve=options.tm_curve,
-        user_frames=options.user_frames,
-        random_frame_count=options.random_frame_count,
-        dark_frame_count=options.dark_frame_count,
-        bright_frame_count=options.bright_frame_count,
-        motion_frame_count=options.motion_frame_count,
-        seed=options.seed,
-        overlay_mode=options.overlay_mode,
         skip_analysis=options.skip_analysis,
         skip_metadata=options.skip_metadata,
-        force_interactive_alignment=options.force_interactive_alignment,
         json_output=options.json_output,
         no_color=options.no_color,
         quiet=options.quiet,
@@ -513,43 +489,45 @@ def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
     return RunCliOptions(
         root=args.resolved_root,
         config_path=args.config_path,
-        input_dir=args.input_dir,
         no_cache=args.no_cache,
         from_cache_only=args.from_cache_only,
-        no_upload=args.no_upload,
-        tm_preset=parsed_tm_preset,
-        tm_target_nits=args.tm_target,
-        tm_curve=parsed_tm_curve,
-        user_frames=parse_frame_list(args.frames),
-        random_frame_count=parse_non_negative_int_option(
-            args.random_frame_count,
-            option_name="--random-frame-count",
-            loc=("analysis", "random_frame_count"),
-        ),
-        dark_frame_count=parse_non_negative_int_option(
-            args.dark_frame_count,
-            option_name="--dark-frame-count",
-            loc=("analysis", "dark_frame_count"),
-        ),
-        bright_frame_count=parse_non_negative_int_option(
-            args.bright_frame_count,
-            option_name="--bright-frame-count",
-            loc=("analysis", "bright_frame_count"),
-        ),
-        motion_frame_count=parse_non_negative_int_option(
-            args.motion_frame_count,
-            option_name="--motion-frame-count",
-            loc=("analysis", "motion_frame_count"),
-        ),
-        seed=args.seed,
-        overlay_mode=parsed_overlay,
         skip_analysis=args.skip_analysis,
         skip_metadata=args.skip_metadata,
-        force_interactive_alignment=args.force_interactive_alignment,
         json_output=args.json_output,
         no_color=no_color,
         quiet=args.quiet,
         verbose=args.verbose,
+        config_overrides=CLIConfigOverrides(
+            input_dir=args.input_dir,
+            no_upload=args.no_upload,
+            tm_preset=parsed_tm_preset,
+            tm_target_nits=args.tm_target,
+            tm_curve=parsed_tm_curve,
+            user_frames=parse_frame_list(args.frames),
+            random_frame_count=parse_non_negative_int_option(
+                args.random_frame_count,
+                option_name="--random-frame-count",
+                loc=("analysis", "random_frame_count"),
+            ),
+            dark_frame_count=parse_non_negative_int_option(
+                args.dark_frame_count,
+                option_name="--dark-frame-count",
+                loc=("analysis", "dark_frame_count"),
+            ),
+            bright_frame_count=parse_non_negative_int_option(
+                args.bright_frame_count,
+                option_name="--bright-frame-count",
+                loc=("analysis", "bright_frame_count"),
+            ),
+            motion_frame_count=parse_non_negative_int_option(
+                args.motion_frame_count,
+                option_name="--motion-frame-count",
+                loc=("analysis", "motion_frame_count"),
+            ),
+            seed=args.seed,
+            overlay_mode=parsed_overlay,
+            force_interactive_alignment=args.force_interactive_alignment,
+        ),
     )
 
 
@@ -650,12 +628,11 @@ def build_effective_config_loaders(
     options: RunCliOptions,
 ) -> tuple[EffectiveConfigLoader, EffectiveConfigLoader]:
     resolved_config: ConfigSchema | None = None
-    cli_overrides = cli_config_overrides_from(options)
 
     def _resolve_effective_config() -> ConfigSchema:
         return load_effective_config(
             args.config_path,
-            cli_overrides=cli_overrides,
+            cli_overrides=options.config_overrides,
             load_config_fn=deps.load_config,
         )
 

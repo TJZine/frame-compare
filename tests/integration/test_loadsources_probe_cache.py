@@ -10,6 +10,7 @@ import pytest
 
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.config.loader import get_default_config
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import RuntimeConfig
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
@@ -103,7 +104,7 @@ async def test_loadsources_writes_clip_probe_cache_file(
         quiet=True,
         skip_analysis=True,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=DefaultVSLoader())
     result = await execute_run(request, deps=deps)
@@ -144,7 +145,7 @@ async def test_loadsources_reuses_clip_probe_cache_file(
         quiet=True,
         skip_analysis=True,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=DefaultVSLoader())
     result = await execute_run(request, deps=deps)
@@ -222,8 +223,8 @@ def test_configured_run_uses_shared_real_loader(
                 RunRequest(
                     root=tmp_path,
                     skip_metadata=True,
-                    no_upload=True,
                     quiet=True,
+                    config_overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 RunDependencies(vs_loader=injected_loader),
             )

@@ -202,7 +202,7 @@ def build_phases_before_align(
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
-            warn_only=True,
+            warn_only=not request.from_cache_only,
             fatal_exceptions=(ExclusionRecoverySelectionError,),
             progress_total=ANALYZE_PROGRESS_TOTAL,
             skip_detail="Disabled" if request.skip_analysis else "Not required",

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import stat
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from pathlib import Path
@@ -14,6 +15,7 @@ from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
+    SettingsError,
 )
 
 from frame_compare.config.errors import (
@@ -79,13 +81,27 @@ def _toml_suppressed_settings_schema(
     )
 
 
+def _require_regular_config_file(path: Path, *, required: bool) -> None:
+    """Follow authored symlinks, but never read a directory or special device."""
+    try:
+        source_stat = path.stat()
+    except FileNotFoundError:
+        if required:
+            raise ConfigNotFoundError(path) from None
+    except OSError:
+        raise ConfigParseError(path, "could not access configuration file") from None
+    else:
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise ConfigParseError(path, "configuration must be a regular file")
+
+
 def load_config(
     config_path: Path | None = None,
     overrides: dict[str, object] | None = None,
 ) -> ConfigSchema:
     """Load configuration from TOML file with overrides."""
-    if config_path is not None and not config_path.exists():
-        raise ConfigNotFoundError(config_path)
+    source_path = config_path or Path("config/config.toml")
+    _require_regular_config_file(source_path, required=config_path is not None)
 
     merged_overrides = overrides or {}
 
@@ -111,31 +127,40 @@ def load_config(
         # on kwargs unpacking.
         return settings_cls(**cast(Any, merged_overrides))
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigParseError(config_path or Path("config/config.toml"), str(exc)) from exc
-    except UnicodeDecodeError as exc:
+        raise ConfigParseError(config_path or Path("config/config.toml"), str(exc)) from None
+    except UnicodeDecodeError:
         raise ConfigParseError(
             config_path or Path("config/config.toml"),
             "configuration is not valid UTF-8",
-        ) from exc
+        ) from None
+    except SettingsError:
+        raise ConfigValidationError(
+            [],
+            message="Could not decode configuration settings from environment",
+            hint="Check JSON syntax in FRAME_COMPARE_* section and list variables",
+        ) from None
+    except OSError:
+        raise ConfigParseError(source_path, "could not read configuration file") from None
     except ValidationError as exc:
         # pydantic errors are compatible with our normalizer but require a cast for strict typing
         normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
-        raise ConfigValidationError(normalized) from exc
+        raise ConfigValidationError(normalized) from None
 
 
 def load_raw_config(config_path: Path) -> RawConfigDocument:
     """Load TOML without environment precedence and preserve every parsed value."""
+    _require_regular_config_file(config_path, required=True)
     try:
         text = config_path.read_text(encoding="utf-8-sig")
         untrusted: object = tomllib.loads(text)
-    except FileNotFoundError as exc:
-        raise ConfigNotFoundError(config_path) from exc
+    except FileNotFoundError:
+        raise ConfigNotFoundError(config_path) from None
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigParseError(config_path, str(exc)) from exc
-    except UnicodeDecodeError as exc:
-        raise ConfigParseError(config_path, "configuration is not valid UTF-8") from exc
-    except OSError as exc:
-        raise ConfigParseError(config_path, f"could not read configuration ({exc})") from exc
+        raise ConfigParseError(config_path, str(exc)) from None
+    except UnicodeDecodeError:
+        raise ConfigParseError(config_path, "configuration is not valid UTF-8") from None
+    except OSError:
+        raise ConfigParseError(config_path, "could not read configuration file") from None
 
     payload = _narrow_toml_table(untrusted, path="root")
     return RawConfigDocument(
@@ -145,11 +170,15 @@ def load_raw_config(config_path: Path) -> RawConfigDocument:
 
 
 def validate_raw_config_payload(
-    payload: TomlPayload,
+    payload: Mapping[str, object],
     *,
     redact_inputs: bool,
 ) -> ConfigSchema:
-    """Validate a parsed TOML payload without consulting environment settings."""
+    """Validate parsed or already resolved values without reacquiring sources.
+
+    Config merges must retain their acquired values and authored field presence;
+    neither ambient TOML nor environment settings may fill omitted placeholders.
+    """
     defaults_only_schema = _toml_suppressed_settings_schema(
         "RawConfigSchema",
         _defaults_only_settings_sources,
@@ -162,7 +191,7 @@ def validate_raw_config_payload(
             for error in normalized:
                 if "input" in error:
                     error["input"] = "<redacted>"
-        raise ConfigValidationError(normalized) from exc
+        raise ConfigValidationError(normalized) from None
 
 
 def _narrow_toml_table(value: object, *, path: str) -> TomlPayload:

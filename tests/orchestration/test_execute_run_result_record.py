@@ -8,6 +8,7 @@ from typing import Never
 import pytest
 
 from frame_compare.config.errors import ConfigNotFoundError
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.errors import NoVideosFoundError
@@ -49,8 +50,8 @@ def _request(root: Path) -> RunRequest:
         root=root,
         skip_analysis=True,
         skip_metadata=True,
-        no_upload=True,
         quiet=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
 
 

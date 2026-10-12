@@ -11,6 +11,7 @@ import pytest
 
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import phase_alignment
 from frame_compare.orchestration.context import ClipState, RunContext
 from frame_compare.services import alignment as alignment_service
@@ -495,7 +496,9 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
 
     monkeypatch.setattr(alignment_audio, "probe_streams", unavailable_probe)
     state = ExecutionState(selected_frames=[0, 1, 2])
-    request = RunRequest(root=tmp_path, skip_metadata=True, no_upload=True)
+    request = RunRequest(
+        root=tmp_path, skip_metadata=True, config_overrides=CLIConfigOverrides(no_upload=True)
+    )
     align = build_phases_before_align(
         request=request,
         config=ctx.config,
