@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -21,6 +22,10 @@ def _bundle_runtime_function_block(build_script: str) -> str:
     start = build_script.index("function Assert-BundleRuntime")
     end = build_script.index("function Copy-PythonDistLicenses")
     return build_script[start:end]
+
+
+def _runtime_proof_source(repo_root: Path) -> str:
+    return _read_text_or_fail(repo_root / "tools/windows_portable/runtime_smoke.py")
 
 
 def _generated_portable_launcher(build_script: str) -> str:
@@ -390,17 +395,83 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
 def test_windows_portable_direct_placebo_smoke_respects_runtime_probe(
     repo_root: Path,
 ) -> None:
-    build_script = _read_text_or_fail(
-        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    )
-
-    direct_smoke = build_script[
-        build_script.index("def prove_placebo_tonemap_frame()") : build_script.index(
+    proof_source = _runtime_proof_source(repo_root)
+    direct_smoke = proof_source[
+        proof_source.index("def prove_placebo_tonemap_frame()") : proof_source.index(
             "def prove_apply_tonemap_frame()"
         )
     ]
     assert "placebo_direct_frame=skipped reason=vulkan_runtime_unavailable" in direct_smoke
     assert "direct_out.get_frame(0)" in direct_smoke
+
+
+@pytest.mark.parametrize(
+    ("phase", "expected_proof"),
+    (
+        ("package_imports", "prove_package_imports"),
+        ("runtime_contract", "prove_runtime_contract"),
+        ("vapoursynth_environment", "prove_vapoursynth_environment"),
+        ("lwlibavsource_frame", "prove_lwlibavsource"),
+        ("placebo_tonemap_api", "prove_placebo_tonemap_api"),
+        ("apply_tonemap_frame", "prove_apply_tonemap_frame"),
+        ("placebo_tonemap_frame", "prove_placebo_tonemap_frame"),
+        ("vsview_runtime", "prove_vsview_runtime"),
+        ("unknown", None),
+    ),
+)
+def test_windows_portable_python_phase_dispatch_is_fail_closed(
+    repo_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    expected_proof: str | None,
+) -> None:
+    # Execute the real CLI dispatcher, replacing only platform proof bodies.
+    tree = ast.parse(_runtime_proof_source(repo_root))
+    namespace = {}
+    calls = []
+
+    def failing_proof(*args):
+        calls.append(args)
+        raise RuntimeError("native proof failed")
+
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef):
+            namespace[node.name] = failing_proof
+    dispatcher = ast.Module(
+        body=[node for node in tree.body if not isinstance(node, ast.FunctionDef)],
+        type_ignores=[],
+    )
+    monkeypatch.setattr(sys, "argv", ["runtime-smoke.py", phase, "fixture.mp4"])
+    if expected_proof is None:
+        with pytest.raises(AssertionError, match="unknown runtime proof phase"):
+            exec(compile(dispatcher, "runtime_smoke.py", "exec"), namespace)
+        assert calls == []
+    else:
+        # Only the selected phase may run; its error must escape to PowerShell.
+        for name in tuple(namespace):
+            if name != expected_proof:
+                del namespace[name]
+        with pytest.raises(RuntimeError, match="native proof failed"):
+            exec(compile(dispatcher, "runtime_smoke.py", "exec"), namespace)
+        assert len(calls) == 1
+        expected_args = (
+            (Path("fixture.mp4"),) if phase in {"lwlibavsource_frame", "vsview_runtime"} else ()
+        )
+        assert calls[0] == expected_args
+
+
+def test_windows_portable_copies_python_proof_under_owned_cleanup(repo_root: Path) -> None:
+    build_script = _read_text_or_fail(repo_root / "tools/windows_portable/build_portable.ps1")
+    runtime = _bundle_runtime_function_block(build_script)
+    copy = "Copy-Item -LiteralPath $smokeSource -Destination $smokePath -Force"
+    assert '$smokeSource = Join-Path $PSScriptRoot "runtime_smoke.py"' in runtime
+    assert runtime.index("try {") < runtime.index(copy) < runtime.index("Invoke-BundleRuntimeProof")
+    assert runtime.index("} finally {") < runtime.index(
+        "Remove-Item -Force -LiteralPath $smokePath"
+    )
+    assert "$smokeScript" not in runtime
+    # Parsing the Python source provides the syntax gate even on hosts without Windows.
+    compile(_runtime_proof_source(repo_root), "runtime_smoke.py", "exec")
 
 
 def test_windows_portable_workflow_surfaces_direct_placebo_result(repo_root: Path) -> None:
@@ -419,9 +490,17 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
 
+    proof_source = _runtime_proof_source(repo_root)
+
     for expected in (
         "Invoke-BundleRuntimeProof",
         "phase=$Phase start",
+        "ffmpeg tiny media generation",
+        "bundle runtime validation phase '$Phase' failed with exit code $exitCode",
+    ):
+        assert expected in build_script
+
+    for expected in (
         "version_major == 81",
         "api_minor == 3",
         "LWLibavSource",
@@ -434,14 +513,18 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         "import vspackrgb.rust",
         "from PySide6.QtWidgets import QApplication",
         "WINDOWS_BUNDLE_PROOF",
-        "ffmpeg tiny media generation",
         "runtime_contract=ok",
         "FFMS2 must remain excluded",
         "standalone FFmpeg directory leaked onto PATH",
     ):
-        assert expected in build_script
+        assert expected in proof_source
 
-    for phase in (
+    phases = re.findall(
+        r"Invoke-BundleRuntimeProof -Python \$python -SmokePath \$smokePath "
+        r'-Phase "([^"]+)" -MediaPath \$mediaPath -Required \$true',
+        _bundle_runtime_function_block(build_script),
+    )
+    assert phases == [
         "package_imports",
         "runtime_contract",
         "vapoursynth_environment",
@@ -450,21 +533,11 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         "apply_tonemap_frame",
         "placebo_tonemap_frame",
         "vsview_runtime",
-    ):
-        assert phase in build_script
-
-    assert (
-        "bundle runtime validation phase '$Phase' failed with exit code $exitCode" in build_script
-    )
-    assert 'Phase "vsview_runtime" -MediaPath $mediaPath -Required $true' in build_script
-    assert 'Phase "lwlibavsource_frame" -MediaPath $mediaPath -Required $true' in build_script
-    assert 'Phase "placebo_tonemap_api" -MediaPath $mediaPath -Required $true' in build_script
-    assert 'Phase "apply_tonemap_frame" -MediaPath $mediaPath -Required $true' in build_script
-    assert 'Phase "placebo_tonemap_frame" -MediaPath $mediaPath -Required $true' in build_script
-    assert "placebo_tonemap_api=ok" in build_script
-    assert "apply_tonemap=ok " in build_script
-    assert "unexpectedly reduced output below 10-bit" in build_script
-    assert "libplacebo_runtime_usable=" in build_script
+    ]
+    assert "placebo_tonemap_api=ok" in proof_source
+    assert "apply_tonemap=ok " in proof_source
+    assert "unexpectedly reduced output below 10-bit" in proof_source
+    assert "libplacebo_runtime_usable=" in proof_source
 
 
 def test_windows_portable_build_runtime_validation_restores_process_environment(
@@ -590,10 +663,11 @@ def test_windows_portable_build_reads_version_from_archived_app_source(
 def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
-    assert "import vsview.app.main" in build_script
-    assert "import vsview.cli" in build_script
-    assert "import vspackrgb.rust" in build_script
-    assert "from PySide6.QtWidgets import QApplication" in build_script
+    proof_source = _runtime_proof_source(repo_root)
+    assert "import vsview.app.main" in proof_source
+    assert "import vsview.cli" in proof_source
+    assert "import vspackrgb.rust" in proof_source
+    assert "from PySide6.QtWidgets import QApplication" in proof_source
     assert '"testsrc2=size=64x64:rate=1:duration=3"' in build_script
     fixture_generation = re.search(
         r'-f lavfi -i "testsrc2=size=64x64:rate=1:duration=(?P<duration>\d+)" '
@@ -601,8 +675,8 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
         build_script,
     )
     assert fixture_generation is not None
-    lwlibavsource_proof = build_script[
-        build_script.index("def prove_lwlibavsource") : build_script.index("def build_placebo_clip")
+    lwlibavsource_proof = proof_source[
+        proof_source.index("def prove_lwlibavsource") : proof_source.index("def build_placebo_clip")
     ]
     frame_count_assertion = re.search(
         r"assert_true\(source\.num_frames == (?P<count>\d+),", lwlibavsource_proof
@@ -610,8 +684,8 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     assert frame_count_assertion is not None
     assert fixture_generation.group("duration") == fixture_generation.group("frames")
     assert fixture_generation.group("frames") == frame_count_assertion.group("count") == "3"
-    combined_proof = build_script[
-        build_script.index("def prove_vsview_runtime") : build_script.index("phase = sys.argv[1]")
+    combined_proof = proof_source[
+        proof_source.index("def prove_vsview_runtime") : proof_source.index("phase = sys.argv[1]")
     ]
     for required_proof in (
         "preload_vapoursynth_runtime()",
@@ -631,7 +705,7 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     assert "vsview_runtime_preload=ok" in combined_proof
     assert "pyside6_event_loop=ok" in combined_proof
     assert "qt_ffmpeg_runtime=ok lineage=7.1.5" in combined_proof
-    assert "qt_webengine_runtime=absent deployment=excluded" in build_script
+    assert "qt_webengine_runtime=absent deployment=excluded" in proof_source
     assert "vsview_runtime=ok" in combined_proof
     assert 'Phase "vsview_runtime" -MediaPath $mediaPath -Required $true' in build_script
     assert combined_proof.index("preload_vapoursynth_runtime()") < combined_proof.index(
@@ -642,14 +716,15 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     )
 
 
-def test_windows_portable_embedded_vsview_proof_covers_viewer_first_whole_set(
+def test_windows_portable_python_vsview_proof_covers_viewer_first_whole_set(
     repo_root: Path,
 ) -> None:
     build_script = _read_text_or_fail(
         repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     )
-    proof = build_script[
-        build_script.index("def prove_generated_vsview_session") : build_script.index(
+    proof_source = _runtime_proof_source(repo_root)
+    proof = proof_source[
+        proof_source.index("def prove_generated_vsview_session") : proof_source.index(
             "def prove_vsview_runtime"
         )
     ]
@@ -671,21 +746,34 @@ def test_windows_portable_embedded_vsview_proof_covers_viewer_first_whole_set(
     assert 'f"{media_path.stem}:{comparison_two_media_path.stem}": 0' in proof
     assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in proof
     assert 'comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2}' in proof
-    assert (
-        "active_parent = QWidget()\n            active_panel = AlignmentReviewPanel(active_parent, panel_api)"
-        in proof
+    tree = ast.parse(proof_source)
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "prove_generated_vsview_session"
     )
-    assert (
-        "keep_parent = QWidget()\n            keep_panel = AlignmentReviewPanel(keep_parent, panel_api)"
-        in proof
-    )
-    assert "active_panel.on_workspace_loaded()\n            app.processEvents()" in proof
-    assert (
-        "active_panel.on_current_voutput_changed(voutputs[output_index], output_index)\n"
-        "                app.processEvents()"
-    ) in proof
-    assert "active_panel.use_positions_button.click()\n            app.processEvents()" in proof
-    assert "keep_panel.keep_button.click()\n            app.processEvents()" in proof
+    callback_methods = {
+        "on_workspace_loaded",
+        "on_current_voutput_changed",
+        "click",
+    }
+    observed_callbacks = []
+    for node in ast.walk(function):
+        statements = getattr(node, "body", None)
+        if not isinstance(statements, list):
+            continue
+        for index, statement in enumerate(statements):
+            if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+                continue
+            callback = statement.value.func
+            if isinstance(callback, ast.Attribute) and callback.attr in callback_methods:
+                observed_callbacks.append(callback.attr)
+                following = statements[index + 1]
+                assert isinstance(following, ast.Expr) and isinstance(following.value, ast.Call)
+                assert ast.unparse(following.value.func) == "app.processEvents"
+    assert observed_callbacks.count("on_workspace_loaded") == 2
+    assert observed_callbacks.count("on_current_voutput_changed") == 1
+    assert observed_callbacks.count("click") == 2
     assert '"0/3 positions captured"' in proof
     assert r'"3/3 positions captured \u2014 ready to confirm"' in proof
     assert '"alignment_positions=ok"' in proof
@@ -751,10 +839,11 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     assert '$_ -match "(?i)\\bERROR\\b"' in launch_proof
     assert "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok" in launch_proof
 
-    assert 'media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
-    assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
-    assert 'comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2}' in build_script
-    assert "Color metadata incomplete; using standard display defaults (BT.709)" in build_script
+    proof_source = _runtime_proof_source(repo_root)
+    assert 'media_path.stem: {"_Matrix": 2, "_Range": 2}' in proof_source
+    assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in proof_source
+    assert 'comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2}' in proof_source
+    assert "Color metadata incomplete; using standard display defaults (BT.709)" in proof_source
     assert '$normalizedCombined = ($combined -replace "\\s+", " ").Trim()' in launch_proof
 
 
@@ -1098,6 +1187,7 @@ def _write_extracted_verifier_fixture(
             ".github/workflows/windows-portable-build.yml",
             ".github/workflows/windows-portable.yml",
             "tools/windows_portable/build_portable.ps1",
+            "tools/windows_portable/runtime_smoke.py",
             "tools/windows_portable/build_update.ps1",
             "tools/windows_portable/bundle_info.schema.json",
             "tools/windows_portable/generate_update_keypair.ps1",
@@ -1897,10 +1987,53 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
     return bundle
 
 
+@pytest.fixture
+def inventory_source_repo(repo_root: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Give inventory checks committed source provenance independent of the worktree."""
+    source_repo = tmp_path_factory.mktemp("portable-inventory-source")
+    tree = ast.parse(
+        _read_text_or_fail(repo_root / "tools/windows_portable/write_bundle_inventory.py")
+    )
+    source_paths = next(
+        ast.literal_eval(node.value)
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "SOURCE_SCRIPTS"
+            for target in node.targets
+        )
+    )
+    for relative_path in source_paths:
+        destination = source_repo / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(repo_root / relative_path, destination)
+    for args in (
+        ("init", "--quiet"),
+        ("add", "."),
+        (
+            "-c",
+            "user.name=Portable test",
+            "-c",
+            "user.email=portable@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "source fixture",
+        ),
+    ):
+        subprocess.run(
+            ["git", "-C", str(source_repo), *args], check=True, capture_output=True, timeout=30
+        )
+    return source_repo
+
+
 def _run_bundle_inventory(
     *,
     bundle: Path,
     repo_root: Path,
+    source_repo: Path,
     manifest: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -1912,7 +2045,7 @@ def _run_bundle_inventory(
             "--manifest",
             str(manifest or repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"),
             "--repo-root",
-            str(repo_root),
+            str(source_repo),
             "--output",
             str(bundle / "bundle_inventory.json"),
         ],
@@ -1926,9 +2059,12 @@ def _run_bundle_inventory(
 def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     tmp_path: Path,
     repo_root: Path,
+    inventory_source_repo: Path,
 ) -> None:
     bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
-    result = _run_bundle_inventory(bundle=bundle, repo_root=repo_root)
+    result = _run_bundle_inventory(
+        bundle=bundle, repo_root=repo_root, source_repo=inventory_source_repo
+    )
     assert result.returncode == 0, f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
 
     inventory_text = (bundle / "bundle_inventory.json").read_text(encoding="utf-8")
@@ -1979,6 +2115,7 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
         re.fullmatch(r"[a-f0-9]{64}", source["sha256"]) and source["bytes"] > 0
         for source in inventory["corresponding_sources"]
     )
+    assert "tools/windows_portable/runtime_smoke.py" in inventory["source_build_install_scripts"]
     assert inventory["source_build_install_scripts"] == sorted(
         inventory["source_build_install_scripts"]
     )
@@ -1995,10 +2132,49 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     assert "Inter 4.1 (OFL-1.1)" in notices
 
 
+def test_windows_portable_inventory_requires_committed_python_proof(
+    tmp_path: Path,
+    repo_root: Path,
+    inventory_source_repo: Path,
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    proof_path = "tools/windows_portable/runtime_smoke.py"
+    for args in (
+        ("rm", "--quiet", proof_path),
+        (
+            "-c",
+            "user.name=Portable test",
+            "-c",
+            "user.email=portable@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "missing proof fixture",
+        ),
+    ):
+        subprocess.run(
+            ["git", "-C", str(inventory_source_repo), *args],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+    result = _run_bundle_inventory(
+        bundle=bundle,
+        repo_root=repo_root,
+        source_repo=inventory_source_repo,
+    )
+    assert result.returncode != 0
+    assert proof_path in result.stderr
+    assert not (bundle / "bundle_inventory.json").exists()
+
+
 @pytest.mark.parametrize("field", ["bytes", "source_bytes", "build_source_bytes"])
 def test_windows_portable_bundle_inventory_rejects_negative_artifact_sizes(
     tmp_path: Path,
     repo_root: Path,
+    inventory_source_repo: Path,
     field: str,
 ) -> None:
     bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
@@ -2012,6 +2188,7 @@ def test_windows_portable_bundle_inventory_rejects_negative_artifact_sizes(
     result = _run_bundle_inventory(
         bundle=bundle,
         repo_root=repo_root,
+        source_repo=inventory_source_repo,
         manifest=manifest_path,
     )
 
@@ -2030,6 +2207,7 @@ def test_windows_portable_bundle_inventory_rejects_negative_artifact_sizes(
 def test_windows_portable_bundle_inventory_rejects_malformed_fingerprints(
     tmp_path: Path,
     repo_root: Path,
+    inventory_source_repo: Path,
     field_path: tuple[str, ...],
 ) -> None:
     bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
@@ -2041,7 +2219,9 @@ def test_windows_portable_bundle_inventory_rejects_malformed_fingerprints(
     target[field_path[-1]] = "NOT-A-SHA256"
     bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
 
-    result = _run_bundle_inventory(bundle=bundle, repo_root=repo_root)
+    result = _run_bundle_inventory(
+        bundle=bundle, repo_root=repo_root, source_repo=inventory_source_repo
+    )
 
     assert result.returncode != 0
     assert "must be a lowercase SHA-256 digest" in result.stderr
@@ -2050,6 +2230,7 @@ def test_windows_portable_bundle_inventory_rejects_malformed_fingerprints(
 def test_windows_portable_bundle_inventory_rejects_matching_stale_runtime_fingerprints(
     tmp_path: Path,
     repo_root: Path,
+    inventory_source_repo: Path,
 ) -> None:
     bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
     stale_fingerprints = dict.fromkeys(
@@ -2068,7 +2249,12 @@ def test_windows_portable_bundle_inventory_rejects_matching_stale_runtime_finger
     manifest_path = tmp_path / "stale-manifest.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    result = _run_bundle_inventory(bundle=bundle, repo_root=repo_root, manifest=manifest_path)
+    result = _run_bundle_inventory(
+        bundle=bundle,
+        repo_root=repo_root,
+        source_repo=inventory_source_repo,
+        manifest=manifest_path,
+    )
 
     assert result.returncode != 0
     assert "do not match the canonical windows-x64 contract" in result.stderr
@@ -2077,6 +2263,7 @@ def test_windows_portable_bundle_inventory_rejects_matching_stale_runtime_finger
 def test_windows_portable_bundle_inventory_uses_packaged_runtime_contract(
     tmp_path: Path,
     repo_root: Path,
+    inventory_source_repo: Path,
 ) -> None:
     bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
     packaged_fingerprints = {
@@ -2101,6 +2288,7 @@ def test_windows_portable_bundle_inventory_uses_packaged_runtime_contract(
     result = _run_bundle_inventory(
         bundle=bundle,
         repo_root=repo_root,
+        source_repo=inventory_source_repo,
         manifest=manifest_path,
     )
 
@@ -2129,13 +2317,16 @@ def test_windows_portable_bundle_inventory_uses_packaged_runtime_contract(
 def test_windows_portable_bundle_inventory_rejects_prohibited_local_and_generated_files(
     tmp_path: Path,
     repo_root: Path,
+    inventory_source_repo: Path,
     relative_path: str,
 ) -> None:
     bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
     residue = bundle / relative_path
     residue.parent.mkdir(parents=True, exist_ok=True)
     residue.write_text("generated index", encoding="utf-8")
-    result = _run_bundle_inventory(bundle=bundle, repo_root=repo_root)
+    result = _run_bundle_inventory(
+        bundle=bundle, repo_root=repo_root, source_repo=inventory_source_repo
+    )
     assert result.returncode != 0
     assert "prohibited local/generated files found in bundle" in result.stderr
 
@@ -2173,6 +2364,7 @@ def test_windows_portable_manifest_records_exact_source_locations(repo_root: Pat
 def test_windows_portable_bundle_inventory_rejects_missing_corresponding_source_integrity(
     tmp_path: Path,
     repo_root: Path,
+    inventory_source_repo: Path,
     field: str,
 ) -> None:
     bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
@@ -2186,6 +2378,7 @@ def test_windows_portable_bundle_inventory_rejects_missing_corresponding_source_
     result = _run_bundle_inventory(
         bundle=bundle,
         repo_root=repo_root,
+        source_repo=inventory_source_repo,
         manifest=manifest_path,
     )
 
