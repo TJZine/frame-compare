@@ -28,6 +28,11 @@ Frame Compare is a CLI-first packaged Python app with importable internal module
 
 The CLI keeps VS-heavy imports lazy through proxy functions so help text and simple commands do not import the full runtime stack at module import time.
 
+`config.overrides.CLIConfigOverrides` owns typed persistent CLI overrides. Parsing
+creates one value carried by both `RunCliOptions.config_overrides` and
+`RunRequest.config_overrides`; effective-config resolution and preparation consume
+it directly. Raw flag parsing and run-mode controls remain CLI-owned.
+
 Preparation creates the run's default `DefaultVSLoader` immediately after
 resolving effective config, before loading sources. Injected loaders remain
 caller-owned. `runtime.memory_limit_mb` is an optional frame-cache cap in MiB;
@@ -107,6 +112,8 @@ also check admission. VSView polls its blocking waits and reaps owned work.
 A native frame request already in flight has no guaranteed finite drain deadline;
 see the CLI contract's Run Interruption section for that limit and the separately
 owned shared-TMDB response-cache exception.
+Audio/video confirmation checks its cancellation event immediately before every
+native motion, base-offset, and hypothesis frame request.
 
 `frame_compare.utils.run_warnings` owns the immutable in-memory `RunWarning`
 record (typed source, severity, message, optional detail). Producers choose
@@ -128,6 +135,8 @@ and returns a `MetricsAcquisition` containing the metrics and the actual `hit` o
 `computed` disposition. Analyze presentation consumes that result without a
 predictive cache read. Cache-only preparation still validates before reserving
 output, and cache-only analysis reads again without permission to compute.
+Analyze is required for cache-only execution: a failed second acquisition aborts
+the run before rendering or publishing rather than using the initial frame plan.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
 `quality` is the default full-resolution VapourSynth PlaneStats behavior, while
 `performance` is an approximate temporal-sampling strategy over the same
@@ -177,6 +186,11 @@ cache/alignment identity, and stem-based physical PNG filename ownership remain
 unchanged. `frame_compare.render.naming` bounds overlong absolute screenshot paths
 for legacy Windows browser compatibility by retaining a readable stem prefix and a
 deterministic digest suffix.
+Batch expansion allocates final screenshot paths once and validates their physical
+identities through render-owned naming before clip preparation. Exclusive temporary
+name reservations detect the actual output volume's case/Unicode rules; existing
+files are inspected without writing and owned reservations are removed before native
+preparation. Collisions use the render-owned typed `FC-4021` error.
 
 ## Module Boundaries
 
@@ -256,7 +270,9 @@ recovery requirement.
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
   config and preset writes; runtime `slowpics.webhook_url` and `tmdb.api_key` values
-  are excluded from every generated TOML payload
+  are excluded from every generated TOML payload. The config-owned representation
+  preserves authoredness of preset-controlled color fields for merging and persistence
+  while retaining unrelated schema defaults.
 - `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
   workspace root, but follows the sole configured `paths.generated_dir`). The full
@@ -360,7 +376,11 @@ recovery requirement.
   root, falls back, or mutates `run_info.toml`.
 - `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache
 - `<run-folder>/generated/manual_overrides.toml`: persisted interactively confirmed
-  manual alignment overrides for the current run
+  manual alignment overrides for the current run. Canonical version "2" stores
+  `reference_clip`, `comparison_clip`, `frame_offset`, and `timestamp` under
+  reference:comparison keys. Record presence represents confirmed manual authority;
+  there is no separate confirmation flag. Unsupported versions are recoverable
+  cache misses and are replaced on the next save without migration.
 - `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v4,
   diagnostic-only audio evidence owned by
   `frame_compare.services.alignment_diagnostics` and defined once in
@@ -636,7 +656,10 @@ activation, requires each source to be visited for the default viewer-position
 workflow, and writes only a complete typed
 sidecar through one whole-set action. The panel's manual source-frame and known-offset
 inputs feed that same result model; its secondary keep-current action writes one
-`keep_current` decision per comparison. `alignment_vsview` owns availability policy,
+`keep_current` decision per comparison. The panel derives immutable audio-review
+presentations, summary text, and details once per comparison at workspace activation;
+unload or replacement clears them. Preview callbacks reuse that evidence while
+updating live frame drafts and markers. `alignment_vsview` owns availability policy,
 expected-comparison construction from raw source counts, result acceptance, and
 applying confirmed offsets; its service, persistence, override, cache, and CLI/config
 boundaries remain unchanged and it does not parse terminal input. The
@@ -1037,6 +1060,9 @@ bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, determ
 V1 JSON export, strict import validation, a selected merge/replace candidate shared by
 preview and atomic apply, stale-preview rejection, and
 the Review tab's dedicated edit/import/export interaction lifecycle. That controller is
+the single editor-limit owner: notes are bounded to 1000 Unicode scalars in editing,
+stored records, and V1 import/export. The textarea has no native maxlength because
+browsers count UTF-16 code units rather than Unicode scalars. The controller is
 created on first visible Review use, keeps form rendering stable across unrelated viewer
 refreshes, and routes transition announcements through the existing shared polite live
 region. A persistent status line states how many review records are saved in this

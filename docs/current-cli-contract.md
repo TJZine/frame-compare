@@ -150,6 +150,14 @@ so invalid config paths fail through the standard typed path error. `run`, `wiza
 destination before config reads or writes; `run` also validates generated-data
 root structure before diagnostics, config writes, or runtime entry. `preset list`
 remains root-only and ignores its accepted `--config` value.
+Configuration acquisition requires a readable regular file; authored file symlinks
+remain allowed within the resolved path rules. Nonregular or unreadable selected
+config input fails as sanitized `FC-1002`/`CONFIG_PARSE_ERROR`; a missing selected
+file remains `FC-1001`. Malformed JSON in `FRAME_COMPARE_*` section/list variables
+fails as `FC-1003`/`CONFIG_VALIDATION_ERROR`. These use configuration exit code 2
+and the normal typed JSON/human error streams. Preset acquisition similarly uses
+`FC-1005` for unreadable/nonregular input and retains `FC-1004` for missing presets;
+user-authored symlinked preset directories remain supported.
 
 Media input is a read boundary, not a write boundary. Configured
 `paths.input_dir` and the `run --input` override may be relative, absolute,
@@ -254,6 +262,14 @@ fallback. Orchestrated rendering continues to use the source stem as `filename_l
 absolute screenshot path would exceed the legacy Windows browser-safe boundary, the
 physical filename retains a readable source-stem prefix and adds a deterministic
 digest suffix so local `file://` reports remain loadable without identity collisions.
+Final screenshot paths are allocated and checked before clip render preparation.
+Exact generated duplicates and names that address the same file on the actual
+output filesystem, including Unicode case/normalization aliases, fail with
+`FC-4021`/`SCREENSHOT_OUTPUT_COLLISION` and processing exit code 5. Rename the
+colliding source files to make the generated names distinct. Validation temporarily
+reserves candidate names exclusively, never opens existing files for writing, and
+removes owned reservations before preparation. Valid screenshot naming and source
+selector semantics are unchanged.
 
 When analysis is skipped because effective `[analysis]` requests only
 `user_frames` and/or `random_frame_count`, `sources.analysis_source` is not
@@ -939,6 +955,10 @@ recovery requirement.
   and metric algorithm identity before metadata prefetch and before run-folder
   reservation, so a missing, wrong-mode, or invalid entry does not leave an empty
   run folder.
+- The matching cache must remain valid through the cache-only Analyze phase. If
+  its later acquisition fails, the run exits with the typed cache/analysis error
+  before rendering or publishing; it does not complete with only the initial
+  user/random frame plan.
 - `--from-cache-only` does not require or prohibit TMDB network access after analysis
   cache prevalidation succeeds. `--skip-metadata`, disabled TMDB, and a missing API
   key perform no TMDB cache reads or writes.
@@ -1518,6 +1538,12 @@ trust-upgrade path. Ordinary non-Frame-Compare sessions remain inert. Frame Comp
 derives the sibling result path from the trusted generated script path, then rejects
 missing, malformed, stale, mixed-session, duplicate, incomplete, or out-of-bounds
 results. It never trusts panel-supplied paths or counts.
+Accepted manual offsets are persisted separately in the current run's
+`generated/manual_overrides.toml`. Its canonical version "2" stores source names,
+signed frame offsets, and timestamps; record presence represents confirmed manual
+authority. There is no separate confirmation flag. Unsupported older versions are
+ignored as recoverable cache state and replaced on the next save without migration.
+This format is separate from the unchanged native result sidecar schema v1.
 This generated-session/panel workflow adds no `run` flag, configuration field,
 successful JSON field, terminal input protocol, or CLI schema change.
 `audio_alignment.use_vsview = true` is optional; forced mode fails closed when
@@ -1933,6 +1959,12 @@ must not turn schema defaults into explicit tonemap target overrides.
 `tone_curve`, `gamma_lift`, and `contrast_recovery` follow the same rule as
 `target_nits`: each replaces the preset value only when explicitly present in config.
 `--tm-curve` overrides `tone_curve` for one run (`src/frame_compare/render/prepare.py:37-73`).
+Generated config and preset TOML omit these four preset-controlled fields unless
+authored explicitly, including authored values equal to schema defaults. Save/reload
+and partial preset application preserve their override authority; unrelated defaults
+remain materialized and generated-file secret stripping is unchanged.
+Source acquisition establishes TOML/environment precedence once; applying preset or
+CLI overrides validates already-resolved values without reacquiring ambient settings.
 
 The default `reference` baseline also uses `contrast_recovery = 0.3`. This value is
 forwarded to libplacebo tonemapping, not applied as a separate post-tonemap contrast

@@ -491,6 +491,11 @@ Canonical verification path:
    and load that entry point, construct the panel offscreen, round-trip the generated
    metadata/result sidecar, and reject a malformed result. BestSource is VSView/UI-only
    and does not replace Frame Compare's generated-session source loader.
+   The repository-owned `tools/windows_portable/runtime_smoke.py` supplies this
+   bundled Python proof. The builder copies it to temporary `runtime-smoke.py`,
+   runs every required phase with the bundled interpreter and environment, and
+   removes it in the existing cleanup. Source provenance includes the Python file;
+   lint, syntax, and source equivalence do not establish Windows bundle acceptance.
    Run the direct vs-placebo frame proof after Qt when Vulkan is usable; an exact
    `vulkan_runtime_unavailable` skip is permitted only on hosts without that runtime
    and does not replace the separate physical-Windows GPU proof.
