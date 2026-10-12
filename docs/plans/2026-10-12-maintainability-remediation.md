@@ -519,3 +519,74 @@ volume as the remaining U2 platform branch. Record exact SHA and observed result
 No signing key, release/publication, manual signed-workflow dispatch or source-policy
 bypass is authorized. The existing unsigned PR workflow is another acceptance route
 only after the human authorizes pushing and opening the PR.
+
+### Windows acceptance record, 2026-10-12
+
+The local U2/U8 Windows gates passed. This supersedes the gate-open observations
+above; retain Active for the Mac controller's integration/acceptance disposition.
+Separate physical-display/media-runtime release limits remain open in the
+dependency-refresh handoff.
+
+- Pulled clean `v0.7.0` HEAD/local `origin/v0.7.0`:
+  `6d5fca4d4a7482029d612881d67c69eccabcd3bc`, containing `b5df8a4d`; later changes
+  were documentation only. Final tested source:
+  `929c076ac7fb570f28cb0ef7a641beb2a51843cb` (`test: make Windows acceptance
+  fixtures portable`), changing two tests and no production source. GPT-6.1-Sol
+  medium implementation/high independent review passed 47 affected cases without
+  skips. `review-code` was unavailable after discovery; review used repository
+  contracts and develop-code's fallback. Scoped Ruff lint/format, Pyright and
+  diff checks passed.
+- Initial failure evidence retains ten failures: seven from the controller's
+  in-repository pytest basetemp correctly triggering private-key containment
+  refusal; two Windows fixture defects (open-file deletion and oversized native
+  environment value), plus one subsequent leaked-handle warning. Corrections
+  retain independent physical replacement/ownership and oversized refusal,
+  sanitization and no-write assertions. Fresh outside-repository C: basetemp:
+  **358 passed, 25 skipped in 215.02s**, exit 0. All 208 Windows portable and
+  50 U2 cases passed with zero skips; 16 workflow skips lack jq, nine require POSIX.
+- Windows 10 Home build 19045 x64; PowerShell 7.6.4; Git 2.56.0.windows.1;
+  uv 0.8.17; source Python 3.13.7; embedded Python 3.13.16; frozen dev/VSView sync
+  passed. C: NTFS, 4096-byte allocation units, case sensitivity disabled on both
+  pytest and screenshot output directories.
+- Both unsigned builds passed; the correction was rebuilt into a fresh directory.
+  All eight phases reported ordered start/ok exactly once: package_imports,
+  runtime_contract, vapoursynth_environment, lwlibavsource_frame,
+  placebo_tonemap_api, apply_tonemap_frame, placebo_tonemap_frame, vsview_runtime.
+  Managed R81/API4.3, L-SMASH 1310, placebo 2.0.4, VSView 0.12.1, PySide6 6.11.2,
+  BestSource 22, vspackrgb 2.0 and pinned LGPL FFmpeg loaded. Preload-before-Qt,
+  generated L-SMASH media, panel entrypoint, whole-set metadata, confirmed/keep-current
+  sidecars, malformed rejection and offscreen launch/cleanup passed. FFMS2 and
+  deployed Qt WebEngine remained absent. Actual application tonemap: RGBS/32-bit;
+  direct Vulkan tonemap: RGB48/16-bit; no Vulkan-unavailable skip. Vulkan enumeration:
+  loader 1.4.341, one RTX 5080, device API 1.4.351, driver 617.14. Stale host overlay
+  warnings were retained; libplacebo did not separately log a selected-adapter ID.
+- Extracted verifier exit 0, exact `WINDOWS_EXTRACTED_PROOF result=ok`:
+  help/version/JSON-clean doctor and installed shim commands, exact source SHA,
+  runtime fingerprints, ZIP layout and 105 verified license records. Supplemental
+  comparison proved all 196 source files equal committed Git archive bytes; an
+  initial raw-blob comparison correctly differed on Git's configured CRLF export.
+  Disposable LOCALAPPDATA installs preserved all eight existing installation files
+  and restored the exact user PATH. PowerShell 5.1.19041.7725 additionally passed
+  install/shim help/version from a fresh non-ASCII bundle path with BOM-less UTF-8
+  state. No candidate processes remained after proof.
+- Extracted-interpreter actual-volume naming probe: Movie/movie and Ç/ç physically
+  alias and refuse with FC-4021 / SCREENSHOT_OUTPUT_COLLISION; NFC/NFD,
+  Straße/Strasse, Ç/c and straße/strasze remain distinct and valid. Existing bytes,
+  hard links, exact duplicates, reservations, failed creation and cancellation
+  admission cleanup passed. Retained tests also proved refusal before native
+  preparation/render admission and cleanup after cancellation of a reservation.
+
+Absolute Windows evidence roots:
+
+- Initial failure, corrected pytest/JUnit, implementation/review and host/Vulkan
+  logs: `C:\Software\video\frame-compare\dist\maintainability-acceptance-20261012T220412295Z`.
+- Final build/evidence, extracted proof/doctor JSON/stderr, packaged naming,
+  Windows 5.1, process/isolation logs, extracted bundle and ZIP:
+  `C:\Software\video\frame-compare\dist\maintainability-acceptance-20261012T221123904Z`.
+- Final ZIP SHA-256:
+  `56fff2f5ada57ee8b883c2f8c47d83aa3774283cdac8387aa87f4beb34cdaf9b`.
+
+Visible VSView interaction, real HDR10/Dolby Vision/perceptual acceptance, exact
+predecessor migration and other physical-media cases remain unverified; native
+desktop automation is unavailable in this chat. No signing, publishing, release
+tags, PRs, push, hosted dispatch or live slow.pics/webhook calls occurred.
