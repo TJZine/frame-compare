@@ -75,7 +75,9 @@ canonical evidence parser, and source-routing instructions.
   stash, reset, stage, commit, push, open PRs, or publish. The controller owns Git.
   The human subsequently authorized proper commits for all remediation changes;
   the controller will create coherent conventional commits after applicable checks,
-  excluding unrelated work. Push, PR creation, and release remain unauthorized.
+  excluding unrelated work. The human subsequently authorized pushing committed
+  changes to `origin/v0.7.0` for a Windows-machine pull and requested a Windows Codex
+  handoff. PR creation and release remain unauthorized.
 - Preserve the unrelated dirty documentation-refresh capture-spec/pages-reference,
   untracked documentation redesign assets/plans/prompts, and `.claude/launch.json`.
 - Preserve runtime-free help/version, typed sanitized errors and documented exits,
@@ -454,8 +456,9 @@ commits with repository pre-commit hooks passing; unrelated work is excluded:
 
 The companion `docs: record remediation contracts and acceptance evidence` commit
 contains this plan and the four current contract/runbook/runtime documents. All
-remediation changes are committed; unrelated local work is excluded. No push, PR,
-signing, release or publication occurred.
+remediation changes are committed; unrelated local work is excluded. The human
+subsequently authorized the branch push and Windows handoff. No PR, signing,
+release or publication is authorized by that instruction.
 
 The diagnostic high reviewer accepted the bounded note, independently proving
 the retained non-timeout failure behavior. An extra child browser run overlapped
@@ -486,6 +489,11 @@ acceptance retains every test and assertion without changing repository CI polic
 Plan remains Active solely for actual Windows unsigned-bundle and filesystem proof.
 
 ## Windows acceptance handoff
+
+The human will pull `v0.7.0` on a Windows machine and give Codex the self-contained
+[`Windows acceptance prompt`](../prompts/2026-10-12-maintainability-windows-acceptance-codex.md).
+The controller will commit that handoff separately and fast-forward push this branch;
+runtime acceptance remains open pending the Windows report.
 
 This gate stays open. Use a Windows checkout at the final remediation commit with
 the extracted Python source committed; inventory generation verifies source bytes
