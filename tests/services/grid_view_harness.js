@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { domMechanics } = require('./dom_fixture');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const assetsPath = path.join(
@@ -14,6 +15,35 @@ const assetsPath = path.join(
 );
 const formatPath = path.join(assetsPath, 'viewer_format.js');
 const assetPath = path.join(assetsPath, 'grid_view.js');
+// The common fixture must preserve listener lifecycle and nested focus semantics.
+{
+    const document = { activeElement: null };
+    const parent = domMechanics(() => document);
+    const child = domMechanics(() => document);
+    const grandchild = domMechanics(() => document);
+    parent.append(child);
+    child.append(grandchild);
+    assert.equal(parent.contains(grandchild), true);
+    grandchild.focus();
+    assert.equal(document.activeElement, grandchild);
+    let onceCalls = 0;
+    child.addEventListener('load', () => {
+        onceCalls += 1;
+        child.dispatch('load');
+    }, { once: true });
+    child.dispatch('load');
+    assert.equal(onceCalls, 1);
+    assert.equal(child.listenerCount('load'), 0);
+    const removed = () => assert.fail('removed listener ran');
+    child.addEventListener('input', () => child.removeEventListener('input', removed));
+    child.addEventListener('input', removed);
+    child.dispatch('input');
+    child.remove();
+    assert.equal(parent.contains(grandchild), false);
+    assert.equal(child.parentElement, null);
+    assert.equal(document.activeElement, null);
+}
+
 const context = {};
 const source = `${fs.readFileSync(formatPath, 'utf8')}\n${fs.readFileSync(assetPath, 'utf8')}\nglobalThis.__GridView = GridView;`;
 vm.runInNewContext(source, context, { filename: assetPath });
@@ -38,14 +68,12 @@ assert.equal(grid.positionText(4, 6, false), 'Clips 5\u20136 of 6');
 assert.equal(grid.positionText(3, 6, true), 'Clip 4 of 6');
 
 function fakeElement(tagName = 'div', rect = { left: 0, top: 0, width: 400, height: 240 }) {
-    const listeners = new Map();
     const attributes = new Map();
     const classes = new Set();
     const element = {
+        ...domMechanics(() => context.document),
         tagName: tagName.toUpperCase(),
         rect,
-        parentElement: null,
-        children: [],
         dataset: {},
         hidden: false,
         disabled: false,
@@ -62,31 +90,6 @@ function fakeElement(tagName = 'div', rect = { left: 0, top: 0, width: 400, heig
                 if (force) classes.add(name);
                 else classes.delete(name);
             },
-        },
-        addEventListener(type, listener) {
-            const entries = listeners.get(type) || [];
-            entries.push(listener);
-            listeners.set(type, entries);
-        },
-        dispatch(type, event = {}) {
-            for (const listener of listeners.get(type) || []) listener(event);
-        },
-        append(...children) {
-            children.forEach(child => { child.parentElement = this; });
-            this.children.push(...children);
-        },
-        replaceChildren(...children) {
-            if (this.contains?.(context.document?.activeElement)) {
-                context.document.activeElement = null;
-            }
-            this.children.forEach(child => { child.parentElement = null; });
-            this.children = [];
-            this.append(...children);
-        },
-        remove() {
-            if (!this.parentElement) return;
-            this.parentElement.children = this.parentElement.children.filter(child => child !== this);
-            this.parentElement = null;
         },
         setAttribute(name, value) { attributes.set(name, String(value)); },
         getAttribute(name) { return attributes.get(name) ?? null; },
@@ -123,15 +126,6 @@ function fakeElement(tagName = 'div', rect = { left: 0, top: 0, width: 400, heig
             };
             visit(this);
             return found;
-        },
-        contains(candidate) {
-            if (candidate === this) return true;
-            return this.children.some(child => child.contains?.(candidate));
-        },
-        focus() {
-            this.focused = true;
-            if (context.document) context.document.activeElement = this;
-            this.dispatch('focus');
         },
     };
     return element;

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { domMechanics } = require('./dom_fixture');
 
 const lensPath = path.resolve(
     __dirname,
@@ -19,20 +20,19 @@ const viewerFormatPath = path.join(path.dirname(lensPath), 'viewer_format.js');
 let focusDocument = null;
 
 function fakeElement(rect = { left: 0, top: 0, width: 0, height: 0 }) {
-    const listeners = new Map();
     const attributes = new Map();
     const classes = new Set();
     const capturedPointers = new Set();
     let currentRect = { ...rect };
     let srcValue = '';
     const element = {
+        ...domMechanics(() => focusDocument),
         hidden: false,
         disabled: false,
         checked: false,
         value: '',
         textContent: '',
         dataset: {},
-        children: [],
         naturalWidth: 1920,
         naturalHeight: 1080,
         complete: true,
@@ -49,36 +49,6 @@ function fakeElement(rect = { left: 0, top: 0, width: 0, height: 0 }) {
             },
             contains(name) { return classes.has(name); },
         },
-        addEventListener(type, callback, options = {}) {
-            const entries = listeners.get(type) || [];
-            entries.push({ callback, once: Boolean(options?.once) });
-            listeners.set(type, entries);
-        },
-        removeEventListener(type, callback) {
-            const entries = listeners.get(type) || [];
-            listeners.set(type, entries.filter(entry => entry.callback !== callback));
-        },
-        listenerCount(type) { return (listeners.get(type) || []).length; },
-        listenerCallbacks(type) {
-            return (listeners.get(type) || []).map(entry => entry.callback);
-        },
-        dispatch(type, values = {}) {
-            const event = {
-                target: this,
-                currentTarget: this,
-                preventDefault() {},
-                stopPropagation() {},
-                ...values,
-            };
-            const entries = [...(listeners.get(type) || [])];
-            entries.forEach(entry => {
-                entry.callback(event);
-                if (entry.once) {
-                    const current = listeners.get(type) || [];
-                    listeners.set(type, current.filter(candidate => candidate !== entry));
-                }
-            });
-        },
         setAttribute(name, value) { attributes.set(name, String(value)); },
         getAttribute(name) { return attributes.get(name) ?? null; },
         removeAttribute(name) {
@@ -93,10 +63,7 @@ function fakeElement(rect = { left: 0, top: 0, width: 0, height: 0 }) {
             };
         },
         setRect(nextRect) { currentRect = { ...nextRect }; },
-        replaceChildren(...children) { this.children = children; },
-        contains(target) { return target === this; },
         closest() { return null; },
-        focus() { if (focusDocument) focusDocument.activeElement = this; },
         querySelector() { return this.children[0] || null; },
         setPointerCapture(pointerId) { capturedPointers.add(pointerId); },
         releasePointerCapture(pointerId) {
@@ -133,7 +100,7 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
     popover.hidden = true;
     const firstSetting = fakeElement();
     popover.querySelector = () => firstSetting;
-    popover.contains = target => [popover, firstSetting].includes(target);
+    popover.append(firstSetting);
     const sizeButtons = ['small', 'medium', 'large'].map(size => {
         const button = fakeElement();
         button.dataset.lensSize = size;
@@ -207,18 +174,14 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
         addEventListener() {},
     };
     focusDocument = document;
-    lens.contains = target => [
-        lens,
-        selectors['[data-lens-drag-handle]'],
-    ].includes(target);
-    paletteGroup.contains = target => [
-        paletteGroup,
+    lens.append(selectors['[data-lens-drag-handle]']);
+    paletteGroup.append(
         elements['btn-lens'],
         activeControls,
         elements['btn-lens-zoom-out'],
         elements['btn-lens-zoom-in'],
         elements['btn-lens-settings'],
-    ].includes(target);
+    );
     const context = {
         console,
         document,

@@ -10,6 +10,7 @@ import subprocess
 from dataclasses import replace
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -118,6 +119,12 @@ def _run_browser_dump(
                 encoding="utf-8",
                 timeout=30,
             )
+        except subprocess.CalledProcessError as error:
+            stderr = error.stderr
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            error.add_note(f"Chrome stderr (first 8000 characters):\n{(stderr or '')[:8000]}")
+            raise
         except subprocess.TimeoutExpired:
             if attempt == 1:
                 raise
@@ -171,17 +178,24 @@ def test_browser_dump_does_not_retry_non_timeout_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = 0
+    error = subprocess.CalledProcessError(
+        2, ["chrome"], stderr="profile startup failed\n" + "x" * 9000
+    )
 
     def fail(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         nonlocal calls
         calls += 1
-        raise subprocess.CalledProcessError(1, ["chrome"])
+        raise error
 
     monkeypatch.setattr(subprocess, "run", fail)
 
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(subprocess.CalledProcessError) as raised:
         _run_browser_dump("chrome", tmp_path / "report.html", width=375, height=240)
     assert calls == 1
+    assert raised.value is error
+    assert raised.value.returncode == 2
+    assert "profile startup failed" in error.__notes__[0]
+    assert len(error.__notes__[0]) < 8100
 
 
 def _generated_report(
@@ -1258,3 +1272,221 @@ document.addEventListener('DOMContentLoaded', () => {
         "data-blink-retry-current",
     ):
         assert parser.document_attributes.get(attribute) == "true", parser.document_attributes
+
+
+def _run_browser_input(
+    browser: str,
+    report_path: Path,
+    profile: Path,
+    script: str,
+    *,
+    timeout: float = 40,
+) -> subprocess.CompletedProcess[str]:
+    """Own Chrome independently of Node, including helper timeout/failure cleanup."""
+    from nodejs_wheel import node
+
+    chrome = subprocess.Popen(
+        [
+            browser,
+            "--headless=new",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-gpu",
+            "--no-first-run",
+            "--remote-debugging-port=0",
+            f"--user-data-dir={profile}",
+            report_path.as_uri(),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        return cast(
+            subprocess.CompletedProcess[str],
+            node(
+                ["-e", script, report_path.as_uri(), str(profile)],
+                return_completed_process=True,
+                capture_output=True,
+                encoding="utf-8",
+                check=False,
+                timeout=timeout,
+            ),
+        )
+    finally:
+        chrome.terminate()
+        try:
+            chrome.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            chrome.kill()
+            chrome.wait(timeout=5)
+
+
+def test_review_note_native_insertion_uses_unicode_scalar_limit(tmp_path: Path) -> None:
+    """CDP input enters through Chrome editing, including trusted input events."""
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    script = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const [report, profile] = process.argv.slice(1);
+let socket;
+let nextId = 0;
+const pending = new Map();
+const pause = () => new Promise(resolve => setTimeout(resolve, 100));
+async function command(method, params = {}) {
+    const id = ++nextId;
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            pending.delete(id);
+            reject(new Error(`CDP ${method} timed out`));
+        }, 5000);
+        pending.set(id, { resolve, reject, timer });
+        socket.send(JSON.stringify({ id, method, params }));
+    });
+}
+async function evaluate(expression) {
+    const result = await command('Runtime.evaluate', { expression, returnByValue: true });
+    assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
+    return result.result.value;
+}
+(async () => {
+    try {
+        let port;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            try {
+                port = (await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
+                break;
+            } catch { await pause(); }
+        }
+        assert.ok(port, 'Chrome did not expose a debugging port');
+        const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`, {
+            signal: AbortSignal.timeout(5000),
+        })).json();
+        const target = targets.find(target => target.type === 'page' && target.url === report);
+        assert.ok(target, 'generated report page is missing');
+        socket = new WebSocket(target.webSocketDebuggerUrl);
+        await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('CDP socket timed out')), 5000);
+            socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+            socket.addEventListener('error', error => { clearTimeout(timer); reject(error); }, { once: true });
+        });
+        socket.addEventListener('message', event => {
+            const message = JSON.parse(event.data);
+            const request = pending.get(message.id);
+            if (!request) return;
+            pending.delete(message.id);
+            clearTimeout(request.timer);
+            if (message.error) request.reject(new Error(JSON.stringify(message.error)));
+            else request.resolve(message.result);
+        });
+        let initialized = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            initialized = await evaluate("typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)");
+            if (initialized) break;
+            await pause();
+        }
+        assert.ok(initialized, 'viewer did not initialize');
+        await evaluate(`(() => {
+            ReportViewer.inspector.setOpen(true, { save: false });
+            ReportViewer.inspector.setTab('review', { save: false });
+            globalThis.note = document.querySelector('[data-review-note]');
+            globalThis.trustedInputs = 0;
+            note.addEventListener('input', event => { if (event.isTrusted) trustedInputs += 1; });
+            note.focus();
+        })()`);
+        for (const prefix of ['a'.repeat(999), '😀'.repeat(999), 'a😀'.repeat(499) + 'é']) {
+            // Select existing text and replace it through the browser input pipeline.
+            await evaluate('note.focus(); note.select();');
+            await command('Input.insertText', { text: prefix });
+            assert.equal(await evaluate('note.value'), prefix);
+            assert.equal(await evaluate('document.activeElement === note'), true);
+            await command('Input.insertText', { text: '🚀xy' });
+            const expected = prefix + '🚀';
+            assert.equal(await evaluate('note.value'), expected);
+            assert.equal(await evaluate("document.querySelector('[data-review-note-count]').textContent"), '1000 / 1000');
+            assert.equal(await evaluate('note.selectionStart === note.value.length && note.selectionEnd === note.value.length'), true);
+            const exported = JSON.parse(await evaluate('ReportViewer.reviewController.model.exportText()'));
+            assert.equal(exported.reviews[0].note, expected);
+            // An edit inside the note must keep its selection while below the bound.
+            await evaluate('note.setSelectionRange(0, note.value.length);');
+            await command('Input.insertText', { text: 'left😀right' });
+            await evaluate('note.setSelectionRange(4, 6);');
+            await command('Input.insertText', { text: 'é' });
+            assert.equal(await evaluate('note.value'), 'leftéright');
+            assert.equal(await evaluate('note.selectionStart'), 5);
+            assert.equal(await evaluate('document.activeElement === note'), true);
+        }
+        assert.equal(await evaluate('trustedInputs'), 12);
+        console.log('Native BMP, supplementary, mixed, bounds, selection, focus and export passed');
+    } finally {
+        socket?.close();
+    }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = _run_browser_input(browser, report_path, tmp_path / "chrome-input-profile", script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Native BMP, supplementary, mixed" in result.stdout
+
+
+@pytest.mark.parametrize("failure", ["timeout", "command"])
+def test_browser_input_cleanup_survives_helper_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    """A real Chrome process is reaped even when subprocess.run kills Node."""
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    processes: list[subprocess.Popen[Any]] = []
+    original_popen = subprocess.Popen
+
+    def track_process(*args: Any, **kwargs: Any) -> subprocess.Popen[Any]:
+        process = original_popen(*args, **kwargs)
+        if args[0][0] == browser:
+            processes.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", track_process)
+    report_path = tmp_path / "report.html"
+    report_path.write_text("<html></html>", encoding="utf-8")
+    script = r"""
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const profile = process.argv[2];
+(async () => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+        try {
+            await fs.readFile(path.join(profile, 'DevToolsActivePort'));
+            console.log('Chrome ready');
+            FAILURE
+            return;
+        } catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+    }
+    throw new Error('Chrome never became ready');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    script = script.replace(
+        "FAILURE",
+        "setInterval(() => {}, 1000);"
+        if failure == "timeout"
+        else "throw new Error('CDP failed');",
+    )
+    if failure == "timeout":
+        with pytest.raises(subprocess.TimeoutExpired) as raised:
+            _run_browser_input(browser, report_path, tmp_path / "profile", script, timeout=4)
+        assert "Chrome ready" in str(raised.value.output)
+    else:
+        result = _run_browser_input(browser, report_path, tmp_path / "profile", script)
+        assert result.returncode != 0
+        assert "Chrome ready" in result.stdout
+        assert "CDP failed" in result.stderr
+    assert len(processes) == 1
+    assert processes[0].poll() is not None
+    assert processes[0].wait(timeout=0) == processes[0].returncode

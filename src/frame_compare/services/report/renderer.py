@@ -742,7 +742,7 @@ def _render_inspector() -> str:
                 </select>
             </label>
             <label class="rv-review-field">Note <span data-review-note-count>0 / {_REVIEW_NOTE_MAX_LENGTH}</span>
-                <textarea data-review-note rows="5" maxlength="{_REVIEW_NOTE_MAX_LENGTH}" tabindex="-1"></textarea>
+                <textarea data-review-note rows="5" tabindex="-1"></textarea>
             </label>
             <label class="rv-review-field">Preferred clip
                 <select data-review-preferred tabindex="-1"></select>

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { domMechanics } = require('./dom_fixture');
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 const viewerPath = path.join(
@@ -93,22 +94,20 @@ function payloadWithClipCount(clipCount) {
 function fakeElement() {
     const classes = new Set();
     const attributes = new Map();
-    const listeners = new Map();
     let definitionValues = null;
     const inspectorPrimary = { value: null };
     return {
+        ...domMechanics(() => activeDocument),
         value: '',
         textContent: '',
         disabled: false,
         hidden: false,
         inert: false,
         tabIndex: 0,
-        children: [],
         dataset: {},
         tagName: 'DIV',
         isContentEditable: false,
         isConnected: true,
-        listeners,
         classList: {
             toggle(name, force) {
                 const enabled = force === undefined ? !classes.has(name) : Boolean(force);
@@ -142,31 +141,7 @@ function fakeElement() {
         closest() {
             return null;
         },
-        contains(target) {
-            return target === this;
-        },
-        addEventListener(type, listener) {
-            const registered = listeners.get(type) || [];
-            registered.push(listener);
-            listeners.set(type, registered);
-        },
-        removeEventListener(type, listener) {
-            const registered = listeners.get(type) || [];
-            listeners.set(type, registered.filter(item => item !== listener));
-        },
-        dispatch(type, event = {}) {
-            if (!Object.hasOwn(event, 'target')) event.target = this;
-            for (const listener of listeners.get(type) || []) {
-                listener(event);
-            }
-        },
-        focus() {
-            if (activeDocument) activeDocument.activeElement = this;
-        },
         scrollIntoView() {},
-        replaceChildren(...children) {
-            this.children = children;
-        },
         querySelector(selector) {
             if (selector === '.rv-inspector-clip-primary') {
                 if (!inspectorPrimary.value) inspectorPrimary.value = fakeElement();
@@ -1871,7 +1846,7 @@ async function assertMainImageUnavailableState() {
         const { viewer } = loadViewer({ clipCount: 2 });
         viewer.state.mode = 'slider';
         viewer.updateImages();
-        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+        const staleError = viewer.dom.leftImg.listenerCallbacks('error')[0];
         viewer.state.currentFrameIdx = 1;
         viewer.updateImages();
         staleError();
@@ -1886,7 +1861,7 @@ async function assertMainImageUnavailableState() {
         viewer.updateImages();
         viewer.dom.leftImg.dispatch('load');
         viewer.dom.rightImg.dispatch('load');
-        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+        const staleError = viewer.dom.leftImg.listenerCallbacks('error')[0];
         viewer.updateImages();
         staleError();
         assert.equal(viewer.dom.emptyState.hidden, true);
@@ -1899,7 +1874,7 @@ async function assertMainImageUnavailableState() {
         viewer.gridView = { render() {} };
         viewer.state.mode = 'slider';
         viewer.updateImages();
-        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+        const staleError = viewer.dom.leftImg.listenerCallbacks('error')[0];
         viewer.state.mode = 'grid';
         viewer.updateImages();
         staleError();
@@ -1913,7 +1888,7 @@ async function assertMainImageUnavailableState() {
         viewer.gridView = { render() {} };
         viewer.state.mode = 'slider';
         viewer.updateImages();
-        const staleError = viewer.dom.leftImg.listeners.get('error')[0];
+        const staleError = viewer.dom.leftImg.listenerCallbacks('error')[0];
 
         viewer.state.mode = 'diff';
         viewer.state.currentFrameIdx = 1;
