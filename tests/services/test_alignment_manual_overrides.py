@@ -16,19 +16,18 @@ from frame_compare.services.alignment_manual_overrides import (
 )
 
 
-def _override(comparison: str, offset: int, *, confirmed: bool = True) -> ManualOverride:
+def _override(comparison: str, offset: int) -> ManualOverride:
     return ManualOverride(
         reference_clip="ref",
         comparison_clip=comparison,
         frame_offset=offset,
         timestamp="2026-01-03T12:00:00Z",
-        confirmed=confirmed,
     )
 
 
-def test_manual_overrides_v1_round_trip_preserves_values(tmp_path: Path) -> None:
+def test_manual_overrides_v2_round_trip_preserves_values(tmp_path: Path) -> None:
     first = _override("comp_a", 42)
-    second = _override("comp_b", -10, confirmed=False)
+    second = _override("comp_b", -10)
 
     save_manual_override(tmp_path, first)
     save_manual_override(tmp_path, second)
@@ -70,7 +69,7 @@ def test_load_manual_overrides_unsupported_version_is_empty(tmp_path: Path) -> N
 def test_load_manual_overrides_skips_invalid_entries(tmp_path: Path) -> None:
     (tmp_path / MANUAL_OVERRIDES_FILE).write_text(
         """\
-version = "1"
+version = "2"
 
 ["ref:invalid"]
 reference_clip = "ref"
@@ -83,17 +82,16 @@ reference_clip = "ref"
 comparison_clip = "valid"
 frame_offset = -7
 timestamp = "2026-01-03T12:00:00Z"
-confirmed = false
 """,
         encoding="utf-8",
     )
 
-    assert load_manual_overrides(tmp_path) == {"ref:valid": _override("valid", -7, confirmed=False)}
+    assert load_manual_overrides(tmp_path) == {"ref:valid": _override("valid", -7)}
 
 
 def test_load_manual_overrides_read_error_is_empty(tmp_path: Path) -> None:
     path = tmp_path / MANUAL_OVERRIDES_FILE
-    path.write_text('version = "1"\n', encoding="utf-8")
+    path.write_text('version = "2"\n', encoding="utf-8")
 
     with (
         patch("pathlib.Path.open", side_effect=OSError("permission denied")),
@@ -108,7 +106,7 @@ def test_load_manual_overrides_read_error_is_empty(tmp_path: Path) -> None:
 def test_save_manual_override_merges_overwrites_and_orders_keys(tmp_path: Path) -> None:
     zeta = _override("zeta", 10)
     alpha = _override("alpha", 20)
-    updated_zeta = _override("zeta", 99, confirmed=False)
+    updated_zeta = _override("zeta", 99)
 
     save_manual_override(tmp_path, zeta)
     save_manual_override(tmp_path, alpha)
@@ -119,14 +117,15 @@ def test_save_manual_override_merges_overwrites_and_orders_keys(tmp_path: Path) 
         "ref:zeta": updated_zeta,
     }
     content = (tmp_path / MANUAL_OVERRIDES_FILE).read_text(encoding="utf-8")
-    assert content.startswith('version = "1"')
+    assert "confirmed" not in content
+    assert content.startswith('version = "2"')
     assert content.index('["ref:alpha"]') < content.index('["ref:zeta"]')
 
 
 def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> None:
     path = tmp_path / MANUAL_OVERRIDES_FILE
     path.write_text(
-        'version = "1"\n["old:entry"]\nreference_clip = "old"\n'
+        'version = "2"\n["old:entry"]\nreference_clip = "old"\n'
         'comparison_clip = "entry"\nframe_offset = 1\n'
         'timestamp = "2026-01-03T12:00:00Z"\n',
         encoding="utf-8",
@@ -208,3 +207,19 @@ def test_pending_interrupt_prevents_atomic_publication(
         asyncio.run(publish())
     assert not target.exists()
     assert list(target.parent.glob(f".{target.name}.*")) == []
+
+
+@pytest.mark.parametrize("confirmed", ["true", "false"])
+def test_previous_format_is_rejected_and_replaced(tmp_path: Path, confirmed: str) -> None:
+    path = tmp_path / MANUAL_OVERRIDES_FILE
+    path.write_text(
+        'version = "1"\n["ref:old"]\nreference_clip = "ref"\n'
+        'comparison_clip = "old"\nframe_offset = 0\n'
+        f'timestamp = "2026-01-03T12:00:00Z"\nconfirmed = {confirmed}\n',
+        encoding="utf-8",
+    )
+    assert load_manual_overrides(tmp_path) == {}
+    replacement = _override("new", 0)
+    save_manual_override(tmp_path, replacement)
+    assert load_manual_overrides(tmp_path) == {"ref:new": replacement}
+    assert "confirmed" not in path.read_text(encoding="utf-8")

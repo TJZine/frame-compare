@@ -7,7 +7,7 @@ from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from threading import Event
-from typing import Literal, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -641,12 +641,12 @@ def test_cancellation_between_positions_is_observed(
     original = alignment_video._read_frame
     reads = 0
 
-    def read_frame(node: vs.VideoNode, frame: int) -> np.ndarray:
+    def read_frame(node: vs.VideoNode, frame: int, **kwargs: Any) -> np.ndarray:
         nonlocal reads
         reads += 1
         if reads >= 6:
             cancellation.set()
-        return original(node, frame)
+        return original(node, frame, **kwargs)
 
     monkeypatch.setattr(alignment_video, "_read_frame", read_frame)
     result = _run(tmp_path, truth=0, cancellation=cancellation)
@@ -1502,10 +1502,10 @@ def test_video_check_reuses_only_selected_luma_with_identical_evidence(
             retained_bytes.append(sum(image.nbytes for image in retained_frames.values()))
         return selected
 
-    def read_frame(node: vs.VideoNode, frame: int) -> alignment_video.FloatFrame:
+    def read_frame(node: vs.VideoNode, frame: int, **kwargs: Any) -> alignment_video.FloatFrame:
         nonlocal reads
         reads += 1
-        return read(node, frame)
+        return read(node, frame, **kwargs)
 
     monkeypatch.setattr(alignment_video, "_motion_positions", select_frames)
     monkeypatch.setattr(alignment_video, "_read_frame", read_frame)
@@ -1519,3 +1519,35 @@ def test_video_check_reuses_only_selected_luma_with_identical_evidence(
     assert _decide_video(attempt, result).decision == _decide_video(attempt, baseline).decision
     assert max(retained_counts) == 12
     assert max(retained_bytes) <= 12 * 320 * 180 * np.dtype(np.float32).itemsize
+
+
+@pytest.mark.parametrize("phase", ["motion", "base", "hypotheses"])
+@pytest.mark.parametrize("cancel_after", [1, 2])
+def test_cancellation_prevents_each_subsequent_native_read(phase: str, cancel_after: int) -> None:
+    cancellation = Event()
+    reads = 0
+
+    class CancellingNode:
+        num_frames = 60
+
+        def get_frame(self, frame: int) -> tuple[np.ndarray]:
+            nonlocal reads
+            assert not cancellation.is_set(), "native read admitted after cancellation"
+            reads += 1
+            if reads == cancel_after:
+                cancellation.set()
+            return (np.arange(16, dtype=np.float32).reshape(4, 4) + frame,)
+
+    node = cast(vs.VideoNode, CancellingNode())
+    if phase == "motion":
+        result = alignment_video._motion_positions(node, 5, 40, 2, cancellation=cancellation)
+    elif phase == "base":
+        result = alignment_video._score_base_positions(
+            node, node, (20,), (-2, -1, 0, 1, 2), cancellation=cancellation
+        )
+    else:
+        result = alignment_video._score_hypotheses(
+            node, node, 20, 0, (1, 3), cancellation=cancellation
+        )
+    assert result is None
+    assert reads == cancel_after

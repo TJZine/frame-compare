@@ -28,6 +28,7 @@ from frame_compare.utils.alignment_evidence import (
     audio_unavailable_phrase,
 )
 from frame_compare.utils.alignment_review_projection import (
+    AudioReviewPresentation,
     audio_evidence_rows,
     build_audio_review_presentation,
 )
@@ -71,11 +72,19 @@ _KEEP_HELP = (
 _SAVED_GUIDANCE = "Close VSView to resume Frame Compare."
 
 
-def _suggested_offset(comparison: AlignmentReviewComparisonMetadata) -> int | None:
-    attempt = comparison.audio_review.audio_attempt
-    if attempt is not None:
-        return build_audio_review_presentation(attempt).suggested_offset
+def _suggested_offset(
+    comparison: AlignmentReviewComparisonMetadata, review: AudioReviewPresentation | None
+) -> int | None:
+    if review is not None:
+        return review.suggested_offset
     return comparison.audio_review.current_authority.frame_offset
+
+
+@dataclass(frozen=True, slots=True)
+class _ComparisonPresentation:
+    review: AudioReviewPresentation | None
+    summary: str
+    details: str
 
 
 @dataclass(slots=True)
@@ -116,6 +125,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         super().__init__(parent, api)
         self._workspace: AlignmentReviewWorkspaceMetadata | None = None
         self._session: AlignmentReviewSession | None = None
+        self._presentations: tuple[_ComparisonPresentation, ...] = ()
         self._source_drafts = list[_SourceDraft]()
         self._offset_drafts = list[_OffsetDraft]()
         self._active_output_id: int | None = None
@@ -281,6 +291,20 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
 
         self._workspace = workspace
         self._session = session
+        presentations: list[_ComparisonPresentation] = []
+        for comparison in workspace.comparisons:
+            attempt = comparison.audio_review.audio_attempt
+            review = build_audio_review_presentation(attempt) if attempt is not None else None
+            presentations.append(
+                _ComparisonPresentation(
+                    review=review,
+                    summary=_audio_summary(comparison, review),
+                    details=_audio_details(
+                        comparison, workspace.reference.source_frame_count, review
+                    ),
+                )
+            )
+        self._presentations = tuple(presentations)
         self._source_drafts = [
             _SourceDraft(
                 output_id=workspace.reference.output_id,
@@ -355,8 +379,10 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.audio_detail_groups.clear()
         if self._workspace is None:
             return
-        for comparison in self._workspace.comparisons:
-            summary = QLabel(_audio_summary(comparison), self.audio_group)
+        for comparison, presentation in zip(
+            self._workspace.comparisons, self._presentations, strict=True
+        ):
+            summary = QLabel(presentation.summary, self.audio_group)
             summary.setWordWrap(True)
             summary.setTextInteractionFlags(
                 Qt.TextInteractionFlag.TextSelectableByMouse
@@ -377,7 +403,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             )
             details_layout = QVBoxLayout(details)
             detail_label = QLabel(
-                _audio_details(comparison, self._workspace.reference.source_frame_count),
+                presentation.details,
                 details,
             )
             detail_label.setWordWrap(True)
@@ -413,6 +439,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             self.api.timeline.clear_notches(_TIMELINE_GROUP)
         self._workspace = None
         self._session = None
+        self._presentations = ()
         self._source_drafts.clear()
         self._offset_drafts.clear()
         self._active_output_id = None
@@ -527,8 +554,10 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             return
         markers = list[tuple[int, str, str]]()
         if source_index == 0:
-            for comparison in self._workspace.comparisons:
-                marker_offset = _marker_offset(comparison)
+            for comparison, presentation in zip(
+                self._workspace.comparisons, self._presentations, strict=True
+            ):
+                marker_offset = _marker_offset(comparison, presentation.review)
                 suggestion = _suggested_pair(marker_offset)[0]
                 if (
                     suggestion is not None
@@ -538,19 +567,20 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                         (
                             suggestion,
                             _marker_color(comparison, "reference"),
-                            _marker_text(comparison, suggestion, "reference"),
+                            _marker_text(comparison, suggestion, "reference", presentation.review),
                         )
                     )
         else:
             comparison = self._workspace.comparisons[source_index - 1]
-            marker_offset = _marker_offset(comparison)
+            presentation = self._presentations[source_index - 1]
+            marker_offset = _marker_offset(comparison, presentation.review)
             suggestion = _suggested_pair(marker_offset)[1]
             if suggestion is not None and suggestion < comparison.source_frame_count:
                 markers.append(
                     (
                         suggestion,
                         _marker_color(comparison, "comparison"),
-                        _marker_text(comparison, suggestion, "comparison"),
+                        _marker_text(comparison, suggestion, "comparison", presentation.review),
                     )
                 )
         self.api.timeline.clear_notches(_TIMELINE_GROUP, update=not markers)
@@ -665,7 +695,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 elif offset is not None:
                     outcome = f"{offset:+d}f — {_trim_explanation(offset)}"
                 else:
-                    outcome = _audio_summary(comparison).splitlines()[0]
+                    outcome = self._presentations[index - 1].summary.splitlines()[0]
             outcome_label.setText(outcome)
 
         if not self._saved:
@@ -825,12 +855,14 @@ def _candidate_offset(comparison: AlignmentReviewComparisonMetadata) -> int | No
     return attempt.decision.candidate.frame_offset
 
 
-def _marker_offset(comparison: AlignmentReviewComparisonMetadata) -> int | None:
+def _marker_offset(
+    comparison: AlignmentReviewComparisonMetadata, review: AudioReviewPresentation | None
+) -> int | None:
     if comparison.audio_review.current_authority.frame_offset is not None:
         return comparison.suggested_offset
     attempt = comparison.audio_review.audio_attempt
     if attempt is not None and attempt.decision.state in {"provisional", "unavailable"}:
-        return _suggested_offset(comparison)
+        return _suggested_offset(comparison, review)
     return comparison.suggested_offset
 
 
@@ -844,8 +876,13 @@ def _marker_color(comparison: AlignmentReviewComparisonMetadata, role: str) -> s
     return "#3daee9" if role == "reference" else "#d79b35"
 
 
-def _marker_text(comparison: AlignmentReviewComparisonMetadata, frame: int, role: str) -> str:
-    offset = _marker_offset(comparison)
+def _marker_text(
+    comparison: AlignmentReviewComparisonMetadata,
+    frame: int,
+    role: str,
+    review: AudioReviewPresentation | None,
+) -> str:
+    offset = _marker_offset(comparison, review)
     if offset is None:
         return ""
     attempt = comparison.audio_review.audio_attempt
@@ -854,7 +891,7 @@ def _marker_text(comparison: AlignmentReviewComparisonMetadata, frame: int, role
     elif (
         attempt is not None
         and comparison.audio_review.current_authority.frame_offset is None
-        and _suggested_offset(comparison) is not None
+        and _suggested_offset(comparison, review) is not None
     ):
         prefix = "[PROVISIONAL — NOT APPLIED]"
     elif comparison.audio_review.evidence_availability == "historical_details_unavailable":
@@ -870,7 +907,9 @@ def _unavailable_summary_line(comparison: AlignmentReviewComparisonMetadata) -> 
     return _unavailable_summary_line_for_reason(reason)
 
 
-def _audio_summary(comparison: AlignmentReviewComparisonMetadata) -> str:
+def _audio_summary(
+    comparison: AlignmentReviewComparisonMetadata, review: AudioReviewPresentation | None
+) -> str:
     authority = comparison.audio_review.current_authority
     lines: list[str] = []
     attempt = comparison.audio_review.audio_attempt
@@ -898,7 +937,7 @@ def _audio_summary(comparison: AlignmentReviewComparisonMetadata) -> str:
             )
         )
     elif attempt is not None and attempt.decision.state in {"provisional", "unavailable"}:
-        review = build_audio_review_presentation(attempt)
+        assert review is not None
         candidate = review.suggested_offset
         if candidate is not None:
             lines.extend((f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED",))
@@ -917,7 +956,8 @@ def _audio_summary(comparison: AlignmentReviewComparisonMetadata) -> str:
         if original is not None:
             lines.append(f"Original evidence: {original}")
     elif authority.origin == "computed_this_run" and attempt is not None:
-        noted = build_audio_review_presentation(attempt).noted_line(panel=True)
+        assert review is not None
+        noted = review.noted_line(panel=True)
         if noted is not None:
             lines.append(noted)
     return "\n".join(lines)
@@ -943,6 +983,7 @@ def _unavailable_summary_line_for_reason(reason: str) -> str:
 def _audio_details(
     comparison: AlignmentReviewComparisonMetadata,
     reference_source_frame_count: int,
+    review: AudioReviewPresentation | None,
 ) -> str:
     attempt = comparison.audio_review.audio_attempt
     if attempt is None:
@@ -951,11 +992,13 @@ def _audio_details(
             lines,
             comparison,
             reference_source_frame_count,
+            review,
         )
         return "\n".join(lines)
-    lines = list(build_audio_review_presentation(attempt).verbose_lines(panel=True))
+    assert review is not None
+    lines = list(review.verbose_lines(panel=True))
     lines.extend(f"{row.key}: {row.value}" for row in audio_evidence_rows(attempt))
-    _append_marker_bounds_detail(lines, comparison, reference_source_frame_count)
+    _append_marker_bounds_detail(lines, comparison, reference_source_frame_count, review)
     return "\n".join(lines)
 
 
@@ -963,8 +1006,9 @@ def _append_marker_bounds_detail(
     lines: list[str],
     comparison: AlignmentReviewComparisonMetadata,
     reference_source_frame_count: int,
+    review: AudioReviewPresentation | None,
 ) -> None:
-    reference_frame, comparison_frame = _suggested_pair(_marker_offset(comparison))
+    reference_frame, comparison_frame = _suggested_pair(_marker_offset(comparison, review))
     if reference_frame is not None and reference_frame >= reference_source_frame_count:
         lines.append("Origin hint marker omitted: reference frame is outside raw source bounds.")
     if comparison_frame is not None and comparison_frame >= comparison.source_frame_count:
