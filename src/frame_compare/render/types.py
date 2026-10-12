@@ -27,9 +27,7 @@ if TYPE_CHECKING:
 class EncoderSettings:
     """Encoder settings for screenshot output files."""
 
-    format: str = "png"
     compression: int = 6
-    bit_depth: int = 8
     vs_writer: VsScreenshotWriter = VsScreenshotWriter.AUTO
 
 

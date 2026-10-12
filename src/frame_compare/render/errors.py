@@ -69,3 +69,18 @@ class OverlayError(ProcessingError):
                 details={"reason": reason},
             )
         )
+
+
+class ScreenshotOutputCollisionError(ProcessingError):
+    """Two final screenshot paths would overwrite one output (FC-4021)."""
+
+    def __init__(self, first: Path, second: Path) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-4021",
+                name="SCREENSHOT_OUTPUT_COLLISION",
+                message=f"Duplicate screenshot output: {first.name!r} and {second.name!r}",
+                hint="Rename the colliding source files to give screenshots distinct names on the output filesystem",
+                details={"first_path": str(first), "second_path": str(second)},
+            )
+        )

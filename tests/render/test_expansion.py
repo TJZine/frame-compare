@@ -8,6 +8,8 @@ import pytest
 
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import OverlayMode
+from frame_compare.config.schema_models import SourcesConfig
+from frame_compare.orchestration.source_selection import resolve_source_selection
 from frame_compare.render.batch.expansion import (
     expand_batch_render_requests,
     validate_batch_requests,
@@ -48,13 +50,9 @@ def _prepared(*, state: PresentationState = PresentationState.SDR) -> PreparedRe
     )
 
 
-def test_validate_batch_requests_rejects_duplicate_labels_and_outputs() -> None:
+def test_validate_batch_requests_rejects_duplicate_labels() -> None:
     with pytest.raises(ValueError, match="Duplicate label"):
         validate_batch_requests([_request(), _request()])
-
-    duplicate = replace(_request(), comparison_frames=[12, 12])
-    with pytest.raises(ValueError, match="Duplicate screenshot output"):
-        validate_batch_requests([duplicate])
 
 
 @pytest.mark.parametrize("dimensions", [(0, 1080), (1920, 0), (-1, 1080)])
@@ -68,13 +66,14 @@ def test_validate_batch_requests_rejects_non_positive_source_dimensions(
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expansion_preserves_source_mapping_and_prepared_source(
     mock_prepare: MagicMock,
+    tmp_path: Path,
 ) -> None:
     prepared = _prepared()
     mock_prepare.return_value = prepared
     batch = _request()
     requests, ranges, facts = expand_batch_render_requests(
         [batch],
-        output_dir=Path("out"),
+        output_dir=tmp_path / "out",
         config=ConfigSchema(),
         overlay_mode=OverlayMode.NONE,
         renderer="vapoursynth",
@@ -98,13 +97,14 @@ def test_expansion_preserves_source_mapping_and_prepared_source(
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expansion_copies_progress_label_without_changing_overlay_label(
     mock_prepare: MagicMock,
+    tmp_path: Path,
 ) -> None:
     mock_prepare.return_value = _prepared()
     batch = replace(_request(), progress_label="Reference | ATV WEB-DL")
 
     requests, _, _ = expand_batch_render_requests(
         [batch],
-        output_dir=Path("out"),
+        output_dir=tmp_path / "out",
         config=ConfigSchema(),
         overlay_mode=OverlayMode.STANDARD,
         renderer="vapoursynth",
@@ -119,6 +119,7 @@ def test_expansion_copies_progress_label_without_changing_overlay_label(
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expansion_uses_actual_preparation_state_and_overlay_facts(
     mock_prepare: MagicMock,
+    tmp_path: Path,
 ) -> None:
     prepared = _prepared(state=PresentationState.HDR_TONEMAP_OFF)
     mock_prepare.return_value = prepared
@@ -126,7 +127,7 @@ def test_expansion_uses_actual_preparation_state_and_overlay_facts(
     batch = replace(batch, signal=SourceSignalFacts(is_hdr=True))
     requests, _, facts = expand_batch_render_requests(
         [batch],
-        output_dir=Path("out"),
+        output_dir=tmp_path / "out",
         config=ConfigSchema(),
         overlay_mode=OverlayMode.DIAGNOSTIC,
         renderer="vapoursynth",
@@ -140,7 +141,9 @@ def test_expansion_uses_actual_preparation_state_and_overlay_facts(
 
 
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
-def test_expansion_rejects_out_of_range_source_frame(mock_prepare: MagicMock) -> None:
+def test_expansion_rejects_out_of_range_source_frame(
+    mock_prepare: MagicMock, tmp_path: Path
+) -> None:
     mock_prepare.return_value = _prepared()
     request = replace(
         _request(), source_frames=[101], comparison_frames=[101], selection_labels=[None]
@@ -148,9 +151,116 @@ def test_expansion_rejects_out_of_range_source_frame(mock_prepare: MagicMock) ->
     with pytest.raises(ValueError, match="outside valid range"):
         expand_batch_render_requests(
             [request],
-            output_dir=Path("out"),
+            output_dir=tmp_path / "out",
             config=ConfigSchema(),
             overlay_mode=OverlayMode.NONE,
             renderer="vapoursynth",
             ffmpeg_runner=MagicMock(),
         )
+
+
+@pytest.mark.parametrize("labels", [("Bad?Name", "Bad:Name"), ("A" * 300 + "?", "A" * 300 + ":")])
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_final_output_collisions_refused_before_preparation(
+    mock_prepare: MagicMock, labels: tuple[str, str], tmp_path: Path
+) -> None:
+    from frame_compare.render.errors import ScreenshotOutputCollisionError
+
+    batches = [replace(_request(label), filename_label=label) for label in labels]
+    with (
+        pytest.raises(ScreenshotOutputCollisionError) as caught,
+    ):
+        expand_batch_render_requests(
+            batches,
+            output_dir=tmp_path,
+            config=ConfigSchema(),
+            overlay_mode=OverlayMode.NONE,
+            renderer="vapoursynth",
+            ffmpeg_runner=MagicMock(),
+        )
+    assert caught.value.code == "FC-4021"
+    assert caught.value.name == "SCREENSHOT_OUTPUT_COLLISION"
+    assert caught.value.context.hint is not None
+    if len(labels[0]) > 255:
+        assert "~" in caught.value.context.message
+    mock_prepare.assert_not_called()
+
+
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_final_duplicate_frame_refused_before_preparation(
+    mock_prepare: MagicMock, tmp_path: Path
+) -> None:
+    from frame_compare.render.errors import ScreenshotOutputCollisionError
+
+    batch = replace(_request(), comparison_frames=[12, 12])
+    with pytest.raises(ScreenshotOutputCollisionError):
+        expand_batch_render_requests(
+            [batch],
+            output_dir=tmp_path,
+            config=ConfigSchema(),
+            overlay_mode=OverlayMode.NONE,
+            renderer="vapoursynth",
+            ffmpeg_runner=MagicMock(),
+        )
+    mock_prepare.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "stems", [("Movie", "movie"), ("Ç", "ç"), ("é", "e\u0301"), ("Straße", "Strasse"), ("Ç", "c")]
+)
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_source_stem_aliases_follow_output_filesystem(
+    mock_prepare: MagicMock, tmp_path: Path, stems: tuple[str, str]
+) -> None:
+    from frame_compare.render.batch.orchestrator import render_screenshots_from_batch_detailed
+    from frame_compare.render.errors import ScreenshotOutputCollisionError
+    from frame_compare.render.types import BatchRenderOptions
+
+    # Different input extensions coexist even on a case-insensitive input volume.
+    sources = [tmp_path / f"{stems[0]}.mkv", tmp_path / f"{stems[1]}.mp4"]
+    for source in sources:
+        source.touch()
+    selection = resolve_source_selection(
+        input_dir=tmp_path, discovered_paths=sources, config=SourcesConfig()
+    )
+    assert selection.ordered_paths == sources
+    batches = [
+        replace(_request(source.stem), clip_path=source, filename_label=source.stem)
+        for source in selection.ordered_paths
+    ]
+    mock_prepare.return_value = _prepared()
+    output_dir = tmp_path / "screenshots"
+    output_dir.mkdir()
+    first = output_dir / f"12 - {stems[0]}.png"
+    first.touch()
+    alias = output_dir / f"12 - {stems[1]}.png"
+    filesystem_distinct = not (alias.exists() and alias.samefile(first))
+    first.unlink()
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.render_batch_detailed", return_value=[]
+        ) as render,
+    ):
+        if filesystem_distinct:
+            requests, _, _ = expand_batch_render_requests(
+                batches,
+                output_dir=tmp_path / "screenshots",
+                config=ConfigSchema(),
+                overlay_mode=OverlayMode.NONE,
+                renderer="vapoursynth",
+                ffmpeg_runner=MagicMock(),
+            )
+            assert [request.output_path.name for request in requests] == [
+                f"{frame} - {stem}.png" for stem in stems for frame in (12, 22)
+            ]
+            assert mock_prepare.call_count == 2
+        else:
+            with pytest.raises(ScreenshotOutputCollisionError):
+                render_screenshots_from_batch_detailed(
+                    batches,
+                    tmp_path / "screenshots",
+                    ConfigSchema(),
+                    BatchRenderOptions(renderer="vapoursynth"),
+                )
+            mock_prepare.assert_not_called()
+            render.assert_not_called()

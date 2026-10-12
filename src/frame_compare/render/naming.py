@@ -5,6 +5,9 @@ import os
 import re
 from pathlib import Path
 
+from frame_compare.render.errors import EncodingError, ScreenshotOutputCollisionError
+from frame_compare.utils.cancellation import raise_if_cancelling
+
 INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f\ud800-\udfff]')
 _MAX_LEGACY_WINDOWS_PATH_CHARS = 259
 _CONSERVATIVE_FILESYSTEM_COMPONENT_BYTES = 255
@@ -87,3 +90,65 @@ def generate_screenshot_path(output_dir: Path, filename_label: str, frame_number
     if available_label_units < 1 or available_label_bytes < 1 or not shortened_label:
         raise ValueError("screenshot output directory is too long for a browser-safe filename")
     return output_dir / f"{prefix}{shortened_label}{suffix}"
+
+
+def validate_screenshot_paths(paths: list[Path]) -> None:
+    """Refuse final paths that address the same file on their destination."""
+    exact: set[str] = set()
+    for path in paths:
+        if str(path) in exact:
+            raise ScreenshotOutputCollisionError(path, path)
+        exact.add(str(path))
+
+    identities: dict[tuple[int, int], Path] = {}
+    reservations: list[tuple[Path, tuple[int, int] | None]] = []
+    current_path: Path | None = None
+    try:
+        for path in paths:
+            raise_if_cancelling()
+            current_path = path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                # Reserve the actual name exclusively. The filesystem determines
+                # equivalence, including Unicode normalization/case rules and
+                # Windows per-directory flags. Existing files are never opened
+                # for writing; all owned reservations are removed before rendering.
+                with path.open("xb") as reservation:
+                    # Register ownership before inspecting metadata so even an
+                    # fstat failure removes the exclusively created reservation.
+                    reservations.append((path, None))
+                    status = os.fstat(reservation.fileno())
+                    identity = (status.st_dev, status.st_ino)
+                    reservations[-1] = (path, identity)
+            except FileExistsError:
+                status = path.stat()
+                identity = (status.st_dev, status.st_ino)
+            previous = identities.get(identity)
+            if previous is not None:
+                raise ScreenshotOutputCollisionError(previous, path)
+            identities[identity] = path
+        raise_if_cancelling()
+    except OSError:
+        assert current_path is not None
+        raise EncodingError(current_path, "Unable to validate screenshot output names") from None
+    finally:
+        cleanup_failure: Path | None = None
+        for path, identity in reversed(reservations):
+            try:
+                # Do not remove a replacement owned by another writer when its
+                # identity is available. Each output directory belongs to one run;
+                # concurrent modification during validation is unsupported.
+                if identity is None:
+                    path.unlink()
+                else:
+                    status = path.stat(follow_symlinks=False)
+                    if (status.st_dev, status.st_ino) == identity:
+                        path.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                cleanup_failure = path
+        if cleanup_failure is not None:
+            raise EncodingError(
+                cleanup_failure, "Unable to remove screenshot name reservation"
+            ) from None

@@ -16,7 +16,7 @@ from frame_compare.render.geometry import (
     active_rect_source_from_provenance,
     plan_render_geometry,
 )
-from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
+from frame_compare.render.naming import generate_screenshot_path, validate_screenshot_paths
 from frame_compare.render.prepare import prepare_clip_for_render
 from frame_compare.render.types import (
     EncoderSettings,
@@ -62,7 +62,6 @@ def validate_ffmpeg_batch_tonemap_gate(
 
 def validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> None:
     labels: set[str] = set()
-    output_names: set[str] = set()
     for request in batch_requests:
         lengths = {
             len(request.source_frames),
@@ -85,12 +84,6 @@ def validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> Non
         if request.label in labels:
             raise ValueError(f"Duplicate label {request.label!r} detected in batch requests")
         labels.add(request.label)
-        filename_label = request.filename_label or request.label
-        for frame in request.comparison_frames:
-            output_name = generate_screenshot_name(filename_label, frame)
-            if output_name in output_names:
-                raise ValueError(f"Duplicate screenshot output {output_name!r}")
-            output_names.add(output_name)
 
 
 def expand_batch_render_requests(
@@ -102,6 +95,14 @@ def expand_batch_render_requests(
     renderer: Renderer,
     ffmpeg_runner: FFmpegRunner,
 ) -> tuple[list[RenderRequest], dict[str, range], dict[str, RenderedClipFacts]]:
+    output_paths = [
+        [
+            generate_screenshot_path(output_dir, batch.filename_label or batch.label, frame)
+            for frame in batch.comparison_frames
+        ]
+        for batch in batch_requests
+    ]
+    validate_screenshot_paths([path for paths in output_paths for path in paths])
     prepared = [
         prepare_clip_for_render(
             request.clip_path,
@@ -118,7 +119,9 @@ def expand_batch_render_requests(
     clip_facts: dict[str, RenderedClipFacts] = {}
     start = 0
 
-    for batch, source, plan in zip(batch_requests, prepared, plans, strict=True):
+    for batch, source, plan, paths in zip(
+        batch_requests, prepared, plans, output_paths, strict=True
+    ):
         geometry = _geometry_facts(plan)
         source_resolution = (
             source.source_dimensions
@@ -177,11 +180,7 @@ def expand_batch_render_requests(
                     clip=source.prepared_clip,
                     diagnostic_source=source.diagnostic_source,
                     frame_number=source_frame,
-                    output_path=generate_screenshot_path(
-                        output_dir,
-                        batch.filename_label or batch.label,
-                        comparison_frame,
-                    ),
+                    output_path=paths[index],
                     overlay=overlay,
                     encoder_settings=EncoderSettings(
                         compression=config.screenshots.png_compression,

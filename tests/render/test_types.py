@@ -46,9 +46,7 @@ def _clip_facts() -> RenderedClipFacts:
 
 def test_encoder_settings_defaults() -> None:
     settings = EncoderSettings()
-    assert settings.format == "png"
     assert settings.compression == 6
-    assert settings.bit_depth == 8
     assert settings.vs_writer == VsScreenshotWriter.AUTO
 
 
