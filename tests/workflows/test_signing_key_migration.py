@@ -88,7 +88,13 @@ def test_migration_preserves_key_and_sanitizes_failures(
             "<RSAKeyValue>&private;</RSAKeyValue>",
         )
     elif failure == "oversized_xml":
-        monkeypatch.setenv("SOURCE_SIGNING_KEY", "test-private-fragment" * 2000)
+        # Windows environment values cannot exceed the validator's 32768-character
+        # bound. Isolate this input in a mapping so validation receives it intact.
+        monkeypatch.setattr(
+            migration.os,
+            "environ",
+            dict(os.environ) | {"SOURCE_SIGNING_KEY": "test-private-fragment" * 2000},
+        )
     elif failure == "public_mismatch":
         monkeypatch.setenv("SOURCE_SIGNING_KEY", key_xml(PARAMETERS | {"Modulus": 999}))
     elif failure == "missing_token":
@@ -128,6 +134,8 @@ def test_migration_preserves_key_and_sanitizes_failures(
     assert source not in logs.out + logs.err
     assert "test-private-fragment" not in logs.out + logs.err
     assert "test-only-migration-token" not in logs.out + logs.err
+    if failure == "oversized_xml":
+        assert "Source signing key is missing or oversized." in logs.err
     if failure is None:
         writes = [args for args, _ in calls if args[0] == "secret"]
         assert [args[-1] for args in writes] == ["production", "release-candidate"]

@@ -217,15 +217,24 @@ def test_reservation_metadata_failure_removes_exclusive_creation(tmp_path: Path)
 
 def test_cleanup_preserves_replacement_file(tmp_path: Path) -> None:
     path = tmp_path / "1 - first.png"
-    original_open = Path.open
+    retained_reservation = tmp_path / "reservation.png"
+    replacement = tmp_path / "replacement.png"
+    replacement.write_bytes(b"another owner")
+    replacement_status = replacement.stat()
+    replacement_identity = (replacement_status.st_dev, replacement_status.st_ino)
 
-    def replace_reservation(candidate: Path, *args, **kwargs):
-        file = original_open(candidate, *args, **kwargs)
-        candidate.unlink()
-        with original_open(candidate, "wb") as replacement:
-            replacement.write(b"another owner")
-        return file
+    def replace_closed_reservation() -> None:
+        if not path.exists():
+            return
+        # The final cancellation checkpoint follows the reservation's close.
+        # Retain its file so the replacement cannot reuse its physical identity.
+        path.rename(retained_reservation)
+        replacement.rename(path)
 
-    with patch.object(Path, "open", replace_reservation):
+    with patch("frame_compare.render.naming.raise_if_cancelling", replace_closed_reservation):
         validate_screenshot_paths([path])
+    reserved_status = retained_reservation.stat()
+    assert (reserved_status.st_dev, reserved_status.st_ino) != replacement_identity
+    surviving_status = path.stat()
+    assert (surviving_status.st_dev, surviving_status.st_ino) == replacement_identity
     assert path.read_bytes() == b"another owner"
