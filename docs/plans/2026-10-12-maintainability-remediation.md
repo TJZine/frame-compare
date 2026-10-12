@@ -3,10 +3,11 @@ search:
   exclude: true
 ---
 
-Status: Active
+Status: Historical
 Scope: Implement and independently review the accepted 2026-10-12 repository audit findings.
 Owner: Codex orchestrator chat `01a131e8-0fff-7692-8a33-73c7acee693d` on local.
 Source: `/Users/tristan/Software/frame-compare`, branch `v0.7.0`, HEAD `933395d820d780207b953b4231f6761390f66689`.
+Completion: Implementation, independent review, local/Linux gates and reported Windows U2/unsigned U8 acceptance are complete. Earlier open-gate statements below are historical; the final controller disposition supersedes them. Separate visible-desktop/physical-media release acceptance is outside this remediation.
 
 # Maintainability remediation
 
@@ -241,8 +242,8 @@ prioritizes outcomes; it does not require sequential work where ownership is dis
 | Native worker U3/U6/U9 | `01a131fa-df1f-7403-8ccc-a25620da4816` | gpt-6.1-sol / medium | High review accepted; Linux offscreen native proof passed |
 | Pipeline worker U4 then U7 | `01a131fa-e742-7ba3-9e2a-f47ed2d854d7` | gpt-6.1-sol / medium | U4 accepted; corrected U7 accepted by high reviewer |
 | Report worker U5 | `01a131fa-efb9-7e73-b420-d4a26520cc25` | gpt-6.1-sol / medium | High review and exclusive browser/serial full native gates passed |
-| Render worker U2 | `01a131fa-f733-72c0-8366-6a3c2683dde5` | gpt-6.1-sol / medium | High review, local/Linux filesystem and combined gates passed; Windows branch open |
-| Windows worker U8 | `01a131fa-ffaf-76e0-a0e9-b1cd11b81d00` | gpt-6.1-sol / medium | High review accepted source readiness; Windows acceptance remains gated |
+| Render worker U2 | `01a131fa-f733-72c0-8366-6a3c2683dde5` | gpt-6.1-sol / medium | High review, local/Linux/Windows filesystem and combined gates accepted |
+| Windows worker U8 | `01a131fa-ffaf-76e0-a0e9-b1cd11b81d00` | gpt-6.1-sol / medium | High source review and reported actual unsigned Windows bundle acceptance complete |
 
 Do not mark this plan Historical or implementation accepted until required work
 and evidence are complete. Record platform-open status explicitly if source work
@@ -590,3 +591,34 @@ Visible VSView interaction, real HDR10/Dolby Vision/perceptual acceptance, exact
 predecessor migration and other physical-media cases remain unverified; native
 desktop automation is unavailable in this chat. No signing, publishing, release
 tags, PRs, push, hosted dispatch or live slow.pics/webhook calls occurred.
+
+### Controller integration and disposition, 2026-10-12
+
+The human supplied the Windows report and requested pulling its changes. The Mac
+controller fetched `origin/v0.7.0` and fast-forwarded from `6d5fca4d` to
+`36a8ff901fa0b9b860d4c76b9c617aeb2ac07353`, integrating correction `929c076a`
+and the Windows evidence record. The correction changes only two test fixtures;
+production source and protected contracts are unchanged. Source inspection found
+the replacement-file test retains independently distinct physical identities and
+owned cleanup protection, and the oversized-key test retains sanitized fail-closed
+refusal without relying on an impossible native Windows environment value.
+No material findings were established. On the integrated Mac checkout, the two
+affected modules passed **47 tests without skips**, Ruff lint/format and diff
+checks passed. The prior full native/Docker/media proof remains applicable to
+unchanged production code; redundant full reruns were unnecessary.
+
+The controller accepts the human-provided Windows evidence at tested source
+`929c076ac7fb570f28cb0ef7a641beb2a51843cb` for U2 and unsigned U8: actual NTFS
+identity/preservation/cleanup, all required bundled phases, managed native/plugin
+and generated-frame proof, extracted provenance/license/ZIP/doctor proof, and
+offscreen process lifetime. Reported Windows regression results are 358 passed,
+25 workflow-capability skips, with every portable and U2 test passing without
+skips. The report and committed record identify logs and the exact ZIP hash;
+those Windows artifacts were not independently rerun or read on this Mac.
+
+All required remediation work and acceptance are complete; this plan is Historical.
+Visible VSView interaction and broader physical-media, predecessor migration,
+signing/legal release disposition and hosted-CI acceptance remain distinct limits
+of the existing platform/release work, not claims established by this remediation.
+Unrelated local work was preserved. The previously authorized branch push permits
+publishing this documentation closure to `v0.7.0`; it does not authorize a release.
