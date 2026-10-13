@@ -402,7 +402,7 @@ inert ordinary-session state, load a production-generated L-SMASH session with V
 0.12.1, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
 all three outputs, and round-trip/validate the sibling result sidecar. The R81
 dependency refresh ran the inside-container offscreen proof on macOS Docker Desktop;
-see the [Windows 10 handoff](plans/2026-10-07-dependency-refresh-windows10-handoff.md)
+see the [Windows 10 handoff](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-07-dependency-refresh-windows10-handoff.md)
 for its evidence and limits. The Linux X11 host wrapper remains unverified.
 The contract does not prove a visible X11 desktop
 launch, Qt ergonomics, native Windows behavior, or physical-Windows acceptance.

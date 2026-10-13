@@ -7,9 +7,9 @@ search:
 
 ## Capture sets
 
-The [documentation refresh plan](../plans/2026-10-08-documentation-refresh.md)
+The [documentation refresh plan](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-08-documentation-refresh.md)
 defines capture sets 1 and 2, and the
-[documentation site redesign plan](../plans/2026-10-12-documentation-site-redesign.md)
+[documentation site redesign plan](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-12-documentation-site-redesign.md)
 adds set 3:
 
 1. Set 1 uses macOS, Docker, the official EBU/DVB streams, and headless Chrome
