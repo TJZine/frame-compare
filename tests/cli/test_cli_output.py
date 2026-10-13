@@ -122,10 +122,18 @@ def _workspace_path(*parts: str) -> Path:
     return Path(os.path.sep, "workspace", *parts)
 
 
-def _request(*, no_upload: bool = False, skip_analysis: bool = False) -> RunRequest:
+def _request(
+    *,
+    no_upload: bool = False,
+    skip_analysis: bool = False,
+    no_cache: bool = False,
+    from_cache_only: bool = False,
+) -> RunRequest:
     return RunRequest(
         root=_workspace_path(),
         skip_analysis=skip_analysis,
+        no_cache=no_cache,
+        from_cache_only=from_cache_only,
         config_overrides=CLIConfigOverrides(no_upload=no_upload),
     )
 
@@ -134,7 +142,21 @@ def _missing_executable(_name: str) -> str:
     raise FileNotFoundError(_name)
 
 
-def test_at_a_glance_prints_default_rows_without_vsview_text(monkeypatch: MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("no_cache", "from_cache_only", "cache_label"),
+    [
+        (False, False, "read and write"),
+        (True, False, "refresh current entry"),
+        (False, True, "cache only"),
+    ],
+    ids=["default", "refresh", "cache-only"],
+)
+def test_at_a_glance_prints_default_rows_without_vsview_text(
+    monkeypatch: MonkeyPatch,
+    no_cache: bool,
+    from_cache_only: bool,
+    cache_label: str,
+) -> None:
     def _resolve(command: str) -> str:
         if command not in {"ffmpeg", "ffprobe"}:
             raise FileNotFoundError(command)
@@ -148,7 +170,7 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(monkeypatch: Monkey
 
     print_at_a_glance(
         console,
-        request=_request(no_upload=True),
+        request=_request(no_upload=True, no_cache=no_cache, from_cache_only=from_cache_only),
         config=config,
         root=_workspace_path(),
         config_path=_workspace_path("config", "config.toml"),
@@ -168,6 +190,7 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(monkeypatch: Monkey
     assert "10 random" in output
     assert "seed" in output
     assert "quality profile" in _rendered_row_value(output, "analysis")
+    assert cache_label in _rendered_row_value(output, "cache")
     assert "FFmpeg audio" in _rendered_row_value(output, "tools")
     assert "do not reuse" in _rendered_row_value(output, "offsets")
     assert "HTML report" in output

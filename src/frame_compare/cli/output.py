@@ -287,7 +287,7 @@ def print_at_a_glance(
     cache_policy = (
         "cache only"
         if request.from_cache_only
-        else "bypassed"
+        else "refresh current entry"
         if request.no_cache
         else "read and write"
     )

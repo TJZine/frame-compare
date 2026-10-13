@@ -371,7 +371,7 @@ unchanged.
   categories (`20 random · 10 dark · …`), a `user frames` comma list,
   `analysis` as `{mode lower} profile · {policy} source` (plus
   `· skipped for this run`), `cache` as `read and write` / `cache only` /
-  `bypassed`, `skip` as `first {lead} · last {trail}` / `none`, and `seed`.
+  `refresh current entry`, `skip` as `first {lead} · last {trail}` / `none`, and `seed`.
   `Rendering` is `automatic · VapourSynth preferred` or `FFmpeg`, with
   `overlay` as `{mode lower}` and `geometry` as
   `{geometry lower} geometry · active area {mode lower}`. `tone map` is
