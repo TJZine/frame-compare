@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import selectors
+import signal
 import subprocess
 import sys
 import threading
@@ -500,17 +503,13 @@ def test_ctrl_c_cancels_alignment_cleanup_before_keyboard_interrupt(tmp_path: Pa
 import faulthandler
 faulthandler.dump_traceback_later(5)
 import asyncio
-import os
-import signal
 import sys
-import threading
 import time
 from pathlib import Path
 
 from frame_compare.services import alignment
 from frame_compare.services.errors import raise_if_alignment_cancelled
 from frame_compare.services.types import AlignmentConfig
-from frame_compare.utils.alignment_evidence import CollectionFailureCategory
 from tests.services.alignment_request_test_support import alignment_request
 
 reference = Path(sys.argv[1])
@@ -522,12 +521,11 @@ request = alignment_request(
     generated_dir=reference.parent,
 )
 
-worker_reached_block = threading.Event()
 print("ctrl_c_stage=imports-ready", file=sys.stderr, flush=True)
 
 def block(**kwargs):
     print("ctrl_c_stage=worker-ready", file=sys.stderr, flush=True)
-    worker_reached_block.set()
+    print("ctrl_c_worker=ready", flush=True)
     cancellation = kwargs["cancellation"]
     while not cancellation.is_set():
         time.sleep(0.001)
@@ -536,16 +534,6 @@ def block(**kwargs):
 
 alignment._compute_requested_alignments = block
 
-def interrupt_once_worker_ready():
-    if worker_reached_block.wait(timeout=5):
-        print("ctrl_c_stage=sending-sigint", file=sys.stderr, flush=True)
-        os.kill(os.getpid(), signal.SIGINT)
-        return
-    print("ctrl_c_setup=worker-never-reached-block", file=sys.stderr, flush=True)
-    os._exit(42)
-
-helper = threading.Thread(target=interrupt_once_worker_ready, daemon=True)
-helper.start()
 try:
     asyncio.run(alignment.align_clips_from_request(request, config))
 except KeyboardInterrupt:
@@ -555,16 +543,50 @@ else:
 finally:
     faulthandler.cancel_dump_traceback_later()
 """
-    try:
-        result = subprocess.run(
+    # Keep process-directed SIGINT and the external sender used by Ctrl+C.
+    # Readiness, cancellation, and worker cleanup share the same deadline.
+    deadline = time.monotonic() + 10
+    stderr_path = tmp_path / "alignment-child.stderr"
+    with stderr_path.open("w+", encoding="utf-8") as stderr_file:
+        process = subprocess.Popen(
             [sys.executable, "-c", script, str(reference), str(comparison)],
-            check=False,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=stderr_file,
             text=True,
-            timeout=10,
         )
-    except subprocess.TimeoutExpired as exc:
-        pytest.fail(f"alignment child timed out; stdout={exc.stdout!r}; stderr={exc.stderr!r}")
+        stdout = ""
+        try:
+            assert process.stdout is not None
+            marker = b"ctrl_c_worker=ready\n"
+            ready = bytearray()
+            with selectors.DefaultSelector() as selector:
+                selector.register(process.stdout, selectors.EVENT_READ)
+                while len(ready) < len(marker):
+                    assert selector.select(timeout=max(0, deadline - time.monotonic())), (
+                        "alignment child did not report worker-ready before the deadline"
+                    )
+                    chunk = os.read(process.stdout.fileno(), len(marker) - len(ready))
+                    assert chunk, "alignment child exited before reporting worker-ready"
+                    ready.extend(chunk)
+            assert ready == marker
+            os.kill(process.pid, signal.SIGINT)
+            stdout, _ = process.communicate(timeout=max(0, deadline - time.monotonic()))
+        except (subprocess.TimeoutExpired, AssertionError) as error:
+            process.kill()
+            stdout, _ = process.communicate(timeout=3)
+            stderr_file.seek(0)
+            pytest.fail(
+                f"alignment child failed: {error}; stdout={stdout!r}; stderr={stderr_file.read()!r}"
+            )
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=3)
+            if process.stdout is not None:
+                process.stdout.close()
+        stderr_file.seek(0)
+        stderr = stderr_file.read()
 
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ctrl_c_cleanup=ok"
+    assert process.returncode == 0, stderr
+    assert stdout.strip() == "ctrl_c_cleanup=ok"
+    assert "ctrl_c_stage=worker-cancelled" in stderr
