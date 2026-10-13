@@ -26,6 +26,7 @@ DOCKER_TRIGGER_PATHS = (
     "Dockerfile",
     "docker-compose*.yml",
     "tools/verify_docker_*.sh",
+    "tools/docker_runtime_smoke.py",
     "tools/checkout_source_commit.sh",
     ".dockerignore",
     ".github/workflows/docker-integration.yml",
@@ -143,7 +144,8 @@ def _run_verifier(
     # isolated from the developer's checkout.
     script_root = tmp_path / "repo"
     (script_root / "tools").mkdir(parents=True)
-    shutil.copy2(repo_root / "tools" / "verify_docker_integration.sh", script_root / "tools")
+    for name in ("verify_docker_integration.sh", "docker_runtime_smoke.py"):
+        shutil.copy2(repo_root / "tools" / name, script_root / "tools")
     if seed_previous:
         generated_root = (
             tmp_path / "foreign-generated" if symlink_generated else script_root / "generated"
@@ -233,6 +235,10 @@ def test_verifier_passes_host_user_media_environment_and_artifacts(
     result, invocation = _run_verifier(repo_root, tmp_path)
 
     assert result.returncode == 17
+    assert (
+        'python /home/framecompare/frame-compare/tools/docker_runtime_smoke.py "$media_path" "$doctor_path" "$ffindex_path"'
+        in invocation
+    )
     environment_args = set(_docker_environment_args(invocation))
     assert {
         "HOME=/tmp/framecompare-home",
@@ -352,6 +358,7 @@ def test_workflow_triggers_all_docker_runtime_and_test_paths(repo_root: Path) ->
     ("path", "selected"),
     [
         ("tools/checkout_source_commit.sh", True),
+        ("tools/docker_runtime_smoke.py", True),
         (".dockerignore", True),
         ("docs/current-architecture.md", False),
         ("README.md", False),
@@ -392,6 +399,7 @@ def test_dockerignore_excludes_local_residue_without_excluding_image_inputs(
         "tests/workflows/test_docker_integration_contract.py",
         "tools/checkout_source_commit.sh",
         "tools/verify_docker_integration.sh",
+        "tools/docker_runtime_smoke.py",
         "Dockerfile",
     )
     assert not any(
