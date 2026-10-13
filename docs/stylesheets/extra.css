@@ -1097,6 +1097,10 @@ html .md-footer-meta.md-typeset .fc-footer a:not(:focus, :hover) {
 }
 
 @media screen and (max-width: 44.984375em) {
+  .md-typeset h1 {
+    font-size: 2em;
+  }
+
   .fc-hero__actions .fc-button {
     flex: 1 1 100%;
   }
