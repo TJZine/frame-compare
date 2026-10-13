@@ -1,13 +1,17 @@
+---
+description: Run the wizard, check the runtime, preview with a dry run, and run your first comparison.
+---
+
 # Your first comparison
 
-A safe first run has four stages: configure, diagnose, preview, then execute. Use the
-same installation route and workspace for every stage so configuration and path
-resolution remain consistent.
+Run your first comparison in four stages: configure, diagnose, preview, then execute.
+Use the same installation route and workspace for every stage so Frame Compare reads
+the same configuration and resolves paths consistently.
 
 ## Before you begin
 
 Create or select a workspace with at least two supported files in its input directory.
-For a publication-safe example matching the figures below, use two sources such as:
+For an example you can publish that matches the output below, use two sources such as:
 
 ```text
 comparison_videos/
@@ -65,13 +69,15 @@ case-insensitively.
 
 ### 1. Wizard
 
-The wizard interactively sets the input directory, the generated-data location,
-reference selection, and the frame-selection goal. It does not prompt for an upload
-toggle or configure rendering and publishing; those remain configuration, environment,
-and preset concerns. It writes configuration only after confirmation, and the first-use
-configuration explicitly keeps `slowpics.auto_upload = false`. After a successful save,
-or a no-op with nothing to change, it prints suggested `doctor`, `run --dry-run`, and
-`run` commands for your resolved workspace and config file. It never runs them.
+The wizard asks you to set the input directory, the generated-data location, the
+reference, and the frame-selection goal. Configure rendering and publishing through
+configuration, environment variables, or presets; the wizard has no upload toggle.
+It writes configuration only after confirmation, and the first-use configuration
+keeps `slowpics.auto_upload = false`.
+
+After a successful save, or a no-op with nothing to change, the wizard prints suggested
+`doctor`, `run --dry-run`, and `run` commands for your resolved workspace and config file.
+It never runs them.
 
 ### 2. Doctor
 
@@ -82,21 +88,65 @@ rendering or alignment path.
 
 ### 3. Dry run
 
-A dry run validates configuration, source discovery, reference and comparison order,
-selection intent, and output intent without entering the rendering pipeline. It does
-not probe media, contact the render or alignment runtime, or otherwise prove the
-runtime is ready to render; run `doctor` to confirm runtime readiness. Check:
+A dry run reads your configuration and the file names in the input directory.
+It shows the sources it found, the reference, the frames you asked for, and what a run
+would create. It does not open the videos, so run `doctor` to check the media runtime.
 
-- the expected reference is first;
+Check:
+
+- the Reference line names the source you expect;
 - every intended comparison is present once;
-- the generated-data root is correct;
+- the input directory is correct;
 - frame counts and analysis mode match your intent;
 - publishing remains disabled unless deliberately enabled.
 
-<figure class="fc-figure">
-  <img src="../images/terminal-dry-run.svg" alt="Dry-run output listing the workspace, two sources, the reference, frame counts, outputs, and disabled publishing." loading="lazy">
-  <figcaption>A dry run shows what a real run would use and create, without touching media or the network.</figcaption>
-</figure>
+Check the sources, the Reference line, and the frame counts in this output.
+
+``` { .text .fc-output title="Output · frame-compare run --dry-run" }
+No side effects: this dry run validates configuration and input filenames only; it does not write,
+render, upload, or open anything.
+
+Will use
+  Workspace: /workspace
+  Input directory: comparison_videos
+  Sources (2): hlg10-comparison.ts, pq10-reference.ts
+  Reference: pq10-reference.ts -> pq10-reference.ts
+  Frame selection: specific frames, random frames, dark frames, bright frames
+  Specific frames: 1000
+  Frame counts: specific=1, random=3, dark=1, bright=1, motion=0
+  Analysis: quality mode; metrics required; random seed 42
+
+Would create in a real run
+  Screenshots: yes
+  Run folder: yes
+  Offline report: yes
+  Open report after success: not configured
+
+Publishing after success
+  slow.pics upload: disabled; visibility public
+  Copy URL to clipboard: not applicable
+  Open the published URL: not applicable
+  Create a URL shortcut: not applicable
+  Send a webhook notification: not applicable
+
+Unknown until execution
+  Run folder name: not available yet (resolved during run-folder reservation)
+  Final selected frames: not available before media probing and runtime frame selection
+  Clip metadata: not available before media probing
+  Output dimensions: not available before media probing and render planning
+
+Not performed by dry-run
+  - runtime readiness checks
+  - FFmpeg and ffprobe checks
+  - media probing
+  - frame analysis
+  - audio alignment
+  - cache reads and writes
+  - run-folder reservation and metadata writes
+  - screenshot rendering and report generation
+  - network metadata lookup and publishing
+  - browser, clipboard, and VSView actions
+```
 
 ### 4. Run
 
@@ -105,16 +155,24 @@ performs analysis and alignment when required, renders screenshots, records meta
 and writes the report. Network publication occurs only when the effective configuration
 or command explicitly enables it.
 
-<figure class="fc-figure">
-  <img src="../images/terminal-run-complete.svg" alt="Completed run summary with the report and screenshot paths, frame and source counts, and timings." loading="lazy">
-  <figcaption>The summary links the report and screenshots of the run folder you created.</figcaption>
-</figure>
+Use the report and screenshot paths in the completed-run summary.
+
+``` { .text .fc-output title="Output · frame-compare run" }
+╭─ ✓ Comparison complete ──────────────────────────────────────────────────────────────────────────╮
+│   report               generated/pq10-reference + hlg10-comparison/report.html                   │
+│   screenshots          generated/pq10-reference + hlg10-comparison/screenshots  12 files         │
+│                                                                                                  │
+│   run                  6 frames · 2 sources · cache miss                                         │
+│                                                                                                  │
+│   time                 5m 06s total                                                              │
+│     machine            setup 52.0 s    analyze 2m 29s    render 1m 45s                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
 
 ## Repeat comparisons
 
 Once configuration and the runtime are established, most later comparisons only need
-the preview and execute stages; you do not have to repeat the wizard or doctor for
-every run.
+the preview and execute stages.
 
 === "Windows portable"
 
@@ -149,14 +207,14 @@ frame-selection goal changes. After a successful save, or a no-op, it prints sug
 `doctor`/`run --dry-run`/`run` commands for your resolved workspace and config file.
 Run them through the same route that ran the wizard. In Docker, the printed paths are
 container paths such as `/workspace`; use the Docker commands above from the host.
+
 Revisit `doctor` after any change to the runtime: an application upgrade, a new
 machine, a different Docker image, a graphics-driver or Vulkan update, or a
-VSView/plugin change. A dry run only validates configuration and intent; it does not
-probe media or prove the runtime is ready to render.
+VSView/plugin change.
 
 ## Find the result
 
-Each executed run gets a reserved directory beneath `paths.generated_dir`:
+Frame Compare reserves a run folder beneath `paths.generated_dir` for each executed run:
 
 ```text
 generated/
@@ -179,23 +237,31 @@ continue to work when the entire folder is moved or archived. Docker users shoul
 the host-open helper or translate `/workspace/generated/` to the host `generated/`
 directory.
 
-## Confirm the comparison is trustworthy
+## Check the result before you share it
 
 Before sharing a result:
 
-1. Review several frames in slider and diff modes.
+1. Review several frames in **Slider** and **Diff** views.
 2. Check source labels, resolution, HDR/SDR identity, and frame numbers.
 3. Verify alignment around dialogue, cuts, and motion.
 4. Look for crop, aspect-ratio, or tonemapping differences that could make the
    comparison misleading.
 5. Keep the result local until it looks correct.
 
-Continue with:
+## Next steps
+
+<div class="fc-cards" markdown>
 
 - [Reports and overlays](../guides/reports-and-overlays.md)
-- [Sources, references, and labels](../guides/sources-and-labels.md)
-- [Frame selection and analysis](../guides/analysis-modes.md)
+
+    Use the report views to check the result.
+
 - [Audio alignment](../guides/audio-alignment.md)
-- [VSView alignment review](../guides/vsview-review.md)
-- [HDR and tonemapping](../guides/hdr-tonemapping.md)
+
+    Read what the alignment result means.
+
 - [Troubleshooting](../guides/troubleshooting.md)
+
+    Problems listed by stage.
+
+</div>

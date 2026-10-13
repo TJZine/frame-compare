@@ -1,3 +1,7 @@
+---
+description: Install Frame Compare from source with uv or pip on a system where you manage the media libraries.
+---
+
 # Native source
 
 Native source installation is for advanced users who manage their own media runtime.
@@ -11,7 +15,7 @@ Install these host prerequisites first:
 - `uv` (recommended for the repository's locked environment) or pip;
 - optionally VSView 0.12.1 with the native Frame Compare panel for alignment review.
 
-VapourSynth is not optional for the default renderer. Setting
+The default renderer requires VapourSynth. Setting
 `screenshots.use_ffmpeg = true` selects the FFmpeg screenshot path, but HDR frames
 that require tonemapping still need VapourSynth.
 
@@ -24,16 +28,21 @@ uv sync --no-dev --extra vsview --frozen
 ```
 
 The `vsview` extra pins VSView 0.12.1, the native Frame Compare alignment panel, and
-the repository-managed VapourSynth Python package to R81. It uses VSView's base
+the repository-managed VapourSynth Python package to R81.
+
+It uses VSView's base
 dependency graph, including its documented PySide6 backend; the upstream `recommended`
 and `full` extras are intentionally not selected. Its current resolution includes
 vsjetengine 1.8.0, BestSource 22, vspackrgb, and jetpytools 3.1.2. Install and run
 Frame Compare and VSView from this same environment: a PATH-only VSView executable
 does not provide the panel contract and is unsupported.
+
 On Windows it also installs the selected `vapoursynth-lsmas 1310.0.0.0` and
 `vs-placebo 2.0.4` plugin wheels so the locked environment matches the supported native
 media stack. Linux and macOS still require host-managed L-SMASH-Works and vs-placebo
-installations. If you do not need native panel review, omit `--extra vsview` while
+installations.
+
+If you do not need native panel review, omit `--extra vsview` while
 retaining the required native renderer dependencies. BestSource is owned by VSView's
 UI workspace; generated Frame Compare sessions continue to load sources through
 L-SMASH-Works and its Frame Compare-owned index paths.
@@ -64,11 +73,14 @@ Put at least two supported video files in `comparison_videos/`, then follow
 
 ## Check the runtime
 
-The supported reference stack, exact source revisions, and platform policies are
-listed in [Supported Media Runtime](../supported-media-runtime.md). Native installs
+[Requirements](../reference/requirements.md) summarizes what you need. The
+[Supported media runtime](../supported-media-runtime.md) record lists the supported
+reference stack, exact source revisions, and platform policies. Native installs
 may resolve distribution-managed FFmpeg and Vulkan components differently, so
 `frame-compare doctor --json` and a generated-fixture smoke test are required after
-any runtime change. Unmanaged Windows, Linux, and macOS use OS-scoped selected-contract
-identities rather than verified native binary hashes. After replacing native FFmpeg,
+any runtime change.
+
+Unmanaged Windows, Linux, and macOS use OS-scoped selected-contract identities; their
+native binary hashes are not verified. After replacing native FFmpeg,
 VapourSynth, or source-plugin binaries, clear generated caches and Frame Compare-owned
 indexes before reuse.

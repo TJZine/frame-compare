@@ -1,8 +1,12 @@
+---
+description: The Docker Compose services, the NVIDIA and X11 profiles, and the host helper that opens reports.
+---
+
 # Docker profiles
 
-The default Docker route is headless and uses software Vulkan; this page covers the
-Compose services, the optional NVIDIA and X11 profiles, and the host helper; basic use
-is on [Docker](docker.md).
+The default Docker route is headless and uses software Vulkan. This page covers the
+Compose services, the optional NVIDIA and X11 profiles, and the host helper. Start with
+[Docker](docker.md) for basic use.
 
 ## Compose services
 
@@ -25,12 +29,11 @@ to you; the wizard is the only user service that can write configuration.
 | Linux Docker, CPU/software Vulkan | Full default Docker path: backend rendering, HTML reports, software tonemap, CI parity, deterministic headless verification | Native GPU acceleration, GUI/VSView unless separately configured | This is the canonical default Docker mode. |
 | Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile and GPU proof script for host-dependent Vulkan acceleration | Guaranteed parity without host setup, default CI path, GUI/VSView by default | Documented-only/unverified in this repo unless you run the dedicated proof on a compatible Linux NVIDIA host. |
 | Linux Docker with X11 GUI | Optional `gui-linux` override/profile and GUI proof script for VSView/plugin availability, generated-session loading, native panel construction, typed metadata/result integration, and offscreen rendering | CI coverage, Wayland, VNC/noVNC, automatic broad X server permissions | Linux/X11 only. The verifier contract covers VSView, exact Frame Compare panel entry-point loading, named `Reference`/`Comparison 1` outputs, frame-0 rendering, and sibling-sidecar validation. The Linux X11 host wrapper and visible launch remain unverified. |
-| Native Windows portable | Full native app path including backend rendering, reports, VSView GUI, and Windows installer/update flow | Docker-specific container assumptions | This remains the first-class native desktop/runtime distribution. See [Windows portable](windows-portable.md). |
+| Native Windows portable | Full native app path including backend rendering, reports, VSView GUI, and Windows installer/update flow | Docker-specific container assumptions | See [Windows portable](windows-portable.md) for the native desktop and runtime distribution. |
 
 Optional Docker GPU and GUI profiles require compatible host setup and separate
-verification. The default Docker behavior remains the deterministic headless
-software-Vulkan path even when a host could support more. The GUI verifier's current
-offscreen result does not establish visible X11 desktop behavior.
+verification. Docker uses the deterministic headless software-Vulkan path by default,
+even when a host could support more.
 
 The NVIDIA profile is experimental until proved on the host. The X11 wrapper and a
 visible desktop are unverified.
@@ -46,17 +49,16 @@ bash tools/verify_docker_gpu.sh
 The NVIDIA path keeps the default Docker services unchanged unless you opt into
 `docker-compose.gpu-nvidia.yml` and the `gpu-nvidia` profile. The script requires a
 compatible Linux NVIDIA host with NVIDIA Container Toolkit. It preflights Docker
-Compose before using the Compose `gpus` attribute. If your Compose plugin is older
-than 2.30.0, the script stops and prints a copy/paste-friendly `docker run --gpus all`
-fallback instead of silently dropping to software Vulkan.
+Compose before using the Compose `gpus` attribute.
 
-GPU support here is still documented-only/unverified unless you run
-`bash tools/verify_docker_gpu.sh` successfully on a compatible Linux NVIDIA machine.
+If your Compose plugin is older than 2.30.0, the script stops and prints a
+`docker run --gpus all` fallback you can copy and paste. It does not switch to software
+Vulkan. Run `bash tools/verify_docker_gpu.sh` successfully on a compatible Linux NVIDIA
+machine to verify GPU support.
 
-If you are evaluating optional Docker GPU or profile wiring, use the official Docker
-GPU/container and profile docs as the source of truth for host prerequisites and
-compose semantics: Docker Engine GPU access, Docker Desktop GPU support notes,
-Compose profiles, and the Compose `gpus` service attribute are documented at
+Use the official Docker documentation for host prerequisites and Compose behavior when
+evaluating optional GPU or profile setup. Docker documents Engine GPU access, Desktop
+GPU support, Compose profiles, and the Compose `gpus` service attribute at
 [docs.docker.com/engine/containers/gpu](https://docs.docker.com/engine/containers/gpu/),
 [docs.docker.com/desktop/features/gpu](https://docs.docker.com/desktop/features/gpu/),
 [docs.docker.com/compose/how-tos/profiles](https://docs.docker.com/compose/how-tos/profiles/),
@@ -67,9 +69,8 @@ and
 
 The optional GUI profile is for Linux desktop users who want the native Frame Compare
 VSView alignment panel inside the container for interactive alignment checks. The
-panel is available only for Frame Compare-generated sessions and is the sole human
-alignment-review surface. It does not change the default Docker image or the default
-CI-safe path.
+panel is available only for Frame Compare-generated sessions. Use it for all human
+alignment review. The profile keeps the default Docker image and CI path unchanged.
 
 ### X11 contract
 
@@ -91,10 +92,11 @@ bash tools/verify_docker_gui.sh
 
 The verifier covers the `frame-compare-alignment-review` entry point, offscreen panel
 construction, generated output metadata, the atomic sidecar round trip, and
-malformed-result rejection. An offscreen pass does not prove visible desktop behavior;
-the X11 host wrapper and a visible launch remain unverified until a compatible Linux/X11
-host runs them. The host wrapper needs Linux with X11 and does not run on macOS Docker
-Desktop.
+malformed-result rejection.
+
+An offscreen pass does not prove visible desktop behavior. The X11 host wrapper and a
+visible launch remain unverified until a compatible Linux/X11 host runs them. The host
+wrapper needs Linux with X11 and does not run on macOS Docker Desktop.
 
 If your X server denies access, use the narrow local-user form on the host instead
 of `xhost +`:
@@ -111,16 +113,16 @@ xhost -si:localuser:$(id -un)
 
 ### Manual GUI launch
 
-Manual GUI launch stays separate from proofing. After the proof passes, you can
-launch an interactive container manually with:
+After the proof passes, launch an interactive container manually with this separate
+command:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gui-linux.yml run --rm frame-compare-run \
   run --root /workspace --input /workspace/comparison_videos
 ```
 
-GUI support here remains documented-only/unverified until you run
-`bash tools/verify_docker_gui.sh` successfully on a compatible Linux desktop host.
+Run `bash tools/verify_docker_gui.sh` successfully on a compatible Linux desktop host
+to verify GUI support.
 
 ## Host open helper
 
@@ -150,9 +152,8 @@ host `./generated` bind mount. A custom container output path is durable only wh
 you explicitly map it to a host-owned directory; the helper intentionally does not
 translate arbitrary mounts.
 
-The helper rejects `/workspace/config`, `/workspace/comparison_videos`, the removed
-`/workspace/screenshots` output root,
-non-canonical paths, symlink escapes, and non-`https://slow.pics/...` URLs.
-This helper is host-side only; it does not change the existing CLI/browser
-ownership inside the container. It is not a general `docker run` path
-translator for arbitrary custom bind mounts.
+The helper rejects `/workspace/config`, `/workspace/comparison_videos`,
+`/workspace/screenshots`, non-canonical paths, symlink escapes, and
+non-`https://slow.pics/...` URLs. It runs only on the host and leaves CLI and browser
+actions inside the container unchanged. It translates only the default Compose mounts;
+use your own path translation for arbitrary custom `docker run` bind mounts.

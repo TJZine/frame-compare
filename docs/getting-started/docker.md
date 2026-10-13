@@ -1,3 +1,7 @@
+---
+description: Run Frame Compare in Docker on macOS or Linux and find the results on the host.
+---
+
 # Docker
 
 Docker is the recommended reproducible, headless route for macOS and Linux. On macOS
@@ -13,11 +17,15 @@ files into `comparison_videos/` before the wizard.
 The UID and GID variables make container-created bind-mount files belong to the
 current host user. Pre-creating the directories keeps ownership predictable.
 
-```bash
+```bash title="Set up the workspace"
 export FRAME_COMPARE_HOST_UID="$(id -u)"
 export FRAME_COMPARE_HOST_GID="$(id -g)"
 mkdir -p config comparison_videos generated
+```
 
+Then build the image and run the four stages:
+
+```bash title="Build the image and run the four stages"
 docker compose build frame-compare-run
 docker compose run --rm frame-compare-wizard
 docker compose run --rm frame-compare-run doctor
@@ -28,8 +36,9 @@ docker compose run --rm frame-compare-run run --root /workspace
 The wizard creates or reviews `config/config.toml`; it writes only after confirmation.
 The wizard and run service mount the generated-data root at
 `/workspace/generated`; this single host directory retains reports, screenshots,
-run records, run-local state, and shared caches after container removal. The run
-service mounts configuration and media read-only. The first-use wizard keeps
+run records, run-local state, and shared caches after container removal.
+
+The run service mounts configuration and media read-only. The first-use wizard keeps
 `slowpics.auto_upload = false`, so the normal run is local unless you later opt in.
 
 ## Where results go
@@ -61,12 +70,21 @@ The run service mounts media read-only, and Frame Compare keeps its L-SMASH-Work
 index beside the media as described in [Output layout](../reference/output-layout.md).
 If index construction fails, Frame Compare retries without a disk cache. These
 cache-free source loads rebuild the index in memory and repeat the indexing cost.
+
 A usable existing Frame Compare-owned index can be reused even on a read-only mount,
 so the warning is not expected on every run. The warning alone needs no action;
 frame selection, alignment, and rendering are unaffected by the cache-free fallback.
 
 ## Next steps
 
-See [Docker profiles](docker-profiles.md) for NVIDIA and X11 profiles and the full
-service list. Continue with [Your first comparison](first-comparison.md)
-for what each safety step checks.
+<div class="fc-cards" markdown>
+
+- [Your first comparison](first-comparison.md)
+
+    What each stage checks, with the Docker commands.
+
+- [Docker profiles](docker-profiles.md)
+
+    NVIDIA and X11 profiles and the full service list.
+
+</div>

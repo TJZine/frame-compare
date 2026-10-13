@@ -1,111 +1,94 @@
+---
+description: Download, verify, and install the Windows portable bundle, then update, back up, or remove it.
+---
+
 # Windows portable
 
-The Windows portable bundle is the recommended Frame Compare distribution for Windows
-10/11 x64. It includes the supported Python and media runtime, VSView with its
-PySide6 backend and native Frame Compare alignment panel for review, the
-installer, and signed code-only update and rollback tooling.
+The Windows portable bundle is the complete Frame Compare distribution for Windows
+10 and 11 (x64). It includes Python, the media runtime, VSView with the alignment
+panel, an installer, and signed code-only updates.
 
-The portable graph pins the base `vsview` package and the Frame Compare panel
-entry point; its upstream
-`recommended` and `full` extras are not bundled. BestSource and vspackrgb serve the
-VSView/UI runtime. Frame Compare-generated sessions continue to load comparison media
-through L-SMASH-Works and Frame Compare-owned indexes.
+## Install
 
-## Install from a published release
+[Download the latest release](https://github.com/TJZine/frame-compare/releases/latest){ .md-button .md-button--primary }
 
-Download both files for the same release tag:
+<div class="fc-steps" markdown>
 
-```text
-frame-compare-portable-win-x64-<tag>.zip
-frame-compare-portable-win-x64-<tag>.zip.sha256
-```
+1.  **Download both files from the same release.**
 
-Authenticate the ZIP's release provenance before extracting it. On an internet-connected
-machine with the GitHub CLI installed, verify the release artifact against this
-repository and the dedicated Windows build workflow:
+    ```text
+    frame-compare-portable-win-x64-<tag>.zip
+    frame-compare-portable-win-x64-<tag>.zip.sha256
+    ```
 
-```powershell
-$tag = "<tag>"
-$zip = ".\frame-compare-portable-win-x64-$tag.zip"
-# Resolve the selected lightweight refs/tags/<tag> ref through GitHub.
-$tagSha = @(gh api "repos/TJZine/frame-compare/git/ref/tags/$tag" --jq ".object.sha")
-if ($LASTEXITCODE -ne 0) {
-    throw "Could not resolve release tag $tag. Do not install this download."
-}
-if ($tagSha.Count -ne 1) {
-    throw "Release tag $tag did not resolve to exactly one commit SHA. Do not install this download."
-}
-$tagSha = $tagSha[0].Trim()
-if ($tagSha -notmatch "^[0-9a-f]{40}$") {
-    throw "Release tag $tag resolved to an invalid commit SHA. Do not install this download."
-}
-gh attestation verify $zip `
-  --repo TJZine/frame-compare `
-  --signer-workflow TJZine/frame-compare/.github/workflows/windows-portable-build.yml `
-  --source-digest $tagSha
-if ($LASTEXITCODE -ne 0) {
-    throw "Release provenance verification failed. Do not install this download."
-}
-```
+2.  **Verify the download.**
 
-Then verify the ZIP checksum before extracting it:
+    On an internet-connected machine with the GitHub CLI installed,
+    confirm that this repository's Windows build workflow produced the ZIP, then
+    compare its SHA-256 checksum.
 
-```powershell
-$zip = ".\frame-compare-portable-win-x64-$tag.zip"
-$checksumFile = "$zip.sha256"
-$expected = ((Get-Content -LiteralPath $checksumFile -Raw).Trim() -split "\s+")[0].ToLowerInvariant()
-$actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actual -ne $expected) {
-    throw "SHA-256 mismatch. Do not install this download."
-}
-"SHA-256 verified: $actual"
-```
+    ??? fc-disclosure "Show the verification commands"
 
-The expected and actual hashes must match exactly. Delete and download both files again
-if verification fails; do not bypass the mismatch.
+        ```powershell title="PowerShell · release provenance"
+        $tag = "<tag>"
+        $zip = ".\frame-compare-portable-win-x64-$tag.zip"
+        # Resolve the selected lightweight refs/tags/<tag> ref through GitHub.
+        $tagSha = @(gh api "repos/TJZine/frame-compare/git/ref/tags/$tag" --jq ".object.sha")
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not resolve release tag $tag. Do not install this download."
+        }
+        if ($tagSha.Count -ne 1) {
+            throw "Release tag $tag did not resolve to exactly one commit SHA. Do not install this download."
+        }
+        $tagSha = $tagSha[0].Trim()
+        if ($tagSha -notmatch "^[0-9a-f]{40}$") {
+            throw "Release tag $tag resolved to an invalid commit SHA. Do not install this download."
+        }
+        gh attestation verify $zip `
+          --repo TJZine/frame-compare `
+          --signer-workflow TJZine/frame-compare/.github/workflows/windows-portable-build.yml `
+          --source-digest $tagSha
+        if ($LASTEXITCODE -ne 0) {
+            throw "Release provenance verification failed. Do not install this download."
+        }
+        ```
 
-Extract the ZIP into a fresh, empty folder, open the extracted bundle folder, and run:
+        Then verify the ZIP checksum before extracting it:
 
-```powershell
-.\install.cmd
-```
+        ```powershell title="PowerShell · SHA-256 checksum"
+        $zip = ".\frame-compare-portable-win-x64-$tag.zip"
+        $checksumFile = "$zip.sha256"
+        $expected = ((Get-Content -LiteralPath $checksumFile -Raw).Trim() -split "\s+")[0].ToLowerInvariant()
+        $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $expected) {
+            throw "SHA-256 mismatch. Do not install this download."
+        }
+        "SHA-256 verified: $actual"
+        ```
 
-Open a new terminal after installation so the updated user `PATH` is loaded.
+    !!! warning "The hashes must match exactly"
+
+        Delete and download both files again if verification fails; do not bypass the mismatch.
+
+3.  **Extract the ZIP into a fresh, empty folder.**
+
+4.  **Run the installer from the extracted folder.**
+
+    ```powershell title="PowerShell"
+    .\install.cmd
+    ```
+
+5.  **Open a new terminal.**
+
+    Open a new terminal after installation so the updated user `PATH` is loaded.
+    Check the runtime with `frame-compare doctor`.
+
+</div>
 
 <figure class="fc-figure">
   <img src="../images/windows-portable-install.png" alt="Windows PowerShell showing a verified SHA-256 checksum followed by a successful shim installation." width="1109" height="119" loading="lazy">
   <figcaption>Verify the ZIP first, then install the shim and open a new terminal so the updated PATH applies.</figcaption>
 </figure>
-
-## Build the portable bundle from a clone
-
-Use this route only when no suitable published bundle exists or when validating the
-packaging path. It requires Windows 10/11 x64, Git, PowerShell 7 or newer, network access to every
-pinned upstream artifact, build time, and download-cache space.
-
-From the repository root:
-
-```powershell
-.\install.cmd
-```
-
-The root command delegates to the source installer, builds
-`dist\frame-compare-portable-win-x64`, and installs the same user-level shim as a
-published bundle. The source route refuses before bootstrap, dependency sync, or output
-changes when PowerShell 7 is unavailable. Run a direct source `.ps1` installer with
-`pwsh`; Windows PowerShell 5.1 remains supported for published-bundle installation,
-launch, and updates.
-
-The source-built bundle, not the repository root, is the application workspace:
-
-```text
-dist/frame-compare-portable-win-x64/
-├── config/
-├── comparison_videos/
-├── generated/
-├── frame-compare.ps1
-└── install.cmd
-```
 
 ## Workspace and generated data
 
@@ -121,17 +104,16 @@ configuration.
 The default generated-data location is the bundle’s `generated/` directory. In the
 wizard, set **Generated data location** to a normal external folder when reports,
 screenshots, history, run state, and reusable caches must survive bundle replacement.
-The installed fallback configuration retains that authored choice, and the updater,
-rollback flow, reinstall path, and uninstaller leave the external root outside their
-managed replacement boundary.
+The installed fallback configuration retains that choice. The updater, rollback flow,
+reinstall path, and uninstaller leave that external root untouched.
 
 A top-level bundle `screenshots/` directory is not a runtime output root. Every executed
 comparison writes its canonical `report.html`, sibling `screenshots/`, run records, and
 run-local generated state beneath the selected generated-data root.
 
-Moving the bundle or source media can change cache identity because source paths are part
-of freshness and request identity. Existing run folders remain viewable when kept intact;
-no cache-hit guarantee is made after a move.
+Moving the bundle or source media can change cache identity because Frame Compare uses
+source paths to check freshness and identify requests. Keep existing run folders intact
+to view them after a move. A move may prevent cache reuse.
 
 ## First comparison
 
@@ -140,12 +122,12 @@ no cache-hit guarantee is made after a move.
 2. Open a new PowerShell terminal.
 3. Run:
 
-```powershell
-frame-compare wizard
-frame-compare doctor
-frame-compare run --dry-run
-frame-compare run
-```
+    ```powershell
+    frame-compare wizard
+    frame-compare doctor
+    frame-compare run --dry-run
+    frame-compare run
+    ```
 
 The first-use configuration keeps slow.pics automatic upload disabled. Review the local
 report before enabling any publication integration.
@@ -192,28 +174,35 @@ Apply a code-only update:
 frame-compare-update apply .\frame-compare-update-win-x64-<tag>.zip
 ```
 
-The updater bounds the archive and its two fixed authentication entries, then verifies
-the signature before parsing the manifest or inspecting and extracting payload entries.
-It verifies every payload hash before replacement. Unsigned packages have no interactive
-bypass. Archive compressed size, entry count, per-entry and total
-uncompressed size, and compression ratio are bounded before extraction. It accepts only
-a native-panel-capable full bundle (`bundle_info.schema_version` 3) and refuses
-pre-native-panel schema-2 bundles, as well as missing, malformed, or different
-media-runtime fingerprints, before applying any change. That refusal cannot be
-overridden safely because a code-only ZIP does not carry replacement native media
-components. An unavailable installed app version also fails closed instead of skipping
-the signed source-version range; install the complete portable ZIP instead.
+??? fc-disclosure "Why an update can be refused"
+
+    The updater bounds the archive and its two fixed authentication entries, then verifies
+    the signature before parsing the manifest or inspecting and extracting payload entries.
+    It verifies every payload hash before replacement. Unsigned packages have no interactive
+    bypass. Archive compressed size, entry count, per-entry and total
+    uncompressed size, and compression ratio are bounded before extraction.
+
+    It accepts only
+    a native-panel-capable full bundle (`bundle_info.schema_version` 3) and refuses
+    pre-native-panel schema-2 bundles, as well as missing, malformed, or different
+    media-runtime fingerprints, before applying any change. That refusal cannot be
+    overridden safely because a code-only ZIP does not carry replacement native media
+    components. An unavailable installed app version also fails closed instead of skipping
+    the signed source-version range; install the complete portable ZIP instead.
 
 When the fingerprint differs, install the complete portable ZIP for that release into a
 fresh, empty folder. Overlaying a full ZIP onto an existing bundle root is unsupported.
 
-Before a full reinstall, preserve the old bundle and its user configuration, source videos,
-and generated data. Copy the authored `config/config.toml` and any bundle-local inputs or
-`generated/` data into the new bundle as needed, or retain their external locations.
-Do not copy application code, runtime files, or update backups from the old bundle.
-Run the new bundle's `install.cmd` to point the installed shim at it. The installed
-AppData fallback configuration and external user data are preserved. Keep
-**Generated data location** external when reports and reusable state must survive
+Before a full reinstall:
+
+1. Preserve the old bundle and its user configuration, source videos, and generated data.
+2. Copy your `config/config.toml` and any bundle-local inputs or `generated/` data into
+   the new bundle as needed, or retain their external locations.
+3. Leave application code, runtime files, and update backups in the old bundle.
+4. Run the new bundle's `install.cmd` to point the installed shim at it.
+
+The installed AppData fallback configuration and external user data are preserved.
+Keep **Generated data location** external when reports and reusable state must survive
 replacement.
 
 ## Backup and rollback
@@ -227,16 +216,16 @@ frame-compare-update purge-backups --keep 5
 Each code-update backup records the media-runtime and requirements-lock identity of
 the bundle that created it. `list-backups` marks backups with missing, malformed, or
 different identity as unavailable. `rollback` refuses those backups before changing any
-file. Identity-less legacy backups cannot be restored or migrated. Compatible backups
-restore only application code; rollback is not a substitute for a complete bundle
-reinstall across different runtime or dependency fingerprints.
+file. Identity-less legacy backups cannot be restored or migrated.
+
+Compatible backups restore only application code; rollback is not a substitute for a
+complete bundle reinstall across different runtime or dependency fingerprints.
 
 ## Uninstall
 
 Run `uninstall.cmd` from the current portable bundle root. It removes the installed user
-shim and managed `PATH` entry. It preserves the installed state configuration and leaves
-unknown files in place. It does not silently delete the portable bundle, source videos, or
-an external generated-data root.
+shim and managed `PATH` entry. It preserves the installed state configuration, unknown
+files, the portable bundle, source videos, and any external generated-data root.
 
 ## Bundle provenance and licenses
 
@@ -251,6 +240,46 @@ Each complete bundle includes:
 The selected profile and compatibility policy are described in
 [Supported media runtime](../supported-media-runtime.md). Artifact-level hashes and source
 revisions in the build manifest and generated inventory remain authoritative.
+
+## Build the portable bundle from a clone
+
+Use this route only when no suitable published bundle exists or when validating the
+packaging path. It requires Windows 10/11 x64, Git, PowerShell 7 or newer, network
+access to every pinned upstream artifact, build time, and download-cache space.
+
+From the repository root:
+
+```powershell
+.\install.cmd
+```
+
+The root command delegates to the source installer, builds
+`dist\frame-compare-portable-win-x64`, and installs the same user-level shim as a
+published bundle. The source route refuses before bootstrap, dependency sync, or output
+changes when PowerShell 7 is unavailable.
+
+Run a direct source `.ps1` installer with
+`pwsh`; Windows PowerShell 5.1 remains supported for published-bundle installation,
+launch, and updates.
+
+Use the source-built bundle as the application workspace:
+
+```text
+dist/frame-compare-portable-win-x64/
+├── config/
+├── comparison_videos/
+├── generated/
+├── frame-compare.ps1
+└── install.cmd
+```
+
+## Bundle contents
+
+The portable graph pins the base `vsview` package and the Frame Compare panel
+entry point; its upstream
+`recommended` and `full` extras are not bundled. BestSource and vspackrgb serve the
+VSView/UI runtime. Frame Compare-generated sessions continue to load comparison media
+through L-SMASH-Works and Frame Compare-owned indexes.
 
 ## Troubleshooting
 
