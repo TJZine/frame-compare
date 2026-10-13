@@ -12,6 +12,7 @@ from frame_compare.analysis.types import (
     SelectionDetail,
 )
 from frame_compare.analysis.window import SelectionWindow
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration import execution
 from frame_compare.orchestration.context import RunContext
@@ -140,24 +141,26 @@ def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
     assert analyze_phase.skip_condition(config) is True
 
 
-def test_run_request_cli_config_overrides_capture_runtime_override_contract(tmp_path: Path) -> None:
+def test_run_request_config_overrides_capture_runtime_override_contract(tmp_path: Path) -> None:
     request = RunRequest(
         root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        tm_preset=TonemapPreset.FILMIC,
-        tm_target_nits=203,
-        overlay_mode=OverlayMode.DIAGNOSTIC,
-        user_frames=[4, 8],
-        random_frame_count=12,
-        dark_frame_count=2,
-        bright_frame_count=3,
-        motion_frame_count=4,
-        seed=123,
-        no_upload=True,
-        force_interactive_alignment=True,
+        config_overrides=CLIConfigOverrides(
+            input_dir=tmp_path / "comparison_videos",
+            tm_preset=TonemapPreset.FILMIC,
+            tm_target_nits=203,
+            overlay_mode=OverlayMode.DIAGNOSTIC,
+            user_frames=[4, 8],
+            random_frame_count=12,
+            dark_frame_count=2,
+            bright_frame_count=3,
+            motion_frame_count=4,
+            seed=123,
+            no_upload=True,
+            force_interactive_alignment=True,
+        ),
     )
 
-    overrides = request.cli_config_overrides()
+    overrides = request.config_overrides
 
     assert overrides.input_dir == tmp_path / "comparison_videos"
     assert overrides.tm_preset == TonemapPreset.FILMIC

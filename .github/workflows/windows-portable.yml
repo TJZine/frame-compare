@@ -5,13 +5,14 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Verify artifacts or run the guarded release orchestrator
+        description: Verify, release, or perform the one-time signing-key migration
         required: true
         default: verify
         type: choice
         options:
           - verify
           - release
+          - migrate-signing-key
       channel:
         description: Approval channel for signed verification or publication
         required: true
@@ -29,13 +30,25 @@ on:
         required: false
         type: string
       expected_sha:
-        description: Exact 40-character source commit SHA (verify or release operation)
+        description: Exact 40-character source commit SHA (required for release or migration)
         required: false
         type: string
 
 permissions: {}
 
 jobs:
+  migrate_signing_key:
+    name: Migrate signing key after production approval
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'migrate-signing-key'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/migrate-signing-key.yml
+    with:
+      expected_sha: ${{ inputs.expected_sha }}
+    secrets:
+      SOURCE_SIGNING_KEY: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}
+      SIGNING_KEY_MIGRATION_TOKEN: ${{ secrets.SIGNING_KEY_MIGRATION_TOKEN }}
+
   verify_pull_request:
     name: Verify unsigned Windows portable artifacts
     if: github.event_name == 'pull_request'

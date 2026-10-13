@@ -17,6 +17,7 @@ from frame_compare.cli.run_command import (
 )
 from frame_compare.config.errors import ConfigValidationError, ConfigWriteError
 from frame_compare.config.loader import get_default_config
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import (
     ConfigSchema,
     OverlayMode,
@@ -46,10 +47,47 @@ def test_build_run_request_from_cli_maps_all_runtime_options() -> None:
         RunCliOptions(
             root=Path("/workspace"),
             config_path=Path("/workspace/config/custom.toml"),
-            input_dir=Path("inputs"),
             no_cache=True,
             from_cache_only=True,
+            skip_analysis=True,
+            skip_metadata=True,
+            json_output=True,
+            no_color=True,
+            quiet=True,
+            verbose=True,
+            config_overrides=CLIConfigOverrides(
+                input_dir=Path("inputs"),
+                no_upload=True,
+                tm_preset=TonemapPreset.FILMIC,
+                tm_target_nits=203,
+                tm_curve=ToneCurve.SPLINE,
+                user_frames=[12, 24],
+                random_frame_count=17,
+                dark_frame_count=3,
+                bright_frame_count=4,
+                motion_frame_count=5,
+                seed=42,
+                overlay_mode=OverlayMode.DIAGNOSTIC,
+                force_interactive_alignment=True,
+            ),
+        )
+    )
+
+    assert request == RunRequest(
+        root=Path("/workspace"),
+        config_path=Path("/workspace/config/custom.toml"),
+        no_cache=True,
+        from_cache_only=True,
+        skip_analysis=True,
+        skip_metadata=True,
+        no_color=True,
+        quiet=True,
+        verbose=True,
+        json_output=True,
+        config_overrides=CLIConfigOverrides(
+            input_dir=Path("inputs"),
             no_upload=True,
+            force_interactive_alignment=True,
             tm_preset=TonemapPreset.FILMIC,
             tm_target_nits=203,
             tm_curve=ToneCurve.SPLINE,
@@ -60,40 +98,7 @@ def test_build_run_request_from_cli_maps_all_runtime_options() -> None:
             motion_frame_count=5,
             seed=42,
             overlay_mode=OverlayMode.DIAGNOSTIC,
-            skip_analysis=True,
-            skip_metadata=True,
-            force_interactive_alignment=True,
-            json_output=True,
-            no_color=True,
-            quiet=True,
-            verbose=True,
-        )
-    )
-
-    assert request == RunRequest(
-        root=Path("/workspace"),
-        config_path=Path("/workspace/config/custom.toml"),
-        input_dir=Path("inputs"),
-        no_cache=True,
-        from_cache_only=True,
-        no_upload=True,
-        skip_analysis=True,
-        skip_metadata=True,
-        force_interactive_alignment=True,
-        tm_preset=TonemapPreset.FILMIC,
-        tm_target_nits=203,
-        tm_curve=ToneCurve.SPLINE,
-        user_frames=[12, 24],
-        random_frame_count=17,
-        dark_frame_count=3,
-        bright_frame_count=4,
-        motion_frame_count=5,
-        seed=42,
-        overlay_mode=OverlayMode.DIAGNOSTIC,
-        no_color=True,
-        quiet=True,
-        verbose=True,
-        json_output=True,
+        ),
     )
 
 
@@ -396,7 +401,7 @@ def test_handle_run_allows_external_input_override() -> None:
     )
 
     assert len(runner.requests) == 1
-    assert runner.requests[0].input_dir == external_input
+    assert runner.requests[0].config_overrides.input_dir == external_input
 
 
 def test_handle_run_allows_exact_windows_portable_state_config(

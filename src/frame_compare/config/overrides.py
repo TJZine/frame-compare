@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, TypedDict, cast
+from typing import TypedDict, cast
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
-from frame_compare.config.errors import ConfigValidationError
+from frame_compare.config.loader import validate_raw_config_payload
+from frame_compare.config.persistence import dump_config_with_explicit_color
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.config.utils import deep_merge
-from frame_compare.errors import normalize_pydantic_errors
 
 
 class TonemapCliOverrides(TypedDict, total=False):
@@ -37,68 +37,6 @@ class CLIConfigOverrides:
     overlay_mode: OverlayMode | None = None
     no_upload: bool = False
     force_interactive_alignment: bool = False
-
-
-class CLIConfigOverrideSource(Protocol):
-    """Dependency-light source of values that may override effective config."""
-
-    @property
-    def input_dir(self) -> Path | None: ...
-
-    @property
-    def tm_preset(self) -> TonemapPreset | None: ...
-
-    @property
-    def tm_target_nits(self) -> int | None: ...
-
-    @property
-    def tm_curve(self) -> ToneCurve | None: ...
-
-    @property
-    def user_frames(self) -> list[int] | None: ...
-
-    @property
-    def random_frame_count(self) -> int | None: ...
-
-    @property
-    def dark_frame_count(self) -> int | None: ...
-
-    @property
-    def bright_frame_count(self) -> int | None: ...
-
-    @property
-    def motion_frame_count(self) -> int | None: ...
-
-    @property
-    def seed(self) -> int | None: ...
-
-    @property
-    def overlay_mode(self) -> OverlayMode | None: ...
-
-    @property
-    def no_upload(self) -> bool: ...
-
-    @property
-    def force_interactive_alignment(self) -> bool: ...
-
-
-def cli_config_overrides_from(source: CLIConfigOverrideSource) -> CLIConfigOverrides:
-    """Project one canonical CLI override source into effective-config inputs."""
-    return CLIConfigOverrides(
-        input_dir=source.input_dir,
-        tm_preset=source.tm_preset,
-        tm_target_nits=source.tm_target_nits,
-        tm_curve=source.tm_curve,
-        user_frames=source.user_frames,
-        random_frame_count=source.random_frame_count,
-        dark_frame_count=source.dark_frame_count,
-        bright_frame_count=source.bright_frame_count,
-        motion_frame_count=source.motion_frame_count,
-        seed=source.seed,
-        overlay_mode=source.overlay_mode,
-        no_upload=source.no_upload,
-        force_interactive_alignment=source.force_interactive_alignment,
-    )
 
 
 CLI_OVERRIDE_MAP: dict[str, str] = {
@@ -154,15 +92,10 @@ def apply_cli_overrides(
     if not overrides:
         return config
 
-    base_dict = config.model_dump()
+    base_dict = dump_config_with_explicit_color(config)
     merged = deep_merge(base_dict, overrides)
 
-    try:
-        # Cast merged dict to Any to satisfy static type checkers on kwargs unpacking
-        updated = ConfigSchema.model_validate(cast(Any, merged))
-    except ValidationError as exc:
-        normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
-        raise ConfigValidationError(normalized) from exc
+    updated = validate_raw_config_payload(merged, redact_inputs=False)
 
     _restore_explicit_fields(updated, config, overrides)
     return updated

@@ -215,8 +215,10 @@ fingerprints miss and rebuild under the normal cache policy; there is no migrati
 The shared alignment reuse cache is schema v2 after the viewer migration. It stores
 neutral `computed` and `interactive_confirmed` origins. Existing schema-v1 entries are
 ignored and recomputed; no v1 migration or compatibility reader is provided. Run-local
-`manual_overrides.toml` remains a v1 file with the same path, ordering, atomic-write
-behavior, and offset semantics.
+`manual_overrides.toml` uses canonical version "2" without a `confirmed` field,
+retaining its path, ordering, atomic-write behavior, and offset semantics. Older or
+unsupported versions are recoverable cache misses without migration; the next
+manual save replaces them.
 
 Frame Compare-owned L-SMASH-Works indexes use a profile-scoped filename:
 

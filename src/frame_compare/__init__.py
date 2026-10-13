@@ -1,4 +1,4 @@
 """Frame Compare — Video frame comparison tool."""
 
-__version__ = "0.6.1"
+__version__ = "0.7.0"
 __all__ = ["__version__"]

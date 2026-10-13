@@ -17,7 +17,7 @@ import tomli_w
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
 
-MANUAL_OVERRIDES_VERSION = "1"
+MANUAL_OVERRIDES_VERSION = "2"
 MANUAL_OVERRIDES_FILE = "manual_overrides.toml"
 
 log = structlog.get_logger()
@@ -32,14 +32,12 @@ class ManualOverride:
         comparison_clip: Path stem of comparison clip
         frame_offset: User-confirmed signed frame offset (comparison-relative-to-reference)
         timestamp: ISO 8601 timestamp when override was recorded
-        confirmed: True if user explicitly confirmed computed offset
     """
 
     reference_clip: str
     comparison_clip: str
     frame_offset: int
     timestamp: str
-    confirmed: bool = True
 
 
 def load_manual_overrides(cache_dir: Path) -> dict[str, ManualOverride]:
@@ -113,7 +111,6 @@ def _manual_override_from_entry(entry: dict[str, object]) -> ManualOverride:
     comp_clip = entry.get("comparison_clip")
     frame_off = entry.get("frame_offset")
     ts = entry.get("timestamp")
-    conf = entry.get("confirmed", True)
 
     if not isinstance(ref_clip, str):
         raise TypeError("reference_clip must be str")
@@ -123,15 +120,12 @@ def _manual_override_from_entry(entry: dict[str, object]) -> ManualOverride:
         raise TypeError("frame_offset must be int")
     if not isinstance(ts, str):
         raise TypeError("timestamp must be str")
-    if not isinstance(conf, bool):
-        raise TypeError("confirmed must be bool")
 
     return ManualOverride(
         reference_clip=ref_clip,
         comparison_clip=comp_clip,
         frame_offset=frame_off,
         timestamp=ts,
-        confirmed=conf,
     )
 
 
@@ -183,7 +177,6 @@ def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
         "comparison_clip": override.comparison_clip,
         "frame_offset": override.frame_offset,
         "timestamp": override.timestamp,
-        "confirmed": override.confirmed,
     }
     data[key] = entry
 

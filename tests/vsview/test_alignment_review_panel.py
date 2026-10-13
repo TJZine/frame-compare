@@ -1365,3 +1365,46 @@ def test_p4a_panel_covers_each_non_applied_reason(
     assert expected in summary
     assert [field.text() for field in panel.frame_inputs] == ["", ""]
     assert not panel.use_positions_button.isEnabled()
+
+
+def test_evidence_is_built_once_per_comparison_and_replaced_with_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    builds = 0
+    original = build_audio_review_presentation
+
+    def build(attempt: AudioAlignmentAttempt) -> Any:
+        nonlocal builds
+        builds += 1
+        return original(attempt)
+
+    monkeypatch.setattr(
+        "frame_compare.vsview.alignment_review_panel.build_audio_review_presentation", build
+    )
+    panel, api, _script = _panel(
+        tmp_path,
+        comparison_count=2,
+        suggestion=None,
+        audio_reviews=(
+            _attempt_audio_review(_production_nested_targets_attempt()),
+            _provisional_audio_review(ordinal=2, frame_offset=7),
+        ),
+    )
+    assert builds == 2
+    summaries = [label.text() for label in panel.audio_summary_labels]
+    for frame in range(5):
+        _visit(panel, api, 0, frame)
+        _visit(panel, api, 1, frame + 1)
+    assert builds == 2
+    assert [label.text() for label in panel.audio_summary_labels] == summaries
+    assert "frame 4" in panel.source_status_labels[0].text()
+
+    api.voutputs[1].kwargs[ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY] = _provisional_audio_review(
+        frame_offset=9
+    )
+    _call_hook(panel.on_workspace_loaded)
+    assert builds == 4
+    assert "+9f" in panel.audio_summary_labels[0].text()
+    assert "not captured" in panel.source_status_labels[0].text()
+    _visit(panel, api, 0, 12)
+    assert builds == 4

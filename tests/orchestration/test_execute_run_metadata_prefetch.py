@@ -13,6 +13,7 @@ import pytest
 import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.config.loader import load_config
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import phase_post_render, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.errors import TmdbError
@@ -103,7 +104,7 @@ def test_execute_run_from_cache_only_missing_probe_cache_skips_metadata_prefetch
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=False,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -175,7 +176,7 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=False,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -236,7 +237,7 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=False,
-                no_upload=True,
+                config_overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
         )
@@ -312,7 +313,7 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=False,
-                no_upload=True,
+                config_overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
         )
@@ -376,7 +377,7 @@ def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
                     root=tmp_path,
                     skip_analysis=True,
                     skip_metadata=False,
-                    no_upload=True,
+                    config_overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
             )
@@ -413,7 +414,12 @@ def test_interrupt_stops_tmdb_request_admission_and_cancels_inflight_http(
             raise AssertionError("blocked HTTP request returned")
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
-            request = RunRequest(root=tmp_path, quiet=True, skip_analysis=True, no_upload=True)
+            request = RunRequest(
+                root=tmp_path,
+                quiet=True,
+                skip_analysis=True,
+                config_overrides=CLIConfigOverrides(no_upload=True),
+            )
             deps = RunDependencies(
                 http_client=client, vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()
             )

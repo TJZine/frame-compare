@@ -1,0 +1,68 @@
+name: One-time signing-key migration
+
+# Called through the existing default-branch dispatcher so no main commit is needed.
+on:
+  workflow_call:
+    inputs:
+      expected_sha:
+        required: true
+        type: string
+    secrets:
+      SOURCE_SIGNING_KEY:
+        required: true
+      SIGNING_KEY_MIGRATION_TOKEN:
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: frame-compare-signing-key-migration
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Bind migration to reviewed branch commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Validate migration source
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$SOURCE_REPOSITORY" != "TJZine/frame-compare" || "$SOURCE_REF" != "refs/heads/v0.7.0" ]]; then
+            echo "Migration is restricted to TJZine/frame-compare branch v0.7.0." >&2
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ || "$EXPECTED_SHA" != "$SOURCE_SHA" ]]; then
+            echo "Migration requires the exact reviewed v0.7.0 head SHA." >&2
+            exit 1
+          fi
+
+  migrate:
+    name: Copy existing key to protected environments
+    needs: preflight
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: production
+    steps:
+      - name: Checkout approved source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate and migrate key without displaying it
+        env:
+          SOURCE_SIGNING_KEY: ${{ secrets.SOURCE_SIGNING_KEY }}
+          GH_TOKEN: ${{ secrets.SIGNING_KEY_MIGRATION_TOKEN }}
+        shell: bash
+        run: python3 scripts/migrate_signing_key.py

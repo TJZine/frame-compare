@@ -270,6 +270,7 @@ def check_video_alignment(
                         frame,
                         confirmed,
                         alternative_offsets,
+                        cancellation=cancellation,
                         retained_frames=reference_frames,
                     )
                     if scored is None:
@@ -434,8 +435,12 @@ def _motion_positions(
             frame = round(slot_start + slot * (candidate_index + 0.5) / _MOTION_CANDIDATES)
             if frame < 0 or frame + _MOTION_STEP >= node.num_frames:
                 continue
-            image = _read_frame(node, frame)
-            motion = float(np.mean(np.abs(image - _read_frame(node, frame + _MOTION_STEP))))
+            try:
+                image = _read_frame(node, frame, cancellation=cancellation)
+                next_image = _read_frame(node, frame + _MOTION_STEP, cancellation=cancellation)
+            except _VideoCancelled:
+                return None
+            motion = float(np.mean(np.abs(image - next_image)))
             if motion > best_motion:
                 best_frame, best_motion, best_image = frame, motion, image
         if retained_frames is not None and best_image is not None:
@@ -464,7 +469,7 @@ def _score_base_positions(
                 None if retained_frames is None else retained_frames.get(reference_frame)
             )
             reference_ranks = _average_ranks(
-                _read_frame(reference_node, reference_frame)
+                _read_frame(reference_node, reference_frame, cancellation=cancellation)
                 if reference_image is None
                 else reference_image
             )
@@ -474,7 +479,13 @@ def _score_base_positions(
                     np.mean(
                         np.abs(
                             reference_ranks
-                            - _average_ranks(_read_frame(comparison_node, reference_frame - offset))
+                            - _average_ranks(
+                                _read_frame(
+                                    comparison_node,
+                                    reference_frame - offset,
+                                    cancellation=cancellation,
+                                )
+                            )
                         )
                     )
                 )
@@ -496,13 +507,19 @@ def _score_base_positions(
     return evidence, winners, margins
 
 
-def _read_frame(node: vs.VideoNode, frame: int) -> FloatFrame:
+class _VideoCancelled(RuntimeError):
+    """No further native frame reads may be admitted."""
+
+
+def _read_frame(node: vs.VideoNode, frame: int, *, cancellation: Event | None = None) -> FloatFrame:
     try:
         frame_count = node.num_frames
     except Exception as exc:
         raise RuntimeError("video frame count access failed") from exc
     if frame < 0 or frame >= frame_count:
         raise IndexError("video frame is outside the source")
+    if _is_cancelled(cancellation):
+        raise _VideoCancelled("video frame read cancelled")
     try:
         raw = node.get_frame(frame)
         try:
@@ -698,12 +715,13 @@ def _score_hypotheses(
     confirmed: int,
     alternative_offsets: Sequence[int],
     *,
+    cancellation: Event | None = None,
     retained_frames: dict[int, FloatFrame] | None = None,
 ) -> tuple[float, float, int | None] | None:
     try:
         reference_image = None if retained_frames is None else retained_frames.get(reference_frame)
         reference_ranks = _average_ranks(
-            _read_frame(reference_node, reference_frame)
+            _read_frame(reference_node, reference_frame, cancellation=cancellation)
             if reference_image is None
             else reference_image
         )
@@ -712,7 +730,11 @@ def _score_hypotheses(
                 np.mean(
                     np.abs(
                         reference_ranks
-                        - _average_ranks(_read_frame(comparison_node, reference_frame - offset))
+                        - _average_ranks(
+                            _read_frame(
+                                comparison_node, reference_frame - offset, cancellation=cancellation
+                            )
+                        )
                     )
                 )
             )

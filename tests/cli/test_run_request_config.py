@@ -8,7 +8,7 @@ from _pytest.monkeypatch import MonkeyPatch
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode
 from frame_compare.cli.run_command import RunCliOptions, build_run_request_from_cli
-from frame_compare.config.overrides import CLIConfigOverrides, cli_config_overrides_from
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 
@@ -57,9 +57,9 @@ def test_run_builds_run_request_from_cli_args(monkeypatch: MonkeyPatch, tmp_path
     assert result.exit_code == 0
 
     request = captured["request"]
-    assert request.tm_target_nits == 203
-    assert request.overlay_mode == OverlayMode.DIAGNOSTIC
-    assert request.force_interactive_alignment is True
+    assert request.config_overrides.tm_target_nits == 203
+    assert request.config_overrides.overlay_mode == OverlayMode.DIAGNOSTIC
+    assert request.config_overrides.force_interactive_alignment is True
 
 
 def test_run_builds_run_request_with_typed_choice_overrides(
@@ -89,36 +89,38 @@ def test_run_builds_run_request_with_typed_choice_overrides(
 
     assert result.exit_code == 0
     request = captured["request"]
-    assert request.tm_preset == TonemapPreset.FILMIC
-    assert request.tm_curve == ToneCurve.SPLINE
-    assert request.overlay_mode == OverlayMode.DIAGNOSTIC
+    assert request.config_overrides.tm_preset == TonemapPreset.FILMIC
+    assert request.config_overrides.tm_curve == ToneCurve.SPLINE
+    assert request.config_overrides.overlay_mode == OverlayMode.DIAGNOSTIC
 
 
-def test_cli_and_runtime_share_the_complete_config_override_projection() -> None:
+def test_cli_and_runtime_share_the_complete_config_overrides() -> None:
     options = RunCliOptions(
         root=Path("/workspace"),
         config_path=Path("/workspace/config/config.toml"),
-        input_dir=Path("external-input"),
         no_cache=True,
         from_cache_only=False,
-        no_upload=True,
-        tm_preset=TonemapPreset.FILMIC,
-        tm_target_nits=203,
-        tm_curve=ToneCurve.SPLINE,
-        user_frames=[3, 5],
-        random_frame_count=7,
-        dark_frame_count=2,
-        bright_frame_count=1,
-        motion_frame_count=4,
-        seed=19,
-        overlay_mode=OverlayMode.DIAGNOSTIC,
         skip_analysis=False,
         skip_metadata=True,
-        force_interactive_alignment=True,
         json_output=True,
         no_color=True,
         quiet=True,
         verbose=False,
+        config_overrides=CLIConfigOverrides(
+            input_dir=Path("external-input"),
+            no_upload=True,
+            tm_preset=TonemapPreset.FILMIC,
+            tm_target_nits=203,
+            tm_curve=ToneCurve.SPLINE,
+            user_frames=[3, 5],
+            random_frame_count=7,
+            dark_frame_count=2,
+            bright_frame_count=1,
+            motion_frame_count=4,
+            seed=19,
+            overlay_mode=OverlayMode.DIAGNOSTIC,
+            force_interactive_alignment=True,
+        ),
     )
     expected = CLIConfigOverrides(
         input_dir=Path("external-input"),
@@ -136,40 +138,46 @@ def test_cli_and_runtime_share_the_complete_config_override_projection() -> None
         force_interactive_alignment=True,
     )
 
-    assert cli_config_overrides_from(options) == expected
-    assert build_run_request_from_cli(options).cli_config_overrides() == expected
+    assert options.config_overrides == expected
+    request = build_run_request_from_cli(options)
+    assert request.config_overrides is options.config_overrides
+    assert request.config_overrides == expected
 
 
 def test_cli_and_runtime_preserve_absent_and_explicit_empty_overrides() -> None:
     options = RunCliOptions(
         root=Path("/workspace"),
         config_path=Path("/workspace/config/config.toml"),
-        input_dir=None,
         no_cache=False,
         from_cache_only=False,
-        no_upload=False,
-        tm_preset=None,
-        tm_target_nits=None,
-        tm_curve=None,
-        user_frames=[],
-        random_frame_count=None,
-        dark_frame_count=None,
-        bright_frame_count=None,
-        motion_frame_count=None,
-        seed=None,
-        overlay_mode=None,
         skip_analysis=False,
         skip_metadata=False,
-        force_interactive_alignment=False,
         json_output=False,
         no_color=False,
         quiet=False,
         verbose=False,
+        config_overrides=CLIConfigOverrides(
+            input_dir=None,
+            no_upload=False,
+            tm_preset=None,
+            tm_target_nits=None,
+            tm_curve=None,
+            user_frames=[],
+            random_frame_count=None,
+            dark_frame_count=None,
+            bright_frame_count=None,
+            motion_frame_count=None,
+            seed=None,
+            overlay_mode=None,
+            force_interactive_alignment=False,
+        ),
     )
     expected = CLIConfigOverrides(user_frames=[])
 
-    assert cli_config_overrides_from(options) == expected
-    assert build_run_request_from_cli(options).cli_config_overrides() == expected
+    assert options.config_overrides == expected
+    request = build_run_request_from_cli(options)
+    assert request.config_overrides is options.config_overrides
+    assert request.config_overrides == expected
 
 
 def test_run_builds_run_request_with_input_dir(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -185,7 +193,7 @@ def test_run_builds_run_request_with_input_dir(monkeypatch: MonkeyPatch, tmp_pat
         ["--input", "custom_inputs"], tmp_path=tmp_path, monkeypatch=monkeypatch
     )
     assert result.exit_code == 0
-    assert captured["request"].input_dir == Path("custom_inputs")
+    assert captured["request"].config_overrides.input_dir == Path("custom_inputs")
 
 
 def test_run_write_config_respects_root_and_config_and_does_not_invoke_runner(

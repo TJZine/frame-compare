@@ -737,13 +737,12 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
     )
 
     manual_overrides = {
-        "version": "1",
+        "version": "2",
         "ref:comp_manual": {
             "reference_clip": "ref",
             "comparison_clip": "comp_manual",
             "frame_offset": 2,
             "timestamp": "2026-06-06T12:30:00Z",
-            "confirmed": True,
         },
     }
     (generated_dir / "manual_overrides.toml").write_text(
@@ -836,13 +835,12 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
         generated_dir=generated_dir,
     )
     manual_overrides = {
-        "version": "1",
+        "version": "2",
         "ref:comp_manual": {
             "reference_clip": "ref",
             "comparison_clip": "comp_manual",
             "frame_offset": 2,
             "timestamp": "2026-06-06T12:30:00Z",
-            "confirmed": True,
         },
     }
     (generated_dir / "manual_overrides.toml").write_text(

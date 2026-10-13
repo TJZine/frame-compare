@@ -295,7 +295,7 @@ def run(
     no_cache: bool = _option(
         False,
         "--no-cache",
-        help="Disable analysis cache reads and writes for this run.",
+        help="Refresh the current scoped analysis cache entry; preserve other cached entries.",
         rich_help_panel="Planning and diagnostics",
     ),
     from_cache_only: bool = _option(

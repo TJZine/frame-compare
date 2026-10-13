@@ -206,7 +206,6 @@ def _save_confirmed_offsets(
                 comparison_clip=comparison.stem,
                 frame_offset=confirmed_offsets_by_key[key],
                 timestamp=timestamp,
-                confirmed=True,
             ),
         )
 

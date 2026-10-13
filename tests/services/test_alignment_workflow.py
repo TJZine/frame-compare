@@ -442,7 +442,6 @@ def test_pre_collection_identity_change_is_aborted_per_comparison(
             comparison_clip=manual.stem,
             frame_offset=3,
             timestamp="2026-09-25T00:00:00Z",
-            confirmed=True,
         ),
     )
     config = _config()
@@ -518,7 +517,6 @@ def test_manual_override_wins_without_decoding(
             comparison_clip=comparison.stem,
             frame_offset=3,
             timestamp="2026-09-25T00:00:00Z",
-            confirmed=True,
         ),
     )
     monkeypatch.setattr(

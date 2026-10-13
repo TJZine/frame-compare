@@ -1,8 +1,16 @@
+import asyncio
 import os
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
+from frame_compare.render.errors import EncodingError, ScreenshotOutputCollisionError
+from frame_compare.render.naming import (
+    generate_screenshot_name,
+    generate_screenshot_path,
+    validate_screenshot_paths,
+)
 
 
 def test_generate_name_sanitizes_surrogate_escape():
@@ -114,3 +122,119 @@ def test_generate_path_bounds_multibyte_component_for_large_frame(tmp_path):
 )
 def test_generate_name_cases(label: str, frame: int, extension: str, expected: str) -> None:
     assert generate_screenshot_name(label, frame, extension=extension) == expected
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        ("Movie", "movie"),
+        ("Ç", "ç"),
+        ("é", "e\u0301"),
+        ("Straße", "Strasse"),
+        ("Ç", "c"),
+        ("straße", "strasze"),
+    ],
+)
+def test_output_identity_uses_actual_unicode_rules_and_cleans_reservations(
+    tmp_path: Path, names: tuple[str, str]
+) -> None:
+    paths = [tmp_path / f"10 - {name}.png" for name in names]
+    # Establish physical equivalence independently of validation's implementation.
+    paths[0].write_bytes(b"original")
+    aliases = paths[1].exists() and paths[1].samefile(paths[0])
+    paths[0].unlink()
+    if aliases:
+        with pytest.raises(ScreenshotOutputCollisionError):
+            validate_screenshot_paths(paths)
+    else:
+        validate_screenshot_paths(paths)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_output_identity_preserves_existing_files(tmp_path: Path) -> None:
+    first = tmp_path / "10 - original.png"
+    second = tmp_path / "10 - existing-link.png"
+    first.write_bytes(b"existing screenshot")
+    second.hardlink_to(first)
+    with pytest.raises(ScreenshotOutputCollisionError):
+        validate_screenshot_paths([tmp_path / "10 - new.png", first, second])
+    assert first.read_bytes() == second.read_bytes() == b"existing screenshot"
+    assert sorted(path.name for path in tmp_path.iterdir()) == [second.name, first.name]
+
+
+def test_reservation_failure_is_typed_and_removes_prior_reservations(tmp_path: Path) -> None:
+    paths = [tmp_path / "1 - first.png", tmp_path / "1 - second.png"]
+    original_open = Path.open
+
+    def fail_second(path: Path, *args, **kwargs):
+        if path == paths[1]:
+            raise PermissionError("private operating-system text")
+        return original_open(path, *args, **kwargs)
+
+    with (
+        patch.object(Path, "open", fail_second),
+        pytest.raises(EncodingError) as caught,
+    ):
+        validate_screenshot_paths(paths)
+    assert "private operating-system text" not in str(caught.value)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_cancellation_removes_reservations_before_admitting_next_path(tmp_path: Path) -> None:
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    paths = [tmp_path / "1 - first.png", tmp_path / "1 - second.png"]
+    original_open = Path.open
+    opened: list[Path] = []
+
+    def cancel_after_first(path: Path, *args, **kwargs):
+        opened.append(path)
+        file = original_open(path, *args, **kwargs)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        return file
+
+    async def validate_and_deliver_cancellation() -> None:
+        with patch.object(Path, "open", cancel_after_first), pytest.raises(_RunInterrupt):
+            validate_screenshot_paths(paths)
+        assert opened == paths[:1]
+        assert list(tmp_path.iterdir()) == []
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(validate_and_deliver_cancellation())
+
+
+def test_reservation_metadata_failure_removes_exclusive_creation(tmp_path: Path) -> None:
+    with (
+        patch("frame_compare.render.naming.os.fstat", side_effect=OSError("metadata failed")),
+        pytest.raises(EncodingError),
+    ):
+        validate_screenshot_paths([tmp_path / "1 - first.png"])
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_cleanup_preserves_replacement_file(tmp_path: Path) -> None:
+    path = tmp_path / "1 - first.png"
+    retained_reservation = tmp_path / "reservation.png"
+    replacement = tmp_path / "replacement.png"
+    replacement.write_bytes(b"another owner")
+    replacement_status = replacement.stat()
+    replacement_identity = (replacement_status.st_dev, replacement_status.st_ino)
+
+    def replace_closed_reservation() -> None:
+        if not path.exists():
+            return
+        # The final cancellation checkpoint follows the reservation's close.
+        # Retain its file so the replacement cannot reuse its physical identity.
+        path.rename(retained_reservation)
+        replacement.rename(path)
+
+    with patch("frame_compare.render.naming.raise_if_cancelling", replace_closed_reservation):
+        validate_screenshot_paths([path])
+    reserved_status = retained_reservation.stat()
+    assert (reserved_status.st_dev, reserved_status.st_ino) != replacement_identity
+    surviving_status = path.stat()
+    assert (surviving_status.st_dev, surviving_status.st_ino) == replacement_identity
+    assert path.read_bytes() == b"another owner"

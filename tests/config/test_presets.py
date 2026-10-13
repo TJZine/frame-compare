@@ -141,6 +141,8 @@ def test_save_preset_roundtrip(tmp_path: Path) -> None:
     original_config.slowpics.remove_after_days = 90
     # This is what save_preset serializes (excludes None values)
     expected_data = original_config.model_dump(mode="json", exclude_none=True)
+    for field in ("target_nits", "tone_curve", "gamma_lift", "contrast_recovery"):
+        del expected_data["color"][field]
 
     save_preset("roundtrip", original_config, presets_dir=tmp_path)
     loaded_data = load_preset("roundtrip", presets_dir=tmp_path)
@@ -205,3 +207,38 @@ def test_save_preset_preserves_authored_generated_directory(
     report = persisted.get("report")
     assert isinstance(report, dict)
     assert "output_dir" not in report
+
+
+@pytest.mark.parametrize("failure", ["directory", "read_denied", "read_missing"])
+def test_preset_acquisition_failure_is_typed_and_sanitized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    path = tmp_path / "selected.toml"
+    if failure == "directory":
+        path.mkdir()
+    else:
+        path.write_text("[analysis]\nrandom_frame_count = 12\n")
+
+        def fail_read(*_args: object, **_kwargs: object) -> str:
+            if failure == "read_missing":
+                raise FileNotFoundError("sentinel-read-detail")
+            raise PermissionError("sentinel-read-detail")
+
+        monkeypatch.setattr(Path, "read_text", fail_read)
+    error_type = PresetNotFoundError if failure == "read_missing" else PresetInvalidError
+    with pytest.raises(error_type) as exc_info:
+        load_preset("selected", presets_dir=tmp_path)
+    assert "sentinel-read-detail" not in str(exc_info.value.context.to_dict())
+    assert exc_info.value.__cause__ is None
+
+
+def test_preset_acquisition_follows_symlinked_directory(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "selected.toml").write_bytes(b"\xef\xbb\xbf[analysis]\nrandom_frame_count = 12\n")
+    link = tmp_path / "presets"
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks unavailable on this host")
+    assert load_preset("selected", presets_dir=link)["analysis"] == {"random_frame_count": 12}

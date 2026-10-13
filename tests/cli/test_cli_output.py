@@ -13,6 +13,7 @@ from rich.console import Console
 
 from frame_compare.cli.output import print_at_a_glance, print_result_summary
 from frame_compare.config.loader import get_default_config
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import AnalysisPerformanceMode, ConfigSchema
 from frame_compare.config.schema_enums import (
     OverlayMode,
@@ -124,8 +125,8 @@ def _workspace_path(*parts: str) -> Path:
 def _request(*, no_upload: bool = False, skip_analysis: bool = False) -> RunRequest:
     return RunRequest(
         root=_workspace_path(),
-        no_upload=no_upload,
         skip_analysis=skip_analysis,
+        config_overrides=CLIConfigOverrides(no_upload=no_upload),
     )
 
 

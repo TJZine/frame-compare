@@ -179,6 +179,7 @@ def test_run_rejects_retired_frame_count_options(
                 "apply to this run only",
                 "Add --write-config to save the effective configuration",
                 "Require valid cached analysis",
+                "Refresh the current scoped analysis cache entry; preserve other cached entries.",
                 "Preview what a run would use and create without probing or side effects.",
                 "Write the effective config, then exit without running.",
                 "Print resolved workspace paths as JSON, then exit.",

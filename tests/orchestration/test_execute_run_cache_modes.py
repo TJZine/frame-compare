@@ -14,14 +14,18 @@ import frame_compare.analysis.cache_io as cache_io
 import frame_compare.services.alignment_reuse_cache as alignment_reuse_cache
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import (
+    CacheLoadResult,
     ClipIdentity,
+    MetricCacheRequest,
     MetricsAcquisition,
 )
 from frame_compare.config.loader import load_config
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.orchestration import phase_selection
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
-from frame_compare.utils.cache_errors import CacheVersionMismatchError
+from frame_compare.orchestration.execution_types import PublishPhaseOutput
+from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
@@ -127,7 +131,7 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
         no_cache=True,
         skip_analysis=False,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
 
     def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
@@ -180,12 +184,142 @@ def test_execute_run_from_cache_only_fails_when_probe_cache_missing(
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
     with pytest.raises(MetricsCalculationError):
         asyncio.run(execute_run(request, deps=deps))
+
+
+@pytest.mark.parametrize("second_read", ["valid", "missing", "corrupted", "version_mismatch"])
+def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    second_read: str,
+) -> None:
+    create_config(
+        tmp_path,
+        content=_cache_config(
+            analysis="random_frame_count = 1\nrandom_seed = 42\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        )
+        + "\n[slowpics]\nauto_upload = true\n",
+    )
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "a_source.mkv", "b_comp.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
+    paths = [input_dir / "a_source.mkv", input_dir / "b_comp.mkv"]
+    write_metrics_cache(
+        tmp_path / "generated" / "cache" / "analysis",
+        source_path=paths[0],
+        video_paths=paths,
+        config=config,
+    )
+    load_cached_metrics = cache_io.load_cached_metrics_for_request
+    reads: list[CacheLoadResult] = []
+
+    def _load_then_invalidate(
+        cache_dir: Path, fingerprint: str, request: MetricCacheRequest
+    ) -> CacheLoadResult:
+        result = load_cached_metrics(cache_dir, fingerprint, request)
+        reads.append(result)
+        if len(reads) == 1:
+            assert result.success is True
+            cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
+            assert cache_path is not None
+            if second_read == "missing":
+                cache_path.unlink()
+            elif second_read == "corrupted":
+                cache_path.write_text("invalid JSON", encoding="utf-8")
+            elif second_read == "version_mismatch":
+                payload = json.loads(cache_path.read_text(encoding="utf-8"))
+                payload["version"] = cache_io.CACHE_VERSION + 1
+                cache_path.write_text(json.dumps(payload), encoding="utf-8")
+        return result
+
+    compute_calls: list[str] = []
+
+    def _unexpected_compute(**_kwargs: object) -> MetricsAcquisition:
+        compute_calls.append("compute")
+        raise AssertionError("cache-only analysis must not compute metrics")
+
+    publish_calls: list[str] = []
+
+    async def _publish(*_args: object, **_kwargs: object) -> PublishPhaseOutput:
+        publish_calls.append("publish")
+        return PublishPhaseOutput(slowpics_url="https://slow.pics/c/test")
+
+    monkeypatch.setattr(cache_io, "load_cached_metrics_for_request", _load_then_invalidate)
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _unexpected_compute)
+    monkeypatch.setattr("frame_compare.orchestration.execution.run_publish_phase", _publish)
+    runner = FakeFFmpegRunner()
+    request = RunRequest(root=tmp_path, from_cache_only=True, skip_metadata=True)
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=runner)
+
+    if second_read == "valid":
+        result = asyncio.run(execute_run(request, deps=deps))
+        assert result.success is True
+        assert result.cache_hit is True
+        assert result.frame_count == 2
+        assert len(runner.calls) == 4
+        assert publish_calls == ["publish"]
+    else:
+        expected_error = {
+            "missing": MetricsCalculationError,
+            "corrupted": CacheCorruptionError,
+            "version_mismatch": CacheVersionMismatchError,
+        }[second_read]
+        with pytest.raises(expected_error):
+            asyncio.run(execute_run(request, deps=deps))
+        assert runner.calls == []
+        assert publish_calls == []
+
+    assert len(reads) == 2
+    assert reads[1].success is (second_read == "valid")
+    assert compute_calls == []
+
+
+def test_execute_run_optional_analysis_failure_retains_initial_frame_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_config(
+        tmp_path,
+        content=_cache_config(
+            analysis="random_frame_count = 1\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        ),
+    )
+    create_video_files(tmp_path / "comparison_videos", "a_source.mkv", "b_comp.mkv")
+
+    def _fail_metrics(**_kwargs: object) -> MetricsAcquisition:
+        raise MetricsCalculationError("analysis unavailable")
+
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fail_metrics)
+    runner = FakeFFmpegRunner()
+    result = asyncio.run(
+        execute_run(
+            RunRequest(
+                root=tmp_path,
+                skip_metadata=True,
+                config_overrides=CLIConfigOverrides(no_upload=True),
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=runner),
+        )
+    )
+
+    assert result.success is True
+    assert result.frame_count == 1
+    assert len(runner.calls) == 2
+    assert any(
+        warning.source == "analysis" and "analysis unavailable" in warning.text
+        for warning in result.warnings
+    )
 
 
 def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
@@ -222,7 +356,7 @@ def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -282,7 +416,11 @@ def test_execute_run_from_cache_only_uses_scoped_cache(
         analysis_source_path=input_dir / analysis_filename,
     )
     request = RunRequest(
-        root=tmp_path, from_cache_only=True, skip_analysis=False, skip_metadata=True, no_upload=True
+        root=tmp_path,
+        from_cache_only=True,
+        skip_analysis=False,
+        skip_metadata=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     diagnostics_by_stage: dict[str, list[str]] = {}
 
@@ -364,7 +502,7 @@ enable = false
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
@@ -424,7 +562,7 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
@@ -450,7 +588,7 @@ def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 

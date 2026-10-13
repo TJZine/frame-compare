@@ -11,8 +11,7 @@ from typing import Literal, Protocol
 
 import httpx
 
-from frame_compare.config.overrides import CLIConfigOverrides, cli_config_overrides_from
-from frame_compare.config.schema import OverlayMode, ToneCurve, TonemapPreset
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.utils.post_upload_actions import PostUploadActionResults
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -29,44 +28,20 @@ class RunRequest:
     See docs/current-cli-contract.md for CLI flag → config mappings and persistence rules.
     """
 
-    # Core paths
+    # Paths and persistent CLI overrides
     root: Path
     config_path: Path | None = None
-    input_dir: Path | None = None
+    config_overrides: CLIConfigOverrides = field(default_factory=CLIConfigOverrides)
 
-    # Cache behavior
+    # Run-mode controls
     no_cache: bool = False
     from_cache_only: bool = False
-
-    # Skip flags
     skip_analysis: bool = False
     skip_metadata: bool = False
-    no_upload: bool = False
-    force_interactive_alignment: bool = False
-
-    # Tonemap overrides (highest priority)
-    tm_preset: TonemapPreset | None = None
-    tm_target_nits: int | None = None
-    tm_curve: ToneCurve | None = None
-
-    # Frame selection overrides
-    user_frames: list[int] | None = None
-    random_frame_count: int | None = None
-    dark_frame_count: int | None = None
-    bright_frame_count: int | None = None
-    motion_frame_count: int | None = None
-    seed: int | None = None
-
-    # Output behavior
-    overlay_mode: OverlayMode | None = None
     no_color: bool = False
     quiet: bool = False
     verbose: bool = False
     json_output: bool = False
-
-    def cli_config_overrides(self) -> CLIConfigOverrides:
-        """Project runtime CLI values into the config override DTO."""
-        return cli_config_overrides_from(self)
 
 
 def _utc_now() -> datetime:

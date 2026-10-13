@@ -3,24 +3,25 @@
 from __future__ import annotations
 
 import re
+import stat
 import tomllib
 from pathlib import Path
-from typing import Any, cast
 
 import tomli_w
-from pydantic import ValidationError
 
 from frame_compare.config.errors import (
-    ConfigValidationError,
     ConfigWriteError,
     PresetInvalidError,
     PresetNameInvalidError,
     PresetNotFoundError,
 )
-from frame_compare.config.persistence import dump_config_for_persistence
+from frame_compare.config.loader import validate_raw_config_payload
+from frame_compare.config.persistence import (
+    dump_config_for_persistence,
+    dump_config_with_explicit_color,
+)
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.utils import deep_merge
-from frame_compare.errors import normalize_pydantic_errors
 from frame_compare.utils.atomic_write import write_text_atomic
 
 DEFAULT_PRESETS_DIR = Path("config/presets")
@@ -48,15 +49,18 @@ def load_preset(name: str, presets_dir: Path | None = None) -> dict[str, object]
     directory = presets_dir or DEFAULT_PRESETS_DIR
     preset_path = directory / f"{name}.toml"
 
-    if not preset_path.exists():
-        raise PresetNotFoundError(name)
-
     try:
-        payload = tomllib.loads(preset_path.read_text(encoding="utf-8"))
+        if not stat.S_ISREG(preset_path.stat().st_mode):
+            raise PresetInvalidError(preset_path, "preset must be a regular file")
+        payload = tomllib.loads(preset_path.read_text(encoding="utf-8-sig"))
+    except FileNotFoundError:
+        raise PresetNotFoundError(name) from None
     except tomllib.TOMLDecodeError as exc:
-        raise PresetInvalidError(preset_path, str(exc)) from exc
-    except UnicodeDecodeError as exc:
-        raise PresetInvalidError(preset_path, "preset is not valid UTF-8") from exc
+        raise PresetInvalidError(preset_path, str(exc)) from None
+    except UnicodeDecodeError:
+        raise PresetInvalidError(preset_path, "preset is not valid UTF-8") from None
+    except OSError:
+        raise PresetInvalidError(preset_path, "could not read preset file") from None
     return payload
 
 
@@ -103,11 +107,7 @@ def apply_preset(
     filled with schema defaults during validation.
     """
     preset_data = load_preset(preset_name, presets_dir=presets_dir)
-    base_dict = config.model_dump()
+    base_dict = dump_config_with_explicit_color(config)
     merged = deep_merge(base_dict, preset_data)
 
-    try:
-        return ConfigSchema.model_validate(cast(Any, merged))
-    except ValidationError as exc:
-        normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
-        raise ConfigValidationError(normalized) from exc
+    return validate_raw_config_payload(merged, redact_inputs=False)

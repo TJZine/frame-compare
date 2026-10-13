@@ -7,6 +7,38 @@ notes used by the guarded publication workflow.
 
 ## Unreleased
 
+## [0.7.0]
+
+### Changed
+
+- Reuse prepared audio-evidence summaries in the native alignment panel during
+  preview updates while keeping live frame drafts and markers current.
+- Maintain Windows bundled-runtime verification in a dedicated Python source file
+  while preserving the packaged native, VSView, provenance and cleanup checks.
+
+### Fixed
+
+- Preserve explicitly authored tone-map settings through config save/reload and
+  partial preset application without reacquiring unrelated ambient settings.
+- Report unreadable or nonregular config/preset files and malformed environment
+  settings as sanitized typed errors.
+- Reject screenshot names that address the same physical file before rendering,
+  including filesystem case and Unicode aliases, without overwriting existing files.
+- Stop admitting new video-alignment frame requests after cancellation.
+- Fail cache-only runs before rendering when required analysis-cache acquisition
+  becomes unavailable or invalid after prevalidation.
+- Let report notes use the full 1000-Unicode-scalar limit, including supplementary
+  characters, while preserving import/export bounds.
+- Describe `--no-cache` as refreshing the current scoped entry in CLI help.
+- Add a one-time approved migration for the existing repository signing key when
+  its original private file is unavailable.
+
+### Upgrade notes
+
+- Run-local `manual_overrides.toml` uses version "2" without a separate `confirmed`
+  field. Older versions are ignored as recoverable cache state and replaced on the
+  next manual save without migration. The native VSView result sidecar remains v1.
+
 ## [0.6.1]
 
 ### Added

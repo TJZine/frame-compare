@@ -26,6 +26,7 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
 )
 from frame_compare.config.loader import load_config
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration import phase_selection, preparation
@@ -135,7 +136,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
         no_cache=True,
         skip_analysis=False,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
 
     def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
@@ -181,7 +182,7 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_probe_cach
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
@@ -208,7 +209,7 @@ def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -237,10 +238,9 @@ def test_execute_prep_external_input_reserves_outputs_only_under_generated(
         preparation.execute_prep(
             RunRequest(
                 root=root,
-                input_dir=external_input,
                 skip_analysis=True,
                 skip_metadata=True,
-                no_upload=True,
+                config_overrides=CLIConfigOverrides(input_dir=external_input, no_upload=True),
             ),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),
@@ -277,7 +277,7 @@ def test_execute_prep_creates_missing_generated_root_only_during_reservation(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=True,
-                no_upload=True,
+                config_overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
@@ -308,7 +308,7 @@ def test_execute_prep_external_generated_root_owns_run_and_shared_state(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=True,
-                no_upload=True,
+                config_overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
@@ -364,7 +364,7 @@ def test_execute_prep_reserves_under_resolved_generated_root_symlink(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=True,
-                no_upload=True,
+                config_overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
@@ -408,7 +408,7 @@ def test_execute_prep_rejects_junctioned_reserved_run_directory(
                     root=tmp_path,
                     skip_analysis=True,
                     skip_metadata=True,
-                    no_upload=True,
+                    config_overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 deps=RunDependencies(vs_loader=FakeVSLoader()),
             )
@@ -519,7 +519,7 @@ enable = false
                 root=tmp_path,
                 skip_analysis=False,
                 skip_metadata=True,
-                no_upload=True,
+                config_overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(
                 vs_loader=AnalysisCapableVSLoader(),
@@ -548,7 +548,7 @@ enable = false
                 from_cache_only=True,
                 skip_analysis=False,
                 skip_metadata=True,
-                no_upload=True,
+                config_overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(
                 vs_loader=AnalysisCapableVSLoader(),
@@ -598,7 +598,7 @@ def test_execute_run_cache_only_run_folder_probe_snapshot_excludes_unrelated_sha
                 from_cache_only=True,
                 skip_analysis=False,
                 skip_metadata=True,
-                no_upload=True,
+                config_overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(
                 vs_loader=AnalysisCapableVSLoader(),
@@ -638,7 +638,7 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
         root=tmp_path,
         skip_analysis=False,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -676,7 +676,7 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 

@@ -8,6 +8,7 @@ from typing import Never
 
 import pytest
 
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.errors import GeneratedDataReservationError
@@ -54,7 +55,7 @@ def test_execute_run_run_info_write_failure_happens_before_probing_and_cleans_em
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        no_upload=True,
+        config_overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=NoProbeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -111,7 +112,7 @@ def test_execute_run_post_reservation_resolution_failure_cleans_run_directory(
                     root=tmp_path,
                     skip_analysis=True,
                     skip_metadata=True,
-                    no_upload=True,
+                    config_overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 deps=RunDependencies(
                     vs_loader=NoProbeVSLoader(),

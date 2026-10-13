@@ -847,6 +847,7 @@ foreach ($source in $inventorySources) {
 $requiredSourceScripts = @(
   ".github/workflows/windows-portable-build.yml",
   "tools/windows_portable/build_portable.ps1",
+  "tools/windows_portable/runtime_smoke.py",
   "tools/windows_portable/bundle_info.schema.json",
   "tools/windows_portable/manifest.windows-x64.json",
   "tools/windows_portable/manifest.schema.json",
