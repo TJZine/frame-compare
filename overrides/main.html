@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {% if not page.url %}
+    {% set fc_title = config.site_name ~ " documentation" %}
+  {% elif page.meta and page.meta.title %}
+    {% set fc_title = page.meta.title %}
+  {% elif page.title and not page.is_homepage %}
+    {% set fc_title = page.title | striptags %}
+  {% else %}
+    {% set fc_title = config.site_name %}
+  {% endif %}
+  {% if page.meta and page.meta.description %}
+    {% set fc_description = page.meta.description %}
+  {% else %}
+    {% set fc_description = config.site_description %}
+  {% endif %}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ fc_title }}">
+  <meta property="og:description" content="{{ fc_description }}">
+  {% if page.canonical_url %}
+    <meta property="og:url" content="{{ page.canonical_url }}">
+  {% endif %}
+  <meta property="og:image" content="{{ config.site_url }}assets/brand/social-card.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Frame Compare logo and title beside a harbour frame split between the PQ10 and HLG10 sources.">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" sizes="32x32" href="{{ 'assets/brand/favicon-32.png' | url }}">
+  <link rel="apple-touch-icon" href="{{ 'assets/brand/apple-touch-icon.png' | url }}">
+  <link rel="preload" href="{{ 'assets/fonts/geist-latin-wght-normal.woff2' | url }}" as="font" type="font/woff2" crossorigin>
+{% endblock %}

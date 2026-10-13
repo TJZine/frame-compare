@@ -1,0 +1,15 @@
+{% extends "main.html" %}
+
+{% block content %}
+  <div class="fc-404">
+    <p class="fc-404__code">404</p>
+    <h1>Page not found</h1>
+    <p>This page does not exist. Search with <kbd>/</kbd>, or start from one of these pages.</p>
+    <ul class="fc-404__links">
+      <li><a href="{{ 'getting-started/' | url }}">Choose an installation</a></li>
+      <li><a href="{{ 'getting-started/first-comparison/' | url }}">Your first comparison</a></li>
+      <li><a href="{{ 'reference/configuration/' | url }}">Configuration</a></li>
+      <li><a href="{{ 'guides/troubleshooting/' | url }}">Troubleshooting</a></li>
+    </ul>
+  </div>
+{% endblock %}

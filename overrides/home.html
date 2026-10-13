@@ -1,0 +1,33 @@
+{% extends "main.html" %}
+
+{% block content %}
+  {{ page.content }}
+{% endblock %}
+
+{% block hero %}
+  <section class="fc-hero" aria-labelledby="fc-hero-title">
+    <div class="fc-hero__inner md-grid">
+      <div class="fc-hero__copy">
+        <p class="fc-hero__kicker">Documentation</p>
+        <h1 id="fc-hero-title" class="fc-hero__title">Frame Compare</h1>
+        <p class="fc-hero__lead">{{ config.site_description }}</p>
+        <div class="fc-hero__actions">
+          <a class="fc-button fc-button--primary" href="{{ 'getting-started/' | url }}">Install</a>
+          <a class="fc-button fc-button--ghost" href="{{ 'getting-started/first-comparison/' | url }}">Your first comparison</a>
+        </div>
+      </div>
+      <figure class="fc-compare" data-fc-compare>
+        <div class="fc-compare__stage">
+          <img class="fc-compare__img" src="{{ 'images/home-frame-pq10.webp' | url }}" alt="EBU DVB PQ10 reference at frame 1000: boats in a harbour at sunset." width="1600" height="900">
+          <img class="fc-compare__img fc-compare__img--top" src="{{ 'images/home-frame-hlg10.webp' | url }}" alt="EBU DVB HLG10 comparison at frame 1000." width="1600" height="900">
+          <div class="fc-compare__rule" aria-hidden="true"><span class="fc-compare__knob"></span></div>
+          <span class="fc-compare__label fc-compare__label--ref"><span class="fc-compare__source">EBU DVB </span>PQ10 · Reference</span>
+          <span class="fc-compare__label fc-compare__label--cmp"><span class="fc-compare__source">EBU DVB </span>HLG10 · Comparison</span>
+          <span class="fc-compare__frame">Frame 1000</span>
+          <input class="fc-compare__range" type="range" min="0" max="100" step="1" value="50" aria-label="Divider position. Left of the divider shows the PQ10 reference; right shows the HLG10 comparison.">
+        </div>
+        <figcaption class="fc-compare__credit">Footage: EBU/DVB HEVC test content © EBU, shot by Frans de Jong (EBU), PQ10 conversion by Andrew Cotton (BBC), <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</figcaption>
+      </figure>
+    </div>
+  </section>
+{% endblock %}
