@@ -40,7 +40,7 @@ _NONZERO_TRIM_FRAMES = 5
 def align_clips_from_request(
     request: AlignmentRequest, config: AlignmentConfig
 ) -> list[AlignmentResult]:
-    return asyncio.run(_align_clips_from_request(request, config))
+    return list(asyncio.run(_align_clips_from_request(request, config)).results)
 
 
 def _run_ffmpeg(argv: list[str], *, timeout_seconds: int = 120) -> None:

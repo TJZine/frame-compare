@@ -15,7 +15,7 @@ from frame_compare.services.publishers import PublishResult
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
 )
-from frame_compare.services.types import AlignmentResult
+from frame_compare.services.types import AlignmentOperationOutcome, AlignmentResult
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from tests.orchestration.phase_task_helpers import (
     _clip,
@@ -53,18 +53,22 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     ctx.selection_breakdown = initial_selection.breakdown
     ctx.selection_details_by_source_frame = dict(initial_selection.selection_details)
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=98,
-                time_offset_seconds=4.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=98,
+                    time_offset_seconds=4.08,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     render_capture: dict[str, Any] = {}
     report_capture: dict[str, Any] = {}
@@ -261,18 +265,22 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
         update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=80,
-                time_offset_seconds=3.33,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=80,
+                    time_offset_seconds=3.33,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     captured: dict[str, Any] = {}
     expected_path = tmp_path / "run" / "report.html"

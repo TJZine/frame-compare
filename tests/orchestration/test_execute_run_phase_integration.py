@@ -23,7 +23,11 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.run_result_record import read_run_result
-from frame_compare.services.types import AlignmentResult, AlignmentReviewSummary, TmdbMetadata
+from frame_compare.services.types import (
+    AlignmentOperationOutcome,
+    AlignmentResult,
+    TmdbMetadata,
+)
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
@@ -67,7 +71,6 @@ enable = false
         verbose=False,
         quiet=False,
         json_output=False,
-        review_summary: AlignmentReviewSummary | None = None,
         vs_loader=None,
     ):
         assert request.shared_alignment_cache_dir == tmp_path / "generated" / "cache" / "alignment"
@@ -78,26 +81,28 @@ enable = false
         assert json_output is False
         assert quiet is False
         assert verbose is False
-        return [
-            AlignmentResult(
-                reference_clip=request.reference.path.name,
-                comparison_clip=request.comparisons[0].path.name,
-                frame_offset=1,
-                time_offset_seconds=0.041,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            ),
-            AlignmentResult(
-                reference_clip=request.reference.path.name,
-                comparison_clip=request.comparisons[1].path.name,
-                frame_offset=-1,
-                time_offset_seconds=-0.041,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            ),
-        ]
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip=request.reference.path.name,
+                    comparison_clip=request.comparisons[0].path.name,
+                    frame_offset=1,
+                    time_offset_seconds=0.041,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
+                AlignmentResult(
+                    reference_clip=request.reference.path.name,
+                    comparison_clip=request.comparisons[1].path.name,
+                    frame_offset=-1,
+                    time_offset_seconds=-0.041,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
+            )
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 

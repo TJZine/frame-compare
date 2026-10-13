@@ -266,11 +266,21 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
     assert run_info["naming_source"] == "tmdb"
 
 
+@pytest.mark.parametrize("unattended", [False, True])
 def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    unattended: bool,
 ) -> None:
-    create_config(tmp_path, content=METADATA_RETRY_CONFIG)
+    create_config(
+        tmp_path,
+        content=METADATA_RETRY_CONFIG.replace(
+            "unattended = true", f"unattended = {str(unattended).lower()}"
+        ),
+    )
+    public_config = load_config(tmp_path / "config" / "config.toml")
+    assert public_config.tmdb.unattended is unattended
+    assert public_config.tmdb.model_dump(mode="json")["unattended"] is unattended
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
     expected_metadata = TmdbMetadata(
@@ -342,7 +352,6 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
 
     expected_config = MetadataConfig(
         api_key="test-key",
-        unattended=True,
         timeout_seconds=7.5,
         year_tolerance=1,
         category_preference="movie",

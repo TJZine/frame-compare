@@ -1026,7 +1026,6 @@ category_preference = "tv"
     assert captured["filenames"] == ["Heat.1995.mkv"]
     assert captured["config"] == MetadataConfig(
         api_key="test-key",
-        unattended=True,
         timeout_seconds=3.5,
         year_tolerance=4,
         category_preference="tv",

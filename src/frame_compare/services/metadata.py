@@ -67,13 +67,4 @@ async def resolve_metadata(
     else:
         outcome = await resolve_tmdb_match(parsed, config, client, cache=cache)
 
-    if outcome.selected is not None:
-        return outcome.selected
-
-    if not outcome.candidates:
-        return None
-
-    if config.unattended:
-        return None
-
-    return None
+    return outcome.selected

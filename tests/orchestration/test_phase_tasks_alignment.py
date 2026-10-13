@@ -19,7 +19,7 @@ from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_alignment, phase_selection
 from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentResult
+from frame_compare.services.types import AlignmentOperationOutcome, AlignmentResult
 from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
 from frame_compare.utils.types import AlignmentRequest
 from tests.orchestration.phase_task_helpers import (
@@ -52,21 +52,25 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     selected_frames = [0, 2, 50, 99]
     captured: dict[str, Any] = {}
 
-    def _fake_align_clips_from_request(*args: object, **kwargs: object) -> list[AlignmentResult]:
+    def _fake_align_clips_from_request(
+        *args: object, **kwargs: object
+    ) -> AlignmentOperationOutcome:
         captured["request"] = args[0]
         captured["config"] = args[1]
         captured.update(kwargs)
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=2,
-                time_offset_seconds=0.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=2,
+                    time_offset_seconds=0.08,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
@@ -148,18 +152,20 @@ def test_run_align_phase_retains_material_variable_alignment_without_phase_warni
     monkeypatch.setattr(
         phase_alignment,
         "align_clips_from_request",
-        lambda *_args, **_kwargs: [
-            AlignmentResult(
-                "reference.mkv",
-                "encode.mkv",
-                2,
-                0.08,
-                0.9,
-                "cross_correlation",
-                "computed",
-                stability=summary,
+        lambda *_args, **_kwargs: AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    "reference.mkv",
+                    "encode.mkv",
+                    2,
+                    0.08,
+                    0.9,
+                    "cross_correlation",
+                    "computed",
+                    stability=summary,
+                ),
             )
-        ],
+        ),
     )
 
     output = _run_align_phase(ctx, selected_frames=[2, 50])
@@ -359,7 +365,9 @@ def test_run_align_phase_composes_global_source_trims(
         trim_end_frame_inclusive=reference_trim[1],
     )
     monkeypatch.setattr(
-        phase_alignment, "align_clips_from_request", lambda *_args, **_kwargs: alignments
+        phase_alignment,
+        "align_clips_from_request",
+        lambda *_args, **_kwargs: AlignmentOperationOutcome(tuple(alignments)),
     )
     output = _run_align_phase(ctx, selected_frames=selected_frames)
 
@@ -387,18 +395,22 @@ def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
         update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=2,
-                time_offset_seconds=0.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=2,
+                    time_offset_seconds=0.08,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
@@ -427,17 +439,19 @@ def test_run_align_phase_does_not_substitute_after_full_window_retry(
     monkeypatch.setattr(
         phase_alignment,
         "align_clips_from_request",
-        lambda *_args, **_kwargs: [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=80,
-                time_offset_seconds=3.33,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+        lambda *_args, **_kwargs: AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=80,
+                    time_offset_seconds=3.33,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ],
+        ),
     )
 
     with pytest.raises(ExclusionRecoverySelectionError, match="full-window retry"):
@@ -473,18 +487,22 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
     )
     selected_frames = [0, 1, 2, 3]
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=60,
-                time_offset_seconds=2.5,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=60,
+                    time_offset_seconds=2.5,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
@@ -526,18 +544,22 @@ def test_run_align_phase_filters_and_rebases_sparse_metrics_for_overlap(
         sampled_source_frames=(10, 20, 65, 75, 90),
     )
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=60,
-                time_offset_seconds=2.5,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=60,
+                    time_offset_seconds=2.5,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
@@ -574,18 +596,22 @@ def test_run_align_phase_sparse_overlap_reports_metric_candidate_underfill(
         sampled_source_frames=(10, 100),
     )
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=60,
-                time_offset_seconds=2.5,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=60,
+                    time_offset_seconds=2.5,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
@@ -615,18 +641,22 @@ def test_run_align_phase_raises_when_overlap_is_smaller_than_generated_counts(
         clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
     )
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=98,
-                time_offset_seconds=4.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=98,
+                    time_offset_seconds=4.08,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
@@ -656,18 +686,22 @@ def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_sa
         clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
     )
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=98,
-                time_offset_seconds=4.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=98,
+                    time_offset_seconds=4.08,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
@@ -712,18 +746,22 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
         metric_source_end_exclusive=160,
     )
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=60,
-                time_offset_seconds=2.5,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=60,
+                    time_offset_seconds=2.5,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
@@ -750,18 +788,22 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
     ctx = _context(tmp_path, comparisons=[comparison])
     selected_frames = [0, 1]
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=100,
-                time_offset_seconds=4.0,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=100,
+                    time_offset_seconds=4.0,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
@@ -777,29 +819,33 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
     ctx = _context(tmp_path, comparisons=[comp_a, comp_b])
     selected_frames = [0, 2, 50, 99]
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_a.mkv",
-                frame_offset=2,
-                time_offset_seconds=0.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            ),
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode_b.mkv",
-                frame_offset=None,
-                time_offset_seconds=None,
-                correlation_score=0.1,
-                algorithm="cross_correlation",
-                source="computed",
-                applied=False,
-                diagnostic="low_confidence",
-            ),
-        ]
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode_a.mkv",
+                    frame_offset=2,
+                    time_offset_seconds=0.08,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode_b.mkv",
+                    frame_offset=None,
+                    time_offset_seconds=None,
+                    correlation_score=0.1,
+                    algorithm="cross_correlation",
+                    source="computed",
+                    applied=False,
+                    diagnostic="low_confidence",
+                ),
+            )
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
@@ -839,18 +885,22 @@ def test_map_aligned_to_source_frame_after_positive_negative_and_zero_offsets(
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
 
-    def _fake_align_clips_from_request(*_args: object, **_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=frame_offset,
-                time_offset_seconds=frame_offset / 24,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
+    def _fake_align_clips_from_request(
+        *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="encode.mkv",
+                    frame_offset=frame_offset,
+                    time_offset_seconds=frame_offset / 24,
+                    correlation_score=0.9,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 

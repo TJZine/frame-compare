@@ -55,7 +55,7 @@ _DURATION_SAMPLES = int(_DURATION_SECONDS * 8000)
 
 
 def run_request(*args: object, **kwargs: object) -> list[AlignmentResult]:
-    return asyncio.run(_align_clips_from_request(*args, **kwargs))  # type: ignore[arg-type]
+    return list(asyncio.run(_align_clips_from_request(*args, **kwargs)).results)  # type: ignore[arg-type]
 
 
 def _payload(values: np.ndarray) -> bytes:

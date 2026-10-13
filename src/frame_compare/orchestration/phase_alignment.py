@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
@@ -90,7 +91,6 @@ async def run_align_phase(
         no_color=ctx.no_color,
     )
     alignment_request = _alignment_request_from_context(ctx)
-    review_summary = AlignmentReviewSummary()
     log.debug(
         "alignment_request_prepared",
         comparisons=len(alignment_request.comparisons),
@@ -98,11 +98,10 @@ async def run_align_phase(
         previous_offsets=alignment_request.previous_offsets,
         shared_alignment_cache_dir=str(alignment_request.shared_alignment_cache_dir),
     )
-    results = await align_clips_from_request(
+    outcome = await align_clips_from_request(
         alignment_request,
         alignment_config,
         progress=ctx.reporter,
-        review_summary=review_summary,
         reference_fps=ctx.reference.effective_fps,
         frame_props_by_stem={
             ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
@@ -113,6 +112,9 @@ async def run_align_phase(
         quiet=quiet,
         json_output=json_output,
     )
+
+    results = outcome.results
+    review_summary = outcome.review
 
     updated_comparisons: list[ClipState] = []
     warnings: list[RunWarning] = []
@@ -285,7 +287,7 @@ async def run_align_phase(
 def _align_success_summary(
     *,
     request: AlignmentRequest,
-    results: list[AlignmentResult],
+    results: Sequence[AlignmentResult],
     review: AlignmentReviewSummary,
 ) -> str:
     """Build the durable Align phase summary from short names and review counts."""

@@ -95,7 +95,6 @@ def build_metadata_config(config: ConfigSchema) -> MetadataConfig:
     """Build metadata service config from run config."""
     return MetadataConfig(
         api_key=config.tmdb.api_key,
-        unattended=config.tmdb.unattended,
         timeout_seconds=config.tmdb.timeout_seconds,
         year_tolerance=config.tmdb.year_tolerance,
         category_preference=config.tmdb.category_preference,

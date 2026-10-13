@@ -17,8 +17,8 @@ from frame_compare.orchestration.context import ClipState, RunContext
 from frame_compare.services import alignment as alignment_service
 from frame_compare.services.types import (
     AlignmentConfig,
+    AlignmentOperationOutcome,
     AlignmentResult,
-    AlignmentReviewSummary,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest, AlignmentRequest
@@ -93,19 +93,21 @@ def test_alignment_request_uses_untrimmed_probe_frame_count(
 
     def fake_align(
         request: AlignmentRequest, *_args: object, **_kwargs: object
-    ) -> list[AlignmentResult]:
+    ) -> AlignmentOperationOutcome:
         captured.append(request)
-        return [
-            AlignmentResult(
-                reference_clip=request.reference.path.name,
-                comparison_clip=request.comparisons[0].path.name,
-                frame_offset=0,
-                time_offset_seconds=0.0,
-                correlation_score=1.0,
-                algorithm="cross_correlation",
-                source="computed",
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip=request.reference.path.name,
+                    comparison_clip=request.comparisons[0].path.name,
+                    frame_offset=0,
+                    time_offset_seconds=0.0,
+                    correlation_score=1.0,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", fake_align)
 
@@ -146,20 +148,22 @@ def test_rejected_audio_attempt_survives_without_alignment_or_trim_authority(
     monkeypatch.setattr(
         phase_alignment,
         "align_clips_from_request",
-        lambda *_args, **_kwargs: [
-            AlignmentResult(
-                reference_clip=ctx.reference.path.name,
-                comparison_clip=comparison.path.name,
-                frame_offset=None,
-                time_offset_seconds=None,
-                correlation_score=0.0,
-                algorithm="cross_correlation",
-                source="computed",
-                applied=False,
-                diagnostic="no_single_offset",
-                audio_attempt=attempt,
+        lambda *_args, **_kwargs: AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip=ctx.reference.path.name,
+                    comparison_clip=comparison.path.name,
+                    frame_offset=None,
+                    time_offset_seconds=None,
+                    correlation_score=0.0,
+                    algorithm="cross_correlation",
+                    source="computed",
+                    applied=False,
+                    diagnostic="no_single_offset",
+                    audio_attempt=attempt,
+                ),
             )
-        ],
+        ),
     )
 
     output = _run_align_phase(ctx, selected_frames=[0])
@@ -180,20 +184,22 @@ def test_provisional_audio_candidate_cannot_reach_trim_authority(
     monkeypatch.setattr(
         phase_alignment,
         "align_clips_from_request",
-        lambda *_args, **_kwargs: [
-            AlignmentResult(
-                reference_clip=ctx.reference.path.name,
-                comparison_clip=comparison.path.name,
-                frame_offset=None,
-                time_offset_seconds=None,
-                correlation_score=1.0,
-                algorithm="cross_correlation",
-                source="computed",
-                applied=False,
-                diagnostic="audio_only",
-                audio_attempt=attempt,
+        lambda *_args, **_kwargs: AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip=ctx.reference.path.name,
+                    comparison_clip=comparison.path.name,
+                    frame_offset=None,
+                    time_offset_seconds=None,
+                    correlation_score=1.0,
+                    algorithm="cross_correlation",
+                    source="computed",
+                    applied=False,
+                    diagnostic="audio_only",
+                    audio_attempt=attempt,
+                ),
             )
-        ],
+        ),
     )
     real_calculate_trims = phase_alignment.calculate_alignment_trims
 
@@ -287,10 +293,9 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
         verbose: bool = False,
         quiet: bool = False,
         json_output: bool = False,
-        review_summary: AlignmentReviewSummary | None = None,
         vs_loader: VSLoader | None = None,
-    ) -> list[AlignmentResult]:
-        results = await real_align(
+    ) -> AlignmentOperationOutcome:
+        outcome = await real_align(
             request,
             config,
             progress=progress,
@@ -299,9 +304,9 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
             verbose=verbose,
             quiet=quiet,
             json_output=json_output,
-            review_summary=review_summary,
             vs_loader=vs_loader,
         )
+        results = outcome.results
         assert len(results) == 1
         assert results[0].applied is False
         assert results[0].frame_offset is None
@@ -312,7 +317,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
             '{"final_resolution":{"applied":true,"frame_offset":99}}\n',
             encoding="utf-8",
         )
-        return results
+        return outcome
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", align_then_tamper)
 

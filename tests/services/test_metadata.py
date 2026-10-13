@@ -140,7 +140,7 @@ async def test_resolve_metadata_returns_none_for_unresolved_results_without_call
     async_client: httpx.AsyncClient,
 ) -> None:
     candidates = [_movie(10, "The Witch", 2015), _movie(11, "The Witch", 2016)]
-    config = MetadataConfig(api_key="a" * 32, unattended=False)
+    config = MetadataConfig(api_key="a" * 32)
 
     monkeypatch.setattr(
         metadata,

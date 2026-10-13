@@ -28,13 +28,15 @@ def _run(
     *,
     loader: VSLoader | None = None,
 ) -> list[AlignmentResult]:
-    return asyncio.run(
-        align_clips_from_request(
-            request,
-            config,
-            reference_fps=Fraction(24, 1),
-            vs_loader=loader,
-        )
+    return list(
+        asyncio.run(
+            align_clips_from_request(
+                request,
+                config,
+                reference_fps=Fraction(24, 1),
+                vs_loader=loader,
+            )
+        ).results
     )
 
 

@@ -103,22 +103,28 @@ class ReusableAlignmentEntry:
     computed_result: AlignmentResult | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class AlignmentReviewSummary:
     """Aggregate native-review outcome for human summaries (memory only).
 
-    This carrier is filled during alignment review and read back by the
-    orchestration layer for terminal summaries. It is never persisted to the
-    run record, ``phase_timings``, or JSON output.
+    Returned with alignment results for orchestration terminal summaries. Never
+    persisted to the run record, ``phase_timings``, or JSON output.
     """
 
     review_ran: bool = False
     pairs_confirmed: int = 0
     comparisons_kept: int = 0
     review_seconds: float = 0.0
-    # Set when review was pending but VSView never ran, so the durable Align
-    # line warns instead of showing success.
+    # Pending review without an accepted result warns on the durable Align line.
     review_unresolved: bool = False
+
+
+@dataclass(frozen=True)
+class AlignmentOperationOutcome:
+    """Ordered alignment results and memory-only native review telemetry."""
+
+    results: tuple[AlignmentResult, ...]
+    review: AlignmentReviewSummary = AlignmentReviewSummary()
 
 
 @dataclass(frozen=True)
@@ -175,7 +181,6 @@ class MetadataConfig:
     """Configuration for metadata service."""
 
     api_key: str | None = None
-    unattended: bool = False  # Do not prompt for unresolved matches
     timeout_seconds: float = 10.0
     year_tolerance: int = 2
     category_preference: Literal["movie", "tv"] | None = None

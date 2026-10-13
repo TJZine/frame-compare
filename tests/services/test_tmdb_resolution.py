@@ -178,7 +178,7 @@ async def test_resolve_metadata_returns_none_for_ambiguous_unattended_match(
             return httpx.Response(200, json={"titles": [{"title": "The Witch"}]})
         return httpx.Response(200, json={"results": []})
 
-    config = MetadataConfig(api_key="a" * 32, unattended=True)
+    config = MetadataConfig(api_key="a" * 32)
     async with async_client_factory(httpx.MockTransport(handler)) as client:
         result = await resolve_metadata(["The.Witch.2015.mkv"], config, client)
 
