@@ -1,6 +1,12 @@
+---
+description: Every Frame Compare command and option, and the exit codes it returns.
+---
+
 # Commands
 
-This page lists every command and option; exact behavior is in the [CLI behavioral contract](../current-cli-contract.md).
+Every command and option, with what it changes and whether `--write-config` saves it.
+For exact output streams and JSON fields, see the
+[CLI behavioral contract](../current-cli-contract.md).
 
 ## Command map
 
@@ -33,6 +39,15 @@ The installed Windows shim supplies the bundle or AppData config when you omit
 
 Options apply to one run; `--write-config` saves the options marked "Saved" and
 exits without running.
+
+Runs and dry runs reject `--no-cache` combined with `--from-cache-only`
+([`--no-cache` and `--from-cache-only`](../current-cli-contract.md#run-command-contract)).
+An invalid `--overlay`, `--tm-preset`, or `--tm-curve` value names the option and
+lists its choices before any work starts. Preset names are `reference`, `filmic`,
+`contrast`, `bt2390_spec`, `spline`, `bright_lift`, and `highlight_guard`.
+
+`frame-compare run --help` groups the options under the same six headings as this
+section.
 
 ### Workspace and configuration
 
@@ -267,22 +282,14 @@ Saved by `--write-config`
 
 Debug logging and detailed errors.
 
-Runs and dry runs reject `--no-cache` combined with `--from-cache-only`
-([`--no-cache` and `--from-cache-only`](../current-cli-contract.md#run-command-contract)).
-An invalid `--overlay`, `--tm-preset`, or `--tm-curve` value names the option and
-lists its choices before any work starts. Preset names are `reference`, `filmic`,
-`contrast`, `bt2390_spec`, `spline`, `bright_lift`, and `highlight_guard`.
-
-`frame-compare run --help` lists the same options under six headings: Workspace and
-configuration, Sources and frame selection, Rendering and alignment, Reports and
-publishing, Planning and diagnostics, and Output modes.
-
 ## Wizard
 
 The wizard requires an interactive terminal. It prompts for the input directory,
-generated-data location, reference, and a frame goal (`Random spot check`, `Visual
-coverage`, `Specific frame numbers`, or `Keep current frame selection`). It shows a
-review and writes only after you confirm, then prints suggested next commands. See
+generated-data root, reference, and a frame goal (**Random spot check**, **Visual coverage**,
+**Specific frame numbers**, or **Keep current frame selection**).
+
+It shows a review and writes only after you confirm, then prints suggested next
+commands. See
 [Your first comparison](../getting-started/first-comparison.md).
 
 ## Doctor
@@ -308,7 +315,22 @@ available for automation. `open` opens one report by exact name.
 
 ## Exit codes
 
-See [exit codes and error families](../current-cli-contract.md#exit-codes-and-error-families).
+Commands exit with these codes:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success, including a dry run, `--write-config`, a wizard no-op, and a declined wizard confirmation |
+| `1` | Unexpected or unclassified error |
+| `2` | Configuration error (`FC-1xxx`) or command-line usage error |
+| `3` | Dependency error (`FC-2xxx`), including a `doctor` run with a failing required check |
+| `4` | Input error (`FC-3xxx`) |
+| `5` | Processing error (`FC-4xxx`), or a run that finished unsuccessfully |
+| `6` | Network error (`FC-5xxx`) |
+| `130` | A run or the wizard interrupted by Ctrl+C, or a wizard prompt aborted or reaching end of input |
+
+The first digit of an `FC-` code selects its family and exit code. Human output prints
+the code and message on stderr; `--json` prints a typed error document, described in
+the [CLI behavioral contract](../current-cli-contract.md#output-modes).
 
 ## Automation
 
@@ -318,7 +340,7 @@ For unattended use:
 2. Use a committed secret-free config or controlled generated config.
 3. Run a dry run in deployment validation.
 4. Use `--json` and parse stdout as exactly one JSON document.
-5. Treat stderr as diagnostics rather than part of the result payload.
+5. Read diagnostics from stderr and the result payload from stdout.
 6. Disable native VSView alignment review or configure a fail-closed non-interactive path.
 7. Persist the generated-data root outside ephemeral containers or replaceable bundles.
 

@@ -1,12 +1,25 @@
+---
+description: Every configuration key with its values, its default, and what it changes.
+---
+
 # Configuration
+
+Every key Frame Compare reads from `config/config.toml`, with its values, its default,
+and what it changes.
 
 ## How settings combine
 
-Settings take precedence in this order, highest first: run options, environment
-variables, the TOML file, and built-in defaults. The default file is
-`config/config.toml` under the workspace root. Unknown top-level tables are ignored;
-an unknown key inside a Frame Compare table fails validation. Use the wizard for
-common settings and edit TOML for the rest. See [config validation](../current-cli-contract.md#config-validation-logging-and-migration).
+Settings take precedence in this order, highest first:
+
+1. Run options
+2. Environment variables
+3. The TOML file
+4. Built-in defaults
+
+The default file is `config/config.toml` under the workspace root. Unknown top-level
+tables are ignored; an unknown key inside a Frame Compare table fails validation.
+
+Use the wizard for common settings and edit TOML for the rest. See [config validation](../current-cli-contract.md#config-validation-logging-and-migration).
 
 ## Environment variables and secrets
 
@@ -17,7 +30,7 @@ secrets in the environment; generated config and preset files never contain
 `slowpics.webhook_url` or `tmdb.api_key`, and every configuration error shows their
 values as `<redacted>`.
 
-```bash
+```bash title="Shell"
 export FRAME_COMPARE_SLOWPICS__WEBHOOK_URL="<secret>"
 ```
 
@@ -69,8 +82,8 @@ Default
 
 VapourSynth frame-cache cap in MiB for analysis, rendering, alignment checks, and the VSView session.
 
-The cap applies to VapourSynth's frame cache, not to total process memory, and does
-not affect audio alignment buffers. A smaller cache can increase decoding work.
+The cap limits only VapourSynth's frame cache. Total process memory and audio alignment
+buffers are outside this limit. A smaller cache can increase decoding work.
 
 ```toml
 [runtime]
@@ -109,7 +122,7 @@ Values
 Default
 :   `"disabled"`
 
-Common frame-rate interpretation policy.
+How a common frame rate is chosen when sources disagree.
 
 #### `sources.label_mode` { #sources.label_mode .fc-key }
 
@@ -139,7 +152,7 @@ Values
 Default
 :   empty
 
-Per-source settings in the rows below.
+Per-source settings in the key blocks below.
 
 #### `sources.overrides.<selector>.trim_start_frames` { #sources.overrides.selector.trim_start_frames .fc-key }
 
@@ -595,8 +608,10 @@ Contrast recovery strength.
 Explicit configuration or environment values for `target_nits`, `tone_curve`,
 `gamma_lift`, and `contrast_recovery` override the preset baseline. `--tm-target`
 and `--tm-curve` override `target_nits` and `tone_curve` for one run and take
-precedence over configuration and environment values. `gamma_lift` and
-`contrast_recovery` can be set only through configuration or environment variables;
+precedence over configuration and environment values.
+
+`gamma_lift` and `contrast_recovery` can be set only through configuration or
+environment variables;
 they have no corresponding CLI flags. `--tm-preset` changes the preset baseline;
 explicitly supplied field overrides still take precedence.
 
@@ -757,7 +772,7 @@ Values
 Default
 :   `false`
 
-Slow.pics adult-content flag.
+slow.pics adult-content flag.
 
 #### `slowpics.tmdb_id` { #slowpics.tmdb_id .fc-key }
 
@@ -915,7 +930,7 @@ Values
 Default
 :   `"INFO"`
 
-Log level; `--quiet` and `--verbose` override it.
+Log level.
 
 #### `logging.format` { #logging.format .fc-key }
 

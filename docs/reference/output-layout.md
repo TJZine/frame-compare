@@ -1,8 +1,12 @@
+---
+description: What a run writes to the generated-data root and which files you can move or delete.
+---
+
 # Output layout
 
-Frame Compare writes generated state beneath one configured generated-data root. A
-normal run keeps its report, screenshots, metadata, and lifecycle result together while
-sharing only explicitly reusable cache state across runs.
+Frame Compare writes files beneath one configured generated-data root. A normal run
+keeps its report, screenshots, metadata, and result record together. Runs share caches
+that Frame Compare can reuse.
 
 ## Canonical layout
 
@@ -28,15 +32,15 @@ sharing only explicitly reusable cache state across runs.
     └── run_result.toml
 ```
 
-The exact set of run-local intermediates can vary by enabled features. Scripts should
-rely only on documented artifacts rather than assuming every internal file is stable.
+The intermediate files in a run folder vary with the enabled features. Write scripts
+that rely only on documented artifacts.
 
 ## Ownership
 
 | Path | Owner and purpose |
 | --- | --- |
 | `cache/analysis/` | Reusable luminance and motion metrics keyed by the effective metric request and runtime identity |
-| `cache/alignment/` | Reusable accepted source offsets |
+| `cache/alignment/` | Reusable applied source offsets |
 | `cache/tmdb.toml` | Bounded reusable TMDB search and alternative-title responses; contains no API key or final match decision |
 | `clip_probe.toml` | Shared compatible source-probe evidence |
 | `<run>/report.html` | Canonical offline report entry point |
@@ -49,9 +53,9 @@ rely only on documented artifacts rather than assuming every internal file is st
 
 Files ending in `.lock` coordinate concurrent writers; leave them alone.
 
-Frame Compare-owned L-SMASH-Works `.lwi` indexes are adjacent to the media source rather
-than beneath this root. Their filename includes a runtime-scoped token. Ambiguous legacy
-`<media>.lwi` files are not silently adopted.
+Frame Compare writes its L-SMASH-Works `.lwi` indexes beside each source. Their filename
+includes a runtime-scoped token. Frame Compare does not adopt ambiguous legacy
+`<media>.lwi` files.
 
 When media is mounted read-only, as on the default Docker route, no index file can be
 written. A usable existing Frame Compare-owned index can still be reused. If no usable
@@ -62,10 +66,14 @@ in memory each time the source loads; see [Docker](../getting-started/docker.md#
 
 To move or archive one comparison:
 
-- copy the complete reserved run folder;
-- keep `report.html` and `screenshots/` in their relative positions;
-- remember that browser-local review notes are not files in the run folder;
-- use embedded images only when a single-file artifact is required.
+<div class="fc-steps" markdown>
+
+1. **Copy the complete reserved run folder.**
+2. **Keep `report.html` and `screenshots/` in their relative positions.**
+3. **Remember that browser-local review notes are not files in the run folder.**
+4. **Use embedded images only when a single-file artifact is required.**
+
+</div>
 
 Shared caches are not required to view an existing report.
 
@@ -75,10 +83,9 @@ fresh metadata requests; Frame Compare recreates it as successful lookups occur.
 
 ## Windows portable persistence
 
-The default generated-data location can be inside the bundle, but an external normal
-user directory is recommended when results must survive bundle replacement. The updater,
-rollback, reinstall flow, and uninstaller leave that external root outside their managed
-replacement boundary.
+The default generated-data root can be inside the bundle. Choose an external normal
+user directory when results must survive bundle replacement. The updater, rollback,
+reinstall flow, and uninstaller preserve that external root.
 
 Moving source media or the bundle can change path-based cache identity. Existing reports
 remain viewable as long as their run folder is intact.
@@ -89,15 +96,15 @@ The default Compose route binds the host `generated/` directory to
 `/workspace/generated`. Reports, screenshots, lifecycle records, and shared caches remain
 on the host after the container exits.
 
-A custom container path is durable only when it is explicitly mounted to a host-owned
-location.
+Mount a custom container path to a host-owned location to preserve its files.
 
 ## Cache identity caveat
 
-Source freshness is performance-first: path, size, and modification time are used rather
-than hashing the full media file. A replacement that preserves all three is intentionally
-considered the same source. Advance the modification time or clear the relevant cache
-when such a replacement occurs.
+For performance, Frame Compare checks source freshness by path, size, and modification
+time. It does
+not hash the full source file. Frame Compare considers a replacement that preserves
+all three to be the same source. Advance the modification time or clear the relevant
+cache when such a replacement occurs.
 
 For exact schemas and persistence behavior, see [Current architecture](../current-architecture.md)
 and the [CLI behavioral contract](../current-cli-contract.md).
