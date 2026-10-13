@@ -532,8 +532,7 @@ reference
 :   The source whose frame numbers define the comparison. It appears first.
 
 comparison
-:   Any source other than the reference. The report names them Comparison 1,
-    Comparison 2, and so on.
+:   Any source other than the reference.
 
 input directory
 :   The folder Frame Compare searches for sources, set by `paths.input_dir` or

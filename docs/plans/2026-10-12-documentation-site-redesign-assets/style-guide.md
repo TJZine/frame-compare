@@ -151,7 +151,7 @@ Every user page has, in order:
 | --- | --- | --- |
 | source | clip (in prose), video, input file | One input video that takes part in a comparison. "Clip" appears only when quoting UI text ("3 clips", **Clips** tab) or the file `clip_probe.toml`. |
 | reference | base, master, primary | The source whose frame numbers define the comparison and which appears first. |
-| comparison | target, encode (as a role name) | Every source other than the reference. The UI names them `Comparison 1`, `Comparison 2`. |
+| comparison | target, encode (as a role name) | Every source other than the reference. |
 | input directory | media folder, videos folder | The directory set by `paths.input_dir` or `run --input`. |
 | generated-data root | output directory, output folder | The directory set by `paths.generated_dir`; it holds run folders and shared caches. |
 | run folder | output folder, run directory | The directory Frame Compare reserves for one run beneath the generated-data root. |
