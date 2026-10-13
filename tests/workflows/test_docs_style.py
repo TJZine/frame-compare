@@ -56,7 +56,7 @@ BANNED = (
 FENCED = re.compile(
     r"^[ \t]*(?P<fence>`{3,}|~{3,}).*?^[ \t]*(?P=fence)[ \t]*$", re.MULTILINE | re.DOTALL
 )
-INLINE_CODE = re.compile(r"`[^`\n]*`")
+INLINE_CODE = re.compile(r"(?<!`)(?P<ticks>`+)(?!`)[^\n]*?(?<!`)(?P=ticks)(?!`)")
 WORDS = re.compile(r"\b(" + "|".join(re.escape(term) for term in BANNED) + r")\b", re.IGNORECASE)
 
 
