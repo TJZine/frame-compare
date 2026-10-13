@@ -103,6 +103,7 @@ def validate_screenshot_paths(paths: list[Path]) -> None:
     identities: dict[tuple[int, int], Path] = {}
     reservations: list[tuple[Path, tuple[int, int] | None]] = []
     current_path: Path | None = None
+    primary_error: BaseException | None = None
     try:
         for path in paths:
             raise_if_cancelling()
@@ -130,7 +131,12 @@ def validate_screenshot_paths(paths: list[Path]) -> None:
         raise_if_cancelling()
     except OSError:
         assert current_path is not None
-        raise EncodingError(current_path, "Unable to validate screenshot output names") from None
+        primary_error = EncodingError(current_path, "Unable to validate screenshot output names")
+        raise primary_error from None
+    except BaseException as original_error:
+        # Preserve control flow through cleanup; do not handle or reclassify it.
+        primary_error = original_error
+        raise
     finally:
         cleanup_failure: Path | None = None
         for path, identity in reversed(reservations):
@@ -149,6 +155,10 @@ def validate_screenshot_paths(paths: list[Path]) -> None:
             except OSError:
                 cleanup_failure = path
         if cleanup_failure is not None:
-            raise EncodingError(
-                cleanup_failure, "Unable to remove screenshot name reservation"
-            ) from None
+            if primary_error is None:
+                raise EncodingError(
+                    cleanup_failure, "Unable to remove screenshot name reservation"
+                ) from None
+            primary_error.add_note(
+                f"Unable to remove screenshot name reservation: {cleanup_failure}"
+            )

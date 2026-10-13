@@ -5,11 +5,27 @@ search:
 
 # Windows acceptance for the maintainability remediation
 
-Complete the remaining Windows acceptance for Frame Compare's maintainability
-remediation on `v0.7.0`. The human will pull this branch on the Windows machine
-and give this prompt to Codex there. Read the entire handoff before executing it.
-Use `verify-code`; use `develop-code` and independent `review-code` if a confirmed
-regression needs correction. Honor repository `AGENTS.md` and `.agents/project.md`.
+**Status: Historical; superseded by the accepted remediation closure.**
+
+The [remediation plan](../plans/2026-10-12-maintainability-remediation.md)
+records acceptance of human-provided U2 and unsigned-U8 Windows evidence at
+`929c076ac7fb570f28cb0ef7a641beb2a51843cb` and marks the plan Historical.
+The procedure below is preserved as historical evidence, not a current execution
+request or continuing authorization. Its former execute/keep-Active directions
+are retired.
+
+For new changes, use the applicable procedures in the current
+[Engineering Runbook](../ENGINEERING_RUNBOOK.md). Historical acceptance does not
+verify later source changes or prohibit justified Windows checks. Visible VSView
+interaction, broader physical-media coverage, predecessor migration, signing,
+legal release disposition, and hosted-CI acceptance remain separate claims.
+
+## Historical handoff context
+
+This handoff requested the remaining Windows acceptance for Frame Compare's
+maintainability remediation on `v0.7.0`. The following scope, commands, prior
+results, and return-report instructions document that completed handoff; they
+are not current work instructions.
 
 ## Source and outcome
 
@@ -32,9 +48,9 @@ Read these sources relative to the Windows checkout:
 - `src/frame_compare/render/naming.py`, `render/batch/expansion.py`,
   `tests/render/test_naming.py` and `test_expansion.py`.
 
-The open gates are actual unsigned Windows bundle acceptance (U8) and actual
-Windows-volume screenshot identity, preservation and cleanup (U2). Do not repeat
-the comprehensive audit or already accepted Linux/Docker gates to recreate context.
+The then-open gates were actual unsigned Windows bundle acceptance (U8) and
+actual Windows-volume screenshot identity, preservation and cleanup (U2). Both
+were subsequently accepted for the source identified in the closure above.
 
 ## Approved decisions and boundaries
 
@@ -168,8 +184,7 @@ U2 actual-volume identity/preservation/cleanup observations, process cleanup,
 correction commits/diff and review, and remaining visible/GPU/platform limits.
 Do not claim a skipped/mocked/static phase or absent CI job as a runtime pass.
 
-Keep the existing remediation plan Active until required Windows gates are
-actually accepted; record material evidence there once. No general re-audit or
-duplicated workflow document is needed. Do not assume automatic cross-chat
-callbacks or send external messages from this prompt; the human can paste your
-report back. Mac orchestrator chat: `01a131e8-0fff-7692-8a33-73c7acee693d`.
+The original handoff required keeping the plan Active until Windows acceptance.
+That requirement was fulfilled; the accepted closure supersedes this handoff.
+The historical return route was a human-pasted report to Mac orchestrator chat
+`01a131e8-0fff-7692-8a33-73c7acee693d`, not an automatic cross-chat callback.
