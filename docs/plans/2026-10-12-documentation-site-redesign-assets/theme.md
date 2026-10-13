@@ -598,6 +598,18 @@ body {
   height: 1.3rem;
 }
 
+
+@media screen and (max-width: 76.234375em) {
+  .md-header__button.md-logo {
+    display: block;
+  }
+
+  .md-sidebar--primary .md-logo {
+    background: var(--fc-stage);
+    border-radius: var(--fc-radius-sm);
+  }
+}
+
 .md-tabs {
   background-color: var(--fc-stage);
   border-bottom: 1px solid var(--fc-stage-line);
