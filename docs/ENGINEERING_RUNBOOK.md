@@ -258,6 +258,7 @@ owner is outside a listed directory:
 - `Dockerfile`
 - `docker-compose*.yml`
 - `tools/verify_docker_*.sh`
+- `tools/docker_runtime_smoke.py`
 - `.github/workflows/docker-integration.yml`
 - Docker workflow/contract tests that validate Docker/runtime script or profile semantics
 - `src/frame_compare/render/**`
@@ -284,6 +285,13 @@ bash tools/verify_docker_integration.sh
 The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` with
 10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
 It explicitly excludes `tests/integration/test_alignment_streaming_resources.py`.
+`tools/verify_docker_integration.sh` owns image builds, container invocation,
+cleanup, logs, and artifact handling. It invokes the repository-owned
+`tools/docker_runtime_smoke.py` from the image for native runtime, provenance,
+fixture, and application assertions. Edit that Python owner for runtime proof;
+its source is included in the Docker build context and workflow trigger paths.
+Lint and shell-routing tests support the canonical gate but do not replace it.
+
 For changes to whole-track memory bounds, maximum admitted lag, or streaming collector
 cleanup, run the existing resource proof separately after the canonical gate has
 built the test image:

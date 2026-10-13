@@ -886,7 +886,9 @@ Values
 Default
 :   `false`
 
-Never prompt for an unresolved match.
+Retained for configuration compatibility. Both values currently use noninteractive
+selection: a selected match is returned, while ambiguous or missing matches produce
+no metadata. This setting does not enable a chooser.
 
 #### `tmdb.timeout_seconds` { #tmdb.timeout_seconds .fc-key }
 
