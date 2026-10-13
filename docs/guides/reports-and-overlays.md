@@ -157,7 +157,9 @@ session. Export review JSON while that message is showing to keep the notes.
 
 Import previews additions, changes, and removals before you apply a merge or
 replacement.
-An import that the viewer cannot validate or save leaves existing records untouched.
+An import that fails validation or a browser-storage write leaves existing records
+unchanged. If browser storage is unavailable, a validated import applies only to the
+current session.
 
 ## Screenshot overlays
 

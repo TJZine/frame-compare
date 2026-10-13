@@ -853,6 +853,12 @@ Restructure in this order. Keep every guard string.
   frame-accurate playback.
 - Split the two long paragraphs (94 words in "Navigate and inspect", 101 words in
   "Review notes").
+- In "Review notes", replace "An import that the viewer cannot validate or save leaves
+  existing records untouched." with: "An import that fails validation or a
+  browser-storage write leaves existing records unchanged. If browser storage is
+  unavailable, a validated import applies only to the current session." This approved
+  factual correction follows `src/frame_compare/services/report/assets/review_state.js`
+  (validation, session-only import, and failed storage-write branches).
 - Voice pass.
 
 ### `docs/guides/presets-history-generated-data.md`
