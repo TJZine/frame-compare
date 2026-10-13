@@ -2,6 +2,79 @@ const ALL_CATEGORY_FILTER_KEY = '__fc_all__';
 const DEFAULT_FRAME_CATEGORY = 'selected';
 const EMPTY_IMAGE_SRC = 'data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=';
 
+// Help and Report Information share a lifecycle; Inspector owns its own state.
+class HelpInfoDialog {
+    constructor(viewer, element, trigger, closeButton) {
+        this.viewer = viewer;
+        this.element = element;
+        this.trigger = trigger;
+        this.closeButton = closeButton;
+        this.restoreFocus = null;
+
+        trigger.addEventListener('click', () => this.open());
+        closeButton.addEventListener('click', () => this.close());
+        element.addEventListener('click', (e) => {
+            if (e.target === element) this.close();
+        });
+        element.addEventListener('keydown', (e) => this.handleKey(e));
+    }
+
+    isOpen() {
+        return this.element.classList.contains('open');
+    }
+
+    open() {
+        this.viewer.closeAlignmentPopover({ restoreFocus: false });
+        const activeElement = document.activeElement;
+        this.restoreFocus = activeElement && typeof activeElement.focus === 'function'
+            ? activeElement
+            : this.trigger;
+        this.element.classList.add('open');
+        this.element.setAttribute('aria-hidden', 'false');
+        this.viewer.focusElement(this.closeButton);
+    }
+
+    close(options = {}) {
+        if (!this.isOpen()) return;
+        this.element.classList.remove('open');
+        this.element.setAttribute('aria-hidden', 'true');
+        const restoreTarget = this.restoreFocus?.isConnected
+            ? this.restoreFocus
+            : this.trigger;
+        this.restoreFocus = null;
+        if (options.restoreFocus !== false) this.viewer.focusElement(restoreTarget);
+    }
+
+    handleKey(e) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            this.close();
+            return;
+        }
+        if (e.key !== 'Tab') return;
+
+        const focusable = Array.from(
+            this.element.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+        ).filter(element => !element.disabled && !element.hidden);
+        if (focusable.length === 0) {
+            e.preventDefault();
+            this.viewer.focusElement(this.element);
+            return;
+        }
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            this.viewer.focusElement(last);
+        } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            this.viewer.focusElement(first);
+        }
+    }
+}
+
 const ReportViewer = {
     state: {
         data: null,
@@ -36,8 +109,6 @@ const ReportViewer = {
             left: null,
             right: null,
         },
-        helpRestoreFocus: null,
-        infoRestoreFocus: null,
         inspectorRestoreFocus: null,
         rawAlignX: null,
         rawAlignY: null,
@@ -70,7 +141,7 @@ const ReportViewer = {
             if (this.state.inspectorOpen && this.state.inspectorTab === 'review') {
                 this.ensureReviewController();
             }
-            this.bindHelpEvents();
+            this.bindDialogEvents();
             this.updateOverlayVisibility();
             this.viewport.updateFitButtons();
             this.inspector.updateTabs();
@@ -432,125 +503,23 @@ const ReportViewer = {
     },
 
     isHelpModalOpen() {
-        return this.dom.modal.classList.contains('open');
+        return this.helpDialog.isOpen();
     },
 
     openHelpModal() {
-        this.closeAlignmentPopover({ restoreFocus: false });
-        const activeElement = document.activeElement;
-        this.state.helpRestoreFocus = activeElement && typeof activeElement.focus === 'function'
-            ? activeElement
-            : this.dom.btnHelp;
-        this.dom.modal.classList.add('open');
-        this.dom.modal.setAttribute('aria-hidden', 'false');
-        this.focusElement(this.dom.btnCloseHelp);
+        this.helpDialog.open();
     },
 
     closeHelpModal(options = {}) {
-        if (!this.isHelpModalOpen()) return;
-        this.dom.modal.classList.remove('open');
-        this.dom.modal.setAttribute('aria-hidden', 'true');
-
-        const shouldRestoreFocus = options.restoreFocus !== false;
-        const restoreTarget = this.state.helpRestoreFocus?.isConnected
-            ? this.state.helpRestoreFocus
-            : this.dom.btnHelp;
-        this.state.helpRestoreFocus = null;
-        if (shouldRestoreFocus) this.focusElement(restoreTarget);
-    },
-
-    modalFocusableElements() {
-        return Array.from(
-            this.dom.modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
-        ).filter(element => !element.disabled && !element.hidden);
-    },
-
-    handleModalKey(e) {
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            e.stopPropagation();
-            this.closeHelpModal();
-            return;
-        }
-        if (e.key !== 'Tab') return;
-
-        const focusable = this.modalFocusableElements();
-        if (focusable.length === 0) {
-            e.preventDefault();
-            this.focusElement(this.dom.modal);
-            return;
-        }
-
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-            e.preventDefault();
-            this.focusElement(last);
-        } else if (!e.shiftKey && document.activeElement === last) {
-            e.preventDefault();
-            this.focusElement(first);
-        }
+        this.helpDialog.close(options);
     },
 
     isInfoModalOpen() {
-        return this.dom.infoModal.classList.contains('open');
-    },
-
-    openInfoModal() {
-        this.closeAlignmentPopover({ restoreFocus: false });
-        const activeElement = document.activeElement;
-        this.state.infoRestoreFocus = activeElement && typeof activeElement.focus === 'function'
-            ? activeElement
-            : this.dom.btnInfo;
-        this.dom.infoModal.classList.add('open');
-        this.dom.infoModal.setAttribute('aria-hidden', 'false');
-        this.focusElement(this.dom.btnCloseInfo);
+        return this.infoDialog.isOpen();
     },
 
     closeInfoModal(options = {}) {
-        if (!this.isInfoModalOpen()) return;
-        this.dom.infoModal.classList.remove('open');
-        this.dom.infoModal.setAttribute('aria-hidden', 'true');
-
-        const shouldRestoreFocus = options.restoreFocus !== false;
-        const restoreTarget = this.state.infoRestoreFocus?.isConnected
-            ? this.state.infoRestoreFocus
-            : this.dom.btnInfo;
-        this.state.infoRestoreFocus = null;
-        if (shouldRestoreFocus) this.focusElement(restoreTarget);
-    },
-
-    infoModalFocusableElements() {
-        return Array.from(
-            this.dom.infoModal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
-        ).filter(element => !element.disabled && !element.hidden);
-    },
-
-    handleInfoModalKey(e) {
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            e.stopPropagation();
-            this.closeInfoModal();
-            return;
-        }
-        if (e.key !== 'Tab') return;
-
-        const focusable = this.infoModalFocusableElements();
-        if (focusable.length === 0) {
-            e.preventDefault();
-            this.focusElement(this.dom.infoModal);
-            return;
-        }
-
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-            e.preventDefault();
-            this.focusElement(last);
-        } else if (!e.shiftKey && document.activeElement === last) {
-            e.preventDefault();
-            this.focusElement(first);
-        }
+        this.infoDialog.close(options);
     },
 
     isAlignmentPopoverOpen() {
@@ -851,20 +820,13 @@ const ReportViewer = {
         this.setAlignmentPopoverOpen(false, options);
     },
 
-    bindHelpEvents() {
-        this.dom.btnHelp.addEventListener('click', () => this.openHelpModal());
-        this.dom.btnCloseHelp.addEventListener('click', () => this.closeHelpModal());
-        this.dom.modal.addEventListener('click', (e) => {
-            if (e.target === this.dom.modal) this.closeHelpModal();
-        });
-        this.dom.modal.addEventListener('keydown', (e) => this.handleModalKey(e));
-
-        this.dom.btnInfo.addEventListener('click', () => this.openInfoModal());
-        this.dom.btnCloseInfo.addEventListener('click', () => this.closeInfoModal());
-        this.dom.infoModal.addEventListener('click', (e) => {
-            if (e.target === this.dom.infoModal) this.closeInfoModal();
-        });
-        this.dom.infoModal.addEventListener('keydown', (e) => this.handleInfoModalKey(e));
+    bindDialogEvents() {
+        this.helpDialog = new HelpInfoDialog(
+            this, this.dom.modal, this.dom.btnHelp, this.dom.btnCloseHelp
+        );
+        this.infoDialog = new HelpInfoDialog(
+            this, this.dom.infoModal, this.dom.btnInfo, this.dom.btnCloseInfo
+        );
     },
 
     bindInspectorEvents() {
@@ -1588,7 +1550,7 @@ const ReportViewer = {
             }
         }
 
-        if (this.dom.modal.classList.contains('open') || this.dom.infoModal.classList.contains('open')) return;
+        if (this.isHelpModalOpen() || this.isInfoModalOpen()) return;
         if (this.isAlignmentPopoverOpen()) return;
         if (this.isShortcutEditableTarget(e.target)) return;
 

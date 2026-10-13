@@ -398,6 +398,7 @@ function loadViewer({ clipCount, savedState = null }) {
             hidden: true,
         },
     };
+    viewer.bindDialogEvents();
     viewer.dom.btnInfo.setAttribute('aria-label', 'Report information');
     viewer.dom.btnInfo.setAttribute('title', 'Report information');
     viewer.dom.btnInspector.setAttribute('aria-controls', 'rv-inspector');
@@ -900,32 +901,79 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
     viewer.dom.infoModal.querySelectorAll = () => [viewer.dom.btnCloseInfo, infoLast];
 
     document.activeElement = viewer.dom.btnHelp;
-    viewer.openHelpModal();
+    viewer.dom.btnHelp.dispatch('click');
     document.activeElement = helpLast;
     const helpTab = keyboardEvent('Tab');
-    viewer.handleModalKey(helpTab);
+    viewer.dom.modal.dispatch('keydown', helpTab);
     assert.equal(document.activeElement, viewer.dom.btnCloseHelp);
     const helpShiftTab = keyboardEvent('Tab');
     helpShiftTab.shiftKey = true;
-    viewer.handleModalKey(helpShiftTab);
+    viewer.dom.modal.dispatch('keydown', helpShiftTab);
     assert.equal(document.activeElement, helpLast);
     const helpEscape = keyboardEvent('Escape');
-    viewer.handleModalKey(helpEscape);
+    viewer.dom.modal.dispatch('keydown', helpEscape);
     assert.equal(document.activeElement, viewer.dom.btnHelp);
 
     document.activeElement = viewer.dom.btnInfo;
-    viewer.openInfoModal();
+    viewer.dom.btnInfo.dispatch('click');
     document.activeElement = infoLast;
     const infoTab = keyboardEvent('Tab');
-    viewer.handleInfoModalKey(infoTab);
+    viewer.dom.infoModal.dispatch('keydown', infoTab);
     assert.equal(document.activeElement, viewer.dom.btnCloseInfo);
     const infoShiftTab = keyboardEvent('Tab');
     infoShiftTab.shiftKey = true;
-    viewer.handleInfoModalKey(infoShiftTab);
+    viewer.dom.infoModal.dispatch('keydown', infoShiftTab);
     assert.equal(document.activeElement, infoLast);
     const infoEscape = keyboardEvent('Escape');
-    viewer.handleInfoModalKey(infoEscape);
+    viewer.dom.infoModal.dispatch('keydown', infoEscape);
     assert.equal(document.activeElement, viewer.dom.btnInfo);
+
+    // Exercise both dialogs through the same user event boundary, including
+    // fallback focus and visibility rather than the lifecycle owner's shape.
+    for (const [element, trigger, closeButton, close] of [
+        [viewer.dom.modal, viewer.dom.btnHelp, viewer.dom.btnCloseHelp,
+            options => viewer.closeHelpModal(options)],
+        [viewer.dom.infoModal, viewer.dom.btnInfo, viewer.dom.btnCloseInfo,
+            options => viewer.closeInfoModal(options)],
+    ]) {
+        const origin = fakeElement();
+        viewer.setAlignmentPopoverOpen(true, { restoreFocus: false });
+        document.activeElement = origin;
+        trigger.dispatch('click');
+        assert.equal(viewer.isAlignmentPopoverOpen(), false);
+        assert.equal(element.getAttribute('aria-hidden'), 'false');
+        assert.equal(document.activeElement, closeButton);
+
+        // Interior clicks retain the dialog; a backdrop click closes it.
+        element.dispatch('click', { target: closeButton });
+        assert.equal(element.classList.contains('open'), true);
+        origin.isConnected = false;
+        element.dispatch('click');
+        assert.equal(element.classList.contains('open'), false);
+        assert.equal(element.getAttribute('aria-hidden'), 'true');
+        assert.equal(document.activeElement, trigger);
+
+        document.activeElement = origin;
+        trigger.dispatch('click');
+        const disabled = fakeElement();
+        disabled.disabled = true;
+        const hidden = fakeElement();
+        hidden.hidden = true;
+        element.querySelectorAll = () => [disabled, hidden];
+        const emptyTab = keyboardEvent('Tab');
+        element.dispatch('keydown', emptyTab);
+        assert.equal(emptyTab.defaultPrevented, true);
+        assert.equal(document.activeElement, element);
+        close({ restoreFocus: false });
+        assert.equal(document.activeElement, element);
+
+        document.activeElement = null;
+        trigger.dispatch('click');
+        closeButton.dispatch('click');
+        assert.equal(document.activeElement, trigger);
+    }
+    assert.equal(helpEscape.propagationStopped, true);
+    assert.equal(infoEscape.propagationStopped, true);
 
     summary.modalKeyboardAccessibility = {
         helpFocusTrappedAndRestored: (
