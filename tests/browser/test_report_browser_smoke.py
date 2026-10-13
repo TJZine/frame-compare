@@ -1321,6 +1321,7 @@ def _run_browser_input(
             chrome.wait(timeout=5)
 
 
+@pytest.mark.integration
 def test_review_note_native_insertion_uses_unicode_scalar_limit(tmp_path: Path) -> None:
     """CDP input enters through Chrome editing, including trusted input events."""
     browser = _browser_executable()
@@ -1431,6 +1432,7 @@ async function evaluate(expression) {
     assert "Native BMP, supplementary, mixed" in result.stdout
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("failure", ["timeout", "command"])
 def test_browser_input_cleanup_survives_helper_failure(
     tmp_path: Path,

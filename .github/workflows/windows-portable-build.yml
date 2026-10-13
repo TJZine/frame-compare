@@ -74,7 +74,7 @@ jobs:
       - name: Install dev dependencies (frozen)
         run: uv sync --all-groups --extra vsview --frozen
 
-      - name: Unit tests (mocked VS)
+      - name: Full test suite (includes portable updater proof)
         run: uv run --no-sync pytest -q
 
       - name: Validate update public key
@@ -353,13 +353,6 @@ jobs:
           if ($env:REQUIRE_SIGNED_UPDATE -eq "true" -and $entries -notcontains "update-manifest.sig") {
             throw "Signed update zip is missing update-manifest.sig."
           }
-
-      - name: Portable updater process-boundary proof
-        shell: pwsh
-        run: |
-          uv run --no-sync pytest -q `
-            tests/windows_portable/test_windows_portable_update_apply_e2e.py `
-            tests/windows_portable/test_windows_portable_update_scripts.py
 
       - name: Prepare exact orchestrated release assets
         if: inputs.prepare_release_assets
