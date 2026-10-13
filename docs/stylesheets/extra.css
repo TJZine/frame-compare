@@ -110,7 +110,11 @@
   --md-footer-bg-color--dark: #090908;
 }
 
-:root {
+.md-typeset .highlight {
+  --md-default-fg-color: var(--fc-stage-text);
+  --md-default-fg-color--light: var(--fc-stage-text);
+  --md-default-fg-color--lightest: var(--fc-stage-muted);
+  --md-accent-fg-color: var(--fc-stage-text);
   --md-code-hl-comment-color: #8a877e;
   --md-code-hl-keyword-color: #e9a24c;
   --md-code-hl-string-color: #a8c99a;
@@ -1042,12 +1046,12 @@ body {
   gap: 0.4rem 1.2rem;
 }
 
-.md-footer .fc-footer a {
+html .md-footer-meta.md-typeset .fc-footer a:not(:focus, :hover) {
   color: var(--fc-stage-muted);
   text-decoration: none;
 }
 
-.md-footer .fc-footer a:hover {
+.md-footer .fc-footer a:is(:hover, :focus) {
   color: var(--fc-stage-text);
 }
 
