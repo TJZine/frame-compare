@@ -94,7 +94,7 @@ Write this script to `.tmp/docs-site-redesign/make_offset_diagram.py` and run it
 `python3 -I .tmp/docs-site-redesign/make_offset_diagram.py`. The waveform is
 illustrative, not measured data; the diagram's purpose is to show what an offset is.
 The output on 2026-10-12 had SHA-256
-`b2c9ef985c007ff4517eca6568b9d39f9a01ac257ae013a73ac04883dee7977e`.
+`5100b19f7a4a9a16b794ab087e5dc1b0d48029bb81dbf8c404086e82f3204076`.
 
 ```python
 """Write docs/images/diagram-audio-offset.svg."""
@@ -126,7 +126,7 @@ svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} 190" role="im
 <path d="M{x0} 150 v8 h{5 * bw:.1f} v-8" fill="none" stroke="#a9a79f" stroke-width="1.5"/>
 <text x="{x0 + 5 * bw + 12:.1f}" y="160" fill="#a9a79f" style="font-weight:500;letter-spacing:0">offset between the two tracks</text>
 </svg>'''
-Path("docs/images/diagram-audio-offset.svg").write_text(svg, encoding="utf-8")
+Path("docs/images/diagram-audio-offset.svg").write_text(svg + "\n", encoding="utf-8")
 print("written")
 ```
 
@@ -272,4 +272,5 @@ Make exactly these edits.
    type, selection category, and source and output sizes; anything else is a stop.
 
 The social card, favicons, and fonts live in `docs/assets/`, not `docs/images/`; the
-README does not list them.
+"Current asset set" inventory does not list them. The Set 3 privacy and integrity
+table includes all twelve U2 outputs, including the social card and both icons.
