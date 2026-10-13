@@ -17,8 +17,7 @@ EXPECTED_PATHS = {
     ".gitignore",
     ".github/workflows/docs.yml",
     ".github/ISSUE_TEMPLATE/config.yml",
-    "scripts/generate_api_docs.py",
-    "scripts/api_docs/**",
+    "overrides/**",
     "tests/workflows/test_docs_workflow.py",
 }
 EXPECTED_ACTIONS = {
@@ -73,9 +72,6 @@ def test_docs_workflow_builds_strictly_from_locked_docs_group(repo_root: Path) -
     assert not re.search(r"version:\s*[\"']?latest[\"']?", source, re.IGNORECASE)
     assert _step_by_name(build, "Install documentation dependencies")["run"] == (
         "uv sync --only-group docs --locked"
-    )
-    assert _step_by_name(build, "Check generated API documentation")["run"] == (
-        "uv run --no-sync python scripts/generate_api_docs.py --check"
     )
     assert _step_by_name(build, "Build documentation")["run"] == (
         "uv run --no-sync zensical build --clean --strict"

@@ -73,7 +73,7 @@ Extract the ZIP into a fresh, empty folder, open the extracted bundle folder, an
 Open a new terminal after installation so the updated user `PATH` is loaded.
 
 <figure class="fc-figure">
-  <img src="images/windows-portable-install.png" alt="Windows PowerShell showing a verified SHA-256 checksum followed by a successful shim installation." width="1109" height="119" loading="lazy">
+  <img src="../images/windows-portable-install.png" alt="Windows PowerShell showing a verified SHA-256 checksum followed by a successful shim installation." width="1109" height="119" loading="lazy">
   <figcaption>Verify the ZIP first, then install the shim and open a new terminal so the updated PATH applies.</figcaption>
 </figure>
 
@@ -150,7 +150,7 @@ frame-compare run
 The first-use configuration keeps slow.pics automatic upload disabled. Review the local
 report before enabling any publication integration.
 
-See [Your first comparison](guides/first-comparison.md) for the expected output and
+See [Your first comparison](first-comparison.md) for the expected output and
 review checklist.
 
 ## VSView alignment review
@@ -164,7 +164,7 @@ A PATH-only VSView executable or a separate Python installation is not supported
 Turn review on with `audio_alignment.use_vsview = true`, or require it for one run with
 `--force-interactive-alignment`.
 
-See [VSView alignment review](guides/vsview-review.md) for the workflow, the saved
+See [VSView alignment review](../guides/vsview-review.md) for the workflow, the saved
 result, and troubleshooting.
 
 ## Inspect previous runs
@@ -249,7 +249,7 @@ Each complete bundle includes:
 - `licenses/THIRD_PARTY_NOTICES.txt` and copied component notices.
 
 The selected profile and compatibility policy are described in
-[Supported media runtime](supported-media-runtime.md). Artifact-level hashes and source
+[Supported media runtime](../supported-media-runtime.md). Artifact-level hashes and source
 revisions in the build manifest and generated inventory remain authoritative.
 
 ## Troubleshooting
@@ -263,7 +263,7 @@ revisions in the build manifest and generated inventory remain authoritative.
 | Doctor reports an optional/network warning | Review it against the intended workflow; disabled integrations need no setup |
 | Doctor reports a required media component failure | Reinstall the complete bundle rather than mixing unmanaged replacement DLLs into it |
 | Code-only update reports a runtime mismatch | Install the complete portable ZIP for that release |
-| The alignment panel is missing, stays inactive, or rejects a result | See [VSView alignment review](guides/vsview-review.md#troubleshooting) |
+| The alignment panel is missing, stays inactive, or rejects a result | See [VSView alignment review](../guides/vsview-review.md#troubleshooting) |
 | Reports disappeared after replacing the bundle | Configure an external generated-data root and restore the prior run folders from backup if available |
 
-For broader diagnosis, see [Troubleshooting](guides/troubleshooting.md).
+For broader diagnosis, see [Troubleshooting](../guides/troubleshooting.md).

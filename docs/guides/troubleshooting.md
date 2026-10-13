@@ -133,7 +133,7 @@ Do not delete the complete generated-data root as a first response.
 
 Platform-specific help:
 
-- [Windows portable](../windows-portable.md)
+- [Windows portable](../getting-started/windows-portable.md)
 - [Docker](../getting-started/docker.md)
 - [Docker profiles](../getting-started/docker-profiles.md)
 - [Native source](../getting-started/native.md)

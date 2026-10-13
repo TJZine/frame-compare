@@ -60,7 +60,7 @@ directly, without the `uv run --no-sync` prefix. The pip installation still reli
 on your native FFmpeg, VapourSynth R81, and L-SMASH-Works 1310 setup.
 
 Put at least two supported video files in `comparison_videos/`, then follow
-[Your first comparison](../guides/first-comparison.md).
+[Your first comparison](first-comparison.md).
 
 ## Check the runtime
 

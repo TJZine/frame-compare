@@ -68,5 +68,5 @@ frame selection, alignment, and rendering are unaffected by the cache-free fallb
 ## Next steps
 
 See [Docker profiles](docker-profiles.md) for NVIDIA and X11 profiles and the full
-service list. Continue with [Your first comparison](../guides/first-comparison.md)
+service list. Continue with [Your first comparison](first-comparison.md)
 for what each safety step checks.

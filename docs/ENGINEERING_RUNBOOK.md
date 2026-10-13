@@ -33,8 +33,7 @@ preserve or explicitly change the corresponding product contracts and proof.
 - `docs/current-cli-contract.md`: documented CLI/config/output behavior.
 - `docs/supported-media-runtime.md`: selected native-runtime matrix, provenance,
   licensing, and compatibility boundary.
-- `docs/DECISIONS.md`: historical rationale; `docs/api.md`: generated reference,
-  not a compatibility promise by itself.
+- `docs/DECISIONS.md`: historical rationale.
 - `CONTRIBUTING.md`: contributor setup and PR mechanics; `README.md`: user overview.
 - `docs/plans/**`: task memory activated under Planning And Handoff below.
 - Host configuration: tools, permissions, runtime capabilities, and model settings.
@@ -51,24 +50,11 @@ behavior when the task or a supported contract requires something different.
 Common contributor setup and Python check entry points are in `.agents/project.md`.
 The recipes below supply the additional documentation, runtime, and release proof.
 
-API documentation regeneration and drift check:
-
-```bash
-# Regenerate docs/api.md
-uv run --no-sync python scripts/generate_api_docs.py
-
-# Check docs/api.md for drift (also run automatically as part of the pytest suite)
-uv run --no-sync python scripts/generate_api_docs.py --check
-```
-
 Documentation site setup, strict build, and local preview:
 
 ```bash
 # Install only the locked documentation toolchain
 uv sync --only-group docs --locked
-
-# Check generated API documentation before building the site
-uv run --no-sync python scripts/generate_api_docs.py --check
 
 # Build with link and configuration validation
 uv run --no-sync zensical build --clean --strict
@@ -77,10 +63,11 @@ uv run --no-sync zensical build --clean --strict
 uv run --no-sync zensical serve
 ```
 
-`docs/**` owns authored site content, while root `zensical.toml` owns site structure,
-navigation, and built-in presentation features. Generated output belongs in the ignored
-`site/` directory. Restore the contributor environment together with the documentation
-toolchain before running Python gates after a docs-only sync:
+`docs/**` owns authored site content and its assets. Root `zensical.toml` owns site
+structure, navigation, and theme features, and `overrides/` owns the theme templates.
+Generated output belongs in the ignored `site/` directory. Restore the contributor
+environment together with the documentation toolchain before running Python gates after
+a docs-only sync:
 
 ```bash
 uv sync --group dev --group docs --extra vsview --locked

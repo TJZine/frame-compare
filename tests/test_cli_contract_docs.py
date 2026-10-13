@@ -68,7 +68,11 @@ def test_configuration_reference_lists_every_config_key() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     reference = (repo_root / "docs" / "reference" / "configuration.md").read_text(encoding="utf-8")
     documented = set(
-        re.findall(r"^\| `([a-z_]+(?:\.[a-z_<>]+)+)` \|", reference, flags=re.MULTILINE)
+        re.findall(
+            r"^#### `([a-z_]+(?:\.[a-z_<>]+)+)` \{ #[a-z_.]+ \.fc-key \}$",
+            reference,
+            flags=re.MULTILINE,
+        )
     )
 
     expected: set[str] = set()

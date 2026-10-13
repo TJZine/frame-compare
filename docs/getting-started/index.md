@@ -9,7 +9,7 @@ by operating system and by how much of the media runtime you want to manage.
 
 <p class="fc-route-tag">Windows 10/11 x64</p>
 
-### [Windows portable](../windows-portable.md)
+### [Windows portable](windows-portable.md)
 
 Complete runtime, VSView alignment panel, installer, and signed code-only updates.
 
@@ -90,9 +90,9 @@ Use the same sequence on every route:
 4. Run a dry run to inspect source discovery and output intent.
 5. Run the comparison and open the generated report.
 
-Continue with [Your first comparison](../guides/first-comparison.md). Later
+Continue with [Your first comparison](first-comparison.md). Later
 comparisons with an established configuration and runtime usually need only the dry
-run and run; see [Repeat comparisons](../guides/first-comparison.md#repeat-comparisons).
+run and run; see [Repeat comparisons](first-comparison.md#repeat-comparisons).
 
 !!! note "Publishing stays off"
     The first-use configuration keeps slow.pics automatic upload disabled. Local

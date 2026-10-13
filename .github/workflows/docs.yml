@@ -8,13 +8,12 @@ on:
       - README.md
       - CONTRIBUTING.md
       - zensical.toml
+      - overrides/**
       - pyproject.toml
       - uv.lock
       - .gitignore
       - .github/workflows/docs.yml
       - .github/ISSUE_TEMPLATE/config.yml
-      - scripts/generate_api_docs.py
-      - scripts/api_docs/**
       - tests/workflows/test_docs_workflow.py
   push:
     branches: [main, staging]
@@ -50,9 +49,6 @@ jobs:
 
       - name: Install documentation dependencies
         run: uv sync --only-group docs --locked
-
-      - name: Check generated API documentation
-        run: uv run --no-sync python scripts/generate_api_docs.py --check
 
       - name: Build documentation
         run: uv run --no-sync zensical build --clean --strict

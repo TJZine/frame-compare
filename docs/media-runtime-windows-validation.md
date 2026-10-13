@@ -96,7 +96,6 @@ uv run --no-sync pyright --warnings
 uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
 uv run --no-sync lint-imports
 uv run --no-sync pytest
-uv run --no-sync python scripts/generate_api_docs.py --check
 uv run --no-sync zensical build --clean --strict
 uv build
 ```

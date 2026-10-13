@@ -98,7 +98,6 @@ the current runbook's applicable gates; do not run every route on every edit.
 | Full Docker media gate | `bash tools/verify_docker_integration.sh` |
 | Focused Docker E2E development | `bash tools/verify_docker_integration.sh --pytest-path tests/e2e` |
 | Report browser smoke | `uv run --no-sync pytest -q tests/browser/test_report_browser_smoke.py` |
-| API-reference drift | `uv run --no-sync python scripts/generate_api_docs.py --check` |
 | Documentation site | `uv run --no-sync zensical build --clean --strict` after installing the docs group |
 | Workflow/authority structure | `git diff --check`; parse edited YAML/TOML/JSON and resolve changed references |
 

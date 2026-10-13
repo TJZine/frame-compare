@@ -19,7 +19,7 @@ every difference in a report that opens without a server.
 <div class="fc-actions" markdown>
 
 [Choose an installation](getting-started/index.md){ .md-button .md-button--primary }
-[Run your first comparison](guides/first-comparison.md){ .fc-text-link }
+[Run your first comparison](getting-started/first-comparison.md){ .fc-text-link }
 
 </div>
 
@@ -49,7 +49,7 @@ every difference in a report that opens without a server.
 
 <p class="fc-route-tag">Windows 10/11 x64</p>
 
-### [Windows portable](windows-portable.md)
+### [Windows portable](getting-started/windows-portable.md)
 
 Complete runtime, VSView alignment panel, installer, and signed code-only updates.
 
@@ -123,7 +123,7 @@ Bring your own FFmpeg, VapourSynth, L-SMASH-Works, vs-placebo, and Vulkan.
 
 </div>
 
-Docker and `uv` add a command prefix; [Your first comparison](guides/first-comparison.md)
+Docker and `uv` add a command prefix; [Your first comparison](getting-started/first-comparison.md)
 shows every route.
 
 ## Find an answer

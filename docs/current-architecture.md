@@ -239,10 +239,6 @@ release identities and passes them through the batch request seam. Render worker
 present that string; `OverlayConfig.label`, overlay pixels, output paths, and
 label-keyed result mappings continue to use canonical clip labels.
 
-`docs/api.md` is generated reference material for importable conveniences. It does
-not promote package roots or module exports into supported stable APIs beyond the
-compatibility policy in the runbook.
-
 ## Persistence And Filesystem Owners
 
 The repo uses filesystem persistence, not a database.

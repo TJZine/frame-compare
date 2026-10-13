@@ -192,10 +192,10 @@ Before sharing a result:
 
 Continue with:
 
-- [Reports and overlays](reports-and-overlays.md)
-- [Sources, references, and labels](sources-and-labels.md)
-- [Frame selection and analysis](analysis-modes.md)
-- [Audio alignment](audio-alignment.md)
-- [VSView alignment review](vsview-review.md)
-- [HDR and tonemapping](hdr-tonemapping.md)
-- [Troubleshooting](troubleshooting.md)
+- [Reports and overlays](../guides/reports-and-overlays.md)
+- [Sources, references, and labels](../guides/sources-and-labels.md)
+- [Frame selection and analysis](../guides/analysis-modes.md)
+- [Audio alignment](../guides/audio-alignment.md)
+- [VSView alignment review](../guides/vsview-review.md)
+- [HDR and tonemapping](../guides/hdr-tonemapping.md)
+- [Troubleshooting](../guides/troubleshooting.md)
