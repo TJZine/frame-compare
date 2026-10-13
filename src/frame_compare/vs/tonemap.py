@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.vs import (
     env,
     tonemap_conversion,
@@ -36,6 +37,7 @@ def apply_tonemap(
     """Apply HDR to SDR tonemapping."""
     if not settings.enabled:
         return clip
+    raise_if_cancelling()
     tonemap_conversion.validate_target_nits(settings)
 
     import vapoursynth as vs
@@ -44,10 +46,13 @@ def apply_tonemap(
 
     plugins = env.detect_plugins(core)
 
+    raise_if_cancelling()
     if plugins.get("libplacebo", False) and _libplacebo_runtime_usable():
+        raise_if_cancelling()
         result = tonemap_libplacebo.apply_libplacebo(clip, settings, core, hdr_metadata)
         if result is not None:
             return result
+    raise_if_cancelling()
     return tonemap_fallback.fallback_tonemap(clip, settings, hdr_metadata)
 
 

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.props import detect_hdr, get_optional_int_prop, get_optional_range_prop
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
@@ -52,6 +53,7 @@ def normalize_rgb_props(
         kwargs["_Transfer"] = int(transfer)
     if primaries is not None:
         kwargs["_Primaries"] = int(primaries)
+    raise_if_cancelling()
     return clip.std.SetFrameProps(**kwargs)
 
 
@@ -128,6 +130,7 @@ def convert_non_rgb_with_matrix_hint(
 ) -> vs.VideoNode:
     """Convert non-RGB clips to RGB target format with validated source metadata."""
     if props is None:
+        raise_if_cancelling()
         props = dict(clip.get_frame(0).props)
 
     kwargs = _conversion_kwargs(
@@ -135,6 +138,7 @@ def convert_non_rgb_with_matrix_hint(
         props=props,
         detected_is_hdr=detected_is_hdr,
     )
+    raise_if_cancelling()
     return clip.resize.Bicubic(**kwargs)  # type: ignore[attr-defined]
 
 
@@ -150,6 +154,7 @@ def to_rgbs(
     try:
         if clip.format.id != vs.RGBS:
             if clip.format.color_family == vs.RGB:
+                raise_if_cancelling()
                 return clip.resize.Bicubic(format=vs.RGBS)
             rgbs_format = vs.RGBS
             return convert_non_rgb_with_matrix_hint(
@@ -170,6 +175,7 @@ def apply_post_processing(clip: vs.VideoNode, settings: TonemapSettings) -> vs.V
     """Apply unified post-processing (contrast recovery and gamma lift)."""
     try:
         if settings.gamma_lift:
+            raise_if_cancelling()
             clip = clip.std.Levels(gamma=0.9)
 
         return clip
@@ -184,7 +190,9 @@ def resolve_hdr_tonemap_inputs(
     clip: vs.VideoNode,
     hdr_metadata: HDRMetadata | None,
 ) -> HdrTonemapInputs:
+    raise_if_cancelling()
     props = dict(clip.get_frame(0).props)
+    raise_if_cancelling()
     if hdr_metadata is None:
         detected_is_hdr, hdr_metadata = detect_hdr(props)
     else:

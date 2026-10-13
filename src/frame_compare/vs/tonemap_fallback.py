@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.tonemap_conversion import (
     apply_post_processing,
@@ -51,6 +52,7 @@ def fallback_tonemap(
         scale = float(peak) / float(target_nits)
         scale_s = f"{scale:.10g}"
         expr = f"x {scale_s} * dup 1 + / 2 * 0 max 1 min"
+        raise_if_cancelling()
         clip = clip.std.Expr(expr=[expr, expr, expr])
     except Exception as e:
         raise TonemapError(
