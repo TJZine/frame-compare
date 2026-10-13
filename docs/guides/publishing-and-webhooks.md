@@ -1,11 +1,18 @@
+---
+description: Upload a reviewed comparison to slow.pics and send a webhook notification.
+---
+
 # Publishing and webhooks
+
+Frame Compare keeps every comparison on your computer until you turn on publishing. This
+guide covers uploading to slow.pics and sending a webhook notification.
 
 ## Turn on publishing
 
-Frame Compare is offline-first. slow.pics upload is disabled by default, and the
-first-use wizard does not prompt for or enable an upload toggle; it writes
-`slowpics.auto_upload = false` for a new configuration. Enable it deliberately only
-after a local report looks right, using the config file, the
+slow.pics upload is disabled by default. The first-use wizard writes
+`slowpics.auto_upload = false` for a new configuration.
+It does not prompt for or enable an upload toggle. Enable publishing only after a local
+report looks right, using the config file, the
 `FRAME_COMPARE_SLOWPICS__AUTO_UPLOAD=true` environment variable, or a saved preset:
 
 ```toml
@@ -19,9 +26,12 @@ visibility = "unlisted"
 Uploads use the explicitly planned screenshots from the current render. At most three
 image requests are in flight. Navigation and metadata requests use
 `timeout_seconds = 60.0` by default, image uploads use a separate 180-second default,
-and `max_retries = 3`. Rate-limited responses honor the service's retry timing within
+and `max_retries = 3`.
+
+Rate-limited responses honor the service's retry timing within
 the configured retry budget. See the
-[slow.pics contract](../current-cli-contract.md#slowpics-upload-behavior) before changing
+[slow.pics contract](../current-cli-contract.md#slowpics-upload-behavior) before
+changing
 retention, deletion, retry, or post-upload behavior.
 
 ## Confirm after reviewing the report
@@ -44,7 +54,7 @@ runs cannot prompt.
 After a successful upload, Frame Compare can send the resulting URL to a
 Discord-compatible incoming webhook. Set the secret outside tracked configuration:
 
-```bash
+```bash title="Shell"
 # For an interactive shell; the value is not echoed or placed in shell history.
 read -rsp "Webhook URL: " FRAME_COMPARE_SLOWPICS__WEBHOOK_URL
 export FRAME_COMPARE_SLOWPICS__WEBHOOK_URL
@@ -54,17 +64,22 @@ printf '\n'
 For unattended runs, inject the same variable through a secret store or process
 manager instead.
 
-Do not commit a live webhook URL. Although manually authored TOML can contain
-`webhook_url`, generated configuration and preset files omit it, including wizard
-rewrites, `run --write-config`, `preset save`, and `preset apply`.
+!!! danger "Keep webhook URLs out of config files"
+
+    Do not commit a live webhook URL. Although manually authored TOML can contain
+    `webhook_url`, generated configuration and preset files omit it, including wizard
+    rewrites, `run --write-config`, `preset save`, and `preset apply`.
 
 The webhook payload is the Discord-compatible `content` JSON shape containing the
 slow.pics URL. The endpoint must be external HTTPS. Delivery follows no redirects,
 uses a 10-second absolute deadline per attempt, and makes at most three attempts.
+
 Pre-send connection failures and server errors use bounded backoff; HTTP 429 is
 retried only for a valid `Retry-After` of at most 10 seconds. Once transmission starts,
 an uncertain outcome is not retried because a second POST could duplicate the
-notification. Delivery failures are warnings and do not fail a completed comparison;
+notification.
+
+Delivery failures are warnings and do not fail a completed comparison;
 URL details remain redacted from diagnostics.
 
 The [webhook policy](../current-cli-contract.md#slowpics-webhook-policy) is the

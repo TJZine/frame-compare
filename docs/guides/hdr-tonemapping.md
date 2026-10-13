@@ -1,11 +1,18 @@
+---
+description: How HDR sources become SDR screenshots, which settings change the result, and what the overlay reports.
+---
+
 # HDR and tonemapping
 
-Frame Compare can normalize HDR sources into SDR screenshots so sources with different
-HDR metadata or delivery formats can be reviewed in the same browser report. The
-selected VapourSynth and vs-placebo path performs tonemapping when the effective source
-properties indicate it is required.
+Frame Compare turns HDR sources into SDR screenshots so you can compare them in one
+browser report. It tonemaps a source with vs-placebo when the source's properties show
+that it is HDR.
 
 ## What the pipeline does
+
+You can review sources with different HDR metadata or delivery formats in the same
+browser report. Frame Compare uses the selected VapourSynth and vs-placebo path for
+HDR tonemapping.
 
 1. Probe container metadata and source-frame properties.
 2. Preserve explicit frame evidence and fill only missing or unspecified color facts.
@@ -14,8 +21,8 @@ properties indicate it is required.
 5. Apply the configured vs-placebo tonemapping preset and target luminance.
 6. Render the screenshot and selected overlay.
 
-Ambiguous transfer or primaries metadata remains unknown at the conservative FFmpeg
-fallback boundary rather than being treated as ordinary SDR.
+The FFmpeg fallback leaves ambiguous transfer or primaries metadata unknown. It does
+not treat that metadata as ordinary SDR.
 
 ## Runtime requirements
 
@@ -28,7 +35,7 @@ HDR tonemapping requires:
 
 The Windows portable bundle includes the selected application and plugin stack but still
 uses the host Vulkan-capable graphics environment. The default Docker route uses the
-canonical software-Vulkan path. Native installations own their host setup.
+canonical software-Vulkan path. For a native installation, you manage the host setup.
 
 Run `frame-compare doctor` after installation and after any graphics-driver, Vulkan,
 VapourSynth, source-plugin, or vs-placebo change.
@@ -72,32 +79,32 @@ specifically to study different conversions. See the
 
 ## HDR versus SDR sources
 
-Comparing an HDR source with an SDR source is valid only after deciding what question the
+Comparing an HDR source with an SDR source is valid only after deciding what question
+the
 comparison should answer:
 
-- **Encode fidelity after a common SDR presentation transform** — tonemap the HDR source
+- **Encode fidelity after a common SDR presentation transform**: tonemap the HDR source
   and review both as SDR screenshots.
-- **Native HDR mastering differences** — static SDR screenshots are insufficient; use
+- **Native HDR mastering differences**: static SDR screenshots are insufficient; use
   HDR-aware playback and measurement outside this report workflow.
-- **Metadata correctness** — use diagnostic overlays and recorded properties, but do not
+- **Metadata correctness**: use diagnostic overlays and recorded properties, but do not
   infer perceptual equivalence from metadata alone.
 
-Frame Compare’s report is an SDR browser review artifact unless a future documented
-output contract says otherwise.
+Frame Compare's report presents SDR screenshots for browser review.
 
 ## Dolby Vision considerations
 
-The conservative supported presentation records source-level DV RPU presence on the
-Signal line, exact selected-frame RPU presence in the Frame inspector when the
-VapourSynth source exposes it, and a DV L5-derived active picture as `DV L5` in
-geometry. It does not present L1, L2, or L6 values from a frame-0 probe snapshot as
+Frame Compare records source-level DV RPU presence on the **Signal** line. The **Frame**
+tab in the **Inspector** records exact selected-frame RPU presence when the VapourSynth
+source exposes it. Geometry shows a DV L5-derived active picture as `DV L5`.
+Frame Compare does not present L1, L2, or L6 values from a frame-0 probe snapshot as
 though they came from the selected frame.
 
-Dynamic L1/L2/L6 presentation remains gated on documented provider semantics, exact selected
-source-frame access, correct types and units, independent frame-specific validation,
-repeatability, clean negative cases, and bounded access without scanning. Insufficient
-evidence closes the gate: absence is preferred to plausible but invented metadata. No
-raw-RPU parser is included merely to populate the UI.
+Frame Compare requires documented provider semantics and exact selected source-frame
+access before presenting dynamic L1/L2/L6 values. Those values also require correct
+types and units, independent frame-specific validation, repeatability, clean negative
+cases, and bounded access without scanning. Frame Compare omits values with insufficient
+evidence. It includes no raw-RPU parser to populate the UI.
 
 For publication-bound comparisons:
 
@@ -110,20 +117,23 @@ For publication-bound comparisons:
 
 `diagnostic` overlays can include observed mastering metadata, MaxCLL/MaxFALL, source
 color evidence, source-level RPU presence, DV L5 geometry provenance, applied tonemap
-settings, and selection context. Exact-frame RPU presence stays in the Frame inspector
-to keep baked overlays concise. Dynamic Dolby Vision values require exact selected-frame
-provenance. Missing values compose away without placeholders or fabricated defaults.
+settings, and selection context. Exact-frame RPU presence stays in the **Frame** tab of
+the
+**Inspector** to keep baked overlays concise.
+
+Dynamic Dolby Vision values require exact selected-frame provenance. Frame Compare omits
+missing values without placeholders or fabricated defaults.
 
 <figure class="fc-figure">
   <img src="../images/hdr-diagnostic-overlay.webp" alt="Diagnostic overlay on the EBU DVB HLG10 comparison at frame 1000, listing the source, geometry, HLG BT.2020 signal, and BT.2390 tonemap at 100 nits." width="1920" height="1080" loading="lazy">
   <figcaption>A diagnostic overlay bakes the observed signal and the applied tonemap into the screenshot. The target nits describe the output transform, not measured luminance. Footage © EBU, CC BY 4.0.</figcaption>
 </figure>
 
-Selection scores are useful for explaining why a frame was chosen. They are not a
-replacement for calibrated luminance measurement, VMAF, or a perceptual review. Frame
-Compare does not derive pseudo-nits from selection scores. A tonemap target such as
-100 or 203 nits is an applied output setting, not an observation about source-frame
-luminance.
+Selection scores explain why Frame Compare chose a frame. Use calibrated luminance
+measurement, VMAF, or a perceptual review to assess the result; selection scores cannot
+replace them. Frame Compare does not derive pseudo-nits from selection scores. A tonemap
+target such as 100 or 203 nits sets
+the output transform; it does not measure source-frame luminance.
 
 ## Common problems
 
