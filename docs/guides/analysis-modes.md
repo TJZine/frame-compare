@@ -1,6 +1,10 @@
+---
+description: Choose frames by number, at random, or by brightness and motion, and make the selection repeatable.
+---
+
 # Frame selection and analysis
 
-Frame Compare can combine exact user-selected frames with deterministic random and
+Frame Compare can combine exact user frames with deterministic random and
 metric-selected dark, bright, or motion frames. The right configuration depends on
 whether you want reproducible coverage, specific moments, or the strongest automatic
 search for visually distinct frames.
@@ -15,19 +19,22 @@ search for visually distinct frames.
 | Bright frames | Yes | Highlights, clipping, grain, and tonemapping behavior |
 | Motion frames | Yes | High frame-to-frame change such as action, camera movement, flashes, or cuts; useful for locating potentially stressful scenes |
 
-Frame numbers are interpreted in the selected reference source domain before alignment.
-The final render plan is normalized to the overlap every aligned source can represent.
-A configured user frame that cannot survive trims or alignment is reported rather than
-silently replaced.
+Frame Compare interprets frame numbers in the selected reference source before
+alignment. It limits the final render plan to the overlap every aligned source can
+represent. It reports a configured user frame that cannot survive trims or alignment
+and leaves it unreplaced.
 
-Automatic selections divide the eligible timeline into deterministic temporal regions.
-Random selection chooses a seeded candidate from each region, while dark, bright, and
-motion selection chooses that region's strongest available metric candidate before
-globally backfilling any missing choices. Frame Compare prefers a half-second separation
-from all earlier evidence, rounded up to `ceil(selection-domain effective FPS / 2)`
-frames using the effective reference FPS. If the preferred gap cannot satisfy a category,
-the selector relaxes it by one frame at a time down to one-frame uniqueness. User frames
-remain exact and take precedence over every automatic category.
+Frame Compare divides the eligible timeline into deterministic temporal regions.
+For random selection, it chooses a seeded candidate from each region. For dark, bright,
+and motion selection, it chooses that region's strongest available metric candidate,
+then backfills any missing choices across the timeline.
+
+Frame Compare prefers a half-second separation from all earlier evidence, rounded up to
+`ceil(selection-domain effective FPS / 2)` frames using the effective reference FPS.
+If the preferred gap cannot satisfy a category, the selector relaxes it by one frame
+at a time down to one-frame uniqueness.
+
+User frames remain exact and take precedence over every automatic category.
 
 ## Quality versus performance analysis
 
@@ -43,9 +50,9 @@ performance_mode = "quality"
 | `quality` (default) | Every eligible frame | You want the highest-confidence automatic dark, bright, and motion selection |
 | `performance` | A deterministic sample of `ceil(window_length / 4)` frames, distributed across as many as eight contiguous bursts | Faster analysis matters and approximate automatic selections are acceptable |
 
-Both modes use full-resolution luma PlaneStats on the prepared active picture, respect
-source trims and the shared leading/trailing exclusion window, and leave user and random
-frames eligible across the full selectable window.
+Frame Compare uses full-resolution luma PlaneStats on the prepared active picture in
+both modes. It respects source trims and the shared leading/trailing exclusion window.
+User and random frames remain eligible across the full selectable window.
 
 !!! warning "Performance mode is approximate"
     It samples about 25% of the window; when the window length is not a multiple of
@@ -75,8 +82,8 @@ The exact defaults and accepted ranges are documented in the
 
 ## Excluding intros and credits
 
-Leading and trailing exclusions reduce the metric and selection window without changing
-the source files:
+Set leading and trailing exclusions to reduce the metric and selection window without
+changing the source files:
 
 ```toml
 [analysis]
@@ -89,10 +96,11 @@ the requested plan.
 
 In an interactive run, Frame Compare can offer a one-time full-window retry when the
 configured exclusions are the reason the frame request cannot be satisfied. Accepting
-the retry changes only the effective in-memory run configuration, recomputes
-window-dependent active-picture and cache-domain evidence, emits a warning, and never
-rewrites the authored TOML. JSON, quiet, cache-only, and skipped-analysis paths fail
-closed instead of prompting.
+the retry changes only the effective in-memory run configuration.
+
+Frame Compare recomputes window-dependent active-picture and cache-domain evidence and
+emits a warning. It leaves the config file unchanged.
+JSON, quiet, cache-only, and skipped-analysis paths fail closed instead of prompting.
 
 ## Exact user frames
 
@@ -105,14 +113,14 @@ bright_frame_count = 0
 motion_frame_count = 0
 ```
 
-A user-only plan skips metric analysis entirely. This is useful for reproducing a known
-comparison or investigating a specific scene without creating or loading an analysis
-metrics cache.
+Frame Compare skips metric analysis entirely for a user-only plan. This is useful for
+reproducing a known comparison or investigating a specific scene without creating or
+loading an analysis metrics cache.
 
 ## Reproducibility boundaries
 
-The same inputs and effective configuration produce the same deterministic selection,
-but the following changes can legitimately change the result:
+Frame Compare repeats the same deterministic selection for the same inputs and effective
+configuration. The following changes can change the result:
 
 - source path, byte size, modification time, trims, or effective FPS;
 - selected reference or analysis source;
@@ -125,8 +133,8 @@ Frame Compare does not hash complete media contents for cache freshness. If medi
 replaced while preserving its path, byte size, and modification time, advance the
 modification time or remove the smallest relevant cache entry before reuse.
 
-A cache hit means the cached metric request still matches; it does not freeze later
-selection or alignment decisions.
+A cache hit means the cached metric request still matches. Frame Compare still makes
+selection and alignment decisions afterward.
 
 ## Choosing between modes
 

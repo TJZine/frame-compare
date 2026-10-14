@@ -13,7 +13,7 @@ def test_windows_portable_docs_do_not_disclose_private_key_on_command_line(
 
 
 def test_windows_portable_docs_bind_attestation_to_selected_tag_commit(repo_root: Path) -> None:
-    docs = _read_text_or_fail(repo_root / "docs" / "windows-portable.md")
+    docs = _read_text_or_fail(repo_root / "docs" / "getting-started" / "windows-portable.md")
 
     assert '$tag = "<tag>"' in docs
     assert "git/ref/tags/$tag" in docs
@@ -32,7 +32,7 @@ def test_windows_portable_docs_bind_attestation_to_selected_tag_commit(repo_root
 def test_windows_portable_docs_do_not_promote_removed_path_fields(repo_root: Path) -> None:
     docs = "\n".join(
         (
-            _read_text_or_fail(repo_root / "docs" / "windows-portable.md"),
+            _read_text_or_fail(repo_root / "docs" / "getting-started" / "windows-portable.md"),
             _read_text_or_fail(repo_root / "tools" / "windows_portable" / "README.txt"),
         )
     )
@@ -42,7 +42,7 @@ def test_windows_portable_docs_do_not_promote_removed_path_fields(repo_root: Pat
 
 
 def test_windows_portable_docs_define_native_alignment_handoff(repo_root: Path) -> None:
-    portable = _read_text_or_fail(repo_root / "docs" / "windows-portable.md")
+    portable = _read_text_or_fail(repo_root / "docs" / "getting-started" / "windows-portable.md")
     review = _read_text_or_fail(repo_root / "docs" / "guides" / "vsview-review.md")
     validation = _read_text_or_fail(repo_root / "docs" / "media-runtime-windows-validation.md")
 
@@ -50,7 +50,7 @@ def test_windows_portable_docs_define_native_alignment_handoff(repo_root: Path) 
     assert "frame-compare-alignment-review" in portable
     assert "self-contained Python" in portable
     assert "PATH-only VSView executable" in portable
-    assert "](guides/vsview-review.md)" in portable
+    assert "](../guides/vsview-review.md)" in portable
     assert "bundle_info.schema_version` 3" in portable
     assert "pre-native-panel schema-2 bundles" in portable
     assert "typed, atomic sibling sidecar" in review
@@ -66,7 +66,7 @@ def test_windows_portable_docs_define_native_alignment_handoff(repo_root: Path) 
 
 
 def test_windows_docs_distinguish_source_prerequisite_and_fresh_reinstall(repo_root: Path) -> None:
-    docs = _read_text_or_fail(repo_root / "docs/windows-portable.md")
+    docs = _read_text_or_fail(repo_root / "docs" / "getting-started" / "windows-portable.md")
     assert "PowerShell 7 or newer" in docs
     assert "Windows PowerShell 5.1 remains supported" in docs
     assert "fresh, empty folder" in docs

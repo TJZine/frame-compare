@@ -41,7 +41,7 @@ def align_clips_from_request(
     config: AlignmentConfig,
     **kwargs: Any,
 ) -> list[AlignmentResult]:
-    return asyncio.run(_align_clips_from_request(request, config, **kwargs))
+    return list(asyncio.run(_align_clips_from_request(request, config, **kwargs)).results)
 
 
 def _trusted_computed_result(

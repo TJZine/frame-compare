@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from frame_compare.config.schema import ToneCurve
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.tonemap_conversion import (
@@ -39,6 +40,7 @@ def convert_for_libplacebo(clip: vs.VideoNode, inputs: HdrTonemapInputs) -> vs.V
         if clip.format.bits_per_sample == 16 and clip.format.color_family == vs.RGB:
             return clip
         if clip.format.color_family == vs.RGB:
+            raise_if_cancelling()
             return clip.resize.Bicubic(format=vs.RGB48)
 
         props = inputs.props
@@ -136,6 +138,7 @@ def apply_libplacebo(
             target_nits=target_nits,
             inputs=inputs,
         )
+        raise_if_cancelling()
         clip = core.placebo.Tonemap(clip, **tm_kwargs)  # type: ignore[misc]
     except TypeError as e:
         raise TonemapError(reason=f"Invalid libplacebo Tonemap arguments: {e}") from e
@@ -148,7 +151,9 @@ def apply_libplacebo(
         )
         return None
 
+    raise_if_cancelling()
     clip = clip.resize.Point(format=vs.RGBS)
 
     clip = apply_post_processing(clip, settings)
+    raise_if_cancelling()
     return clip.std.SetFrameProps(_Tonemapped=1, _FrameCompareExpandRange=1)

@@ -1,39 +1,28 @@
+---
+description: Choose between the Windows portable bundle, Docker, and a native source install.
+---
+
 # Choose an installation
 
 Frame Compare has one CLI and three ways to supply its Python and media runtime. Choose
 by operating system and by how much of the media runtime you want to manage.
 
-<div class="fc-routes" markdown>
+<div class="fc-cards" markdown>
 
-<div class="fc-route" markdown>
+- [Windows portable](windows-portable.md)
 
-<p class="fc-route-tag">Windows 10/11 x64</p>
+    Complete runtime, VSView alignment panel, installer, and signed code-only
+    updates. Use this on Windows 10 or 11.
 
-### [Windows portable](../windows-portable.md)
+- [Docker](docker.md)
 
-Complete runtime, VSView alignment panel, installer, and signed code-only updates.
+    Headless runtime with software Vulkan for HDR. Reports stay on the host. Use
+    this on macOS and Linux.
 
-</div>
+- [Native source](native.md)
 
-<div class="fc-route" markdown>
-
-<p class="fc-route-tag">macOS · Linux</p>
-
-### [Docker](docker.md)
-
-Headless managed runtime with software-Vulkan HDR. Reports stay on the host.
-
-</div>
-
-<div class="fc-route" markdown>
-
-<p class="fc-route-tag">Advanced</p>
-
-### [Native source](native.md)
-
-Bring your own FFmpeg, VapourSynth, L-SMASH-Works, vs-placebo, and Vulkan.
-
-</div>
+    Bring your own FFmpeg, VapourSynth, L-SMASH-Works, vs-placebo, and Vulkan. Use
+    this if you already run VapourSynth.
 
 </div>
 
@@ -74,25 +63,28 @@ service, and non-TTY sessions should not rely on them.
 | Native source with `uv` | Locked Python environment plus your media stack | High | Advanced |
 | Native source with pip | Your Python and media stack | Highest | Advanced integration |
 
-“Reproducible” does not mean identical pixels across unrelated operating systems or GPU
-drivers. Use the same route and runtime when bit-for-bit output matters.
+Pixels can differ across operating systems or GPU drivers. Use the same route and
+runtime when bit-for-bit output matters.
 
-The [Supported media runtime](../supported-media-runtime.md) page is the home of
-component versions.
+[Requirements](../reference/requirements.md) lists what each route needs.
 
 ## After installation
 
 Use the same sequence on every route:
 
-1. Put at least two supported video files in the selected input directory.
-2. Run the wizard.
-3. Run `doctor` through the same route.
-4. Run a dry run to inspect source discovery and output intent.
-5. Run the comparison and open the generated report.
+<div class="fc-steps" markdown>
 
-Continue with [Your first comparison](../guides/first-comparison.md). Later
+1.  **Put at least two supported video files in the selected input directory.**
+2.  **Run the wizard.**
+3.  **Run `doctor` through the same route.**
+4.  **Run a dry run to check the sources and what a run would create.**
+5.  **Run the comparison and open the generated report.**
+
+</div>
+
+Continue with [Your first comparison](first-comparison.md). Later
 comparisons with an established configuration and runtime usually need only the dry
-run and run; see [Repeat comparisons](../guides/first-comparison.md#repeat-comparisons).
+run and run; see [Repeat comparisons](first-comparison.md#repeat-comparisons).
 
 !!! note "Publishing stays off"
     The first-use configuration keeps slow.pics automatic upload disabled. Local

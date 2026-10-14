@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Mapping
 from fractions import Fraction
@@ -630,3 +631,49 @@ def test_load_source_hdr_cases(
         assert source.hdr_metadata is not None
         for field, value in expected_metadata.items():
             assert getattr(source.hdr_metadata, field) == value
+
+
+@pytest.mark.parametrize("stage", ["load", "frame", "index_retry"])
+def test_load_source_stops_native_admission_after_interruption(
+    stage: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    video_path = tmp_path / "video.mkv"
+    index_path = source_index_path(video_path)
+    index_path.write_bytes(b"existing-index")
+    calls: list[str] = []
+
+    async def run() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+
+        class InterruptingClip(MockClip):
+            def get_frame(self, n: int) -> SimpleNamespace:
+                calls.append("frame")
+                if stage == "frame":
+                    task.cancel()
+                return super().get_frame(n)
+
+        def loader(_path: str, **_kwargs: object) -> MockClip:
+            calls.append("load")
+            if stage in {"load", "index_retry"}:
+                task.cancel()
+            if stage == "index_retry":
+                raise RuntimeError("failed to construct index")
+            return InterruptingClip()
+
+        def probe(_path: Path) -> None:
+            calls.append("probe")
+
+        monkeypatch.setattr(source_module, "probe_hdr_metadata", probe)
+        core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+        with pytest.raises(_RunInterrupt):
+            load_source(video_path, cast(Core, core))
+        assert calls == (["load", "frame"] if stage == "frame" else ["load"])
+        assert index_path.read_bytes() == b"existing-index"
+        assert task.cancelling() == 1
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run())

@@ -1,115 +1,100 @@
+---
+description: The six stages of a Frame Compare run and what each stage decides.
+---
+
 # How Frame Compare works
 
-Frame Compare is a staged comparison pipeline rather than a screenshot loop. Each
-stage owns a specific decision or artifact, and later stages consume the validated
-result instead of independently reinterpreting the same media.
+Frame Compare runs a comparison in six stages. Each stage makes one decision,
+such as which frames to render or how far apart two sources are, and passes the
+result to the next stage.
 
-```mermaid
-flowchart TD
-    A["Input sources"] --> B["Discovery and configuration validation"]
-    B --> C["Probe cache and source loading"]
-    C --> D["Initial selectable window"]
-    D --> E["Active-picture resolution"]
-    E --> F{"Frame request needs metrics?"}
-    F -->|No| G["User and deterministic random frame plan"]
-    F -->|Yes| H["Quality or performance analysis"]
-    H --> I["Runtime-scoped analysis cache"]
-    I --> J["Dark, bright, and motion selection"]
-    G --> K["Audio alignment"]
-    J --> K
-    K --> L{"Accepted offset reusable?"}
-    L -->|Yes| M["Reuse the accepted offset"]
-    L -->|No| N["Audio correlation and video confirmation"]
-    N --> O{"Automatic authority checks pass?"}
-    O -->|Yes| Q["Apply the automatic offset"]
-    O -->|No| P["Keep the current alignment"]
-    M --> V{"VSView review enabled?"}
-    Q --> V
-    P --> V
-    V -->|Yes| W["VSView alignment panel"]
-    V -->|No| S["Finalize shared aligned overlap and frame mapping"]
-    W --> S
-    S --> T{"HDR tonemapping required?"}
-    T -->|No| U["Render SDR screenshots and overlays"]
-    T -->|Yes| X["VapourSynth and vs-placebo tonemapping"]
-    X --> U
-    U --> Y["Run metadata and offline HTML report"]
-    Y --> Z{"Publishing enabled?"}
-    Z -->|No| AA["Local result"]
-    Z -->|Yes| AB["Optional slow.pics upload and webhook"]
-```
+<div class="fc-pipeline" markdown>
+
+1. [Discovery and validation](#1-discovery-and-validation)
+2. [Probing and selectable-window preparation](#2-probing-and-selectable-window-preparation)
+3. [Frame planning and analysis](#3-frame-planning-and-analysis)
+4. [Alignment](#4-alignment)
+5. [Rendering and tonemapping](#5-rendering-and-tonemapping)
+6. [Report and optional publication](#6-report-and-optional-publication)
+
+</div>
+
+The sections below use the same numbers.
 
 ## 1. Discovery and validation
 
-The CLI resolves the workspace and selected configuration, discovers supported media,
-chooses the reference and comparison order, applies source overrides, and validates
-write boundaries before expensive runtime work begins.
+The CLI resolves the workspace and selected configuration, then discovers supported
+media. It chooses the reference and comparison order and applies source overrides.
+It checks where it can write before expensive runtime work begins.
 
-Use a dry run when you need to inspect this intent without probing and rendering the
+Use a dry run to inspect the sources and settings before probing and rendering the
 full comparison.
 
 ## 2. Probing and selectable-window preparation
 
 Frame Compare loads source properties through the configured media runtime and creates
-the initial selectable domain from source lengths, explicit trims, effective FPS policy,
-and leading or trailing exclusions. Alignment later maps that plan into a final shared
+the initial selectable window from source lengths, explicit trims, effective FPS policy,
+and leading or trailing exclusions. Frame Compare later maps that plan into the aligned
 overlap and may reduce the frames every source can represent.
 
-Active-picture resolution happens before metric analysis. Explicit rectangles have the
-highest precedence; trusted static evidence, dimension/aspect-ratio inference, optional
-content sampling, and full-frame fallback follow according to configuration.
+Frame Compare resolves the active picture before metric analysis. It checks explicit
+rectangles first, then trusted static evidence and dimension/aspect-ratio evidence.
+Optional content sampling and a full-frame fallback follow according to configuration.
 
 ## 3. Frame planning and analysis
 
-Exact user frames and deterministic random frames do not require dense luminance or
-motion metrics. Dark, bright, and motion requests do.
+Frame Compare chooses exact user frames and deterministic random frames without dense
+luminance or motion metrics. It uses those metrics for dark, bright, and motion requests.
 
 - `quality` analyzes every eligible frame in the prepared metric window.
 - `performance` analyzes a deterministic sampled subset and may choose different
   automatic frames.
 
-Metric caches are keyed by the source and runtime facts capable of changing the metric
-arrays. Selection counts and quantile choices are applied after metrics are available.
+Frame Compare keys metric caches by the source and runtime facts that can change the
+metric arrays. It applies selection counts and quantile choices after metrics are
+available.
 
 ## 4. Alignment
 
-The frame plan is mapped into the aligned comparison domain. Audio correlation proposes
-an offset. Frame Compare applies a fresh automatic offset only when decoded video
-confirms the frame offset, the audio authority recount passes, competing runs and
-credible chunk disagreements are resolved, and no alternative offset is confirmed.
+Frame Compare maps the frame plan into the aligned comparison domain. It uses audio
+correlation to propose an offset.
+
+Frame Compare applies a fresh automatic offset to the trims only when decoded video
+confirms it and every other authority check passes. It requires a passed audio authority
+recount, resolved competing runs and credible chunk disagreements, and no confirmed
+alternative offset.
 A candidate remains `NOT APPLIED` if any authority check fails, even when video
 confirms it; the current alignment stays.
 
-An offset accepted in an earlier run is reused while the sources and settings still
-match. With VSView review enabled, the panel opens after alignment unless a complete set
-of previously confirmed offsets was reused. The panel works only from the same
-environment as Frame Compare.
+Frame Compare reuses an offset accepted in an earlier run while the sources and settings
+still match. With VSView review enabled, the panel opens after alignment unless a
+complete set of previously confirmed offsets was reused. The panel works only from the
+same environment as Frame Compare.
 
-Correlation is evidence, not certainty. Silence, replaced music, substantially different
-edits, or unrelated audio streams can produce weak or misleading matches. Review motion,
-cuts, and dialogue in the final report.
+Silence, replaced music, substantially different edits, or unrelated audio streams can
+produce weak or misleading matches. Review motion, cuts, and dialogue in the final report.
 
 For details, see [Audio alignment](audio-alignment.md) and
 [VSView alignment review](vsview-review.md).
 
 ## 5. Rendering and tonemapping
 
-Each aligned frame is mapped back to the corresponding source frame. SDR sources can be
-rendered without HDR tonemapping. HDR sources that need SDR output pass through the
-configured VapourSynth and vs-placebo tonemapping path before screenshot encoding and
-overlay composition.
+Frame Compare maps each aligned frame back to the corresponding source frame. It
+renders SDR sources without HDR tonemapping. For HDR sources that need SDR output, it
+uses the configured VapourSynth and vs-placebo tonemapping path before encoding
+screenshots and composing overlays.
 
 The report viewer adds interactive labels and controls in the browser. Baked screenshot
 overlays are part of the image itself and remain visible outside the report.
 
 ## 6. Report and optional publication
 
-The canonical result is a static `report.html` in the reserved run folder beside its
-screenshots and run records. It works without a server and can be moved as a complete
-folder.
+Frame Compare writes the canonical result as a static `report.html` in the reserved run
+folder beside its screenshots and run records. It works without a server and can be
+moved as a complete folder.
 
-slow.pics upload and webhook notification are separate, explicit post-render actions.
-A local comparison does not require either integration.
+You can turn on slow.pics upload and webhook notification as separate actions after
+rendering. Both are optional for a local comparison.
 
 ## Owned persistent artifacts
 

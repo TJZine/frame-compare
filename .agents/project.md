@@ -52,17 +52,23 @@ better scoped design.
 
 ## Source routes
 
-| Question | Read first |
-| --- | --- |
-| Runtime order, composition, owners | `docs/current-architecture.md`; `src/frame_compare/cli/entry.py`, `runner.py`, `orchestration/coordinator.py` |
-| CLI/config/JSON and persistence contract | Relevant section of `docs/current-cli-contract.md`; affected `cli/` or `config/` owner |
-| Import direction | `importlinter.ini`; current callers of the changed boundary |
-| Alignment policy and application | `services/alignment_decision.py`, `services/alignment.py`, `orchestration/phase_alignment.py`, `utils/alignment_evidence.py` |
-| Reports and interaction | `services/report/`; architecture's Report Viewer section; `tests/services/node_harness.py`, `tests/browser/` |
-| Persistence | Current architecture's persistence section; `config/persistence.py`, `utils/atomic_write.py`, affected cache or run-record owner |
-| Media/runtime compatibility | `docs/supported-media-runtime.md`, `Dockerfile`, `tools/windows_portable/manifest.windows-x64.json`, `pyproject.toml`, `uv.lock` |
-| Runtime or packaging proof | Relevant procedure in `docs/ENGINEERING_RUNBOOK.md`; current CI workflow and verifier script |
-| Historical rationale | `docs/DECISIONS.md`; relevant historical plan only when its decision affects this task |
+Source paths below are relative to `src/frame_compare/`; test paths are relative to
+`tests/`. Focused proof is a starting point, not a replacement for the applicable
+runbook gate. Follow the linked section before loading a whole authority document.
+
+| Question and contract section | Source owner | Focused proof to inspect first |
+| --- | --- | --- |
+| [Runtime flow](../docs/current-architecture.md#runtime-flow) | `runner.py`, `orchestration/coordinator.py`, `orchestration/execution.py` | `orchestration/test_execute_run_failure_cleanup.py` |
+| [JSON/quiet compatibility](../docs/current-cli-contract.md#json-and-quiet-mode-compatibility), [dry run](../docs/current-cli-contract.md#dry-run-planning) | `cli/run_command.py`, `cli/dry_run.py` | `cli/test_run_json_errors.py`, `cli/test_run_dry_run.py` |
+| [Config acquisition](../docs/current-cli-contract.md#config-validation-logging-and-migration), [persistence](../docs/current-architecture.md#configuration-persistence) | `config/loader.py`, `config/persistence.py`, `config/presets.py` | `config/test_loader.py`, `config/test_presets.py` |
+| [Alignment authority](../docs/current-architecture.md#alignment-requests-and-authority) | `services/alignment_decision.py`, `services/alignment.py`, `orchestration/phase_alignment.py` | `services/test_alignment_video.py`, `orchestration/test_phase_alignment_contract.py` |
+| [Native review/evidence](../docs/current-architecture.md#alignment-evidence-reuse-and-native-review) | `utils/alignment_evidence.py`, `vsview/session_script.py`, `vsview/session_runtime.py`, `vsview/alignment_review_contract.py` | `vsview/test_session_script.py`, `vsview/test_alignment_review_contract.py` |
+| [Run interruption](../docs/current-cli-contract.md#run-interruption) | `utils/cancellation.py`, `render/batch/expansion.py`, `render/prepare.py` | `render/test_orchestrator.py`, `render/test_orchestrator_batch_screenshots.py` |
+| [Report viewer](../docs/current-architecture.md#report-viewer) | `services/report/` | `services/test_report_viewer_state.py`, `services/node_harness.py`, `browser/test_report_browser_smoke.py` |
+| [Shared caches](../docs/current-architecture.md#shared-caches-and-decoder-indexes), [run records](../docs/current-architecture.md#run-records-and-review-artifacts) | `analysis/cache_io.py`, `services/run_result_record.py`, `utils/atomic_write.py` | `analysis/test_cache_io.py`, `services/test_run_result_record.py` |
+| [Import direction](../importlinter.ini) | Current callers of the changed boundary | `test_runner_import_smoke.py`; import-linter command below |
+| [Media/runtime compatibility](../docs/supported-media-runtime.md), [runtime proof](../docs/ENGINEERING_RUNBOOK.md#docker-runtime-verification), [Windows proof](../docs/ENGINEERING_RUNBOOK.md#windows-portable-release-path-verification) | Root `Dockerfile`, `tools/docker_runtime_smoke.py`, `tools/windows_portable/manifest.windows-x64.json`, `pyproject.toml`, `uv.lock` | Matching `workflows/` or `windows_portable/` tests, then the linked platform procedure |
+| [Historical rationale](../docs/DECISIONS.md) | Relevant historical plan only when its decision affects this task | Revalidate against current source; historical checks are not current passes |
 
 Use `rg` and direct source reads for exact queries. Codanna is optional assistance
 for unfamiliar ownership/call paths; confirm its index belongs to the right checkout
@@ -98,7 +104,6 @@ the current runbook's applicable gates; do not run every route on every edit.
 | Full Docker media gate | `bash tools/verify_docker_integration.sh` |
 | Focused Docker E2E development | `bash tools/verify_docker_integration.sh --pytest-path tests/e2e` |
 | Report browser smoke | `uv run --no-sync pytest -q tests/browser/test_report_browser_smoke.py` |
-| API-reference drift | `uv run --no-sync python scripts/generate_api_docs.py --check` |
 | Documentation site | `uv run --no-sync zensical build --clean --strict` after installing the docs group |
 | Workflow/authority structure | `git diff --check`; parse edited YAML/TOML/JSON and resolve changed references |
 

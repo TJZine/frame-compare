@@ -67,9 +67,9 @@ from frame_compare.services.errors import (
 )
 from frame_compare.services.types import (
     AlignmentConfig,
+    AlignmentOperationOutcome,
     AlignmentProvenance,
     AlignmentResult,
-    AlignmentReviewSummary,
 )
 from frame_compare.utils.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
@@ -1190,9 +1190,8 @@ async def align_clips_from_request(
     verbose: bool = False,
     quiet: bool = False,
     json_output: bool = False,
-    review_summary: AlignmentReviewSummary | None = None,
     vs_loader: VSLoader | None = None,
-) -> list[AlignmentResult]:
+) -> AlignmentOperationOutcome:
     """Align clips from the typed request seam with shared previous-offset reuse."""
     try:
         await cancellation_checkpoint()
@@ -1304,10 +1303,12 @@ async def align_clips_from_request(
         )
         if completed_confirmed_reuse and not requested_comparisons:
             require_current_alignment_sources(request)
-            return [
-                results_map[alignment_key(reference, comparison.path)]
-                for comparison in request.comparisons
-            ]
+            return AlignmentOperationOutcome(
+                tuple(
+                    results_map[alignment_key(reference, comparison.path)]
+                    for comparison in request.comparisons
+                )
+            )
 
         offsets_by_key = _build_offsets_map(
             reference=reference,
@@ -1330,7 +1331,6 @@ async def align_clips_from_request(
             progress=progress,
             frame_props_by_stem=frame_props_by_stem,
             verbose=verbose,
-            review_summary=review_summary,
         )
         confirmed_offsets = review.confirmed_offsets
         if confirmed_offsets:
@@ -1359,8 +1359,6 @@ async def align_clips_from_request(
                 only_keys=diagnostic_keys,
                 confirmed_frame_pairs=review.confirmed_frame_pairs,
             )
-            if review_summary is not None and not review_summary.review_ran:
-                review_summary.review_unresolved = True
 
         # Even unavailable audio must not send stale prepared facts to rendering.
         # Observe cancellation first, after the worker has completed owned cleanup.
@@ -1372,10 +1370,13 @@ async def align_clips_from_request(
         ):
             save_reusable_offsets(request, list(provenances.values()))
 
-        return [
-            results_map[alignment_key(reference, comparison.path)]
-            for comparison in request.comparisons
-        ]
+        return AlignmentOperationOutcome(
+            tuple(
+                results_map[alignment_key(reference, comparison.path)]
+                for comparison in request.comparisons
+            ),
+            review.summary,
+        )
     except _RunInterrupt:
         await cancellation_checkpoint()
         raise asyncio.CancelledError() from None

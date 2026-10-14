@@ -151,40 +151,84 @@ def test_output_identity_uses_actual_unicode_rules_and_cleans_reservations(
     assert list(tmp_path.iterdir()) == []
 
 
-def test_output_identity_preserves_existing_files(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_output_identity_preserves_existing_files(tmp_path: Path, cleanup_fails: bool) -> None:
     first = tmp_path / "10 - original.png"
     second = tmp_path / "10 - existing-link.png"
+    reserved = [tmp_path / "10 - new-a.png", tmp_path / "10 - new-b.png"]
     first.write_bytes(b"existing screenshot")
     second.hardlink_to(first)
-    with pytest.raises(ScreenshotOutputCollisionError):
-        validate_screenshot_paths([tmp_path / "10 - new.png", first, second])
+    original_unlink = Path.unlink
+    cleanup_attempts: list[Path] = []
+
+    def unlink(path: Path, missing_ok: bool = False) -> None:
+        cleanup_attempts.append(path)
+        if cleanup_fails and path == reserved[1]:
+            raise PermissionError("private cleanup text")
+        original_unlink(path, missing_ok=missing_ok)
+
+    with (
+        patch.object(Path, "unlink", unlink),
+        pytest.raises(ScreenshotOutputCollisionError) as caught,
+    ):
+        validate_screenshot_paths([*reserved, first, second])
+    assert caught.value.code == "FC-4021"
+    assert cleanup_attempts == list(reversed(reserved))
     assert first.read_bytes() == second.read_bytes() == b"existing screenshot"
-    assert sorted(path.name for path in tmp_path.iterdir()) == [second.name, first.name]
+    expected = {first, second, *([reserved[1]] if cleanup_fails else [])}
+    assert set(tmp_path.iterdir()) == expected
+    if cleanup_fails:
+        assert caught.value.__notes__ == [
+            f"Unable to remove screenshot name reservation: {reserved[1]}"
+        ]
 
 
-def test_reservation_failure_is_typed_and_removes_prior_reservations(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_reservation_failure_is_typed_and_removes_prior_reservations(
+    tmp_path: Path, cleanup_fails: bool
+) -> None:
     paths = [tmp_path / "1 - first.png", tmp_path / "1 - second.png"]
     original_open = Path.open
+    original_unlink = Path.unlink
 
     def fail_second(path: Path, *args, **kwargs):
         if path == paths[1]:
             raise PermissionError("private operating-system text")
         return original_open(path, *args, **kwargs)
 
+    def unlink(path: Path, missing_ok: bool = False) -> None:
+        if cleanup_fails:
+            raise PermissionError("private cleanup text")
+        original_unlink(path, missing_ok=missing_ok)
+
     with (
         patch.object(Path, "open", fail_second),
+        patch.object(Path, "unlink", unlink),
         pytest.raises(EncodingError) as caught,
     ):
         validate_screenshot_paths(paths)
+    assert caught.value.context.details == {
+        "path": str(paths[1]),
+        "reason": "Unable to validate screenshot output names",
+    }
+    assert caught.value.__suppress_context__
     assert "private operating-system text" not in str(caught.value)
-    assert list(tmp_path.iterdir()) == []
+    assert list(tmp_path.iterdir()) == (paths[:1] if cleanup_fails else [])
+    if cleanup_fails:
+        assert caught.value.__notes__ == [
+            f"Unable to remove screenshot name reservation: {paths[0]}"
+        ]
 
 
-def test_cancellation_removes_reservations_before_admitting_next_path(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_cancellation_removes_reservations_before_admitting_next_path(
+    tmp_path: Path, cleanup_fails: bool
+) -> None:
     from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
 
     paths = [tmp_path / "1 - first.png", tmp_path / "1 - second.png"]
     original_open = Path.open
+    original_unlink = Path.unlink
     opened: list[Path] = []
 
     def cancel_after_first(path: Path, *args, **kwargs):
@@ -195,24 +239,77 @@ def test_cancellation_removes_reservations_before_admitting_next_path(tmp_path: 
         task.cancel()
         return file
 
+    def unlink(path: Path, missing_ok: bool = False) -> None:
+        if cleanup_fails:
+            raise PermissionError("private cleanup text")
+        original_unlink(path, missing_ok=missing_ok)
+
     async def validate_and_deliver_cancellation() -> None:
-        with patch.object(Path, "open", cancel_after_first), pytest.raises(_RunInterrupt):
+        with (
+            patch.object(Path, "open", cancel_after_first),
+            patch.object(Path, "unlink", unlink),
+            pytest.raises(_RunInterrupt) as caught,
+        ):
             validate_screenshot_paths(paths)
         assert opened == paths[:1]
-        assert list(tmp_path.iterdir()) == []
+        assert list(tmp_path.iterdir()) == (paths[:1] if cleanup_fails else [])
+        if cleanup_fails:
+            assert caught.value.__notes__ == [
+                f"Unable to remove screenshot name reservation: {paths[0]}"
+            ]
         await cancellation_checkpoint()
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(validate_and_deliver_cancellation())
 
 
-def test_reservation_metadata_failure_removes_exclusive_creation(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_reservation_metadata_failure_removes_exclusive_creation(
+    tmp_path: Path, cleanup_fails: bool
+) -> None:
+    path = tmp_path / "1 - first.png"
+    original_unlink = Path.unlink
+
+    def unlink(path: Path, missing_ok: bool = False) -> None:
+        if cleanup_fails:
+            raise PermissionError("private cleanup text")
+        original_unlink(path, missing_ok=missing_ok)
+
     with (
         patch("frame_compare.render.naming.os.fstat", side_effect=OSError("metadata failed")),
-        pytest.raises(EncodingError),
+        patch.object(Path, "unlink", unlink),
+        pytest.raises(EncodingError) as caught,
     ):
-        validate_screenshot_paths([tmp_path / "1 - first.png"])
-    assert list(tmp_path.iterdir()) == []
+        validate_screenshot_paths([path])
+    assert caught.value.context.details == {
+        "path": str(path),
+        "reason": "Unable to validate screenshot output names",
+    }
+    assert list(tmp_path.iterdir()) == ([path] if cleanup_fails else [])
+    if cleanup_fails:
+        assert caught.value.__notes__ == [f"Unable to remove screenshot name reservation: {path}"]
+
+
+@pytest.mark.parametrize("handling_outer_error", [False, True])
+def test_cleanup_only_failure_is_not_suppressed(tmp_path: Path, handling_outer_error: bool) -> None:
+    path = tmp_path / "1 - first.png"
+    with patch.object(Path, "unlink", side_effect=PermissionError("private cleanup text")):
+        try:
+            if handling_outer_error:
+                raise ValueError("unrelated outer error")
+        except ValueError:
+            with pytest.raises(EncodingError) as caught:
+                validate_screenshot_paths([path])
+        else:
+            with pytest.raises(EncodingError) as caught:
+                validate_screenshot_paths([path])
+    assert caught.value.context.details == {
+        "path": str(path),
+        "reason": "Unable to remove screenshot name reservation",
+    }
+    assert caught.value.__suppress_context__
+    assert "private cleanup text" not in str(caught.value)
+    assert path.is_file()
 
 
 def test_cleanup_preserves_replacement_file(tmp_path: Path) -> None:

@@ -68,7 +68,11 @@ def test_configuration_reference_lists_every_config_key() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     reference = (repo_root / "docs" / "reference" / "configuration.md").read_text(encoding="utf-8")
     documented = set(
-        re.findall(r"^\| `([a-z_]+(?:\.[a-z_<>]+)+)` \|", reference, flags=re.MULTILINE)
+        re.findall(
+            r"^#### `([a-z_]+(?:\.[a-z_<>]+)+)` \{ #[a-z_.]+ \.fc-key \}$",
+            reference,
+            flags=re.MULTILINE,
+        )
     )
 
     expected: set[str] = set()
@@ -81,3 +85,18 @@ def test_configuration_reference_lists_every_config_key() -> None:
     )
 
     assert documented == expected
+
+
+def test_commands_reference_exit_codes_match_contract() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    commands = (repo_root / "docs" / "reference" / "commands.md").read_text(encoding="utf-8")
+    row = re.compile(r"^\| `(\d+)` \| (.+?) \|$", re.MULTILINE)
+
+    contract_rows = row.findall(
+        contract.split("## Exit Codes And Error Families", 1)[1].split("\n## ", 1)[0]
+    )
+    commands_rows = row.findall(commands.split("## Exit codes", 1)[1].split("\n## ", 1)[0])
+
+    assert len(contract_rows) == 8
+    assert commands_rows == contract_rows

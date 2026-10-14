@@ -1,3 +1,7 @@
+---
+description: Confirm or enter alignment by eye in the VSView alignment panel.
+---
+
 # VSView alignment review
 
 The VSView alignment panel is the only place to confirm or enter alignment by eye. It
@@ -47,10 +51,15 @@ under **Audio evidence** without applying it.
 
 ## Enter known values
 
-Expand **Enter alignment manually...** and choose
-**Source frames** or **Known offsets**.
-Enter one non-negative untrimmed frame per source for **Source frames**, or one signed
-integer per comparison for **Known offsets**, using `reference − comparison`.
+<div class="fc-steps" markdown>
+
+1.  **Expand the manual controls.** Select **Enter alignment manually...**.
+2.  **Choose the input type.** Choose **Source frames** or **Known offsets**.
+3.  **Enter the values.** Enter one non-negative untrimmed frame per source for
+    **Source frames**, or one signed integer per comparison for **Known offsets**,
+    using `reference − comparison`.
+
+</div>
 
 Source frames use **Confirm these aligned positions**.
 Known offsets use **Confirm these known offsets**.

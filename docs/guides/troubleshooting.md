@@ -1,6 +1,11 @@
+---
+description: Problems and fixes, listed by pipeline stage, and how to collect diagnostics safely.
+---
+
 # Troubleshooting
 
-Start with the same installation route that will run the comparison:
+Start with the same installation route that runs the comparison. Run these two
+commands through it:
 
 ```bash
 frame-compare doctor
@@ -12,28 +17,105 @@ This avoids diagnosing a different Python or media runtime than the one that fai
 
 ## Common problems
 
-| Symptom | What to do |
-| --- | --- |
-| `frame-compare: command not found` after `uv sync` | Use `uv run --no-sync frame-compare ...`, activate `.venv`, or invoke the environment’s entry point directly |
-| `FC-1001` reports a missing configuration file | Run the wizard through the same root/config route that will execute the pipeline |
-| No videos are discovered | Confirm the configured input directory and supported extensions, then rerun the dry run |
-| The wrong source is the reference | Set `sources.reference` to an unambiguous relative path, filename, or stem and verify the dry run |
-| Duplicate or confusing source labels | Use explicit per-source labels; duplicate explicit labels are rejected |
-| Doctor reports VapourSynth or L-SMASH-Works missing | Use Docker or Windows portable, or repair the native supported runtime; the default renderer requires VapourSynth |
-| Doctor reports vs-placebo or Vulkan unavailable | Repair the selected plugin/driver path or use the supported Docker software-Vulkan route for headless work |
-| Automatic alignment is weak or incorrect | Confirm corresponding audio streams, inspect for different edits or silence, and verify with the native Frame Compare VSView panel when available |
-| The VSView alignment panel is missing, inactive, or rejects a result | See [VSView alignment review](vsview-review.md#troubleshooting) |
-| An alignment line says `NOT APPLIED` | The audio candidate was not confirmed by the video; see [what the results mean](audio-alignment.md#what-the-results-mean) |
-| Requested frames cannot survive alignment | Reduce trims or frame counts and inspect the final shared overlap; user frames are not silently replaced |
-| Docker cannot write config or generated data | Export host UID/GID values and pre-create `config`, `comparison_videos`, and `generated` as the host user |
-| Docker report did not open | Expected across the container boundary; use the host helper and exact path printed by the run |
-| Windows command is unavailable after install | Open a new terminal; if needed, rerun `install.cmd` from the bundle’s current location |
-| Windows shim says the bundle moved | Rerun `install.cmd` from the new bundle location to update installed state |
-| Code-only update reports a runtime fingerprint mismatch | Install the complete portable ZIP for that release; code-only updates cannot replace native media components |
-| Report opens without images | Keep `report.html` beside its `screenshots/` directory or rerun the comparison with `report.embed_images = true` |
-| A cache hit appears stale after replacing media | Ensure path, size, or modification time changed, or remove the smallest relevant cache entry |
-| `--no-cache` and `--from-cache-only` are rejected together | Choose one: the first disables cache use, the second requires it |
-| Docker prints `without an L-SMASH index cache` | Expected on the default Docker route; see [Docker](../getting-started/docker.md#the-index-warning) |
+### `frame-compare: command not found` after `uv sync`
+
+Use `uv run --no-sync frame-compare ...`, activate `.venv`, or invoke the
+environment’s entry point directly.
+
+### `FC-1001` reports a missing configuration file
+
+Run the wizard through the same root/config route that will execute the pipeline.
+
+### No videos are discovered
+
+Confirm the configured input directory and supported extensions, then rerun the dry run.
+
+### The wrong source is the reference
+
+Set `sources.reference` to an unambiguous relative path, filename, or stem and verify
+the dry run.
+
+### Duplicate or confusing source labels
+
+Use explicit per-source labels; duplicate explicit labels are rejected.
+
+### Doctor reports VapourSynth or L-SMASH-Works missing
+
+Use Docker or Windows portable, or repair the native supported runtime; the default
+renderer requires VapourSynth.
+
+### Doctor reports vs-placebo or Vulkan unavailable
+
+Repair the selected plugin/driver path or use the supported Docker software-Vulkan route
+for headless work.
+
+### Automatic alignment is weak or incorrect
+
+Confirm corresponding audio streams, inspect for different edits or silence, and verify
+with the native VSView alignment panel when available.
+
+### The VSView alignment panel is missing, inactive, or rejects a result
+
+See [VSView alignment review](vsview-review.md#troubleshooting).
+
+### An alignment line says `NOT APPLIED`
+
+Frame Compare did not apply an offset, because the audio candidate did not pass every
+check or no usable candidate was found; see
+[what the results mean](audio-alignment.md#what-the-results-mean).
+
+### Requested frames cannot survive alignment
+
+Reduce trims or frame counts and inspect the final shared overlap; user frames are not
+silently replaced.
+
+### Docker cannot write config or generated data
+
+Export host UID/GID values and pre-create `config`, `comparison_videos`, and
+`generated` as the host user.
+
+### Docker report did not open
+
+A Docker container cannot open the host browser; use the host helper and exact path
+printed by the run.
+
+### Windows command is unavailable after install
+
+Open a new terminal; if needed, rerun `install.cmd` from the bundle’s current location.
+
+### Windows shim says the bundle moved
+
+Rerun `install.cmd` from the new bundle location to update installed state.
+
+### Code-only update reports a runtime fingerprint mismatch
+
+Install the complete portable ZIP for that release; code-only updates cannot replace
+native media components.
+
+### Report opens without images
+
+Keep `report.html` beside its `screenshots/` directory or rerun the comparison with
+`report.embed_images = true`.
+
+### A cache hit appears stale after replacing media
+
+Ensure path, size, or modification time changed, or remove the smallest relevant cache
+entry.
+
+### `--no-cache` and `--from-cache-only` are rejected together
+
+Choose one: the first disables cache use, the second requires it.
+
+### Docker prints `without an L-SMASH index cache`
+
+The default Docker route prints this warning; see
+[Docker](../getting-started/docker.md#the-index-warning).
+
+## Error codes
+
+Error codes start with `FC-` and a digit that names the family; the
+[exit codes](../reference/commands.md#exit-codes) table maps each family to an exit
+code.
 
 ## Diagnose by pipeline stage
 
@@ -47,8 +129,8 @@ frame-compare run --dry-run
 ```
 
 Check the resolved config file, input directory, generated-data root, discovered files,
-reference, comparison order, and output intent. Do not share unredacted path diagnostics
-when private usernames or directories are unnecessary.
+reference, comparison order, and what the run would create. Do not share unredacted
+path diagnostics when private usernames or directories are unnecessary.
 
 ### Runtime and probing
 
@@ -75,12 +157,15 @@ Review:
 - the resolved active picture;
 - the shared window after alignment.
 
-Interactive full-window recovery is available only for eligible exclusion-constrained
-selection failures. It is not a general “continue anyway” option.
+Frame Compare offers interactive full-window recovery only for eligible frame-selection
+failures constrained by exclusions. You cannot use it to continue past other failures.
 
 ### Alignment
 
-Check that the selected audio streams contain corresponding material. A constant offset cannot fix drift, different edits, or mismatched cadence; review early, middle, and late frames. To confirm or enter an offset by eye, use [VSView alignment review](vsview-review.md).
+Check that the selected audio streams contain corresponding material. A constant offset
+cannot fix drift, different edits, or mismatched cadence; review early, middle, and late
+frames. To confirm or enter an offset by eye, use
+[VSView alignment review](vsview-review.md).
 
 ### Rendering and HDR
 
@@ -104,7 +189,8 @@ Include:
 - whether the command was interactive, quiet, or JSON;
 - sanitized `doctor` output;
 - sanitized run warnings and error code;
-- `alignment_diagnostics/` files when alignment is involved (they hold no media paths or credentials);
+- `alignment_diagnostics/` files when alignment is involved (they hold no media paths or
+  credentials);
 - affected source extensions and relevant media properties;
 - `run --diagnose-paths` output when path resolution matters;
 - whether the issue reproduces with a small publication-safe fixture.
@@ -119,7 +205,7 @@ Do **not** include:
 
 ## When to clear state
 
-Clear only the owner related to the problem:
+Clear only the state related to the problem:
 
 | State | Remove it when |
 | --- | --- |
@@ -133,9 +219,11 @@ Do not delete the complete generated-data root as a first response.
 
 Platform-specific help:
 
-- [Windows portable](../windows-portable.md)
+- [Windows portable](../getting-started/windows-portable.md)
 - [Docker](../getting-started/docker.md)
 - [Docker profiles](../getting-started/docker-profiles.md)
 - [Native source](../getting-started/native.md)
 
-For exact error streams, JSON shape, and exit codes, see the [CLI behavioral contract](../current-cli-contract.md) and its [exit-code table](../current-cli-contract.md#exit-codes-and-error-families).
+For exact error streams, JSON shape, and exit codes, see the
+[CLI behavioral contract](../current-cli-contract.md) and its
+[exit-code table](../current-cli-contract.md#exit-codes-and-error-families).

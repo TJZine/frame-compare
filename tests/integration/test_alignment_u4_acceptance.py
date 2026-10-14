@@ -620,7 +620,9 @@ def _align_pair(
         generated_dir=generated_dir,
         fps_num=_FPS,
     )
-    (result,) = asyncio.run(align_clips_from_request(request, config, vs_loader=DefaultVSLoader()))
+    (result,) = asyncio.run(
+        align_clips_from_request(request, config, vs_loader=DefaultVSLoader())
+    ).results
     return result
 
 

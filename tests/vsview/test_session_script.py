@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import sys
 import types
 from contextlib import redirect_stderr
@@ -12,8 +11,8 @@ from typing import Any
 
 import pytest
 
+from frame_compare.vsview.session_runtime import SessionConsole
 from frame_compare.vsview.session_script import (
-    _build_helpers_section,
     _build_script_content,
     write_vsview_session_script,
 )
@@ -58,14 +57,9 @@ def test_write_vsview_session_script_removes_reserved_path_after_write_failure(
     assert list(sessions_dir.iterdir()) == []
 
 
-def _exec_generated_helpers(*, stderr: io.TextIOBase) -> dict[str, Any]:
-    namespace: dict[str, Any] = {"sys": SimpleNamespace(stdout=io.StringIO(), stderr=stderr)}
-    namespace["os"] = os
-    exec(
-        compile(_build_helpers_section(), "<generated-helpers>", "exec"),
-        namespace,
-    )
-    return namespace
+def _session_console(*, stderr: io.TextIOBase) -> SessionConsole:
+    with redirect_stderr(stderr):
+        return SessionConsole()
 
 
 class _StubStderr(io.StringIO):
@@ -98,9 +92,9 @@ def test_generated_accent_colour_tiers(
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    helpers = _exec_generated_helpers(stderr=_StubStderr())
+    helpers = _session_console(stderr=_StubStderr())
 
-    assert helpers["_accent_code"]() == expected
+    assert helpers.accent_code() == expected
 
 
 def test_generated_helpers_honour_no_color(
@@ -109,10 +103,11 @@ def test_generated_helpers_honour_no_color(
     for key in ("COLORTERM", "WT_SESSION", "TERM"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("NO_COLOR", "1")
-    helpers = _exec_generated_helpers(stderr=_StubStderr())
+    helpers = _session_console(stderr=_StubStderr())
 
-    assert helpers["_header"]("text") == "text"
-    assert helpers["_style"]("text", "33") == "text"
+    with redirect_stderr(_StubStderr()):
+        assert helpers.header("text") == "text"
+        assert helpers.style("text", "33") == "text"
 
 
 def test_generated_glyph_and_arrow_ascii_fallback(
@@ -120,19 +115,19 @@ def test_generated_glyph_and_arrow_ascii_fallback(
 ) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
     ascii_stderr = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
-    helpers = _exec_generated_helpers(stderr=ascii_stderr)
+    helpers = _session_console(stderr=ascii_stderr)
 
-    assert helpers["_glyph"]("waiting") == ">"
-    assert helpers["_glyph"]("failed") == "x"
-    assert helpers["_glyph"]("warning") == "!"
-    assert helpers["_arrow"]() == "->"
+    assert helpers.glyph("waiting") == ">"
+    assert helpers.glyph("failed") == "x"
+    assert helpers.glyph("warning") == "!"
+    assert helpers.arrow() == "->"
     ascii_stderr.close()
 
-    helpers = _exec_generated_helpers(stderr=_StubStderr())
+    helpers = _session_console(stderr=_StubStderr())
 
-    assert helpers["_glyph"]("waiting") == "\u203a"
-    assert helpers["_glyph"]("failed") == "\u2717"
-    assert helpers["_arrow"]() == "\u2192"
+    assert helpers.glyph("waiting") == "\u203a"
+    assert helpers.glyph("failed") == "\u2717"
+    assert helpers.arrow() == "\u2192"
 
 
 def _decision_payload(*, state: str) -> dict[str, object]:
@@ -308,22 +303,38 @@ def test_short_names_by_stem_defaults_to_display_names(tmp_path: Path) -> None:
     named = _build_script_content(short_names_by_stem={"a": "ShortA"}, **kwargs)
 
     assert explicit == defaulted
-    assert "SHORT_NAMES = {}" in defaulted
     assert '"ShortA"' in named
     assert named != defaulted
 
 
 @pytest.mark.parametrize("memory_limit_mb", [None, 1024])
-def test_session_script_optional_frame_cache_limit(memory_limit_mb: int | None) -> None:
+def test_session_script_optional_frame_cache_limit(
+    memory_limit_mb: int | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed: list[tuple[int, int | None]] = []
+    core = SimpleNamespace(max_cache_size=321)
+    fake_vapoursynth = types.ModuleType("vapoursynth")
+    fake_vapoursynth.core = core  # pyright: ignore[reportAttributeAccessIssue]
+    fake_vsview = types.ModuleType("vsview")
+    fake_vsview.set_output = lambda *args, **kwargs: None  # pyright: ignore[reportAttributeAccessIssue]
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vapoursynth)
+    monkeypatch.setitem(sys.modules, "vsview", fake_vsview)
+
+    def observe_loader(_core: object) -> object:
+        observed.append((core.max_cache_size, memory_limit_mb))
+        raise RuntimeError("stop after observing cache admission")
+
+    monkeypatch.setattr(
+        "frame_compare.vsview.session_runtime.resolve_lwlibavsource", observe_loader
+    )
     script = _build_script_content(
-        reference=Path("ref.mkv"),
-        comparisons=[],
-        suggested_offsets_by_key={},
-        audio_review_by_key={},
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "cmp.mkv"],
+        suggested_offsets_by_key={"ref:cmp": 0},
+        audio_review_by_key={"ref:cmp": _accepted_review()},
         memory_limit_mb=memory_limit_mb,
     )
-    compile(script, "session.py", "exec")
-    if memory_limit_mb is None:
-        assert "max_cache_size" not in script
-    else:
-        assert "    core = vs.core\n    core.max_cache_size = 1024\n" in script
+    with pytest.raises(SystemExit) as caught:
+        exec(compile(script, "session.py", "exec"), {"__file__": "session_x.py"})
+    assert caught.value.code == 1
+    assert observed == [(321 if memory_limit_mb is None else memory_limit_mb, memory_limit_mb)]

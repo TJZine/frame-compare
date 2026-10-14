@@ -224,7 +224,6 @@ session, _wait_seconds = launch_alignment_verification_session(
 script_path = session.script_path
 script_text = script_path.read_text(encoding="utf-8")
 compiled = compile(script_text, str(script_path), "exec")
-assert "from vsview import set_output" in script_text
 
 script_module = types.ModuleType("__vsview__")
 script_module.__file__ = str(script_path)

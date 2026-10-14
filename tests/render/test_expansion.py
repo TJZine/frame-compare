@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -264,3 +265,35 @@ def test_source_stem_aliases_follow_output_filesystem(
                 )
             mock_prepare.assert_not_called()
             render.assert_not_called()
+
+
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
+def test_expansion_stops_source_admission_after_interruption(
+    mock_prepare: MagicMock, tmp_path: Path
+) -> None:
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    async def run() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+
+        def prepare(*_args: object, **_kwargs: object) -> PreparedRenderSource:
+            task.cancel()
+            return _prepared()
+
+        mock_prepare.side_effect = prepare
+        with pytest.raises(_RunInterrupt):
+            expand_batch_render_requests(
+                [_request("ref"), _request("comp")],
+                output_dir=tmp_path,
+                config=ConfigSchema(),
+                overlay_mode=OverlayMode.NONE,
+                renderer="vapoursynth",
+                ffmpeg_runner=MagicMock(),
+            )
+        assert mock_prepare.call_count == 1
+        assert task.cancelling() == 1
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run())

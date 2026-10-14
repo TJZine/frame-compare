@@ -195,3 +195,12 @@ def test_windows_portable_release_checksum_paths_are_individual_powershell_value
         "(Join-Path -Path $assetDir -ChildPath "
         '"frame-compare-update-win-x64-$($env:RELEASE_TAG).zip.sha256")'
     ) in source
+
+
+def test_windows_portable_workflow_runs_full_suite_once_including_updater_proof(
+    repo_root: Path,
+) -> None:
+    workflow = _load_workflow(repo_root / ".github/workflows/windows-portable-build.yml")
+    runs = [str(step.get("run", "")) for step in workflow["jobs"]["build"]["steps"]]
+    pytest_runs = [run for run in runs if "pytest" in run]
+    assert pytest_runs == ["uv run --no-sync pytest -q"]

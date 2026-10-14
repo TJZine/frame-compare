@@ -10,7 +10,7 @@ import pytest
 
 from frame_compare.orchestration import phase_alignment
 from frame_compare.orchestration.context import ClipActiveRect
-from frame_compare.services.types import AlignmentResult
+from frame_compare.services.types import AlignmentOperationOutcome, AlignmentResult
 from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vs.loader import VSLoader
 from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
@@ -39,20 +39,22 @@ def test_align_phase_passes_loader_and_active_rect_primitives(
         request: AlignmentRequest,
         _config: object,
         **kwargs: object,
-    ) -> list[AlignmentResult]:
+    ) -> AlignmentOperationOutcome:
         captured["request"] = request
         captured.update(kwargs)
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="comparison.mkv",
-                frame_offset=0,
-                time_offset_seconds=0.0,
-                correlation_score=1.0,
-                algorithm="cross_correlation",
-                source="computed",
+        return AlignmentOperationOutcome(
+            (
+                AlignmentResult(
+                    reference_clip="reference.mkv",
+                    comparison_clip="comparison.mkv",
+                    frame_offset=0,
+                    time_offset_seconds=0.0,
+                    correlation_score=1.0,
+                    algorithm="cross_correlation",
+                    source="computed",
+                ),
             )
-        ]
+        )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", fake_align)
 

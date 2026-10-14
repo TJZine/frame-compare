@@ -12,20 +12,13 @@ import uuid
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from frame_compare.utils.atomic_write import write_text_atomic
-from frame_compare.vs.source import INDEX_CONSTRUCTION_FAILURE_MARKER, source_index_path
-from frame_compare.vsview.alignment_review_contract import (
-    ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
-    ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
-    ALIGNMENT_REVIEW_METADATA_NAME_KEY,
-    ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
-    ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
-    ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
-    ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
-    ALIGNMENT_REVIEW_METADATA_VERSION,
-    ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
-)
+from frame_compare.vs.source import source_index_path
+
+if TYPE_CHECKING:
+    from frame_compare.vsview.session_runtime import ComparisonSource, SessionData
 
 
 def write_vsview_session_script(
@@ -39,7 +32,7 @@ def write_vsview_session_script(
     short_names_by_stem: dict[str, str] | None = None,
     memory_limit_mb: int | None = None,
 ) -> Path:
-    """Generate and write a self-contained VSView script.
+    """Generate deterministic session data and a bootstrap for the installed runtime.
 
     Output location:
         - Directory: `{cache_dir}/vsview_sessions/` (created if missing)
@@ -98,329 +91,6 @@ def _reserve_empty_file(path: Path) -> bool:
     return reserved
 
 
-def _build_script_header() -> str:
-    return '''\
-#!/usr/bin/env python3
-"""VSView alignment verification session.
-
-Sign convention:
-    + trims reference (comparison starts AFTER reference)
-    - trims comparison (comparison starts BEFORE reference)
-
-Audio-derived offsets shown here are hints only. This session displays
-untrimmed source clips so the operator can inspect source-frame positions.
-"""
-from __future__ import annotations
-
-import logging
-import json
-import os
-import sys
-from pathlib import Path
-
-from frame_compare.utils.alignment_evidence import AudioAlignmentDecision, evidence_from_payload
-
-logging.getLogger("vsview.app.workspace.loader").addFilter(
-    lambda record: not (
-        record.levelno == logging.INFO
-        and record.msg == "Content loaded successfully: %r"
-    )
-)
-'''
-
-
-def _build_helpers_section() -> str:
-    marker = json.dumps(INDEX_CONSTRUCTION_FAILURE_MARKER)
-    return (
-        f"INDEX_CONSTRUCTION_FAILURE_MARKER = {marker}\n\n"
-        + '''\
-# ─── Safe Print Helper ────────────────────────────────────────────────────────
-_ORIGINAL_STDERR_ENCODING = getattr(sys.stderr, "encoding", "") or ""
-
-
-def _reconfigure_text_stream(stream):
-    reconfigure = getattr(stream, "reconfigure", None)
-    if reconfigure is None:
-        return False
-
-    failure_reason = None
-    try:
-        reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, LookupError, OSError, TypeError, UnicodeError, ValueError) as error:
-        failure_reason = f"{type(error).__name__}: {error}"
-    else:
-        return True
-    return failure_reason is None
-
-
-_reconfigure_text_stream(sys.stdout)
-_reconfigure_text_stream(sys.stderr)
-
-
-def _ansi_enabled():
-    return "NO_COLOR" not in os.environ and getattr(sys.stderr, "isatty", lambda: False)()
-
-
-def _use_ascii():
-    return not str(_ORIGINAL_STDERR_ENCODING).lower().startswith("utf")
-
-
-def _glyph(kind):
-    table = {
-        "warning": ("!", "!"),
-        "failed": ("\\u2717", "x"),
-        "waiting": ("\\u203a", ">"),
-    }
-    glyph, fallback = table[kind]
-    return fallback if _use_ascii() else glyph
-
-
-def _arrow():
-    return "->" if _use_ascii() else "\\u2192"
-
-
-def _accent_code():
-    colorterm = os.environ.get("COLORTERM", "")
-    if colorterm in ("truecolor", "24bit") or "WT_SESSION" in os.environ:
-        return "38;2;210;172;107"
-    if "256color" in os.environ.get("TERM", ""):
-        return "38;5;180"
-    return "33"
-
-
-def _style(text, code):
-    if not _ansi_enabled():
-        return text
-    return f"\\033[{code}m{text}\\033[0m"
-
-
-def _header(text):
-    return _style(text, _accent_code())
-
-
-def _key(text):
-    return _style(text, "2")
-
-
-def _value(text):
-    return text
-
-
-def _hint(text):
-    return _style(text, "2")
-
-
-def _status(marker):
-    kinds = {"[WARN]": ("warning", "33"), "[FAIL]": ("failed", "31")}
-    kind, code = kinds[marker]
-    return _style(_glyph(kind), code)
-
-
-def _status_line(marker, text):
-    return f"  {_status(marker)} {text}"
-
-
-def safe_print(*args, **kwargs):
-    kwargs.setdefault("file", sys.stderr)
-    try:
-        print(*args, **kwargs)
-    except UnicodeEncodeError:
-        # Fallback for problematic consoles
-        text = " ".join(str(a) for a in args)
-        print(text.encode("ascii", errors="replace").decode("ascii"), **kwargs)
-
-
-def resolve_lwlibavsource(core):
-    """Resolve LWLibavSource from the VapourSynth R81 core.lsmas namespace."""
-    if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
-        return core.lsmas
-    raise RuntimeError("LWLibavSource not found on core.lsmas")
-
-
-def load_preview_source(loader, path, index_path, display_name):
-    try:
-        return loader.LWLibavSource(str(path), cachefile=str(index_path))
-    except Exception as original_error:
-        if INDEX_CONSTRUCTION_FAILURE_MARKER not in str(original_error).casefold():
-            raise
-
-        safe_print(
-            _status_line(
-                "[WARN]",
-                f"Retrying {display_name} without an L-SMASH index cache after index construction failed",
-            )
-        )
-        try:
-            return loader.LWLibavSource(str(path), cache=0)
-        except Exception as fallback_error:
-            raise original_error from fallback_error
-
-
-FRAME_PROP_ALIASES = {
-    "_Matrix": ("_Matrix", "Matrix"),
-    "_Transfer": ("_Transfer", "Transfer"),
-    "_Primaries": ("_Primaries", "Primaries"),
-}
-UNSPECIFIED_FRAME_PROP = 2
-
-
-def _parse_frame_prop_int(value):
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, bytes):
-        try:
-            value = value.decode("ascii")
-        except UnicodeDecodeError:
-            return None
-    if isinstance(value, str):
-        stripped = value.strip()
-        if stripped.isdecimal():
-            return int(stripped)
-    return None
-
-
-def _read_prop(props, canonical_key):
-    for key in FRAME_PROP_ALIASES[canonical_key]:
-        if key in props:
-            return props[key]
-    raise KeyError(canonical_key)
-
-
-def _range_issue(props):
-    if "_Range" not in props:
-        return "missing"
-    parsed_value = _parse_frame_prop_int(props["_Range"])
-    if parsed_value in (0, 1):
-        return None
-    if parsed_value == UNSPECIFIED_FRAME_PROP:
-        return "unspecified"
-    return "invalid"
-
-
-def collect_preview_assumption(label, display_name):
-    props = FRAME_PROPS_BY_LABEL.get(label)
-    if props is None:
-        return None
-
-    color_metadata_incomplete = False
-    for key in FRAME_PROP_ALIASES:
-        try:
-            raw_value = _read_prop(props, key)
-        except Exception:
-            color_metadata_incomplete = True
-            continue
-
-        parsed_value = _parse_frame_prop_int(raw_value)
-        if parsed_value is None or parsed_value == UNSPECIFIED_FRAME_PROP:
-            color_metadata_incomplete = True
-
-    range_issue = _range_issue(props)
-    if not color_metadata_incomplete and range_issue is None:
-        return None
-
-    assumption = {"source": display_name}
-    if color_metadata_incomplete:
-        assumption["preview"] = (
-            "Color metadata incomplete; using standard display defaults (BT.709)"
-        )
-    if range_issue is not None:
-        assumption["range"] = (
-            f"Color-range metadata {range_issue}; VSView infers preview range"
-        )
-    return assumption
-
-
-def apply_preview_defaults(core, clip, label):
-    props = FRAME_PROPS_BY_LABEL.get(label)
-    if props is None:
-        return clip
-
-    defaults = {}
-    for key in FRAME_PROP_ALIASES:
-        try:
-            parsed_value = _parse_frame_prop_int(_read_prop(props, key))
-        except Exception:
-            parsed_value = None
-        if parsed_value is None or parsed_value == UNSPECIFIED_FRAME_PROP:
-            defaults[key] = 1
-    if not defaults:
-        return clip
-    return core.std.SetFrameProps(clip, **defaults)
-'''
-    )
-
-
-def _build_clip_data_section(
-    reference: Path,
-    comparisons: list[Path],
-    suggested_offsets_by_key: dict[str, int | None],
-    audio_review_by_key: dict[str, str],
-    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None,
-    presentation_names_by_stem: dict[str, str] | None,
-    short_names_by_stem: dict[str, str] | None = None,
-) -> str:
-    presentation_names = presentation_names_by_stem or {}
-    targets_lines: list[str] = []
-    for comp in comparisons:
-        comparison_key = f"{reference.stem}:{comp.stem}"
-        suggested_offset = suggested_offsets_by_key.get(comparison_key)
-        audio_review = audio_review_by_key[comparison_key]
-        suggested_offset_value = "None" if suggested_offset is None else str(suggested_offset)
-        targets_lines.append(
-            f"    {json.dumps(comp.stem)}: {{"
-            f'"path": {json.dumps(str(comp))}, '
-            f'"index_path": {json.dumps(str(source_index_path(comp)))}, '
-            f'"display_name": {json.dumps(presentation_names.get(comp.stem, comp.stem))}, '
-            f'"comparison_key": {json.dumps(comparison_key)}, '
-            f'"suggested_offset": {suggested_offset_value}'
-            f', "audio_review": {json.dumps(audio_review)}'
-            "},"
-        )
-
-    targets_content = "\n".join(targets_lines)
-    frame_props_content = json.dumps(
-        _preview_frame_props_for_script(frame_props_by_stem),
-        sort_keys=True,
-        indent=4,
-        allow_nan=False,
-    )
-    metadata_keys_content = json.dumps(
-        {
-            "version": ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
-            "session_id": ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
-            "alignment_key": ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
-            "ordinal": ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
-            "role": ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
-            "name": ALIGNMENT_REVIEW_METADATA_NAME_KEY,
-            "suggested_offset": ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
-            "audio_review": ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
-        },
-        sort_keys=True,
-    )
-    short_names_content = json.dumps(short_names_by_stem or {}, sort_keys=True)
-
-    return f"""\
-# ─── Clip Data ────────────────────────────────────────────────────────────────
-REFERENCE = {{
-    "label": {json.dumps(reference.stem)},
-    "path": {json.dumps(str(reference))},
-    "index_path": {json.dumps(str(source_index_path(reference)))},
-    "display_name": {json.dumps(presentation_names.get(reference.stem, reference.stem))},
-}}
-
-TARGETS = {{
-{targets_content}
-}}
-
-FRAME_PROPS_BY_LABEL = {frame_props_content}
-SHORT_NAMES = {short_names_content}
-REVIEW_METADATA_VERSION = {ALIGNMENT_REVIEW_METADATA_VERSION}
-REVIEW_METADATA_KEYS = {metadata_keys_content}
-"""
-
-
 def _preview_frame_props_for_script(
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None,
 ) -> dict[str, dict[str, str | int]]:
@@ -441,253 +111,6 @@ def _preview_frame_props_for_script(
     return props_for_script
 
 
-def _build_main_execution_section() -> str:
-    return """\
-# ─── Main ─────────────────────────────────────────────────────────────────────
-def _reference_metadata(session_id):
-    return {
-        REVIEW_METADATA_KEYS["version"]: REVIEW_METADATA_VERSION,
-        REVIEW_METADATA_KEYS["session_id"]: session_id,
-        REVIEW_METADATA_KEYS["role"]: "reference",
-        REVIEW_METADATA_KEYS["name"]: REFERENCE["display_name"],
-    }
-
-
-def _comparison_metadata(session_id, target, comparison_number):
-    return {
-        REVIEW_METADATA_KEYS["version"]: REVIEW_METADATA_VERSION,
-        REVIEW_METADATA_KEYS["session_id"]: session_id,
-        REVIEW_METADATA_KEYS["alignment_key"]: target["comparison_key"],
-        REVIEW_METADATA_KEYS["ordinal"]: comparison_number,
-        REVIEW_METADATA_KEYS["role"]: "comparison",
-        REVIEW_METADATA_KEYS["name"]: target["display_name"],
-        REVIEW_METADATA_KEYS["suggested_offset"]: target["suggested_offset"],
-        REVIEW_METADATA_KEYS["audio_review"]: target["audio_review"],
-    }
-
-
-def main():
-    if not TARGETS:
-        safe_print(_status_line("[FAIL]", "Alignment review requires every comparison"))
-        sys.exit(1)
-    try:
-        import vapoursynth as vs
-    except ImportError:
-        safe_print(_status_line("[FAIL]", "VapourSynth is unavailable"))
-        sys.exit(1)
-    try:
-        from vsview import set_output
-    except ImportError:
-        safe_print(_status_line("[FAIL]", "VSView output API is unavailable"))
-        sys.exit(1)
-    core = vs.core
-    try:
-        load_source = resolve_lwlibavsource(core)
-    except RuntimeError as e:
-        safe_print(_status_line("[FAIL]", f"Failed to resolve LWLibavSource loader: {e}"))
-        sys.exit(1)
-
-    ref_path = Path(REFERENCE["path"])
-    if not ref_path.exists():
-        safe_print(_status_line("[FAIL]", f"Reference not found: {ref_path}"))
-        sys.exit(1)
-
-    try:
-        ref_clip = load_preview_source(
-            load_source,
-            ref_path,
-            Path(REFERENCE["index_path"]),
-            REFERENCE["display_name"],
-        )
-    except Exception as e:
-        safe_print(_status_line("[FAIL]", f"Reference source could not be loaded: {e}"))
-        sys.exit(1)
-
-    ref_fps_num = ref_clip.fps.numerator
-    ref_fps_den = ref_clip.fps.denominator
-    preview_assumptions = []
-    ref_assumption = collect_preview_assumption(
-        REFERENCE["label"], REFERENCE["display_name"]
-    )
-    if ref_assumption is not None:
-        preview_assumptions.append(ref_assumption)
-    ref_clip = apply_preview_defaults(core, ref_clip, REFERENCE["label"])
-
-    # Apply overlay to reference (best-effort)
-    try:
-        ref_clip = core.text.Text(
-            ref_clip,
-            f"REF: {REFERENCE['display_name']}\\n"
-            "Open Tool Panel -> Frame Compare Alignment Review.\\n"
-            "Unlink playheads, then position every source on the same visible moment.",
-            alignment=7,
-        )
-    except Exception:
-        safe_print(_status_line("[WARN]", "Could not apply reference text overlay"))
-
-    prepared_comparisons = []
-    ready_hints = []
-
-    for comparison_number, (label, target) in enumerate(TARGETS.items(), start=1):
-        comp_path = Path(target["path"])
-        display_name = target["display_name"]
-        if not comp_path.exists():
-            safe_print(_status_line("[FAIL]", f"Comparison source not found: {comp_path}"))
-            sys.exit(1)
-
-        try:
-            comp_clip = load_preview_source(
-                load_source,
-                comp_path,
-                Path(target["index_path"]),
-                display_name,
-            )
-        except Exception as e:
-            safe_print(_status_line("[FAIL]", f"Comparison source could not be loaded: {e}"))
-            sys.exit(1)
-
-        comp_assumption = collect_preview_assumption(label, display_name)
-        if comp_assumption is not None:
-            preview_assumptions.append(comp_assumption)
-
-        # FPS harmonization: apply AssumeFPS to match reference
-        comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
-        comp_clip = apply_preview_defaults(core, comp_clip, label)
-
-        suggested_offset = target["suggested_offset"]
-        audio_review = json.loads(target["audio_review"])
-        audio_attempt = audio_review["audio_attempt"]
-        raw_decision = (
-            audio_attempt.get("decision") if isinstance(audio_attempt, dict) else None
-        )
-        try:
-            audio_decision = (
-                None
-                if raw_decision is None
-                else evidence_from_payload(AudioAlignmentDecision, raw_decision)
-            )
-        except ValueError:
-            audio_decision = None
-        candidate_offset = (
-            None
-            if audio_decision is None or audio_decision.candidate is None
-            else audio_decision.candidate.frame_offset
-        )
-        audio_attempt_unusable = audio_attempt is not None and (
-            audio_decision is None or candidate_offset is None
-        )
-        authority = audio_review["current_authority"]
-        if (
-            audio_decision is not None
-            and audio_decision.state == "provisional"
-            and candidate_offset is not None
-        ):
-            audio_hint = f"Provisional {candidate_offset:+d}f - NOT APPLIED"
-            hint_pair = "Verify manually; this candidate is not a confirmed alignment"
-            trim_hint = f"Reason: {audio_decision.primary_reason}"
-        elif audio_decision is not None and audio_decision.state == "trusted_automatic":
-            # U4 video-confirm seam: U3 decisions never reach trusted_automatic.
-            audio_hint = f"Audio alignment accepted: {suggested_offset:+d}f"
-            hint_pair = (
-                "No relative audio correction required"
-                if suggested_offset == 0
-                else f"Accepted origin pair: REF {max(suggested_offset, 0)} <-> "
-                f"CMP {max(-suggested_offset, 0)}"
-            )
-            trim_hint = "Accepted by the recorded automatic policy"
-        elif authority["origin"] in {
-            "interactive_confirmed_this_run",
-            "shared_previous_offsets",
-            "preexisting_manual_override",
-        }:
-            audio_hint = f"Current alignment: {suggested_offset:+d}f — manually confirmed"
-            hint_pair = "Historical audio details unavailable"
-            trim_hint = "Manual authority is separate from audio evidence"
-        elif audio_attempt_unusable or suggested_offset is None:
-            audio_hint = "No usable audio candidate"
-            hint_pair = "No automatic correction applied"
-            trim_hint = "Enter known offsets or align the sources manually"
-        else:
-            audio_hint = f"Reused accepted audio alignment: {suggested_offset:+d}f"
-            hint_pair = "Historical chunk and selected-stream details unavailable"
-            trim_hint = "No audio analysis ran this time"
-
-        ready_hints.append((label, audio_hint))
-
-        # Apply comparison identity, hint, and review guidance (best-effort)
-        try:
-            overlay_text = (
-                f"CMP: {display_name}\\n"
-                f"Audio hint: {audio_hint}\\n"
-                f"{hint_pair}\\n"
-                f"{trim_hint}\\n"
-                "Open Tool Panel -> Frame Compare Alignment Review.\\n"
-                "Unlink playheads, then position every source on the same visible moment."
-            )
-            comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
-        except Exception:
-            safe_print(_status_line("[WARN]", "Could not apply comparison text overlay"))
-
-        prepared_comparisons.append((comparison_number, label, target, comp_clip))
-
-    session_id = Path(__file__).stem.rpartition("_")[2]
-    try:
-        set_output(ref_clip, 0, "Reference", **_reference_metadata(session_id))
-        for comparison_number, _label, target, comparison_clip in prepared_comparisons:
-            set_output(
-                comparison_clip,
-                comparison_number,
-                f"Comparison {comparison_number}",
-                **_comparison_metadata(session_id, target, comparison_number),
-            )
-    except Exception as e:
-        safe_print(
-            _status_line("[FAIL]", f"Alignment review outputs could not be registered: {e}")
-        )
-        sys.exit(1)
-
-    if preview_assumptions:
-        safe_print("\\n" + _status_line("[WARN]", "VSView Display Assumptions"))
-        for assumption_number, assumption in enumerate(preview_assumptions):
-            if assumption_number:
-                safe_print()
-            safe_print(f"    {_key('source')}      {_value(assumption['source'])}")
-            if "preview" in assumption:
-                safe_print(f"    {_key('preview')}     {_hint(assumption['preview'])}")
-            if "range" in assumption:
-                safe_print(f"    {_key('range')}       {_hint(assumption['range'])}")
-            safe_print(
-                f"    {_key('impact')}      "
-                f"{_hint('Preview only; source, render, and report unchanged')}"
-            )
-
-    ready_prefix = "\\n" if preview_assumptions else ""
-    safe_print(
-        ready_prefix + _header(f"{_glyph('waiting')} VSView is open \\u00b7 waiting for you")
-    )
-    safe_print("  1  Open Tool Panel " + _arrow() + " Frame Compare Alignment Review.")
-    safe_print("  2  Unlink playheads, then position every source on the same visible moment.")
-    safe_print("  3  Save the alignment in the panel, then close VSView to continue Frame Compare.")
-    safe_print("")
-    safe_print("  outputs  0  " + REFERENCE["display_name"])
-    for comparison_number, _label, target, _comparison_clip in prepared_comparisons:
-        safe_print("           " + str(comparison_number) + "  " + target["display_name"])
-    ready_hint_rows = []
-    for label, audio_hint in ready_hints:
-        ready_hint_rows.append(
-            (SHORT_NAMES.get(label, TARGETS[label]["display_name"]), audio_hint)
-        )
-    if ready_hint_rows:
-        hint_width = max(len(name) for name, _hint_text in ready_hint_rows)
-        first_hint_name, first_hint_text = ready_hint_rows[0]
-        safe_print("  hints    " + first_hint_name.ljust(hint_width) + "  " + first_hint_text)
-        for hint_name, hint_text in ready_hint_rows[1:]:
-            safe_print("           " + hint_name.ljust(hint_width) + "  " + hint_text)
-
-main()
-"""
-
-
 def _build_script_content(
     reference: Path,
     comparisons: list[Path],
@@ -698,26 +121,55 @@ def _build_script_content(
     short_names_by_stem: dict[str, str] | None = None,
     memory_limit_mb: int | None = None,
 ) -> str:
-    """Build the script content for VSView.
+    """Build deterministic inputs and a small bootstrap, preserving source order."""
+    presentation_names = presentation_names_by_stem or {}
+    targets: dict[str, ComparisonSource] = {}
+    for comparison in comparisons:
+        key = f"{reference.stem}:{comparison.stem}"
+        targets[comparison.stem] = {
+            "path": str(comparison),
+            "index_path": str(source_index_path(comparison)),
+            "display_name": presentation_names.get(comparison.stem, comparison.stem),
+            "comparison_key": key,
+            "suggested_offset": suggested_offsets_by_key.get(key),
+            "audio_review": audio_review_by_key[key],
+        }
+    frame_props = _preview_frame_props_for_script(frame_props_by_stem)
+    data: SessionData = {
+        "reference": {
+            "label": reference.stem,
+            "path": str(reference),
+            "index_path": str(source_index_path(reference)),
+            "display_name": presentation_names.get(reference.stem, reference.stem),
+        },
+        "targets": targets,
+        "frame_props_by_label": {
+            label: dict(sorted(props.items())) for label, props in sorted(frame_props.items())
+        },
+        "short_names": dict(sorted((short_names_by_stem or {}).items())),
+        "memory_limit_mb": memory_limit_mb,
+    }
+    # Target insertion order is the user's output order; sorting the whole payload
+    # would change comparison ordinals. Encode JSON as a Python string literal so
+    # arbitrary filenames and JSON null/booleans remain data rather than source.
+    payload = json.dumps(data, ensure_ascii=True, allow_nan=False, indent=4)
+    return f'''#!/usr/bin/env python3
+"""VSView alignment verification session.
 
-    This content is deterministic for the same inputs (no timestamp in body).
-    """
-    header = _build_script_header()
-    helpers = _build_helpers_section()
-    clip_data = _build_clip_data_section(
-        reference,
-        comparisons,
-        suggested_offsets_by_key,
-        audio_review_by_key,
-        frame_props_by_stem,
-        presentation_names_by_stem,
-        short_names_by_stem,
-    )
-    main_execution = _build_main_execution_section()
-    if memory_limit_mb is not None:
-        main_execution = main_execution.replace(
-            "    core = vs.core\n",
-            f"    core = vs.core\n    core.max_cache_size = {memory_limit_mb}\n",
-        )
+Sign convention:
+    + trims reference (comparison starts AFTER reference)
+    - trims comparison (comparison starts BEFORE reference)
 
-    return f"{header}\n\n{helpers}\n\n\n{clip_data}\n\n{main_execution}"
+Audio-derived offsets shown here are hints only. This session displays
+untrimmed source clips so the operator can inspect source-frame positions.
+"""
+import json
+from pathlib import Path
+from typing import cast
+
+from frame_compare.vsview.session_runtime import SessionData, run_session
+
+SESSION_DATA = cast(SessionData, json.loads({payload!r}))
+
+run_session(SESSION_DATA, Path(__file__))
+'''

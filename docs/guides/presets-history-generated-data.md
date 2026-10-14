@@ -1,12 +1,17 @@
+---
+description: Where Frame Compare keeps run folders and caches, how to reopen past runs, and how to save presets.
+---
+
 # Presets, history, and generated data
 
-Frame Compare separates authored configuration from generated run state. Presets help
-reuse intentional settings, while history reads persisted run results from the selected
-generated-data root.
+Frame Compare keeps your configuration separate from what runs produce. This guide
+covers where run folders and caches go, how to reopen a past run, and how to save
+settings
+as a preset.
 
 ## Choose a durable generated-data location
 
-`paths.generated_dir` owns:
+`paths.generated_dir` sets the generated-data root, which holds:
 
 - reserved run folders;
 - screenshots and reports;
@@ -44,8 +49,9 @@ Environment variables and platform-specific path rules are documented in the
     └── run_result.toml
 ```
 
-The top-level shared cache is not a history entry. Each immediate run folder is
-self-contained for review, while selected caches remain reusable across compatible runs.
+History reads persisted run results from the selected generated-data root. It excludes
+the top-level shared cache. Each immediate run folder is self-contained for review,
+while selected caches remain reusable across compatible runs.
 
 See [Output layout](../reference/output-layout.md) for ownership and portability rules.
 
@@ -71,8 +77,9 @@ frame-compare history list --json
 frame-compare history open <run-name>
 ```
 
-History uses exact run names rather than fuzzy matching. It is read-only: the current
-command surface does not rename, delete, replay, or migrate runs.
+History opens the exact run name you give it. It uses no fuzzy matching and is
+read-only:
+it does not rename, delete, replay, or migrate runs.
 
 ## Save a preset
 
@@ -80,8 +87,8 @@ command surface does not rename, delete, replay, or migrate runs.
 frame-compare preset save publication-quality
 ```
 
-Presets are appropriate for reusable comparison intent such as frame counts, overlays,
-analysis mode, and publishing policy. Generated preset files omit runtime secrets.
+Use presets to reuse settings such as frame counts, overlays, analysis mode, and
+publishing policy. Generated preset files omit runtime secrets.
 User-authored symlinks for the preset directory remain supported: `preset save` follows
 the directory link and writes the preset file to its resolved target.
 
@@ -104,17 +111,19 @@ frame-compare preset list
 
 Generated configuration and preset writes exclude sensitive values such as webhook URLs
 and TMDB API keys. Supply secrets through environment variables or an external secret
-manager rather than committing them to TOML.
+manager. Keep them out of committed TOML files.
 
 ## Cache maintenance
 
-Cache reuse is performance-first. Source identity uses path, size, and modification time
-rather than hashing multi-gigabyte media. If a workflow replaces media while preserving
-all three values, clear the relevant cache or advance the modification time.
+Frame Compare uses path, size, and modification time to identify sources for cache
+reuse.
+It avoids hashing multi-gigabyte media to reduce the work needed to reuse a cache. If a
+workflow replaces media while preserving all three values, clear the relevant cache or
+advance the modification time.
 
 For unmanaged native runtimes, clear generated caches and Frame Compare-owned indexes
 after replacing FFmpeg, VapourSynth, or decoder/plugin binaries outside the managed
 profile contract.
 
 Do not delete the complete generated-data root merely to solve one stale entry. Remove
-the smallest relevant cache or run directory after confirming it is safe to discard.
+the smallest relevant cache or run folder after confirming it is safe to discard.

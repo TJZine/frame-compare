@@ -69,6 +69,20 @@ class AlignmentVSViewOutcome:
         "no_result",
     ]
     confirmed_frame_pairs: tuple[tuple[str, int, int], ...] = ()
+    review_seconds: float = 0.0
+    comparisons_kept: int = 0
+
+    @property
+    def summary(self) -> AlignmentReviewSummary:
+        reviewed = self.review_outcome in ("confirmed", "keep_current")
+        confirmed = len(self.confirmed_offsets or {})
+        return AlignmentReviewSummary(
+            review_ran=reviewed,
+            pairs_confirmed=confirmed,
+            comparisons_kept=self.comparisons_kept,
+            review_seconds=self.review_seconds,
+            review_unresolved=self.review_outcome in ("no_result", "rejected_result"),
+        )
 
 
 def _current_tty_status() -> _TTYStatus:
@@ -318,7 +332,6 @@ def maybe_launch_alignment_vsview(
     progress: ProgressReporter | None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     verbose: bool = False,
-    review_summary: AlignmentReviewSummary | None = None,
 ) -> AlignmentVSViewOutcome:
     """Launch one native review and apply only a complete, trusted result."""
     raise_if_cancelling()
@@ -358,6 +371,7 @@ def maybe_launch_alignment_vsview(
     reference_path = reference.path
     comparison_paths = [comparison.path for comparison in comparisons]
     progress_suspended = _suspend_progress_for_interaction(progress)
+    review_seconds = 0.0
     try:
         session, wait_seconds = launch_alignment_verification_session(
             request=VSViewSessionRequest(
@@ -393,12 +407,11 @@ def maybe_launch_alignment_vsview(
                 verbose=verbose,
             ),
         )
-        if review_summary is not None:
-            review_summary.review_seconds = max(0.0, wait_seconds)
+        review_seconds = max(0.0, wait_seconds)
         if launch_decision.no_tty:
             _log_no_tty(session.script_path, tty_status)
         if not launch_decision.enabled:
-            return AlignmentVSViewOutcome(None, "no_result")
+            return AlignmentVSViewOutcome(None, "no_result", review_seconds=review_seconds)
         try:
             result = read_alignment_review_result(
                 session,
@@ -406,7 +419,7 @@ def maybe_launch_alignment_vsview(
             )
         except AlignmentReviewContractError as exc:
             _handle_invalid_result(exc, config=config, tty_status=tty_status)
-            return AlignmentVSViewOutcome(None, "rejected_result")
+            return AlignmentVSViewOutcome(None, "rejected_result", review_seconds=review_seconds)
 
         raise_if_cancelling()
         confirmed_offsets = _confirmed_offsets(result)
@@ -421,10 +434,6 @@ def maybe_launch_alignment_vsview(
         kept_count = len(result.decisions) - len(confirmed_offsets)
         pairs_confirmed = len(confirmed_offsets)
         message = format_vsview_review_message(pairs_confirmed, kept_count)
-        if review_summary is not None:
-            review_summary.review_ran = True
-            review_summary.pairs_confirmed = pairs_confirmed
-            review_summary.comparisons_kept = kept_count
         print_vsview_review_result(
             accepted=True,
             message=message,
@@ -434,6 +443,8 @@ def maybe_launch_alignment_vsview(
             confirmed_offsets,
             "confirmed" if confirmed_offsets else "keep_current",
             _confirmed_frame_pairs(result),
+            review_seconds=review_seconds,
+            comparisons_kept=kept_count,
         )
     except VSViewError as exc:
         if config.force_interactive:
@@ -447,4 +458,4 @@ def maybe_launch_alignment_vsview(
     finally:
         if progress_suspended and progress is not None:
             progress.resume()
-    return AlignmentVSViewOutcome(None, "no_result")
+    return AlignmentVSViewOutcome(None, "no_result", review_seconds=review_seconds)

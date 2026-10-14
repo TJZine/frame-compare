@@ -8,6 +8,7 @@ import structlog
 
 from frame_compare.config.schema_enums import VsScreenshotWriter
 from frame_compare.render.types import PreparedRenderSource, Renderer
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.media_facts import PresentationState
 
 if TYPE_CHECKING:
@@ -90,6 +91,7 @@ def is_hdr_via_runner(path: Path, runner: FFmpegRunner) -> bool:
     from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
     from frame_compare.vs.errors import SourceLoadError
 
+    raise_if_cancelling()
     try:
         metadata = runner.probe_hdr(path)
     except FFmpegNotFoundError:
@@ -115,6 +117,7 @@ def _apply_vs_tonemap_and_labeling(
     config: ConfigSchema,
 ) -> tuple[vs.VideoNode, TonemapSettings | None]:
     """Handles VapourSynth tonemap settings resolution and application."""
+    raise_if_cancelling()
     if should_tonemap(source_info, config):
         from frame_compare.vs.tonemap import apply_tonemap
 
@@ -230,6 +233,7 @@ def prepare_clip_for_render(
         VapourSynthNotFoundError,
     )
 
+    raise_if_cancelling()
     if ffmpeg_runner is None:
         from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 
@@ -249,6 +253,7 @@ def prepare_clip_for_render(
             from frame_compare.vs.loader import DefaultVSLoader
 
             loader = DefaultVSLoader(memory_limit_mb=config.runtime.memory_limit_mb)
+            raise_if_cancelling()
             source_info = loader.load(clip_path)
             diagnostic_source = source_info.clip
             prepared_clip = source_info.clip
@@ -265,6 +270,8 @@ def prepare_clip_for_render(
             vs_load_failure = exc
         except Exception as e:
             raise RenderError(reason=f"{type(e).__name__}: {e}") from e
+
+    raise_if_cancelling()
 
     # === DETERMINISTIC FALLBACK LOGIC (§1.4.1, §1.4.4) ===
     if vs_load_failure is not None and renderer == "auto":

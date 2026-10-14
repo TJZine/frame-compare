@@ -9,6 +9,7 @@ from hashlib import file_digest
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.hdr_probe import probe_hdr_metadata
@@ -72,6 +73,7 @@ def load_source(
         PluginNotFoundError: If the L-SMASH Works plugin is unavailable (FC-2003).
         SourceLoadError: If the source cannot be loaded or inspected (FC-4015).
     """
+    raise_if_cancelling()
     if core is None:
         core = ensure_vs_environment()
 
@@ -94,12 +96,14 @@ def load_source(
             path=Path(path),
             loader_kwargs=loader_kwargs,
         )
+        raise_if_cancelling()
         frame = clip.get_frame(0)
         clip_fps = cast(_VideoNodeWithFps, clip).fps
         fps = Fraction(clip_fps.numerator, clip_fps.denominator)
         frame_props = dict(frame.props)
         probed_metadata = None
         if hdr_signal_is_unspecified(frame_props):
+            raise_if_cancelling()
             probed_metadata = probe_hdr_metadata(Path(path))
         is_hdr, hdr_metadata = detect_hdr(frame_props, probed_metadata)
     except PluginNotFoundError:
@@ -179,12 +183,14 @@ def _load_lwlibav_source(
         "cachefile": str(index_path),
         **loader_kwargs,
     }
+    raise_if_cancelling()
     try:
         return loader.LWLibavSource(str(path), **indexed_kwargs)
     except Exception as original_error:
         if not _is_index_construction_failure(original_error):
             raise
 
+        raise_if_cancelling()
         if index_path.is_file():
             try:
                 index_path.unlink()
@@ -195,6 +201,7 @@ def _load_lwlibav_source(
                     error,
                 )
             else:
+                raise_if_cancelling()
                 try:
                     return loader.LWLibavSource(str(path), **indexed_kwargs)
                 except Exception as retry_error:
@@ -211,6 +218,7 @@ def _load_lwlibav_source(
             path,
         )
 
+        raise_if_cancelling()
         try:
             return loader.LWLibavSource(str(path), cache=0, **loader_kwargs)
         except Exception as retry_error:

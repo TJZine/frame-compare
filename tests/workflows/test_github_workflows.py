@@ -178,6 +178,7 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
         "Dockerfile",
         "docker-compose*.yml",
         "tools/verify_docker_*.sh",
+        "tools/docker_runtime_smoke.py",
         "tools/checkout_source_commit.sh",
         ".dockerignore",
         ".github/workflows/docker-integration.yml",
@@ -341,7 +342,7 @@ def test_ci_keeps_test_audit_browser_and_distribution_gates(
     assert "uv run --no-sync ruff check ." in lint_run
     assert "uv run --no-sync ruff format --check ." in lint_run
     test_run = "\n".join(str(step.get("run", "")) for step in jobs["test"]["steps"])
-    assert "pytest -q -n auto --dist loadgroup" in test_run
+    assert "pytest -q -n auto --dist loadgroup --ignore=tests/browser" in test_run
     browser_runs = [str(step.get("run", "")) for step in jobs["report-browser"]["steps"]]
     assert any("command -v google-chrome" in run for run in browser_runs)
     assert any("tests/browser/test_report_browser_smoke.py" in run for run in browser_runs)

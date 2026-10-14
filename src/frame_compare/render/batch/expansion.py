@@ -27,6 +27,7 @@ from frame_compare.render.types import (
     RenderRequest,
     ScreenshotBatchRequest,
 )
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     RenderedGeometryFacts,
@@ -103,16 +104,19 @@ def expand_batch_render_requests(
         for batch in batch_requests
     ]
     validate_screenshot_paths([path for paths in output_paths for path in paths])
-    prepared = [
-        prepare_clip_for_render(
-            request.clip_path,
-            renderer,
-            config,
-            ffmpeg_runner=ffmpeg_runner,
-            source_is_hdr=request.signal.is_hdr,
+    prepared: list[PreparedRenderSource] = []
+    for request in batch_requests:
+        raise_if_cancelling()
+        prepared.append(
+            prepare_clip_for_render(
+                request.clip_path,
+                renderer,
+                config,
+                ffmpeg_runner=ffmpeg_runner,
+                source_is_hdr=request.signal.is_hdr,
+            )
         )
-        for request in batch_requests
-    ]
+    raise_if_cancelling()
     plans = _geometry_plans(batch_requests, prepared, config)
     requests: list[RenderRequest] = []
     ranges: dict[str, range] = {}

@@ -1,6 +1,12 @@
+---
+description: Every Frame Compare command and option, and the exit codes it returns.
+---
+
 # Commands
 
-This page lists every command and option; exact behavior is in the [CLI behavioral contract](../current-cli-contract.md).
+Every command and option, with what it changes and whether `--write-config` saves it.
+For exact output streams and JSON fields, see the
+[CLI behavioral contract](../current-cli-contract.md).
 
 ## Command map
 
@@ -34,52 +40,257 @@ The installed Windows shim supplies the bundle or AppData config when you omit
 Options apply to one run; `--write-config` saves the options marked "Saved" and
 exits without running.
 
-| Option | Value | Effect | Saved by `--write-config` |
-| --- | --- | --- | --- |
-| `--root`, `-r` | path | Workspace root | No |
-| `--config`, `-c` | path | Config file | No |
-| `--input`, `-i` | path | Input directory | `paths.input_dir` |
-| `--frames` | `FRAME[,FRAME…]` | Reference source frames to render | `analysis.user_frames` |
-| `--random-frame-count` | count | Random frames | `analysis.random_frame_count` |
-| `--dark-frame-count` | count | Dark frames; needs analysis | `analysis.dark_frame_count` |
-| `--bright-frame-count` | count | Bright frames; needs analysis | `analysis.bright_frame_count` |
-| `--motion-frame-count` | count | Motion frames; needs analysis | `analysis.motion_frame_count` |
-| `--seed` | integer | Frame-selection seed | `analysis.random_seed` |
-| `--tm-preset` | preset name | Tonemap preset | `color.preset` |
-| `--tm-target` | nits | Tonemap target | `color.target_nits` |
-| `--tm-curve` | `bt2390`, `spline`, `reinhard` | Tonemap curve | `color.tone_curve` |
-| `--overlay` | `minimal`, `standard`, `diagnostic`, `none` | Baked overlay mode | `screenshots.overlay_mode` |
-| `--force-interactive-alignment` | — | Require a successful VSView review | `audio_alignment.force_interactive` and `audio_alignment.use_vsview` |
-| `--no-upload` | — | Turn slow.pics upload off | `slowpics.auto_upload = false` |
-| `--skip-analysis` | — | Skip metric analysis; dark, bright, and motion counts must be zero | No |
-| `--skip-metadata` | — | Skip the TMDB lookup | No |
-| `--no-cache` | — | Do not read or write the analysis cache | No |
-| `--from-cache-only` | — | Require valid cached analysis; never recompute | No |
-| `--dry-run` | — | Show what a run would use and create, without side effects | No |
-| `--write-config` | — | Save the effective configuration and exit | No |
-| `--diagnose-paths` | — | Print resolved paths as JSON and exit | No |
-| `--json` | — | Machine-readable output on stdout; diagnostics on stderr | No |
-| `--no-color` | — | Plain output | No |
-| `--quiet`, `-q` | — | Hide progress and detailed summaries | No |
-| `--verbose`, `-v` | — | Debug logging and detailed errors | No |
-
 Runs and dry runs reject `--no-cache` combined with `--from-cache-only`
 ([`--no-cache` and `--from-cache-only`](../current-cli-contract.md#run-command-contract)).
 An invalid `--overlay`, `--tm-preset`, or `--tm-curve` value names the option and
 lists its choices before any work starts. Preset names are `reference`, `filmic`,
 `contrast`, `bt2390_spec`, `spline`, `bright_lift`, and `highlight_guard`.
 
-`frame-compare run --help` lists the same options under six headings: Workspace and
-configuration, Sources and frame selection, Rendering and alignment, Reports and
-publishing, Planning and diagnostics, and Output modes.
+`frame-compare run --help` groups the options under the same six headings as this
+section.
+
+### Workspace and configuration
+
+#### `--root`, `-r` { #run-root .fc-key }
+
+Value
+:   path
+
+Saved by `--write-config`
+:   No
+
+Workspace root.
+
+#### `--config`, `-c` { #run-config .fc-key }
+
+Value
+:   path
+
+Saved by `--write-config`
+:   No
+
+Config file.
+
+### Sources and frame selection
+
+#### `--input`, `-i` { #run-input .fc-key }
+
+Value
+:   path
+
+Saved by `--write-config`
+:   `paths.input_dir`
+
+Input directory.
+
+#### `--frames` { #run-frames .fc-key }
+
+Value
+:   `FRAME[,FRAME…]`
+
+Saved by `--write-config`
+:   `analysis.user_frames`
+
+Reference source frames to render.
+
+#### `--random-frame-count` { #run-random-frame-count .fc-key }
+
+Value
+:   count
+
+Saved by `--write-config`
+:   `analysis.random_frame_count`
+
+Random frames.
+
+#### `--dark-frame-count` { #run-dark-frame-count .fc-key }
+
+Value
+:   count
+
+Saved by `--write-config`
+:   `analysis.dark_frame_count`
+
+Dark frames; needs analysis.
+
+#### `--bright-frame-count` { #run-bright-frame-count .fc-key }
+
+Value
+:   count
+
+Saved by `--write-config`
+:   `analysis.bright_frame_count`
+
+Bright frames; needs analysis.
+
+#### `--motion-frame-count` { #run-motion-frame-count .fc-key }
+
+Value
+:   count
+
+Saved by `--write-config`
+:   `analysis.motion_frame_count`
+
+Motion frames; needs analysis.
+
+#### `--seed` { #run-seed .fc-key }
+
+Value
+:   integer
+
+Saved by `--write-config`
+:   `analysis.random_seed`
+
+Frame-selection seed.
+
+### Rendering and alignment
+
+#### `--tm-preset` { #run-tm-preset .fc-key }
+
+Value
+:   preset name
+
+Saved by `--write-config`
+:   `color.preset`
+
+Tonemap preset.
+
+#### `--tm-target` { #run-tm-target .fc-key }
+
+Value
+:   nits
+
+Saved by `--write-config`
+:   `color.target_nits`
+
+Tonemap target.
+
+#### `--tm-curve` { #run-tm-curve .fc-key }
+
+Value
+:   `bt2390`, `spline`, `reinhard`
+
+Saved by `--write-config`
+:   `color.tone_curve`
+
+Tonemap curve.
+
+#### `--overlay` { #run-overlay .fc-key }
+
+Value
+:   `minimal`, `standard`, `diagnostic`, `none`
+
+Saved by `--write-config`
+:   `screenshots.overlay_mode`
+
+Baked overlay mode.
+
+#### `--force-interactive-alignment` { #run-force-interactive-alignment .fc-key }
+
+Saved by `--write-config`
+:   `audio_alignment.force_interactive` and `audio_alignment.use_vsview`
+
+Require a successful VSView review.
+
+### Reports and publishing
+
+#### `--no-upload` { #run-no-upload .fc-key }
+
+Saved by `--write-config`
+:   `slowpics.auto_upload = false`
+
+Turn slow.pics upload off.
+
+### Planning and diagnostics
+
+#### `--skip-analysis` { #run-skip-analysis .fc-key }
+
+Saved by `--write-config`
+:   No
+
+Skip metric analysis; dark, bright, and motion counts must be zero.
+
+#### `--skip-metadata` { #run-skip-metadata .fc-key }
+
+Saved by `--write-config`
+:   No
+
+Skip the TMDB lookup.
+
+#### `--no-cache` { #run-no-cache .fc-key }
+
+Saved by `--write-config`
+:   No
+
+Do not read or write the analysis cache.
+
+#### `--from-cache-only` { #run-from-cache-only .fc-key }
+
+Saved by `--write-config`
+:   No
+
+Require valid cached analysis; never recompute.
+
+#### `--dry-run` { #run-dry-run .fc-key }
+
+Saved by `--write-config`
+:   No
+
+Show what a run would use and create, without side effects.
+
+#### `--write-config` { #run-write-config .fc-key }
+
+Saved by `--write-config`
+:   No
+
+Save the effective configuration and exit.
+
+#### `--diagnose-paths` { #run-diagnose-paths .fc-key }
+
+Saved by `--write-config`
+:   No
+
+Print resolved paths as JSON and exit.
+
+### Output modes
+
+#### `--json` { #run-json .fc-key }
+
+Saved by `--write-config`
+:   No
+
+Machine-readable output on stdout; diagnostics on stderr.
+
+#### `--no-color` { #run-no-color .fc-key }
+
+Saved by `--write-config`
+:   No
+
+Plain output.
+
+#### `--quiet`, `-q` { #run-quiet .fc-key }
+
+Saved by `--write-config`
+:   No
+
+Hide progress and detailed summaries.
+
+#### `--verbose`, `-v` { #run-verbose .fc-key }
+
+Saved by `--write-config`
+:   No
+
+Debug logging and detailed errors.
 
 ## Wizard
 
 The wizard requires an interactive terminal. It prompts for the input directory,
-generated-data location, reference, and a frame goal (`Random spot check`, `Visual
-coverage`, `Specific frame numbers`, or `Keep current frame selection`). It shows a
-review and writes only after you confirm, then prints suggested next commands. See
-[Your first comparison](../guides/first-comparison.md).
+generated-data root, reference, and a frame goal (**Random spot check**, **Visual coverage**,
+**Specific frame numbers**, or **Keep current frame selection**).
+
+It shows a review and writes only after you confirm, then prints suggested next
+commands. See
+[Your first comparison](../getting-started/first-comparison.md).
 
 ## Doctor
 
@@ -104,7 +315,22 @@ available for automation. `open` opens one report by exact name.
 
 ## Exit codes
 
-See [exit codes and error families](../current-cli-contract.md#exit-codes-and-error-families).
+Commands exit with these codes:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success, including a dry run, `--write-config`, a wizard no-op, and a declined wizard confirmation |
+| `1` | Unexpected or unclassified error |
+| `2` | Configuration error (`FC-1xxx`) or command-line usage error |
+| `3` | Dependency error (`FC-2xxx`), including a `doctor` run with a failing required check |
+| `4` | Input error (`FC-3xxx`) |
+| `5` | Processing error (`FC-4xxx`), or a run that finished unsuccessfully |
+| `6` | Network error (`FC-5xxx`) |
+| `130` | A run or the wizard interrupted by Ctrl+C, or a wizard prompt aborted or reaching end of input |
+
+The first digit of an `FC-` code selects its family and exit code. Human output prints
+the code and message on stderr; `--json` prints a typed error document, described in
+the [CLI behavioral contract](../current-cli-contract.md#output-modes).
 
 ## Automation
 
@@ -114,7 +340,7 @@ For unattended use:
 2. Use a committed secret-free config or controlled generated config.
 3. Run a dry run in deployment validation.
 4. Use `--json` and parse stdout as exactly one JSON document.
-5. Treat stderr as diagnostics rather than part of the result payload.
+5. Read diagnostics from stderr and the result payload from stdout.
 6. Disable native VSView alignment review or configure a fail-closed non-interactive path.
 7. Persist the generated-data root outside ephemeral containers or replaceable bundles.
 

@@ -99,7 +99,12 @@ only for a main-thread TTY using the asyncio Runner's SIGINT handler, then resto
 that exact handler. Persistence owners pass guards to atomic writes and abort checks
 to lock polling; generic utilities do not inspect the ambient task. Failure records
 remain writable. Main-task metric, active-rectangle sampling and source-benchmark
-loops check before each frame request. Each parallel render batch owns one
+loops check before each frame request. Render expansion checks admission before
+each source preparation. Source preparation checks between native source loading,
+frame inspection, HDR probing, and index recovery/retry operations. Tonemap preparation
+checks between capability probing, frame inspection, native conversion/filter
+operations, and fallback admission. Already admitted native work still drains before
+cleanup. Each parallel render batch owns one
 `threading.Event`: its main-thread 50 ms future-wait poll sets it on cancellation
 or a real failure, and workers check it before each render frame. Stopped units
 retain completed frame results as cleanup outcomes; real-failure ordering remains authoritative.
@@ -239,15 +244,11 @@ release identities and passes them through the batch request seam. Render worker
 present that string; `OverlayConfig.label`, overlay pixels, output paths, and
 label-keyed result mappings continue to use canonical clip labels.
 
-`docs/api.md` is generated reference material for importable conveniences. It does
-not promote package roots or module exports into supported stable APIs beyond the
-compatibility policy in the runbook.
-
 ## Persistence And Filesystem Owners
 
 The repo uses filesystem persistence, not a database.
 
-Primary owned paths:
+### Source freshness and runtime identity
 
 Source freshness for the analysis, probe, and alignment reuse caches follows one
 performance-first policy: source identity uses path, byte size, and modification
@@ -267,12 +268,16 @@ Frame Compare-owned indexes before reuse. See
 [Supported Media Runtime](supported-media-runtime.md) for the profile boundary and
 recovery requirement.
 
+### Configuration persistence
+
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
   config and preset writes; runtime `slowpics.webhook_url` and `tmdb.api_key` values
   are excluded from every generated TOML payload. The config-owned representation
   preserves authoredness of preset-controlled color fields for merging and persistence
   while retaining unrelated schema defaults.
+### Shared caches and decoder indexes
+
 - `<resolved paths.generated_dir>/cache/analysis/<label>__<fingerprint>.compframes`:
   shared analysis metrics cache (defaults to `generated/cache/analysis/` under the
   workspace root, but follows the sole configured `paths.generated_dir`). The full
@@ -355,8 +360,11 @@ recovery requirement.
   failure is warned and an unusable index location falls back to a cache-free source
   open. Generated VSView sessions reuse this exact owned path for reference and
   comparison source loads, allowing L-SMASH-Works to create it there when missing.
-  The self-contained VSView child leaves rejected parent-owned indexes untouched and
+  The managed VSView preview runtime leaves rejected parent-owned indexes untouched and
   retries only index-construction failures cache-free.
+
+### Run records and review artifacts
+
 - `<run-folder>/run_info.toml`: root-level, write-only run identity metadata version 2 written
   immediately after every run-folder reservation. It stores creation time, final
   folder name, naming source, source filenames, Frame Compare version, the full
@@ -424,6 +432,8 @@ declare the full fingerprint through deployment metadata; `doctor --json` compar
 the declaration with the code-owned expectation without trusting the environment
 value as authority. See [Supported Media Runtime](supported-media-runtime.md).
 
+### Workspace containment and run reservation
+
 `frame_compare.orchestration.preflight` owns hybrid path enforcement. The selected
 config file and configured `paths.config_dir` resolve under the workspace root after
 environment expansion and symlink resolution; escaping paths raise `FC-3009` before
@@ -476,6 +486,8 @@ settle, or to make one best-effort failure write while re-raising the original
 exception unchanged. Completed-run record failures add a stable warning and do
 not change successful media work into failure.
 
+### Alignment requests and authority
+
 The align phase uses a typed orchestration-to-services request seam:
 `frame_compare.orchestration.phase_alignment.run_align_phase()` builds a
 `frame_compare.utils.types.AlignmentRequest` for
@@ -495,6 +507,12 @@ orchestration-owned or analysis-owned identity types such as `ClipState`,
 and cache facts: offset bounds, channel strategy, selected streams, and previous
 offset reuse policy. `AlignmentConfig` carries execution and presentation
 preferences rather than a second copy of those facts.
+
+The service returns an `AlignmentOperationOutcome` containing ordered immutable
+results and an immutable `AlignmentReviewSummary`. Native review supplies the
+summary's counts, elapsed wait, and unresolved status through its returned outcome;
+the phase adapter reads that telemetry without a mutable output parameter. This
+telemetry remains memory-only and adds no persisted or result-JSON fields.
 
 Prepared identities remain frozen. Cached acceptance and persistence validate
 current path, size, and mtime against them; prompts and native review do not permit
@@ -538,6 +556,8 @@ without a mutable diagnostics side channel. `frame_compare.services.alignment_pr
 previous-offset reuse policy. Validated
 human-confirmed authority continues to reuse through the `previous_offsets` policy;
 stale-policy shared entries miss and recompute.
+
+### Audio collection and video confirmation
 
 Computed alignment work runs whole-track chunked correlation over each selected audio
 stream. `alignment_audio` owns stream probing and deterministic selection, audio and
@@ -611,6 +631,8 @@ review check-point construction. Base and examined-target positions are motion-s
 from the reference alone (the highest-motion candidate per slot), never evenly spaced.
 It never falls back to FFMS2. A missing or failing loader becomes
 `video_check_unavailable`, not a run failure.
+### Alignment evidence, reuse, and native review
+
 `frame_compare.utils.alignment_evidence` is the single definition of the v4
 evidence schema: frozen dataclasses, one strict standard-library payload walker/parser,
 plain explicit records, and the shared per-comparison byte bound. Pure shared alignment
@@ -639,8 +661,12 @@ therefore report historical stream/chunk details as unavailable rather than
 inventing them.
 
 Native alignment review is deliberately split across the existing owners. The
-`frame_compare.vsview.session_script` owner generates one `Reference` output and the
-complete ordered `Comparison N` output set, registering each source once and
+`frame_compare.vsview.session_script` owner reserves the script path and generates
+deterministic session data plus a small installed-package bootstrap.
+`frame_compare.vsview.session_runtime` owns preview source loading, defaults,
+console guidance, and output registration after all sources are prepared. It uses
+the explicit generated script path for session identity, creates one `Reference`
+output and the complete ordered `Comparison N` output set, registering each source once and
 serializing role/key/ordinal/name, the authoritative integer/null offset, and bounded
 service-projected audio evidence as metadata schema v5. That projection omits
 per-chunk rows but retains target identity, bounds, credibility and offset, analyzed
@@ -899,6 +925,10 @@ shortcut reference; the filmstrip is the final visible report region. One respon
 Inspector width token owns both desktop drawer width and
 stage reservation; the existing tablet/phone overlay boundary keeps stage margin at
 zero.
+
+Help and Report Information share the local `HelpInfoDialog` owner in
+`assets/viewer.js` for visibility, focus restoration, Tab trapping, and Escape
+handling. The Inspector retains its separate drawer lifecycle and focus policy.
 
 Viewer appearance remains owned by `assets/viewer.css`: neutral charcoal surfaces,
 readable text tiers, restrained brass comparison markers, and neutral utility states.
@@ -1180,7 +1210,7 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/render/batch/orchestrator.py`
 - `src/frame_compare/orchestration/doctor.py` and its focused diagnostic owners
   (`doctor_checks.py`, `doctor_types.py`)
-- `src/frame_compare/vsview/adapter.py`, `session_script.py`,
+- `src/frame_compare/vsview/adapter.py`, `session_script.py`, `session_runtime.py`,
   `alignment_review_contract.py`, and `alignment_review_panel.py`
 
 Working rule: changes to these files should usually trigger full verification and, when they reshape behavior or ownership, a same-pass update to this document.
@@ -1189,7 +1219,8 @@ Native alignment-review hotspot dispositions for the current implementation:
 
 | Hotspot | Disposition |
 | --- | --- |
-| `src/frame_compare/vsview/session_script.py` | Responsibility unchanged: it owns deterministic generated VSView scripts, L-SMASH source loading, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v5 transport required by the panel. |
+| `src/frame_compare/vsview/session_script.py` | Owns script-path reservation, deterministic session data and the installed-package bootstrap. The generated path remains the session identity. |
+| `src/frame_compare/vsview/session_runtime.py` | Owns typed session execution: L-SMASH preview source loading, defaults and console guidance, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v5 transport required by the panel. |
 | `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict metadata-v5/result-v1 validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape; it validates the embedded audio attempt through the single `utils/alignment_evidence.py` parser instead of re-describing the schema. |
 | `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, validated evidence presentation, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, synchronization markers, and safe contract-rejection feedback. |
 | `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |

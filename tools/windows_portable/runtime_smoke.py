@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import importlib.metadata
+import io
 import json
 import os
 import subprocess
 import sys
 import types
+from contextlib import redirect_stderr
 from pathlib import Path
 
 
@@ -424,15 +426,21 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         },
     )
     script_text = script_path.read_text(encoding="utf-8")
-    assert_true(
-        "Color metadata incomplete; using standard display defaults (BT.709)" in script_text,
-        "generated VSView session omitted BT.709 preview defaults",
-    )
     script_module = types.ModuleType("__vsview__")
     script_module.__file__ = str(script_path)
     sys.modules["__vsview__"] = script_module
     try:
-        exec(compile(script_text, str(script_path), "exec"), script_module.__dict__)
+        diagnostics = io.StringIO()
+        try:
+            with redirect_stderr(diagnostics):
+                exec(compile(script_text, str(script_path), "exec"), script_module.__dict__)
+        finally:
+            sys.stderr.write(diagnostics.getvalue())
+        assert_true(
+            "Color metadata incomplete; using standard display defaults (BT.709)"
+            in diagnostics.getvalue(),
+            "generated VSView session omitted BT.709 preview defaults",
+        )
         outputs = get_outputs()
         names = [output.name for output in outputs.values()]
         assert_true(
@@ -446,6 +454,10 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         for output in vs.get_outputs().values():
             frame = output.clip.get_frame(0)
             assert_true(frame.width == 64 and frame.height == 64, "generated VSView output failed")
+            assert_true(
+                all(frame.props[key] == 1 for key in ("_Matrix", "_Transfer", "_Primaries")),
+                "generated VSView output omitted BT.709 preview properties",
+            )
 
         session = alignment_review_session_from_script(script_path, require_result_absent=True)
         candidates = tuple(

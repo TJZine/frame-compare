@@ -37,7 +37,9 @@ _VIDEO_SIZE = "160x90"
 def align_clips_from_request(
     request: AlignmentRequest, config: AlignmentConfig, *, vs_loader: VSLoader | None = None
 ) -> list[AlignmentResult]:
-    return asyncio.run(_align_clips_from_request(request, config, vs_loader=vs_loader))
+    return list(
+        asyncio.run(_align_clips_from_request(request, config, vs_loader=vs_loader)).results
+    )
 
 
 def _run_ffmpeg(argv: list[str], *, timeout_seconds: int = 120) -> None:

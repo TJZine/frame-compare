@@ -1,3 +1,7 @@
+---
+description: Open the report, switch views, inspect frames, keep review notes, and choose screenshot overlays.
+---
+
 # Reports and overlays
 
 The report is a static HTML page for comparing every rendered frame across your
@@ -10,10 +14,9 @@ sources; it opens in any current browser without a server.
 
 ## Open and keep a report
 
-Every completed comparison can produce a static HTML report that works without a web
-server. The canonical `report.html` sits at the root of the reserved run folder beside
-`screenshots/`; keeping that folder together preserves relative image loading when the
-result is moved, archived, or opened on another machine.
+Every completed comparison can produce a report. The canonical `report.html` sits at
+the root of the reserved run folder beside `screenshots/`. Keep that folder together so
+relative image paths work when you move, archive, or open the result on another machine.
 
 `report.auto_open = true` is the default for an interactive local run. Auto-open is
 suppressed for JSON, quiet, and non-TTY output. A Docker container cannot open the host
@@ -32,31 +35,13 @@ embed_images = true
 `report.default_mode` sets the view a report opens in: `slider` (default), `overlay`
 (Single), `diff`, or `blink`. Grid cannot be the default.
 
-### Slider
-
-Slider reveals one source against another across a draggable divider. Use it for spatial
-differences such as crop, scaling, haloing, texture, denoising, grain, and subtle tone
-changes.
-
-### Single
-
-Single shows one source at a time for source-specific checks.
-
-### Diff
-
-Diff highlights pixel differences between the selected pair. Use it to find where
-sources diverge, then judge the difference in Slider or Blink.
-
-### Blink
-
-Blink alternates the selected pair, which reveals grain structure, small exposure
-changes, and differences a stationary divider hides. Browser timing is not frame-accurate
-playback.
-
-### Grid
-
-Grid shows every source together so outliers stand out. Scan here first, then pick a pair
-for Slider, Diff, or Blink.
+| View | Use it for |
+| --- | --- |
+| Slider | Reveal one source against another across a draggable divider to inspect spatial differences such as crop, scaling, haloing, texture, denoising, grain, and subtle tone changes. |
+| Single | Show one source at a time for source-specific checks. |
+| Diff | Highlight pixel differences between the selected pair to find where sources diverge, then judge the difference in Slider or Blink. |
+| Blink | Alternate the selected pair to reveal grain structure, small exposure changes, and differences a stationary divider hides; browser timing is not frame-accurate playback. |
+| Grid | Show every source together so outliers stand out, then pick a pair for Slider, Diff, or Blink. |
 
 <figure class="fc-figure">
   <img src="../images/report-grid.webp" alt="Report in Grid view showing the PQ10 reference and HLG10 comparison side by side at frame 1000." width="1600" height="1000" loading="lazy">
@@ -66,31 +51,37 @@ for Slider, Diff, or Blink.
 ## Navigate and inspect
 
 Move between frames with the frame selector, the arrow buttons, or the filmstrip, which
-filters by category and has Compact, Normal, and Large sizes. Choose the pair with the
-two source selectors and swap them with the button between them. The floating palette
-over the image holds zoom, fit, viewport reset, fullscreen, **Source labels**, and
-**Lens**. `report.include_filmstrip = false` hides the filmstrip, and `Offset: none` in
-the toolbar refers to a spatial image offset, not to timing alignment.
+filters by category and has **Compact**, **Normal**, and **Large** sizes. Choose the
+pair
+with the two source selectors and swap them with the button between them.
 
-Source selectors, the optional source labels, and baked overlays serve different
-contexts. Selectors identify the source at the point of selection. Source labels stay
+The floating palette over the image holds zoom, fit, viewport reset, fullscreen,
+**Source labels**, and **Lens**. `report.include_filmstrip = false` hides the filmstrip.
+`Offset: none` in the toolbar refers to a spatial image offset; it does not change
+timing
+alignment.
+
+Selectors identify the source at the point of selection. Source labels stay
 anchored to the viewport while zooming and panning, and are useful when baked text is
 outside the visible area. Baked text stays with screenshots uploaded to slow.pics and is
-unaffected by the source-labels toggle. When baked text already provides enough context,
-hide source labels to reduce overlapping text; hiding them does not make the report blind
-or anonymous, since source identity can remain in baked overlays, filenames, and report
-metadata.
+unaffected by the source-labels toggle.
 
-Source labels show each source's complete file size. File size is context, not bitrate or
-a measure of quality. The header shows when the report was generated in your browser's
-locale; hover it for the exact timestamp.
+When baked text already provides enough context, hide source labels to reduce
+overlapping
+text.
+
+Source labels show each source's complete file size. Use file size as context; it does
+not measure bitrate or quality. The header shows when the report was generated in your
+browser's locale; hover it for the exact timestamp.
 
 ### Inspector
 
-Open the Inspector with **Inspector** or <kbd>I</kbd>. Its **Frame** tab lists every
+Open the **Inspector** with **Inspector** or <kbd>I</kbd>. Its **Frame** tab lists every
 source's own frame number and picture type for the current comparison frame. **Clips**
 shows each source's name, filename, picture size, length, file size, presentation, and
-signal. **Image offset** shifts a source spatially and never changes timing. **Review**
+signal.
+
+**Image offset** shifts a source spatially and never changes timing. **Review**
 holds bookmarks, tags, notes, and the preferred source.
 
 <figure class="fc-figure">
@@ -111,10 +102,12 @@ sources. Drag the lens window's grip to move it.
 
 ### Report information
 
-The **Report information** button in the header opens the Report Information dialog: the
-title, report ID, generated time, content, the **Opens in** view, the default pair, the
-slow.pics link when uploaded, every source, and a Rendering section that states whether
-tonemapping was applied and with which settings.
+The **Report information** button in the header opens the **Report Information** dialog.
+It lists the title, report ID, generated time, content, the **Opens in** view, the
+default
+pair, the slow.pics link when uploaded, and every source. Its **Rendering** section
+states
+whether Frame Compare applied tonemapping and which settings it used.
 
 <figure class="fc-figure fc-figure--narrow">
   <img src="../images/report-information.webp" alt="Report Information dialog listing the title, report ID, generated time, content, the Opens in view, the default pair, and the sources." loading="lazy">
@@ -143,22 +136,30 @@ tonemapping was applied and with which settings.
 
 ## Review notes
 
-Viewer state such as the current frame, mode, selected sources, reveal position, viewport,
+Viewer state such as the current frame, mode, selected sources, reveal position,
+viewport,
 and review notes can persist in the browser for that report. It does not rewrite the
-HTML or run directory. Clearing browser storage or opening the report under a different
+report or run folder. Clearing browser storage or opening the report under a different
 URL can remove that local state.
 
 Exported review JSON applies only to the report it came from.
 
-The Review tab holds the bookmark, tag, note, and **Preferred clip** fields alongside
-**Export review JSON** and **Import review JSON**, the only ways to keep or transfer
-notes outside the browser that made them. A persistent line states how many review
-records are saved in this browser, and a fixed note beside it reminds that notes are
-not stored in the report file. When browser storage is unavailable or a save fails, the
-viewer says changes are kept only for that session instead of claiming a save that did
-not happen; export review JSON while that message is showing to keep the notes. Import
-previews additions, changes, and removals before merge or replace is applied, and an
-import that cannot be validated or saved leaves existing records untouched.
+The **Review** tab holds the bookmark, tag, note, and **Preferred clip** fields
+alongside
+**Export review JSON** and **Import review JSON**. Those controls are the only ways to
+keep
+or transfer notes outside the browser that made them.
+
+A persistent line states how many review records are saved in this browser, and a fixed
+note beside it reminds you that notes are not stored in the report file. When browser
+storage is unavailable or a save fails, the viewer says changes are kept only for that
+session. Export review JSON while that message is showing to keep the notes.
+
+Import previews additions, changes, and removals before you apply a merge or
+replacement.
+An import that fails validation or a browser-storage write leaves existing records
+unchanged. If browser storage is unavailable, a validated import applies only to the
+current session.
 
 ## Screenshot overlays
 
@@ -188,7 +189,7 @@ and screenshot generation still succeeds.
 
 File size is the complete container storage cost, formatted with binary MiB/GiB/TiB
 units. It does not rank quality, bitrate efficiency, or a comparison winner. Tonemap
-target nits describe the configured output transform; they are not measured luminance
+target nits describe the configured output transform; they do not measure luminance
 for the selected frame.
 
 Overlay text is part of the rendered image. Viewer labels and controls are browser
@@ -199,11 +200,11 @@ distributed under the SIL Open Font License 1.1.
 
 ## Recommended review sequence
 
-1. Start in grid mode to identify obvious outliers.
+1. Start in **Grid** to identify obvious outliers.
 2. Choose the reference and one comparison.
-3. Use slider for spatial and texture differences.
-4. Use diff to locate small changed regions.
-5. Use blink to judge grain, exposure, and subtle presentation changes.
+3. Use **Slider** for spatial and texture differences.
+4. Use **Diff** to locate small changed regions.
+5. Use **Blink** to judge grain, exposure, and subtle presentation changes.
 6. Inspect metadata and selection context when a frame looks suspicious.
 7. Check several categories and both early and late aligned frames.
 8. Record notes only after confirming source identity and alignment.
@@ -211,13 +212,13 @@ distributed under the SIL Open Font License 1.1.
 ## Archive or share a report
 
 - Keep `report.html` and `screenshots/` together.
-- Archive the complete run folder, not selected individual files.
-- Prefer `report.embed_images = true` only when a single-file artifact is required.
+- Archive the complete run folder.
+- Prefer `report.embed_images = true` only when you need a single-file report.
 - Review filenames and metadata before sharing; they may disclose source names.
 - Browser-local notes are not automatically included in the run folder.
 
-The ordinary report is not a blind-comparison artifact: source identity can appear in
-baked overlays, physical filenames, report metadata, and viewer labels.
+Hiding source labels does not make the report blind or anonymous. Source identity can
+appear in baked overlays, physical filenames, report metadata, and viewer labels.
 
 For exact opening precedence, persistence, and report-generation behavior, see the
 [report contract](../current-cli-contract.md#report-auto-open-ownership) and

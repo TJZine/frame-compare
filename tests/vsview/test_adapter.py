@@ -33,9 +33,9 @@ from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewContractError,
 )
 from frame_compare.vsview.errors import VSViewError
+from frame_compare.vsview.session_runtime import install_workspace_log_filter
 from frame_compare.vsview.session_script import (
     _build_script_content,
-    _build_script_header,
     write_vsview_session_script,
 )
 
@@ -838,8 +838,7 @@ def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_disti
 def test_generated_script_suppresses_only_redundant_vsview_load_success() -> None:
     logger = logging.getLogger("vsview.app.workspace.loader")
     existing_filters = tuple(logger.filters)
-    namespace: dict[str, object] = {}
-    exec(_build_script_header(), namespace)  # noqa: S102
+    install_workspace_log_filter()
     added_filters = [item for item in logger.filters if item not in existing_filters]
 
     try:
@@ -857,27 +856,27 @@ def test_generated_script_suppresses_only_redundant_vsview_load_success() -> Non
 
 
 def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    generated = _build_script_content(
-        reference=tmp_path / "ref.mkv",
-        comparisons=[tmp_path / "a.mkv"],
+    overlays: list[str] = []
+    _execute_generated_script(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        comparison_stems=("a",),
         suggested_offsets_by_key={"ref:a": 0},
-        audio_review_by_key=_audio_review_map({"ref:a": 0}),
-        presentation_names_by_stem={"ref": "2160p \u00b7 REF", "a": "2160p \u00b7 A"},
-        short_names_by_stem={"a": "ShortA"},
+        overlay_sink=overlays,
     )
-
-    # Burned-in overlays keep the ASCII arrow; the ready step renders it via _arrow().
-    assert generated.count("Open Tool Panel -> Frame Compare Alignment Review.") == 2
-    assert (
-        "  2  Unlink playheads, then position every source on the same visible moment." in generated
-    )
+    assert len(overlays) == 2
+    for overlay in overlays:
+        assert "Open Tool Panel -> Frame Compare Alignment Review." in overlay
+        assert "Unlink playheads, then position every source on the same visible moment." in overlay
+    output = capsys.readouterr().err
+    assert "  2  Unlink playheads, then position every source on the same visible moment." in output
     assert (
         "  3  Save the alignment in the panel, then close VSView to continue Frame Compare."
-        in generated
+        in output
     )
-    assert "VSView is open" in generated
+    assert "VSView is open" in output
 
 
 def test_write_vsview_session_script_uses_unique_uuid_paths(
@@ -911,6 +910,8 @@ def test_write_vsview_session_script_uses_unique_uuid_paths(
     assert re.fullmatch(r"vsview_ref_\d{8}T\d{6}Z_[0-9a-f]{32}\.py", first.name)
     assert re.fullmatch(r"vsview_ref_\d{8}T\d{6}Z_[0-9a-f]{32}\.py", second.name)
     assert first != second
+    assert first.read_bytes() == second.read_bytes()
+    compile(first.read_text(encoding="utf-8"), str(first), "exec")
 
 
 def test_write_vsview_session_script_retries_uuid_path_collision(

@@ -3,29 +3,6 @@
 This document describes the present-day user-facing CLI contract for Frame Compare.
 It is intentionally about current behavior, not desired future behavior.
 
-## Contents
-
-- [Operating Stance](#operating-stance)
-- [Authority And Update Rules](#authority-and-update-rules)
-- [Command Surface](#command-surface)
-- [Exit Codes And Error Families](#exit-codes-and-error-families)
-- [Shared Path Resolution Rules](#shared-path-resolution-rules)
-- [Config-Only Sources Surface](#config-only-sources-surface)
-- [`history` Command Contract](#history-command-contract)
-- [`version` Command Contract](#version-command-contract)
-- [`run` Command Contract](#run-command-contract)
-- [CLI Flag To Config Mapping](#cli-flag-to-config-mapping)
-- [Config-Only Analysis Surface](#config-only-analysis-surface)
-- [Config-Only slow.pics Surface](#config-only-slowpics-surface)
-- [VSView Native Alignment Diagnostics](#vsview-native-alignment-diagnostics)
-- [Config-Only Screenshot Surface](#config-only-screenshot-surface)
-- [Config Validation, Logging, And Migration](#config-validation-logging-and-migration)
-- [Config-Only Audio Alignment Surface](#config-only-audio-alignment-surface)
-- [Persistence Rules](#persistence-rules)
-- [`wizard` Command Contract](#wizard-command-contract)
-- [`doctor` Command Contract](#doctor-command-contract)
-- [`preset` Command Contract](#preset-command-contract)
-
 ## Operating Stance
 
 Frame Compare is a CLI-first packaged Python app. Command names, flags, exit behavior,
@@ -330,6 +307,8 @@ unchanged.
 
 ### Output Modes
 
+#### Dry-run planning
+
 - `--dry-run` is a runtime-only planning mode. It loads and validates the effective
   config and CLI options, validates the resolved configured input directory,
   discovers supported source filenames, validates filename-based source selectors,
@@ -382,6 +361,8 @@ unchanged.
   generation is disabled, and renders all slow.pics post-upload actions as
   `not applicable` when slow.pics upload is disabled. This presentation rule does
   not alter the JSON fields, which continue to report effective configuration.
+#### Run-plan presentation
+
 - Normal non-quiet runs begin with a `Run plan` panel containing `Workspace`,
   `Frames`, `Rendering`, `Alignment`, `Review`, and `Publishing` sections with
   the section value on the section row and a blank line between sections.
@@ -390,7 +371,7 @@ unchanged.
   categories (`20 random · 10 dark · …`), a `user frames` comma list,
   `analysis` as `{mode lower} profile · {policy} source` (plus
   `· skipped for this run`), `cache` as `read and write` / `cache only` /
-  `bypassed`, `skip` as `first {lead} · last {trail}` / `none`, and `seed`.
+  `refresh current entry`, `skip` as `first {lead} · last {trail}` / `none`, and `seed`.
   `Rendering` is `automatic · VapourSynth preferred` or `FFmpeg`, with
   `overlay` as `{mode lower}` and `geometry` as
   `{geometry lower} geometry · active area {mode lower}`. `tone map` is
@@ -414,6 +395,8 @@ unchanged.
   that root; external paths remain absolute. Rich folds long paths at narrow
   terminal widths without replacing path text with an ellipsis. `--verbose` may add
   the absolute form beside a contained relative path.
+#### JSON and quiet-mode compatibility
+
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
 - In that JSON object, `slowpics_url` is the only machine-readable slow.pics
   result field. No copy/open/shortcut/webhook result fields are emitted.
@@ -441,6 +424,8 @@ unchanged.
   `previous_offsets = "always"`.
 - `--quiet` is incompatible with report-confirmed slow.pics upload when that
   prompt would be needed.
+#### Source, alignment, and completion summaries
+
 - Human-readable non-quiet runs emit a `Frame Alignment` diagnostic to stderr after
   the alignment phase when accepted or rejected frame alignment changes need
   explanation. The diagnostic reports normalized source-frame row 0, final trim
@@ -548,6 +533,8 @@ unchanged.
   `config`, `input`, and `output` sub-rows; `output` is the resolved
   generated-data root. The constant run-folder policy and derived screenshot path
   are not configuration rows.
+#### Progress and terminal behavior
+
 - Human Rich progress uses title-case product phase labels: `Plan`, `Analyze`,
   `Align`, `Render`, `Metadata`, `Publish`, `Report`, `Confirm`, and `Cleanup`,
   with completed lines as `{glyph} {Label:<9} {summary}` and the duration
@@ -598,6 +585,8 @@ unchanged.
   `×` as `x`, dashes as `-`, `…` as `...`, `›` as `>`) and any other
   unencodable character becomes `?`. Encodable text, including cp1252 output,
   is unchanged, and JSON output is ASCII-escaped.
+#### Audio-alignment presentation
+
 - Audio alignment remains one coherent `Align` phase in Rich output (`ALIGN`
   in plain/log output). Saved/manual/shared offset
   lookup is shown as `ALIGN | Checking saved offsets` without a nested task. Fresh
@@ -680,6 +669,8 @@ unchanged.
   modes still suppress Rich progress, and non-TTY human runs use plain progress.
   Consolidated FPS diagnostics retain their existing log presentation rather than
   Rich FPS panels.
+#### Diagnostic paths
+
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
   `output`, and `root`, then exits without invoking the runtime pipeline. The
   `output` value is the resolved generated-data root and `cache` is its
@@ -1252,6 +1243,14 @@ analysis, rendering, and alignment video checking. It is not a hard limit on
 total process memory and does not affect bounded audio-alignment buffers.
 The separate VSView session applies the same cap immediately after acquiring
 its core. When unset, neither process changes the VapourSynth default.
+
+## Config-Only TMDB Surface
+
+`[tmdb].unattended` remains an accepted, persisted boolean with default `false`.
+It currently has no behavioral effect: both values use the resolver's selected
+match when available and otherwise continue without a match. Neither value opens
+an interactive metadata chooser. Keeping the key accepted preserves existing
+configuration files; it does not select a separate service policy.
 
 ## Config-Only Analysis Surface
 

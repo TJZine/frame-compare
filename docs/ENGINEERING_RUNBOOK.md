@@ -33,8 +33,7 @@ preserve or explicitly change the corresponding product contracts and proof.
 - `docs/current-cli-contract.md`: documented CLI/config/output behavior.
 - `docs/supported-media-runtime.md`: selected native-runtime matrix, provenance,
   licensing, and compatibility boundary.
-- `docs/DECISIONS.md`: historical rationale; `docs/api.md`: generated reference,
-  not a compatibility promise by itself.
+- `docs/DECISIONS.md`: historical rationale.
 - `CONTRIBUTING.md`: contributor setup and PR mechanics; `README.md`: user overview.
 - `docs/plans/**`: task memory activated under Planning And Handoff below.
 - Host configuration: tools, permissions, runtime capabilities, and model settings.
@@ -51,24 +50,11 @@ behavior when the task or a supported contract requires something different.
 Common contributor setup and Python check entry points are in `.agents/project.md`.
 The recipes below supply the additional documentation, runtime, and release proof.
 
-API documentation regeneration and drift check:
-
-```bash
-# Regenerate docs/api.md
-uv run --no-sync python scripts/generate_api_docs.py
-
-# Check docs/api.md for drift (also run automatically as part of the pytest suite)
-uv run --no-sync python scripts/generate_api_docs.py --check
-```
-
 Documentation site setup, strict build, and local preview:
 
 ```bash
 # Install only the locked documentation toolchain
 uv sync --only-group docs --locked
-
-# Check generated API documentation before building the site
-uv run --no-sync python scripts/generate_api_docs.py --check
 
 # Build with link and configuration validation
 uv run --no-sync zensical build --clean --strict
@@ -77,10 +63,11 @@ uv run --no-sync zensical build --clean --strict
 uv run --no-sync zensical serve
 ```
 
-`docs/**` owns authored site content, while root `zensical.toml` owns site structure,
-navigation, and built-in presentation features. Generated output belongs in the ignored
-`site/` directory. Restore the contributor environment together with the documentation
-toolchain before running Python gates after a docs-only sync:
+`docs/**` owns authored site content and its assets. Root `zensical.toml` owns site
+structure, navigation, and theme features, and `overrides/` owns the theme templates.
+Generated output belongs in the ignored `site/` directory. Restore the contributor
+environment together with the documentation toolchain before running Python gates after
+a docs-only sync:
 
 ```bash
 uv sync --group dev --group docs --extra vsview --locked
@@ -271,6 +258,7 @@ owner is outside a listed directory:
 - `Dockerfile`
 - `docker-compose*.yml`
 - `tools/verify_docker_*.sh`
+- `tools/docker_runtime_smoke.py`
 - `.github/workflows/docker-integration.yml`
 - Docker workflow/contract tests that validate Docker/runtime script or profile semantics
 - `src/frame_compare/render/**`
@@ -297,6 +285,13 @@ bash tools/verify_docker_integration.sh
 The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` with
 10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
 It explicitly excludes `tests/integration/test_alignment_streaming_resources.py`.
+`tools/verify_docker_integration.sh` owns image builds, container invocation,
+cleanup, logs, and artifact handling. It invokes the repository-owned
+`tools/docker_runtime_smoke.py` from the image for native runtime, provenance,
+fixture, and application assertions. Edit that Python owner for runtime proof;
+its source is included in the Docker build context and workflow trigger paths.
+Lint and shell-routing tests support the canonical gate but do not replace it.
+
 For changes to whole-track memory bounds, maximum admitted lag, or streaming collector
 cleanup, run the existing resource proof separately after the canonical gate has
 built the test image:
@@ -407,7 +402,7 @@ inert ordinary-session state, load a production-generated L-SMASH session with V
 0.12.1, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
 all three outputs, and round-trip/validate the sibling result sidecar. The R81
 dependency refresh ran the inside-container offscreen proof on macOS Docker Desktop;
-see the [Windows 10 handoff](plans/2026-10-07-dependency-refresh-windows10-handoff.md)
+see the [Windows 10 handoff](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-07-dependency-refresh-windows10-handoff.md)
 for its evidence and limits. The Linux X11 host wrapper remains unverified.
 The contract does not prove a visible X11 desktop
 launch, Qt ergonomics, native Windows behavior, or physical-Windows acceptance.

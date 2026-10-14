@@ -303,7 +303,7 @@ offscreen, load a production-generated L-SMASH session, register named
 typed sibling result while rejecting malformed data. The R81 dependency refresh
 passed the inside-container offscreen proof with real L-SMASH media on macOS
 Docker Desktop; its evidence is recorded in the
-[Windows 10 handoff](plans/2026-10-07-dependency-refresh-windows10-handoff.md).
+[Windows 10 handoff](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-07-dependency-refresh-windows10-handoff.md).
 The Linux X11 host wrapper and visible desktop launch remain unverified.
 Offscreen proof does not replace final validation on the supported physical Windows system.
 macOS offscreen or synthetic-panel proof exercises the Python/Qt/plugin contract only;

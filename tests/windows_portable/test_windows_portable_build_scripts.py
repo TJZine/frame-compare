@@ -38,43 +38,6 @@ def _generated_portable_launcher(build_script: str) -> str:
     return match.group("launcher")
 
 
-def test_windows_portable_bundle_launcher_restores_process_environment(repo_root: Path) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-
-    assert "function Get-FrameCompareLauncherEnvironmentValue" in build_script
-    assert "function Restore-FrameCompareLauncherEnvironmentValue" in build_script
-    assert '$originalPath = Get-FrameCompareLauncherEnvironmentValue -Name "PATH"' in build_script
-    assert (
-        '$originalPythonUtf8 = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONUTF8"'
-        in build_script
-    )
-    assert '$originalPythonPath = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH"' in (
-        build_script
-    )
-    assert (
-        "$originalVsExtraPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "
-        '"VAPOURSYNTH_EXTRA_PLUGIN_PATH"'
-    ) in build_script
-    assert (
-        "$originalVsPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "
-        '"VAPOURSYNTH_PLUGIN_PATH"'
-    ) in build_script
-    assert (
-        'Restore-FrameCompareLauncherEnvironmentValue -Name "PATH" -Value $originalPath'
-        in build_script
-    )
-    assert (
-        'Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" '
-        "-Value $originalVsPluginPath"
-    ) in build_script
-    assert "Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH" in build_script
-    assert (
-        'Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" '
-        "-Value $originalVsExtraPluginPath"
-    ) in build_script
-
-
 def test_windows_portable_bundle_launcher_uses_cli_package_entry(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
@@ -540,54 +503,138 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
     assert "libplacebo_runtime_usable=" in proof_source
 
 
-def test_windows_portable_build_runtime_validation_restores_process_environment(
+@pytest.mark.integration
+@pytest.mark.parametrize("owner", ["launcher", "runtime-validation"])
+@pytest.mark.parametrize("initial_value", [None, "", "outer-value"], ids=["absent", "empty", "set"])
+def test_windows_portable_restores_environment_and_location_after_failure(
     repo_root: Path,
+    tmp_path: Path,
+    owner: str,
+    initial_value: str | None,
 ) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    runtime_validation = _bundle_runtime_function_block(build_script)
-
-    assert "function Get-ProcessEnvironmentValue" in build_script
-    assert "function Restore-ProcessEnvironmentValue" in build_script
-    assert '$originalPath = Get-ProcessEnvironmentValue -Name "PATH"' in build_script
-    assert '$originalPythonUtf8 = Get-ProcessEnvironmentValue -Name "PYTHONUTF8"' in build_script
-    assert '$originalPythonPath = Get-ProcessEnvironmentValue -Name "PYTHONPATH"' in build_script
-    assert (
-        "$originalVsExtraPluginPath = Get-ProcessEnvironmentValue -Name "
-        '"VAPOURSYNTH_EXTRA_PLUGIN_PATH"'
-    ) in build_script
-    assert (
-        '$originalVsPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"'
-        in build_script
+    if os.name != "nt":
+        pytest.skip("Windows process environment semantics required")
+    powershell = shutil.which("pwsh") or shutil.which("powershell")
+    if powershell is None:
+        pytest.skip("PowerShell is required for the portable restoration regression")
+    build_path = repo_root / "tools/windows_portable/build_portable.ps1"
+    bundle = tmp_path / "bundle"
+    (bundle / "python").mkdir(parents=True)
+    # Both entry points require Python to exist before entering their owned
+    # environment scope; failure must happen after that admission.
+    (bundle / "python/python.exe").touch()
+    launcher = bundle / "frame-compare.ps1"
+    launcher.write_text(_generated_portable_launcher(build_path.read_text()), encoding="utf-8")
+    (bundle / "bundle_info.json").write_text(
+        '{"media_runtime_fingerprint":"fixture-fingerprint"}', encoding="utf-8"
     )
-    assert 'Restore-ProcessEnvironmentValue -Name "PATH" -Value $originalPath' in build_script
-    assert (
-        'Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" '
-        "-Value $originalVsPluginPath"
-    ) in build_script
-    assert "Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH" in build_script
-    assert (
-        'Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" '
-        "-Value $originalVsExtraPluginPath"
-    ) in runtime_validation
-    for name in (
+    if owner == "runtime-validation":
+        # Missing FFmpeg fails after runtime environment setup and Push-Location.
+        expected_error = "Bundled FFmpeg executable not found"
+    else:
+        # The invalid executable fails after environment setup and Push-Location.
+        expected_error = None
+    names = [
+        "PATH",
+        "PYTHONUTF8",
+        "PYTHONDONTWRITEBYTECODE",
+        "PYTHONPATH",
+        "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
+        "VAPOURSYNTH_PLUGIN_PATH",
         "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT",
         "FRAME_COMPARE_RUNTIME_KIND",
         "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED",
         "FRAME_COMPARE_FFMPEG_EXECUTABLE",
         "FRAME_COMPARE_FFPROBE_EXECUTABLE",
-    ):
-        assert f'Get-ProcessEnvironmentValue -Name "{name}"' in runtime_validation
-        assert f'Restore-ProcessEnvironmentValue -Name "{name}"' in runtime_validation
-    assert runtime_validation.count("Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot") == 1
-    assert runtime_validation.index("try {") < runtime_validation.index(
-        "Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot"
+    ]
+    inputs = tmp_path / "inputs.json"
+    inputs.write_text(
+        json.dumps(
+            {
+                "build": str(build_path),
+                "bundle": str(bundle),
+                "launcher": str(launcher),
+                "owner": owner,
+                "names": names,
+                "value": initial_value,
+            }
+        ),
+        encoding="utf-8",
     )
-    assert runtime_validation.index("Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot") < (
-        runtime_validation.index("} finally {")
+    proof_script = tmp_path / "restore-after-failure.ps1"
+    proof_script.write_text(
+        r"""param([string]$InputsPath)
+$ErrorActionPreference = "Stop"
+$inputs = Get-Content -LiteralPath $InputsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($inputs.owner -eq "runtime-validation") {
+  $tokens = $null
+  $errors = $null
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    $inputs.build, [ref]$tokens, [ref]$errors
+  )
+  if ($errors.Count -ne 0) { throw "Build script failed to parse" }
+  # Load real function definitions without running the builder. Private helper
+  # names and local-variable spelling have no role in the observed contract.
+  foreach ($definition in $ast.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
+  }, $false)) {
+    Invoke-Expression $definition.Extent.Text
+  }
+}
+$before = [ordered]@{}
+foreach ($name in $inputs.names) {
+  [Environment]::SetEnvironmentVariable($name, $inputs.value, "Process")
+  $before[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+}
+$location = (Get-Location).Path
+$failure = $null
+try {
+  if ($inputs.owner -eq "runtime-validation") {
+    Assert-BundleRuntime -BundleRoot $inputs.bundle
+  } else {
+    & $inputs.launcher version
+  }
+} catch {
+  $failure = $_.Exception.Message
+}
+$after = [ordered]@{}
+foreach ($name in $inputs.names) {
+  $after[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+}
+[ordered]@{
+  before = $before
+  after = $after
+  location_before = $location
+  location_after = (Get-Location).Path
+  failure = $failure
+} | ConvertTo-Json -Depth 4 -Compress
+""",
+        encoding="utf-8",
     )
-    assert "Push-Location $BundleRoot" in runtime_validation
-    assert "Pop-Location" in runtime_validation
+    result = subprocess.run(
+        [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(proof_script),
+            str(inputs),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["failure"]
+    if expected_error is not None:
+        assert expected_error in observed["failure"]
+    assert set(observed["before"]) == set(names)
+    assert observed["after"] == observed["before"]
+    assert observed["location_after"] == observed["location_before"]
 
 
 def test_windows_portable_build_exports_vsview_extra(repo_root: Path) -> None:

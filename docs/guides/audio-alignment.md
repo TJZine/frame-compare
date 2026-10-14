@@ -1,13 +1,22 @@
+---
+description: How Frame Compare measures the offset between sources from their audio, and what APPLIED and NOT APPLIED mean.
+---
+
 # Audio alignment
 
 Frame Compare estimates the offset between the reference and each comparison from their
-audio. A fresh automatic offset is applied only when video confirmation and all other
-authority checks pass. Alignment changes which source frames are compared; it never
-retimes or rewrites the files.
+audio. Frame Compare applies a fresh automatic offset only when video confirmation and
+all other authority checks pass. It changes which source frames are compared without
+retiming or rewriting the files.
+
+<figure class="fc-figure">
+  <img src="../images/diagram-audio-offset.svg" alt="The reference and comparison audio tracks show the same pattern shifted in time; the shift is the offset." width="640" height="190" loading="lazy">
+  <figcaption>The offset is the shift between the two tracks. The waveform is illustrative.</figcaption>
+</figure>
 
 ## When alignment helps
 
-Alignment is useful when sources contain the same program but differ because of:
+Use alignment when sources contain the same program but differ because of:
 
 - leading studio logos or broadcaster slates;
 - different container start times;
@@ -33,25 +42,30 @@ The terminal distinguishes applied offsets from candidates that still need revie
 
 Each line starts with `Comparison N - `. A `+0f` result is a real zero offset, not a
 missing one. `--verbose` adds the evidence counts and `--quiet` keeps only actionable
-warnings. The audio is decoded whole and compared in chunks, then a sample of decoded
-frames checks the exact offset. Automatic application requires video confirmation,
-a passed audio authority recount, resolved competing runs and credible chunk
-disagreements, and no confirmed alternative offset. Video confirmation alone does
-not authorize application or writing the candidate to the computed-offset cache.
+warnings.
+
+Frame Compare decodes the whole audio and compares it in chunks, then checks the exact
+offset with a sample of decoded frames. It requires video confirmation and a passed
+audio authority recount before applying an automatic offset. It also requires resolved
+competing runs and credible chunk disagreements, and no confirmed alternative offset.
+
+Video confirmation alone does not authorize application or writing the candidate to
+the computed-offset cache.
 The exact thresholds live in the
 [contract](../current-cli-contract.md#config-only-audio-alignment-surface).
 
 ## Choose the audio streams
 
-The alignment service uses the selected audio streams from
-configuration. Confirm that the sources are using corresponding language, mix, and
-content. A stereo theatrical mix and a commentary track can correlate poorly even when
-the video is the same. Without overrides, the reference switches from its
-default-ranked stream to its best-ranked stream in a shared language when its
-default language is missing from the comparison.
+Frame Compare uses the audio streams selected in your configuration. Confirm that the
+sources are using corresponding language, mix, and content. A stereo theatrical mix and
+a commentary track can correlate poorly even when the video is the same.
 
-When automatic stream selection is unsuitable, use the audio-alignment configuration
-surface documented in the
+Without overrides, the reference switches from its default-ranked stream to its
+best-ranked stream in a shared language when its default language is missing from the
+comparison.
+
+When automatic stream selection is unsuitable, set the audio-alignment keys documented
+in the
 [CLI behavioral contract](../current-cli-contract.md#config-only-audio-alignment-surface).
 
 ```toml
@@ -64,20 +78,20 @@ comparison_streams = { "Encode-A" = 0 }
 
 ## Sources with different frame rates
 
-Set `match_fps` or `effective_fps` first. The audio is then stretched onto the effective
-timeline, so a 24 fps release of 23.976 content or a PAL 25 fps release keeps a constant
-offset. Drift for other reasons is not applied. See
+Set `match_fps` or `effective_fps` first. Frame Compare then stretches the audio onto the
+effective timeline, so a 24 fps release of 23.976 content or a PAL 25 fps release keeps
+a constant offset. Drift for other reasons is not applied. See
 [Sources, references, and labels](sources-and-labels.md#correct-timing-metadata).
 
 ## Reuse an accepted offset
 
-An applied automatic offset is cached and reused whenever the source files, trims,
-effective FPS, stream choices, alignment settings, and runtime still match. A cache
-miss recomputes the alignment, and corrupt entries are ignored with a warning.
+Frame Compare caches an applied automatic offset and reuses it whenever the source
+files, trims, effective FPS, stream choices, alignment settings, and runtime still match.
+It recomputes the alignment on a cache miss and ignores corrupt entries with a warning.
 
-Offsets confirmed in the panel are also cached, but reused only when `previous_offsets`
-is `prompt` or `always`. The default `disabled` never reuses them. Provisional and
-unavailable results are never cached.
+Frame Compare also caches offsets confirmed in the panel, but reuses them only when
+`previous_offsets` is `prompt` or `always`. The default `disabled` never reuses them.
+Frame Compare never caches provisional or unavailable results.
 
 ## Review the evidence
 
@@ -98,7 +112,7 @@ different edit.
 
 For visual confirmation, use [VSView alignment review](vsview-review.md).
 
-Automatic correlation is a strong starting point, not a substitute for visual review.
+Use automatic correlation as a starting point for visual review.
 For a publication-bound comparison, manually check the final report even when the
 alignment cache hits and no warning is emitted.
 

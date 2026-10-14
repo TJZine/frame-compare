@@ -1,5 +1,6 @@
 """Tests for tonemapping module."""
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -113,3 +114,36 @@ def test_convert_non_rgb_signal_cases(
     )
     assert result is resized
     clip.resize.Bicubic.assert_called_once_with(format=vs.RGBS, **expected_kwargs)
+
+
+@pytest.mark.parametrize("operation", ["metadata", "rgb_conversion"])
+@pytest.mark.parametrize("interrupted_before_frame", [False, True])
+def test_tonemap_conversion_checks_frame_and_next_native_admission(
+    operation: str, interrupted_before_frame: bool
+) -> None:
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    async def run() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        clip = MagicMock()
+
+        def frame(_index: int) -> MagicMock:
+            task.cancel()
+            return MagicMock(props={"_Matrix": 9, "_Transfer": 16, "_Primaries": 9})
+
+        clip.get_frame.side_effect = frame
+        if interrupted_before_frame:
+            task.cancel()
+        with pytest.raises(_RunInterrupt):
+            if operation == "metadata":
+                tonemap_module.resolve_hdr_tonemap_inputs(clip, None)
+            else:
+                tonemap_module.convert_non_rgb_with_matrix_hint(clip, target_format=vs.RGBS)
+        assert clip.get_frame.call_count == (0 if interrupted_before_frame else 1)
+        clip.resize.Bicubic.assert_not_called()
+        assert task.cancelling() == 1
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run())

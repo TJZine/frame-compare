@@ -1,6 +1,6 @@
-# Windows Installation
+# Windows installation
 
-See the canonical [Windows Portable Guide](docs/windows-portable.md) for release
+See the canonical [Windows portable guide](docs/getting-started/windows-portable.md) for release
 and source installation, portable directory layout, optional dependencies,
 first-run commands, updates, backups, rollback, uninstalling, and troubleshooting.
 

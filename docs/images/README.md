@@ -7,13 +7,17 @@ search:
 
 ## Capture sets
 
-The [documentation refresh plan](../plans/2026-10-08-documentation-refresh.md)
-defines two capture sets:
+The [documentation refresh plan](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-08-documentation-refresh.md)
+defines capture sets 1 and 2, and the
+[documentation site redesign plan](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-12-documentation-site-redesign.md)
+adds set 3:
 
 1. Set 1 uses macOS, Docker, the official EBU/DVB streams, and headless Chrome
    for report, HDR, and terminal captures (U1).
 2. Set 2 uses the physical Windows host for installer output and the VSView alignment
    panel (U10).
+3. Set 3 derives the home page images from set 1 screenshots and generates the
+   diagram, social card, and icons (2026-10-12 site redesign, unit U2).
 
 ## Provenance record
 
@@ -53,10 +57,21 @@ defines two capture sets:
 | Capture date | 2026-10-10 |
 | Captured by | Maintainer using Snipping Tool on the physical Windows desktop; Codex prepared the bundle and verified the assets |
 
+### Set 3: derived and generated
+
+| Field | Recorded value |
+| --- | --- |
+| Sources | Set 1 run folder screenshots at 3840 × 2160: frame 1000 for both sources, and frames 45, 83, 948, 1050, and 1080 of the PQ10 reference |
+| Processing | Lanczos downscale to 1600 × 900 (hero) and 480 × 270 (strip); WebP quality 90, method 6, no metadata |
+| Diagram | `diagram-audio-offset.svg`, generated from a fixed illustrative waveform; not measured data |
+| Social card and icons | Rendered from HTML with headless Chrome at device scale 1; social card saved as JPEG quality 85 |
+| Chrome version | Google Chrome 155.0.8059.40 |
+| Date | 2026-10-12 |
+
 ## Asset policy
 
 - Export viewer and photo captures as WebP at quality 90 with metadata stripped.
-- Generate terminal SVGs with the capture specification's ANSI converter.
+- Show terminal output as text blocks, not images.
 - Keep Windows terminal captures as PNG.
 - Never upscale a capture.
 - Use the capture specification for every capture.
@@ -65,16 +80,18 @@ defines two capture sets:
 
 | File | Role | Pages | Set |
 | --- | --- | --- | --- |
-| `report-overview.webp` | Slider mode at frame 1000 with the reference and comparison labels visible | `docs/index.md` (hero and strip), `README.md`, `docs/guides/reports-and-overlays.md` | 1 |
-| `report-grid.webp` | Grid view at frame 1000 | `docs/index.md` (strip), `docs/guides/reports-and-overlays.md` | 1 |
-| `report-inspector.webp` | Slider mode with the **Inspector** open on the **Clips** tab | `docs/index.md` (strip), `docs/guides/reports-and-overlays.md` | 1 |
-| `report-lens.webp` | Slider mode with the lens on and pointer at viewport (640, 470) | `docs/index.md` (strip), `docs/guides/reports-and-overlays.md` | 1 |
+| `report-overview.webp` | Slider mode at frame 1000 with the reference and comparison labels visible | `docs/index.md` (Report views tabs), `README.md`, `docs/guides/reports-and-overlays.md` | 1 |
+| `report-grid.webp` | Grid view at frame 1000 | `docs/index.md` (Report views tabs), `docs/guides/reports-and-overlays.md` | 1 |
+| `report-inspector.webp` | Slider mode with the **Inspector** open on the **Clips** tab | `docs/index.md` (Report views tabs), `docs/guides/reports-and-overlays.md` | 1 |
+| `report-lens.webp` | Slider mode with the lens on and pointer at viewport (640, 470) | `docs/index.md` (Report views tabs), `docs/guides/reports-and-overlays.md` | 1 |
 | `report-information.webp` | **Report Information** dialog clipped to its bounds | `docs/guides/reports-and-overlays.md` | 1 |
-| `hdr-diagnostic-overlay.webp` | Top-left 1920 × 1080 crop of the frame-1000 HLG10 diagnostic screenshot | `docs/guides/hdr-tonemapping.md` | 1 |
-| `terminal-dry-run.svg` | Complete human dry-run output | `docs/guides/first-comparison.md` | 1 |
-| `terminal-run-complete.svg` | `Comparison complete` panel from the run | `docs/guides/first-comparison.md` | 1 |
-| `windows-portable-install.png` | Checksum verification through the install script's final terminal instruction | `docs/windows-portable.md` | 2 |
+| `hdr-diagnostic-overlay.webp` | Top-left 1920 × 1080 crop of the frame-1000 HLG10 diagnostic screenshot | `docs/guides/hdr-tonemapping.md`, `docs/index.md` (How a comparison runs) | 1 |
+| `windows-portable-install.png` | Checksum verification through the install script's final terminal instruction | `docs/getting-started/windows-portable.md` | 2 |
 | `vsview-alignment-panel.webp` | VSView alignment panel with both sources captured at frame 1000 and ready to confirm | `docs/guides/vsview-review.md` | 2 |
+| `home-frame-pq10.webp` | Frame 1000 of the PQ10 reference, left of the hero divider | `docs/index.md` (hero, through `overrides/home.html`), social card | 3 |
+| `home-frame-hlg10.webp` | Frame 1000 of the HLG10 comparison, right of the hero divider | `docs/index.md` (hero), social card | 3 |
+| `home-strip-<frame>.webp` | Six selected frames of the PQ10 reference | `docs/index.md` (Frame selection) | 3 |
+| `diagram-audio-offset.svg` | Illustrative audio offset between two tracks | `docs/index.md`, `docs/guides/audio-alignment.md` | 3 |
 
 ## Deliberate capture decisions
 
@@ -88,8 +105,8 @@ defines two capture sets:
   the capture and the Mac browser renders the Windows bundle's viewer.
 - Drive the five viewer states with the specified headless Chrome script to keep
   viewport, scale, frame, pair, and browser state consistent.
-- Export captured ANSI text through Rich as searchable SVG with remote font rules
-  removed so documentation loads no external font.
+- Show terminal output as text copied from real runs,
+  so readers can search and copy it.
 - Capture installer output and the visible VSView alignment panel only on the
   physical Windows host in U10.
 
@@ -121,12 +138,8 @@ Set 1 privacy and integrity review completed on 2026-10-09:
 | `report-lens.webp` | Correct pair at frame 1000 with the lens on and pointer at (640, 470); no loading, error, or private strings |
 | `report-information.webp` | Complete 896 × 666 dialog with correct pair, six frames, two sources, and generic filenames; no private strings |
 | `hdr-diagnostic-overlay.webp` | Complete diagnostic block, including `Signal:` and `Tonemap:`, on the HLG10 source at frame 1000; no cut line or private strings |
-| `terminal-dry-run.svg` | Every nonblank output line retained; no private strings, remote font rules, or external font URL |
-| `terminal-run-complete.svg` | `Comparison complete` panel retained with generic run paths, six frames, and two sources; no private strings or external font URL |
 
 The six WebP exports use quality 90 and contain no EXIF, XMP, or ICC metadata.
-Both SVGs contain zero occurrences of remote font rules, the CDN hostname,
-host home-directory paths, or the maintainer's username.
 No release-group names, private server names, credentials, tokens, cookies, or
 unintended subtitles or watermarks appear in set 1.
 
@@ -146,3 +159,20 @@ The WebP uses quality 90 with no EXIF, XMP, or ICC metadata. Neither capture was
 scaled. The installer PNG retains only sRGB, gamma, and DPI metadata.
 Uninstall removed the temporary shim and restored the user PATH exactly to its
 starting value. VSView closed without saving; no alignment-result sidecar exists.
+
+Set 3 privacy and integrity review completed on 2026-10-12:
+
+| Asset | Review result |
+| --- | --- |
+| `home-frame-pq10.webp` | Full-size 1600 × 900 harbour sunset; EBU DVB PQ10 Reference label, frame 1000, B-frame, User, and source/output sizes; no private strings or unintended subtitles or watermarks |
+| `home-frame-hlg10.webp` | Full-size 1600 × 900 harbour sunset with sailboat; EBU DVB HLG10 Comparison label, frame 1000, B-frame, User, and source/output sizes; no private strings or unintended subtitles or watermarks |
+| `home-strip-45.webp` | Full-size 480 × 270 daylight harbour; PQ10 reference, frame 45, Bright; expected baked metadata inherited from the inspected source; no private strings or unintended subtitles or watermarks |
+| `home-strip-83.webp` | Full-size 480 × 270 daylight harbour; PQ10 reference, frame 83, Random; expected baked metadata inherited from the inspected source; no private strings or unintended subtitles or watermarks |
+| `home-strip-948.webp` | Full-size 480 × 270 sunset harbour; PQ10 reference, frame 948, Random; expected baked metadata inherited from the inspected source; no private strings or unintended subtitles or watermarks |
+| `home-strip-1000.webp` | Full-size 480 × 270 sunset harbour; PQ10 reference, frame 1000, User; expected baked metadata inherited from the inspected source; no private strings or unintended subtitles or watermarks |
+| `home-strip-1050.webp` | Full-size 480 × 270 sunset harbour; PQ10 reference, frame 1050, Dark; expected baked metadata inherited from the inspected source; no private strings or unintended subtitles or watermarks |
+| `home-strip-1080.webp` | Full-size 480 × 270 sunset harbour; PQ10 reference, frame 1080, Random; expected baked metadata inherited from the inspected source; no private strings or unintended subtitles or watermarks |
+| `diagram-audio-offset.svg` | Full-size 640 × 190 preview shows reference/comparison bars and the offset bracket and text; illustrative waveform, no private data |
+| `social-card.jpg` | Full-size 1200 × 630 card shows the logo, Frame Compare, prescribed headline and subline, brass URL, and PQ10-left/HLG10-right harbour split with white divider; no fallback serif, missing glyph boxes, missing images, or private strings |
+| `apple-touch-icon.png` | Full-size 180 × 180 mark centred on #111110; no other text or private data |
+| `favicon-32.png` | Full-size 32 × 32 mark with transparent background; no other text or private data |

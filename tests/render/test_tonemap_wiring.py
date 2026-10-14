@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -157,3 +158,139 @@ def test_resolve_tonemap_settings_cases(
             assert getattr(settings, field) is value
         else:
             assert getattr(settings, field) == value
+
+
+@pytest.mark.parametrize("interruption_stage", ["before", "source", "fallback"])
+def test_preparation_stops_native_admission_after_interruption(interruption_stage: str) -> None:
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+
+    async def run() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        runner = MagicMock()
+        source = MagicMock(is_hdr=True, width=1920, height=1080)
+        config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
+
+        def load(_path: Path) -> object:
+            task.cancel()
+            if interruption_stage == "fallback":
+                raise VapourSynthNotFoundError()
+            return source
+
+        with (
+            patch("frame_compare.vs.loader.DefaultVSLoader") as loader_cls,
+            patch("frame_compare.vs.tonemap.apply_tonemap") as tonemap,
+        ):
+            loader_cls.return_value.load.side_effect = load
+            if interruption_stage == "before":
+                task.cancel()
+            with pytest.raises(_RunInterrupt):
+                prepare_clip_for_render(Path("ref.mkv"), "auto", config, ffmpeg_runner=runner)
+            assert loader_cls.return_value.load.call_count == (
+                0 if interruption_stage == "before" else 1
+            )
+            tonemap.assert_not_called()
+            runner.probe_hdr.assert_not_called()
+        assert task.cancelling() == 1
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "stage, expected_calls",
+    [
+        ("before_probe", []),
+        ("probe_true", ["probe"]),
+        ("probe_false", ["probe"]),
+        ("libplacebo_frame", ["probe", "frame"]),
+        ("fallback_frame", ["frame"]),
+        ("conversion", ["probe", "frame", "bicubic"]),
+        ("placebo_failure", ["probe", "frame", "props", "placebo"]),
+        ("placebo_success", ["probe", "frame", "props", "placebo"]),
+    ],
+)
+def test_preparation_tonemap_dispatch_stops_after_interruption(
+    stage: str, expected_calls: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import vapoursynth as vs
+
+    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
+    from frame_compare.vs.tonemap_runtime import LibplaceboRuntimeState
+
+    calls: list[str] = []
+    for variable in (
+        "FRAME_COMPARE_REQUIRE_LIBPLACEBO",
+        "FRAME_COMPARE_DISABLE_LIBPLACEBO",
+        "FRAME_COMPARE_LIBPLACEBO_PROBE",
+    ):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setattr(
+        "frame_compare.vs.tonemap._LIBPLACEBO_RUNTIME_STATE", LibplaceboRuntimeState()
+    )
+
+    async def run() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        clip = MagicMock()
+        clip.format.id = vs.RGBS
+        clip.format.color_family = vs.YUV if stage == "conversion" else vs.RGB
+        clip.format.bits_per_sample = 10 if stage == "conversion" else 16
+        core = MagicMock()
+        source = MagicMock(clip=clip, is_hdr=True, width=1920, height=1080, hdr_metadata=None)
+
+        def detect_plugins(_core: object) -> dict[str, bool]:
+            if stage == "before_probe":
+                task.cancel()
+            return {"libplacebo": stage != "fallback_frame"}
+
+        def probe() -> bool:
+            calls.append("probe")
+            if stage in {"probe_true", "probe_false"}:
+                task.cancel()
+            return stage != "probe_false"
+
+        def frame(_index: int) -> MagicMock:
+            calls.append("frame")
+            if stage in {"libplacebo_frame", "fallback_frame"}:
+                task.cancel()
+            return MagicMock(props={"_Matrix": 9, "_Transfer": 16, "_Primaries": 9})
+
+        def operation(name: str):
+            def native(*_args: object, **_kwargs: object) -> MagicMock:
+                calls.append(name)
+                if (name == "placebo" and stage in {"placebo_failure", "placebo_success"}) or (
+                    name == "bicubic" and stage == "conversion"
+                ):
+                    task.cancel()
+                if name == "placebo" and stage == "placebo_failure":
+                    raise RuntimeError("native tonemap failed")
+                return clip
+
+            return native
+
+        clip.get_frame.side_effect = frame
+        clip.resize.Bicubic.side_effect = operation("bicubic")
+        clip.std.SetFrameProps.side_effect = operation("props")
+        core.placebo.Tonemap.side_effect = operation("placebo")
+        clip.resize.Point.side_effect = operation("point")
+        clip.std.Expr.side_effect = operation("expr")
+        clip.std.Levels.side_effect = operation("levels")
+        monkeypatch.setattr("frame_compare.vs.env.detect_plugins", detect_plugins)
+        monkeypatch.setattr("frame_compare.vs.tonemap_runtime.probe_libplacebo_runtime", probe)
+        monkeypatch.setattr(vs, "core", core)
+        with patch("frame_compare.vs.loader.DefaultVSLoader") as loader_cls:
+            loader_cls.return_value.load.return_value = source
+            with pytest.raises(_RunInterrupt):
+                prepare_clip_for_render(
+                    Path("hdr.mkv"), "vapoursynth", ConfigSchema(), ffmpeg_runner=MagicMock()
+                )
+        # Exercise the real prepare -> dispatch -> conversion/libplacebo/fallback
+        # chain; only native entry points and the probe's external result are faked.
+        assert calls == expected_calls
+        assert task.cancelling() == 1
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run())
