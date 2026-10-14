@@ -6,7 +6,7 @@ FROM ghcr.io/astral-sh/uv:0.13.0@sha256:cdc6093146eb3ff6a40107b38f008b789e050e77
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build supplemental VapourSynth plugins
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.13.16-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS builder
+FROM python:3.14.8-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS builder
 
 # Deterministic media-runtime pins. Every Git checkout verifies both the exact
 # commit and a content-derived digest of the complete tracked source tree.
@@ -221,7 +221,7 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Runtime
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.13.16-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS runtime
+FROM python:3.14.8-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170 AS runtime
 
 ARG VAPOURSYNTH_VERSION=81
 ARG VS_PLACEBO_VERSION=2.0.4
