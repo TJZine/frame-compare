@@ -58,7 +58,8 @@ archived. Temporary Chrome profiles for DOM dumps are removed by their helper;
 trusted-input profiles remain under basetemp, while the helper terminates/reaps
 its Chrome child.
 
-For the transfer route, follow the runbook's manual browser procedure: edit a
+For the transfer route, use these manual steps, consistent with the runbook's
+browser/manual evidence guidance: edit a
 note/bookmark, use **Export review JSON** and observe the downloaded file, copy the
 report, assets and review file to the destination, open with fresh storage, select
 **Import review JSON**, choose merge/replace and reload. Capture the action, file,
