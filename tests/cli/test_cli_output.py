@@ -344,7 +344,11 @@ def test_at_a_glance_marks_analysis_mode_skipped_for_this_run(
 
 def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    workspace = tmp_path / "[root]"
+    workspace.mkdir()
+    relative_config = Path("config") / "[file].toml"
     config = _config()
     config.paths.input_dir = "[bold]input[end]"
     config.paths.generated_dir = "[cyan]generated[end]"
@@ -355,8 +359,8 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
     print_at_a_glance(
         console,
         inputs=AcquiredRunConfig(
-            _workspace_path("[root]"),
-            _workspace_path("[root]", "config", "[file].toml"),
+            workspace,
+            workspace / relative_config,
             apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
         ),
         no_cache=False,
@@ -368,8 +372,8 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
 
     output = _render(console)
     assert "root" in output
-    assert str(_workspace_path("[root]")) in output
-    assert "config/[file].toml" in output
+    assert str(workspace) in output
+    assert str(relative_config) in output
     assert "[bold]input[end]" in output
     assert "[cyan]generated[end]" in output
 

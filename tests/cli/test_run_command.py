@@ -211,7 +211,10 @@ def test_handle_json_output_omits_memory_only_review_wait(
     }
 
 
-def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> None:
+def test_handle_run_write_config_applies_cli_overrides_and_skips_runner(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    expected_config = workspace / "config" / "config.toml"
     runner = RecordingRunner()
     written_paths: list[Path] = []
     written_configs: list[ConfigSchema] = []
@@ -220,7 +223,7 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> Non
         config_path: Path | None = None,
         overrides: dict[str, object] | None = None,
     ) -> ConfigSchema:
-        assert config_path == Path("/workspace/config/config.toml")
+        assert config_path == expected_config
         assert overrides is None
         return get_default_config()
 
@@ -231,6 +234,8 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> Non
     handle_run(
         replace(
             _base_args(),
+            resolved_root=workspace,
+            config_path=expected_config,
             write_config=True,
             frames="3,5,8",
             random_frame_count="17",
@@ -248,7 +253,7 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> Non
     )
 
     assert runner.requests == []
-    assert written_paths == [Path("/workspace/config/config.toml")]
+    assert written_paths == [expected_config]
     assert written_configs[0].analysis.user_frames == [3, 5, 8]
     assert written_configs[0].analysis.random_frame_count == 17
     assert written_configs[0].color.preset == TonemapPreset.FILMIC
@@ -354,12 +359,20 @@ def test_handle_run_allows_external_generated_root(mode: str) -> None:
     assert (len(written) == 1) is (mode == "write")
 
 
-def test_handle_run_allows_external_input_override() -> None:
+def test_handle_run_allows_external_input_override(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     runner = RecordingRunner()
-    external_input = Path("/external/media")
+    external_input = tmp_path / "external" / "media"
+    external_input.mkdir(parents=True)
 
     handle_run(
-        replace(_base_args(), input_dir=external_input),
+        replace(
+            _base_args(),
+            resolved_root=workspace,
+            config_path=workspace / "config" / "config.toml",
+            input_dir=external_input,
+        ),
         _deps(
             DepsOptions(
                 runner=runner,
