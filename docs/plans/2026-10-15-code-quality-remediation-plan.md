@@ -2541,6 +2541,7 @@ and responsibility text were always correct. Role files do not grant child permi
 | `01a13ed5-7e47-7ea0-9201-1f47b6a097f0` | deep_reviewer: P1/fix recheck, P2 and Wave B | `4a89`; verified parent above |
 | `01a13ee0-8b57-7573-9de8-4374f0fc445e` | deep_reviewer: P6/P8/P7, P9 and Wave C | `794e`; verified parent above |
 | `01a13ee3-a368-7772-90c2-9c84da0890a7` | reviewer: P11 stable code, final notes and later integration | `22db`; verified parent above |
+| `01a13f25-6c16-7010-978e-738aa9f991a4` | fresh deep_reviewer: final cumulative P0–P11/20-group/CQ21 coverage and source review | `f240`; original human retrieval required before callback |
 
 ### Package/CQ coverage and current source identities
 
@@ -3134,3 +3135,39 @@ review is the next required source gate, covering all supported CQ groups/subpar
 migrations/deletions/compatibility and exclusion discipline. Current425native gate
 is running, complete-source Docker/distribution proof follows serially/stably; no
 full acceptance is claimed while target proof remains open.
+
+
+### Final cumulative source review and complete-source native pass
+
+Fresh independent final reviewer created from current task state9306f30b, explicit
+presetdeep_reviewer/gpt-6.1-sol/xhigh, chat01a13f25-6c16-7010-978e-738aa9f991a4,
+worktreef240; actual ID/assignment/cwd confirmed by supported read_thread. Exact
+cumulative range9fe932ede7ea333018e60c81720e29b60a089890..9306f30b4ebf434458197e0d44dd4a4510ec3391;
+production/test/product-doc source425b52ad, later commits ledger-only. Full supported
+20groups/allCQ21parts and P0–P11 composition, caller/deletion/compatibility/authority/
+persistence/cleanup/exclusion discipline assigned; prior reviews/evidence reusable
+only after independent validation. No broad new audit/planning, no edits/delegation/
+heavy runtime; direct original human authorization retrieval with pagination required.
+Current findings pending. All package and Wave A/B/C reviews already clear; this
+fresh final source gate remains independent and required.
+
+Complete-source native verifierb49f PASSED exact425b52ad:3900total,
+**3604passed/296skipped/0failures/errors**,exit0. ActualChrome and currentP9realSIGINT/
+FFmpegchildreaping/stop/progress/order/failure/report-association cases ran,not skipped.
+Skipped5nativeplugins+6mediaopt-in+3resources+2live+280Windows/PowerShell/platform;
+no Windows/signing inference. Owned artifacts `.tmp/final-native.ktM4fz/{native.xml,native.log}`.
+Same-source pyright0/0,ruff/format531,bandit0medium/high,imports2kept(185files/805deps),
+strictdocs1.36s/diffclean. No source edits/commits; owned processes/dump profiles
+cleaned; browser/full-native RELEASED. Later ledger-only changes do not alter tested
+code; future product fixes invalidate affected evidence.
+
+Verifiera638 now owns exclusive final Docker/media lease at EXACT425b52ad; unique
+rebuilt images/scoped full canonical gate, warm37media retained, allP9/prior real
+media claims required. No concurrent heavy native/browser/distribution work; no
+source fixes,globalprune or platform false pass. Current Docker result pending.
+Fresh wheel/sdist/installed CLI+bundled-asset proof follows once stable and Docker
+releases. All Windows/PS5.1/PS7filesystem/signed-hosted requirements stay OPEN;
+PS7Linux15parse/44pure-vector proof accepted only for language/grammar. P2reviewer
+independently hash-checked all15sources+driver against9ae and current425, confirming
+that limited proof without runtime rerun. No acceptance blocker from rejected P2-F1.
+Only final reviewer/runtime/distribution children remain useful pending work.
