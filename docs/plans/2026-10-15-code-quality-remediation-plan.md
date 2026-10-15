@@ -170,7 +170,7 @@ updater.
 | CQ22 doctor reference | Confirmed doc defect (S3) | P0 | `docs/reference/commands.md` doctor section matches no-HTTP contract |
 | CQ22 no-cache reference + Windows acceptance text | Confirmed doc defect (S3) | P0 | `commands.md` `--no-cache` and `docs/media-runtime-windows-validation.md` describe scoped refresh |
 | CQ22 geometry architecture claim | Confirmed doc defect (S3) | P8 | `docs/current-architecture.md` direct-call inference claim removed with CQ12 |
-| CQ22 ownership/payload/disclosure docs | Same-pass documentation | P5, P6, P7, P8, P9 | Architecture/CLI-contract sections updated in the package that changes them |
+| CQ22 ownership/payload/disclosure docs | Same-pass documentation | P1, P4, P5, P6, P7, P8, P9 | Architecture/CLI-contract sections updated in the package that changes them |
 
 CQ7 and CQ14 do not appear in this matrix by design (see §11).
 
@@ -197,14 +197,15 @@ CQ7 and CQ14 do not appear in this matrix by design (see §11).
 | --- | --- | --- |
 | `tools/windows_portable/build_portable.ps1`, `version_utils.ps1` | P1 (`Main`, output reservation), P2 (grammar through `version_utils.ps1`, which the builder dot-sources) | P1 merges first; P2 rebases |
 | `tools/windows_portable/verify_extracted_bundle.ps1`, `write_bundle_inventory.py`, `tools/windows_portable/README.txt`, runbook Windows section | P1 (`path_safety.ps1` extraction, provenance, source-build docs), P2 (version helper entries, provenance, update/rollback docs) | P1 first; P2 rebases |
-| `tests/windows_portable/test_windows_portable_build_scripts.py` | P1, P2, P8 (asserts on `runtime_smoke.py` text ~364–501, ~748) | P1, then P2; P8 rebases its small hunk |
+| `tests/windows_portable/test_windows_portable_build_scripts.py` | P1, P2, P8 (asserts on `runtime_smoke.py` text ~364–501, ~748) | P1 before P2; P8 (Wave A) and P1/P2 in either order, whichever lands later rebases |
 | `tools/windows_portable/runtime_smoke.py`, `tools/docker_runtime_smoke.py` | P8 (`apply_tonemap` result type) | P8 only; note the build-scripts test dependency above |
 | `src/frame_compare/orchestration/preparation.py`, `coordinator.py`, `tools/alignment_benchmark.py` | P5 (acquisition), P7 (domain, required read) | P5 first |
 | `orchestration/execution_types.py`, `phase_output_application.py`, `phase_post_render.py` | P10, P7, P9 (and P8 for `phase_post_render.py` tonemap summary) | P10 first (smallest); then P7/P8 in either order; P9 last |
 | `render/prepare.py` | P5 (delete `cli_overrides` branch), P8 (applied facts) | Either order; second rebases a small hunk |
 | `render/batch/expansion.py`, `render/types.py` (`RenderedClipFacts`) | P8 (geometry, applied tonemap facts), P9 (jobs, result types) | P8 first |
 | `orchestration/phase_render.py` | P7 (selection reads, selection-row helper), P8 (active-rect provenance mapping ~16/~239), P9 (rewrite to jobs) | P7 and P8 in either order; P9 last |
-| `orchestration/active_rect.py` | P7 (domain builder calls `metric_cache_request_for_clip`), P8 (new `ClipActiveRectSource → ActivePictureProvenance` mapping) | Either order; small hunks |
+| `orchestration/active_rect.py` | P8 (new `ClipActiveRectSource → ActivePictureProvenance` mapping); P7 only calls the existing `metric_cache_request_for_clip` through `metric_request_for_domain` and should not need to edit it | P8 owns edits |
+| `tests/orchestration/test_preparation_cache.py`, `test_preparation_active_rect.py` | P5 (`prepare_preflight` callers), P7 (domain fields) | P5 first |
 | `analysis/cache_io.py` | P4 (decode), P7 (`acquire_required_metrics`) | P4 first (small) |
 | `services/alignment_reuse_cache.py`, `services/alignment_manual_overrides.py` | P4 (decode catches), P6 (candidate; reuse-cache refactor) | P4 first (small); P6 rebases |
 | `tests/orchestration/test_phase_tasks.py`, `tests/orchestration/test_execute_run_cache_modes.py` | P4 (cache-only corruption cases), P7 (CQ4/6/9) | P4 first; P7 rebases |
@@ -268,9 +269,9 @@ it. No mandatory documentation framework.
    preserved caches.
 3. Rewrite the Windows acceptance bullet: “`--no-cache` removes the matching analysis
    entry, recomputes, and persists a fresh entry; repeated runs without it then hit.”
-4. Checked and left unchanged: “network doctor warnings” in
-   `tools/windows_portable/README.txt` (~56) and
-   `docs/getting-started/windows-portable.md` (~292) refer to doctor's
+4. Checked and left unchanged: “Optional or network doctor warnings” in
+   `tools/windows_portable/README.txt` (~56) and “Doctor reports an optional/network
+   warning” in `docs/getting-started/windows-portable.md` (~292) refer to doctor's
    contract-defined “Network and credentials” section, not to network access.
 5. Run `uv run --no-sync pytest -q tests/test_cli_contract_docs.py`,
    `git diff --check`, and the documentation site build
@@ -817,9 +818,10 @@ recorded or explicitly open.
 - `viewport.js`: `currentAlignment()` returns a normalized copy of
   `pairAlignments[currentPairAlignmentKey()]` or the neutral default. A private
   `writeCurrentAlignment(a, {clearDrafts})` normalizes, applies the existing
-  clip-count/key guards, and writes the map entry; it clears raw drafts only where
-  today's caller does (`setManualAlignment` and committed input yes;
-  `setAlignmentPreset('custom')`, ~546–556, no). `setManualAlignment` (~558) and
+  clip-count/key guards, and writes the map entry; it clears raw drafts exactly where
+  today's code does (`setManualAlignment`, committed input, and non-custom presets via
+  `applyAlignmentPresetOffsets` ~438–444: yes; `setAlignmentPreset('custom')`,
+  ~546–556: no). `setManualAlignment` (~558) and
   `setAlignmentPreset` (~546, `custom` keeps current x/y) write through it, then
   `applyAlignment` and persist. `commitRawAlignmentInput` (~603), `applyAlignment`
   (~611–618), and `alignmentStatusValue` (~642–649) read `currentAlignment()`.
@@ -849,8 +851,10 @@ element()`, and returns `element` on the fixture. Scenario-level `fakeElement()`
 calls (~489, 497, 776, 898–899, 939, 958, 960, 1145, 1201, 1207, 1463–1465,
 1721–1723) become `fixture.element()`. Delete the global so a stray use throws.
 Apply the same per-environment closure to `lens_harness.js`: `makeEnvironment`
-creates elements (~87–143) before its `document` (~176), so the factory closure must
-resolve the document lazily from the environment; scenario-level `fakeElement()` calls
+creates elements (~87–143) before its `document` literal (~155; `focusDocument` is
+assigned at ~176), and that document's `createElement` (~166) also calls
+`fakeElement`, so the factory closure must resolve the document lazily from the
+environment and cover `createElement` too; scenario-level `fakeElement()` calls
 that become an environment's `activeElement` (`externalFocus` ~682,
 `transientExternalFocus` ~719) use that environment's factory, while geometry-only
 elements (~308, ~313, ~454) need no document. `grid_view_harness.js` does use
@@ -1041,8 +1045,9 @@ entry); `run_result_record.py` tuple membership (does not hash); subprocess JSON
 **Ordered steps.** (1) Add the constant and its contract test; (2) per-owner changes
 in the table; (3) CQ19 field constraints; (4) tests; (5) document that the four
 timeouts must be finite next to their existing minimum-bound text in
-`docs/current-cli-contract.md` (~1382, ~1635) and `docs/reference/configuration.md`
-(~474–480).
+`docs/current-cli-contract.md` (every timeout entry: ~1382 and ~1635 plus the
+slow.pics and TMDB `timeout_seconds` entries) and `docs/reference/configuration.md`
+(the four timeout entries, ~474, ~717, ~807, ~893).
 
 **Tests (real temporary files; assert the policy result, not the exception type).**
 - `tests/utils/test_serialized_decode.py`: deep JSON (`'['*10000`), deep TOML (1,500
@@ -1168,7 +1173,11 @@ def refresh_report_auto_open_preference(inputs: AcquiredRunConfig, load_config_f
   doctor no longer uses it. Callers to migrate: `tests/orchestration/test_preflight.py`
   (~528–654), `test_preparation_cache.py` (~102, ~193, ~251, ~303, ~355),
   `test_execute_run_failure_cleanup.py` (~47), `test_preparation_active_rect.py`
-  (~364), and `tests/config/test_effective.py` (~16).
+  (~364), and `tests/config/test_effective.py` (~16). The loader parameters of
+  `maybe_open_report_path` and `build_confirm_slowpics_upload_callback`
+  (`run_command.py` ~720, ~433) change to take the acquired value and injected
+  loader, so also migrate `tests/cli/test_run_interactive.py` (13
+  `resolve_effective_config=` arguments) and `tests/utils/test_terminal.py` (~90).
 - CLI `handle_run` acquires once; dry-run, logging, diagnose-paths, write-config
   (`write_config_to(inputs.config_path, inputs.config)` through the existing
   secret-safe persistence), `validate_run_contracts`, callbacks, preview,
@@ -1218,15 +1227,19 @@ used by run (one selection owner, including the exact portable state-file except
 Pass `DoctorConfigSelection(root, config_path, explicit)` through `RunDoctorFn`,
 `run_doctor`, and `collect_checks` to the TMDB check. Add `doctor` to the shim's
 injection (`Get-ConfigInjectionIndex`). Doctor resolves its selection through
-`run_inputs.select_run_config_path`, the same function run uses. Failure behavior:
-an invalid selection argument (path escaping the root, nonregular or unreadable
-selected path) is a typed top-level failure through the standard CLI error contract,
-exactly as for run (the doctor contract already allows typed top-level failures and
-`handle_doctor` catches `FrameCompareError`); the default config being absent →
-defaults+environment (today's tolerance; `_resolve_tmdb_config` must also catch
-`ConfigNotFoundError`, which it does not today); an explicit config that is missing
-or fails to load/validate → reported in the TMDB check's details, not a top-level
-failure; no HTTP; JSON schema unchanged.
+`run_inputs.select_run_config_path`, the same function run uses. Failure behavior
+follows where each check lives: `resolve_selected_config_path` (`preflight.py`
+~259–279) only expands, syntax-checks, and contains the path, so a path that escapes
+the root or is syntactically invalid is a typed top-level failure through the
+standard CLI error contract, exactly as for run (the doctor contract already allows
+typed top-level failures and `handle_doctor` catches `FrameCompareError`). Regular-file
+and readability checks live in `load_config` (`loader.py` ~82–95, raising
+`ConfigParseError`), so an explicit config that is missing (`ConfigNotFoundError`),
+nonregular, unreadable, or fails to parse/validate is reported in the TMDB check's
+details, not as a top-level failure; `_resolve_tmdb_config` (`doctor_checks.py`
+~620–645) must catch `ConfigNotFoundError` for that explicit case, which it does not
+today. An absent **default** config keeps today's behavior (passed as `None`, so
+defaults+environment). No HTTP; JSON schema unchanged.
 Doctor drops the upward root search to match run. Preserved: environment-variable
 precedence, local-only/no-HTTP behavior, the exact portable state-file containment
 exception (no sibling LocalAppData files), and runtime-free option parsing (doctor's
@@ -1651,8 +1664,12 @@ def acquire_required_metrics(request: MetricCacheRequest, *, video_paths: list[P
   `build_prepared_selection_domain(*, clips, config, analysis_clip, selection_window,
   override)`. The metric request is **not stored**: one function,
   `metric_request_for_domain(domain, config)`, wraps `metric_cache_request_for_clip`
-  and is called exactly where requests are built today (Analyze; preparation's
-  cache-only and `no_cache` branches). Building it eagerly for every run would move
+  (its inputs are the domain's `analysis_clip` and `selection_window` plus
+  `config.screenshots.active_rect_detection`) and is called exactly where requests are
+  built today (Analyze; preparation's cache-only and `no_cache` branches). The
+  cache-only branch builds its request from `prevalidated_*` values before the final
+  domain exists (`preparation.py` ~651–667); it builds a prevalidated domain there
+  with the same builder. Building it eagerly for every run would move
   `MetricFrameRange` validation (`analysis/types.py` ~60–63, can raise `ValueError`)
   from the warn-only Analyze phase into fatal preparation. It carries neither
   clips (Align replaces them; a second authority) nor config (`ctx.config` remains the
@@ -1697,12 +1714,21 @@ def acquire_required_metrics(request: MetricCacheRequest, *, video_paths: list[P
    now: report frame details (`phase_post_render.py` ~428–441) and the label list
    `phase_render.py` builds (~44–55), deleting both private derivations in P7. P9
    later builds `SelectedScreenshot`s from the same rows. Test churn from removing
-   `ExecutionState.selected_frames` and the three `RunContext` fields:
-   `test_phase_tasks_alignment.py` (15 `ctx.analysis_metrics =` assignments, ~481,
-   ~535, ~587, ~636, ~681, ~738, …, and 4 domain-field reads),
-   `test_phase_post_render_outputs.py` (~462–463), `test_execution_phase_plan.py`
-   (~206–264, ~389), and `test_phase_alignment_contract.py` (~449,
-   `ExecutionState(selected_frames=...)`).
+   `ExecutionState.selected_frames`, the three `RunContext` selection fields, and the
+   four loose domain fields. Start with a grep over `src/`, `tools/`, and `tests/` for
+   `selected_frames`, `selection_breakdown`, `selection_details_by_source_frame`,
+   `analysis_metrics`, `selection_window`, `analysis_clip`,
+   `analysis_selection_domain`, and `full_window_retry_override`, and migrate every
+   hit. Known sites: `test_phase_tasks_alignment.py` (6 `ctx.analysis_metrics =`
+   assignments, ~481, ~535, ~587, …, and 4 domain-field reads), `test_phase_tasks.py`
+   (about 24 `ctx.selection_window`/`ctx.analysis_clip` writes),
+   `test_phase_output_integration.py` (8), `test_phase_tasks_outputs.py`,
+   `test_phases.py`, `test_phase_post_render_outputs.py` (~462–463),
+   `test_execution_phase_plan.py` (~206–264, ~389), `test_phase_alignment_contract.py`
+   (~449, `ExecutionState(selected_frames=...)`), `test_preparation_source_selection.py`
+   and its `_fastest_source`/`_fps` siblings, `test_preparation_active_rect.py` (~186,
+   ~250, ~314), `test_preparation_cache.py` (~82), and `execute_run_helpers.py`
+   (~200).
 5. Delete the removed fields and slice assignments.
 6. Docs: `docs/current-architecture.md` § Runtime Flow (selection ownership,
    execution-time reads), § Shared caches (single required-read owner, two lifecycle
@@ -1807,7 +1833,9 @@ class TonemapResult: clip: vs.VideoNode; applied: AppliedTonemap | None   # None
   `render/prepare.py`; `tools/docker_runtime_smoke.py` (~447–457, run by
   `verify_docker_integration.sh`); `tools/windows_portable/runtime_smoke.py`
   (`prove_apply_tonemap_frame` ~330–354, run inside the bundle build); tests
-  `tests/vs/test_integration.py` (~69–73, ~112) and `tests/vs/test_tonemap.py`; and the
+  `tests/vs/test_integration.py` (~69–73, ~112), `tests/vs/test_tonemap.py`,
+  `tests/vs/test_tonemap_apply.py` (imports and calls it directly, about 20
+  references), and `tests/render/test_tonemap_wiring.py` (~182, patches it); and the
   lazy export in `vs/__init__.py` (~38, ~60). The two runtime smokes should also
   assert the applied implementation they expect (libplacebo when usable), which turns
   the smoke into evidence for CQ11. `tests/windows_portable/test_windows_portable_build_scripts.py`
@@ -1844,7 +1872,9 @@ report payload `REPORT_VERSION` (`payload.py` ~29) from `1.2` to `1.3`:
   fallback_cause} | null`. The 1.2 flat `presentation.tone_curve` and
   `presentation.target_nits` fields (`_presentation_payload` ~595–602), which carried
   requested values, are removed.
-- `rendering.tonemap`: `{ran: bool, requested: settings | null, shared: transform | null}`.
+- `rendering.tonemap`: `{ran: bool, requested: settings | null, shared: {implementation,
+  algorithm, effective_controls} | null}` — `shared` is the run-level projection, never
+  the full per-clip transform, so it contains no resolved peak and no fallback cause.
   This replaces 1.2's `{applied: bool, settings}`: `settings` presented requested
   values as effective, and a boolean named `applied` beside applied facts is ambiguous.
 - Identity: `build_report_id` (`payload.py` ~497–523) hashes the identity clips and
@@ -1910,7 +1940,9 @@ report payload `REPORT_VERSION` (`payload.py` ~29) from `1.2` to `1.3`:
 (3) payload 1.3, identity, Python renderer, JS consumers; (4) fallback warning;
 (5) CQ12 geometry deletion and orchestration mapping; (6) docs: CLI contract §
 Report And Overlay Metadata Contract (~1002–1059: version 1.3, per-clip applied
-disclosure, identity facts, fallback disclosure), `docs/current-architecture.md`
+disclosure, identity facts, fallback disclosure, and rewording “resolved tonemap
+settings when tonemapping ran” at ~1026 to the shared applied transform plus per-clip
+peaks), `docs/current-architecture.md`
 (~967 payload references; ~1136–1154 geometry ownership, removing the stale
 direct-call inference claim — the CQ22 geometry item), and user report/HDR guides
 that describe the tonemap disclosure.
@@ -2015,11 +2047,13 @@ class RenderedClip: label: str; clip_facts: RenderedClipFacts; screenshots: tupl
   is batched only when every request is compatible, `orchestrator.py` ~109–111, using
   `is_ffmpeg_batch_compatible`), partial progress and admission, and SIGINT admission.
   The 13 ungrouped tests in `tests/render/test_orchestrator.py` are ported where
-  they prove one of those obligations; tests that split one unit into several FFmpeg
-  groups (`test_render_batch_sequential_splits_incompatible_ffmpeg_requests`,
-  `…_mixes_indivisible_ffmpeg_groups_and_singletons`) exercise behavior production
-  never runs and are rewritten as all-or-serial cases or retired with that reason
-  recorded. The ordered-prefix progress (`_record_ready_progress`,
+  they prove one of those obligations (for example
+  `…_mixes_indivisible_ffmpeg_groups_and_singletons`, ~765–815, whose three clips
+  each batch uniformly, ports directly to one job per clip). A test that splits one
+  unit into several FFmpeg groups
+  (`test_render_batch_sequential_splits_incompatible_ffmpeg_requests`) exercises
+  behavior production never runs and is rewritten as an all-or-serial case or retired
+  with that reason recorded. The ordered-prefix progress (`_record_ready_progress`,
   `_render_description`, “Rendering” label) exists only on that path; production uses
   count-only `advance` under a lock, so deleting it removes no product behavior. Its
   only input, `RenderRequest.progress_label` and `ScreenshotBatchRequest.progress_label`
@@ -2200,7 +2234,7 @@ stats: the store writes its stats as JSON (key, created and reused recipe names,
 per-recipe seconds) under `FRAME_COMPARE_E2E_ARTIFACTS` when that variable is set. The
 verifier accepts only `--pytest-path`, so focused rows use a direct command in the
 existing notes style, for example
-`docker compose run --rm frame-compare-test -lc 'export FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache …; pytest -q tests/integration/test_alignment_u4_acceptance.py -k replacement-4 --durations=0'`,
+`docker compose run --rm frame-compare-test -lc 'export FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/e2e/u4-measure …; pytest -q tests/integration/test_alignment_u4_acceptance.py -k replacement-4 --durations=0'`,
 clearing `generated/test-media-cache/test_alignment_u4_acceptance` first for cold
 rows. Rows:
 
@@ -2236,7 +2270,7 @@ recorded.
 | P1 | ruff/pyright; Linux skips inspected | — | — | — | — | **Required** (PS7 builder/installer fixtures; runbook steps 3–4; hosted verify) | — |
 | P2 | ruff/pyright; Python vectors; release-contract tests | — | — | — | — | **Required** (PS5.1 + PS7 updater E2E; PS5.1 bundle install/uninstall; runbook steps 5–6; signing or documented-only) | — |
 | P3 | pyright/ruff for bridge | — | **Required** | **Required** | — | — | — |
-| P4 | Logic | **Required** | — | — | — | — | — |
+| P4 | Logic; `tests/test_cli_contract_docs.py`; strict docs build (after P0 step 0) | **Required** | — | — | — | — | — |
 | P5 | Logic | **Required** | — | — | **Required** (regression) | **Required** (shim doctor selection) | — |
 | P6 | Logic; `tests/vsview` panel/contract suites must actually run (Qt/EGL available) | **Required** | — | — | **Required** (U4 phase/cache matrix) | — | — |
 | P7 | Logic, lint-imports | **Required** | — | — | **Required** | — | — |
@@ -2415,7 +2449,7 @@ the reason it could not be obtained.
       and Windows hosted verify at the final SHA (reuse package evidence only where the
       relevant code is unchanged).
 - [ ] `docs/current-architecture.md` and `docs/current-cli-contract.md` reflect every
-      ownership/contract change listed in packages P5–P9; runbook, README.txt,
+      ownership/contract change listed in packages P1, P4, and P5–P9; runbook, README.txt,
       windows-portable guide, and CONTRIBUTING updated per P1, P2, P11.
 - [ ] Final review against the report: no supported finding or CQ21 subpart open, no
       implicit caller migration or deletion, no temporary compatibility layer, CQ7/CQ14
