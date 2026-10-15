@@ -16,7 +16,7 @@ on:
       - .github/ISSUE_TEMPLATE/config.yml
       - tests/workflows/test_docs_workflow.py
   push:
-    branches: [main, staging]
+    branches: [main, pre-release, staging]
     paths: *docs-paths
   workflow_dispatch:
 

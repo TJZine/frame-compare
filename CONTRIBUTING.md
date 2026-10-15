@@ -50,7 +50,8 @@ tracked `.codanna/settings.toml.in` template; never commit the rendered
 ## Branch and pull request workflow
 
 1. Start from the base branch named in the issue, handoff, or maintainer request.
-   Otherwise target `main`.
+   Otherwise start from and target `pre-release` for normal development. `main`
+   receives the reviewed squash promotion of a complete release.
 2. Create a focused branch:
 
    ```bash
@@ -62,6 +63,13 @@ tracked `.codanna/settings.toml.in` template; never commit the rendered
    documentation. Reuse sufficient proof; do not add tests merely to satisfy a step.
 5. Run applicable verification from the repository profile and specialist runbook.
 6. Open a pull request against the intended integration branch.
+
+Delete completed development branches after merging. Freeze `pre-release` during
+release acceptance; after successful stable publication, approved branch maintenance
+archives its accepted head and starts it again from the published `main` commit.
+Start new-cycle branches from the refreshed `pre-release`. Unmerged or local-only
+work must be carried forward explicitly before approving that operation. See the
+[release branch procedure](docs/ENGINEERING_RUNBOOK.md#pre-release-staging-and-dependency-update-flow).
 
 Do not assume `main`, `staging`, `cleanup`, or a version-development branch is the
 correct target when the task names another base explicitly.

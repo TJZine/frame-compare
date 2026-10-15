@@ -155,7 +155,7 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     docker = _load_workflow(repo_root / ".github" / "workflows" / "docker-integration.yml")
 
     assert set(ci["on"]) == {"push", "pull_request", "workflow_dispatch"}
-    assert set(ci["on"]["push"]["branches"]) == {"main", "staging"}
+    assert set(ci["on"]["push"]["branches"]) == {"main", "pre-release", "staging"}
     assert ci["permissions"] == {"contents": "read"}
     assert set(docker["on"]) == {"pull_request", "workflow_dispatch"}
     assert docker["permissions"] == {"contents": "read"}
@@ -216,6 +216,8 @@ def test_release_please_remains_guarded_and_non_merging(repo_root: Path) -> None
     assert release["if"] == "needs.initial_release_guard.outputs.enabled == 'true'"
     assert release["permissions"] == {"contents": "write", "pull-requests": "write"}
     assert action["with"]["skip-github-release"] == "true"
+    assert action["with"]["target-branch"] == "pre-release"
+    assert workflow["on"]["push"]["branches"] == ["pre-release"]
     assert checkout["with"]["fetch-depth"] == "1"
     assert checkout["with"]["persist-credentials"] == "false"
     assert ".release-please-manifest.json" in guard_run
@@ -256,6 +258,7 @@ def test_windows_portable_dispatch_owns_immutable_inputs_and_environment_gates(
         "attestations": "write",
         "contents": "write",
         "id-token": "write",
+        "pull-requests": "read",
     }
 
     release = _load_workflow(repo_root / ".github" / "workflows" / "release.yml")

@@ -568,7 +568,7 @@ Canonical verification path:
    workflow with its explicit verify inputs (the workflow checks out the supplied SHA):
 
    ```bash
-   WorkflowRef='<branch-containing-the-workflow>'
+   WorkflowRef='pre-release' # Use main with channel=stable
    ExpectedSha='<40-character-lowercase-head-sha-of-WorkflowRef>'
    gh workflow run windows-portable.yml \
      --ref "$WorkflowRef" \
@@ -579,8 +579,9 @@ Canonical verification path:
    ```
 
    The secret-free validation job requires `ExpectedSha` to equal the selected
-   protected branch head or protected, conventionally named release-tag head before
-   the signed reusable workflow can start. The selected `release-candidate` or `production`
+   protected `pre-release` head for RC verification or protected `main` head for
+   stable verification before the signed reusable workflow can start. Development
+   branches and release tags are not signed-verification entrypoints. The selected `release-candidate` or `production`
    environment owns the signing key, required reviewer approval, and allowed
    deployment branch/tag rules; `windows-ci` is the unsigned pull-request environment
    and must not contain signing secrets. Record the resulting workflow URL, exact SHA,
@@ -617,13 +618,13 @@ Current CI ownership:
   workflow. Do not replace the explicit mapping with broad `secrets: inherit`.
 - `.github/workflows/release-on-merge.yml` observes pushes to `main`. A changed
   stable manifest version starts publication only when GitHub identifies that exact
-  pushed commit as the merge commit of a release PR targeting this repository's
-  `main`. Supported titles are `chore(release): X.Y.Z` (Release Please),
+  pushed commit as the squash commit of a release PR from this repository's
+  `pre-release` into `main`. Supported titles are `chore(release): X.Y.Z` (Release Please),
   `chore(release): prepare Frame Compare vX.Y.Z`, and
   `chore(release)!: prepare Frame Compare vX.Y.Z`; the title version must match
   the manifest. Ordinary merges, unchanged versions, and RC versions do not
-  publish. The version is compared with `main` before the push, supporting squash,
-  merge, and rebase merges even when the version bump precedes the final commit.
+  publish. The version is compared with `main` before the push, so a version bump made
+  earlier on `pre-release` still qualifies at its final squash promotion.
   The release PR's final merged commit must be the pushed head.
   Human merges trigger this workflow; merges performed using `GITHUB_TOKEN`
   suppress downstream push workflows and require the manual entrypoint instead.
@@ -639,13 +640,14 @@ Current CI ownership:
   the release body, and publishes only after complete draft asset and body proof.
   Keeping dispatch at this pre-existing path makes the pre-merge RC reachable
   without a preparatory commit on `main`.
-- `.github/workflows/release-please.yml` runs only after the version currently
+- `.github/workflows/release-please.yml` observes `pre-release` and prepares
+  version/changelog PRs targeting `pre-release`. It runs only after the version
   recorded in `.release-please-manifest.json` has a matching published stable tag
-  and release. This keeps it dormant while the guarded release entrypoint is
-  publishing that manifest version, then resumes human-reviewed version/changelog
-  PR behavior for later changes. GitHub-release creation remains disabled; the
-  guarded release workflow owns publication through either automatic merge or
-  manual dispatch.
+  and release. This keeps it dormant while that manifest version awaits publication.
+  Merge its preparation PR into `pre-release`, complete RC acceptance, then open a
+  separately titled release promotion PR from `pre-release` into `main`.
+  GitHub-release creation remains disabled; the guarded release workflow owns
+  publication through either automatic merge or manual dispatch.
 - `.github/workflows/windows-portable-build.yml` is the reusable full portable
   build/sign/verification boundary called by PR, manual verification, and the
   release orchestrator.
@@ -674,6 +676,81 @@ that handoff as complete based only on hosted CI.
   from active workflow triggers.
 - `staging` is synchronized from `main` and is the integration target for normal
   Dependabot version updates. It is not the pre-main release-integration branch.
+
+- Normal changes start on short-lived branches from `pre-release` and return through
+  reviewed PRs. CI and unsigned Windows packaging accept PRs without development-head
+  allowlists. General CI, documentation and unsigned Windows checks also run on
+  pushes to the applicable stable branches. Docker media remains path-selected on
+  PRs; required checks must not depend on a path-selected job that may never run.
+- Protect `main` and `pre-release` with reviewed squash merges, required `CI Pass`
+  and unsigned Windows checks, and blocked ordinary deletion/history rewrites.
+  Main's release promotion is one squash commit for the complete release. The RC
+  environment permits only `pre-release`; production permits only `main`. Both
+  require approval. `windows-ci` has no signing secrets or approval gate. Version
+  development branches, including `v0.7.0`, need no signing allowlist entries.
+- After successful **stable** publication and its final asset checks, `release.yml`
+  calls `recreate-pre-release.yml` in the same workflow run. RC publication does not
+  recreate the branch. A separate release-event trigger would miss publications
+  made using `GITHUB_TOKEN`, so this dependency is part of the release owner.
+- The `branch-maintenance` environment permits only `main` and requires maintainer
+  approval. Approval confirms a development freeze: no incoming/outgoing open PRs,
+  no uncarried local/unopened branches depending on the old integration history,
+  and no concurrent main/tag changes. Hold new-cycle development until maintenance
+  finishes. The script cannot discover local branches or lock GitHub PR creation.
+- `scripts/recreate_pre_release.py` requires the published, nondraft stable release,
+  exact main/tag SHA, exactly one same-repository merged `pre-release` -> `main`
+  release PR, its exact accepted head, a single-parent squash commit, and matching
+  source trees. It rechecks all open PR pages and main/tag/integration/archive refs
+  immediately before mutation. Advanced integration work and archive collisions
+  refuse. Successful retries are idempotent only with the matching archive present.
+- Recreation is one atomic Git push: save the old head at
+  `refs/tags/pre-release-archive/<stable-tag>-<accepted-head>` and replace
+  `refs/heads/pre-release` with the published squash commit. Explicit leases require
+  the accepted old head and an absent archive. There is no branch-deletion interval,
+  and any rejection prevents both ref changes. Protect archive tags against updates
+  and deletion. The archive retains commit/PR provenance; start new work from the
+  refreshed branch, not an old checkout. Main/tag are also checked after the push;
+  detected movement fails for manual reconciliation with the archive retained.
+  API queries and a pre-release lease do not atomically lock main or the open-PR set.
+- Provision a dedicated GitHub App installed **only** on this repository, with
+  Contents and Workflows write permissions for the history update. Give that App
+  bypass only on the `pre-release` ruleset; never grant it a main/archives bypass.
+  Store `BRANCH_MAINTENANCE_CLIENT_ID` as a variable and
+  `BRANCH_MAINTENANCE_PRIVATE_KEY` as a secret **only in `branch-maintenance`**.
+  The pinned token action mints a repository-scoped installation token after
+  approval and revokes it afterward. It receives no Secrets or Administration
+  permissions. The built-in workflow token performs read-only metadata checks;
+  the App token performs the guarded Git update. Missing App configuration or
+  insufficient protection permissions fails closed; no protection is removed.
+  App provisioning remains an explicit maintainer setup step if no identity exists.
+- Unlike this recreation, `sync-staging.yml` uses `GITHUB_TOKEN` to fast-forward or
+  merge `main` while preserving staging-only commits. It does not delete/recreate
+  `staging` and cannot supply a protected-branch history-rewrite identity.
+- If publication succeeded but recreation was blocked, retain all branches and
+  archive refs, reconcile the reported condition, then rerun only the failed
+  maintenance job. The manual recovery workflow also accepts the exact current main
+  SHA and existing stable tag from `main`; it repeats all guards and approval.
+  Never rerun publication merely to retry maintenance:
+
+  ```bash
+  gh workflow run recreate-pre-release.yml --ref main \
+    -f expected_sha='<exact-current-published-main-sha>' -f release_tag='vX.Y.Z'
+  ```
+
+  The reset App/environment setup and live recreation still need target-service
+  proof. Focused local proof executes real disposable Git remotes, including lease
+  races and server-side atomic rejection, plus metadata and workflow controls:
+
+  ```bash
+  uv run --no-sync pytest -q -rs tests/workflows/test_pre_release_recreation.py tests/workflows/test_release_on_merge.py tests/workflows/test_github_workflows.py tests/workflows/test_staging_sync_workflow.py tests/windows_portable/test_windows_portable_workflow.py
+  ```
+
+  Before live acceptance, record exact source, successful publication dependency,
+  maintenance approval, App identity/protection behavior, archive/new branch SHAs,
+  and resulting unsigned CI. Exercise refusal conditions only in disposable
+  repositories. Local Git/fixture proof does not establish GitHub authorization.
+  Signing-key migration and hosted signing require their separate authorization;
+  configuring branch lifecycle does not grant it.
 
 - `.github/workflows/sync-staging.yml` runs after each `main` push and can also be
   dispatched manually. It fast-forwards `staging` when possible, merges `main`
