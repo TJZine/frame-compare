@@ -2443,7 +2443,7 @@ the reason it could not be obtained.
       2026-10-15 (D1 → P1; D2 → P2; D3a/D3b → P8; D4 → P5).
 - [x] P0 step 0: review-report links fixed; strict docs build passed with no warnings
       (2026-10-15).
-- [ ] P0: three public passages corrected; strict docs build passes.
+- [x] P0: three public passages corrected; strict docs build passes (reviewed and integrated; section 14).
 - [ ] P1: no code removes an existing output root; failure cleanup removes only a
       directory the run reserved; failure leaves existing state byte-identical; CI
       requirements fingerprint unchanged; D1 policy implemented with reversal on
@@ -2454,10 +2454,10 @@ the reason it could not be obtained.
       interrupted-state repair used by apply and rollback; `backup.json` beside
       `compatibility.json`; PS5.1 and PS7 updater E2E, PS5.1 install/uninstall, and
       signed/documented-only status recorded.
-- [ ] P3: `selectPair` is the only pair-changing path; Appendix A and `0:0` variants fixed
+- [x] P3: `selectPair` is the only pair-changing path; Appendix A and `0:0` variants fixed
       in Node and real browser; fixtures own documents; JS asserts each obligation
       once; focused scenario run and deliberate-failure proof recorded.
-- [ ] P4: owner-specific recovery for every reader in the table, including config and
+- [x] P4: owner-specific recovery for every reader in the table, including config and
       presets; four timeouts finite.
 - [ ] P5: one config acquisition per run; preview override policy and
       `TonemapCliOverrides` deleted; benchmark migrated; doctor and shim selection
@@ -2474,7 +2474,7 @@ the reason it could not be obtained.
 - [ ] P9: structured jobs/results end to end; range plumbing and duplicate validators
       deleted; ungrouped mode removed with obligations ported; Docker and Windows
       hosted evidence.
-- [ ] P10: one policy warning in result, summary, and record.
+- [x] P10: one policy warning in result, summary, and record (joined/current composition proof; native gate at 04d5c90b).
 - [ ] P11: recipe module, key, demand/full-matrix generation; measurements recorded.
 - [ ] Integrated head: full native suite, `lint-imports`, Docker gate, browser smoke,
       and Windows hosted verify at the final SHA (reuse package evidence only where the
@@ -2763,7 +2763,7 @@ coverage and routes findings without personal substantive review.
 
 | Boundary / reviewer | Owned wave scope and explicit integration interfaces | Status at exact 04d5c90b |
 | --- | --- | --- |
-| A / 01a13ece-fcf0-7da1-afb9-c63eb44a89a8, reviewer/high | P0/P3/P4/P5/P10: CLI/config/JSON/viewer/persistence/warnings; P6 records, P8 payload/facts and P11 request construction interfaces | Assigned, pending |
+| A / 01a13ece-fcf0-7da1-afb9-c63eb44a89a8, reviewer/high | P0/P3/P4/P5/P10: CLI/config/JSON/viewer/persistence/warnings; P6 records, P8 payload/facts and P11 request construction interfaces | COMPLETE, no findings; current-source equivalence, actual mixed-warning/report/record/JSON probe and 108 focused passes |
 | B / 01a13ee0-8b57-7573-9de8-4374f0fc445e, deep/xhigh | P6/P8 authority/native/render/report; P5 inputs, P4 failure policy, P10 warnings, P11 real phase/cache/smoke interfaces | COMPLETE, no findings; unchanged application-source proof and explicit current U4/native interface tracing |
 | C / 01a13ed5-7e47-7ea0-9201-1f47b6a097f0, deep/xhigh | P1 preservation/activation/provenance; P5 doctor shim, P8 runtime smoke, P0 acceptance docs and P11 runbook coexistence | COMPLETE, no findings; P1 source/test equivalence verified, relevant cross-boundary callers traced, Windows execution still open |
 | D / 01a13ee3-a368-7772-90c2-9c84da0890a7, reviewer/high | P11 recipe/cache/verifier/notes and U4 config/authority/runtime interfaces to P5/P6/P8 | COMPLETE, no findings; unchanged-source/AST and evidence inspection, no new runtime run |
@@ -2830,3 +2830,27 @@ authority/cache assertion. Cumulative diff clean; no runtime execution claimed.
 Parent's separately observed04d5 native pass remains applicable. Boundaries B/C/D
 complete with no findings; A and combined current Docker remain pending. No other
 independent integration is ready; P2/P7 work and their later reviews remain active.
+
+
+### Wave A independent source review complete
+
+Boundary A completed at exact04d5c90b with no actionable finding/uncovered seam.
+Reviewer verified relevant prior CLI/config/input/viewer/decoder/error-formatting/
+P6/P10 owners unchanged, inspected P8payload1.3/applied-fact/consumer migrations and
+P11 real acquired-request path. Fresh94report/Node/payload/markup/render/publish/
+CLI-doc/joined-warning passes plus14alignment-cache/review passes(no skips;88deselected).
+A real two-clip report/phase/result/record/summary/JSON probe with mocked media and
+transport produced render+collection warnings exactly once each,count2,status
+completed_with_warnings,explicit association/title,unchanged successJSON. This is
+logic proof,not native media. Prior individual reviews reused only with equivalence.
+
+All four Wave A review boundaries A/B/C/D now COMPLETE at exact04d5c90b; their union
+covers all nine packages and explicit cross-package composition. NO actionable
+findings or missing code-review obligation remains for this wave source. Current
+native/browser/static/docs gates separately passed as recorded. Combined current
+Docker is still running; Windows/platform acceptance OPEN. Overall plan not complete:
+P2/P7 implementation and later Wave B review, P9 implementation/Wave C review, final
+cumulative independent review/gates and accepted target-proof limitations remain.
+P0/P3/P4/P10 package checklist items checked only against their recorded completed
+obligations; other package/platform/full-plan checks stay open. Pending children
+are the only useful remaining work until callbacks; no idle polling.
