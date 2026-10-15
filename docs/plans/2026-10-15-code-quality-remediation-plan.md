@@ -3246,3 +3246,89 @@ cross-check against JUnit/build/manual/package/artifact/hosted records found no
 remaining material overclaim after correcting the opening Outcome summary. The plan's
 design and coverage matrix are preserved. Verification processes completed, temporary
 User PATH changes were restored, and raw failures/fixtures/bundles remain available.
+
+### Stable branch workflow transition, 2026-10-15
+
+The later maintainer request authorizes squash release promotion into `main`, safe
+recreation of `pre-release`, stable-branch CI configuration, and updating existing
+PR [#138](https://github.com/TJZine/frame-compare/pull/138). It does not authorize
+signing-key migration, hosted signing or release publication. This subsection
+supersedes the earlier proposed `v0.7.0` signed-verification dispatch and protected-ref
+instructions; the preceding local Windows results retain their original source scope.
+
+Implementation source is **`52e64ec70243e48678f129defa0d78801db7cec4`**, following
+CLI fixture portability correction `cb62080c`. Application source, runtime locks,
+portable builder and updater are unchanged from handoff `8a46c1a2`. The fixture fix
+addresses the three native-path assertions that failed the unsigned hosted run
+[38807149244](https://github.com/TJZine/frame-compare/actions/runs/38807149244),
+without changing their bracket/config-override/external-input obligations.
+
+Normal development PRs target `pre-release`; Release Please prepares versions there.
+A completed release is squash-promoted from `pre-release` into `main`. After stable
+publication and final asset verification, separately approved maintenance atomically
+archives the accepted integration head and replaces `pre-release` with the published
+main commit. Leases, tree/squash identity, published release, all open-PR pages and
+before/after ref checks refuse unsafe states. Approval confirms the documented
+development freeze, including unpushed branches that GitHub cannot discover. The
+[runbook](../ENGINEERING_RUNBOOK.md#pre-release-staging-and-dependency-update-flow)
+owns setup, recovery and the limits of the concurrency guarantees.
+
+**Observed local verification at this implementation:**
+
+- `uv run --no-sync pytest -q -rs tests/workflows tests/windows_portable/test_windows_portable_workflow.py tests/test_cli_contract_docs.py --junitxml=generated/branch-workflow/2026-10-15/workflow-acceptance.xml`:
+  **178 passed, 0 failed, 9 skipped**. All nine skips are existing POSIX source-checkout
+  process/rename cases, unavailable on Windows. The 35 recreation cases passed,
+  including real disposable Git remotes, lease races, archive preservation,
+  idempotence and server-side atomic rejection. These do not prove live GitHub App
+  authorization.
+- The three previously failing CLI cases: **3 passed, 0 failed, 0 skipped**.
+  Both affected files via `uv run --no-sync pytest -q -rs tests/cli/test_cli_output.py tests/cli/test_run_command.py --junitxml=generated/branch-workflow/2026-10-15/cli-portability-files.xml`:
+  **72 passed, 0 failed, 1 skipped** (POSIX execute-bit proof unavailable on Windows).
+- Whole-repository Ruff lint/format and Pyright passed; explicit Pyright of the new
+  maintenance script and changed tests passed with no errors/warnings. Actionlint
+  1.7.12 passed all workflows with external ShellCheck/Pyflakes integrations disabled
+  because those tools are unavailable. Existing executable workflow tests supply
+  focused shell behavior proof. Strict documentation and `git diff --check` passed.
+- Independent read-only review covered workflow/reset safety, the concrete settings
+  payloads, App-token scope and final CLI fixture delta; no unresolved findings.
+
+**Observed repository configuration:** squash is the only enabled merge method.
+`main` retains its protections; `pre-release` blocks ordinary deletion/rewrites and
+requires squash PRs, resolved conversations and strict `CI Pass` plus
+`Verify unsigned Windows portable artifacts / build` checks. Check names and GitHub
+Actions integration ID15368 were confirmed against actual PR checks. Archive tags
+allow creation and block update/deletion. `release-candidate` permits only
+`pre-release`, and `branch-maintenance` permits only `main`; both require maintainer
+approval. Production and signing credentials were not changed. The maintenance
+ruleset has **no App bypass yet**, and no maintenance App/credential was provisioned.
+Staging's existing built-in-token fast-forward/merge behavior remains unchanged.
+
+Evidence is retained under
+`C:\Software\video\frame-compare\generated\branch-workflow\2026-10-15`, including
+JUnit/logs, original hosted failure log, settings before/plan/applied/readback JSON
+and verified verification-tool metadata. The recreation-focused JUnit is under
+`generated/windows-acceptance/2026-10-15/release-workflow/`. These ignored artifacts
+are local evidence, not uploaded hosted artifacts.
+
+**Remaining authorization and acceptance:** a maintainer must register/install the
+repository-scoped maintenance App, grant Contents/Workflows write, configure its
+client ID/private key only in `branch-maintenance`, and grant bypass only for the
+`pre-release` ruleset. No main/archive bypass is required. Live postpublication
+recreation remains unobserved until its prerequisites and maintenance approval exist.
+PR #138 remains the integration vehicle; a new exact-head unsigned run must establish
+hosted packaging proof. No PR merge or branch recreation is claimed here.
+
+For separately authorized RC signed verification, first merge the reviewed changes
+into protected `pre-release`, resolve its **then-current exact head**, confirm the
+real protected signing configuration and negative-access prerequisites, and obtain
+the `release-candidate` environment approval. The prepared entrypoint is now:
+
+```powershell
+$ExpectedSha = (git ls-remote origin refs/heads/pre-release).Split()[0]
+gh workflow run windows-portable.yml --repo TJZine/frame-compare --ref pre-release -f operation=verify -f channel=rc -f expected_sha=$ExpectedSha
+```
+
+This command is documented only, **not dispatched**. Protected signing and hosted
+signed verification remain pending separate maintainer authorization; no workflow
+URL, resolved signed SHA or signed artifacts exist for this transition. Fixture
+signing does not satisfy that gate. Overall remediation acceptance remains **OPEN**.
