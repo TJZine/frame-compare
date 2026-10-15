@@ -2479,6 +2479,10 @@ the reason it could not be obtained.
 - [ ] Integrated head: full native suite, `lint-imports`, Docker gate, browser smoke,
       and Windows hosted verify at the final SHA (reuse package evidence only where the
       relevant code is unchanged).
+- [ ] Final bundled report assets: run the runbook's Python Distribution Verification
+      on stable final source (wheel/sdist, existing verifier, fresh installed CLI
+      help/version and applicable report-asset inclusion). P3/P8 modify bundled assets,
+      so the existing runbook trigger applies; this adds proof, not product scope.
 - [ ] `docs/current-architecture.md` and `docs/current-cli-contract.md` reflect every
       ownership/contract change listed in packages P1, P4, and P5–P9; runbook, README.txt,
       windows-portable guide, and CONTRIBUTING updated per P1, P2, P11.
@@ -2553,9 +2557,9 @@ ledger-only commit is `f9eec86dd972d4fe4cb684558b0deb60584c4bf2` (Wave A plus in
 | P4 / CQ10,CQ19 | `c2b62b05` → `30515500`; F1 `a79528de` → `b2dcd6aa` | Original package reviewed/native passed; narrow F1 reopened then independently RESOLVED, both real loaders + CLI proved. Final integrated native pending. |
 | P5 / CQ8,CQ18 | original `b9ca34f2/1d03dbfe`; rebased/integrated `b2232196/1ba2f13b` | Complete, independently reviewed no new findings; inherited F1 closed at b2. Docker, current native and installed Windows shim proof open. |
 | P6 / CQ2,CQ5,CQ21c | `2313b659/f871e88c/977cc3f7` → `1f7ae791/fae10b01/af500389` | Complete, deep review no findings; native and real phase/cache Docker gate passed at 04d5c90b. |
-| P7 / CQ4,CQ6,CQ9 | original `4ea3ec04/0a2222ce/5a6f03ba`; rebased `a2257207/fb840295/e971b136` → integrated `8c70dfb5/badc1b48/f9eec86d` | Complete implementation/integration; 1545 current focused passes; complete independent deep review and native/Docker acceptance pending. |
+| P7 / CQ4,CQ6,CQ9 | original `4ea3ec04/0a2222ce/5a6f03ba`; rebased `a2257207/fb840295/e971b136` → integrated `8c70dfb5/badc1b48/f9eec86d` | Complete implementation/integration and current independent deep review, no findings; current native passed, Docker real-media acceptance pending. |
 | P8 / CQ11,CQ12,CQ22 geometry | original `165eb46a/4ce11247`; rebased `e09d684c/306631b9` → `bc182b07/698095cd` | Complete and integrated; early deep review and current P5/P6/P10 integration recheck no findings. Standalone/current native and Docker passed at 04d5c90b; Windows hosted acceptance open. |
-| P9 / CQ3 | Not dispatched | Wait for reviewed/integrated P7/P8/P10. Full structured jobs/results and ungrouped-path deletion still required. |
+| P9 / CQ3 | Active in 9bb4 from reviewed `47b5457c` (production source f9eec86d) | Full end-to-end jobs/results/scheduler migration assigned after current P7/P8/P10 source reviews clear; runtime gates required later. |
 | P10 / CQ13 | `f0c67e62` → `94efe8cd` | Complete, independent review no findings; joined warning/result/summary/record proof + native gate at 94 passed. |
 | P11 / CQ21b | original `d3250f4e/c542928b`; rebased `e4f502a2/881b0fde` → integrated `722da1ec/04d5c90b` | Code, final notes and current Wave A boundary independently reviewed, no findings; original cold Docker 295-pass proof and current combined-head 298-pass gate complete. |
 
@@ -2957,3 +2961,30 @@ proof required, no static substitution or stale images. No concurrent heavy nati
 run, global pruning or source fixes; report failures to owners. Current P7 deep
 composition recheck and Docker result pending; P9not dispatched until source clears.
 P2isolated implementation continues. Only pending children remain.
+
+
+P7 COMPLETE current deep review at exact001755f5..f9eec86d found no actionable finding
+or unresolved disposition. Independent range-diff CQ6/CQ9 identical, CQ4 only P8import
+context;44/51P7paths byte-identical, remaining7reviewed as integrated P8/P11/docs/fixture
+context. Worker e971→integratedf9 src/tests/tools identical. Preserved all typed-error,
+request/raw-key/v8literal/dual-read/recovery/snapshot/coordinate/lazy-domain semantics;
+U4test function ASTs identical,only prepared-domain constructor/access migrated.
+Fresh70focused reviewer passes/no skips plus previous454/independent old-Git replay
+reused. Current P8facts/report/provenance, P5acquisition, P6authority and P10warnings
+inspected together. Source prerequisite clear; real Docker still pending, current
+native3607pass already observed separately. Wave B union with P2 remains later.
+
+P9fullCQ3 assigned to reused P8worker01a13ec8-7014-7c63-bcf2-3cc807db28a9/worker-medium,
+owned9bb4, current task base47b5457c3516645d67e212d19fe14bef89240c0c (productionf9).
+All seven steps/types/jobs/indivisible scheduler/render-report-publish migration and
+named deletions/test obligations supplied; no reduced slice or P7/P8redo. Exact old
+ungrouped proof→job obligation mapping required, real SIGINT/reaping/failure/progress/
+name/fact association retained. Fullnative/Docker/Windows acceptance later; no resource
+lease in implementation. P2continues in5016. Parent owns final integration/review.
+
+Closeout verification note: runbook explicitly requires Python distribution proof
+when bundled assets change; P3/P8changed report JS. Final checklist now records that
+existing route once on stable final source, including wheel/sdist verification and
+fresh installed help/version/relevant asset proof. No dependency/config redesign or
+new test framework authorized. This is an existing obligation,not replanning design.
+Only active child implementation/review/runtime results remain; no idle polling.
