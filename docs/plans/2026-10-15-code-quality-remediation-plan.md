@@ -2501,12 +2501,12 @@ final-report-only fallback; the parent retrieves on its next activation.
 | Package | Owner / role / chat | Base and integration | State / evidence / remaining acceptance |
 | --- | --- | --- | --- |
 | P1 | worker / medium; `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | `9741fcc9`; worktree `5016` | Active; priority installation-preservation work; all P1 steps and CQ21d builder/installer portion; independent review and Windows acceptance pending |
-| P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | `9741fcc9`; worktree `9bb4` | Active; complete fixture/runner/transition package; separate planned commits; Node and real-browser evidence pending |
-| P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Implemented/integrated; independent reviewer `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` active; 724 focused tests passed; full native gate pending |
+| P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | worker `7ccdb965/986abc2e/149ef433` → integrated `8e32ee40/54e80bb6/983658b8` | Implemented/integrated; independent reviewer active; final-source Node/report/22-browser proof passed |
+| P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Implemented/integrated/independently reviewed, no findings; 724 focused passes; full native gate open |
 | P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | `9741fcc9`; worktree `b49f` | Active; bounded warning propagation with joined behavioral proof; independent review pending |
-| P0 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `260670cc` → integrated `23d2f59f` | Implemented/integrated; 5 CLI-doc tests + strict docs passed; independent reviewer shared with P4 active; step 0 not redone |
+| P0 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `260670cc` → integrated `23d2f59f` | Implemented/integrated/independently reviewed, no findings; 5 CLI-doc tests + strict docs passed; Wave A composition pending |
 | P5 | worker / medium; `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | `30515500`; worktree `9676` | Active; full acquisition/doctor scope; P10 shared-file ordering tracked |
-| P6 | Next practical batch after P4 shared-owner changes | — | Full CQ5/CQ21c/CQ2 scope pending |
+| P6 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | assigned current integrated `44a11213`; worktree `9bdf` | Active; complete CQ5/CQ21c/CQ2; reviewed P4 prerequisite retained; native/Docker gates deferred |
 | P8 | Next practical batch after P3/P10 shared-owner changes | — | Full applied-fact/payload/geometry scope pending |
 | P11 | worker / medium; `01a13ed0-043c-75f0-9554-afb21690373c` | `30515500`; worktree `a638` | Active; full recipe/store/cache + before/after measurements; exclusive Docker lease granted |
 | P2 | Wave B after integrated, reviewed P1 prerequisite | — | Grammar/transaction scope pending; PS5.1/7/Windows/signing acceptance open |
@@ -2597,3 +2597,39 @@ lease for a repeat at stable final source, using owned `.tmp/p3-browser-final`
 profiles; its exit/final identity is pending. P10 reminded to defer full native
 (which includes browser) and report focused/static completion without waiting on
 that gate. Earlier 22-case pass remains evidence only for its earlier source.
+
+
+### Independent P0/P4 conclusions and P3 integration
+
+Reviewer `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` verified original human authorization
+and completed read-only reviews of P4 `6c047405..30515500` and P0
+`e7e05b1d..23d2f59f`: **no actionable findings or design contradictions**. All P4
+per-owner table policies, typed failures, decode-only catches/hooks, four finite
+timeouts, two cache reads/no-compute failure, retained deterministic schemas/bytes
+and documentation inspected; P0 prose checked against actual source/contract/anchors.
+Reviewer ran 71 + 49 passing test executions across overlapping focused selections
+(no skips, not 120 distinct tests), read-only using worker interpreter with reviewer
+source on PYTHONPATH; diff checks clean. Worker 724/static/docs evidence reused, not
+misrepresented as reviewer reruns. P4 full native gate open; P0 runtime acceptance
+complete for its docs scope. Wave A composition and final cumulative review pending.
+
+P6 full package assigned to reused P4/P0 worker, same worker model/medium reasoning,
+after reviewed P4 integration. Start from then-current `44a11213` in isolated `9bdf`;
+scoped conventional commits only, all nine steps/CQ5/CQ21c/CQ2 and retained authority
+proof specified. P5 acquisition, P11 recipes, CQ7/CQ14 excluded; full-native/browser
+and Docker deferred for stable input/resource coordination.
+
+P3 final callback froze clean worker head `149ef433fdfdc661528087a0ce32962bb170e960`.
+Parent verified three-commit range/file list and cleanly cherry-picked all three to
+`8e32ee40`, `54e80bb6`, `983658b865ef479b9edfcdea66c2944379d13709`, from parent
+`44a11213`; 20 files +3562/-3948. Relevant code unchanged by integration. Worker
+reports full fixture ownership, named-runner/assertion consolidation and derived pair
+state migration/deletions complete; no CQ7/CQ14/payload/storage drift. Actual final
+source proof: 9 bridge invocations pass; 84 report service tests pass; **22 native
+Chrome browser cases pass/no skips** after final edits, unique owned profiles cleaned.
+Focused scenario/env selector and restored deliberate-failure/unknown-name proofs
+recorded; ruff/format/pyright/diff clean. No native/media gate needed for P3.
+Browser lease now released at final-source completion (supersedes premature release).
+P3 independent full-package review assigned to reused reviewer/high, exact stable
+range `44a11213..983658b8`, including every assertion migration/selection/persistence
+obligation and exclusions. Not yet accepted from worker callback alone.
