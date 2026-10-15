@@ -2465,7 +2465,7 @@ the reason it could not be obtained.
 - [x] P6: V6 gates evaluated once; scenario support separated; `ComparisonResolution`
       map with pure confirmation; candidate-based publication; on-disk proofs A–D;
       Docker gate.
-- [ ] P7: typed failure kinds; intact metric request and shared required read with both
+- [x] P7: typed failure kinds; intact metric request and shared required read with both
       lifecycle reads kept; execution-time selection reads; snapshot and domain values;
       byte-identical key fixtures; Docker gate.
 - [ ] P8: per-clip applied tonemap facts in overlay/report/warning; payload 1.3 and
@@ -2557,7 +2557,7 @@ ledger-only commit is `f9eec86dd972d4fe4cb684558b0deb60584c4bf2` (Wave A plus in
 | P4 / CQ10,CQ19 | `c2b62b05` → `30515500`; F1 `a79528de` → `b2dcd6aa` | Original package reviewed/native passed; narrow F1 reopened then independently RESOLVED, both real loaders + CLI proved. Final integrated native pending. |
 | P5 / CQ8,CQ18 | original `b9ca34f2/1d03dbfe`; rebased/integrated `b2232196/1ba2f13b` | Complete, independently reviewed no new findings; inherited F1 closed at b2. Docker, current native and installed Windows shim proof open. |
 | P6 / CQ2,CQ5,CQ21c | `2313b659/f871e88c/977cc3f7` → `1f7ae791/fae10b01/af500389` | Complete, deep review no findings; native and real phase/cache Docker gate passed at 04d5c90b. |
-| P7 / CQ4,CQ6,CQ9 | original `4ea3ec04/0a2222ce/5a6f03ba`; rebased `a2257207/fb840295/e971b136` → integrated `8c70dfb5/badc1b48/f9eec86d` | Complete implementation/integration and current independent deep review, no findings; current native passed, Docker real-media acceptance pending. |
+| P7 / CQ4,CQ6,CQ9 | original `4ea3ec04/0a2222ce/5a6f03ba`; rebased `a2257207/fb840295/e971b136` → integrated `8c70dfb5/badc1b48/f9eec86d` | Complete implementation/integration/current deep review, no findings; native3607 and real Docker298 passes at f9eec86d, no P7 target gate remains open. |
 | P8 / CQ11,CQ12,CQ22 geometry | original `165eb46a/4ce11247`; rebased `e09d684c/306631b9` → `bc182b07/698095cd` | Complete and integrated; early deep review and current P5/P6/P10 integration recheck no findings. Standalone/current native and Docker passed at 04d5c90b; Windows hosted acceptance open. |
 | P9 / CQ3 | Active in 9bb4 from reviewed `47b5457c` (production source f9eec86d) | Full end-to-end jobs/results/scheduler migration assigned after current P7/P8/P10 source reviews clear; runtime gates required later. |
 | P10 / CQ13 | `f0c67e62` → `94efe8cd` | Complete, independent review no findings; joined warning/result/summary/record proof + native gate at 94 passed. |
@@ -2988,3 +2988,29 @@ existing route once on stable final source, including wheel/sdist verification a
 fresh installed help/version/relevant asset proof. No dependency/config redesign or
 new test framework authorized. This is an existing obligation,not replanning design.
 Only active child implementation/review/runtime results remain; no idle polling.
+
+
+P7 integrated REAL-MEDIA Docker gate PASSED at exactf9eec86d in clean detacheda638,
+one rebuilt canonical full verifier. **298passed in173.23s,0failures/errors/skips/
+xfail/xpass**; all CLI/nonroot/plugins/sharedlibs/OBUParse/provenance/doctor/fixtures/
+softwareVulkan/native-frame, production-tooling-absence, actual installed app and
+post-removal generated-mount report/PNG/TOML/analysis/probe-cache stages passed.
+Actual current P7 metrics/selection/domain composition executed with retained
+P5/P6/P8/P11:U4acceptance38(phase-cache9,FPS3,retimed3),cache7,loadsources/probe/metrics6,
+renderorchestrator6,pipeline4,mediaalignment2/cache1/render2/tonemap1. This is newf9
+runtime evidence,not relabeled Wave A proof. Linuxaarch64/Debian-trixie,Python3.13.16,
+VS R81/API4.3,L-SMASH1310,FFMS2 5.0,placebo2.0.4,FFmpeg7.1.5 profile retained.
+
+Scoped projectframe-compare-p7-a638-f9eec86d; command canonical verifier with generated
+compose override ONLY unique image tags/JUnit. Artifacts a638
+`generated/p7-f9eec86d/{docker-gate.log,junit.xml,result.json,compose.yml}` and
+`generated/e2e/run.XclraU/u4-media-gw0-27a0369e5b874360be312cb43f63e99c.json`.
+Warm37reused/0created,real recipe keyf1578a121e841c9bbb3c5e704c1becafb390187a31fbec723feda86da2354884,
+no cache indexes/temps. Newtestimage sha256:1affc98349daf73cbec9a81a4f5c5e6f64e3b1682834d0dc4509c0d90bb14c94;
+runimage sha256:a8455e49aa2985063665df7c237c5f9c219aa565e029cb76f1cf9e4fdbcdebf9.
+Owned compose/network removed,zero scoped containers; Docker lease RELEASED. No source
+edits/commits,unrelated cleanup or Windows/signing claim. P7checkbox now complete
+against all its required source/native/media obligations; final Wave B union with
+P2 and later cumulative source still required. P2/P9 implementation are the remaining
+active production tasks, no runtime lease held. Await meaningful callbacks without
+idle polling; scope and Windows acceptance limitations unchanged.
