@@ -2531,35 +2531,35 @@ and responsibility text were always correct. Role files do not grant child permi
 
 | Child ID | Preset / scopes | Worktree / callback |
 | --- | --- | --- |
-| `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | worker: P1 and review remediation | `5016`; verified parent above |
-| `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | worker: P3, then P8/rebase | `9bb4`; verified parent above |
+| `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | worker: P1/remediation, then P2 | `5016`; verified parent above |
+| `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | worker: P3, P8/rebase, then P9 | `9bb4`; verified parent above |
 | `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker: P4, P0, P6, P4-F1 | `9bdf`; verified parent above |
 | `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | worker_luna: P10; verification-only integrated native gate and P8 runtime diagnosis | `b49f`; verified parent above |
 | `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | worker: P5/rebase, now P7 | `9676`; verified parent above |
 | `01a13ed0-043c-75f0-9554-afb21690373c` | worker: P11, measurements/runtime gate, current rebase | `a638`; verified parent above |
 | `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` | reviewer: P0/P4/P3/P10/P5, D4/F1 adjudication and recheck | `cec8`; verified parent above |
-| `01a13ed5-7e47-7ea0-9201-1f47b6a097f0` | deep_reviewer: P1 and focused fix recheck | `4a89`; verified parent above |
-| `01a13ee0-8b57-7573-9de8-4374f0fc445e` | deep_reviewer: P6, P8 and integration recheck | `794e`; verified parent above |
+| `01a13ed5-7e47-7ea0-9201-1f47b6a097f0` | deep_reviewer: P1/fix recheck, P2 and Wave B | `4a89`; verified parent above |
+| `01a13ee0-8b57-7573-9de8-4374f0fc445e` | deep_reviewer: P6/P8/P7, P9 and Wave C | `794e`; verified parent above |
 | `01a13ee3-a368-7772-90c2-9c84da0890a7` | reviewer: P11 stable code, final notes and later integration | `22db`; verified parent above |
 
 ### Package/CQ coverage and current source identities
 
 The approved CQ mapping in section 5 remains canonical. No supported group or CQ21
 subpart is dropped; CQ7/CQ14 remain excluded. Current integration source before this
-ledger-only commit is `f9eec86dd972d4fe4cb684558b0deb60584c4bf2` (Wave A plus integrated P7).
+ledger-only commit is `425b52ad1fa0c2962e774b14c6ede6fe63680a27` (all P0–P11 implementation commits present; reviews/acceptance pending).
 
 | Package | Worker source → integrated identity | Implementation / independent review / acceptance |
 | --- | --- | --- |
 | P0 / CQ22 prose | `260670cc` → `23d2f59f` | Complete, reviewed no findings; 5 CLI-doc tests + strict docs passed. Step 0 not repeated. |
 | P1 / CQ15,CQ21d builder | `14b599a2` → `21691a97`; fixes `b920d48a` → `3af4041d` | Implemented; all five findings independently RESOLVED at 3af4041d, source prerequisite cleared. Windows proof open. |
-| P2 / CQ16,CQ17,CQ21d updater | Active in 5016 from reviewed `04d5c90b` | Full grammar/transaction/backup/CQ21d scope assigned after P1 source clears; platform/signing acceptance remains required. |
+| P2 / CQ16,CQ17,CQ21d updater | worker `78e71c3e` → integrated `9ae3ca9d` | Full implementation present; independent deep/Wave B review active; PS/Windows/signing acceptance open. |
 | P3 / CQ1,CQ20,CQ21a | `7ccdb965/986abc2e/149ef433` → `8e32ee40/54e80bb6/983658b8` | Complete, independently reviewed no findings; Node and 22 real-browser passes. Final Wave A union pending. |
 | P4 / CQ10,CQ19 | `c2b62b05` → `30515500`; F1 `a79528de` → `b2dcd6aa` | Original package reviewed/native passed; narrow F1 reopened then independently RESOLVED, both real loaders + CLI proved. Final integrated native pending. |
 | P5 / CQ8,CQ18 | original `b9ca34f2/1d03dbfe`; rebased/integrated `b2232196/1ba2f13b` | Complete, independently reviewed no new findings; inherited F1 closed at b2. Docker, current native and installed Windows shim proof open. |
 | P6 / CQ2,CQ5,CQ21c | `2313b659/f871e88c/977cc3f7` → `1f7ae791/fae10b01/af500389` | Complete, deep review no findings; native and real phase/cache Docker gate passed at 04d5c90b. |
 | P7 / CQ4,CQ6,CQ9 | original `4ea3ec04/0a2222ce/5a6f03ba`; rebased `a2257207/fb840295/e971b136` → integrated `8c70dfb5/badc1b48/f9eec86d` | Complete implementation/integration/current deep review, no findings; native3607 and real Docker298 passes at f9eec86d, no P7 target gate remains open. |
 | P8 / CQ11,CQ12,CQ22 geometry | original `165eb46a/4ce11247`; rebased `e09d684c/306631b9` → `bc182b07/698095cd` | Complete and integrated; early deep review and current P5/P6/P10 integration recheck no findings. Standalone/current native and Docker passed at 04d5c90b; Windows hosted acceptance open. |
-| P9 / CQ3 | Active in 9bb4 from reviewed `47b5457c` (production source f9eec86d) | Full end-to-end jobs/results/scheduler migration assigned after current P7/P8/P10 source reviews clear; runtime gates required later. |
+| P9 / CQ3 | worker `7840c859` → integrated `425b52ad` | Full implementation present; independent deep/Wave C review active; focused1023+121passes, native/Docker/Windows gates open. |
 | P10 / CQ13 | `f0c67e62` → `94efe8cd` | Complete, independent review no findings; joined warning/result/summary/record proof + native gate at 94 passed. |
 | P11 / CQ21b | original `d3250f4e/c542928b`; rebased `e4f502a2/881b0fde` → integrated `722da1ec/04d5c90b` | Code, final notes and current Wave A boundary independently reviewed, no findings; original cold Docker 295-pass proof and current combined-head 298-pass gate complete. |
 
@@ -3014,3 +3014,44 @@ against all its required source/native/media obligations; final Wave B union wit
 P2 and later cumulative source still required. P2/P9 implementation are the remaining
 active production tasks, no runtime lease held. Await meaningful callbacks without
 idle polling; scope and Windows acceptance limitations unchanged.
+
+
+### All initial implementation commits integrated; P2/P9 reviews active
+
+P2worker5016 froze clean04d5c90b..78e71c3e,20files,+1365/-253; parent verified
+metadata/file list and clean-cherry-picked to9ae3ca9d fromfeb5a9e1. Full sharedPS
+stable/RC grammar/vector wiring/D2/exactsmoke, complete backup marker, journaled
+apply+rollback/repair, all deletions/CQ21d/migrations/docs implemented. Worker246passes/
+280skips Windows+workflow selection,Pythonvectorspass,PS/platformvectors/E2Eskipped;
+static/import/strictdocs clean. No PS syntax/execution or signing/Windows proof yet.
+Deep reviewer01a13ed5 assigned complete exactfeb5a9e1..9ae3ca9d plus Wave B cumulative
+04d5c90b..9ae3ca9d(P2/P7), actual transaction/security/identity/failure fixtures and
+P1lock/helper/provenance compatibility. No review clearance inferred; findings pending.
+
+P9worker9bb4 froze clean47b5457c..7840c859,25files,+736/-769; parent clean-cherry-
+picked to425b52ad afterP2. Full structuredclip/jobs/results, indivisible scheduler,
+report/publish projections and named API/range/ungrouped/duplicate-validator deletions
+implemented; currentP7rows/P8facts preserved. Explicit old ungrouped-test disposition
+map reported, unsupported within-unit splitting replaced by all-or-serial proof;
+realbatch mismatch tests patchDefaultFFmpegRunner and observe[1,2]beforeframe99refusal.
+Worker1023focused passes/no skips includes realSIGINT<=150ms/actualFFmpegchild reaping/
+stagingcleanup/ordering/admission/progress,plus121cache/record/docs passes; static/
+imports/security/strictdocs clean. Native integration only type-checked, no full
+native/Docker/Windows result claimed. Deep reviewer01a13ee0 assigned exact
+9ae3ca9d..425b52ad completeP9 plus Wave C current P7/P8/P10/P5/P6/P11 composition,
+retired-test obligations and cleanup/cancellation/association; findings pending.
+
+All P0–P11 implementation source now exists in parent Git, but work is NOT complete:
+P2/P9 independent review/fixes and Wave B/C composition, final cumulative independent
+review, final stable native/media/distribution proof and target acceptance remain.
+
+Verifiera638 assigned exclusive SHORT tooling-Docker lease at425b52ad: seek actual
+PS7 AST syntax + committed PURE version vectors in an official Microsoft Linux
+container, first verifying current official image provenance/availability and exact
+version/digest. Only exact committed PSfiles/vector staged, read-only mount, network
+disabled during execution; no install/update/build entrypoints invoked, no host
+installation or source edits. Pure version owner only may execute; no duplicated
+oracle/guard bypass. Failures route to P2owner/reviewer. This is additional bounded
+syntax/language proof, NOT Windows/PS5.1/transaction/filesystem acceptance. No browser/
+full-native/media gate until lease release; final current gates follow serially.
+If unavailable,record exact condition rather than custom toolchain or retry loop.
