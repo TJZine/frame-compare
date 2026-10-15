@@ -15,23 +15,22 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 pytest.importorskip("vsview")
 
-# Qt must see the offscreen platform before PySide6 and VSView are imported.
-from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
-from vsengine.loops import get_loop, set_loop  # noqa: E402
-from vsview.vsenv import QtEventLoop  # noqa: E402
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from vsengine.loops import get_loop, set_loop
+from vsview.vsenv import QtEventLoop
 
-from frame_compare.services.alignment import _build_audio_review_map  # noqa: E402
-from frame_compare.services.alignment_keys import alignment_key  # noqa: E402
-from frame_compare.services.types import AlignmentProvenance, AlignmentResult  # noqa: E402
-from frame_compare.utils.alignment_evidence import (  # noqa: E402
+from frame_compare.services.alignment import _build_audio_review_map
+from frame_compare.services.alignment_keys import alignment_key
+from frame_compare.services.types import AlignmentProvenance, AlignmentResult
+from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
 )
-from frame_compare.utils.alignment_review_projection import (  # noqa: E402
+from frame_compare.utils.alignment_review_projection import (
     build_audio_review_presentation,
 )
-from frame_compare.vsview.alignment_review_contract import (  # noqa: E402
+from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
     ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
     ALIGNMENT_REVIEW_METADATA_NAME_KEY,
@@ -42,11 +41,11 @@ from frame_compare.vsview.alignment_review_contract import (  # noqa: E402
     ALIGNMENT_REVIEW_METADATA_VERSION,
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
 )
-from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
+from frame_compare.vsview.alignment_review_panel import (
     AlignmentReviewPanel,
     vsview_register_toolpanel,
 )
-from tests.alignment_review_test_support import (  # noqa: E402
+from tests.alignment_review_test_support import (
     audio_review as _audio_review,
 )
 from tests.alignment_review_test_support import (

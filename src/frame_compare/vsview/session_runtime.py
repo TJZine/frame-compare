@@ -1,5 +1,3 @@
-"""Executable owner for generated VSView sessions; native imports stay at launch."""
-
 from __future__ import annotations
 
 import json
@@ -99,8 +97,6 @@ def install_workspace_log_filter() -> None:
 
 
 class SessionConsole:
-    """Per-session stream setup and presentation without mutable module state."""
-
     def __init__(self) -> None:
         self._original_stderr_encoding = getattr(sys.stderr, "encoding", "") or ""
         self.reconfigure_text_stream(sys.stdout)
@@ -173,7 +169,6 @@ class SessionConsole:
 
 
 def resolve_lwlibavsource(core: vs.Core) -> PreviewSourceLoader:
-    """Resolve LWLibavSource from the VapourSynth R81 core.lsmas namespace."""
     if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
         return cast(PreviewSourceLoader, core.lsmas)
     raise RuntimeError("LWLibavSource not found on core.lsmas")
@@ -303,7 +298,6 @@ def apply_preview_defaults(
     return core.std.SetFrameProps(clip, **defaults)
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
 def _reference_metadata(session_id: str, reference: ReferenceSource) -> dict[str, str | int]:
     return {
         REVIEW_METADATA_KEYS["version"]: REVIEW_METADATA_VERSION,
@@ -329,7 +323,6 @@ def _comparison_metadata(
 
 
 def run_session(data: SessionData, script_path: Path) -> None:
-    """Load all sources before registering the native review workspace outputs."""
     console = SessionConsole()
     install_workspace_log_filter()
     reference = data["reference"]
@@ -393,7 +386,6 @@ def run_session(data: SessionData, script_path: Path) -> None:
         preview_assumptions.append(ref_assumption)
     ref_clip = apply_preview_defaults(core, ref_clip, reference["label"], frame_props_by_label)
 
-    # Apply overlay to reference (best-effort)
     try:
         ref_clip = core.text.Text(
             ref_clip,
@@ -435,7 +427,6 @@ def run_session(data: SessionData, script_path: Path) -> None:
         if comp_assumption is not None:
             preview_assumptions.append(comp_assumption)
 
-        # FPS harmonization: apply AssumeFPS to match reference
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
         comp_clip = apply_preview_defaults(core, comp_clip, label, frame_props_by_label)
 
@@ -469,7 +460,6 @@ def run_session(data: SessionData, script_path: Path) -> None:
             hint_pair = "Verify manually; this candidate is not a confirmed alignment"
             trim_hint = f"Reason: {audio_decision.primary_reason}"
         elif audio_decision is not None and audio_decision.state == "trusted_automatic":
-            # U4 video-confirm seam: U3 decisions never reach trusted_automatic.
             accepted_offset = cast(int, suggested_offset)
             audio_hint = f"Audio alignment accepted: {accepted_offset:+d}f"
             hint_pair = (
@@ -498,7 +488,6 @@ def run_session(data: SessionData, script_path: Path) -> None:
 
         ready_hints.append((label, audio_hint))
 
-        # Apply comparison identity, hint, and review guidance (best-effort)
         try:
             overlay_text = (
                 f"CMP: {display_name}\n"

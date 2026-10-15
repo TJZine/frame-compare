@@ -1,5 +1,3 @@
-"""Opt-in resource proof for paired whole-track audio collection."""
-
 from __future__ import annotations
 
 import os
@@ -117,7 +115,7 @@ def _linux_rss_bytes(pids: tuple[int, ...]) -> int:
 
 
 def _darwin_rss_bytes(pids: tuple[int, ...]) -> int:
-    completed = subprocess.run(  # noqa: S603 - fixed platform measurement command
+    completed = subprocess.run(
         ["ps", "-o", "rss=", "-p", ",".join(str(pid) for pid in pids)],
         check=True,
         capture_output=True,
@@ -214,8 +212,6 @@ _PAIRED_MEDIA_SECONDS = 10_800
 
 
 class _CountingConsumer:
-    """Trivial paired consumer: proves delivery order without retaining PCM."""
-
     def __init__(self) -> None:
         self.count = 0
 
@@ -226,7 +222,6 @@ class _CountingConsumer:
 
 
 def _paired_decode_argv(path: Path) -> list[str]:
-    """The shipped whole-track collection recipe for the fixture's only stream."""
     return alignment_audio.collection_argv(
         path,
         alignment_audio.probe_streams(path).audio[0],
@@ -236,7 +231,7 @@ def _paired_decode_argv(path: Path) -> list[str]:
 
 
 def _generate_long_audio(path: Path, *, duration_seconds: int) -> None:
-    subprocess.run(  # noqa: S603 - fixed deterministic test fixture command
+    subprocess.run(
         [
             "ffmpeg",
             "-hide_banner",
@@ -343,7 +338,7 @@ def _paired_call(
         _paired_decode_argv(comparison),
         chunks=_paired_chunks(),
         lag_samples=lag_samples,
-        consumer=consumer,
+        consume_borrowed_chunk=consumer,
         reference_limit_samples=reference_limit,
         comparison_limit_samples=comparison_limit,
         total_timeout_seconds=total_timeout,

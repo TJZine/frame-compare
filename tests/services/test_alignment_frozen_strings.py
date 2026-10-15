@@ -109,7 +109,7 @@ def _unavailable_result(
         status="complete",
         audio=replace(
             attempt_with_chunks(0).audio,
-            status="no_single_offset",  # type: ignore[arg-type]
+            status="no_single_offset",
         ),
         decision=replace(
             attempt_with_chunks(0).decision,
@@ -1442,7 +1442,7 @@ def test_verbose_unavailable_shows_runs(tmp_path: Path, capsys: pytest.CaptureFi
             AudioChunkRun(first_index=0, last_index=0, lag=100, chunk_count=1),
             AudioChunkRun(first_index=1, last_index=1, lag=-200, chunk_count=1),
         ),
-        audio=replace(base.audio, status="no_single_offset"),  # type: ignore[arg-type]
+        audio=replace(base.audio, status="no_single_offset"),
         decision=replace(
             base.decision,
             state="unavailable",

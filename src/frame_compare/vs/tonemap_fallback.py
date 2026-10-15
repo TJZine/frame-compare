@@ -1,5 +1,3 @@
-"""Fallback HDR tonemap implementation."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -23,7 +21,6 @@ def fallback_tonemap(
     settings: TonemapSettings,
     hdr_metadata: HDRMetadata | None = None,
 ) -> vs.VideoNode:
-    """Fallback tonemapping using a scaled Reinhard-style curve via std.Expr."""
     target_nits = validate_target_nits(settings)
     inputs = resolve_hdr_tonemap_inputs(clip, hdr_metadata)
     clip = to_rgbs(
@@ -33,27 +30,23 @@ def fallback_tonemap(
     )
     hdr_metadata = inputs.hdr_metadata
 
-    peak = settings.source_peak
-    if peak is None:
-        peak = hdr_metadata.max_cll if hdr_metadata and hdr_metadata.max_cll else 1000
+    source_peak_nits = settings.source_peak
+    if source_peak_nits is None:
+        source_peak_nits = hdr_metadata.max_cll if hdr_metadata and hdr_metadata.max_cll else 1000
 
     try:
-        # Heuristic fallback when libplacebo is unavailable or fails at runtime.
-        #
-        # Notes:
-        # - VS float RGB clips are typically normalized, and we want to avoid producing
-        #   near-zero output (black screenshots). We therefore operate on a relative
-        #   scale and normalize roughly around the configured target nits.
-        #
-        # Define:
-        #   x_rel = x * (peak / target_nits)
-        #   y = 2 * x_rel / (1 + x_rel)
-        # which maps x_rel=1 -> y~=1 (after the 2x), and compresses highlights.
-        scale = float(peak) / float(target_nits)
-        scale_s = f"{scale:.10g}"
-        expr = f"x {scale_s} * dup 1 + / 2 * 0 max 1 min"
+        # VapourSynth float RGB has a nominal 0–1 range.
+        source_to_target_peak_ratio = float(source_peak_nits) / float(target_nits)
+        formatted_peak_ratio = f"{source_to_target_peak_ratio:.10g}"
+        peak_scaled_reinhard_expression = f"x {formatted_peak_ratio} * dup 1 + / 2 * 0 max 1 min"
         raise_if_cancelling()
-        clip = clip.std.Expr(expr=[expr, expr, expr])
+        clip = clip.std.Expr(
+            expr=[
+                peak_scaled_reinhard_expression,
+                peak_scaled_reinhard_expression,
+                peak_scaled_reinhard_expression,
+            ]
+        )
     except Exception as e:
         raise TonemapError(
             reason=f"Fallback tonemap failed: {e}",

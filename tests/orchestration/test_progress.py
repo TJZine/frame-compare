@@ -1,5 +1,3 @@
-"""Tests for orchestration progress reporter selection."""
-
 import sys
 from io import StringIO
 
@@ -17,7 +15,6 @@ from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 
 
 def test_select_reporter_tty_detection_interactive(monkeypatch: pytest.MonkeyPatch):
-    """Auto-detection in TTY should return RichProgressReporter."""
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     reporter = select_reporter()
     assert isinstance(reporter, RichProgressReporter)
@@ -26,7 +23,6 @@ def test_select_reporter_tty_detection_interactive(monkeypatch: pytest.MonkeyPat
 def test_select_reporter_uses_stderr_tty_when_stdout_is_not_tty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Auto-detection should use Rich when stderr is interactive."""
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
     monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
     reporter = select_reporter()
@@ -36,7 +32,6 @@ def test_select_reporter_uses_stderr_tty_when_stdout_is_not_tty(
 def test_select_reporter_no_color_uses_rich_for_detected_tty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Auto-detected interactive no-color runs should keep Rich progress."""
     monkeypatch.setenv("TERM", "xterm-256color")
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
@@ -48,7 +43,7 @@ def test_select_reporter_no_color_uses_rich_for_detected_tty(
     monkeypatch.setattr(progress_module, "human_console", console)
     reporter = select_reporter(no_color=True)
     assert isinstance(reporter, RichProgressReporter)
-    reporter._print_durable_line(  # noqa: SLF001
+    reporter._print_durable_line(
         ProgressPhaseStatus.FAILED, "TEST", summary=None, duration=0, duration_text=None
     )
     assert "TEST" in output.getvalue()

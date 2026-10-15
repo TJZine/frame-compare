@@ -139,7 +139,7 @@ def convert_non_rgb_with_matrix_hint(
         detected_is_hdr=detected_is_hdr,
     )
     raise_if_cancelling()
-    return clip.resize.Bicubic(**kwargs)  # type: ignore[attr-defined]
+    return clip.resize.Bicubic(**kwargs)
 
 
 def to_rgbs(

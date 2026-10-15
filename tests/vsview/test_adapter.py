@@ -1,5 +1,3 @@
-"""Focused tests for the VSView adapter and generated session contract."""
-
 from __future__ import annotations
 
 import json
@@ -287,7 +285,7 @@ import vapoursynth
 assert vapoursynth.__file__ == {str(runtime_dir / "vapoursynth.py")!r}
 """
 
-    result = subprocess.run(  # nosec B603
+    result = subprocess.run(
         [sys.executable, "-c", probe_code],
         stdin=subprocess.DEVNULL,
         capture_output=True,
@@ -488,7 +486,6 @@ def test_run_vsview_command_reaps_child_after_interruption(
 
 @pytest.mark.skipif(os.name == "nt", reason="SIGINT wait interruption is POSIX-specific")
 def test_real_child_is_reaped_after_interruption(tmp_path: Path) -> None:
-    """Exercise the signal boundary that a Popen mock cannot model."""
     marker = tmp_path / "child.pid"
     child_code = (
         "import os, time\n"
@@ -528,7 +525,7 @@ def test_real_child_is_reaped_after_interruption(tmp_path: Path) -> None:
         "    raise SystemExit('expected KeyboardInterrupt')\n"
     )
 
-    runner = subprocess.Popen(  # noqa: S603 - test uses an explicit interpreter argv
+    runner = subprocess.Popen(
         [sys.executable, "-c", helper_code, str(marker), child_code],
         cwd=Path(__file__).parents[2],
         env=os.environ.copy(),
@@ -946,7 +943,6 @@ def test_write_vsview_session_script_retries_uuid_path_collision(
 
 
 def test_adapter_children_preserve_trusted_parent_user_site(tmp_path: Path) -> None:
-    """Both readiness and review subprocesses can see an installed user-site dependency."""
     import textwrap
 
     import structlog
@@ -988,7 +984,7 @@ def test_adapter_children_preserve_trusted_parent_user_site(tmp_path: Path) -> N
         assert _run_startup_probe(command, env=env).returncode == 0
         assert _run_vsview_command(command, env=env)[0] == 0
     """)
-    result = subprocess.run(  # noqa: S603 - selected Python interpreter and owned fixture
+    result = subprocess.run(
         [getattr(sys, "_base_executable", sys.executable), "-c", script],
         cwd=tmp_path,
         env=environment,

@@ -796,7 +796,7 @@ def _collect_and_decide_audio_pair(
         ),
         chunks=plan.chunks,
         lag_samples=plan.lag_samples,
-        consumer=accumulator.add,
+        consume_borrowed_chunk=accumulator.add,
         reference_limit_samples=planned.reference_limit_samples,
         comparison_limit_samples=planned.comparison_limit_samples,
         total_timeout_seconds=planned.total_timeout_seconds,

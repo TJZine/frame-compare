@@ -100,6 +100,7 @@ reportMissingModuleSource = false
 reportUnusedImport = true
 reportUnusedVariable = true
 reportPrivateUsage = true
+reportUnnecessaryTypeIgnoreComment = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "src"
@@ -124,7 +125,7 @@ src = ["src", "tests"]
 extend-exclude = [".tmp", "docs/plans", "docs/prompts", "docs/reviews"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W", "UP", "B", "SIM", "C4"]
+select = ["E", "F", "I", "W", "UP", "B", "SIM", "C4", "RUF100", "PGH003", "PGH004"]
 ignore = ["E501"]  # Line length handled by formatter
 
 [tool.ruff.lint.isort]

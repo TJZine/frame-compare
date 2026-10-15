@@ -1,5 +1,3 @@
-"""Metric calculation logic for frame analysis."""
-
 from __future__ import annotations
 
 from dataclasses import replace
@@ -46,11 +44,6 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
-# Orchestration "analyze" phase progress total.
-# Contract:
-# - `execute_phases()` advances the phase by 1 on successful completion.
-# - `calculate_metrics()` advances the remaining steps (total - 1) on cache hit,
-#   and advances twice (after luminance + after cache-save attempt) on cache miss.
 ANALYZE_PROGRESS_TOTAL = 3
 
 
@@ -189,48 +182,6 @@ def calculate_metrics(
     timing_recorder: AnalysisTimingRecorder | None = None,
     memory_limit_mb: int | None = None,
 ) -> MetricsAcquisition:
-    """
-    Acquire frame metrics for the given clips.
-
-    Uses cached values if valid cache exists and config matches.
-    Only the selected analysis source is analyzed.
-
-    Args:
-        video_paths: Ordered video file paths (first entry is the selected reference clip)
-        analysis_source_path: Video path to load for metric analysis. Defaults to
-            the selected reference for compatibility with older callers.
-        config: Analysis configuration
-        cache_dir: Directory for cache files
-        reporter: Optional progress reporter
-        memory_limit_mb: Optional VapourSynth frame-cache cap in MiB for the default loader.
-        vs_loader: Optional VapourSynth clip loader seam
-        selection_domain: Optional selection-domain token included in
-            the analysis cache key when source overrides affect reference
-            selection.
-        effective_fps: Optional FPS value stored in metrics metadata for
-            timing and selection-detail normalization.
-        metric_active_rect: Optional active-picture rectangle applied during
-            metric calculation and included in cache identity. ``None`` uses
-            the full source frame.
-        metric_frame_range: Exact contiguous source-frame domain to analyze.
-            ``None`` analyzes the full source for compatibility with direct callers.
-        active_rect_source: Provenance for ``metric_active_rect`` stored in
-            cache metadata. Defaults to ``"full-frame"``.
-        active_rect_detection_mode: Detection policy that produced the active
-            rectangle. Defaults to ``"aspect_ratio"``.
-        active_rect_algorithm_id: Stable active-rectangle resolver algorithm
-            identity used for cache isolation. Defaults to
-            ``"active_rect_resolution_v2"``.
-
-    Returns:
-        Metrics with the actual cache-hit or computed acquisition disposition
-
-    Raises:
-        MetricsCalculationError (FC-4002): If frame extraction or metric
-            computation fails, OR if analysis clip has 0 frames.
-        PluginNotFoundError (FC-2003): If VapourSynth lsmas plugin unavailable.
-        SourceLoadError (FC-4015): If video file cannot be loaded.
-    """
     if not video_paths:
         raise MetricsCalculationError("No input video paths provided")
     source_path = video_paths[0] if analysis_source_path is None else analysis_source_path
@@ -262,7 +213,6 @@ def calculate_metrics(
 
     clips = _clip_identities(video_paths)
 
-    # Cache miss or invalid - compute metrics for the selected analysis source only.
     with record_span(timing_recorder, "source_load"):
         source = _load_analysis_source(source_path, vs_loader, memory_limit_mb)
     try:
@@ -326,7 +276,6 @@ def slice_frame_metrics(
     start_index: int,
     frame_count: int,
 ) -> FrameMetrics:
-    """Slice a contiguous metric domain while preserving source-frame metadata."""
     if (
         start_index < 0
         or frame_count < 0

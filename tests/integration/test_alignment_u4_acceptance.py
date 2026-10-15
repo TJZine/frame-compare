@@ -1,5 +1,3 @@
-"""U4 acceptance matrix over deterministic ten-minute L-SMASH media."""
-
 from __future__ import annotations
 
 import asyncio
@@ -11,10 +9,13 @@ import statistics
 import tempfile
 import time
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Generator, Iterator
+from contextlib import closing
 from dataclasses import dataclass, replace
 from fractions import Fraction
+from inspect import unwrap
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -41,6 +42,7 @@ from frame_compare.services.alignment_video import VideoClipRequest
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.alignment_policy import position_winner
 from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
+from frame_compare.utils.file_lock import FileLockTimeoutError, exclusive_file_lock
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.env import detect_plugins, ensure_vs_environment
@@ -52,7 +54,6 @@ from tests.orchestration.preparation_test_support import (
 )
 from tests.services.alignment_request_test_support import alignment_request
 
-# Keep the session media generation on one worker.
 pytestmark = pytest.mark.xdist_group("alignment-u4")
 
 vs_mod = pytest.importorskip("vapoursynth")
@@ -254,8 +255,6 @@ def _write_insert(
     else:
         tail_label = "tail"
     audio_graph += f";[3:a]atrim=duration=4,asetpts=PTS-STARTPTS[insert];[a0][insert][{tail_label}]concat=n=3:v=0:a=1[a]"
-    # The second video input is the four-second inserted segment. Audio inputs
-    # are base, foreign insert, and optionally an unrelated tail source.
     _write_media(
         path,
         audio_graph=audio_graph,
@@ -282,7 +281,6 @@ def _write_low_motion_cue(path: Path) -> None:
 
 
 def _write_retimed(path: Path, reference: Path, *, fps: str, setpts: str, asetrate: int) -> None:
-    """Trim the first 48 frames, then speed video and audio to ``fps`` (U4b)."""
     _run_ffmpeg(
         [
             "-i",
@@ -580,26 +578,77 @@ def _write_media_set(root: Path) -> _MediaSet:
 
 
 @pytest.fixture(scope="session")
-def u4_media(tmp_path_factory: pytest.TempPathFactory) -> _MediaSet:
+def u4_media(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_MediaSet]:
     root = tmp_path_factory.mktemp("alignment-u4")
     cache = os.environ.get("FRAME_COMPARE_TEST_MEDIA_CACHE")
-    if cache:
-        version = run_subprocess(["ffmpeg", "-version"], timeout_seconds=10).stdout
-        key = hashlib.sha256(Path(__file__).read_bytes() + version).hexdigest()
-        generator_root = Path(cache).resolve() / Path(__file__).stem
-        generator_root.mkdir(parents=True, exist_ok=True)
+    if not cache:
+        yield _write_media_set(root)
+        return
+
+    version = run_subprocess(["ffmpeg", "-version"], timeout_seconds=10).stdout
+    key = hashlib.sha256(Path(__file__).read_bytes() + version).hexdigest()
+    generator_root = Path(cache).resolve() / Path(__file__).stem
+    generator_root.mkdir(parents=True, exist_ok=True)
+    with exclusive_file_lock(generator_root / ".verifier.lock", timeout_seconds=0):
         cached = generator_root / key
         if not cached.exists():
             with tempfile.TemporaryDirectory(dir=generator_root, prefix=".tmp-") as temporary:
                 _write_media_set(Path(temporary))
                 Path(temporary).rename(cached)
-        # ponytail: one verifier at a time; add locking if overlapping runs are needed.
         for previous in generator_root.iterdir():
             if previous != cached and previous.is_dir():
                 shutil.rmtree(previous)
         for media in cached.iterdir():
             (root / media.name).symlink_to(media)
-    return _write_media_set(root)
+        yield _write_media_set(root)
+
+
+def test_cached_media_lock_rejects_overlap_until_session_teardown(
+    tmp_path_factory: pytest.TempPathFactory,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cache_root = tmp_path / "cache"
+    generator_root = cache_root / Path(__file__).stem
+    lock_path = generator_root / ".verifier.lock"
+    monkeypatch.setenv("FRAME_COMPARE_TEST_MEDIA_CACHE", str(cache_root))
+    monkeypatch.setattr(
+        f"{__name__}.run_subprocess",
+        lambda *_args, **_kwargs: MagicMock(stdout=b"ffmpeg-lock-contract"),
+    )
+
+    def write_media(root: Path) -> _MediaSet:
+        with pytest.raises(FileLockTimeoutError), exclusive_file_lock(lock_path, timeout_seconds=0):
+            pass
+        reference = root / "reference.mkv"
+        if not reference.exists():
+            reference.write_bytes(b"fixture-media")
+        return _MediaSet(
+            reference=reference,
+            comparisons={},
+            multipath_reference=reference,
+            references={},
+        )
+
+    monkeypatch.setattr(f"{__name__}._write_media_set", write_media)
+    fixture_factory = cast(
+        Callable[[pytest.TempPathFactory], Generator[_MediaSet]], unwrap(u4_media)
+    )
+    with closing(fixture_factory(tmp_path_factory)) as first_session:
+        first = next(first_session)
+        unfinished_generation = generator_root / ".tmp-other-verifier"
+        unfinished_generation.mkdir()
+        with (
+            closing(fixture_factory(tmp_path_factory)) as overlapping_session,
+            pytest.raises(FileLockTimeoutError),
+        ):
+            next(overlapping_session)
+        assert unfinished_generation.is_dir()
+        assert first.reference.read_bytes() == b"fixture-media"
+
+    with closing(fixture_factory(tmp_path_factory)) as next_session:
+        assert next(next_session).reference.read_bytes() == b"fixture-media"
+        assert not unfinished_generation.exists()
 
 
 def _align_pair(
@@ -695,7 +744,6 @@ def _real_clip(
 
 
 def _probe_frame_count(path: Path) -> int:
-    """Return the real decoded video frame count of a generated file."""
     probe = run_subprocess(
         [
             "ffprobe",
@@ -1054,7 +1102,6 @@ _MATCH_FPS_PREP_CONFIG = (
 def _configured_prep_alignment(
     media: _MediaSet, name: str, root: Path
 ) -> tuple[PrepState, AlignPhaseOutput]:
-    """Run one pair through match_fps preparation into the real align phase (U5)."""
     reference_path = media.references.get(name, media.reference)
     input_dir = root / "comparison_videos"
     input_dir.mkdir(parents=True, exist_ok=True)
@@ -1267,8 +1314,6 @@ def _assert_video(
     assert video.confirmed_offset == confirmed_offset
     assert len(video.positions) == 12
     if held_frames is not None:
-        # Black comparison pictures give equal scores at all offsets; elsewhere
-        # the fixture's unchanged timing must give an informative confirmed minimum.
         expected_wins = 0
         for position in video.positions:
             scores = position.score_by_offset
@@ -1554,7 +1599,6 @@ def test_budget_exhaustion_leaves_later_credible_targets_unexamined(
     targets = result.audio_attempt.video_check.targets
     assert len(targets) == len(disagreement_indices)
     assert {target.first_chunk_index for target in targets} == set(disagreement_indices)
-    # Target priority follows this run's audio evidence, not fixed fixture chunk IDs.
     ranked_psrs: list[float] = []
     for rank, target in enumerate(targets):
         index = target.first_chunk_index

@@ -413,7 +413,7 @@ def main() -> int:
         raise NotADirectoryError(packaged_src)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(packaged_src))
-    from frame_compare.vs.runtime_contract import (  # noqa: PLC0415
+    from frame_compare.vs.runtime_contract import (
         MEDIA_RUNTIME_SCOPES,
     )
     from frame_compare.vs.runtime_contract import (

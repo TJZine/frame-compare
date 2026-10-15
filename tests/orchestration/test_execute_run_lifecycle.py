@@ -1,5 +1,3 @@
-"""Lifecycle-level tests for execute_run."""
-
 from __future__ import annotations
 
 import asyncio
@@ -41,14 +39,12 @@ from .preparation_test_support import create_config
 
 
 def _zero_monotonic_timer() -> float:
-    """Return a stable monotonic timestamp for tests that do not exercise timing."""
     return 0.0
 
 
 def test_execute_run_returns_success_and_records_preflight_timing(
     tmp_path: Path,
 ) -> None:
-    """Given valid workspace -> returns success and records preflight timing."""
     create_config(tmp_path)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -466,7 +462,6 @@ def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
 
 
 def test_execute_run_propagates_config_not_found_error(tmp_path: Path) -> None:
-    """Given missing config -> preflight error is raised."""
     request = RunRequest(root=tmp_path)
 
     with pytest.raises(ConfigNotFoundError):
@@ -476,7 +471,6 @@ def test_execute_run_propagates_config_not_found_error(tmp_path: Path) -> None:
 def test_execute_run_applies_cli_overrides_before_phase_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """CLI overrides are applied to config before phase execution begins."""
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
@@ -585,7 +579,6 @@ enable = false
 
 
 def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: Path) -> None:
-    """Prove that probe cache is populated on first run and reused on second run without reprobe calls."""
     create_config(tmp_path)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -656,7 +649,6 @@ def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
 
 
 def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
-    """Child entry point: real CLI, runner signals, owners and failed-record writer."""
     import json
     import os
     import signal
@@ -870,7 +862,7 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
         "from tests.orchestration.test_execute_run_lifecycle import first_sigint_lifecycle_probe; "
         "first_sigint_lifecycle_probe(Path(sys.argv[1]), sys.argv[2])"
     )
-    result = subprocess.run(  # noqa: S603 - explicit interpreter and test-owned arguments
+    result = subprocess.run(
         [sys.executable, "-c", code, str(tmp_path), owner],
         cwd=Path(__file__).parents[2],
         capture_output=True,
@@ -939,7 +931,7 @@ def test_real_render_failure_wins_over_queued_sigint_and_client_close(tmp_path: 
         "from tests.orchestration.test_execute_run_lifecycle import first_sigint_lifecycle_probe; "
         "first_sigint_lifecycle_probe(Path(sys.argv[1]), 'failure')"
     )
-    result = subprocess.run(  # noqa: S603 - explicit interpreter and test-owned arguments
+    result = subprocess.run(
         [sys.executable, "-c", code, str(tmp_path)],
         cwd=Path(__file__).parents[2],
         capture_output=True,

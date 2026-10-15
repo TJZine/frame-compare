@@ -22,7 +22,7 @@ from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.types import SourceInfo
 
 if TYPE_CHECKING:
-    import vapoursynth as vs  # type: ignore
+    import vapoursynth as vs
 
 
 class _ClosableFrame(Protocol):

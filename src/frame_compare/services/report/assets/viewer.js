@@ -2,7 +2,6 @@ const ALL_CATEGORY_FILTER_KEY = '__fc_all__';
 const DEFAULT_FRAME_CATEGORY = 'selected';
 const EMPTY_IMAGE_SRC = 'data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=';
 
-// Help and Report Information share a lifecycle; Inspector owns its own state.
 class HelpInfoDialog {
     constructor(viewer, element, trigger, closeButton) {
         this.viewer = viewer;
@@ -81,7 +80,7 @@ const ReportViewer = {
         currentFrameIdx: 0,
         leftClipIdx: 0,
         rightClipIdx: 1,
-        activeClipIdx: 0, // For overlay/blink
+        activeClipIdx: 0,
         mode: 'slider',
         zoom: 1.0,
         fitMode: 'actual',
@@ -154,7 +153,7 @@ const ReportViewer = {
             }
 
             this.bindInteractionEvents();
-            this.setMode(this.state.mode); // Apply default mode UI state
+            this.setMode(this.state.mode);
             this.preloadImages();
         } catch (e) {
             console.error("Failed to initialize viewer:", e);
@@ -447,7 +446,6 @@ const ReportViewer = {
                 action.key === previous.actions[index].key
                 && action.ariaLabel === previous.actions[index].ariaLabel
             ))) {
-            // Keep focused controls, but bind them to the current request generation.
             previous.actions = retryActions;
             return;
         }
@@ -780,13 +778,11 @@ const ReportViewer = {
         });
         this.dom.btnAlignmentReset.addEventListener('click', () => this.viewport.setAlignmentPreset('none'));
 
-        // Toggle popover visibility
         this.dom.btnAlignToggle.addEventListener('click', (e) => {
             e.stopPropagation();
             this.setAlignmentPopoverOpen(!this.isAlignmentPopoverOpen());
         });
 
-        // Close on outside click
         document.addEventListener('click', (e) => {
             if (
                 this.isAlignmentPopoverOpen()
@@ -797,7 +793,6 @@ const ReportViewer = {
             }
         });
 
-        // Close on Escape key
         this.dom.alignPopover.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 e.preventDefault();
@@ -1659,12 +1654,10 @@ const ReportViewer = {
         this.ensureDistinctPairSelection(mode);
         if (mode === 'blink') this.keepBlinkActiveInPair();
 
-        // Stop blink if leaving blink mode
         if (this.state.blinkInterval && mode !== 'blink') {
             clearInterval(this.state.blinkInterval);
             this.state.blinkInterval = null;
         }
-        // Start blink if entering
         if (mode === 'blink' && !this.state.blinkInterval) {
             if (this.reducedMotionActive()) {
                 this.state.blinkPauseRequested = true;
@@ -1787,10 +1780,8 @@ const ReportViewer = {
         if (count <= 0) return;
         if (this.state.mode === 'grid') return;
         if (this.state.mode === 'slider') {
-            // Cycle left clip
             this.setLeftClip((this.state.leftClipIdx + direction + count) % count);
         } else if (this.state.mode === 'diff' || this.state.mode === 'blink') {
-            // Cycle the comparison side of the explicit pair.
             this.setRightClip(
                 this.nextDistinctClipIndex(this.state.rightClipIdx, this.state.leftClipIdx, direction)
             );
@@ -2038,11 +2029,8 @@ const ReportViewer = {
             leftAlt = `${ViewerFormat.clipAccessibleName(leftClip)} - Frame ${frameData.number}`;
             rightAlt = `${ViewerFormat.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
 
-            // For Diff mode, right layer is the "compare" one which gets difference blend
-            // Left layer is base.
 
         } else {
-            // Overlay uses the left layer as the single visible layer.
             const activeImage = frameData.images?.[this.state.activeClipIdx];
             const rightImage = frameData.images?.[this.state.rightClipIdx];
             const activeClip = this.state.data.clips[this.state.activeClipIdx];
@@ -2054,7 +2042,6 @@ const ReportViewer = {
                 return;
             }
             leftSrc = activeImage.src;
-            // Right layer remains hidden; keep its source tied to the comparison pair.
             rightSrc = rightImage.src;
 
             leftClip = activeClip;
@@ -2121,7 +2108,6 @@ const ReportViewer = {
         }
         this.normalizeCurrentFrameForFilter();
 
-        // Update controls
         this.dom.frameSelect.value = this.state.currentFrameIdx;
         this.updateFrameNavigationControls();
         this.updateFrameOptionVisibility();
@@ -2138,14 +2124,12 @@ const ReportViewer = {
         this.updatePaletteOrientation();
         this.updateBlinkControls();
         this.updateInspectorData();
-        // Update images and labels
         this.updateImages();
         this.viewport.updateSlider();
         this.viewport.applyFitMode();
         this.viewport.applyAlignment();
         this.viewport.applyPan();
 
-        // Update filmstrip active state
         Array.from(this.dom.filmstrip.children).forEach((el, idx) => {
             const frameIdx = parseInt(el.dataset.idx);
             const categoryKey = el.dataset.categoryKey

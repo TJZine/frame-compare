@@ -1,5 +1,3 @@
-"""Metadata resolution workflow and compatibility facade."""
-
 from typing import TYPE_CHECKING
 
 import httpx
@@ -38,26 +36,6 @@ async def resolve_metadata(
     *,
     cache: TmdbCache | None = None,
 ) -> TmdbMetadata | None:
-    """
-    Full metadata resolution workflow.
-
-    Steps:
-    1. Parse the first filename
-    2. Delegate TMDB ranking to the resolver
-    3. Return the resolver's selected match when available
-    4. Otherwise return no match
-
-    Args:
-        filenames: List of filenames to try parsing
-        config: TMDB configuration
-        client: HTTP client (injected, not owned)
-
-    Returns:
-        TmdbMetadata if found and selected, None otherwise
-
-    Raises:
-        TmdbError: If TMDB lookup fails
-    """
     if not filenames:
         return None
 

@@ -139,7 +139,7 @@ def apply_libplacebo(
             inputs=inputs,
         )
         raise_if_cancelling()
-        clip = core.placebo.Tonemap(clip, **tm_kwargs)  # type: ignore[misc]
+        clip = core.placebo.Tonemap(clip, **tm_kwargs)
     except TypeError as e:
         raise TonemapError(reason=f"Invalid libplacebo Tonemap arguments: {e}") from e
     except Exception as e:

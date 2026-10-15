@@ -1,5 +1,3 @@
-"""Screenshot file naming utilities."""
-
 import hashlib
 import os
 import re
@@ -30,7 +28,6 @@ def _filesystem_component_limit(path: Path) -> int:
 
 
 def sanitize_filename_stem(label: str) -> str:
-    """Return a legacy-compatible filesystem-safe screenshot label."""
     sanitized = INVALID_LABEL_PATTERN.sub("_", label)
     if os.name == "nt":
         sanitized = sanitized.rstrip(" .")
@@ -39,7 +36,6 @@ def sanitize_filename_stem(label: str) -> str:
 
 
 def generate_screenshot_name(filename_label: str, frame_number: int, extension: str = "png") -> str:
-    """Return a stable screenshot filename as ``{frame} - {safe label}.{extension}``."""
     if frame_number < 0:
         raise ValueError("frame_number must be non-negative")
     extension = extension.lstrip(".")
@@ -93,7 +89,6 @@ def generate_screenshot_path(output_dir: Path, filename_label: str, frame_number
 
 
 def validate_screenshot_paths(paths: list[Path]) -> None:
-    """Refuse final paths that address the same file on their destination."""
     exact: set[str] = set()
     for path in paths:
         if str(path) in exact:
@@ -101,7 +96,7 @@ def validate_screenshot_paths(paths: list[Path]) -> None:
         exact.add(str(path))
 
     identities: dict[tuple[int, int], Path] = {}
-    reservations: list[tuple[Path, tuple[int, int] | None]] = []
+    owned_reservations: list[tuple[Path, tuple[int, int] | None]] = []
     current_path: Path | None = None
     primary_error: BaseException | None = None
     try:
@@ -110,17 +105,13 @@ def validate_screenshot_paths(paths: list[Path]) -> None:
             current_path = path
             path.parent.mkdir(parents=True, exist_ok=True)
             try:
-                # Reserve the actual name exclusively. The filesystem determines
-                # equivalence, including Unicode normalization/case rules and
-                # Windows per-directory flags. Existing files are never opened
-                # for writing; all owned reservations are removed before rendering.
+                # The filesystem determines equivalence, including Unicode normalization,
+                # case rules, and Windows per-directory flags.
                 with path.open("xb") as reservation:
-                    # Register ownership before inspecting metadata so even an
-                    # fstat failure removes the exclusively created reservation.
-                    reservations.append((path, None))
+                    owned_reservations.append((path, None))
                     status = os.fstat(reservation.fileno())
                     identity = (status.st_dev, status.st_ino)
-                    reservations[-1] = (path, identity)
+                    owned_reservations[-1] = (path, identity)
             except FileExistsError:
                 status = path.stat()
                 identity = (status.st_dev, status.st_ino)
@@ -134,16 +125,12 @@ def validate_screenshot_paths(paths: list[Path]) -> None:
         primary_error = EncodingError(current_path, "Unable to validate screenshot output names")
         raise primary_error from None
     except BaseException as original_error:
-        # Preserve control flow through cleanup; do not handle or reclassify it.
         primary_error = original_error
         raise
     finally:
         cleanup_failure: Path | None = None
-        for path, identity in reversed(reservations):
+        for path, identity in reversed(owned_reservations):
             try:
-                # Do not remove a replacement owned by another writer when its
-                # identity is available. Each output directory belongs to one run;
-                # concurrent modification during validation is unsupported.
                 if identity is None:
                     path.unlink()
                 else:

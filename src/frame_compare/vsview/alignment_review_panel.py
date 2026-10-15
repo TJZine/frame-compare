@@ -1,5 +1,3 @@
-"""Native VSView tool panel for Frame Compare alignment review."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -928,8 +926,6 @@ def _audio_summary(
             )
         )
     elif authority.origin == "computed_this_run" and authority.frame_offset is not None:
-        # U4 video-confirm seam: fresh computed results stay provisional in
-        # U3, so this branch only renders once the video check confirms.
         lines.extend(
             (
                 f"Accepted audio alignment: {authority.frame_offset:+d}f — APPLIED",
@@ -967,7 +963,6 @@ def _original_audio_summary(decision: AudioAlignmentDecision) -> str | None:
     state = decision.state
     candidate = decision.candidate.frame_offset if decision.candidate is not None else None
     if state == "trusted_automatic" and candidate is not None:
-        # U4 video-confirm seam: U3 decisions never reach trusted_automatic.
         return f"Accepted audio alignment: {candidate:+d}f — APPLIED"
     if state == "provisional" and candidate is not None:
         return f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED"

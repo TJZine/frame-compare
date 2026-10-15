@@ -109,7 +109,7 @@ finally:
 """
     stack_path = tmp_path / "prompt-child-stack.txt"
     master, slave = pty.openpty()
-    process = subprocess.Popen(  # noqa: S603 - explicit test interpreter and argv
+    process = subprocess.Popen(
         [sys.executable, "-c", code, prompt, str(stack_path)],
         stdin=slave,
         stderr=slave,

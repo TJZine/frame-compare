@@ -132,7 +132,7 @@ def _attempt_shell(
     return AudioAlignmentAttempt(
         reference_identity_digest=_REFERENCE_DIGEST,
         comparison_identity_digest=_COMPARISON_DIGEST,
-        comparison_ordinal=ordinal,  # type: ignore[arg-type]
+        comparison_ordinal=ordinal,
         status=status,  # type: ignore[arg-type]
         estimator_policy=ALIGNMENT_ESTIMATOR_POLICY,
         diagnostic_policy=_DIAGNOSTIC_POLICY,
@@ -261,7 +261,7 @@ def rejected_audio_attempt(
 
 def _collection_facts(role: str) -> AudioCollectionFacts:
     return AudioCollectionFacts(
-        role="reference" if role == "reference" else "comparison",  # type: ignore[arg-type]
+        role="reference" if role == "reference" else "comparison",
         emitted_samples=8000,
         eof_sample=8000,
         elapsed_seconds=0.25,
