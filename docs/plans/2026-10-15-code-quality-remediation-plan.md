@@ -93,9 +93,10 @@ elsewhere; no test-count targets; new tests are parallel-safe (`tmp_path`,
 When all packages are complete:
 
 1. **Windows source installation never destroys an existing bundle.** The builder
-   builds into disposable staging and refuses occupied or unsafe destinations; the
-   source installer activates a freshly built, verified bundle only after success
-   and handles user data by an explicit, reversible policy (P1).
+   validates first, atomically reserves a new output folder (refusing occupied or
+   unsafe destinations), and on failure removes only what it reserved; the source
+   installer activates a freshly built, verified bundle only after success and
+   handles user data by an explicit, reversible policy (P1).
 2. **The updater owns one stable/RC version grammar** for extraction, signed range
    admission, and exact target verification, and **every source-tree replacement
    (apply and rollback) runs through one stage → verify → promote → smoke → commit
@@ -156,9 +157,9 @@ updater.
 | CQ11 | Confirmed defect (S2) | P8 | `AppliedTonemap` per clip through overlay/report; payload 1.3; identity from applied facts |
 | CQ12 | Maintainability (S3) | P8 | Render geometry consumes resolved facts; inference modes/helpers deleted; stale architecture claim corrected |
 | CQ13 | Maintainability/observability (S3) | P10 | Policy warning in `PublishPhaseOutput.warnings`; one final warning in result, summary, and record |
-| CQ15 | Confirmed defect (S1) | P1 | Builder staging + occupied/unsafe refusal; source installer fresh target + post-verification activation + explicit user-data policy |
+| CQ15 | Confirmed defect (S1) | P1 | Builder validation + atomic reservation + occupied/unsafe refusal + reservation-scoped cleanup; source installer fresh target + post-verification activation + explicit, reversible user-data policy |
 | CQ16 | Confirmed defect (S2) | P2 | Shared stable/RC grammar/ordering; range semantics; exact target verification |
-| CQ17 | Inferred risk (S2) | P2 | `Invoke-SourceTreeReplacement` for apply and rollback; `backup.json` completeness record; `Restore-FromBackup` deleted |
+| CQ17 | Inferred risk (S2) | P2 | Journaled `Invoke-SourceTreeReplacement` and interrupted-state repair for apply and rollback; `backup.json` completeness record beside `compatibility.json`; `Restore-FromBackup` deleted |
 | CQ18 | Confirmed defect (S3) | P5 | Doctor uses run's selection owner; shim injects selected config for doctor |
 | CQ19 | Confirmed defect (S3) | P4 | `allow_inf_nan=False` on the four operation timeouts |
 | CQ20 | Confirmed test-support defect (S3) | P3 (step 1) | Per-fixture element factories in viewer and lens harnesses; two-fixture isolation regression |
@@ -194,8 +195,10 @@ CQ7 and CQ14 do not appear in this matrix by design (see §11).
 
 | Shared file or resource | Packages | Rule |
 | --- | --- | --- |
-| `tools/windows_portable/build_portable.ps1` | P1 (`Main`, output staging), P2 (`Write-BundleInfo` version validation) | P1 merges first; P2 rebases |
-| `tests/windows_portable/test_windows_portable_build_scripts.py` | P1, P2 | Same order as above |
+| `tools/windows_portable/build_portable.ps1` | P1 (`Main`, output reservation), P2 (`Write-BundleInfo` version validation) | P1 merges first; P2 rebases |
+| `tools/windows_portable/verify_extracted_bundle.ps1`, `write_bundle_inventory.py`, `tools/windows_portable/README.txt`, runbook Windows section | P1 (`path_safety.ps1` extraction, provenance, source-build docs), P2 (version helper entries, provenance, update/rollback docs) | P1 first; P2 rebases |
+| `tests/windows_portable/test_windows_portable_build_scripts.py` | P1, P2, P8 (asserts on `runtime_smoke.py` text ~364–501, ~748) | P1, then P2; P8 rebases its small hunk |
+| `tools/windows_portable/runtime_smoke.py`, `tools/docker_runtime_smoke.py` | P8 (`apply_tonemap` result type) | P8 only; note the build-scripts test dependency above |
 | `src/frame_compare/orchestration/preparation.py`, `coordinator.py`, `tools/alignment_benchmark.py` | P5 (acquisition), P7 (domain, required read) | P5 first |
 | `orchestration/execution_types.py`, `phase_output_application.py`, `phase_post_render.py` | P10, P7, P9 (and P8 for `phase_post_render.py` tonemap summary) | P10 first (smallest); then P7/P8 in either order; P9 last |
 | `render/prepare.py` | P5 (delete `cli_overrides` branch), P8 (applied facts) | Either order; second rebases a small hunk |
@@ -205,11 +208,12 @@ CQ7 and CQ14 do not appear in this matrix by design (see §11).
 | `analysis/cache_io.py` | P4 (decode), P7 (`acquire_required_metrics`) | P4 first (small) |
 | `services/alignment_reuse_cache.py`, `services/alignment_manual_overrides.py` | P4 (decode catches), P6 (candidate; reuse-cache refactor) | P4 first (small); P6 rebases |
 | `tests/orchestration/test_phase_tasks.py`, `tests/orchestration/test_execute_run_cache_modes.py` | P4 (cache-only corruption cases), P7 (CQ4/6/9) | P4 first; P7 rebases |
-| `tests/orchestration/test_phase_alignment_contract.py` | P6 (`ComparisonResolution` fixture), P9 (render artifact consumer) | P6 first or rebase |
+| `tests/orchestration/test_phase_alignment_contract.py` | P6 (`ComparisonResolution` fixture), P7 (`ExecutionState` construction ~449), P9 (render artifact consumer) | P6 first or rebase |
+| `tests/orchestration/test_execution_phase_plan.py`, `test_execute_run_lifecycle.py` | P5 (request construction), P7 (`PrepState`, selection fields), P10 (publish output application) | P5 and P10 before P7 (already the package order) |
 | `tests/services/test_alignment_frozen_strings.py`, `tests/vsview/test_alignment_review_panel.py` | P6 (CQ21c and review-map signature) | Same package; CQ21c step precedes CQ2 step |
-| `tests/integration/test_alignment_u4_acceptance.py` | P11 (recipes), P7 (`RunContext`/`PrepState` constructors at ~808, ~1118) | Either order; second rebases; never run two Docker verifiers concurrently in one checkout |
+| `tests/integration/test_alignment_u4_acceptance.py` | P11 (recipes), P7 (`RunContext`/`PrepState` constructors at ~808, ~1118), P5 (`RunRequest(root=root)` ~1113) | Either order; second rebases; never run two Docker verifiers concurrently in one checkout |
 | Docker verifier media cache (`generated/test-media-cache`) | P5–P9, P11 gates | One verifier at a time per checkout |
-| `docs/current-architecture.md`, `docs/current-cli-contract.md` | P0, P5–P9 | Each package edits only its sections; integration owner resolves textual conflicts |
+| `docs/current-architecture.md`, `docs/current-cli-contract.md` | P0, P4 (finite timeouts), P5–P9 | Each package edits only its sections; integration owner resolves textual conflicts |
 
 ### 6.2 Execution waves
 
@@ -264,7 +268,11 @@ it. No mandatory documentation framework.
    preserved caches.
 3. Rewrite the Windows acceptance bullet: “`--no-cache` removes the matching analysis
    entry, recomputes, and persists a fresh entry; repeated runs without it then hit.”
-4. Run `uv run --no-sync pytest -q tests/test_cli_contract_docs.py`,
+4. Checked and left unchanged: “network doctor warnings” in
+   `tools/windows_portable/README.txt` (~56) and
+   `docs/getting-started/windows-portable.md` (~292) refer to doctor's
+   contract-defined “Network and credentials” section, not to network access.
+5. Run `uv run --no-sync pytest -q tests/test_cli_contract_docs.py`,
    `git diff --check`, and the documentation site build
    (`uv sync --group dev --group docs --extra vsview --locked` then
    `uv run --no-sync zensical build --clean --strict`).
@@ -294,70 +302,111 @@ deletion with no relationship checks.
 Supporting facts used by the design:
 
 - The active-install pointer already exists: `%LOCALAPPDATA%\Programs\FrameCompare\state\config.json`
-  (`{schema_version, install_type, bundle_path}`), written atomically by the bundle
-  `install.ps1` (~54–61). Readers: `shim/frame-compare.ps1`,
-  `shim/frame-compare-update.ps1` (~279–304), `verify_extracted_bundle.ps1`.
+  (`{schema_version, install_type, bundle_path}`). The bundle `install.ps1` copies the
+  `bin` shims first (~43–53), then writes the pointer through a temporary file and
+  move (~54–61), then updates the user `PATH`; only the pointer write is atomic.
+  Readers: `shim/frame-compare.ps1`, `shim/frame-compare-update.ps1` (~279–304),
+  `verify_extracted_bundle.ps1` (~1290).
 - The AppData state `config.toml` written by `install.ps1` (~63–77) uses
   bundle-relative `comparison_videos`/`generated` paths; the shim runs from the
   active bundle directory. A newly activated bundle therefore does not see data left
   in the previous bundle.
-- `write_bundle_inventory.py` `_assert_safe_bundle` (~298–321) rejects files under
-  `config/` or `comparison_videos/`, so in-place preservation of user data inside the
-  output root would fail the build's own inventory check, and overlaying a runtime
-  onto old files is documented as unsupported.
+- The builder always creates **empty** `config\` and `comparison_videos\` folders
+  (`build_portable.ps1` ~1184–1189), which the extracted-bundle verifier requires
+  (`verify_extracted_bundle.ps1` ~431–436); `write_bundle_inventory.py`
+  `_assert_safe_bundle` (~298–321) rejects any file under them. In-place preservation
+  of user files inside the output root would fail the build's own inventory check,
+  and overlaying a runtime onto old files is documented as unsupported.
+- **The build location is part of the bundle's update identity.** `uv export
+  --output-file $reqFile` (`build_portable.ps1` ~599–604) writes the absolute output
+  path into the header of `requirements.lock.txt` (reproduced during plan review with
+  the locked `uv`); its SHA-256 becomes `bundle_info.requirements_lock_sha256`
+  (~767–789), and the updater refuses any code-only update whose
+  `expected_requirements_lock_sha256` differs (`frame-compare-update.ps1` ~876–883).
+  CI builds at a fixed path, so the fingerprint is stable between releases today. Any
+  design that builds at a varying path (for example a randomly named staging folder
+  renamed afterwards) would change the fingerprint every release and make the updater
+  refuse every code-only update.
 - CI (`windows-portable-build.yml` ~92–104) passes `-OutDir dist/frame-compare-portable-win-x64`
   on a fresh checkout and never relies on overwriting.
 
 **Chosen design.**
 
-*Builder (`build_portable.ps1`): refuse occupied or unsafe output; build in staging.*
+*Builder (`build_portable.ps1`): validate first, atomically reserve the final output,
+build in place, and clean up only what this run reserved.*
 
 1. Before any filesystem mutation: resolve paths; read and validate the manifest and
    `artifacts`; validate relationships:
    - `OutDir` must not exist (a file, a directory, or a reparse point). There is no
      overwrite flag: maintainers delete disposable output explicitly.
-   - `OutDir` must not be a drive root, the current directory, `RepoRoot`,
-     `CacheDir`, `$PSScriptRoot`, or the manifest's directory, and must neither
-     contain nor be contained by any of them, except that `OutDir` beneath
-     `RepoRoot\dist` is allowed. `CacheDir` and `OutDir` must not nest either way.
-   - Reuse the existing containment helper (`Test-PathWithin`,
-     `verify_extracted_bundle.ps1` ~38–44) by moving it into a dot-sourced helper the
-     builder can share, rather than writing a second copy.
-2. Reserve `<OutDir>.staging-<guid>` as a sibling using the existing atomic
-   reservation pattern (`New-AtomicallyReservedDirectory`, ~270–283; error 183 is a
-   refusal). Run every existing build, runtime-smoke, and inventory step against
-   staging.
-3. Promote with `[IO.Directory]::Move(staging, OutDir)`; a destination that appeared
-   meanwhile makes the move fail and the build fail without touching it.
-4. On any failure remove only the staging directory (existing `finally` cleanup
-   pattern). Never remove `OutDir`.
-5. Relocation after build is safe: `._pth` entries are relative (~487–493) and the
-   extracted-ZIP verifier already proves relocatability.
+   - `OutDir` must not be a drive root and must not equal or contain the current
+     directory, `RepoRoot`, `CacheDir`, `$PSScriptRoot`, or the manifest's directory;
+     it must not lie inside `CacheDir`, `$PSScriptRoot`, or the manifest's directory;
+     it may lie inside `RepoRoot` only beneath `RepoRoot\dist`. `CacheDir` and
+     `OutDir` must not nest either way. (Being inside the current directory is
+     allowed: the builder's own default is `$PWD\dist\…`.)
+   - Error messages name the resolved paths, which keeps the existing proof that
+     relative paths resolve against the provider location.
+2. Reserve `OutDir` itself with the existing atomic reservation
+   (`New-AtomicallyReservedDirectory`, `verify_extracted_bundle.ps1` ~270–283, whose
+   create-new semantics refuse an existing path, Win32 error 183). Move it, its
+   native interop type (~64–65 `Add-Type` block it depends on), and `Test-PathWithin`
+   (~38–44) into one dot-sourced build-time helper,
+   `tools/windows_portable/path_safety.ps1`, used by both the verifier and the
+   builder; add that file to `SOURCE_SCRIPTS` in `write_bundle_inventory.py` (~30–48)
+   and to the build-scripts provenance fixture (`test_windows_portable_build_scripts.py`
+   ~1233–1251).
+3. Build in place at the final path, exactly as today, so the lock header and
+   `requirements_lock_sha256` stay identical to today's CI output.
+4. On any failure after a successful reservation, remove only that reserved
+   directory, identified by the reservation result held in memory (never by path
+   existence alone). A failure before reservation removes nothing. A process crash
+   can leave a partial `OutDir`; the next run refuses it as occupied and names it, so
+   it is never silently reused or deleted.
+5. Rejected: build into a randomly named staging sibling and rename on success. It
+   protects the final path equally, but it embeds the staging path into the lock
+   header and so breaks code-only update admission (fact above). Rejected: post-hoc
+   rewriting of the lock header; it hides a path dependency instead of avoiding it.
+   (Making the lock path-independent with `uv export --no-header` is a separate,
+   deliberate fingerprint migration and is not part of this package.)
 
 *Source installer (`install-from-source.ps1`, root `install.ps1`): fresh target,
 activation after verification, explicit user-data policy.*
 
 1. Default `-OutDir` becomes a fresh sibling under `dist\`:
-   `frame-compare-portable-win-x64-<app_version>-<yyyyMMddHHmmss>`; an explicit
-   `-OutDir` that exists is refused by the builder before mutation.
+   `frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>` (local time; the application
+   version is recorded in `bundle_info.json`, so it is not needed in the name and no
+   second version source is introduced). An explicit `-OutDir` that exists is refused
+   by the builder before mutation.
 2. Read the current pointer's `bundle_path` (if any) as the previous bundle. The
    installer never deletes or rewrites the previous bundle's runtime or code.
-3. Build and verify; only then handle user data, then run the new bundle's
-   `install.ps1` (which atomically switches the pointer and replaces `bin` shims).
+3. Build and verify first. Only then handle user data, then run the new bundle's
+   `install.ps1` to activate it.
 4. User data: new parameter `-UserData Move|Leave` on `install-from-source.ps1`,
    forwarded by root `install.ps1` (which today forwards only `-SkipSync`;
    `install.cmd` already forwards `%*`). Only the documented user locations
-   `config\`, `comparison_videos\`, and `generated\` are considered; no other file is
-   inferred to be user-owned or disposable.
-   - `Move`: same-volume rename of each existing documented folder from the previous
-     bundle into the new bundle (the new bundle never contains `config\` or
-     `comparison_videos\` content, by inventory). All-or-nothing: if any rename fails,
-     reverse completed renames and do not activate. Absolute paths written inside the
-     user's config are not rewritten; the completion message names the old path.
-   - `Leave`: activate without moving; the message lists the folders left behind.
-   - Default when the previous bundle holds any of those folders and `-UserData` is
+   `config\`, `comparison_videos\`, and `generated\` are considered, and a location
+   counts as user data only when it is **non-empty**; no other file is inferred to be
+   user-owned or disposable.
+   - `Move`: precondition checks before any move: previous and new bundles are on the
+     same volume (rename cannot cross volumes; if they differ, `Move` is unavailable
+     and the installer refuses activation with instructions); each non-empty source
+     folder exists; each target folder in the new bundle is absent or empty. Then, for
+     each non-empty source folder: remove the new bundle's empty placeholder folder
+     (re-checking that it is empty), rename the source folder into the new bundle.
+     All-or-nothing: if any step fails, reverse completed renames and recreate removed
+     empty placeholders, and do not activate. If the new bundle's `install.ps1` fails
+     after the moves, reverse the moves the same way so the data returns to the
+     still-active previous bundle.
+   - `Leave`: activate without moving; the message lists the non-empty folders left
+     behind and warns that the shim may now select an older AppData state config if
+     the new bundle has no `config\config.toml`.
+   - Default when the previous bundle holds non-empty user folders and `-UserData` is
      absent: **see decision D1** (recommended: `Move`).
-   - If no previous bundle or no user data exists, activate directly.
+   - If there is no previous bundle or no non-empty user folder, activate directly.
+   - Moving media changes absolute source paths, so path-keyed caches miss once and
+     recompute; absolute paths inside the user's config are not rewritten. The
+     completion message states both and names the previous bundle path.
 5. Old bundles are never deleted by the installer. Print the previous bundle path and
    state that it can be removed manually once the new one is accepted.
 
@@ -373,51 +422,71 @@ activation after verification, explicit user-data policy.*
 - **Shared transaction code with the updater (P2):** the builder produces a whole
   user-owned root activated by a pointer under PowerShell 7; the updater swaps only
   `app\src\frame_compare` under a lock on Windows PowerShell 5.1. They share the
-  stage → validate → commit principle, not code.
+  validate → reserve/stage → commit principle, not code.
 
 **Ordered steps.**
-1. Add the shared path-relationship helper (moved, not copied) and builder
-   pre-mutation validation; reorder `Main` so manifest validation precedes any
-   mutation.
-2. Implement staging reservation, promotion, and staging-only cleanup.
+1. Move `Test-PathWithin` and `New-AtomicallyReservedDirectory` (with its interop
+   type) into `path_safety.ps1`; dot-source it from the verifier and builder; update
+   provenance lists. Add builder pre-mutation validation and reorder `Main` so
+   manifest validation precedes any mutation.
+2. Replace the delete-and-recreate step with reservation, in-place build, and
+   reservation-scoped cleanup.
 3. Update the source installer defaults, pointer read, `-UserData` handling with
-   reversal, activation ordering, and messages; thread `-UserData` through root
-   `install.ps1`.
-4. Update docs: `tools/windows_portable/README.txt` (source builds now produce a
-   versioned folder; the shim always uses the active bundle; user-data choices),
+   preconditions and reversal (including reversal on activation failure), activation
+   ordering, and messages; thread `-UserData` through root `install.ps1`.
+4. Update docs: `tools/windows_portable/README.txt` (source builds produce a
+   timestamped folder; the shim always uses the active bundle; user-data choices),
    `docs/getting-started/windows-portable.md` (~255–275), `INSTALL-WINDOWS.md` if it
-   names the fixed folder, and the runbook's Windows section (maintainer rebuilds
-   must remove disposable output first; builder refuses occupied output).
+   names the fixed folder, `docs/current-architecture.md` (~426, which names the fixed
+   output folder), and the runbook's Windows section (maintainer rebuilds must remove
+   disposable output first; builder refuses occupied output).
 5. Tests (below), replacing incidental spelling assertions near the touched owners.
 
 **Caller migration and deletions.** Delete the unconditional `Remove-Item -Recurse
--Force -LiteralPath $OutDir` and recreate step. CI invocation keeps working
-unchanged (fresh checkout). No compatibility path keeps the old destructive behavior.
+-Force -LiteralPath $OutDir` and recreate step, and the verifier's private copies of
+the moved helpers. CI invocation keeps working unchanged (fresh checkout, same final
+path). No compatibility path keeps the old destructive behavior.
 
 **Tests (CQ15 and CQ21d).**
-- Flip `test_windows_portable_build_scripts.py` ~62–108 (currently asserts that a
-  relative output directory is created even when the manifest is missing) to assert
-  that nothing is created or removed when the manifest is missing or malformed.
+- Rework `test_windows_portable_build_scripts.py` ~62–108 (currently asserts that a
+  relative output directory is created even when the manifest is missing): assert that
+  nothing is created or removed when the manifest is missing or malformed, and keep
+  its proof of relative-path resolution through the error message that names the
+  resolved output and cache paths.
 - New Windows-executed builder fixtures (gated like existing ones: `os.name == "nt"`
   plus PowerShell discovery): occupied `OutDir` refused with sentinel files
-  byte-identical; unsafe relationships (drive root, repo root, ancestor of repo,
-  cache nesting, manifest directory) refused before mutation; injected failure after
-  staging leaves no staging directory and no `OutDir`.
-- Source-install fixture with a stubbed builder (existing entrypoint test style in
-  `test_windows_portable_install_entrypoints.py`): previous bundle with
-  `config\config.toml`, `comparison_videos\x.mkv`, `generated\run\…` sentinels and a
-  pointer; assert repeat invocation builds a new folder, previous runtime/code
-  untouched, `Move` relocates exactly the three folders and switches the pointer,
-  `Leave` switches the pointer without moving, injected build failure leaves the
-  pointer and previous bundle byte-identical, and an injected rename failure reverses
-  completed moves and does not activate.
+  byte-identical; unsafe relationships (drive root, repo root, ancestor of the repo or
+  current directory, cache nesting, manifest directory) refused before mutation;
+  `OutDir` beneath the current directory accepted; injected failure after reservation
+  removes only the reserved `OutDir`; a leftover partial `OutDir` is refused, not
+  deleted.
+- Fingerprint stability: building the same commit twice at the same final path yields
+  identical `bundle_info.requirements_lock_sha256` (Windows acceptance; guards the
+  update-admission fact above).
+- Source-install fixtures with a stubbed builder (existing entrypoint test style) and
+  an **isolated `LOCALAPPDATA`** (every source-install test must set it to `tmp_path`;
+  otherwise the pointer read and default `Move` could act on a developer's real
+  installation): previous bundle with non-empty `config\config.toml`,
+  `comparison_videos\x.mkv`, `generated\run\…` sentinels and a pointer; new bundle with
+  empty placeholders. Assert: repeat invocation builds a new folder; previous
+  runtime/code untouched; `Move` relocates exactly the non-empty folders and switches
+  the pointer; `Leave` switches the pointer without moving; empty previous folders are
+  not treated as user data; different-volume `Move` refuses activation; injected build
+  failure leaves the pointer and previous bundle byte-identical; an injected rename
+  failure reverses completed moves, restores placeholders, and does not activate; an
+  injected `install.ps1` failure after moves returns the data to the previous bundle.
+- Migrate `test_root_source_installer_prerequisite_at_process_boundary`
+  (`test_windows_portable_install_entrypoints.py` ~146–199): it runs the real source
+  installer against the host `LOCALAPPDATA` and asserts the fixed
+  `dist/frame-compare-portable-win-x64/install.ps1`; isolate `LOCALAPPDATA` and assert
+  the timestamped folder instead.
 - CQ21d replacements in this package's owners (keep structural checks): replace
   `install_entrypoints` ~39–41 invocation-spelling assertions, `build_scripts`
   ~114/117 (`$bundleConfigDir` spelling), ~706 (`Get-AppVersionFromSource … $OutDir`
-  spelling, which staging breaks while the obligation remains), and ~2442–2463 helper
-  names with executable fixtures or bundle-inventory observations. Retain public-key
-  gate, `git archive HEAD` committed source, `--require-clean-repo`, PowerShell 7
-  prerequisite, CMD absolute-path fallbacks, and forbidden inventory content checks.
+  spelling), and ~2442–2463 helper names with executable fixtures or bundle-inventory
+  observations. Retain public-key gate, `git archive HEAD` committed source,
+  `--require-clean-repo`, PowerShell 7 prerequisite, CMD absolute-path fallbacks, and
+  forbidden inventory content checks.
 
 **Gates.**
 - Linux/static: `uv run --no-sync pytest -q tests/windows_portable` (inspect skips:
@@ -431,16 +500,21 @@ unchanged (fresh checkout). No compatibility path keeps the old destructive beha
   failure; observe the previous bundle unchanged and the shim launching the new one.
 
 **Compatibility.** Users invoking the builder on an existing output now get a refusal
-instead of deletion (intended). Existing installs pointed at
+instead of deletion (intended). CI bundles keep the same build path and therefore the
+same requirements fingerprint. Existing installs pointed at
 `dist\frame-compare-portable-win-x64` keep working; the next source install creates a
-sibling. Disk usage grows until users delete old bundles (documented).
+timestamped sibling. Source-built bundles already have path-specific requirements
+fingerprints today; that does not change. Disk usage grows until users delete old
+bundles (documented).
 
-**Rollback.** Revert P1. Bundles created with versioned names stay valid because the
+**Rollback.** Revert P1. Bundles created with timestamped names stay valid because the
 pointer stores an absolute path.
 
-**Exit criteria.** No code path removes an existing output root; manifest/build
-failure leaves existing state byte-identical; repeat source installation preserves
-user data per D1's chosen policy; Windows acceptance recorded or explicitly open.
+**Exit criteria.** No code path removes an existing output root; failure cleanup
+removes only a directory this run reserved; manifest/build failure leaves existing
+state byte-identical; the requirements fingerprint is unaffected for CI builds; repeat
+source installation preserves user data per D1's chosen policy, including reversal on
+activation failure; Windows acceptance recorded or explicitly open.
 
 ---
 
@@ -449,154 +523,233 @@ user data per D1's chosen policy; Windows acceptance recorded or explicitly open
 **Problems.**
 - **CQ16 (confirmed, S2):** `frame-compare-update.ps1` extracts versions with
   `^frame-compare\s+([0-9]+(?:\.[0-9]+){1,3})$` (~584–599), falling back to raw
-  `__version__` (~614–621); `Test-StringInRange` (~564–582) uses
+  `__version__` (~612–622); `Test-StringInRange` (~564–582) uses
   `[System.Version]::Parse`, so installed RC versions (`0.8.0rc1`) always fail
   admission. Release inputs support RC versions (`.github/workflows/release.yml`,
-  `scripts/validate_release_contract.py:15–19`). `build_update.ps1` (~258–278) writes
-  raw `to_app_version`, numeric `from_app_version_min = "<MAJOR>.<MINOR>.0"`, and
-  `from_app_version_max = $null`. Additionally `Invoke-SmokeCheck` (~458–486)
+  `scripts/validate_release_contract.py:15–19`). `build_update.ps1` (~69–75, ~272–285)
+  writes raw `to_app_version`, numeric `from_app_version_min = "<MAJOR>.<MINOR>.0"`,
+  and `from_app_version_max = $null`. Additionally `Invoke-SmokeCheck` (~458–486)
   verifies the target by substring match.
 - **CQ17 (inferred risk, S2):** `Restore-FromBackup` (~631–636) deletes the current
   source tree and copies the backup into place; explicit rollback (~638–674) uses it
   with no staging, completeness check, smoke check, or recovery. Apply (~676–1006)
   already stages `.new`, keeps `.old`, renames, smoke-checks, and recovers, but its
-  final recovery fallback also uses `Restore-FromBackup`.
+  recovery fallbacks (~951, ~971) also use `Restore-FromBackup`. Apply also reads the
+  installed version by running the bundle (~790–799), throws if the target is missing
+  (~892), deletes any stale `.old` (~898–900), and creates the backup with
+  `Copy-Item` into a per-second ID directory via `Ensure-Directory` (~902–910) before
+  writing `compatibility.json` (backup identity) beside it.
 
 **Distribution fact.** Code-only updates carry only `app/src/frame_compare`; the
 updater in `%LOCALAPPDATA%\Programs\FrameCompare\bin` changes only when a full
 bundle's `install.ps1` runs. The P2 updater therefore reaches users through full
-bundle installation, which always targets a fresh directory with no backups.
-Installations already on an RC with the old updater cannot repair themselves through
-a code-only update; release notes must direct them to a one-time full bundle install.
+bundle installation, which always targets a fresh directory with no backups (the
+`bin` updater locates its bundle through the pointer `install.ps1` writes for its own
+bundle). Installations already on an RC with the old updater cannot repair themselves
+through a code-only update; release notes must direct them to a one-time full bundle
+install.
 
 **Chosen design.**
 
 *Version grammar (one PowerShell owner, one Python owner, one shared vector table).*
-- New `tools/windows_portable/shim/frame-compare-version.ps1`, dot-sourced by the
-  updater, `build_update.ps1`, and `build_portable.ps1`; installed into `bin` by
-  bundle `install.ps1` and removed by `uninstall.ps1` (`Copy-InstallerFiles` already
-  copies `shim\`). Functions: `ConvertTo-FrameCompareVersion` (parse or `$null`),
-  `Compare-FrameCompareVersion`, `Test-FrameCompareVersionInRange`.
-- Grammar (Windows PowerShell 5.1 compatible, `-cmatch`, ASCII `[0-9]` because .NET
-  `\d` matches Unicode digits, component length capped so `[int]::Parse(...,
-  InvariantCulture)` cannot overflow):
-  `^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})(?:rc([1-9][0-9]{0,8}))?$`.
-  This is exactly the release contract's stable/RC grammar
-  (`STABLE_VERSION_RE`/`RC_VERSION_RE`) with an overflow cap.
+- New `tools/windows_portable/shim/frame-compare-version.ps1` with
+  `ConvertTo-FrameCompareVersion` (parse or `$null`), `Compare-FrameCompareVersion`,
+  and `Test-FrameCompareVersionInRange`. Consumers:
+  - the updater dot-sources it from its own directory and fails with a clear message
+    if it is missing;
+  - `tools/windows_portable/version_utils.ps1` (already dot-sourced by
+    `build_portable.ps1` ~22 and `build_update.ps1` ~19) dot-sources it, and
+    `Get-AppVersionFromSource` validates its result with the grammar, so the build
+    scripts gain the grammar through the existing helper rather than a new import;
+  - bundle `install.ps1` adds it to its file checks and copy list (~24–37, ~43–53)
+    and `uninstall.ps1` to its removal list (~39);
+  - `verify_extracted_bundle.ps1` adds it to `requiredEntries` (~365–379);
+  - `write_bundle_inventory.py` adds it to `SOURCE_SCRIPTS` (~30–48), with the
+    provenance fixture (`test_windows_portable_build_scripts.py` ~1233–1251);
+  - test harnesses that copy only the updater (`test_windows_portable_update_apply_e2e.py`
+    ~70–83, `test_windows_portable_install_uninstall_e2e.py` ~93–99) copy it too.
+- Grammar (Windows PowerShell 5.1 compatible, case-sensitive `-cmatch`, ASCII
+  `[0-9]` because .NET `\d` matches Unicode digits, `\z` rather than `$` because .NET
+  `$` also matches before a trailing newline, component length capped so
+  `[int]::Parse(..., [Globalization.CultureInfo]::InvariantCulture)` cannot overflow):
+  `^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})(?:rc([1-9][0-9]{0,8}))?\z`.
+  For ASCII inputs within the length cap this accepts exactly the release contract's
+  stable/RC strings (`STABLE_VERSION_RE`/`RC_VERSION_RE`). The Python regexes use
+  Unicode `\d` and no cap; add `re.ASCII` to them (a release-contract tightening with
+  no valid-version consequence) so both sides agree on the edges.
 - Ordering: `(major, minor, patch, rc)` with the final release ordered after every
-  `rcN` of the same base.
+  `rcN` of the same base. Python has no ordering owner, so ordering vectors are
+  exercised only by the PowerShell test.
 - Range semantics (decision D2): `max` inclusive; an RC `min` uses strict order; a
   stable `min` `X.Y.Z` also admits that base's release candidates (behaves as
   `X.Y.Zrc1`). The generator keeps emitting numeric `X.Y.0`, so updaters already in
   users' `bin` still parse stable bounds with `System.Version` and keep their
   stable→stable path.
-- Malformed installed, bound, or target versions fail closed with a typed message.
+- Downgrades: the updater has no downgrade check today, so a target older than the
+  installed version but inside the signed range is admitted (for example installed
+  `0.8.0`, target `0.8.0rc2`). P2 keeps that behavior (rollback is the supported way
+  back; signed ranges bound what can be applied) and documents and tests it rather
+  than adding a new refusal (part of D2).
+- Malformed installed, bound, or target versions fail closed with a clear message
+  before any mutation.
 - `Invoke-SmokeCheck` parses the reported version with the same grammar and compares
-  exactly (`-ceq` on normalized strings, or `Compare-FrameCompareVersion -eq 0`).
-- Audit every other version comparison in the updater (no-downgrade or same-version
-  checks if present) and route it through `Compare-FrameCompareVersion`.
+  exactly (`Compare-FrameCompareVersion -eq 0`).
 - Python remains authoritative in `scripts/validate_release_contract.py`. Add a JSON
   vector file (e.g. `tests/windows_portable/version_vectors.json`) consumed by a
-  Python test against `validate_release_contract` and by a PowerShell-executed test
-  against the PowerShell owner, so the two implementations cannot drift silently.
+  Python test against `validate_release_contract` (validity vectors) and by a
+  PowerShell-executed test against the PowerShell owner (validity and ordering), so
+  the two implementations cannot drift silently.
 - Manifest format: unchanged fields and `schema_version`. Optionally add the grammar
   as a JSON-schema `pattern` on `to_app_version`/`from_app_version_*` in
   `update_manifest.schema.json`; this is validation tightening, not a format change.
 
 *Source-tree replacement transaction (updater-only).*
+- A small journal, `app\.frame_compare_replacement.json`
+  `{schema_version, operation, state: "staged" | "promoting" | "committed", started_at}`,
+  written by temporary file and move at each state change, makes interrupted states
+  unambiguous.
+- `Repair-InterruptedReplacement -BundlePath` runs **immediately after
+  `Acquire-UpdateLock` in both apply and rollback**, before apply's version read,
+  target-exists check, or stale-`.old` deletion (all of which would otherwise refuse
+  or destroy recovery material):
+  - no journal: if `.old` or `.new` exist without a journal, refuse with their paths
+    (unknown state; never guess);
+  - `staged` (crash before any rename): remove `.new`; target untouched;
+  - `promoting` (crash during or after the two renames, before commit): if `.old`
+    exists, the previous tree is intact there and the current target (if any) never
+    passed smoke, so move a present target aside to `.failed-<timestamp>` and rename
+    `.old` back; if `.old` does not exist, no rename happened and the target is
+    untouched; then remove `.new`;
+  - `committed` (crash while removing `.old`): remove the leftover `.old`;
+  - then delete the journal. Today's unconditional stale-`.new`/`.old` deletion at
+    ~894–900 is replaced by this function.
 - `Invoke-SourceTreeReplacement -BundlePath -TargetDir -CandidateDir -ExpectedInventory -ExpectedVersion`,
-  called with the update lock held:
-  1. Repair an interrupted prior run: target missing and `.old` present → rename
-     `.old` back before anything else; stale `.new` removed.
-  2. Stage the candidate into `.new` (copy).
-  3. Verify `.new` against `ExpectedInventory` (exact relative path set, byte sizes,
+  called with the update lock held and after repair:
+  1. Stage the candidate into `.new` (copy); journal `staged`.
+  2. Verify `.new` against `ExpectedInventory` (exact relative path set, byte sizes,
      SHA-256).
-  4. Rename target → `.old`, then `.new` → target (`Invoke-WithRetry` as today).
-  5. Smoke-check with exact version.
-  6. Commit by removing `.old`.
-  On any failure: restore `.old` by rename. If recovery itself fails, keep `.old` and
-  `.new`, and report both paths and the manual recovery step. Never delete-then-copy.
+  3. Journal `promoting`; rename target → `.old`, then `.new` → target
+     (`Invoke-WithRetry` as today).
+  4. Smoke-check with exact version.
+  5. Journal `committed`; remove `.old`; delete the journal.
+  On any failure before `committed`: move a promoted target aside to
+  `.failed-<timestamp>`, rename `.old` back, delete `.new`, and delete the journal. If
+  recovery itself fails, keep every directory and the journal, and report the paths
+  and the manual recovery step. Never delete-then-copy.
 - Apply passes its authenticated, extracted, hash-checked payload directory and the
-  signed manifest's file list as the inventory. Rollback passes the backup directory
-  and the backup's own inventory.
+  signed manifest's file list as the inventory. Rollback passes the backup's
+  `frame_compare` directory and the backup's own inventory.
 - Signed archive authentication/extraction and backup identity/selection remain with
   their callers.
-- Backup completeness record: after copying the current tree to
-  `.update_backups\<id>\frame_compare`, write `backup.json`
-  `{schema_version, app_version, media_runtime_fingerprint, requirements_lock_sha256, files:[{path, sha256, bytes}]}`
-  last, via temporary file and move, as the commit marker. Hash from the source tree
-  and verify the copy against it. Refuse an existing backup ID directory (IDs have
-  one-second resolution and `Ensure-Directory` would merge).
-- `list-backups` and `rollback` treat a backup without a valid `backup.json` as
+- Backup layout and completeness (`.update_backups\<id>\`):
+  - Refuse an existing `<id>` directory instead of merging into it (IDs have
+    one-second resolution and `Ensure-Directory` would merge).
+  - Copy the current tree to `<id>\frame_compare` (unchanged location).
+  - Keep writing `<id>\compatibility.json` exactly as today (identity checked by
+    `list-backups`/`rollback`; tested at `test_windows_portable_update_scripts.py`
+    ~762–773; runbook step 5).
+  - Write `<id>\backup.json` **last**, via temporary file and move, as the completeness
+    marker: `{schema_version, app_version, files: [{path, sha256, bytes}]}`, hashed from
+    the source tree and verified against the copy. It sits beside, never inside,
+    `frame_compare\`, so rollback cannot copy it into the source tree.
+  - If backup creation fails, remove that partial `<id>` directory before refusing the
+    update.
+- `list-backups` and `rollback` require both a valid `compatibility.json` matching the
+  installed identity (as today) and a valid `backup.json`; anything else is listed
   unavailable (“completeness record missing”), extending the documented policy that
   identity-less legacy backups are not migrated. In practice the P2 updater never
   coexists with pre-P2 backups, because it arrives only through a fresh full-bundle
-  directory.
+  directory (the caveat is a manual or partially failed bundle install that rewrote
+  `bin` but not the pointer; such backups are simply listed unavailable).
+- `Invoke-PurgeBackups` (~488–507) keeps the newest five **complete** backups and
+  removes incomplete ones, so incomplete backups can no longer displace usable ones.
 
 *Rejected alternatives.* Stripping suffixes or mapping `rcN` into a fourth numeric
 component (silently misorders and breaks exact verification); an inlined grammar copy
-in each script plus a parity test (drifts; three scripts need it); a general
+in each script plus a parity test (drifts; several scripts need it); a general
 versioning library (new dependency, not needed); keeping `Restore-FromBackup` as a
-“simple” rollback (it is the risk).
+“simple” rollback (it is the risk); inferring interrupted state from which directories
+exist (ambiguous between “crashed before commit” and “crashed while committing”).
 
 **Ordered steps.**
-1. Add `frame-compare-version.ps1`, vectors, and Python/PowerShell vector tests.
+1. Add `frame-compare-version.ps1`, wire it through `version_utils.ps1`, the bundle
+   installer/uninstaller, verifier, provenance list, and test harness copies; add
+   vectors and Python/PowerShell vector tests; add `re.ASCII` to the release-contract
+   regexes.
 2. Migrate extraction, Python fallback, range admission, and smoke verification;
    migrate `build_update.ps1` validation and `min` derivation; validate
-   `Write-BundleInfo` `app_version` in `build_portable.ps1` (after P1 merges);
-   install/uninstall the helper in `bin`.
-3. Add `backup.json` creation/verification and backup-ID refusal.
-4. Implement `Invoke-SourceTreeReplacement`; migrate apply (promotion, smoke,
-   recovery) and rollback to it.
-5. Delete `Restore-FromBackup` and every fallback call to it.
-6. Update the runbook Windows section (version grammar, backup completeness record,
-   transaction recovery material), `README.txt` update/rollback text, and the
-   changelog/release-note guidance for RC users needing one full reinstall.
+   `Write-BundleInfo` `app_version` in `build_portable.ps1` (after P1 merges).
+3. Add backup-ID refusal, `backup.json` creation/verification beside the existing
+   `compatibility.json`, partial-backup cleanup, and purge of incomplete backups.
+4. Add the journal, `Repair-InterruptedReplacement` (called right after the lock in
+   apply and rollback), and `Invoke-SourceTreeReplacement`; migrate apply (promotion,
+   smoke, recovery) and rollback to it.
+5. Delete `Restore-FromBackup`, its fallback calls (~951, ~971), and the
+   unconditional stale `.new`/`.old` deletion.
+6. Update the runbook Windows section (version grammar, downgrade behavior, backup
+   completeness record, journal and recovery material), `README.txt` update/rollback
+   text, and the changelog/release-note guidance for RC users needing one full
+   reinstall.
 
 **Tests.**
 - Signed apply E2E (`test_windows_portable_update_apply_e2e.py`, currently numeric
   `1.0.0`/`1.0.1` fixtures): add RC→RC, RC→stable, stable→RC within a line (per D2),
-  stable→next-minor RC refused, inclusive `max`, malformed installed/bound/target
-  values refused before mutation, exact target mismatch (`0.8.0` vs reported
-  `0.8.0rc1`; `1.0.1` vs `1.0.10`) triggering recovery.
-- Rollback/transaction failure injection, comparing `_snapshot_bytes` of the current
-  tree: unreadable backup file, truncated backup (inventory mismatch), copy failure,
-  rename failure, smoke failure, and an interrupted state (`target` missing, `.old`
-  present) repaired on the next invocation. Retain successful rollback,
+  stable→next-minor RC refused, inclusive `max`, a same-line downgrade admitted (per
+  D2), malformed installed/bound/target values refused before mutation, and exact
+  target mismatch (`0.8.0` vs reported `0.8.0rc1`; `1.0.1` vs `1.0.10`) triggering
+  recovery.
+- Transaction and rollback failure injection, comparing `_snapshot_bytes` of the
+  current tree: unreadable backup file, truncated backup (inventory mismatch), copy
+  failure, rename failure, smoke failure, and each interrupted journal state (`staged`;
+  `promoting` after only the first rename; `promoting` after both renames;
+  `committed` with a leftover `.old`)
+  repaired correctly by the next apply **and** the next rollback; `.old`/`.new`
+  without a journal refused with paths. Retain successful rollback,
   invalid/incompatible-backup refusal before lock creation, lock ownership, and purge
   serialization.
-- `list-backups`: missing/invalid `backup.json` listed unavailable.
+- Backups: existing `<id>` refused; failed backup leaves no partial `<id>`;
+  `list-backups` lists missing/invalid `backup.json` or `compatibility.json` as
+  unavailable; purge keeps five complete backups and removes incomplete ones.
 - Parametrize apply/rollback E2E over `powershell.exe` and `pwsh` on Windows; today
   the helper prefers `pwsh`, so Windows PowerShell 5.1 is not exercised for the
   updater.
 - CQ21d replacements: `update_scripts` ~680 (`"Get-BundleAppVersion" in updater`;
   behavior covered at `apply_e2e` ~389–400), ~731–732, ~740–742, ~766–771 (ordering
-  against the deleted `Restore-FromBackup`), and re-anchor ~646–649's no-bypass intent
-  on behavior. Keep PKCS1/SHA256, signature-before-parse ordering (~685), schema
-  constants, and no-interactive-bypass structural checks.
+  against the deleted `Restore-FromBackup`; keep the `compatibility.json` obligation
+  through behavior), and re-anchor ~646–649's no-bypass intent on behavior. Keep
+  PKCS1/SHA256, signature-before-parse ordering (~685), schema constants, and
+  no-interactive-bypass structural checks.
 
 **Gates.**
 - Linux: `uv run --no-sync pytest -q tests/windows_portable tests/workflows`
-  (Python vector test runs; PowerShell cases skip—inspect skips).
+  (Python vector and release-contract tests run; PowerShell cases skip—inspect skips).
 - **Acceptance requirement (Windows, PowerShell 5.1 and 7):** updater E2E above.
-- **Acceptance requirement (runbook step 5–6):** build the code-only update ZIP,
+- **Acceptance requirement (Windows PowerShell 5.1 install/uninstall):** P2 changes
+  the bundle `install.ps1`/`uninstall.ps1`, which retain 5.1 support; run the
+  runbook's BOM-less UTF-8 install-state check from a non-ASCII bundle path under 5.1
+  (runbook “Windows Portable / Release-Path Verification”, PowerShell paragraph).
+- **Acceptance requirement (runbook steps 5–6):** build the code-only update ZIP,
   prove matching-runtime apply/rollback and mismatched-runtime refusal, sign it, and
   record the hosted `windows-portable.yml` run; if signing cannot run, mark signing
   documented-only and require maintainer confirmation.
 
 **Compatibility.** Manifest fields unchanged. Old installed updaters keep working for
 stable numeric installations. RC installations need one full bundle install to obtain
-the new updater (documented). Backups gain `backup.json`; older updaters ignore it.
+the new updater (documented). Backups keep `compatibility.json` and gain `backup.json`
+beside it; older updaters ignore the extra file. The replacement journal is new
+updater-private state inside `app\`.
 
 **Rollback.** Revert P2; bundles installed with the P2 helper in `bin` are replaced by
 the next bundle install. Backups with `backup.json` remain usable by older updaters
-(extra file ignored).
+(`compatibility.json` unchanged, extra file ignored). A leftover journal is ignored by
+older updaters.
 
 **Exit criteria.** One grammar owner used by extraction, range, generator, bundle
 info, and smoke; exact target verification; no delete-then-copy restoration remains;
-every replacement goes through the transaction; failure injections leave the current
-tree intact or recoverable with reported material; Windows 5.1/7 evidence recorded or
-explicitly open.
+every replacement goes through the journaled transaction; every interrupted state is
+repaired or refused with paths by both apply and rollback; failure injections leave
+the current tree intact or recoverable with reported material; Windows 5.1/7 evidence
+recorded or explicitly open.
 
 ---
 
@@ -624,17 +777,24 @@ explicitly open.
 **Chosen design for CQ1: derive the committed offset; one selection function.**
 - `viewport.js`: `currentAlignment()` returns a normalized copy of
   `pairAlignments[currentPairAlignmentKey()]` or the neutral default. A private
-  `writeCurrentAlignment(a)` normalizes, applies the existing clip-count/key guards,
-  clears raw drafts, and writes the map entry. `setManualAlignment` (~558) and
+  `writeCurrentAlignment(a, {clearDrafts})` normalizes, applies the existing
+  clip-count/key guards, and writes the map entry; it clears raw drafts only where
+  today's caller does (`setManualAlignment` and committed input yes;
+  `setAlignmentPreset('custom')`, ~546–556, no). `setManualAlignment` (~558) and
   `setAlignmentPreset` (~546, `custom` keeps current x/y) write through it, then
   `applyAlignment` and persist. `commitRawAlignmentInput` (~603), `applyAlignment`
   (~611–618), and `alignmentStatusValue` (~642–649) read `currentAlignment()`.
   `rawAlignX/rawAlignY` stay as transient drafts.
 - `viewer.js`: `selectPair({left, right, mode, activate} = {}, {render = true} = {})`:
   resolve indexes, set mode, repair a distinct pair when the mode requires it
-  (Slider same-source stays valid), resolve `activate` after repair, apply Blink
-  keep-in-pair, clear raw drafts if the pair key changed, and render (render
-  persists).
+  (Slider same-source stays valid), resolve `activate` after repair in every mode
+  (as `applyDefaultSelection` does today, ~978), apply Blink keep-in-pair **only when
+  the resulting mode is `blink`** (today's condition at ~988, ~1001, ~1013, ~1089,
+  ~1655; Overlay/Single and Diff deliberately allow an active source outside the pair,
+  e.g. the restore case asserting `activeClipIdx === 3` in Diff with pair `0:1`,
+  harness ~617), clear raw drafts on every left/right selection call (today's
+  behavior through `loadCurrentPairAlignment`, even when the key is unchanged) and
+  when mode-driven repair changes the pair key, and render (render persists).
 - `inspector.js` (~378–380) reads `currentAlignment()`.
 - Rejected: (1) adding `loadCurrentPairAlignment()` in `setMode` (fixes the reported
   symptom, misses the `0:0` leak path through persist, and keeps the protocol in
@@ -649,9 +809,16 @@ explicitly open.
 element()`, and returns `element` on the fixture. Scenario-level `fakeElement()`
 calls (~489, 497, 776, 898–899, 939, 958, 960, 1145, 1201, 1207, 1463–1465,
 1721–1723) become `fixture.element()`. Delete the global so a stray use throws.
-Apply the same per-environment closure to `lens_harness.js`. `grid_view_harness`,
-viewport, inspector, and review harnesses do not use the shared mechanics and need
-no change. Run async scenario groups sequentially for clear failure attribution.
+Apply the same per-environment closure to `lens_harness.js`: `makeEnvironment`
+creates elements (~87–143) before its `document` (~176), so the factory closure must
+resolve the document lazily from the environment; scenario-level `fakeElement()` calls
+that become an environment's `activeElement` (`externalFocus` ~682,
+`transientExternalFocus` ~719) use that environment's factory, while geometry-only
+elements (~308, ~313, ~454) need no document. `grid_view_harness.js` does use
+`domMechanics` (~21–23, ~74) but closes over its single module-level `context`, which
+is never replaced, so it needs no change; viewport, inspector, and review harnesses do
+not use the shared mechanics. Run async scenario groups sequentially for clear failure
+attribution.
 
 **Chosen design for CQ21a.**
 - Shared `tests/services/harness_runner.js`: each harness exports named scenario
@@ -695,7 +862,8 @@ no change. Run async scenario groups sequentially for clear failure attribution.
 1. CQ20 fix in viewer and lens harnesses; add the two-fixture isolation scenario
    (focus, remove, replaceChildren affect only the owning document). Commit.
 2. CQ21a runner/bridge; migrate viewer, lens, grid, review_state,
-   review_controller, and viewport harnesses; move (c) fields into JS assertions,
+   review_controller, viewport, and inspector harnesses (the inspector bridge,
+   `test_report_viewer_inspector.py` ~19–35, mirrors 15 class-(b) `True` markers); move (c) fields into JS assertions,
    then remove mirrors. Prove focused execution and failure reporting with a
    deliberate, uncommitted assertion break in one scenario, then restore. Commit.
 3. CQ1: implement `currentAlignment`/`writeCurrentAlignment`, `selectPair`; migrate
@@ -720,15 +888,19 @@ into the writer); the store call in `persistViewerState`; the store/load lines i
 selectors and restore; scattered repair/Blink calls replaced by `selectPair`;
 `applyAlignmentState(neutral)` in resets; the three `state` alignment fields. Harness
 fixture initializations of those fields (viewer_state ~295–297, viewport ~72–73,
-inspector ~196–197) and viewport-harness stubs (~110, ~190) migrate to the new
-interface; ~40 `viewer.state.alignX` reads become `currentAlignment()`.
+inspector ~196–197), viewport-harness stubs (~110, ~190), and the inspector
+harness's two `viewport` stubs (~227, ~378, which need `currentAlignment()`) migrate
+to the new interface; ~40 `viewer.state.alignX` reads become `currentAlignment()`.
 
 **Preserved behavior.** Directional pair keys, valid same-source Slider, single-clip
 `0:0`, storage key `frame-compare:report-viewer:${report_id}:viewport` and
 `pairAlignments` schema, malformed-state normalization, restored width-fit, keyboard
 and focus behavior, Blink pause intent, Grid pan-unit conversion, and stale Diff
-image rejection. One intentional difference: visiting a pair without editing it no
-longer writes a neutral entry (absent already means neutral on restore).
+image rejection. Intentional differences: (1) visiting a pair without editing it no
+longer writes a neutral entry (absent already means neutral on restore); (2) when
+`setMode` repairs the pair to a different key, uncommitted raw drafts are cleared, so
+a draft typed for the old pair cannot commit onto the restored pair (today `setMode`
+never touches drafts).
 
 **Tests.**
 - Node regressions (viewer harness): Slider same-source → Diff and → Blink, with a
@@ -740,8 +912,11 @@ longer writes a neutral entry (absent already means neutral on restore).
   (like `_append_width_fit_restore_probe` ~955): clear storage; Slider; type 7/3 into
   `#align-x`/`#align-y` with `input` and `blur`; set `#right-select` to 0; click Diff;
   record pair, `getComputedStyle(.rv-right).transform` (`matrix(1, 0, 0, 1, 7, 3)`),
-  `#alignment-status`, and persisted `pairAlignments['0:1']`; repeat for Blink and an
-  unset destination; record into one `data-` JSON attribute and assert all cases.
+  the `#canvas` `--align-x`/`--align-y` custom properties (set by `applyAlignment`,
+  `viewport.js` ~611–612), `#alignment-status`, and persisted `pairAlignments['0:1']`;
+  repeat for Blink and an unset destination. In Blink the right layer is hidden while
+  the left source is active, so assert the custom properties there (or toggle the
+  active source before reading the transform); record into one `data-` JSON attribute and assert all cases.
 - Retain all Node suites in the report's viewer verification table and the four
   browser cases listed there.
 
@@ -811,17 +986,24 @@ execution/completion; real-browser case recorded.
 | `orchestration/probing/probe_cache.py` (~223–237) | add decode tuple to the parse branch | read mode `{}` with warning; update mode still raises `_ProbeCacheReadError` and does not overwrite |
 | `services/alignment_manual_overrides.py` (~77–92, ~157–172) | widen both | `None` / `corrupt_on_write` (existing) |
 | `services/alignment_reuse_cache.py` (~119–133) | widen | cache ignored; write starts fresh |
-| `config/schema_sources.py` `_read_file` (~21–24) | re-raise `TOMLDecodeError`/`UnicodeDecodeError` unchanged; map `(RecursionError, ValueError)` to `ConfigParseError(path, "configuration exceeds TOML parser limits")` | typed `FC-1002`-family config failure, exit 2 (O2); never silent defaults |
+| `config/schema_sources.py` `TomlConfigSettingsSourceNoBOM._read_file` (~21–24) | re-raise `TOMLDecodeError`/`UnicodeDecodeError` unchanged; map `(RecursionError, ValueError)` to `ConfigParseError(path, "configuration exceeds TOML parser limits")` | typed `FC-1002`-family config failure, exit 2 (O2); never silent defaults |
 | `config/loader.py` `load_raw_config` (~153–163) | same mapping | typed config error for wizard paths |
-| `config/presets.py` (~52–63) | same mapping to the preset owner's existing typed parse error | typed preset failure |
+| `config/presets.py` (~52–63) | same mapping to `PresetInvalidError(preset_path, parse_details)` | typed `FC-1005` preset failure |
+| `config/schema_sources.py` `EnvironmentSettingsSource` (~27–37, complex-value decoding for `FRAME_COMPARE_*` JSON variables) | convert `RecursionError` to `ValueError` where the complex value is decoded, so pydantic-settings' existing `SettingsError` path applies (a long integer already becomes `ConfigValidationError` `FC-1003` today) | typed `FC-1003` config failure for deeply nested environment JSON (planning review reproduced a raw `RecursionError` with `FRAME_COMPARE_TMDB` set to 10,000 nested brackets) |
+
+The existing `(RecursionError, ValueError)` handling for embedded evidence at
+`alignment_review_contract.py` ~446–448 switches to the shared constant so one
+documented tuple remains.
 
 Not changed: `tmdb_cache.py` ~106/~183 membership-before-type (already contained per
 entry); `run_result_record.py` tuple membership (does not hash); subprocess JSON
 (ffprobe) is not persisted state.
 
 **Ordered steps.** (1) Add the constant and its contract test; (2) per-owner changes
-in the table; (3) CQ19 field constraints; (4) tests; (5) note finite timeout bounds in
-the configuration reference only if it documents bounds today.
+in the table; (3) CQ19 field constraints; (4) tests; (5) document that the four
+timeouts must be finite next to their existing minimum-bound text in
+`docs/current-cli-contract.md` (~1382, ~1635) and `docs/reference/configuration.md`
+(~474–480).
 
 **Tests (real temporary files; assert the policy result, not the exception type).**
 - `tests/utils/test_serialized_decode.py`: deep JSON (`'['*10000`), deep TOML (1,500
@@ -847,8 +1029,10 @@ the configuration reference only if it documents bounds today.
 - `tests/services/test_alignment_manual_overrides.py` (~45/158),
   `test_alignment_reuse_cache.py` (~673).
 - `tests/config/test_loader.py` (~85): `load_config`/`load_raw_config` raise
-  `ConfigParseError`; CLI-level JSON error test in `tests/cli/test_run_json_errors.py`
-  observes a single typed error object; `tests/config/test_presets.py` (~63).
+  `ConfigParseError` for deep and long-integer TOML; `load_config` raises
+  `ConfigValidationError` for a deeply nested `FRAME_COMPARE_TMDB` JSON value; CLI-level
+  JSON error tests in `tests/cli/test_run_json_errors.py` observe a single typed error
+  object for both; `tests/config/test_presets.py` (~63) observes `PresetInvalidError`.
 - CQ19: extend `tests/config/test_schema.py` (~66–70 non-finite pattern, ~252–256),
   `tests/config/test_slowpics.py` (~103–107), and `tests/config/test_loader.py` for
   `inf` from TOML and from `FRAME_COMPARE_TMDB__TIMEOUT_SECONDS=inf`, expecting
@@ -913,11 +1097,19 @@ def build_run_request(*, root, config_path=None, overrides=CLIConfigOverrides(),
 def refresh_report_auto_open_preference(inputs: AcquiredRunConfig, load_config_fn=load_config) -> bool | None
 ```
 
-- `RunRequest` carries `inputs: AcquiredRunConfig` (required) plus the existing
-  run-only controls (`no_cache`, `from_cache_only`, `skip_analysis`,
-  `skip_metadata`, `no_upload`, etc.). `root`, `config_path`, and
+- `RunRequest` carries `inputs: AcquiredRunConfig` (required) plus its existing
+  run-only control fields (`orchestration/types.py` ~32–44, e.g. `no_cache`,
+  `from_cache_only`, `skip_analysis`, `skip_metadata`). `root`, `config_path`, and
   `config_overrides` are removed: there is no optional path beside optional settings.
-  (`build_run_request` imports `RunRequest` lazily to keep `run_inputs` light.)
+  `--no-upload` is not a request field; it stays a `CLIConfigOverrides.no_upload`
+  override mapped into `slowpics.auto_upload` during acquisition, so no second
+  authority is added.
+- Callers: the CLI builds `RunRequest(inputs=…, …)` directly from the value it
+  already acquired; `build_run_request` (which acquires) is only for programmatic
+  callers (benchmark, tests), so the CLI never acquires twice. `build_run_request`
+  imports `RunRequest` lazily to keep `run_inputs` light (verified during review:
+  `orchestration.preflight` and `cli.entry` import without httpx or `vs.loader`;
+  `orchestration/__init__` is lazy; `orchestration.types` pulls both).
 - `resolve_run_workspace` recomputes path facts and containment from the admitted
   config **at each use**; it is a use-boundary check against the current
   filesystem, not a second config read. (Decided over caching `WorkspacePaths` in the
@@ -927,10 +1119,17 @@ def refresh_report_auto_open_preference(inputs: AcquiredRunConfig, load_config_f
   unexpanded-path admission load).
 - `execute_prep` consumes `request.inputs.config` and `resolve_run_workspace`, still
   checks the input directory and lists sources once (source freshness at use, O5).
-  `prepare_preflight`, its duplicate input listing, `build_preflight_input_dir_override`,
-  and the `resolve_effective_config` call are deleted (decided: `prepare_preflight`
-  has no production caller after migration; tests compose through
-  `build_run_request`).
+  Deleted, after migrating every caller listed here: `prepare_preflight` and its
+  re-export through `preparation`, its duplicate input listing,
+  `build_preflight_input_dir_override`, `_resolve_paths_with_config_file`,
+  `PreflightResult` (its `warnings`, read at `preparation.py` ~676 and ~769, move to
+  the workspace resolution result), `config/effective.py`'s `load_effective_config`
+  and `resolve_effective_config` (their remaining readers become
+  `refresh_report_auto_open_preference`), and `resolve_workspace`'s upward search once
+  doctor no longer uses it. Callers to migrate: `tests/orchestration/test_preflight.py`
+  (~528–654), `test_preparation_cache.py` (~102, ~193, ~251, ~303, ~355),
+  `test_execute_run_failure_cleanup.py` (~47), `test_preparation_active_rect.py`
+  (~364), and `tests/config/test_effective.py` (~16).
 - CLI `handle_run` acquires once; dry-run, logging, diagnose-paths, write-config
   (`write_config_to(inputs.config_path, inputs.config)` through the existing
   secret-safe persistence), `validate_run_contracts`, callbacks, preview,
@@ -940,7 +1139,10 @@ def refresh_report_auto_open_preference(inputs: AcquiredRunConfig, load_config_f
   § “Report Auto-Open Ownership”) remains as `refresh_report_auto_open_preference`:
   rereads `inputs.config_path`, returns `report.auto_open`, or `None` on failure
   (report opens, matching ~982–983). Used by `maybe_open_report_path` (~715–735) for
-  the pre-prompt confirmation check and the post-run open.
+  the post-run open and by the slow.pics confirmation callback before its prompt
+  (~441–446). The CLI passes its injected `deps.load_config`, not the module default,
+  so tests that inject loaders observe these refreshes. These named refreshes are the
+  only config reads besides the single acquisition.
 - Preserved boundaries: runtime-free simple commands (O1); dry-run exits before any
   request or side effect; wizard raw edits keep `load_raw_config` and are untouched;
   secret-safe persistence; source freshness and containment rechecked where sources
@@ -950,9 +1152,11 @@ def refresh_report_auto_open_preference(inputs: AcquiredRunConfig, load_config_f
   move admission after runtime acquisition through preparation (pulls runtime
   imports into admission, risking O1, and still leaves callbacks needing the value).
 
-**Preview (CQ8 second half).** `print_at_a_glance(console, *, inputs, run_controls,
-no_upload_flag: bool, verbose)`; every displayed setting reads `inputs.config`;
-`run_controls` supplies run-only flags; `no_upload_flag` exists only for the
+**Preview (CQ8 second half).** `print_at_a_glance(console, *, inputs, no_cache: bool,
+from_cache_only: bool, skip_analysis: bool, skip_metadata: bool, no_upload_flag: bool,
+verbose)`; every displayed setting reads `inputs.config`; the explicit keyword
+booleans supply run-only flags (no request object, so the preview cannot read a
+second config); `no_upload_flag` exists only for the
 “disabled by --no-upload” label (~330). Visible change: the `input` row shows the
 resolved input directory rather than the raw `--input` string. Delete
 `TonemapCliOverrides`, `resolve_tonemap_settings`'s `cli_overrides` parameter and
@@ -974,9 +1178,16 @@ why. No authored/resolved color hierarchy is introduced.
 used by run (one selection owner, including the exact portable state-file exception).
 Pass `DoctorConfigSelection(root, config_path, explicit)` through `RunDoctorFn`,
 `run_doctor`, and `collect_checks` to the TMDB check. Add `doctor` to the shim's
-injection (`Get-ConfigInjectionIndex`). Doctor remains tolerant: default config
-missing → defaults+environment; explicit config missing/invalid → reported in the
-TMDB check's details, not a top-level failure; no HTTP; JSON schema unchanged.
+injection (`Get-ConfigInjectionIndex`). Doctor resolves its selection through
+`run_inputs.select_run_config_path`, the same function run uses. Failure behavior:
+an invalid selection argument (path escaping the root, nonregular or unreadable
+selected path) is a typed top-level failure through the standard CLI error contract,
+exactly as for run (the doctor contract already allows typed top-level failures and
+`handle_doctor` catches `FrameCompareError`); the default config being absent →
+defaults+environment (today's tolerance; `_resolve_tmdb_config` must also catch
+`ConfigNotFoundError`, which it does not today); an explicit config that is missing
+or fails to load/validate → reported in the TMDB check's details, not a top-level
+failure; no HTTP; JSON schema unchanged.
 Doctor drops the upward root search to match run. Preserved: environment-variable
 precedence, local-only/no-HTTP behavior, the exact portable state-file containment
 exception (no sibling LocalAppData files), and runtime-free option parsing (doctor's
@@ -1006,7 +1217,9 @@ hidden environment variable (an unsupported second selection mechanism).
 
 **Tests.**
 - Rewrite rather than delete: `test_run_request_config.py` (~97, ~147) asserts the
-  acquired config; `test_run_command.py` (~404, ~436) asserts `inputs.config_path`;
+  acquired config; `test_run_command.py` ~404 (today asserts
+  `config_overrides.input_dir`) asserts the acquired config's resolved input
+  directory, and ~436 asserts `inputs.config_path`;
   `test_preflight.py` (~528–654) becomes the acquisition suite;
   `test_execute_run_lifecycle.py` (~465) observes `ConfigNotFoundError` from
   acquisition; remove `test_execution_phase_plan.py` (~144) only after confirming its
@@ -1021,9 +1234,12 @@ hidden environment variable (an unsupported second selection mechanism).
   slow.pics confirmation callback absent; after the run assert the report was not
   opened (refresh sees the later edit). `--json` variant: exactly one JSON object on
   stdout, exit 0.
-- **New orchestration regression:** acquire; rewrite the file; patch
-  `config.loader.load_config` to fail; `execute_prep` uses admitted settings. Delete a
-  source file after acquisition: `NoVideosFoundError` still raised.
+- **New orchestration regression:** acquire with a counting `load_config_fn`;
+  rewrite the file; make the counting loader fail on any further call (patching
+  `config.loader.load_config` alone would prove nothing, because modules bind the
+  function by name at import); `execute_prep` uses the admitted settings and the
+  loader count stays at one. Delete a source file after acquisition:
+  `NoVideosFoundError` still raised.
 - Preview: `tests/render/test_tonemap_wiring.py` (~106–131) rewritten to pass an
   effective `ColorConfig`; CLI preview tests assert values come from effective
   config.
@@ -1043,13 +1259,19 @@ only an AppData config containing `[tmdb] enabled=false` produces a doctor TMDB 
 consistent with run's selected config.
 
 **Compatibility.** `RunRequest` is internal (no supported import API); no shim kept.
-New public doctor options (D4). Preview `input` row text changes. JSON outputs
-unchanged.
+New public doctor options (D4). Visible changes, recorded in §9: the preview `input`
+row shows the resolved directory; when `--config` contains an environment variable,
+`--diagnose-paths` JSON `"config"` and the `--write-config` destination now show the
+expanded path (today the unexpanded argument); `phase_timings["preflight"]` shrinks
+because acquisition moves out of `execute_prep` (it feeds the summary setup row and
+the run record). Run JSON outputs are otherwise unchanged.
 
 **Rollback.** Revert P5 as a unit (internal callers migrate atomically).
 
 **Exit criteria.** Exactly one config acquisition per run (assert by counting
-`load_config` calls in the regression); no runtime reapplication of overrides; preview
+`acquire_run_config` calls, plus `load_config` calls equal to one acquisition plus the
+named preference refreshes that actually ran; the `--json` variant has no refresh); no
+runtime reapplication of overrides; preview
 has no override logic; benchmark and tests use the acquisition owner; doctor and run
 select the same config for the same arguments and under the shim.
 
@@ -1062,7 +1284,8 @@ select the same config for the same arguments and under the shim.
   `is_trusted_automatic` (~326) encode the same five gates; `decide_after_video`
   (~595–633) calls both and keeps a now-unreachable `"no_single_offset"` fallback
   (~628) and `reasons or (primary_reason,)` (~633). Sole production caller:
-  `decide_after_video`; also exported in `__all__` (~828) and used by three tests.
+  `decide_after_video`; also exported in `__all__` (~828) and called at three sites in
+  two test functions (`test_alignment_decision.py` ~445/~451 and ~499).
 - **CQ21c:** `tests/vsview/test_alignment_review_panel.py` (~56–67) imports builders
   from collected modules `tests/services/test_alignment_evidence.py` and
   `test_alignment_frozen_strings.py`; producer fixtures (~595, ~743) call private
@@ -1142,7 +1365,8 @@ Pure operations in new `services/alignment_resolution.py`:
 `confirm_manual(resolution, *, frame_offset, fps_reference, reference_clip,
 comparison_clip)`, and `ordered_results(request, resolutions) -> tuple[AlignmentResult, ...]`.
 `confirm_manual` builds a `"manual"` result with `frame_offset / fps_reference`
-(existing reference-FPS conversion), keeps the previous `stability` and the same
+(existing reference-FPS conversion; the caller resolves the reference FPS once, only
+when confirmed offsets exist, before the loop, as `alignment.py` ~217–223 does today), keeps the previous `stability` and the same
 `audio_attempt` object, sets origin `interactive_confirmed_this_run`, and sets
 `computed_fallback` to the previous result only when it was applied and
 `cross_correlation`. Acceptance cases:
@@ -1155,10 +1379,16 @@ comparison_clip)`, and `ordered_results(request, resolutions) -> tuple[Alignment
 | Unavailable | Keep current / missing optional review | `confirm_manual` not called; record unchanged |
 
 **Cache candidate.** `prepare_reusable_source_set(request, resolutions) ->
-ReusableSourceSetCandidate | None` in `services/alignment_reuse_cache.py` (it owns the
-origin mapping and serialization prerequisites; placing it in
-`alignment_previous_offsets` would create an import cycle). It unions today's rules:
-complete requested set by `comparison_cache_key` (unrelated items ignored), applied,
+ReusableSourceSetCandidate | None` in `services/alignment_reuse_cache.py`. It already
+owns the origin mapping and serialization prerequisites, and `save` can then accept
+only a prepared candidate; `alignment_previous_offsets` already imports
+`alignment_reuse_cache`, so putting the candidate type in `previous_offsets` would
+create a cycle. Key spaces: the resolutions map is keyed by `alignment_key` (as
+today's service gate, `previous_offsets.py` ~213), while persistence completeness is
+by `comparison_cache_key` (`reuse_cache.py` ~560–566); `prepare_reusable_source_set`
+checks that every requested comparison exists under its `alignment_key` **and** that
+the record's `comparison_cache_key` matches the request's. It unions today's rules:
+complete requested set (unrelated items ignored), applied,
 allowed origins, at least one current-run origin, `computed_this_run` requires a
 `trusted_automatic` attempt plus stability, `shared_computed` requires stability,
 interactive requires no fallback or a fallback with stability.
@@ -1213,7 +1443,11 @@ does not depend on P7.
   the A4b test (~445–459) asserts `()` and `("competing_offset",)`; ordering tests
   (~509, ~529) and `test_decide_after_video_trusts_the_recounted_authority` unchanged.
 - CQ21c: verify by temporarily breaking `alignment_video._build_targets` (uncommitted):
-  only services producer/parity tests fail; panel tests pass.
+  only services producer/parity tests fail; panel tests pass. This counts only if the
+  panel and contract suites actually collect and run: `tests/vsview/test_alignment_review_panel.py`
+  uses `importorskip` for PySide6/vsview and fails to import in the planning container
+  (`libEGL.so.1` missing). Run it where Qt/EGL is available (`--extra vsview`) and
+  inspect skips; a skip or collection error is not a pass (AGENTS.md).
 - CQ2 new observations with a real temporary shared cache:
   - **A (mixed published):** seed at T0 via prepare+save with an interactive entry
     and a computed entry; decline prompt; real writer with `_accepted_at_now` → T1;
@@ -1237,7 +1471,10 @@ does not depend on P7.
 - Fixture churn (~35 sites in `test_alignment_reuse_cache.py`,
   `test_alignment_previous_offsets.py`, `test_phase_alignment_contract.py` ~336,
   review-map callers in diagnostics/evidence/panel/contract tests, frozen strings
-  ~147/~1198–1214, cancellation ~156/~285) goes through one `_resolution` test helper.
+  ~147/~1198–1214, cancellation diagnostics patches ~156/~285 and `save` patches
+  ~158/~287, and `test_alignment_video_wiring.py` ~65, which patches
+  `save_reusable_offsets` with a `(request, provenances)` lambda) goes through one
+  `_resolution` test helper and the new `save` signature.
 - Retain every row of the report's “Alignment authority and persistence” table.
 
 **Gates.** Full verification. Docker gate at the package head
@@ -1278,11 +1515,14 @@ publication; V6 trust has one source; on-disk publication proofs A–D pass.
 - **CQ4:** `execution.py` binds `state.selected_frames` into `partial`s (~216, ~300);
   `phase_output_application.py` mutates it by slice assignment (~26, ~37, ~49) and
   writes related metadata to `RunContext` separately (~27–28, ~42–44, ~52–57).
-  The prepared selection domain (window, analysis clip, token, override, metric
-  request) is rebuilt in `preparation.py` (~624–667 cache-only, ~707–756 normal) and
-  `full_window_retry.py` (~194–215, assigning seven fields ~217–223), copied
-  field-by-field in `coordinator.py` (~164–176), `tools/alignment_benchmark.py`
-  (~286–293), and the U4 test (~1118).
+  The prepared selection domain (window, analysis clip, token, override) is rebuilt
+  in `preparation.py` (~624–667 cache-only, ~707–756 normal) and
+  `full_window_retry.py` (~194–215, assigning seven fields ~217–223, including config
+  and clips), held as four `PrepState` fields (`execution_types.py` ~196–199),
+  copied field-by-field in `coordinator.py` (~169–174), `tools/alignment_benchmark.py`
+  (~286–293), and the U4 test (~1118). The metric request is not part of that state
+  today: Analyze builds it lazily (`phase_selection.py` ~299) and preparation builds
+  it only on its cache-only and `no_cache` branches (~662, ~751).
 
 **Chosen design (CQ6).** `class SelectionFailureKind(Enum)` in `analysis/errors.py`
 (orchestration may import analysis, O9). `SelectionError(..., kind=SelectionFailureKind.UNCLASSIFIED)`
@@ -1327,7 +1567,9 @@ def acquire_required_metrics(request: MetricCacheRequest, *, video_paths: list[P
   computing. No memoization of the first read; no predictive read for normal
   compute-or-hit.
 - Fingerprint bytes: a private `_keyed_request(request, video_paths)` fills only an
-  absent `analysis_source_path` with `video_paths[0]` (today's `metrics.py` ~187).
+  absent `analysis_source_path` with `video_paths[0]` (today's `metrics.py` ~187);
+  `acquire_required_metrics` uses the same `_keyed_request`, so both reads key exactly
+  as computation does.
   `metric_frame_range` and `effective_fps` stay unresolved for keying (absent →
   `full_source`/`source`; explicit full range and explicit FPS equal to source FPS
   still key differently). Resolution happens only at computation
@@ -1365,10 +1607,15 @@ def acquire_required_metrics(request: MetricCacheRequest, *, video_paths: list[P
 - (b2) `PreparedSelectionDomain` (frozen, `orchestration/selection_domain.py`, which
   owns the token builder ~237): `selection_window` (per-clip trim-relative — a fourth
   vocabulary, kept out of the snapshot), `analysis_clip: ClipState | None`
-  (pre-alignment prepared clip), `token: str` (`""` when no analysis clip),
-  `metric_request: MetricCacheRequest`, `full_window_retry_override`. Built by
+  (pre-alignment prepared clip), `token: str` (`""` when no analysis clip), and
+  `full_window_retry_override` — the same four facts `PrepState` holds today. Built by
   `build_prepared_selection_domain(*, clips, config, analysis_clip, selection_window,
-  override)`, which always calls `metric_cache_request_for_clip`. It carries neither
+  override)`. The metric request is **not stored**: one function,
+  `metric_request_for_domain(domain, config)`, wraps `metric_cache_request_for_clip`
+  and is called exactly where requests are built today (Analyze; preparation's
+  cache-only and `no_cache` branches). Building it eagerly for every run would move
+  `MetricFrameRange` validation (`analysis/types.py` ~60–63, can raise `ValueError`)
+  from the warn-only Analyze phase into fatal preparation. It carries neither
   clips (Align replaces them; a second authority) nor config (`ctx.config` remains the
   one effective config). Recovery becomes three coherent assignments
   (`ctx.config`, `ctx.reference/comparisons`, `ctx.selection_domain`) plus the
@@ -1395,19 +1642,28 @@ def acquire_required_metrics(request: MetricCacheRequest, *, video_paths: list[P
    `test_execute_run_run_folders.py`). Delete the keyword decomposition,
    reconstruction, and duplicated classification.
 3. CQ4: `PreparedSelectionDomain` and builder; migrate preparation branches,
-   `PrepState` (five fields → `selection_domain`), coordinator copy, recovery,
-   `phase_selection.py` (~298–303, ~277–278, ~206–210), `phase_alignment.py`
-   (~167, ~183–185), `full_window_retry.py` (~128, ~137, ~200, ~244), benchmark (~286),
-   and test constructors (`phase_task_helpers.py` ~208, `execute_run_helpers.py` ~403,
-   `test_phases.py` ~55, overlay tests, `test_ffmpeg_overlay_application.py` ~57,
-   U4 ~808/~1118).
+   `PrepState` (four fields → `selection_domain`), coordinator copy, recovery,
+   `phase_selection.py` (~298–303 via `metric_request_for_domain`, ~277–278,
+   ~206–210), `phase_alignment.py` (~167, ~183–185), `full_window_retry.py` (~128,
+   ~137, ~200, ~244), benchmark (~286), and test constructors
+   (`phase_task_helpers.py` ~208, `execute_run_helpers.py` ~403, `test_phases.py` ~55,
+   overlay tests, `test_ffmpeg_overlay_application.py` ~57, U4 ~808/~1118,
+   `PrepState(...)` in `test_execute_run_lifecycle.py` ~107/~150/~214/~304/~385/~713
+   and `test_execution_phase_plan.py` ~59).
 4. CQ4: `SelectionSnapshot`; execution-time closures; `apply_phase_output` writer;
    readers (`phase_alignment.py` ~204/~213, `phase_render.py` ~49/~53,
    `phase_post_render.py` ~424–440, `coordinator.py` ~59–93 and ~218–262). Introduce
    one orchestration helper producing selection rows (frame, reference source frame,
-   label/detail/category) from the snapshot, used by report frame details now and by
-   P9's render request construction later (removes the duplicate label derivation in
-   `phase_render.py` ~44–55 and `phase_post_render.py` ~428–441).
+   label/detail/category) from the snapshot and use it in **both** current consumers
+   now: report frame details (`phase_post_render.py` ~428–441) and the label list
+   `phase_render.py` builds (~44–55), deleting both private derivations in P7. P9
+   later builds `SelectedScreenshot`s from the same rows. Test churn from removing
+   `ExecutionState.selected_frames` and the three `RunContext` fields:
+   `test_phase_tasks_alignment.py` (15 `ctx.analysis_metrics =` assignments, ~481,
+   ~535, ~587, ~636, ~681, ~738, …, and 4 domain-field reads),
+   `test_phase_post_render_outputs.py` (~462–463), `test_execution_phase_plan.py`
+   (~206–264, ~389), and `test_phase_alignment_contract.py` (~449,
+   `ExecutionState(selected_frames=...)`).
 5. Delete the removed fields and slice assignments.
 6. Docs: `docs/current-architecture.md` § Runtime Flow (selection ownership,
    execution-time reads), § Shared caches (single required-read owner, two lifecycle
@@ -1418,11 +1674,20 @@ def acquire_required_metrics(request: MetricCacheRequest, *, video_paths: list[P
 - CQ6: migrate `test_phase_tasks.py` (~385, ~430) direct constructions to pass
   `kind=`; add: rewording a qualifying reason keeps consent/retry; an `UNCLASSIFIED`
   error carrying an old eligible string gets no offer; each producer sets its kind;
-  JSON error output byte-identical (`tests/cli/test_run_json_errors.py` ~372/~413).
+  `to_dict()` output for errors raised by real producers (not hand-constructed) is
+  unchanged by `kind`. The existing CLI JSON tests (`tests/cli/test_run_json_errors.py`
+  ~372/~413) construct `ExclusionRecoverySelectionError` directly, so they are kept
+  but are not the producer proof.
 - CQ9: byte-identical cache keys and equal v8 metadata, pre- versus post-migration,
   for absent range, explicit full range, absent FPS, explicit FPS equal to source FPS,
-  absent source path (capture expected keys from the pre-migration code as literal
-  fixtures in the same PR, not by calling the new code); retain
+  absent source path. Capture expected values from the pre-migration code as literal
+  fixtures in the same PR (not by calling the new code), made machine-independent:
+  `compute_cache_key` hashes absolute paths, file size and mtime (`cache_io.py`
+  ~75–83) and `media_runtime_identity("analysis")` (`metric_identity.py` ~76), whose
+  profile varies by deployment and OS (`vs/runtime_contract.py` ~121–136). So pin the
+  media-runtime profile, use relative paths under a `chdir` to `tmp_path`, fix mtimes
+  with `os.utime`, and also capture the pure `_metric_cache_request_token` strings as
+  literals. Retain
   `tests/analysis/test_cache_identity.py`, `test_cache_serialization.py`, cache-mode
   tests (`test_execute_run_cache_modes.py` ~256 no compute), and cache-only tests
   (`test_phase_tasks.py` ~507/537/575); corruption still fails before reservation and
@@ -1493,8 +1758,22 @@ class TonemapResult: clip: vs.VideoNode; applied: AppliedTonemap | None   # None
 ```
 - `apply_tonemap` returns `TonemapResult`; `apply_libplacebo` reports a failure cause
   instead of bare `None`; one `resolve_source_peak` in `tonemap_conversion` replaces
-  the duplicated peak rule (`tonemap_libplacebo.py` ~68–71 and fallback). Freeze
-  `TonemapSettings` (existing code uses `replace()`; audit and migrate any mutation).
+  the duplicated peak rule (`tonemap_libplacebo.py` ~67–70 and `tonemap_fallback.py`
+  ~33–35). Freeze `TonemapSettings`: no mutation exists in `src`, `tests`, or `tools`
+  (verified during review), and freezing also protects the shared preset instances
+  returned by `get_preset_settings`. The `"configured"` peak origin is reachable only
+  through `TonemapSettings.source_peak`, which no config field sets today; keep it so
+  the record stays truthful if a caller supplies one.
+- Every caller of `apply_tonemap` migrates in the same commit:
+  `render/prepare.py`; `tools/docker_runtime_smoke.py` (~447–457, run by
+  `verify_docker_integration.sh`); `tools/windows_portable/runtime_smoke.py`
+  (`prove_apply_tonemap_frame` ~330–354, run inside the bundle build); tests
+  `tests/vs/test_integration.py` (~69–73, ~112) and `tests/vs/test_tonemap.py`; and the
+  lazy export in `vs/__init__.py` (~38, ~60). The two runtime smokes should also
+  assert the applied implementation they expect (libplacebo when usable), which turns
+  the smoke into evidence for CQ11. `tests/windows_portable/test_windows_portable_build_scripts.py`
+  (~364–501, ~748) asserts on `runtime_smoke.py` source text; update only what the
+  edit invalidates (coordinate with P1/P2, §6.1).
 - The fallback has its own truthful identity
   (`frame_compare_peak_scaled_rational_v1`); it is not labeled `REINHARD`.
 - Per-clip flow: `prepare._apply_vs_tonemap_and_labeling` →
@@ -1503,8 +1782,14 @@ class TonemapResult: clip: vs.VideoNode; applied: AppliedTonemap | None   # None
   `Tonemap: fallback (peak-scaled) → 203 nits`; libplacebo text unchanged) →
   orchestration `ClipInfo.tonemap` → payload per-clip presentation.
 - Shared summary: delete `ReportRenderingInfo.tonemap_settings` and the mixed-settings
-  `ValueError`; the payload service derives `shared` only when every tonemapped
-  clip's applied transform is equal.
+  `ValueError`. `build_rendering_payload(info)` (`payload.py` ~439) gains the per-clip
+  applied facts as an explicit argument. It derives `shared` from the
+  **run-level transform identity** only: implementation, algorithm, and effective
+  controls. The per-clip resolved source peak and the fallback cause are excluded from
+  `shared`, because production resolves the peak per clip from that clip's MaxCLL
+  (or 1000) and two ordinary HDR sources would otherwise never share a summary; each
+  clip's presentation shows its own resolved peak. `shared` is null only when
+  implementations, algorithms, or effective controls differ across tonemapped clips.
 - Fallback policy (decision D3a, recommended default): keep the permitted runtime
   fallback, disclose it per clip, and add one `RunWarning("render", …)` naming the
   clips that fell back and the cause class. Preserve fatal configuration/signature
@@ -1515,13 +1800,22 @@ class TonemapResult: clip: vs.VideoNode; applied: AppliedTonemap | None   # None
 
 **Serialized compatibility and identity (decision D3b, recommended default).** Bump
 report payload `REPORT_VERSION` (`payload.py` ~29) from `1.2` to `1.3`:
-- `clips[].presentation.tonemap`: `{implementation, algorithm, target_nits,
-  source_peak_nits, source_peak_origin, effective_controls, fallback_cause} | null`.
-- `rendering.tonemap`: `{applied, requested: settings | null, shared: <applied> | null}`.
-- `build_report_id` (`payload.py` ~497–523) hashes output-affecting applied facts
-  (implementation, algorithm, effective controls, resolved peak); excludes `requested`
-  and `fallback_cause` (as `display` is excluded). Two runs with identical output via
-  different failure causes share identity.
+- `clips[].presentation`: `{state, tonemap}` where `tonemap` is `{implementation,
+  algorithm, target_nits, source_peak_nits, source_peak_origin, effective_controls,
+  fallback_cause} | null`. The 1.2 flat `presentation.tone_curve` and
+  `presentation.target_nits` fields (`_presentation_payload` ~595–602), which carried
+  requested values, are removed.
+- `rendering.tonemap`: `{ran: bool, requested: settings | null, shared: transform | null}`.
+  This replaces 1.2's `{applied: bool, settings}`: `settings` presented requested
+  values as effective, and a boolean named `applied` beside applied facts is ambiguous.
+- Identity: `build_report_id` (`payload.py` ~497–523) hashes the identity clips and
+  the whole `rendering` dict, so the exclusions must be implemented in both
+  projections. `build_report_identity_clips` (~459–471) drops `display` (as today)
+  and `presentation.tonemap.fallback_cause`; a new rendering identity projection
+  drops `rendering.tonemap.requested`. `shared` already excludes the cause. Identity
+  therefore covers implementation, algorithm, effective controls, and per-clip
+  resolved peak, so two runs with identical output via different failure causes
+  share identity.
 - Rationale: adding fields to 1.2 still changes `report_id` (the whole `rendering`
   dict is hashed), the contract already established 1.1 → 1.2 as a version change
   without review migration (`current-cli-contract.md` ~1013–1017), and the report
@@ -1535,20 +1829,33 @@ report payload `REPORT_VERSION` (`payload.py` ~29) from `1.2` to `1.3`:
   ~266–360), `report_viewer_contracts.py`, Node harness fixtures,
   `tests/browser/test_report_browser_smoke.py`, `tests/e2e/test_media_tonemap.py`
   (~36 reads `report["rendering"]["tonemap"]["settings"]`), rename
-  `test_report_payload_v12.py`.
+  `test_report_payload_v12.py`. Payload fixtures that encode `1.2` or tonemap fields
+  include `tests/services/test_report.py` (~226, ~473), `inspector_harness.js`,
+  `viewer_state_harness.js`, `review_state_harness.js`, and
+  `review_controller_harness.js`; about 20 test files reference `tonemap_settings`.
+  Make the first migration step a grep (`'1\.2'`, `payload_version`, `tonemap_settings`,
+  `tone_curve`, `"settings"` under `rendering`) across `src/`, `tests/`, `tools/`, and
+  `docs/`, and migrate every hit or record why it stays.
 
 **Chosen design (CQ12).** Render geometry consumes resolved facts only:
 - `SourceGeometry` takes a required active rectangle plus canonical
   `ActivePictureProvenance`; `RenderGeometryPlan` carries canonical provenance.
-- Delete `ActiveRectDetectionMode`, `active_rect_detection` and its validation
-  (`_validate_options` ~240–243), `_resolve_active_rects`,
+- Delete `ActiveRectDetectionMode`, the `RenderGeometryOptions.active_rect_detection`
+  field and its validation (`_validate_options` ~240–243; the user-facing config field
+  `screenshots.active_rect_detection` in `schema_models.py` ~211 is the orchestration
+  policy input and stays), `_resolve_active_rects`,
   `_dimension_derived_active_rects`, `_mod_safe_contained_vertical_rect`,
   `_aspect_ratio_derived_active_rects`, `_select_aspect_ratio_candidate`,
   `_aspect_ratio_candidates`, `_aspect_candidate_support_count`, `_rect_ratio`,
   `_ratio_matches`, `_ratio_relative_delta`, `_AspectCandidate`, the three
   `ASPECT_RATIO_*` constants, `ActiveRectSource`/`ProvidedActiveRectSource`, both
   provenance converters (~34–71); replace `_is_safe_active_rect`'s silent full-frame
-  fallback with a `ValueError` (the request contract already guarantees validity).
+  fallback with a `ValueError`. The request contract alone does not guarantee this:
+  `validate_batch_requests` checks the active picture against
+  `request.source_resolution` (`expansion.py` ~79–84), while geometry uses the prepared
+  `source_dimensions` when positive (~221–226). Add a typed expansion check that the
+  active picture lies within the prepared dimensions (or that the two resolutions
+  match) before planning geometry.
   `source_overlay_origin` has no production reader: delete it unless a retained test
   proves an obligation.
 - `expansion.py`: simplify `_geometry_facts`; remove the dead dimension-widening
@@ -1578,11 +1885,15 @@ that describe the tonemap disclosure.
 - Add: dispatch returns each fallback cause; two clips with identical requested
   settings, one libplacebo and one fallback → independent per-clip disclosure,
   `shared` null, one render warning, `report_id` differs from the all-libplacebo case
-  but not between fallback causes; JS review state rejects 1.2 documents in a 1.3
-  report; payload 1.3 shape tests.
+  but not between fallback causes; two HDR clips with different MaxCLL through the
+  same implementation → `shared` present and per-clip peaks shown; JS review state
+  rejects 1.2 documents in a 1.3 report; payload 1.3 shape tests (no flat
+  `presentation.tone_curve`/`target_nits`, no `rendering.tonemap.settings`).
 - CQ12 mapping before retiring render inference tests: axis cases
-  (`test_geometry.py` ~240–341) and invalid-rect fallback (~135, ~148) →
-  `tests/orchestration/test_active_rect.py::test_dimension_detection[...]`; ratio
+  (`test_geometry.py` ~240–341) → `tests/orchestration/test_active_rect.py::test_dimension_detection[...]`;
+  the invalid-rect cases (~135, ~148) become render tests asserting the new
+  `ValueError` and the typed expansion check (they test render's own input guard, not
+  inference); ratio
   cases (~595–769) → `test_aspect_ratio_detection[...]` and
   `test_post_refinement_ratio_*`; check the three-source ultrawide outlier against
   the existing `…-extreme` case and add an orchestration case if not equivalent;
@@ -1640,8 +1951,9 @@ class PreparedClipRender:  # one indivisible scheduling unit
 @dataclass(frozen=True, slots=True)
 class RenderedScreenshot:
     selection: SelectedScreenshot; result: RenderedFrameResult
-    # __post_init__: result.facts.source_frame == selection.source_frame (backend trust boundary;
-    # the FFmpeg batch path does not check this today)
+    # __post_init__: result.facts.source_frame == selection.source_frame
+    # (replaces the per-label loop in phase_render.py ~95-98, which already covers
+    # VapourSynth and FFmpeg results; the check moves to the pairing point)
 @dataclass(frozen=True, slots=True)
 class RenderedClip: label: str; clip_facts: RenderedClipFacts; screenshots: tuple[RenderedScreenshot, ...]
 ```
@@ -1659,12 +1971,22 @@ class RenderedClip: label: str; clip_facts: RenderedClipFacts; screenshots: tupl
 - **Ungrouped `render_batch_detailed` mode is deleted (decided).** It has no
   production, plugin, or tool caller (entry points are the CLI and the VSView panel;
   `render/__init__` and `render/batch/__init__` export nothing; production always
-  passes `work_unit_ranges`). Its distinct production-relevant obligations are ported
-  to job form: lowest-index failure precedence, FFmpeg grouping within a unit
-  (`_ffmpeg_batch_end`, `is_ffmpeg_batch_compatible`), partial progress and admission,
-  and SIGINT admission. The ordered-prefix progress (`_record_ready_progress`,
+  passes `work_unit_ranges`). Its production-relevant obligations are ported to job
+  form: lowest-index failure precedence, all-or-serial FFmpeg batching per job (a job
+  is batched only when every request is compatible, `orchestrator.py` ~109–111, using
+  `is_ffmpeg_batch_compatible`), partial progress and admission, and SIGINT admission.
+  The 13 ungrouped tests in `tests/render/test_orchestrator.py` are ported where
+  they prove one of those obligations; tests that split one unit into several FFmpeg
+  groups (`test_render_batch_sequential_splits_incompatible_ffmpeg_requests`,
+  `…_mixes_indivisible_ffmpeg_groups_and_singletons`) exercise behavior production
+  never runs and are rewritten as all-or-serial cases or retired with that reason
+  recorded. The ordered-prefix progress (`_record_ready_progress`,
   `_render_description`, “Rendering” label) exists only on that path; production uses
-  count-only `advance` under a lock, so deleting it removes no product behavior.
+  count-only `advance` under a lock, so deleting it removes no product behavior. Its
+  only input, `RenderRequest.progress_label` and `ScreenshotBatchRequest.progress_label`
+  (`render/types.py` ~128, ~146; forwarded at `expansion.py` ~195) computed by
+  `_render_progress_label(s)` in `phase_render.py` (~59, ~79, ~133–150), has no other
+  reader and is deleted with it.
 - Rejected: consolidating only the result containers first and leaving request
   lists/ranges (the report's smaller slice; keeps the reconstruction protocol);
   cached mutable compatibility dictionaries; a generalized async scheduler.
@@ -1693,8 +2015,11 @@ scheduling (~1149–1154) and hotspots disposition.
 clip-facts tuple return and length check, `work_unit_ranges` and range validation
 (`orchestrator.py` ~61–81, ~321, ~330, ~338–348, ~416–428), the ungrouped scheduling
 mode, `RenderArtifacts.__post_init__`, `expected_frames` and the identity loop in
-`phase_render.py` (~58, ~64, ~95–98; the picture-type warning stays), and the
-count/mapping re-checks in `phase_post_render.py` (~328–344). Keep `ReportData`,
+`phase_render.py` (~58, ~64, ~95–98; the picture-type warning stays), the
+`progress_label` fields and `_render_progress_label(s)` helpers, `_render_description`,
+`_record_ready_progress`, and the count/mapping re-checks in `phase_post_render.py`
+(~328–344). The `not render.screenshots_by_label` emptiness test at
+`phase_post_render.py` ~279 becomes an emptiness test over `render.clips`. Keep `ReportData`,
 `_validate_report_cardinality`, and slow.pics count checks (separate input contracts).
 
 **Caller migration (tests).** `tests/orchestration/phase_task_helpers.py`,
@@ -1702,16 +2027,22 @@ count/mapping re-checks in `phase_post_render.py` (~328–344). Keep `ReportData
 `test_phase_tasks_outputs.py`, `test_execute_run_*`, `test_overlay_frame_number.py`,
 `test_ffmpeg_overlay_application.py`, `test_phase_alignment_contract.py`,
 `test_execution_phase_plan.py`, `tests/services/test_slowpics_upload_plan.py`,
-`tests/render/test_orchestrator.py` (~10 ungrouped tests ported),
-`tests/render/test_orchestrator_batch_screenshots.py`,
+`tests/render/test_orchestrator.py` (13 ungrouped tests, handled as above),
+`tests/render/test_orchestrator_batch_screenshots.py`, `tests/render/test_expansion.py`,
+`tests/render/test_expansion_geometry.py`, `tests/render/test_expansion_overlay.py`,
+`tests/orchestration/test_overlay_selection_label_domain.py`,
 `tests/integration/test_render_orchestrator.py`, `tests/integration/test_render_pipeline.py`
 (~98, ~110), `tests/orchestration/test_execute_run_lifecycle.py` (~777).
 
 **Tests.** Retain every “Rendering and orchestration” row in the report (including
 `test_real_sigint_stops_frame_admission_within_150ms`,
 `test_ffmpeg_batch_stop_reaps_child_without_publishing_partial_results`, and unequal
-clip-count fact association). Add: FFmpeg-batch fact identity mismatch rejected at
-`RenderedScreenshot`; job-index failure precedence; unresolved comparison membership
+clip-count fact association). Add: a result whose `facts.source_frame` differs from
+its selection is rejected at `RenderedScreenshot` (the default FFmpeg runner echoes
+requested frame numbers, and injected runners never batch because
+`encoders.py` ~118 requires `type(runner) is DefaultFFmpegRunner`, so this test
+monkeypatches `DefaultFFmpegRunner.extract_frames`; it proves bookkeeping/order
+protection, not decode correctness); job-index failure precedence; unresolved comparison membership
 remains in render/report/slow.pics (`test_unresolved_comparison_remains_in_render_report_and_slowpics_membership`).
 
 **Gates.** Full verification; Docker gate (render scheduling, native/FFmpeg execution).
@@ -1724,8 +2055,8 @@ Internal APIs change atomically.
 **Rollback.** Revert P9 as a unit.
 
 **Exit criteria.** Clip/frame structure carried end to end; no label-range plumbing or
-result-by-label reconstruction; one cardinality/identity check at the backend trust
-boundary; ordering, failure, cancellation, and native-fact contracts proved by
+result-by-label reconstruction; one cardinality/identity check where results are
+paired with selections; ordering, failure, cancellation, and native-fact contracts proved by
 retained tests and the Docker gate.
 
 ---
@@ -1760,7 +2091,10 @@ unchanged. Retain `test_slowpics_metadata.py` (~148), `test_phase_post_render_ou
 **Gates.** Full verification. No Docker (no media observation changes).
 
 **Compatibility.** Runs with the mismatch now record `completed_with_warnings`
-(existing status, intended outcome); JSON unchanged.
+(existing status, intended outcome). Run success JSON is unchanged; `history list` and
+`history open` JSON for such runs now show `status: completed_with_warnings`, a
+`warning_count` of 1, and the warning in `warning_summaries` (intended; no schema
+change). Exit codes are unaffected.
 
 **Rollback.** Revert P10.
 
@@ -1779,39 +2113,57 @@ cold. Lock `.verifier.lock` (~592), temp-dir rename publication (~595–597), pr
 (~606–651).
 
 **Design.**
-- `tests/integration/alignment_u4_media_test_support.py` (no VapourSynth import):
-  constants, graph builders, writers (~74–441), `RECIPES: Mapping[str,
-  MediaRecipe(writer, requires)]`, `PAIRS`, and
-  `open_u4_media(tmp_root, *, cache_root, full_matrix, ffmpeg_version=…, recipes=RECIPES)`
-  yielding a lazy `U4MediaStore` (`pair(name)`, `path(recipe)`, `materialize_all()`,
-  `stats`). Absorbs pair selection in `_align_pair` (~659–663), `_phase_context`
-  (~776–778), `_configured_prep_alignment` (~1105).
-- Key: `sha256(b"u4-media-v1\0" + support-module source + b"\0" + ffmpeg -version)`.
-  Recipe parameters are declared data inside the module; per-recipe digests are not
+- Two support modules, neither importing VapourSynth:
+  `tests/integration/alignment_u4_media_recipes.py` (constants, graph builders,
+  writers ~74–441, `RECIPES: Mapping[str, MediaRecipe(writer, requires)]`, `PAIRS`) —
+  the only keyed source — and `tests/integration/alignment_u4_media_store.py`
+  (`open_u4_media(tmp_root, *, cache_root, full_matrix, ffmpeg_version=…,
+  recipes=RECIPES)` yielding a lazy `U4MediaStore` with `pair(name)`,
+  `path(recipe)`, `materialize_all()`, `stats`). Store edits therefore do not
+  invalidate media. Pair selection from `_align_pair` (~659–663), `_phase_context`
+  (~776–778), and `_configured_prep_alignment` (~1105) moves into `PAIRS`, preserving
+  `_align_pair`'s multipath special case; `_configured_prep_alignment` has no
+  multipath case and its current callers pass only scenario names and `insert-300`, so
+  merging is behavior-preserving (re-check callers at implementation).
+- Key: `sha256(b"u4-media-v1\0" + recipes-module source + b"\0" + ffmpeg -version)`.
+  Recipe parameters are declared data inside that module; per-recipe digests are not
   added unless measurements show frequent recipe edits.
 - Demand generation under the session lock: generate a recipe on first access after
   its `requires` (`retimed-25` → `reference`; NTSC variants → NTSC reference;
   `retimed-insert` stages its own insert); publish each file by temp file +
   `os.replace` inside the key directory; file existence means complete; on acquire
-  prune sibling keys, `.tmp-*` directories, and dot-prefixed temp files; symlink each
+  prune sibling keys, `.tmp-*` directories, and dot-prefixed temp files **except
+  `.verifier.lock`** (deleting a held lock file breaks mutual exclusion on POSIX);
+  symlink each
   materialized file into the session root (indexes stay outside the cache). Cache
   disabled → lazy generation in tmp.
 - Full matrix: `FRAME_COMPARE_U4_MEDIA_FULL=1` calls `materialize_all()` up front;
-  `tools/verify_docker_integration.sh` sets it on the default (complete) path so the
-  full gate still builds every recipe. Generator directory name stays
+  `tools/verify_docker_integration.sh` adds `-e FRAME_COMPARE_U4_MEDIA_FULL=1` to
+  `docker_env_args` (~150–158) only when no `--pytest-path` was given (a host export
+  would not reach the container), so the full gate (which CI runs with `--no-cache`
+  and no `--pytest-path`) still builds every recipe. Update
+  `tests/workflows/test_docker_integration_contract.py` for the new argument. Generator directory name stays
   `test_alignment_u4_acceptance` so the first run prunes the old key.
 - Lock-overlap test moves to `tests/integration/test_alignment_u4_media_cache.py` with
   injected fake version reader and recipes (runs without VapourSynth, no xdist group).
   The acceptance module keeps its xdist group.
 
-**Tests.** Key stable under test-module edits and changed by support-source edits;
+**Tests.** Key stable under test-module and store-module edits and changed by
+recipes-module edits;
 demand generation builds only requested recipes plus prerequisites; full-matrix
 completeness; pruning isolation; no partial file after a writer exception; lock overlap.
 
 **Measurements (record before claiming a speedup)** in
 `tests/integration/NOTES-u4-media-preparation.md` (style of
-`NOTES-u4-video-check-cost.md`), via `U4MediaStore.stats` and a
-`pytest_terminal_summary` hook plus `--durations=0`, in the Docker runtime:
+`NOTES-u4-video-check-cost.md`). Under the verifier, U4 runs inside an xdist worker,
+so a controller-side `pytest_terminal_summary` hook cannot see the store's in-memory
+stats: the store writes its stats as JSON (key, created and reused recipe names,
+per-recipe seconds) under `FRAME_COMPARE_E2E_ARTIFACTS` when that variable is set. The
+verifier accepts only `--pytest-path`, so focused rows use a direct command in the
+existing notes style, for example
+`docker compose run --rm frame-compare-test -lc 'export FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache …; pytest -q tests/integration/test_alignment_u4_acceptance.py -k replacement-4 --durations=0'`,
+clearing `generated/test-media-cache/test_alignment_u4_acceptance` first for cold
+rows. Rows:
 
 | Run | Expected files created |
 | --- | --- |
@@ -1821,8 +2173,9 @@ completeness; pruning isolation; no partial file after a writer exception; lock 
 | After a real recipe edit, focused / full | 2 / 37 |
 | Cold full gate (duration comparable to baseline) | 37 |
 
-**Docs.** Runbook (~317–325) and `CONTRIBUTING.md` (~159–164): key = exact U4 recipe
-module source + complete `ffmpeg -version`; assertion-only edits keep the cache;
+**Docs.** Runbook (~317–325) and `CONTRIBUTING.md` (~159–164): key = exact
+`alignment_u4_media_recipes.py` source + complete `ffmpeg -version`; assertion-only and
+store-only edits keep the cache;
 per-file atomic replace; demand generation; `FRAME_COMPARE_U4_MEDIA_FULL` for the
 complete gate.
 
@@ -1842,11 +2195,11 @@ recorded.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P0 | docs build, CLI-doc test | — | — | — | — | — | — |
 | P1 | ruff/pyright; Linux skips inspected | — | — | — | — | **Required** (PS7 builder/installer fixtures; runbook steps 3–4; hosted verify) | — |
-| P2 | ruff/pyright; Python vectors | — | — | — | — | **Required** (PS5.1 + PS7 updater E2E; runbook steps 5–6; signing or documented-only) | — |
+| P2 | ruff/pyright; Python vectors; release-contract tests | — | — | — | — | **Required** (PS5.1 + PS7 updater E2E; PS5.1 bundle install/uninstall; runbook steps 5–6; signing or documented-only) | — |
 | P3 | pyright/ruff for bridge | — | **Required** | **Required** | — | — | — |
 | P4 | Logic | **Required** | — | — | — | — | — |
 | P5 | Logic | **Required** | — | — | **Required** (regression) | **Required** (shim doctor selection) | — |
-| P6 | Logic | **Required** | — | — | **Required** (U4 phase/cache matrix) | — | — |
+| P6 | Logic; `tests/vsview` panel/contract suites must actually run (Qt/EGL available) | **Required** | — | — | **Required** (U4 phase/cache matrix) | — | — |
 | P7 | Logic, lint-imports | **Required** | — | — | **Required** | — | — |
 | P8 | Logic, lint-imports | **Required** | **Required** (payload consumers) | **Required** | **Required** (+ pixel proof if graph changes) | **Required** (hosted verify; `vs/` changed) | — |
 | P9 | Logic, lint-imports | **Required** | — | — | **Required** | **Required** (hosted verify; render path) | — |
@@ -1882,7 +2235,7 @@ job is not a pass.
 | Report payload | P8 | 1.2 → 1.3; per-clip applied tonemap | Old HTML reports unaffected; no review migration (existing precedent) | none |
 | Report identity | P8 | Hash applied output-affecting tonemap facts | New IDs for regenerated reports; browser-local state starts fresh | none |
 | Overlay text (diagnostic) | P8 | Fallback disclosed truthfully | Baked pixels change only for fallback + diagnostic overlay | none |
-| Run warnings / record status | P8, P10 | Fallback warning; policy warning recorded | Records may become `completed_with_warnings` (existing status); success JSON unchanged | none |
+| Run warnings / record status | P8, P10 | Fallback warning; policy warning recorded | Records may become `completed_with_warnings` (existing status); `history list/open` JSON shows the status, count, and summary; run success JSON and exit codes unchanged | none |
 | Metric cache v8 | P4, P7 | Decode recovery; request intact | Bytes and keys byte-identical (tested) | none |
 | Alignment reuse cache v2 | P6 | Candidate preparation | Bytes unchanged (tested) | none |
 | VSView result contract v1 | P4, P6 | Decode recovery; services refactor | Unchanged wire format | none |
@@ -1890,12 +2243,15 @@ job is not a pass.
 | Viewer storage | P3 | Derived offset | Same key/schema; no neutral writes on visit | none |
 | CLI `doctor` | P5 | `--root/--config`; no upward search | New options; JSON unchanged | none |
 | CLI preview | P5 | Values from effective config | `input` row shows resolved path | none |
+| `--diagnose-paths` JSON / `--write-config` destination | P5 | Environment variables in `--config` expanded once | Shows/writes the expanded path instead of the raw argument | none |
+| Run timings (`phase_timings["preflight"]`, summary setup row, run record) | P5 | Acquisition moves before `execute_prep` | Preflight timing shrinks by the config-read cost | none |
 | Config validation | P4 | `inf` timeouts and parser-limit TOML rejected | Typed config errors | none |
 | Selection error JSON (`FC-4012`) | P7 | Internal `kind` added | `kind` not serialized; message/details byte-identical (tested) | none |
 | `RunRequest` / internal APIs | P5–P9 | Reshaped | Internal; atomic caller migration | none |
-| Windows builder | P1 | Refuses occupied output | Maintainers delete disposable output | none |
-| Windows source installer | P1 | Versioned bundle folder; user-data policy | Existing pointer remains valid | none |
-| Windows updater | P2 | Grammar; transaction; `backup.json` | Manifest fields unchanged; stable `min` stays numeric for old updaters; RC installs need one full reinstall | none |
+| Windows builder | P1 | Refuses occupied output; builds at the final path | Maintainers delete disposable output; CI requirements fingerprint unchanged (same build path) | none |
+| Windows source installer | P1 | Timestamped bundle folder; user-data policy | Existing pointer remains valid; moved media makes path-keyed caches recompute once | none |
+| Windows updater | P2 | Grammar; journaled transaction; `backup.json` beside `compatibility.json` | Manifest fields unchanged; stable `min` stays numeric for old updaters; RC installs need one full reinstall; same-line downgrades still admitted | none |
+| Release-contract regexes | P2 | `re.ASCII` added | No valid version changes meaning | none |
 | U4 test media cache | P11 | New key | Old key pruned automatically | none |
 
 No package introduces a temporary compatibility layer; every internal migration
@@ -1922,8 +2278,8 @@ fixture, runner, support-module boundaries (P3, P6, P11, P1/P2).
 
 | ID | Question | Options and consequences | Recommended default |
 | --- | --- | --- | --- |
-| **D1** (CQ15, P1) | When a source reinstall finds user data (`config\`, `comparison_videos\`, `generated\`) in the previous active bundle and no `-UserData` choice was given, what happens? | **Move** (rename the three folders into the new bundle, all-or-nothing, then activate): keeps the documented “rerun install.cmd” workflow; data follows the AppData state config's bundle-relative paths. **Refuse to activate** (build, verify, print instructions, exit non-zero): no automatic data handling, but every rerun needs a flag. **Leave**: activates while data stays invisible in the old folder. | **Move**, with `-UserData Leave` as opt-out. The builder's refusal of occupied output is independent of D1 and ships regardless. |
-| **D2** (CQ16, P2) | Stable↔RC admission semantics | Allow RC→RC, RC→stable, stable→RC within one `major.minor` line (stable `min` admits its RCs) vs. forbid stable→RC code updates (RC requires full bundle) | Allow within the line, as specified in P2 |
+| **D1** (CQ15, P1) | When a source reinstall finds user data (non-empty `config\`, `comparison_videos\`, or `generated\`) in the previous active bundle and no `-UserData` choice was given, what happens? | **Move** (rename the non-empty folders into the new bundle on the same volume, all-or-nothing, reversed if activation fails, then activate): keeps the documented “rerun install.cmd” workflow; data follows the AppData state config's bundle-relative paths. **Refuse to activate** (build, verify, print instructions, exit non-zero): no automatic data handling, but every rerun needs a flag. **Leave**: activates while data stays invisible in the old folder. | **Move**, with `-UserData Leave` as opt-out. The builder's refusal of occupied output is independent of D1 and ships regardless. |
+| **D2** (CQ16, P2) | Stable↔RC admission semantics | Allow RC→RC, RC→stable, stable→RC within one `major.minor` line (stable `min` admits its RCs) and keep today's admission of same-line downgrades vs. forbid stable→RC code updates (RC requires full bundle) and/or add a new downgrade refusal | Allow within the line and keep downgrade admission, as specified in P2 |
 | **D3a** (CQ11, P8) | Unavailable requested tonemap: fail or disclosed fallback? | Keep fallback disclosed per clip + one run warning (current tested behavior, now truthful) vs. a new `color.tonemap_fallback = "allow" \| "refuse"` setting with a typed `FC-` error on any cause (schema, wizard, docs, doctor implications) | Keep disclosed fallback + warning; do not add a setting now |
 | **D3b** (CQ11, P8) | Payload/identity compatibility | Bump to 1.3 with applied-fact identity (regenerated reports get new IDs; browser state starts fresh) vs. additive 1.2 fields (still changes IDs; misrepresents the contract) | Bump to 1.3 |
 | **D4** (CQ18, P5) | Public `doctor` CLI change | Add `--root/--config`, shim injects for doctor, drop upward search (consistent with run) vs. keep upward search when `--root` is absent (two root policies) | Add options; match run's selection exactly |
@@ -1984,11 +2340,16 @@ the reason it could not be obtained.
       D4 → P5).
 - [ ] P0: review-report links fixed so the strict docs build is usable; three public
       passages corrected; strict docs build passes.
-- [ ] P1: no code removes an existing output root; failure leaves state byte-identical;
-      D1 policy implemented; Windows PS7 fixtures and hosted verify recorded.
+- [ ] P1: no code removes an existing output root; failure cleanup removes only a
+      directory the run reserved; failure leaves existing state byte-identical; CI
+      requirements fingerprint unchanged; D1 policy implemented with reversal on
+      activation failure; source-install tests isolate `LOCALAPPDATA`; Windows PS7
+      fixtures and hosted verify recorded.
 - [ ] P2: one version grammar owner across extraction/range/generator/bundle info/smoke;
-      exact target check; `Restore-FromBackup` deleted; transaction used by apply and
-      rollback; PS5.1 and PS7 updater E2E and signed/documented-only status recorded.
+      exact target check; `Restore-FromBackup` deleted; journaled transaction and
+      interrupted-state repair used by apply and rollback; `backup.json` beside
+      `compatibility.json`; PS5.1 and PS7 updater E2E, PS5.1 install/uninstall, and
+      signed/documented-only status recorded.
 - [ ] P3: `selectPair` is the only pair-changing path; Appendix A and `0:0` variants fixed
       in Node and real browser; fixtures own documents; JS asserts each obligation
       once; focused scenario run and deliberate-failure proof recorded.
