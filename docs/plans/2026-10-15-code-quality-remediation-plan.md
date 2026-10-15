@@ -2552,7 +2552,7 @@ ledger-only commit is `425b52ad1fa0c2962e774b14c6ede6fe63680a27` (all P0–P11 i
 | --- | --- | --- |
 | P0 / CQ22 prose | `260670cc` → `23d2f59f` | Complete, reviewed no findings; 5 CLI-doc tests + strict docs passed. Step 0 not repeated. |
 | P1 / CQ15,CQ21d builder | `14b599a2` → `21691a97`; fixes `b920d48a` → `3af4041d` | Implemented; all five findings independently RESOLVED at 3af4041d, source prerequisite cleared. Windows proof open. |
-| P2 / CQ16,CQ17,CQ21d updater | worker `78e71c3e` → integrated `9ae3ca9d` | Full implementation present; independent deep/Wave B review active; PS/Windows/signing acceptance open. |
+| P2 / CQ16,CQ17,CQ21d updater | worker `78e71c3e` → integrated `9ae3ca9d` | Full implementation and independent deep/Wave B review complete, no actionable findings; LinuxPS7language proof passes, Windows/signing acceptance open. |
 | P3 / CQ1,CQ20,CQ21a | `7ccdb965/986abc2e/149ef433` → `8e32ee40/54e80bb6/983658b8` | Complete, independently reviewed no findings; Node and 22 real-browser passes. Final Wave A union pending. |
 | P4 / CQ10,CQ19 | `c2b62b05` → `30515500`; F1 `a79528de` → `b2dcd6aa` | Original package reviewed/native passed; narrow F1 reopened then independently RESOLVED, both real loaders + CLI proved. Final integrated native pending. |
 | P5 / CQ8,CQ18 | original `b9ca34f2/1d03dbfe`; rebased/integrated `b2232196/1ba2f13b` | Complete, independently reviewed no new findings; inherited F1 closed at b2. Docker, current native and installed Windows shim proof open. |
@@ -3114,3 +3114,23 @@ without deletion. Reviewer **475fresh focused passes/no skips** (65render/schedu
 and child reaping/staging/no-partial results. No fullnative/Docker/Windows claim;
 those gates remain separate. Current425native running, finalP2review pending,
 then fresh cumulative independent review and final stable distribution/media proof.
+
+
+P2 COMPLETE deep review and Wave B source composition CLEAR, no actionable findings,
+at exactfeb5a9e1..9ae3ca9d(P2) and04d5c90b..9ae3ca9d(Wave B,P2+P7). Reviewer traced
+all20files/steps1–6,strict shared grammar/D2/exactsmoke and helper distribution,
+owned completebackup/identity/purge, atomic journal/state repair/rename recovery/
+committed cleanup, signature-before-parse/archive/lock/cleanup and all meaningful
+failure/dual-interpreter fixtures. P1safeguards/activation lock retained. P7src/tests/
+benchmarks byte-identicalf9→9ae; prior real P7gates remain relevant, no coupling gap.
+Fresh15Pythonrelease/vector passes,static/source/diff checks; no reviewerWindows or
+PS runtime claimed. Retracted P2-F1 explicitly REJECTED, no separate coverage work
+inferred. All WindowsPS5.1/PS7filesystem/installer/updater/signed-hosted requirements
+and signing documented-only status remain OPEN. Reviewer source clean9ae.
+
+All package source reviews and all Wave A/B/C integrated composition reviews now
+clear for original full implementation ending425b52ad. Fresh independent cumulative
+review is the next required source gate, covering all supported CQ groups/subparts,
+migrations/deletions/compatibility and exclusion discipline. Current425native gate
+is running, complete-source Docker/distribution proof follows serially/stably; no
+full acceptance is claimed while target proof remains open.
