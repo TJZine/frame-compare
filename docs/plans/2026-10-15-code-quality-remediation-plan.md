@@ -2501,9 +2501,9 @@ final-report-only fallback; the parent retrieves on its next activation.
 | Package | Owner / role / chat | Base and integration | State / evidence / remaining acceptance |
 | --- | --- | --- | --- |
 | P1 | worker / medium; `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | worker `14b599a2` → integrated `21691a97` | Implemented/integrated; deep reviewer `01a13ed5-7e47-7ea0-9201-1f47b6a097f0` active; Windows acceptance open |
-| P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | worker `7ccdb965/986abc2e/149ef433` → integrated `8e32ee40/54e80bb6/983658b8` | Implemented/integrated; independent reviewer active; final-source Node/report/22-browser proof passed |
+| P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | worker `7ccdb965/986abc2e/149ef433` → integrated `8e32ee40/54e80bb6/983658b8` | Implemented/integrated/independently reviewed, no findings; final-source Node/report/22-browser proof passed; full Wave A composition pending |
 | P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Implemented/integrated/independently reviewed, no findings; 724 focused passes; full native gate open |
-| P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | worker `f0c67e62` → integrated `94efe8cd` | Implemented/integrated; independent reviewer active; worker reused for verification-only full native gate at `94efe8cd` |
+| P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | worker `f0c67e62` → integrated `94efe8cd` | Implemented/integrated/independently reviewed, no findings; worker running verification-only full native gate at `94efe8cd` |
 | P0 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `260670cc` → integrated `23d2f59f` | Implemented/integrated/independently reviewed, no findings; 5 CLI-doc tests + strict docs passed; Wave A composition pending |
 | P5 | worker / medium; `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | `30515500`; worktree `9676` | Active; full acquisition/doctor scope; P10 shared-file ordering tracked |
 | P6 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | assigned current integrated `44a11213`; worktree `9bdf` | Active; complete CQ5/CQ21c/CQ2; reviewed P4 prerequisite retained; native/Docker gates deferred |
@@ -2693,3 +2693,42 @@ post-change measurements and full canonical gate. This is progress, not completi
 Pending active work: P5/P6/P8/P11 implementation, P3/P10 reviewer, P1 deep reviewer,
 P10 integrated verifier. P1 worker idle/reusable for review fixes and eventual P2
 only after reviewed prerequisite. No P2/P7/P9 dispatch yet; no pending child setup IDs.
+
+
+### Independent P3/P10 review and partial Wave A composition
+
+Reviewer/high `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` completed P3 exact range
+`44a112137684f1c5d878d6ae22d51f1083a19149..983658b865ef479b9edfcdea66c2944379d13709`
+and P10 exact range
+`9c6d0ba717a7cc7c6e39b45894dd1aa4072d6294..94efe8cdd2abe86caa1136849d25122cd17d5e03`:
+**no actionable findings or decisions required**. All20 P3 files and all5 P10 files
+inspected against complete approved package obligations.
+
+P3 reviewer compared prior/new JS assertions and traced every plan-named sole-Python
+observation before mirror deletion; reviewed fixture document closure, seven harness
+runner contracts, map-only offset authority/all selection and persistence cases,
+retained loader proof/exclusions, browser probe and architecture. Reviewer ran9 bridge
+invocations/no skips at exact983658b8, plus in-memory runner unknown-name/async-order/
+named-stack/continue-and-summary failure controls, and diff check. Reviewer verified
+worker149ef433 vs integrated983658b8 have no differences in relevant report assets,
+browser, harness/runner or report tests, validating reuse of worker84 report passes,
+22 actual Chrome passes/no skips and static evidence. No browser/Docker reviewer run;
+no P3 runtime gap identified. This does not establish final Wave A composition.
+
+P10 reviewer traced actual producer/execution/application/warning/result/summary/
+persistence/JSON owners and all keyword constructor callers; joined transport proof
+retains URL/title/explicit association and one warning in result/record/terminal,
+post-action warning independence, accepted publish-failure limitation and success
+JSON omission. Existing docs accurate. Reviewer ran61 passing/no-skip lifecycle,
+phase-plan, metadata and phase-post-render tests at exact94efe8cd; diff check clean.
+Full native acceptance remains pending separate verifier.
+
+Bounded composition at94efe8cd covers P0/P3/P4/P10: P0 prose agrees, P3 schema/test
+infrastructure unchanged by decode/warning integration, P4 production files identical
+to reviewed30515500, P10 joined proof exercises P4 persisted record reader with new
+warning metadata. No interaction findings. Explicit uncovered Wave A union:
+P1/P5/P6/P8/P11 and final combined interactions; delegate full Wave A review later.
+Reviewer remained clean/read-only at94efe8cd, now idle/reusable for focused rechecks
+or later wave work. Pending callbacks: P1 deep review; P5/P6/P8/P11 implementation;
+P10 stable-input native verifier. No useful independent integration or dispatch is
+ready until those prerequisites/results arrive; no idle polling.
