@@ -2588,3 +2588,12 @@ diff check/hooks clean. No product/browser/Docker/native gate needed for P0.
 P4 reviewer additionally assigned exact P0 range `e7e05b1d..23d2f59f` using committed
 source, separate conclusions required. P0 implementation complete; independent review
 and full Wave A composition acceptance pending. P4/P0 worker currently idle and reusable.
+
+
+Resource correction from P3: the earlier browser release was premature. Final
+undefined-selector draft clearing and test/readability edits invalidated the earlier
+22-case pass for final-source acceptance. P3 retains/reclaims the exclusive browser
+lease for a repeat at stable final source, using owned `.tmp/p3-browser-final`
+profiles; its exit/final identity is pending. P10 reminded to defer full native
+(which includes browser) and report focused/static completion without waiting on
+that gate. Earlier 22-case pass remains evidence only for its earlier source.
