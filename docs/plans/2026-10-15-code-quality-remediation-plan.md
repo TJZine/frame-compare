@@ -2500,10 +2500,10 @@ final-report-only fallback; the parent retrieves on its next activation.
 
 | Package | Owner / role / chat | Base and integration | State / evidence / remaining acceptance |
 | --- | --- | --- | --- |
-| P1 | First batch; worker / medium; ID pending | Initial baseline plus ledger | Priority installation-preservation work; all P1 steps and CQ21d builder/installer portion; independent review and Windows acceptance pending |
-| P3 | First batch; worker / medium; ID pending | Initial baseline plus ledger | Complete fixture/runner/transition package; separate planned commits; Node and real-browser evidence pending |
-| P4 | First batch; worker / medium; ID pending | Initial baseline plus ledger | All decoder owners and four timeout fields; focused/full proof pending |
-| P10 | First batch; worker_luna / xhigh; ID pending | Initial baseline plus ledger | Bounded warning propagation with joined behavioral proof; independent review pending |
+| P1 | worker / medium; `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | `9741fcc9`; worktree `5016` | Active; priority installation-preservation work; all P1 steps and CQ21d builder/installer portion; independent review and Windows acceptance pending |
+| P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | `9741fcc9`; worktree `9bb4` | Active; complete fixture/runner/transition package; separate planned commits; Node and real-browser evidence pending |
+| P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | `9741fcc9`; worktree `9bdf` | Active; all decoder owners and four timeout fields; focused/full proof pending |
+| P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | `9741fcc9`; worktree `b49f` | Active; bounded warning propagation with joined behavioral proof; independent review pending |
 | P0 | Ready, next bounded dispatch | — | Steps 1–5 pending; step 0 already complete |
 | P5 | Next practical batch | — | Single acquired config + doctor; P10 shared-file ordering tracked |
 | P6 | Next practical batch after P4 shared-owner changes | — | Full CQ5/CQ21c/CQ2 scope pending |
@@ -2517,3 +2517,23 @@ Each wave requires independent integrated review, including cross-package compos
 No package is accepted from a completion callback alone. Final cumulative review and
 all applicable stable-head gates remain pending. This section records implementation
 progress without altering approved design, coverage, compatibility, or exclusions.
+
+
+Dispatch identities confirmed with `list_threads` plus `read_thread` assignment
+retrieval; all four worktree HEADs independently observed at
+`9741fcc91eb5b28f1e8689971229b39a3876959a`. Worktree roots are
+`/Users/tristan/.codex/worktrees/<id>/frame-compare`. All callback routes target the
+orchestrator/host recorded above; human retrieval verification is required in each
+child. Pending setup client IDs have been resolved; no pending ID is used for messaging.
+
+First-batch resource lease: P3 exclusively owns real-browser execution with unique
+owned temporary profiles. P4/P10 were instructed to defer full native suites (which
+include browser tests) until lease transfer or integrated verification; focused
+nonbrowser checks and static gates continue. No Docker lease is active. No package
+implementation, independent review, or runtime acceptance is yet recorded.
+
+Next activation: retrieve meaningful child callbacks/completion evidence; integrate
+scoped commits under parent Git ownership; assign independent review to stable
+package/batch inputs, including P1 deep review. Dispatch P0 and remaining Wave A
+packages in practical batches while honoring shared-file ordering. Full Wave A
+composition review is required before dependent work is accepted.
