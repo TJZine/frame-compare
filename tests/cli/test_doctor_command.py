@@ -816,16 +816,20 @@ def test_doctor_selection_rejects_escape_as_typed_top_level_json_error(
 @pytest.mark.parametrize(
     "env_enabled", [None, "false", "bad"], ids=["defaults", "env", "invalid-env"]
 )
+@pytest.mark.parametrize(
+    "cwd_content", ["[tmdb]\nenabled = false\n", "[malformed"], ids=["valid-cwd", "malformed-cwd"]
+)
 def test_doctor_absent_selected_default_never_reads_another_workspace_config(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     env_enabled: str | None,
+    cwd_content: str,
 ) -> None:
     selected_root = tmp_path / "selected"
     selected_root.mkdir()
     cwd = tmp_path / "cwd"
     (cwd / "config").mkdir(parents=True)
-    (cwd / "config/config.toml").write_text("[tmdb]\nenabled = false\n")
+    (cwd / "config/config.toml").write_text(cwd_content)
     monkeypatch.chdir(cwd)
     for key in ("TMDB_API_KEY", "FRAME_COMPARE_TMDB__API_KEY", "FRAME_COMPARE_TMDB__ENABLED"):
         monkeypatch.delenv(key, raising=False)

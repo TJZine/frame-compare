@@ -411,3 +411,59 @@ def test_nonfinite_timeouts_are_typed_config_errors(
         monkeypatch.setenv(f"FRAME_COMPARE_{section.upper()}__{field.upper()}", "inf")
     with pytest.raises(ConfigValidationError):
         load_config(path)
+
+
+@pytest.mark.parametrize(
+    "content", ["[tmdb]\nenabled = false\n", "[malformed"], ids=["valid-cwd", "malformed-cwd"]
+)
+def test_environment_config_never_stats_or_reads_cwd_toml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    content: str,
+) -> None:
+    from frame_compare.config.loader import load_environment_config
+
+    config_file = tmp_path / "config/config.toml"
+    config_file.parent.mkdir()
+    config_file.write_text(content)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__ENABLED", "true")
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", "2048")
+    original_stat, original_read = Path.stat, Path.read_bytes
+
+    def stat(path: Path, *args, **kwargs):
+        assert path.absolute() != config_file, "environment-only loading must not stat cwd TOML"
+        return original_stat(path, *args, **kwargs)
+
+    def read(path: Path):
+        assert path.absolute() != config_file, "environment-only loading must not read cwd TOML"
+        return original_read(path)
+
+    monkeypatch.setattr(Path, "stat", stat)
+    monkeypatch.setattr(Path, "read_bytes", read)
+    config = load_environment_config()
+    assert config.tmdb.enabled is True
+    assert config.runtime.memory_limit_mb == 2048
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("FRAME_COMPARE_ANALYSIS", "["),
+        ("FRAME_COMPARE_ANALYSIS", "[" * 10000),
+        ("FRAME_COMPARE_TMDB__TIMEOUT_SECONDS", "inf"),
+        ("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", "1.5"),
+    ],
+    ids=["malformed-json", "deep-json", "infinite-timeout", "strict-memory"],
+)
+def test_environment_only_config_keeps_typed_validation_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: str,
+) -> None:
+    from frame_compare.config.loader import load_environment_config
+
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ConfigValidationError) as raised:
+        load_environment_config()
+    assert raised.value.code == "FC-1003"
