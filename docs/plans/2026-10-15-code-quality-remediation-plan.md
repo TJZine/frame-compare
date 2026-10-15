@@ -1242,8 +1242,14 @@ and readability checks live in `load_config` (`loader.py` ~82–95, raising
 nonregular, unreadable, or fails to parse/validate is reported in the TMDB check's
 details, not as a top-level failure; `_resolve_tmdb_config` (`doctor_checks.py`
 ~620–645) must catch `ConfigNotFoundError` for that explicit case, which it does not
-today. An absent **default** config keeps today's behavior (passed as `None`, so
-defaults+environment). No HTTP; JSON schema unchanged.
+today. An absent **default** config uses an explicit config-owner defaults+environment
+route that suppresses TOML acquisition entirely, including unrelated cwd TOML. Reuse
+`EnvironmentSettingsSource` and the bounded `_toml_suppressed_settings_schema` facility;
+preserve typed/sanitized settings errors and existing environment precedence. Do not
+reinterpret `load_config(None)` globally: it intentionally selects cwd TOML for existing
+callers. This corrects the original plan's inaccurate “passed as None” mechanism,
+confirmed by source and temporary-file reproduction during implementation; D4's selected-
+root/defaults+environment behavior is unchanged. No HTTP; JSON schema unchanged.
 Doctor drops the upward root search to match run. Preserved: environment-variable
 precedence, local-only/no-HTTP behavior, the exact portable state-file containment
 exception (no sibling LocalAppData files), and runtime-free option parsing (doctor's
@@ -2787,3 +2793,28 @@ stabilize/identify correction then run canonical native suite with actual Chrome
 owned unique profile cleanup. Docker lease remains P11; Windows shim observation
 remains open. P6/P8 continue focused nonbrowser implementation. No browser overlap
 authorized; P5 must explicitly release on completion/blocker.
+
+
+### P5 adjudication resolved: bounded mechanism correction accepted
+
+Independent reviewer/high `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` ACCEPTED the
+worker's concrete D4 correction after inspecting committed30515500 owners/callers
+(unchanged at reviewer94efe8cd) and real temporary-file reproduction: absent selected
+root plus cwd tmdb.enabled=false causes `load_config(None)` to read unrelated cwd;
+explicit absent path raises FC-1001. The approved intent is coherent; only “passed as
+None” prescription was wrong. P5 package text corrected above before implementation
+integration. No new public policy/decision or broad planning.
+
+Reviewer identified existing bounded no-TOML schema facility and required reuse of
+P4-aware `EnvironmentSettingsSource`. Do not alter default-only get_default_config/
+validate_raw_config_payload or actual implicit-cwd load_config(None) consumers, chdir,
+or magic-path fallback. Default-absence route must avoid any cwd stat/read, honor
+normal env, preserve SettingsError/ValidationError sanitization and FC-1003; explicit
+bad config stays doctor diagnostic, selection syntax/escape/portable containment
+still happens first. Run missing-config admission remains strict as specified.
+Reviewer requirements sent to P5: conflicting valid AND malformed cwd TOML ignored,
+valid env honored, malformed/deep env/inf timeout/strict memory errors remain typed,
+explicit missing diagnostic and O1 imports. Config-only ownership demonstrated no
+eager native imports. Candidate9676 not yet reviewed; full frozen P5 review remains
+pending. No human clarification needed; P5 full-native/browser and P11 Docker leases
+unchanged. Other active implementation/review prerequisites remain pending callbacks.
