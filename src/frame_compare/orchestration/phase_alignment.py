@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from frame_compare.analysis.errors import SelectionError
+from frame_compare.analysis.errors import SelectionError, SelectionFailureKind
 from frame_compare.analysis.metrics import slice_frame_metrics
 from frame_compare.analysis.selection import select_frames, select_random_frames
 from frame_compare.analysis.types import (
@@ -506,6 +506,7 @@ def _reselect_frames_for_trimmed_overlap(
             "insufficient generated candidates after alignment",
             requested=target_count,
             found=selectable_length,
+            kind=SelectionFailureKind.INSUFFICIENT_ALIGNED_CANDIDATES,
         )
     metric_reference_start = (
         selection_source_window[0]
@@ -614,6 +615,7 @@ def _normalize_selected_frames_for_trimmed_domain(
             "insufficient generated candidates after alignment",
             requested=generated_requested_count,
             found=generated_capacity,
+            kind=SelectionFailureKind.INSUFFICIENT_ALIGNED_CANDIDATES,
         )
     generated_target_count = generated_requested_count
     if (
@@ -624,6 +626,7 @@ def _normalize_selected_frames_for_trimmed_domain(
             "insufficient generated frames after full-window retry alignment",
             requested=generated_target_count,
             found=len(normalized_generated_frames),
+            kind=SelectionFailureKind.INSUFFICIENT_ALIGNED_CANDIDATES,
         )
     normalized_frames = sorted(
         {*normalized_user_frames, *normalized_generated_frames[:generated_target_count]}

@@ -10,6 +10,7 @@ from frame_compare.analysis.errors import (
     ExclusionRecoverySelectionError,
     MetricsCalculationError,
     SelectionError,
+    SelectionFailureKind,
 )
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
@@ -44,12 +45,13 @@ _RETRY_FAILED_HINT = (
     "Reduce selector counts, use a longer clip, or use a clip-specific config with "
     "smaller analysis exclusions"
 )
-_ELIGIBLE_REASONS = {
-    "insufficient_candidates",
-    "insufficient random candidates after user frames",
-    "no selectable user or random frames remain after trims/windowing",
-}
-_EMPTY_EXCLUSION_WINDOW_REASON = "analysis ignore windows leave no selectable frames"
+_RECOVERABLE_KINDS = frozenset(
+    {
+        SelectionFailureKind.INSUFFICIENT_METRIC_CANDIDATES,
+        SelectionFailureKind.INSUFFICIENT_RANDOM_CANDIDATES,
+        SelectionFailureKind.NO_INITIAL_FRAMES,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +84,7 @@ def compute_selection_window_with_recovery(
         selection_window = compute_selection_window_for_clips(clips=clips, config=config)
     except SelectionError as error:
         analysis = config.analysis
-        if error.reason != _EMPTY_EXCLUSION_WINDOW_REASON or (
+        if error.kind is not SelectionFailureKind.EMPTY_SELECTION_WINDOW or (
             analysis.ignore_lead_seconds <= 0.0 and analysis.ignore_trail_seconds <= 0.0
         ):
             raise
@@ -259,7 +261,7 @@ def _eligible_for_recovery(config: ConfigSchema, error: SelectionError) -> bool:
     analysis = config.analysis
     return (
         analysis.ignore_lead_seconds > 0.0 or analysis.ignore_trail_seconds > 0.0
-    ) and error.reason in _ELIGIBLE_REASONS
+    ) and error.kind in _RECOVERABLE_KINDS
 
 
 def _full_window_config(config: ConfigSchema) -> ConfigSchema:

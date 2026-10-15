@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import frame_compare.analysis.cache_io as cache_io
-from frame_compare.analysis.errors import MetricsCalculationError, SelectionError
+from frame_compare.analysis.errors import (
+    MetricsCalculationError,
+    SelectionError,
+    SelectionFailureKind,
+)
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.selection import select_frames, select_random_frames
 from frame_compare.analysis.types import (
@@ -95,6 +99,7 @@ def _select_initial_frame_plan_once(ctx: RunContext) -> FramePlanPhaseOutput:
             "insufficient random candidates after user frames",
             requested=random_count,
             found=available_random_count,
+            kind=SelectionFailureKind.INSUFFICIENT_RANDOM_CANDIDATES,
         )
     random_frames = [
         frame + window_start
@@ -121,6 +126,7 @@ def _select_initial_frame_plan_once(ctx: RunContext) -> FramePlanPhaseOutput:
             "no selectable user or random frames remain after trims/windowing",
             requested=requested_initial_count,
             found=0,
+            kind=SelectionFailureKind.NO_INITIAL_FRAMES,
         )
     warnings = _dropped_user_frame_warnings(
         config=ctx.config.analysis,
@@ -399,7 +405,12 @@ def _select_frames_for_selection_domain(
         else (0, reference.effective_num_frames())
     )
     if frame_count <= 0:
-        raise SelectionError("reference source trims leave no selectable frames", 0, 0)
+        raise SelectionError(
+            "reference source trims leave no selectable frames",
+            0,
+            0,
+            kind=SelectionFailureKind.EMPTY_REFERENCE_DOMAIN,
+        )
     expected_metric_start = analysis_clip.trim.trim_start_frames + window_start
     if (
         metrics.metadata.metric_source_start != expected_metric_start

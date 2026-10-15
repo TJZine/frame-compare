@@ -1,6 +1,23 @@
 """Analysis-specific exception types for Frame Compare."""
 
+from enum import Enum, auto
+
 from frame_compare.errors import ErrorContext, JSONValue, ProcessingError
+
+
+class SelectionFailureKind(Enum):
+    """Internal recovery classification; never part of public error payloads."""
+
+    UNCLASSIFIED = auto()
+    EMPTY_METRICS = auto()
+    INSUFFICIENT_METRIC_CANDIDATES = auto()
+    NO_CLIPS = auto()
+    EMPTY_SELECTION_WINDOW = auto()
+    INVALID_CLIP_FPS = auto()
+    INSUFFICIENT_RANDOM_CANDIDATES = auto()
+    NO_INITIAL_FRAMES = auto()
+    EMPTY_REFERENCE_DOMAIN = auto()
+    INSUFFICIENT_ALIGNED_CANDIDATES = auto()
 
 
 class SelectionError(ProcessingError):
@@ -12,6 +29,7 @@ class SelectionError(ProcessingError):
         requested: int,
         found: int,
         *,
+        kind: SelectionFailureKind = SelectionFailureKind.UNCLASSIFIED,
         hint: str = "Adjust selection criteria",
         details: dict[str, JSONValue] | None = None,
     ) -> None:
@@ -31,6 +49,7 @@ class SelectionError(ProcessingError):
                 details=error_details,
             )
         )
+        self.kind = kind
         self.reason = reason
         self.requested = requested
         self.found = found

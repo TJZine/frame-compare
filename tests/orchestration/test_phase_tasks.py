@@ -18,6 +18,7 @@ from frame_compare.analysis.errors import (
     ExclusionRecoverySelectionError,
     MetricsCalculationError,
     SelectionError,
+    SelectionFailureKind,
 )
 from frame_compare.analysis.metric_identity import (
     metric_algorithm_id,
@@ -382,7 +383,12 @@ def test_full_window_retry_progress_failure_is_fatal_before_override(
     with pytest.raises(ExclusionRecoverySelectionError) as exc_info:
         recover_from_exclusion_selection_failure(
             ctx,
-            SelectionError("insufficient_candidates", requested=8, found=4),
+            SelectionError(
+                "insufficient_candidates",
+                requested=8,
+                found=4,
+                kind=SelectionFailureKind.INSUFFICIENT_METRIC_CANDIDATES,
+            ),
             vs_loader=None,
         )
 
@@ -427,7 +433,12 @@ def test_full_window_retry_active_rect_sampling_failure_is_fatal(
     with pytest.raises(ExclusionRecoverySelectionError) as exc_info:
         recover_from_exclusion_selection_failure(
             ctx,
-            SelectionError("insufficient_candidates", requested=8, found=4),
+            SelectionError(
+                "insufficient_candidates",
+                requested=8,
+                found=4,
+                kind=SelectionFailureKind.INSUFFICIENT_METRIC_CANDIDATES,
+            ),
             vs_loader=cast("VSLoader", FailingLoader()),
         )
 
