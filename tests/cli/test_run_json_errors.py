@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -720,3 +723,49 @@ def test_run_json_reports_parser_limits_and_nonfinite_timeout(
     payload = json.loads(result.stdout)
     assert payload["success"] is False
     assert payload["error"]["code"] == code
+
+
+@pytest.mark.parametrize(
+    "variable, content",
+    [
+        ("FRAME_COMPARE_ANALYSIS", "[" * 2000 + '{"api_key":"sentinel-deep-secret"}' + "]" * 2000),
+        ("FRAME_COMPARE_TMDB", "[" * 1000 + '{"api_key":"sentinel-deep-secret"}' + "]" * 1000),
+        (
+            "FRAME_COMPARE_TMDB",
+            '{"api_key":' + '{"nested":' * 1000 + '"sentinel-deep-secret"' + "}" * 1000 + "}",
+        ),
+    ],
+)
+def test_run_json_balanced_deep_environment_errors_at_default_recursion(
+    tmp_path: Path, variable: str, content: str
+) -> None:
+    _write_minimal_config(tmp_path)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("FRAME_COMPARE_")}
+    env[variable] = content
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; assert sys.getrecursionlimit() == 1000; from frame_compare.cli.entry import app; app()",
+            "run",
+            "--root",
+            str(tmp_path),
+            "--json",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == int(ExitCode.CONFIG_ERROR), result.stderr
+    assert result.stderr == ""
+    assert "sentinel-deep-secret" not in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "FC-1003"
+    validation_errors = payload["error"]["details"]["validation_errors"]
+    assert validation_errors[0]["type"] == (
+        "string_type" if content.startswith('{"api_key":') else "model_type"
+    )
+    assert "input" in validation_errors[0]
+    assert len(result.stdout) < 4000

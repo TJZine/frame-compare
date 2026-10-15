@@ -1,5 +1,9 @@
 """Tests for configuration loading logic."""
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -467,3 +471,86 @@ def test_environment_only_config_keeps_typed_validation_failures(
     with pytest.raises(ConfigValidationError) as raised:
         load_environment_config()
     assert raised.value.code == "FC-1003"
+
+
+@pytest.mark.parametrize(
+    "variable, content",
+    [
+        ("FRAME_COMPARE_ANALYSIS", "[" * 2000 + '{"api_key":"sentinel-deep-secret"}' + "]" * 2000),
+        ("FRAME_COMPARE_TMDB", "[" * 1000 + '{"api_key":"sentinel-deep-secret"}' + "]" * 1000),
+        (
+            "FRAME_COMPARE_TMDB",
+            '{"api_key":' + '{"nested":' * 1000 + '"sentinel-deep-secret"' + "}" * 1000 + "}",
+        ),
+    ],
+)
+@pytest.mark.parametrize("route", ["file", "environment"])
+def test_valid_deep_environment_shape_has_bounded_typed_error_at_default_recursion(
+    tmp_path: Path, variable: str, content: str, route: str
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    env = {key: value for key, value in os.environ.items() if not key.startswith("FRAME_COMPARE_")}
+    env[variable] = content
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import json, sys
+from pathlib import Path
+from frame_compare.config.loader import load_config, load_environment_config
+from frame_compare.config.errors import ConfigValidationError
+assert sys.getrecursionlimit() == 1000
+try:
+    if sys.argv[2] == "file":
+        load_config(Path(sys.argv[1]))
+    else:
+        load_environment_config()
+except ConfigValidationError as error:
+    print(json.dumps(error.context.to_dict()))
+else:
+    raise AssertionError("invalid section must fail validation")
+assert sys.getrecursionlimit() == 1000
+""",
+            str(path),
+            route,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert "sentinel-deep-secret" not in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["code"] == "FC-1003"
+    validation_errors = payload["details"]["validation_errors"]
+    assert validation_errors[0]["type"] == (
+        "string_type" if content.startswith('{"api_key":') else "model_type"
+    )
+    assert "input" in validation_errors[0]
+    assert len(result.stdout) < 4000
+
+
+@pytest.mark.parametrize("route", ["file", "environment"])
+@pytest.mark.parametrize("content", ["[0]", '[{"api_key":"sentinel-shallow-secret"}]'])
+def test_shallow_environment_shape_and_valid_control_keep_config_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, route: str, content: str
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    from frame_compare.config.loader import load_environment_config
+
+    def load():
+        return load_config(path) if route == "file" else load_environment_config()
+
+    monkeypatch.setenv("FRAME_COMPARE_TMDB", '{"enabled":false}')
+    assert load().tmdb.enabled is False
+    monkeypatch.setenv("FRAME_COMPARE_TMDB", content)
+    with pytest.raises(ConfigValidationError) as caught:
+        load()
+    payload = caught.value.context.to_dict()
+    assert payload["code"] == "FC-1003"
+    assert "sentinel-shallow-secret" not in json.dumps(payload)
