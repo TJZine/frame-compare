@@ -296,6 +296,9 @@ def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) 
         success=False,
         warning=RunWarning("sources", "warning", "webhook: delivery failed"),
     )
+    collection_warning = RunWarning(
+        "slow.pics", "warning", "slow.pics: collection metadata differed"
+    )
 
     apply_phase_output(
         ctx=ctx,
@@ -304,12 +307,14 @@ def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) 
             slowpics_url="https://slow.pics/c/example",
             uploaded_file_paths=(uploaded,),
             post_upload_actions=(shortcut, webhook),
+            warnings=(collection_warning,),
         ),
     )
 
     assert state.artifacts.slowpics_url == "https://slow.pics/c/example"
     assert state.artifacts.uploaded_slowpics_file_paths == (uploaded,)
     assert state.artifacts.post_upload_actions == (shortcut, webhook)
+    assert state.warnings == [collection_warning, webhook.warning]
 
 
 def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) -> None:

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from fractions import Fraction
 from pathlib import Path
 from typing import Never, cast
 
+import httpx
 import pytest
+from rich.console import Console
 
 from frame_compare.analysis.window import SelectionWindow
+from frame_compare.cli import run_command
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
@@ -22,7 +26,13 @@ from frame_compare.orchestration.execution_types import (
     RenderPhaseOutput,
     RunArtifacts,
 )
+from frame_compare.orchestration.types import ReservedRunCapture, RunResult
+from frame_compare.services.publishers import PublishResult
+from frame_compare.services.run_result_record import read_run_result
+from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
+from frame_compare.services.types import SlowpicsCollectionMetadata, TmdbMetadata
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import SourceInfo
@@ -137,6 +147,178 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
     assert result.success is True
     assert result.post_upload_actions == (shortcut,)
     assert [warning.text for warning in result.warnings] == ["preflight: warned", "report: warned"]
+
+
+def test_execute_run_propagates_collection_warning_once_through_result_summary_and_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference_path = tmp_path / "comparison_videos" / "Reference.mkv"
+    reference_path.parent.mkdir(parents=True)
+    reference_path.write_bytes(b"reference")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    workspace = _workspace(
+        tmp_path,
+        run_subdir="run",
+        screenshots_subdir="run/screenshots",
+    )
+
+    config = ConfigSchema()
+    config.audio_alignment.enable = False
+    config.report.enable = False
+    config.slowpics.auto_upload = True
+    config.slowpics.tmdb_id = 9
+    config.slowpics.tmdb_media_type = "movie"
+    config.slowpics.title = "Explicit title"
+    reference = clip_state(reference_path, label="Reference")
+    prep = PrepState(
+        workspace=workspace,
+        config=config,
+        input_videos=[reference_path],
+        clips=[reference],
+        artifacts=RunArtifacts(
+            resolved_metadata=TmdbMetadata(
+                tmdb_id=7,
+                title="Resolved title",
+                original_title="Resolved title",
+                year=2024,
+                media_type="tv",
+            )
+        ),
+        metadata_prefetch=MetadataPrefetch(None, False),
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=_zero_monotonic_timer(),
+        analysis_selection_domain="test-selection-domain",
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+    )
+    capture = ReservedRunCapture(
+        workspace=workspace,
+        clip_count=1,
+        preflight_duration=0.0,
+        preflight_warnings=[],
+        run_warnings=[],
+    )
+    captured_collection: SlowpicsCollectionMetadata | None = None
+
+    async def fake_execute_prep(request: RunRequest, deps: RunDependencies) -> PrepState:
+        del request
+        assert deps.capture_reserved_run is not None
+        deps.capture_reserved_run(capture)
+        return prep
+
+    def fake_render_phase(
+        _ctx: RunContext,
+        *,
+        frames: list[int],
+        runner: object,
+    ) -> RenderPhaseOutput:
+        del runner
+        screenshot_dir = workspace.screenshots_dir
+        assert screenshot_dir is not None
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+        screenshots = []
+        for frame in frames:
+            screenshot = screenshot_dir / f"{frame}.png"
+            screenshot.write_bytes(b"PNG")
+            screenshots.append(screenshot)
+        return RenderPhaseOutput(
+            render=_render_artifacts(
+                screenshots_by_label={"Reference": screenshots},
+                screenshot_dir=screenshot_dir,
+            )
+        )
+
+    async def fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
+        nonlocal captured_collection
+        captured_collection = cast(SlowpicsCollectionMetadata, kwargs["collection_metadata"])
+        upload_plan = cast(SlowpicsUploadPlan, kwargs["upload_plan"])
+        file_paths = tuple(upload_plan.file_paths)
+        return PublishResult(
+            url="https://slow.pics/c/explicit",
+            screenshot_count=len(file_paths),
+            upload_duration_seconds=0.0,
+            uploaded_file_paths=file_paths,
+        )
+
+    async def fake_post_upload_actions(
+        *_args: object, **_kwargs: object
+    ) -> tuple[PostUploadActionResult, ...]:
+        return ()
+
+    def reject_unexpected_http(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"unexpected HTTP request: {request.method} {request.url}")
+
+    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
+    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda *a, **kw: None)
+    monkeypatch.setattr(coordinator, "emit_final_selection_report", lambda *a, **kw: None)
+    monkeypatch.setattr(coordinator, "emit_frame_alignment_report", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_render_phase",
+        fake_render_phase,
+    )
+    monkeypatch.setattr(
+        "frame_compare.orchestration.phase_post_render.publish_to_slowpics",
+        fake_publish_to_slowpics,
+    )
+    monkeypatch.setattr(
+        "frame_compare.orchestration.phase_post_render.run_slowpics_post_upload_actions",
+        fake_post_upload_actions,
+    )
+
+    async def invoke() -> object:
+        transport = httpx.MockTransport(reject_unexpected_http)
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await execute_run(
+                RunRequest(root=tmp_path, skip_analysis=True, skip_metadata=True),
+                deps=RunDependencies(
+                    ffmpeg_runner=FakeFFmpegRunner(),
+                    http_client=client,
+                    monotonic_timer=_zero_monotonic_timer,
+                    progress=NullProgressReporter(),
+                ),
+            )
+
+    result = cast(RunResult, asyncio.run(invoke()))
+    mismatch = (
+        "slow.pics: explicit TMDB association differs from resolved metadata; "
+        "automatic title metadata was not combined with the explicit association"
+    )
+    assert [warning.text for warning in result.warnings] == [mismatch]
+    assert result.slowpics_url == "https://slow.pics/c/explicit"
+    assert captured_collection is not None
+    assert captured_collection.title == "Explicit title"
+    assert (captured_collection.tmdb_id, captured_collection.tmdb_media_type) == (9, "movie")
+
+    record = read_run_result(run_dir / "run_result.toml")
+    assert record.status == "completed_with_warnings"
+    assert record.warning_count == 1
+    assert record.warning_summaries == ("A run warning was reported.",)
+    console = Console(record=True, color_system=None, width=120)
+    from frame_compare.cli.output import print_result_summary
+
+    print_result_summary(console, result=result, quiet=False, root=tmp_path)
+    summary = console.export_text()
+    assert "Comparison complete · 1 warning" in summary
+    assert summary.count("explicit TMDB association differs") == 1
+
+    json_output: list[str] = []
+    monkeypatch.setattr(run_command.typer, "echo", json_output.append)
+    run_command.handle_json_output(result)
+    payload = json.loads(json_output[0])
+    assert set(payload) == {
+        "cache_hit",
+        "clips_processed",
+        "duration_seconds",
+        "errors",
+        "frame_count",
+        "report_path",
+        "screenshots_dir",
+        "slowpics_url",
+        "success",
+    }
+    assert payload["slowpics_url"] == "https://slow.pics/c/explicit"
 
 
 def test_execute_run_closes_execution_section_without_masking_phase_failure(

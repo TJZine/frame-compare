@@ -197,6 +197,7 @@ async def run_publish_phase(
         slowpics_url=result.url,
         uploaded_file_paths=result.uploaded_file_paths,
         post_upload_actions=post_upload_actions,
+        warnings=tuple(collection_resolution.warnings),
         success_summary=(
             f"{uploaded_count} {uploaded_unit} uploaded · {ctx.config.slowpics.visibility.value}"
         ),

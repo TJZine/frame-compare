@@ -65,9 +65,14 @@ def apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: PhaseO
             state.artifacts.uploaded_slowpics_file_paths = phase_output.uploaded_file_paths
             state.artifacts.post_upload_actions = phase_output.post_upload_actions
             state.warnings.extend(
-                action.warning
-                for action in phase_output.post_upload_actions
-                if action.warning is not None
+                [
+                    *phase_output.warnings,
+                    *(
+                        action.warning
+                        for action in phase_output.post_upload_actions
+                        if action.warning is not None
+                    ),
+                ]
             )
         case ReportPhaseOutput() as phase_output:
             state.artifacts.report_path = phase_output.report_path

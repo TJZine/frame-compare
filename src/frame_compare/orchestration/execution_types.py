@@ -109,6 +109,7 @@ class PublishPhaseOutput:
     slowpics_url: str | None
     uploaded_file_paths: tuple[Path, ...] = ()
     post_upload_actions: PostUploadActionResults = ()
+    warnings: tuple[RunWarning, ...] = ()
     success_summary: str | None = None
 
 
