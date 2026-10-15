@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from frame_compare.render.batch.orchestrator import render_batch_detailed
+from frame_compare.render.batch.orchestrator import render_clip_jobs
 from frame_compare.render.encoders import render_frame_detailed
 from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import (
@@ -19,6 +19,7 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
     SourceSignalFacts,
 )
+from tests.render_test_support import frame_results, prepared_jobs
 
 
 def _overlay_config() -> OverlayConfig:
@@ -95,7 +96,10 @@ def test_render_batch_ordering_contract(mock_video_path: Path, integration_outpu
         )
         requests.append(req)
 
-    results = [rendered.path for rendered in render_batch_detailed(requests, parallelism=1)]
+    results = [
+        rendered.path
+        for rendered in frame_results(render_clip_jobs(prepared_jobs(requests), parallelism=1))
+    ]
 
     assert len(results) == 3
     for i in range(3):
@@ -107,4 +111,4 @@ def test_render_batch_ordering_contract(mock_video_path: Path, integration_outpu
 
 @pytest.mark.integration
 def test_render_batch_empty_requests_returns_empty() -> None:
-    assert [rendered.path for rendered in render_batch_detailed([])] == []
+    assert render_clip_jobs(()) == ()

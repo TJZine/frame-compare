@@ -8,15 +8,14 @@ from frame_compare.config.schema_enums import OverlayMode
 from frame_compare.render.batch.expansion import expand_batch_render_requests
 from frame_compare.render.types import PreparedRenderSource, ScreenshotBatchRequest
 from frame_compare.utils.media_facts import ActivePictureFacts, PresentationState, SourceSignalFacts
+from tests.render_test_support import selections
 
 
 def _request() -> ScreenshotBatchRequest:
     return ScreenshotBatchRequest(
         clip_path=Path("source.mkv"),
         label="CtrlHD",
-        source_frames=[1855],
-        comparison_frames=[1842],
-        selection_labels=["Bright"],
+        frames=selections([1855], [1842], ["Bright"]),
         size_bytes=int(17.42 * 1024**3),
         source_resolution=(3840, 2160),
         source_total_frames=143892,
@@ -40,7 +39,7 @@ def test_overlay_config_contains_structured_facts_and_original_diagnostic_source
         presentation_state=PresentationState.SDR,
         tonemap=None,
     )
-    requests, _, facts = expand_batch_render_requests(
+    jobs = expand_batch_render_requests(
         [_request()],
         output_dir=Path("out"),
         config=ConfigSchema(),
@@ -48,6 +47,8 @@ def test_overlay_config_contains_structured_facts_and_original_diagnostic_source
         renderer="vapoursynth",
         ffmpeg_runner=MagicMock(),
     )
+    requests = [request for job in jobs for request in job.requests]
+    facts = {job.label: job.clip_facts for job in jobs}
     request = requests[0]
     assert request.clip is prepared_graph
     assert request.diagnostic_source is original
@@ -72,7 +73,7 @@ def test_none_overlay_mode_does_not_create_overlay_config(mock_prepare: MagicMoc
         presentation_state=PresentationState.SDR,
         tonemap=None,
     )
-    requests, _, _ = expand_batch_render_requests(
+    jobs = expand_batch_render_requests(
         [_request()],
         output_dir=Path("out"),
         config=ConfigSchema(),
@@ -80,6 +81,7 @@ def test_none_overlay_mode_does_not_create_overlay_config(mock_prepare: MagicMoc
         renderer="vapoursynth",
         ffmpeg_runner=MagicMock(),
     )
+    requests = [request for job in jobs for request in job.requests]
     assert requests[0].overlay is None
 
 
@@ -131,7 +133,7 @@ def test_actual_preparation_preserves_mixed_applied_facts_and_fallback_graph(
     ):
         loader.return_value.load.side_effect = sources
         core.placebo.Tonemap.side_effect = [graphs[0], RuntimeError("device failed")]
-        requests, _, facts = expand_batch_render_requests(
+        jobs = expand_batch_render_requests(
             [_request(), replace(_request(), label="Fallback", clip_path=Path("fallback.mkv"))],
             output_dir=Path("out"),
             config=config,
@@ -139,6 +141,8 @@ def test_actual_preparation_preserves_mixed_applied_facts_and_fallback_graph(
             renderer="vapoursynth",
             ffmpeg_runner=MagicMock(),
         )
+        requests = [request for job in jobs for request in job.requests]
+        facts = {job.label: job.clip_facts for job in jobs}
     assert facts["CtrlHD"].tonemap is not None
     assert facts["Fallback"].tonemap is not None
     assert requests[1].overlay is not None

@@ -10,10 +10,8 @@ from frame_compare.orchestration.execution_types import RenderArtifacts, RenderP
 from frame_compare.orchestration.phase_selection import (
     map_aligned_to_source_frame,
 )
-from frame_compare.orchestration.presentation import clip_role
 from frame_compare.orchestration.selection_rows import selection_rows
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
-from frame_compare.services.release_identity import format_micro_descriptor
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     HDRStaticFacts,
@@ -33,36 +31,38 @@ def run_render_phase(
     runner: FFmpegRunner,
 ) -> RenderPhaseOutput:
     from frame_compare.render.batch.orchestrator import render_screenshots_from_batch_detailed
-    from frame_compare.render.types import BatchRenderOptions, ScreenshotBatchRequest
+    from frame_compare.render.types import (
+        BatchRenderOptions,
+        ScreenshotBatchRequest,
+        SelectedScreenshot,
+    )
 
     clips = [ctx.reference, *ctx.comparisons]
     output_dir = ctx.workspace.screenshots_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-    selection_labels = [row.label for row in selection_rows(ctx, frames=frames)]
+    rows = selection_rows(ctx, frames=frames)
 
     requests: list[ScreenshotBatchRequest] = []
-    expected_frames: dict[str, list[int]] = {}
-    progress_labels = _render_progress_labels(clips)
-    for clip, progress_label in zip(clips, progress_labels, strict=True):
-        source_frames = [
-            map_aligned_to_source_frame(clip=clip, aligned_frame=frame) for frame in frames
-        ]
-        expected_frames[clip.label] = source_frames
+    for clip in clips:
         active_picture = _active_picture_facts(clip)
         requests.append(
             ScreenshotBatchRequest(
                 clip_path=clip.path,
                 label=clip.label,
                 filename_label=clip.path.stem,
-                source_frames=source_frames,
-                comparison_frames=frames,
-                selection_labels=selection_labels,
+                frames=tuple(
+                    SelectedScreenshot(
+                        row.frame,
+                        map_aligned_to_source_frame(clip=clip, aligned_frame=row.frame),
+                        row.label,
+                    )
+                    for row in rows
+                ),
                 size_bytes=clip.probe.fingerprint.size_bytes,
                 source_resolution=(clip.probe.width, clip.probe.height),
                 source_total_frames=clip.probe.num_frames,
                 signal=_source_signal_facts(clip.probe),
                 active_picture=active_picture,
-                progress_label=progress_label,
             )
         )
 
@@ -78,12 +78,10 @@ def run_render_phase(
             parallelism=2,
         ),
     )
-    for label, expected in expected_frames.items():
-        actual = [fact.source_frame for fact in rendered.frame_facts_by_label[label]]
-        if actual != expected:
-            raise ValueError(f"rendered frame facts do not match source mapping for {label!r}")
+    for clip in rendered:
+        label = clip.label
         missing_count = sum(
-            fact.picture_type is None for fact in rendered.frame_facts_by_label[label]
+            screenshot.result.facts.picture_type is None for screenshot in clip.screenshots
         )
         if missing_count:
             warnings.append(
@@ -96,9 +94,10 @@ def run_render_phase(
             )
 
     fallbacks = [
-        f"{label} ({facts.tonemap.transform.cause.value})"
-        for label, facts in rendered.clip_facts_by_label.items()
-        if facts.tonemap is not None and isinstance(facts.tonemap.transform, FallbackTonemap)
+        f"{clip.label} ({clip.clip_facts.tonemap.transform.cause.value})"
+        for clip in rendered
+        if clip.clip_facts.tonemap is not None
+        and isinstance(clip.clip_facts.tonemap.transform, FallbackTonemap)
     ]
     if fallbacks:
         warnings.append(
@@ -109,17 +108,15 @@ def run_render_phase(
             )
         )
 
-    screenshot_total = sum(len(paths) for paths in rendered.screenshots_by_label.values())
-    source_total = len(rendered.screenshots_by_label)
+    screenshot_total = sum(len(clip.screenshots) for clip in rendered)
+    source_total = len(rendered)
     frame_total = screenshot_total // source_total if source_total else 0
     screenshots_unit = "screenshot" if screenshot_total == 1 else "screenshots"
     frames_unit = "frame" if frame_total == 1 else "frames"
     sources_unit = "source" if source_total == 1 else "sources"
     return RenderPhaseOutput(
         render=RenderArtifacts(
-            screenshots_by_label=rendered.screenshots_by_label,
-            frame_facts_by_label=rendered.frame_facts_by_label,
-            clip_facts_by_label=rendered.clip_facts_by_label,
+            clips=rendered,
             screenshot_dir=output_dir,
             warnings=warnings,
         ),
@@ -128,33 +125,6 @@ def run_render_phase(
             f"({frame_total} {frames_unit} × {source_total} {sources_unit})"
         ),
     )
-
-
-def _render_progress_label(clip: ClipState, index: int) -> str:
-    if clip.label_is_explicit:
-        return clip.label
-    role = clip_role(index)
-    descriptor = (
-        format_micro_descriptor(clip.release_identity, separator=" · ")
-        if clip.release_identity is not None
-        else ""
-    )
-    return f"{role} | {descriptor or clip.label}"
-
-
-def _render_progress_labels(clips: list[ClipState]) -> list[str]:
-    labels = [_render_progress_label(clip, index) for index, clip in enumerate(clips)]
-    used = {label for clip, label in zip(clips, labels, strict=True) if clip.label_is_explicit}
-    for index, clip in enumerate(clips):
-        if clip.label_is_explicit:
-            continue
-        base = labels[index]
-        suffix = 2
-        while labels[index] in used:
-            labels[index] = f"{base} ({suffix})"
-            suffix += 1
-        used.add(labels[index])
-    return labels
 
 
 def _source_signal_facts(probe: ClipProbeSnapshot) -> SourceSignalFacts:

@@ -26,6 +26,7 @@ from tests.alignment_review_test_support import (
     unavailable_audio_attempt,
 )
 from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
+from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
 from tests.services.alignment_resolution_test_support import save_resolutions
 
@@ -478,7 +479,7 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
         ), state.warnings
         assert downstream[0].status == PhaseStatus.COMPLETED
         assert state.artifacts.render is not None
-        assert state.artifacts.render.screenshots_by_label
+        assert paths_by_label(state.artifacts.render.clips)
         assert ctx.comparisons[0].alignment is None
         detail = {
             "stream": "audio stream override",

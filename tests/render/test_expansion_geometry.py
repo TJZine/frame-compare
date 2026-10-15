@@ -19,6 +19,7 @@ from frame_compare.utils.media_facts import (
     PresentationState,
     SourceSignalFacts,
 )
+from tests.render_test_support import selections
 
 
 def _batch(
@@ -31,9 +32,7 @@ def _batch(
     return ScreenshotBatchRequest(
         clip_path=Path(f"{label}.mkv"),
         label=label,
-        source_frames=[10],
-        comparison_frames=[10],
-        selection_labels=[None],
+        frames=selections([10], [10], [None]),
         size_bytes=1,
         source_resolution=(width, height),
         source_total_frames=100,
@@ -60,7 +59,7 @@ def test_geometry_facts_preserve_native_active_picture_without_transform(
 ) -> None:
     mock_prepare.return_value = _prepared(1920, 1080)
     supplied = ActivePictureFacts(0, 140, 1920, 800, "content_derived", False)
-    requests, _, clip_facts = expand_batch_render_requests(
+    jobs = expand_batch_render_requests(
         [_batch("ref", 1920, 1080, active=supplied)],
         output_dir=Path("out"),
         config=ConfigSchema(
@@ -70,6 +69,8 @@ def test_geometry_facts_preserve_native_active_picture_without_transform(
         renderer="vapoursynth",
         ffmpeg_runner=MagicMock(),
     )
+    requests = [request for job in jobs for request in job.requests]
+    clip_facts = {job.label: job.clip_facts for job in jobs}
     facts = clip_facts["ref"].geometry
     assert facts.active_picture == supplied
     assert facts.is_noop
@@ -87,7 +88,7 @@ def test_geometry_facts_capture_aligned_active_picture_and_canvas(mock_prepare: 
     config = ConfigSchema(
         screenshots=ScreenshotsConfig(geometry_mode=ScreenshotGeometryMode.ALIGNED)
     )
-    requests, _, facts = expand_batch_render_requests(
+    jobs = expand_batch_render_requests(
         [_batch("wide", 1920, 1080), _batch("narrow", 1440, 1080)],
         output_dir=Path("out"),
         config=config,
@@ -95,6 +96,8 @@ def test_geometry_facts_capture_aligned_active_picture_and_canvas(mock_prepare: 
         renderer="vapoursynth",
         ffmpeg_runner=MagicMock(),
     )
+    requests = [request for job in jobs for request in job.requests]
+    facts = {job.label: job.clip_facts for job in jobs}
     assert all(request.geometry_plan is not None for request in requests)
     assert facts["wide"].geometry.final_canvas_size == (1920, 1080)
     assert facts["wide"].geometry.is_noop is True
@@ -114,7 +117,7 @@ def test_supplied_active_picture_wins_over_config_detection(mock_prepare: MagicM
             geometry_mode=ScreenshotGeometryMode.ALIGNED,
         )
     )
-    requests, _, facts = expand_batch_render_requests(
+    jobs = expand_batch_render_requests(
         [
             _batch("wide", 1920, 1080, active=supplied),
             _batch("narrow", 1440, 1080),
@@ -125,6 +128,8 @@ def test_supplied_active_picture_wins_over_config_detection(mock_prepare: MagicM
         renderer="vapoursynth",
         ffmpeg_runner=MagicMock(),
     )
+    requests = [request for job in jobs for request in job.requests]
+    facts = {job.label: job.clip_facts for job in jobs}
     geometry = facts["wide"].geometry
     assert geometry.active_picture == supplied
     assert geometry.final_canvas_size == (1600, 1080)

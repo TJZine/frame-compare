@@ -19,9 +19,8 @@ from frame_compare.orchestration.types import (
     PostUploadActionResults,
     SlowpicsUploadConfirmationStatus,
 )
-from frame_compare.render.types import RenderedClipFacts
+from frame_compare.render.types import RenderedClip
 from frame_compare.services.types import TmdbMetadata
-from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
@@ -32,24 +31,9 @@ if TYPE_CHECKING:
 
 @dataclass
 class RenderArtifacts:
-    screenshots_by_label: dict[str, list[Path]]
-    frame_facts_by_label: dict[str, list[RenderedFrameFacts]]
-    clip_facts_by_label: dict[str, RenderedClipFacts]
+    clips: tuple[RenderedClip, ...]
     screenshot_dir: Path | None
     warnings: list[RunWarning] = field(default_factory=list[RunWarning])
-
-    def __post_init__(self) -> None:
-        labels = set(self.screenshots_by_label)
-        if labels != set(self.frame_facts_by_label) or labels != set(self.clip_facts_by_label):
-            raise ValueError("render artifact mappings must have identical label sets")
-        for label in labels:
-            paths = self.screenshots_by_label[label]
-            facts = self.frame_facts_by_label[label]
-            if len(paths) != len(facts):
-                raise ValueError(
-                    f"render artifact path/fact count mismatch for {label!r}: "
-                    f"{len(paths)} != {len(facts)}"
-                )
 
 
 @dataclass(frozen=True)

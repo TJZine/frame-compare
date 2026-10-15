@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -88,29 +88,10 @@ class RenderedFrameResult:
 
 
 @dataclass(frozen=True, slots=True)
-class RenderedBatchResult:
-    """One-to-one screenshot, frame-fact, and clip-fact mappings."""
-
-    screenshots_by_label: dict[str, list[Path]] = field(default_factory=dict[str, list[Path]])
-    frame_facts_by_label: dict[str, list[RenderedFrameFacts]] = field(
-        default_factory=dict[str, list[RenderedFrameFacts]]
-    )
-    clip_facts_by_label: dict[str, RenderedClipFacts] = field(
-        default_factory=dict[str, RenderedClipFacts]
-    )
-
-    def __post_init__(self) -> None:
-        labels = set(self.screenshots_by_label)
-        if labels != set(self.frame_facts_by_label) or labels != set(self.clip_facts_by_label):
-            raise ValueError("rendered batch mappings must have identical label sets")
-        for label in labels:
-            paths = self.screenshots_by_label[label]
-            facts = self.frame_facts_by_label[label]
-            if len(paths) != len(facts):
-                raise ValueError(
-                    f"rendered batch path/fact count mismatch for {label!r}: "
-                    f"{len(paths)} != {len(facts)}"
-                )
+class SelectedScreenshot:
+    comparison_frame: int
+    source_frame: int
+    selection_label: str | None
 
 
 @dataclass
@@ -125,7 +106,6 @@ class RenderRequest:
     encoder_settings: EncoderSettings
     ffmpeg_runner: FFmpegRunner | None = None
     geometry_plan: RenderGeometryPlan | None = None
-    progress_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,16 +114,45 @@ class ScreenshotBatchRequest:
 
     clip_path: Path
     label: str
-    source_frames: list[int]
-    comparison_frames: list[int]
-    selection_labels: list[str | None]
+    frames: tuple[SelectedScreenshot, ...]
     size_bytes: int
     source_resolution: tuple[int, int]
     source_total_frames: int | None
     signal: SourceSignalFacts
     active_picture: ActivePictureFacts
     filename_label: str | None = None
-    progress_label: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedClipRender:
+    label: str
+    clip_facts: RenderedClipFacts
+    frames: tuple[SelectedScreenshot, ...]
+    requests: tuple[RenderRequest, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.frames) != len(self.requests):
+            raise ValueError("prepared clip must have one request per selected screenshot")
+        for selection, request in zip(self.frames, self.requests, strict=True):
+            if request.frame_number != selection.source_frame:
+                raise ValueError("prepared request source frame differs from selection")
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedScreenshot:
+    selection: SelectedScreenshot
+    result: RenderedFrameResult
+
+    def __post_init__(self) -> None:
+        if self.result.facts.source_frame != self.selection.source_frame:
+            raise ValueError("rendered source frame differs from selected screenshot")
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedClip:
+    label: str
+    clip_facts: RenderedClipFacts
+    screenshots: tuple[RenderedScreenshot, ...]
 
 
 Renderer = Literal["vapoursynth", "ffmpeg", "auto"]
@@ -166,7 +175,10 @@ __all__ = [
     "OverlayConfig",
     "PreparedRenderSource",
     "RenderRequest",
-    "RenderedBatchResult",
+    "PreparedClipRender",
+    "SelectedScreenshot",
+    "RenderedScreenshot",
+    "RenderedClip",
     "RenderedClipFacts",
     "RenderedFrameResult",
     "Renderer",

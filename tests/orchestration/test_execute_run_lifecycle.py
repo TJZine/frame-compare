@@ -37,6 +37,7 @@ from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import SourceInfo
+from tests.render_test_support import prepared_jobs
 from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
@@ -982,7 +983,9 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                 )
                 for index in range(6)
             ]
-            batch.render_batch_detailed(requests, parallelism=2)
+            batch.render_clip_jobs(
+                prepared_jobs(*[(request,) for request in requests]), parallelism=2
+            )
         return RenderPhaseOutput(
             _render_artifacts(
                 screenshots_by_label={},

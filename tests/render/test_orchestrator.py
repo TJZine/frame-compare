@@ -19,7 +19,7 @@ from frame_compare.config.schema import ColorConfig, ConfigSchema
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.orchestrator import (
     ProgressReporter,
-    render_batch_detailed,
+    render_clip_jobs,
 )
 from frame_compare.render.types import (
     EncoderSettings,
@@ -28,6 +28,7 @@ from frame_compare.render.types import (
 )
 from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+from tests.render_test_support import frame_results, prepared_jobs
 
 
 class _CustomFFmpegRunner(DefaultFFmpegRunner):
@@ -67,7 +68,7 @@ def _rendered(request: RenderRequest) -> RenderedFrameResult:
     )
 
 
-def test_render_batch_detailed_parallel_order(mock_render_request):
+def test_render_jobs_parallel_preserves_job_and_frame_order(mock_render_request):
     frame_zero_started = Event()
     frame_one_completed = Event()
     requests = [
@@ -98,14 +99,18 @@ def test_render_batch_detailed_parallel_order(mock_render_request):
             return _rendered(request)
 
         mock_render.side_effect = side_effect
-        results = render_batch_detailed(requests, parallelism=2, reporter=reporter)
+        results = frame_results(
+            render_clip_jobs(
+                prepared_jobs(*[(request,) for request in requests]),
+                parallelism=2,
+                reporter=reporter,
+            )
+        )
         assert [result.path for result in results] == [r.output_path for r in requests]
         assert [result.facts.source_frame for result in results] == [
             r.frame_number for r in requests
         ]
-        assert [call.args[0] for call in reporter.set_description.call_args_list] == [
-            f"frame {request.frame_number}" for request in requests
-        ]
+        reporter.set_description.assert_not_called()
         assert reporter.advance.call_count == len(requests)
 
 
@@ -130,7 +135,7 @@ def test_render_batch_fail_fast(mock_render_request):
 
         mock_render.side_effect = side_effect
         with pytest.raises(RuntimeError, match="Failed"):
-            render_batch_detailed(requests, parallelism=2)
+            render_clip_jobs(prepared_jobs(*[(request,) for request in requests]), parallelism=2)
 
         invoked_requests = [call.args[0] for call in mock_render.call_args_list]
         assert requests[2] in invoked_requests
@@ -196,10 +201,14 @@ def test_render_batch_parallel_prefers_real_failure_to_cancelled_sibling(
         ),
         pytest.raises(RuntimeError, match="real failure"),
     ):
-        render_batch_detailed(
-            requests,
+        render_clip_jobs(
+            prepared_jobs(
+                *[
+                    tuple(requests[index] for index in indices)
+                    for indices in [range(0, 1), range(1, 2), range(2, 3)]
+                ]
+            ),
             parallelism=2,
-            work_unit_ranges=[range(0, 1), range(1, 2), range(2, 3)],
         )
 
     assert len(controlled_executors) == 1
@@ -245,10 +254,11 @@ def test_render_batch_parallel_propagates_worker_cancellation(tmp_path: Path) ->
         ),
         pytest.raises(CancelledError, match="caller cancelled"),
     ):
-        render_batch_detailed(
-            [request],
+        render_clip_jobs(
+            prepared_jobs(
+                *[tuple([request][index] for index in indices) for indices in [range(0, 1)]]
+            ),
             parallelism=2,
-            work_unit_ranges=[range(0, 1)],
         )
 
 
@@ -300,7 +310,7 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
 
     def run_render() -> None:
         try:
-            render_batch_detailed(requests, parallelism=2)
+            render_clip_jobs(prepared_jobs(*[(request,) for request in requests]), parallelism=2)
         except BaseException as exc:
             render_exceptions.append(exc)
         finally:
@@ -326,7 +336,7 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
     assert str(render_exceptions[0]) == "Failed immediately"
 
 
-def test_render_batch_parallel_reports_lowest_request_index_failure(
+def test_render_jobs_parallel_reports_lowest_job_index_failure(
     tmp_path: Path,
 ) -> None:
     frame_zero_started = Event()
@@ -358,7 +368,7 @@ def test_render_batch_parallel_reports_lowest_request_index_failure(
 
     def run_render() -> None:
         try:
-            render_batch_detailed(requests, parallelism=3)
+            render_clip_jobs(prepared_jobs(requests[:2], requests[2:]), parallelism=2)
         except BaseException as exc:
             exceptions.append(exc)
 
@@ -391,7 +401,11 @@ def test_render_batch_marks_progress_failed_on_exception(mock_render_request) ->
         ),
         pytest.raises(RuntimeError, match="Failed"),
     ):
-        render_batch_detailed([mock_render_request], parallelism=1, reporter=reporter)
+        render_clip_jobs(
+            prepared_jobs(*[(request,) for request in [mock_render_request]]),
+            parallelism=1,
+            reporter=reporter,
+        )
 
     reporter.complete_phase.assert_called_once_with(ProgressPhaseStatus.FAILED)
 
@@ -403,21 +417,20 @@ def test_render_batch_sequential(mock_render_request):
     ]
     with patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as mock_render:
         mock_render.side_effect = _rendered
-        results = [rendered.path for rendered in render_batch_detailed(requests, parallelism=1)]
+        results = [
+            rendered.path
+            for rendered in frame_results(
+                render_clip_jobs(
+                    prepared_jobs(*[(request,) for request in requests]), parallelism=1
+                )
+            )
+        ]
         assert results == [Path("out_0.png"), Path("out_1.png"), Path("out_2.png")]
         assert mock_render.call_count == 3
 
 
-def test_render_batch_empty_validates_work_unit_ranges() -> None:
-    assert (
-        render_batch_detailed(
-            [],
-            work_unit_ranges=[range(0, 0), range(0, 0)],
-        )
-        == []
-    )
-    with pytest.raises(ValueError, match="contiguous and ordered"):
-        render_batch_detailed([], work_unit_ranges=[range(1, 1)])
+def test_render_clip_jobs_empty() -> None:
+    assert render_clip_jobs(()) == ()
 
 
 def test_render_batch_sequential_preserves_default_runner_subclass_override(
@@ -437,7 +450,7 @@ def test_render_batch_sequential_preserves_default_runner_subclass_override(
         for frame in [1, 2]
     ]
 
-    render_batch_detailed(requests, parallelism=1)
+    render_clip_jobs(prepared_jobs(requests), parallelism=1)
 
     assert runner.single_calls == [1, 2]
 
@@ -466,7 +479,7 @@ def test_render_batch_sequential_does_not_batch_non_png_outputs(tmp_path: Path) 
             "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed"
         ) as render_ffmpeg_batch,
     ):
-        render_batch_detailed(requests, parallelism=1)
+        render_clip_jobs(prepared_jobs(requests), parallelism=1)
 
     assert render_frame.call_count == 2
     render_ffmpeg_batch.assert_not_called()
@@ -497,7 +510,7 @@ def test_render_batch_sequential_does_not_batch_negative_frame(tmp_path: Path) -
         ) as render_ffmpeg_batch,
         pytest.raises(RuntimeError, match="single-frame path"),
     ):
-        render_batch_detailed(requests, parallelism=1)
+        render_clip_jobs(prepared_jobs(requests), parallelism=1)
 
     render_frame.assert_called_once_with(requests[0])
     render_ffmpeg_batch.assert_not_called()
@@ -507,7 +520,7 @@ def test_render_batch_sequential_does_not_batch_negative_frame(tmp_path: Path) -
     "incompatibility",
     ["clip", "runner", "geometry", "output-directory", "duplicate", "decreasing"],
 )
-def test_render_batch_sequential_splits_incompatible_ffmpeg_requests(
+def test_render_clip_job_serializes_all_frames_when_any_request_is_incompatible(
     incompatibility: str,
     tmp_path: Path,
 ) -> None:
@@ -522,21 +535,20 @@ def test_render_batch_sequential_splits_incompatible_ffmpeg_requests(
             encoder_settings=EncoderSettings(),
             ffmpeg_runner=runner,
         )
-        for frame in (1, 2)
+        for frame in (1, 2, 3)
     ]
     if incompatibility == "clip":
-        requests[1].clip = Path("other.mkv")
+        requests[2].clip = Path("other.mkv")
     elif incompatibility == "runner":
-        requests[1].ffmpeg_runner = DefaultFFmpegRunner()
+        requests[2].ffmpeg_runner = DefaultFFmpegRunner()
     elif incompatibility == "geometry":
-        requests[0].geometry_plan = MagicMock()
-        requests[1].geometry_plan = MagicMock()
+        requests[2].geometry_plan = MagicMock()
     elif incompatibility == "output-directory":
-        requests[1].output_path = tmp_path / "other" / "out_2.png"
+        requests[2].output_path = tmp_path / "other" / "out_2.png"
     elif incompatibility == "duplicate":
-        requests[1].frame_number = requests[0].frame_number
+        requests[2].frame_number = requests[1].frame_number
     elif incompatibility == "decreasing":
-        requests[0].frame_number = 3
+        requests[2].frame_number = 0
 
     with (
         patch(
@@ -547,7 +559,7 @@ def test_render_batch_sequential_splits_incompatible_ffmpeg_requests(
             "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed"
         ) as render_ffmpeg_batch,
     ):
-        render_batch_detailed(requests, parallelism=1)
+        render_clip_jobs(prepared_jobs(requests), parallelism=1)
 
     assert render_frame.call_count == len(requests)
     render_ffmpeg_batch.assert_not_called()
@@ -588,11 +600,17 @@ def test_render_batch_parallel_overlaps_ffmpeg_groups_and_preserves_order_and_pr
         ) as render_batch,
         patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as render_frame,
     ):
-        results = render_batch_detailed(
-            requests,
-            parallelism=2,
-            reporter=reporter,
-            work_unit_ranges=[range(0, 2), range(2, 5)],
+        results = frame_results(
+            render_clip_jobs(
+                prepared_jobs(
+                    *[
+                        tuple(requests[index] for index in indices)
+                        for indices in [range(0, 2), range(2, 5)]
+                    ]
+                ),
+                parallelism=2,
+                reporter=reporter,
+            )
         )
 
     assert sorted(
@@ -647,10 +665,16 @@ def test_render_batch_parallelizes_clip_units_but_serializes_each_clip(
         "frame_compare.render.batch.orchestrator.render_frame_detailed",
         side_effect=render_single,
     ):
-        results = render_batch_detailed(
-            requests,
-            parallelism=2,
-            work_unit_ranges=[range(0, 2), range(2, 4)],
+        results = frame_results(
+            render_clip_jobs(
+                prepared_jobs(
+                    *[
+                        tuple(requests[index] for index in indices)
+                        for indices in [range(0, 2), range(2, 4)]
+                    ]
+                ),
+                parallelism=2,
+            )
         )
 
     assert calls_by_clip == {
@@ -724,11 +748,15 @@ def test_clip_unit_failure_preserves_partial_serialized_progress_and_admission(
 
     def run_render() -> None:
         try:
-            render_batch_detailed(
-                requests,
+            render_clip_jobs(
+                prepared_jobs(
+                    *[
+                        tuple(requests[index] for index in indices)
+                        for indices in [range(0, 2), range(2, 4), range(4, 5)]
+                    ]
+                ),
                 parallelism=2,
                 reporter=reporter,
-                work_unit_ranges=[range(0, 2), range(2, 4), range(4, 5)],
             )
         except BaseException as exc:
             exceptions.append(exc)
@@ -809,7 +837,11 @@ def test_render_batch_parallel_mixes_indivisible_ffmpeg_groups_and_singletons(
             side_effect=render_single,
         ),
     ):
-        results = render_batch_detailed(requests, parallelism=2)
+        results = frame_results(
+            render_clip_jobs(
+                prepared_jobs(requests[:2], requests[2:3], requests[3:]), parallelism=2
+            )
+        )
 
     assert sorted(batches) == [[1, 2], [4, 5]]
     assert singletons == [3]
@@ -858,7 +890,9 @@ def test_render_batch_parallel_failure_does_not_schedule_later_work(tmp_path: Pa
 
     def run_render() -> None:
         try:
-            render_batch_detailed(requests, parallelism=2)
+            render_clip_jobs(
+                prepared_jobs(requests[:2], requests[2:3], requests[3:]), parallelism=2
+            )
         except BaseException as exc:
             exceptions.append(exc)
 
@@ -948,13 +982,25 @@ def test_clip_workers_stop_before_next_frame_and_preserve_first_failure(
         try:
             if real_failure:
                 with pytest.raises(RuntimeError, match="first render failure"):
-                    render_batch_detailed(
-                        requests, parallelism=2, work_unit_ranges=[range(4), range(4, 8)]
+                    render_clip_jobs(
+                        prepared_jobs(
+                            *[
+                                tuple(requests[index] for index in indices)
+                                for indices in [range(4), range(4, 8)]
+                            ]
+                        ),
+                        parallelism=2,
                     )
             else:
                 with suppress(_RunInterrupt):
-                    render_batch_detailed(
-                        requests, parallelism=2, work_unit_ranges=[range(4), range(4, 8)]
+                    render_clip_jobs(
+                        prepared_jobs(
+                            *[
+                                tuple(requests[index] for index in indices)
+                                for indices in [range(4), range(4, 8)]
+                            ]
+                        ),
+                        parallelism=2,
                     )
             assert sorted(calls) == [0, 4]
         finally:
@@ -1025,7 +1071,7 @@ def test_ffmpeg_batch_stop_reaps_child_without_publishing_partial_results(
         nonlocal task
         task = asyncio.current_task()
         with pytest.raises(_RunInterrupt):
-            render_batch_detailed(requests, parallelism=parallelism)
+            render_clip_jobs(prepared_jobs(requests), parallelism=parallelism)
         await cancellation_checkpoint()
 
     with pytest.raises(asyncio.CancelledError):
@@ -1105,8 +1151,8 @@ def test_real_sigint_stops_frame_admission_within_150ms() -> None:
             sender.start()
             try:
                 with suppress(_RunInterrupt):
-                    orchestrator.render_batch_detailed(
-                        requests, parallelism=2, work_unit_ranges=[range(60), range(60, 120)]
+                    orchestrator.render_clip_jobs(
+                        prepared_jobs(requests[:60], requests[60:]), parallelism=2
                     )
             finally:
                 sender.join(timeout=2)
@@ -1116,6 +1162,7 @@ def test_real_sigint_stops_frame_admission_within_150ms() -> None:
             interrupt_observed.append(time.monotonic())
             await cancellation_checkpoint()
 
+        from tests.render_test_support import prepared_jobs
         orchestrator.render_frame_detailed = render
         orchestrator.wait = poll
         try:

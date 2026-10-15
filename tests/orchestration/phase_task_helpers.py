@@ -34,6 +34,7 @@ from frame_compare.utils.media_facts import (
     SourceSignalFacts,
 )
 from frame_compare.utils.types import WorkspacePaths
+from tests.render_test_support import rendered_clips
 
 __all__ = [
     "_run_align_phase",
@@ -124,23 +125,27 @@ def _render_artifacts(
         else source_frames_by_label
     )
     return RenderArtifacts(
-        screenshots_by_label=screenshots_by_label,
-        frame_facts_by_label={
-            label: [RenderedFrameFacts(source_frame=frame, picture_type="I") for frame in values]
-            for label, values in frames.items()
-        },
-        clip_facts_by_label={
-            label: RenderedClipFacts(
-                size_bytes=0,
-                source_resolution=(1920, 1080),
-                source_total_frames=100,
-                signal=SourceSignalFacts(is_hdr=False),
-                presentation_state=PresentationState.SDR,
-                tonemap=None,
-                geometry=geometry,
-            )
-            for label in screenshots_by_label
-        },
+        clips=rendered_clips(
+            screenshots_by_label,
+            {
+                label: [
+                    RenderedFrameFacts(source_frame=frame, picture_type="I") for frame in values
+                ]
+                for label, values in frames.items()
+            },
+            {
+                label: RenderedClipFacts(
+                    size_bytes=0,
+                    source_resolution=(1920, 1080),
+                    source_total_frames=100,
+                    signal=SourceSignalFacts(is_hdr=False),
+                    presentation_state=PresentationState.SDR,
+                    tonemap=None,
+                    geometry=geometry,
+                )
+                for label in screenshots_by_label
+            },
+        ),
         screenshot_dir=screenshot_dir,
     )
 

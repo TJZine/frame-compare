@@ -1218,12 +1218,25 @@ ranking, or provenance translation. Orchestration projects its cache-stable
 render remains full-frame. The FFmpeg backend applies geometry filters after
 exact frame selection, and the VapourSynth path chooses between the Pillow writer
 and eligible `core.fpng.Write` output without changing CLI import-time behavior.
-The render batch scheduler treats each clip as one production work unit and runs at
-most two clip units at once. Compatible ordered FFmpeg requests within a clip use one
-decode pass; VapourSynth, custom-runner, and non-PNG frames within one clip render
-sequentially while a second clip may overlap. Results remain in request order, and
-overlay/color processing is unchanged. Nested screenshot progress advances after each
-serialized frame completes, or for all FFmpeg frames when their batch completes.
+Render selection crosses the batch boundary as `SelectedScreenshot` records containing
+comparison frame, source frame, and selection label. Expansion validates all physical
+output paths before native preparation and produces one `PreparedClipRender` per clip,
+with clip facts, selections, and render requests. Its constructor checks request count
+and source-frame identity. The scheduler returns ordered `RenderedClip` records;
+each `RenderedScreenshot` checks that its result facts identify the selected source
+frame. There are no flattened request ranges or label-map reconstruction steps.
+
+The scheduler runs at most two clip jobs at once. A clip uses one FFmpeg decode pass
+only when every request is compatible and source frames are ordered; otherwise all
+its frames render sequentially while another clip may overlap. Screenshot progress
+is count-only and locked across workers: each serialized frame advances the count,
+or a completed FFmpeg batch advances it together. Parallel cancellation polls every
+50 ms, closes admission, signals FFmpeg abort, cancels unstarted work, and drains
+owned work before returning. Real failures are selected by lowest clip-job index.
+Report orchestration pairs context clips with rendered clips using strict ordered
+iteration and label checks, then consumes their screenshot records directly. The
+publishing boundary projects plain path dictionaries for services without importing
+render types into the service layer. Overlay, geometry, and color policy are unchanged.
 
 Runtime ownership matrix:
 
@@ -1286,6 +1299,12 @@ These files currently carry disproportionate change risk:
   `alignment_review_contract.py`, and `alignment_review_panel.py`
 
 Working rule: changes to these files should usually trigger full verification and, when they reshape behavior or ownership, a same-pass update to this document.
+
+The render scheduler hotspot now owns only per-clip job scheduling, progress, and
+stop/drain behavior. Selection/request identity belongs to `PreparedClipRender`,
+selection/result identity belongs to `RenderedScreenshot`, and report cardinality
+remains guarded by `ReportData`. Orchestration no longer reconstructs or validates
+parallel path/fact maps.
 
 Native alignment-review hotspot dispositions for the current implementation:
 

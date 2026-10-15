@@ -28,6 +28,7 @@ from frame_compare.services.types import (
     AlignmentResult,
     TmdbMetadata,
 )
+from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
@@ -389,10 +390,10 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
     report_data = captured["report_data"]
     assert output.report_path == expected_report_path
     assert report_data.frames == [7, 11]
-    assert [image.path for image in report_data.clips[0].images] == render.screenshots_by_label[
+    assert [image.path for image in report_data.clips[0].images] == paths_by_label(render.clips)[
         "Reference"
     ]
-    assert [image.path for image in report_data.clips[1].images] == render.screenshots_by_label[
+    assert [image.path for image in report_data.clips[1].images] == paths_by_label(render.clips)[
         "Encode 1"
     ]
     assert report_data.metadata == metadata

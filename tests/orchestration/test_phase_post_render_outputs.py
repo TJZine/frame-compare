@@ -50,6 +50,7 @@ from tests.orchestration.phase_task_helpers import (
     _render_artifacts,
     _RenderRunner,
 )
+from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
 from tests.tonemap_test_support import libplacebo_tonemap
 
@@ -242,10 +243,10 @@ def test_run_report_phase_builds_report_data_and_records_path(
     assert report_data.frame_details == []
     assert report_data.clips[0].active_picture == active_picture
     assert report_data.rendering.geometry_by_label["Reference"].active_picture == active_picture
-    assert [image.path for image in report_data.clips[0].images] == render.screenshots_by_label[
+    assert [image.path for image in report_data.clips[0].images] == paths_by_label(render.clips)[
         "Reference"
     ]
-    assert [image.path for image in report_data.clips[1].images] == render.screenshots_by_label[
+    assert [image.path for image in report_data.clips[1].images] == paths_by_label(render.clips)[
         "Encode 1"
     ]
     assert [clip.display.control for clip in report_data.clips] == [
@@ -351,7 +352,7 @@ def test_run_report_phase_rejects_short_artifacts_before_indexing(tmp_path: Path
         source_frames_by_label={"Reference": [1]},
     )
 
-    with pytest.raises(ValueError, match="report artifacts for 'Reference'.*expected 2"):
+    with pytest.raises(ValueError, match="report image count mismatch for 'Reference': expected 2"):
         phase_post_render.run_report_phase(
             ctx,
             frames=[1, 2],
@@ -376,13 +377,12 @@ def test_run_report_phase_discloses_shared_tonemap_setting(
         source_frames_by_label={"Reference": [1], "Encode 1": [1]},
     )
     settings = TonemapSettings(target_nits=203)
-    render.clip_facts_by_label["Reference"] = replace(
-        render.clip_facts_by_label["Reference"], tonemap=libplacebo_tonemap(settings)
+    render.clips = tuple(
+        replace(clip, clip_facts=replace(clip.clip_facts, tonemap=libplacebo_tonemap(settings)))
+        if clip.label == "Reference" or comparison_hdr
+        else clip
+        for clip in render.clips
     )
-    if comparison_hdr:
-        render.clip_facts_by_label["Encode 1"] = replace(
-            render.clip_facts_by_label["Encode 1"], tonemap=libplacebo_tonemap(settings)
-        )
     captured: dict[str, Any] = {}
 
     def _fake_generate_report(
@@ -953,3 +953,19 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
     assert "publish:" in state.warnings[0].text
     assert "Image upload failed with status 400" in state.warnings[0].text
     assert warning_events == ["phase_warned"]
+
+
+@pytest.mark.parametrize("violation", ["label", "count"])
+def test_report_requires_rendered_clips_in_context_order(tmp_path: Path, violation: str) -> None:
+    ctx = _context(tmp_path)
+    render = _render_artifacts(
+        screenshots_by_label={"Reference": [tmp_path / "frame.png"]}, screenshot_dir=tmp_path
+    )
+    if violation == "label":
+        render.clips = (replace(render.clips[0], label="unrelated"),)
+    else:
+        render.clips = (*render.clips, replace(render.clips[0], label="extra"))
+    with pytest.raises(ValueError, match="clip label mismatch|zip.*longer"):
+        phase_post_render.run_report_phase(
+            ctx, frames=[0], render=render, metadata=None, slowpics_url=None
+        )
