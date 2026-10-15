@@ -304,3 +304,26 @@ def test_alignment_passes_complete_native_session_request(
     }
     assert review["evidence_availability"] == "current_attempt"
     assert review["audio_attempt"]["decision"]["candidate"]["frame_offset"] == 3
+
+
+@pytest.mark.parametrize("payload", ["[" * 10000, "1" * 5000])
+@pytest.mark.parametrize("forced", [False, True])
+def test_decode_limits_retain_computed_authority_or_fail_forced_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: str, forced: bool
+) -> None:
+    def launch(*_args: object, **_kwargs: object):
+        session = _session(tmp_path)
+        session.result_path.write_text(payload, encoding="utf-8")
+        return session, 0.0
+
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
+    config = AlignmentConfig(use_vsview=True, force_interactive=forced, cache_results=False)
+    if forced:
+        with pytest.raises(AudioAlignmentError, match="valid VSView review result"):
+            _run(tmp_path, monkeypatch, config=config)
+    else:
+        results = _run(tmp_path, monkeypatch, config=config)
+        assert results[0].frame_offset == 3
+        assert results[0].source == "computed"
+        assert results[0].applied
+    assert load_manual_overrides(tmp_path) == {}

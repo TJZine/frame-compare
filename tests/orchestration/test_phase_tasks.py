@@ -534,8 +534,11 @@ def test_run_analyze_phase_cache_only_invalid_cache_does_not_recompute(
         )
 
 
+@pytest.mark.parametrize(
+    "corruption", ["numeric", "enum-list", "enum-dict", "deep", "integer-limit"]
+)
 def test_run_analyze_phase_cache_only_oversized_cache_is_typed_corruption(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, corruption: str
 ) -> None:
     ctx = _context(tmp_path)
     ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
@@ -557,6 +560,14 @@ def test_run_analyze_phase_cache_only_oversized_cache_is_typed_corruption(
         input_videos, "fp"
     )
     cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
+
+    if corruption in {"deep", "integer-limit"}:
+        cache_path.write_text("[" * 10000 if corruption == "deep" else "1" * 5000, encoding="utf-8")
+    elif corruption.startswith("enum"):
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        payload["luminance"] = [0.5]
+        payload["metadata"]["active_rect_detection_mode"] = [] if corruption == "enum-list" else {}
+        cache_path.write_text(json.dumps(payload), encoding="utf-8")
 
     class FailingLoader:
         def load(self, path: Path) -> SourceInfo:

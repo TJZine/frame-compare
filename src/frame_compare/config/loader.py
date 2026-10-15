@@ -25,6 +25,7 @@ from frame_compare.config.errors import (
 )
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import normalize_pydantic_errors
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
 type _SettingsSourcesCustomizer = Callable[
     [
@@ -152,7 +153,14 @@ def load_raw_config(config_path: Path) -> RawConfigDocument:
     _require_regular_config_file(config_path, required=True)
     try:
         text = config_path.read_text(encoding="utf-8-sig")
-        untrusted: object = tomllib.loads(text)
+        try:
+            untrusted: object = tomllib.loads(text)
+        except tomllib.TOMLDecodeError:
+            raise
+        except SERIALIZED_DECODE_FAILURES:
+            raise ConfigParseError(
+                config_path, "configuration exceeds TOML parser limits"
+            ) from None
     except FileNotFoundError:
         raise ConfigNotFoundError(config_path) from None
     except tomllib.TOMLDecodeError as exc:

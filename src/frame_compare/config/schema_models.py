@@ -206,7 +206,7 @@ class ScreenshotsConfig(BaseModel):
     overlay_mode: OverlayMode = OverlayMode.STANDARD
     include_frame_number: bool = True
     png_compression: int = Field(default=6, ge=0, le=9)
-    ffmpeg_timeout_seconds: float = Field(default=30.0, ge=5.0)
+    ffmpeg_timeout_seconds: float = Field(default=30.0, ge=5.0, allow_inf_nan=False)
     geometry_mode: ScreenshotGeometryMode = ScreenshotGeometryMode.NATIVE
     active_rect_detection: ScreenshotActiveRectDetection = ScreenshotActiveRectDetection.AUTO
     aligned_scale_policy: ScreenshotAlignedScalePolicy = ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
@@ -270,7 +270,7 @@ class SlowpicsConfig(BaseModel):
     confirm_upload_after_report: bool = False
     visibility: Visibility = Visibility.PUBLIC
     delete_after_upload: bool = False
-    timeout_seconds: float = Field(default=60.0, ge=10.0)
+    timeout_seconds: float = Field(default=60.0, ge=10.0, allow_inf_nan=False)
     max_retries: int = Field(default=3, ge=1, le=10)
     title: str = ""
     title_template: str = ""
@@ -279,7 +279,7 @@ class SlowpicsConfig(BaseModel):
     tmdb_id: Annotated[int, Field(strict=True, gt=0)] | None = None
     tmdb_media_type: Literal["movie", "tv"] | None = None
     remove_after_days: Annotated[int, Field(strict=True, ge=0, le=999999)] = 0
-    image_upload_timeout_seconds: float = Field(default=180.0, ge=10.0)
+    image_upload_timeout_seconds: float = Field(default=180.0, ge=10.0, allow_inf_nan=False)
     copy_url_to_clipboard: bool = True
     open_in_browser: bool = True
     create_url_shortcut: bool = True
@@ -320,7 +320,7 @@ class TmdbConfig(BaseModel):
     api_key: str | None = None
     enabled: bool = True
     unattended: bool = False
-    timeout_seconds: float = Field(default=10.0, ge=1.0)
+    timeout_seconds: float = Field(default=10.0, ge=1.0, allow_inf_nan=False)
     year_tolerance: int = Field(default=2, ge=0, le=5)
     category_preference: Literal["movie", "tv"] | None = None
 

@@ -242,12 +242,16 @@ def test_calculate_metrics_computes_on_cache_miss(
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
+@pytest.mark.parametrize(
+    "corruption", ["numeric", "enum-list", "enum-dict", "deep", "integer-limit"]
+)
 def test_calculate_metrics_recomputes_after_oversized_cache_entry(
     mock_key,
     mock_loader_cls,
     mock_strategy,
     mock_save,
     tmp_path: Path,
+    corruption: str,
 ) -> None:
     mock_key.return_value = "fp"
     video_path = tmp_path / "v1.mkv"
@@ -267,6 +271,14 @@ def test_calculate_metrics_recomputes_after_oversized_cache_entry(
         ),
         encoding="utf-8",
     )
+    path = cache_file(tmp_path, "fp")
+    if corruption in {"deep", "integer-limit"}:
+        path.write_text("[" * 10000 if corruption == "deep" else "1" * 5000, encoding="utf-8")
+    elif corruption.startswith("enum"):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["luminance"] = [0.5]
+        payload["metadata"]["active_rect_source"] = [] if corruption == "enum-list" else {}
+        path.write_text(json.dumps(payload), encoding="utf-8")
     source = mock_loader_cls.return_value.load.return_value
     source.clip.num_frames = 1
     source.fps = Fraction(24, 1)

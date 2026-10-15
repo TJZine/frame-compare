@@ -366,3 +366,48 @@ def test_default_config_location_directory_is_rejected(
     (tmp_path / "config" / "config.toml").mkdir(parents=True)
     with pytest.raises(ConfigParseError, match="regular file"):
         load_config()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+    ],
+)
+@pytest.mark.parametrize("raw", [False, True])
+def test_parser_limits_are_typed_config_errors(tmp_path: Path, content: str, raw: bool) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(ConfigParseError, match="parser limits"):
+        if raw:
+            load_raw_config(path)
+        else:
+            load_config(path)
+
+
+def test_deep_environment_json_is_typed_config_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_TMDB", "[" * 10000)
+    with pytest.raises(ConfigValidationError):
+        load_config()
+
+
+@pytest.mark.parametrize(
+    "section, field",
+    [
+        ("screenshots", "ffmpeg_timeout_seconds"),
+        ("slowpics", "timeout_seconds"),
+        ("slowpics", "image_upload_timeout_seconds"),
+        ("tmdb", "timeout_seconds"),
+    ],
+)
+@pytest.mark.parametrize("source", ["toml", "env"])
+def test_nonfinite_timeouts_are_typed_config_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, section: str, field: str, source: str
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(f"[{section}]\n{field} = inf\n" if source == "toml" else "", encoding="utf-8")
+    if source == "env":
+        monkeypatch.setenv(f"FRAME_COMPARE_{section.upper()}__{field.upper()}", "inf")
+    with pytest.raises(ConfigValidationError):
+        load_config(path)

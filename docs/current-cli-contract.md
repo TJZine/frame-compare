@@ -1246,6 +1246,9 @@ its core. When unset, neither process changes the VapourSynth default.
 
 ## Config-Only TMDB Surface
 
+`[tmdb].timeout_seconds` defaults to `10.0` and must be finite and at least
+`1.0` second.
+
 `[tmdb].unattended` remains an accepted, persisted boolean with default `false`.
 It currently has no behavioral effect: both values use the resolver's selected
 match when available and otherwise continue without a match. Neither value opens
@@ -1379,10 +1382,10 @@ association omits multipart `tmdbId`.
 per-comparison fields. Public maps to `public=true`/`PUBLIC`; explicit unlisted
 maps to `public=false`/`LINK_ONLY`. `remove_after_days` is a strict `0..999999`
 remote retention value: zero sends empty `removeAfter`, positive values send
-decimal days. `image_upload_timeout_seconds` is at least 10 seconds and is the
+decimal days. `image_upload_timeout_seconds` must be finite and at least 10 seconds; it is the
 image write-timeout floor; the floor also cannot be lower than
 `file_size / 256 KiB/s + 15 seconds`. Navigation and metadata continue using
-`timeout_seconds`.
+`timeout_seconds`, which must be finite and at least 10 seconds.
 
 `confirm_upload_after_report` is a config-only, interactive-only opt-in. It only
 has effect when effective `auto_upload = true`; it adds no `run` flag, no wizard
@@ -1632,7 +1635,7 @@ dedicated `run` flags for them:
   compression input for Pillow and VapourSynth fpng. Pillow receives the value
   directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;
   unsupported values fail config validation rather than being silently clamped.
-- `ffmpeg_timeout_seconds` defaults to `30.0` and must be at least `5.0`. It
+- `ffmpeg_timeout_seconds` defaults to `30.0` and must be finite and at least `5.0`. It
   controls only FFmpeg frame extraction. The separate ffprobe HDR metadata
   probe keeps its fixed `15.0` second timeout.
 

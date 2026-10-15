@@ -192,7 +192,19 @@ def test_execute_run_from_cache_only_fails_when_probe_cache_missing(
         asyncio.run(execute_run(request, deps=deps))
 
 
-@pytest.mark.parametrize("second_read", ["valid", "missing", "corrupted", "version_mismatch"])
+@pytest.mark.parametrize(
+    "second_read",
+    [
+        "valid",
+        "missing",
+        "corrupted",
+        "version_mismatch",
+        "enum-list",
+        "enum-dict",
+        "deep",
+        "integer-limit",
+    ],
+)
 def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -234,6 +246,14 @@ def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
                 cache_path.unlink()
             elif second_read == "corrupted":
                 cache_path.write_text("invalid JSON", encoding="utf-8")
+            elif second_read in {"deep", "integer-limit"}:
+                cache_path.write_text(
+                    "[" * 10000 if second_read == "deep" else "1" * 5000, encoding="utf-8"
+                )
+            elif second_read.startswith("enum"):
+                payload = json.loads(cache_path.read_text(encoding="utf-8"))
+                payload["metadata"]["active_rect_source"] = [] if second_read == "enum-list" else {}
+                cache_path.write_text(json.dumps(payload), encoding="utf-8")
             elif second_read == "version_mismatch":
                 payload = json.loads(cache_path.read_text(encoding="utf-8"))
                 payload["version"] = cache_io.CACHE_VERSION + 1
@@ -270,6 +290,10 @@ def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
         expected_error = {
             "missing": MetricsCalculationError,
             "corrupted": CacheCorruptionError,
+            "enum-list": CacheCorruptionError,
+            "enum-dict": CacheCorruptionError,
+            "deep": CacheCorruptionError,
+            "integer-limit": CacheCorruptionError,
             "version_mismatch": CacheVersionMismatchError,
         }[second_read]
         with pytest.raises(expected_error):

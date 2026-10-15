@@ -689,3 +689,34 @@ def test_run_no_color_error_output_preserves_literal_brackets(
     assert "[red]" not in result.stderr
     assert "[yellow]" not in result.stderr
     assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "source, content, code",
+    [
+        ("toml", "x = " + "{x=" * 1500 + "0" + "}" * 1500, "FC-1002"),
+        ("toml", "x = " + "1" * 5000, "FC-1002"),
+        ("env", "[" * 10000, "FC-1003"),
+        ("env", "1" * 5000, "FC-1003"),
+        ("toml", "[tmdb]\ntimeout_seconds = inf\n", "FC-1003"),
+        ("timeout-env", "inf", "FC-1003"),
+    ],
+)
+def test_run_json_reports_parser_limits_and_nonfinite_timeout(
+    tmp_path: Path, monkeypatch: MonkeyPatch, source: str, content: str, code: str
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        path = _write_minimal_config(root)
+        if source == "toml":
+            path.write_text(content, encoding="utf-8")
+        elif source == "env":
+            monkeypatch.setenv("FRAME_COMPARE_TMDB", content)
+        else:
+            monkeypatch.setenv("FRAME_COMPARE_TMDB__TIMEOUT_SECONDS", content)
+        result = runner.invoke(app, ["run", "--root", str(root), "--json"])
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == code

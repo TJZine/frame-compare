@@ -881,3 +881,20 @@ def test_session_rejects_preexisting_result(tmp_path: Path) -> None:
             sessions_dir=session.sessions_dir,
             require_result_absent=True,
         )
+
+
+@pytest.mark.parametrize(
+    "content", [pytest.param("[" * 10000, id="deep"), pytest.param("1" * 5000, id="integer-limit")]
+)
+def test_result_decode_limits_are_unreadable(tmp_path: Path, content: str) -> None:
+    session = _session(tmp_path)
+    session.result_path.write_text(content, encoding="utf-8")
+    with pytest.raises(AlignmentReviewContractError, match="result is unreadable"):
+        read_alignment_review_result(session, _expected())
+
+
+def test_result_duplicate_key_keeps_hook_diagnostic(tmp_path: Path) -> None:
+    session = _session(tmp_path)
+    session.result_path.write_text('{"schema_version":1,"schema_version":1}', encoding="utf-8")
+    with pytest.raises(AlignmentReviewContractError, match="duplicate"):
+        read_alignment_review_result(session, _expected())

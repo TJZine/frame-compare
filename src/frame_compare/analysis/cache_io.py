@@ -28,6 +28,7 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
@@ -182,7 +183,7 @@ def read_cache_version(cache_path: Path) -> str | None:
     """Read the top-level version from a cache payload for error reporting."""
     try:
         raw_data: object = json.loads(cache_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+    except (OSError, *SERIALIZED_DECODE_FAILURES):
         return None
     if not isinstance(raw_data, Mapping):
         return None
@@ -212,7 +213,7 @@ def load_cached_metrics(
     try:
         with cache_path.open("r", encoding="utf-8") as f:
             raw_data: object = json.load(f)
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+    except (OSError, *SERIALIZED_DECODE_FAILURES):
         return CacheLoadResult(success=False, reason="corrupted")
 
     try:
@@ -544,7 +545,7 @@ def _parse_metric_active_rect(value: object) -> MetricActiveRect | None:
 
 
 def _parse_active_rect_source(value: object) -> ActiveRectSource:
-    if value not in {
+    if not isinstance(value, str) or value not in {
         "explicit",
         "metadata",
         "dimension-derived",
@@ -557,7 +558,7 @@ def _parse_active_rect_source(value: object) -> ActiveRectSource:
 
 
 def _parse_active_rect_detection_mode(value: object) -> ActiveRectDetectionMode:
-    if value not in {"provided", "dimension", "aspect_ratio", "auto"}:
+    if not isinstance(value, str) or value not in {"provided", "dimension", "aspect_ratio", "auto"}:
         raise _CacheParseError
     return cast(ActiveRectDetectionMode, value)
 
@@ -571,7 +572,7 @@ def _parse_active_rect_algorithm_id(value: object) -> ActiveRectAlgorithmId:
 def _parse_algorithm_identity_json(value: str) -> Mapping[str, object]:
     try:
         raw_data: object = json.loads(value)
-    except json.JSONDecodeError as exc:
+    except SERIALIZED_DECODE_FAILURES as exc:
         raise _CacheParseError from exc
     return _as_mapping(raw_data)
 

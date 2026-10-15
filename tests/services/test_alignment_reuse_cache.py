@@ -1131,3 +1131,20 @@ def test_owned_lock_wait_aborts_without_publishing(
     assert blocked == [True]
     with file_lock.exclusive_file_lock(path):
         pass
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+    ],
+)
+def test_parser_limits_ignore_cache_and_write_fresh(tmp_path: Path, content: str) -> None:
+    request = _request(tmp_path)
+    path = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    path.parent.mkdir(parents=True)
+    path.write_text(content, encoding="utf-8")
+    assert load_reusable_offset_entries(request) is None
+    save_reusable_offsets(request, [_provenance(request)])
+    assert load_reusable_offset_entries(request) is not None

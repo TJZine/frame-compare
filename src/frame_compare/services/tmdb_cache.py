@@ -26,6 +26,7 @@ import tomli_w
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.file_lock import exclusive_file_lock
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
 log = structlog.get_logger()
 
@@ -275,7 +276,7 @@ class TmdbCache:
                 data = tomllib.load(handle)
         except FileNotFoundError:
             return {}
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        except (OSError, *SERIALIZED_DECODE_FAILURES):
             log.warning(
                 "tmdb_cache_read_failed",
                 cache_path=str(self.path),

@@ -347,6 +347,8 @@ def test_pending_review_without_launch_marks_review_unresolved(
     "payload",
     [
         "{not json",
+        "[" * 10000,
+        "1" * 5000,
         json.dumps(
             {
                 "schema_version": 1,
@@ -376,7 +378,7 @@ def test_pending_review_without_launch_marks_review_unresolved(
             }
         ),
     ],
-    ids=("malformed", "stale-session", "partial", "out-of-bounds"),
+    ids=("malformed", "deep", "integer-limit", "stale-session", "partial", "out-of-bounds"),
 )
 def test_optional_invalid_result_is_rejected_without_persisting_override(
     payload: str,

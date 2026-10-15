@@ -27,6 +27,7 @@ from frame_compare.utils.alignment_evidence import (
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.file_lock import exclusive_file_lock
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
@@ -122,7 +123,7 @@ def _load_cache_data(cache_path: Path) -> dict[str, object] | None:
     try:
         with cache_path.open("rb") as handle:
             data = cast(dict[str, object], tomllib.load(handle))
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError) as exc:
+    except (OSError, *SERIALIZED_DECODE_FAILURES) as exc:
         log.warning(
             "alignment_reuse_cache_unreadable",
             path=str(cache_path),

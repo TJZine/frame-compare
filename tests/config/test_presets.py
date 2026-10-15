@@ -242,3 +242,18 @@ def test_preset_acquisition_follows_symlinked_directory(tmp_path: Path) -> None:
     except OSError:
         pytest.skip("directory symlinks unavailable on this host")
     assert load_preset("selected", presets_dir=link)["analysis"] == {"random_frame_count": 12}
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+    ],
+)
+def test_preset_parser_limits_are_typed(tmp_path: Path, content: str) -> None:
+    (tmp_path / "limited.toml").write_text(content, encoding="utf-8")
+    with pytest.raises(PresetInvalidError) as exc:
+        load_preset("limited", presets_dir=tmp_path)
+    assert exc.value.context.details is not None
+    assert exc.value.context.details["parse_error"] == "configuration exceeds TOML parser limits"

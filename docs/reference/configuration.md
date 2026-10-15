@@ -474,7 +474,7 @@ PNG compression level.
 #### `screenshots.ffmpeg_timeout_seconds` { #screenshots.ffmpeg_timeout_seconds .fc-key }
 
 Values
-:   number, at least `5`
+:   finite number, at least `5`
 
 Default
 :   `30.0`
@@ -717,7 +717,7 @@ Delete the uploaded local screenshots after the report is done.
 #### `slowpics.timeout_seconds` { #slowpics.timeout_seconds .fc-key }
 
 Values
-:   number, at least `10`
+:   finite number, at least `10`
 
 Default
 :   `60.0`
@@ -807,7 +807,7 @@ Days until slow.pics removes the collection; `0` keeps it.
 #### `slowpics.image_upload_timeout_seconds` { #slowpics.image_upload_timeout_seconds .fc-key }
 
 Values
-:   number, at least `10`
+:   finite number, at least `10`
 
 Default
 :   `180.0`
@@ -893,7 +893,7 @@ no metadata. This setting does not enable a chooser.
 #### `tmdb.timeout_seconds` { #tmdb.timeout_seconds .fc-key }
 
 Values
-:   number, at least `1`
+:   finite number, at least `1`
 
 Default
 :   `10.0`
