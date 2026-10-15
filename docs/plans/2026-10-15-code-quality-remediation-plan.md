@@ -2977,3 +2977,16 @@ Temporary edits restored/SHA checked. Canonical cold full Docker RUNNING,leaseP1
 Current pending useful results: P1 fixes→deep recheck, P4-F1 fix→typed proof/recheck,
 P5 full review, P8 native completion/code review/integration, P11 Docker+notes/final
 review. P2/P7 prerequisites not review-cleared yet; P9 still depends on P7/P8/P10.
+
+
+P8 bounded runtime update at frozen4ce11247: second canonical full-native finished
+3643cases,3498passed/142expectedplatform-media skips/3Chrome subprocess-exit2 failures
+(encoded-path,tonemap-disclosure,1920x1080@1.5),different cases from first run. Worker
+reports display-link/allocator/teardown-watchdog diagnostics,not viewer assertion
+failures; this does NOT establish environmental causation or a passing gate. First
+run and second run both FAILED; isolated prior2case rerun passed. One final standalone
+full browser run is in progress to distinguish concurrent-worker load; no flag/harness
+changes or product edits, no unbounded retry-to-green. P8 retains browser lease until
+its observed exit/owned cleanup,then completion will explicitly leave clean full-
+native acceptance OPEN. Docker/Windows also OPEN. Continue independent implementation
+and review while unavailable/flaky target proof is honestly tracked.
