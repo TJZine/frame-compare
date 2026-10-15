@@ -17,16 +17,15 @@ const lensPath = path.resolve(
 );
 const viewerFormatPath = path.join(path.dirname(lensPath), 'viewer_format.js');
 
-let focusDocument = null;
-
-function fakeElement(rect = { left: 0, top: 0, width: 0, height: 0 }) {
+function createElementFactory(documentFor = () => null) {
+    return function element(rect = { left: 0, top: 0, width: 0, height: 0 }) {
     const attributes = new Map();
     const classes = new Set();
     const capturedPointers = new Set();
     let currentRect = { ...rect };
     let srcValue = '';
     const element = {
-        ...domMechanics(() => focusDocument),
+        ...domMechanics(documentFor),
         hidden: false,
         disabled: false,
         checked: false,
@@ -81,66 +80,71 @@ function fakeElement(rect = { left: 0, top: 0, width: 0, height: 0 }) {
         },
     });
     return element;
+    };
 }
 
+const geometryElement = createElementFactory();
+
 function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones = true } = {}) {
-    const stage = fakeElement({ left: 0, top: 0, width: 1000, height: 700 });
-    const activeImage = fakeElement({ left: 100, top: 100, width: 800, height: 450 });
+    let document;
+    const element = createElementFactory(() => document);
+    const stage = element({ left: 0, top: 0, width: 1000, height: 700 });
+    const activeImage = element({ left: 100, top: 100, width: 800, height: 450 });
     activeImage.src = 'clip-2/frame.png';
     activeImage.currentSrc = activeImage.src;
-    const rightImage = fakeElement({ left: 120, top: 110, width: 800, height: 450 });
+    const rightImage = element({ left: 120, top: 110, width: 800, height: 450 });
     rightImage.src = 'clip-1/frame.png';
     rightImage.currentSrc = rightImage.src;
-    const lens = fakeElement({ left: 600, top: 80, width: 240, height: 240 });
-    const palette = fakeElement({ left: 600, top: 632, width: 380, height: 40 });
-    const paletteGroup = fakeElement({ left: 700, top: 640, width: 280, height: 32 });
-    const activeControls = fakeElement();
+    const lens = element({ left: 600, top: 80, width: 240, height: 240 });
+    const palette = element({ left: 600, top: 632, width: 380, height: 40 });
+    const paletteGroup = element({ left: 700, top: 640, width: 280, height: 32 });
+    const activeControls = element();
     activeControls.hidden = true;
-    const popover = fakeElement({ left: 700, top: 312, width: 260, height: 320 });
+    const popover = element({ left: 700, top: 312, width: 260, height: 320 });
     popover.hidden = true;
-    const firstSetting = fakeElement();
+    const firstSetting = element();
     popover.querySelector = () => firstSetting;
     popover.append(firstSetting);
     const sizeButtons = ['small', 'medium', 'large'].map(size => {
-        const button = fakeElement();
+        const button = element();
         button.dataset.lensSize = size;
         return button;
     });
     const markerButtons = ['off', 'ring', 'brackets'].map(markerStyle => {
-        const button = fakeElement();
+        const button = element();
         button.dataset.lensMarker = markerStyle;
         return button;
     });
     const captionButtons = ['off', 'on'].map(caption => {
-        const button = fakeElement();
+        const button = element();
         button.dataset.lensCaption = caption;
         return button;
     });
-    const captionRow = fakeElement();
+    const captionRow = element();
     captionRow.hidden = true;
     const elements = {
-        'btn-lens': fakeElement(),
+        'btn-lens': element(),
         'rv-lens': lens,
-        'rv-lens-target': fakeElement(),
-        'btn-lens-zoom-out': fakeElement(),
-        'btn-lens-zoom-in': fakeElement(),
-        'btn-lens-settings': fakeElement(),
+        'rv-lens-target': element(),
+        'btn-lens-zoom-out': element(),
+        'btn-lens-zoom-in': element(),
+        'btn-lens-settings': element(),
         'lens-settings-popover': popover,
-        'btn-lens-reset': fakeElement(),
+        'btn-lens-reset': element(),
     };
     const selectors = {
         '.rv-viewport-palette': palette,
         '[data-lens-palette-group]': paletteGroup,
         '[data-lens-active-controls]': activeControls,
-        '[data-lens-drag-handle]': fakeElement({ left: 804, top: 88, width: 28, height: 28 }),
-        '[data-lens-zoom]': fakeElement(),
-        '[data-lens-persistence]': fakeElement(),
+        '[data-lens-drag-handle]': element({ left: 804, top: 88, width: 28, height: 28 }),
+        '[data-lens-zoom]': element(),
+        '[data-lens-persistence]': element(),
         '[data-lens-caption-row]': captionRow,
-        '[data-lens-image="active"]': fakeElement(),
-        '[data-lens-image="difference"]': fakeElement(),
-        '[data-lens-status="active"]': fakeElement(),
-        '[data-lens-identity="active"]': fakeElement(),
-        '[data-lens-identity="second"]': fakeElement(),
+        '[data-lens-image="active"]': element(),
+        '[data-lens-image="difference"]': element(),
+        '[data-lens-status="active"]': element(),
+        '[data-lens-identity="active"]': element(),
+        '[data-lens-identity="second"]': element(),
     };
     selectors['[data-lens-identity="second"]'].hidden = true;
     const storageValues = new Map();
@@ -152,7 +156,7 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
             storageValues.set(key, value);
         },
     };
-    const document = {
+    document = {
         activeElement: null,
         getElementById(id) { return elements[id] || null; },
         querySelector(selector) { return selectors[selector] || null; },
@@ -163,17 +167,16 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
             return [];
         },
         createElement(tagName) {
-            const element = fakeElement();
-            element.tagName = tagName.toUpperCase();
-            if (element.tagName === 'IMG') {
-                element.complete = autoLoadClones;
-                detachedLoaders.push(element);
+            const created = element();
+            created.tagName = tagName.toUpperCase();
+            if (created.tagName === 'IMG') {
+                created.complete = autoLoadClones;
+                detachedLoaders.push(created);
             }
-            return element;
+            return created;
         },
         addEventListener() {},
     };
-    focusDocument = document;
     lens.append(selectors['[data-lens-drag-handle]']);
     paletteGroup.append(
         elements['btn-lens'],
@@ -241,6 +244,7 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
         gridView: { entries() { return []; } },
     };
     return {
+        element,
         Lens: context.__Lens,
         viewer,
         elements,
@@ -256,6 +260,23 @@ function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones
         palette,
     };
 }
+
+const first = makeEnvironment();
+const second = makeEnvironment();
+const parent = first.element();
+const child = first.element();
+parent.append(child);
+second.elements['btn-lens'].focus();
+child.focus();
+assert.equal(first.document.activeElement, child);
+assert.equal(second.document.activeElement, second.elements['btn-lens']);
+child.remove();
+assert.equal(first.document.activeElement, null);
+parent.append(child);
+child.focus();
+parent.replaceChildren();
+assert.equal(first.document.activeElement, null);
+assert.equal(second.document.activeElement, second.elements['btn-lens']);
 
 const pure = makeEnvironment();
 const Lens = pure.Lens;
@@ -305,12 +326,12 @@ const bounded = Lens.normalizedPosition({ u: -4, v: 2 });
 assert.equal(bounded.u, 0);
 assert.equal(bounded.v, 1);
 const mapped = Lens.normalizedPoint(
-    fakeElement({ left: 10, top: 20, width: 200, height: 100 }),
+    geometryElement({ left: 10, top: 20, width: 200, height: 100 }),
     110,
     45,
 );
 assert.deepEqual(JSON.parse(JSON.stringify(mapped)), { u: 0.5, v: 0.25 });
-assert.equal(Lens.normalizedPoint(fakeElement({ left: 0, top: 0, width: 0, height: 0 }), 0, 0), null);
+assert.equal(Lens.normalizedPoint(geometryElement({ left: 0, top: 0, width: 0, height: 0 }), 0, 0), null);
 const splitGeometry = Lens.lensImageGeometry(mapped, 200, 100, 4, 240, 120);
 assert.deepEqual(JSON.parse(JSON.stringify(splitGeometry)), {
     width: 800,
@@ -451,7 +472,7 @@ assert.notEqual(
 environment.viewer.state.mode = 'overlay';
 controller.sync();
 
-const gridImage = fakeElement({ left: 8, top: 12, width: 200, height: 100 });
+const gridImage = geometryElement({ left: 8, top: 12, width: 200, height: 100 });
 gridImage.src = 'clip-3/frame.png';
 gridImage.currentSrc = gridImage.src;
 environment.viewer.gridView.entries = () => [{ clipIdx: 2, image: gridImage, unavailable: false }];
@@ -679,7 +700,7 @@ assert.equal(focusEnvironment.elements['btn-lens'].hidden, false);
 assert.equal(focusEnvironment.viewer.dom.stage.classList.contains('rv-lens-active'), false);
 assert.equal(focusEnvironment.document.activeElement, focusEnvironment.elements['btn-lens']);
 focusController.setEnabled(true);
-const externalFocus = fakeElement();
+const externalFocus = focusEnvironment.element();
 focusEnvironment.document.activeElement = externalFocus;
 focusController.setEnabled(false);
 assert.equal(focusEnvironment.document.activeElement, externalFocus);
@@ -716,7 +737,7 @@ assert.equal(
 );
 
 transientFocusController.sync();
-const transientExternalFocus = fakeElement();
+const transientExternalFocus = transientFocusEnvironment.element();
 transientFocusEnvironment.document.activeElement = transientExternalFocus;
 transientFocusController.clearTransient();
 assert.equal(transientFocusEnvironment.document.activeElement, transientExternalFocus);

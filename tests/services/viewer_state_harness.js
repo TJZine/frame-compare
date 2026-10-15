@@ -27,8 +27,6 @@ const viewerFormatPath = path.join(repoRoot, 'src', 'frame_compare', 'services',
 const inspectorPath = path.join(repoRoot, 'src', 'frame_compare', 'services', 'report', 'assets', 'inspector.js');
 const viewportPath = path.join(repoRoot, 'src', 'frame_compare', 'services', 'report', 'assets', 'viewport.js');
 
-let activeDocument = null;
-
 function payloadWithClipCount(clipCount) {
     const clips = Array.from({ length: clipCount }, (_, idx) => ({
         name: `clip-${idx + 1}`,
@@ -91,13 +89,14 @@ function payloadWithClipCount(clipCount) {
     };
 }
 
-function fakeElement() {
+function createElementFactory(documentFor) {
+    return function makeElement() {
     const classes = new Set();
     const attributes = new Map();
     let definitionValues = null;
     const inspectorPrimary = { value: null };
     return {
-        ...domMechanics(() => activeDocument),
+        ...domMechanics(documentFor),
         value: '',
         textContent: '',
         disabled: false,
@@ -144,18 +143,18 @@ function fakeElement() {
         scrollIntoView() {},
         querySelector(selector) {
             if (selector === '.rv-inspector-clip-primary') {
-                if (!inspectorPrimary.value) inspectorPrimary.value = fakeElement();
+                if (!inspectorPrimary.value) inspectorPrimary.value = makeElement();
                 return inspectorPrimary.value;
             }
             return null;
         },
         querySelectorAll(selector) {
             if (selector === '.rv-inspector-clip-heading span') {
-                return [fakeElement(), fakeElement()];
+                return [makeElement(), makeElement()];
             }
             if (selector === 'dd') {
                 if (definitionValues === null) {
-                    definitionValues = Array.from({ length: 7 }, () => fakeElement());
+                    definitionValues = Array.from({ length: 7 }, () => makeElement());
                 }
                 return definitionValues;
             }
@@ -173,8 +172,6 @@ function fakeElement() {
     };
 }
 
-function fakeBody() {
-    return fakeElement();
 }
 
 function renderedText(element) {
@@ -185,6 +182,8 @@ function renderedText(element) {
 }
 
 function loadViewer({ clipCount, savedState = null }) {
+    const document = { activeElement: null };
+    const makeElement = createElementFactory(() => document);
     const storage = new Map();
     const deferredImages = [];
     const reviewMetrics = { creates: 0, binds: 0, renders: 0 };
@@ -237,17 +236,16 @@ function loadViewer({ clipCount, savedState = null }) {
                 };
             },
         },
-        document: {
-            activeElement: null,
-            body: fakeBody(),
+        document: Object.assign(document, {
+            body: makeElement(),
             addEventListener() {},
             createElement(tagName) {
-                return { ...fakeElement(), tagName: String(tagName || '').toUpperCase() };
+                return { ...makeElement(), tagName: String(tagName || '').toUpperCase() };
             },
             createTextNode(text) {
                 return { nodeType: 3, textContent: String(text) };
             },
-        },
+        }),
         window: {
             localStorage: storageApi,
             matchMedia() {
@@ -271,7 +269,6 @@ function loadViewer({ clipCount, savedState = null }) {
             },
         },
     };
-    activeDocument = context.document;
     const script = `${fs.readFileSync(viewerFormatPath, 'utf8')}\n${fs.readFileSync(lensPath, 'utf8')}\n${fs.readFileSync(inspectorPath, 'utf8')}\n${fs.readFileSync(viewportPath, 'utf8')}\n${fs.readFileSync(viewerPath, 'utf8')}\nglobalThis.__ViewerFormat = ViewerFormat;\nglobalThis.__Lens = Lens;\nglobalThis.__Inspector = Inspector;\nglobalThis.__Viewport = Viewport;\nglobalThis.__ReportViewer = ReportViewer;`;
     vm.runInNewContext(script, context, { filename: viewerPath });
     assert.equal(typeof context.__Lens.create, 'function');
@@ -300,101 +297,101 @@ function loadViewer({ clipCount, savedState = null }) {
     viewer.state.rawAlignY = null;
     viewer.dom = {
         stage: {
-            ...fakeElement(),
+            ...makeElement(),
             getBoundingClientRect() {
                 return { width: 1920, height: 1080 };
             },
         },
-        canvas: fakeElement(),
+        canvas: makeElement(),
         sizerImg: {
-            ...fakeElement(),
+            ...makeElement(),
             getBoundingClientRect() {
                 return { width: 1920, height: 1080 };
             },
         },
-        leftImg: fakeElement(),
-        rightImg: fakeElement(),
-        labelLeft: fakeElement(),
-        labelRight: fakeElement(),
-        emptyState: fakeElement(),
-        status: fakeElement(),
-        leftLayer: fakeElement(),
-        rightLayer: fakeElement(),
-        zoomRange: fakeElement(),
-        zoomVal: fakeElement(),
+        leftImg: makeElement(),
+        rightImg: makeElement(),
+        labelLeft: makeElement(),
+        labelRight: makeElement(),
+        emptyState: makeElement(),
+        status: makeElement(),
+        leftLayer: makeElement(),
+        rightLayer: makeElement(),
+        zoomRange: makeElement(),
+        zoomVal: makeElement(),
         modeBtns: ['slider', 'overlay', 'diff', 'blink'].map((mode) => ({
-            ...fakeElement(),
+            ...makeElement(),
             dataset: { mode },
         })),
-        pairControls: fakeElement(),
-        activeControls: fakeElement(),
-        leftSelect: fakeElement(),
-        rightSelect: fakeElement(),
-        activeSelect: fakeElement(),
-        btnSwapClips: fakeElement(),
+        pairControls: makeElement(),
+        activeControls: makeElement(),
+        leftSelect: makeElement(),
+        rightSelect: makeElement(),
+        activeSelect: makeElement(),
+        btnSwapClips: makeElement(),
         fitBtns: ['actual', 'height'].map((fit) => ({
-            ...fakeElement(),
+            ...makeElement(),
             dataset: { fit },
         })),
-        alignmentPreset: fakeElement(),
-        alignX: fakeElement(),
-        alignY: fakeElement(),
-        btnAlignmentReset: fakeElement(),
-        btnAlignToggle: fakeElement(),
-        alignmentStatus: fakeElement(),
-        btnInfo: fakeElement(),
-        btnInspector: fakeElement(),
-        inspector: fakeElement(),
-        btnInspectorClose: fakeElement(),
+        alignmentPreset: makeElement(),
+        alignX: makeElement(),
+        alignY: makeElement(),
+        btnAlignmentReset: makeElement(),
+        btnAlignToggle: makeElement(),
+        alignmentStatus: makeElement(),
+        btnInfo: makeElement(),
+        btnInspector: makeElement(),
+        inspector: makeElement(),
+        btnInspectorClose: makeElement(),
         inspectorTabs: ['frame', 'clips', 'align', 'review'].map((tab) => ({
-            ...fakeElement(),
+            ...makeElement(),
             dataset: { inspectorTab: tab },
         })),
         inspectorPanels: ['frame', 'clips', 'align', 'review'].map((tab) => ({
-            ...fakeElement(),
+            ...makeElement(),
             id: `inspector-panel-${tab}`,
         })),
-        inspectorFrameIdentity: fakeElement(),
-        inspectorFrameDetailRow: fakeElement(),
-        inspectorFrameDetail: fakeElement(),
-        inspectorFramePosition: fakeElement(),
-        inspectorSourceFrames: fakeElement(),
-        inspectorClipsShared: fakeElement(),
-        inspectorClips: fakeElement(),
-        inspectorAlignPair: fakeElement(),
-        inspectorAlignPreset: fakeElement(),
-        inspectorAlignX: fakeElement(),
-        inspectorAlignY: fakeElement(),
-        btnInspectorResetCurrentAlign: fakeElement(),
-        btnInspectorResetAllAlign: fakeElement(),
-        modal: fakeElement(),
-        infoModal: fakeElement(),
-        btnHelp: fakeElement(),
-        btnCloseHelp: fakeElement(),
-        btnCloseInfo: fakeElement(),
-        blinkControls: fakeElement(),
-        btnBlinkPause: fakeElement(),
-        blinkSpeed: fakeElement(),
-        blinkStatus: fakeElement(),
-        viewportPalette: fakeElement(),
-        btnPaletteOrientation: fakeElement(),
+        inspectorFrameIdentity: makeElement(),
+        inspectorFrameDetailRow: makeElement(),
+        inspectorFrameDetail: makeElement(),
+        inspectorFramePosition: makeElement(),
+        inspectorSourceFrames: makeElement(),
+        inspectorClipsShared: makeElement(),
+        inspectorClips: makeElement(),
+        inspectorAlignPair: makeElement(),
+        inspectorAlignPreset: makeElement(),
+        inspectorAlignX: makeElement(),
+        inspectorAlignY: makeElement(),
+        btnInspectorResetCurrentAlign: makeElement(),
+        btnInspectorResetAllAlign: makeElement(),
+        modal: makeElement(),
+        infoModal: makeElement(),
+        btnHelp: makeElement(),
+        btnCloseHelp: makeElement(),
+        btnCloseInfo: makeElement(),
+        blinkControls: makeElement(),
+        btnBlinkPause: makeElement(),
+        blinkSpeed: makeElement(),
+        blinkStatus: makeElement(),
+        viewportPalette: makeElement(),
+        btnPaletteOrientation: makeElement(),
         bottomPanel: {
-            ...fakeElement(),
+            ...makeElement(),
             dataset: { filmstripEnabled: 'true' },
         },
-        btnFilmstripToggle: fakeElement(),
+        btnFilmstripToggle: makeElement(),
         filmstripSizeBtns: ['compact', 'normal', 'large'].map((size) => ({
-            ...fakeElement(),
+            ...makeElement(),
             dataset: { filmstripSize: size },
         })),
-        filmstrip: fakeElement(),
-        activeFilterBadge: fakeElement(),
+        filmstrip: makeElement(),
+        activeFilterBadge: makeElement(),
         alignPopover: {
-            ...fakeElement(),
+            ...makeElement(),
             hidden: true,
         },
         lensSettingsPopover: {
-            ...fakeElement(),
+            ...makeElement(),
             hidden: true,
         },
     };
@@ -446,6 +443,7 @@ function loadViewer({ clipCount, savedState = null }) {
     viewer.viewport.applyAlignment();
     return {
         viewer,
+        element: makeElement,
         format: context.__ViewerFormat,
         lensFactory: context.__Lens,
         storage,
@@ -478,6 +476,26 @@ function keyboardEvent(key) {
 
 const summary = {};
 
+for (const fixture of [loadViewer({clipCount: 2}), loadViewer({clipCount: 2})]) {
+    const other = loadViewer({clipCount: 2});
+    const parent = fixture.element();
+    const child = fixture.element();
+    parent.append(child);
+    other.viewer.dom.btnInspector.focus();
+    child.focus();
+    assert.equal(fixture.document.activeElement, child);
+    assert.equal(other.document.activeElement, other.viewer.dom.btnInspector);
+    child.remove();
+    assert.equal(fixture.document.activeElement, null);
+    assert.equal(other.document.activeElement, other.viewer.dom.btnInspector);
+    parent.append(child);
+    child.focus();
+    parent.replaceChildren();
+    assert.equal(fixture.document.activeElement, null);
+    assert.equal(other.document.activeElement, other.viewer.dom.btnInspector);
+}
+
+
 // Exercise the production pointer handlers and interval callback, including cancellation.
 for (const pauseCause of ['running', 'explicit', 'reduced-motion']) {
     for (const gesture of ['pan', 'pinch', 'lens', 'lens-pan', 'lens-pinch']) {
@@ -486,7 +504,7 @@ for (const pauseCause of ['running', 'explicit', 'reduced-motion']) {
             const { viewer } = fixture;
             fixture.window.addEventListener = () => {};
             for (const name of ['btnZoomOut', 'btnZoomIn', 'btnZoomReset', 'btnFullscreen']) {
-                viewer.dom[name] = fakeElement();
+                viewer.dom[name] = fixture.element();
             }
             viewer.dom.stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1920, height: 1080 });
             viewer.bindViewportEvents();
@@ -494,7 +512,7 @@ for (const pauseCause of ['running', 'explicit', 'reduced-motion']) {
             viewer.setMode('blink');
             if (pauseCause === 'explicit') viewer.setBlinkPaused(true);
             if (gesture.startsWith('lens')) {
-                const lensElement = { ...fakeElement(), style: { setProperty() {} } };
+                const lensElement = { ...fixture.element(), style: { setProperty() {} } };
                 fixture.document.getElementById = id => id === 'rv-lens' ? lensElement : null;
                 fixture.document.querySelector = () => null;
                 fixture.document.querySelectorAll = () => [];
@@ -536,7 +554,7 @@ for (const pauseCause of ['running', 'explicit', 'reduced-motion']) {
 summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 
 {
-    const { viewer, format } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer, format } = loadViewer({ clipCount: 4 });
     assert.equal(
         viewer.state.storageKey,
         'frame-compare:report-viewer:report_viewer_state_contract:viewport',
@@ -588,7 +606,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({
+    const { element: makeElement, viewer } = loadViewer({
         clipCount: 4,
         savedState: {
             mode: 'diff',
@@ -635,7 +653,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({
+    const { element: makeElement, viewer } = loadViewer({
         clipCount: 2,
         savedState: {
             alignmentPreset: 'custom',
@@ -666,7 +684,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({
+    const { element: makeElement, viewer } = loadViewer({
         clipCount: 2,
         savedState: {
             mode: 'diff',
@@ -691,7 +709,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer, storage, storageKey } = loadViewer({
+    const { element: makeElement, viewer, storage, storageKey } = loadViewer({
         clipCount: 4,
         savedState: {
             filmstripCollapsed: true,
@@ -718,7 +736,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({
+    const { element: makeElement, viewer } = loadViewer({
         clipCount: 4,
         savedState: {
             filmstripCollapsed: 'yes',
@@ -745,7 +763,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer, storage, storageKey, document, reviewMetrics } = loadViewer({
+    const { element: makeElement, viewer, storage, storageKey, document, reviewMetrics } = loadViewer({
         clipCount: 4,
         savedState: {
             currentFrameIdx: 1,
@@ -773,7 +791,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
     assert.equal(reviewMetrics.creates, 0);
     viewer.inspector.setTab('clips');
     const focusables = viewer.dom.inspectorFocusables;
-    const initiatingControl = fakeElement();
+    const initiatingControl = makeElement();
     document.activeElement = initiatingControl;
     const infoLabel = viewer.dom.btnInfo.getAttribute('aria-label');
     const infoTitle = viewer.dom.btnInfo.getAttribute('title');
@@ -840,7 +858,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 1 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 1 });
     viewer.inspector.setOpen(true, { focus: false, save: false });
     const card = viewer.dom.inspectorClips.children[0];
     const heading = card.children[0].children[0].textContent;
@@ -868,7 +886,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 2 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
     viewer.state.activeCategoryKey = '__fc_all__';
     viewer.inspector.setOpen(true, { focus: false, save: false });
     assert.equal(viewer.dom.inspectorFrameIdentity.textContent, '10 · Selected');
@@ -882,7 +900,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 2 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
     viewer.inspector.setOpen(true, { focus: false, save: false });
     summary.inspectorFrameSources = viewer.dom.inspectorSourceFrames.children.map(
         row => row.children.map(
@@ -894,9 +912,9 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer, document } = loadViewer({ clipCount: 4 });
-    const helpLast = fakeElement();
-    const infoLast = fakeElement();
+    const { element: makeElement, viewer, document } = loadViewer({ clipCount: 4 });
+    const helpLast = makeElement();
+    const infoLast = makeElement();
     viewer.dom.modal.querySelectorAll = () => [viewer.dom.btnCloseHelp, helpLast];
     viewer.dom.infoModal.querySelectorAll = () => [viewer.dom.btnCloseInfo, infoLast];
 
@@ -936,7 +954,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
         [viewer.dom.infoModal, viewer.dom.btnInfo, viewer.dom.btnCloseInfo,
             options => viewer.closeInfoModal(options)],
     ]) {
-        const origin = fakeElement();
+        const origin = makeElement();
         viewer.setAlignmentPopoverOpen(true, { restoreFocus: false });
         document.activeElement = origin;
         trigger.dispatch('click');
@@ -955,9 +973,9 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 
         document.activeElement = origin;
         trigger.dispatch('click');
-        const disabled = fakeElement();
+        const disabled = makeElement();
         disabled.disabled = true;
-        const hidden = fakeElement();
+        const hidden = makeElement();
         hidden.hidden = true;
         element.querySelectorAll = () => [disabled, hidden];
         const emptyTab = keyboardEvent('Tab');
@@ -990,7 +1008,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
 
     viewer.bindAlignmentEvents();
     viewer.inspector.setOpen(true);
@@ -1039,7 +1057,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
 
     viewer.windowReducedMotion = true;
     const originalReducedMotionActive = viewer.reducedMotionActive;
@@ -1062,7 +1080,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { format } = loadViewer({ clipCount: 2 });
+    const { element: makeElement, format } = loadViewer({ clipCount: 2 });
 
     assert.equal(format.formatFileSize(1), '1.00 B');
     assert.equal(format.formatFileSize(1023), '1023.00 B');
@@ -1088,7 +1106,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
 
     viewer.state.mode = 'blink';
     viewer.state.activeClipIdx = viewer.state.leftClipIdx;
@@ -1112,7 +1130,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
     const button = { tagName: 'BUTTON', isContentEditable: false };
     const textarea = { tagName: 'TEXTAREA', isContentEditable: false };
     const contentEditable = { tagName: 'DIV', isContentEditable: true };
@@ -1140,9 +1158,9 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer, document } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer, document } = loadViewer({ clipCount: 4 });
     const buttons = ['first', 'second', 'third'].map(value => ({
-        ...fakeElement(),
+        ...makeElement(),
         dataset: { value },
     }));
     buttons[0].setAttribute('aria-checked', 'true');
@@ -1178,7 +1196,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
     let prevented = false;
     viewer.dom.modal.classList.remove('open');
     viewer.dom.infoModal.classList.remove('open');
@@ -1196,15 +1214,15 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer, document } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer, document } = loadViewer({ clipCount: 4 });
     const items = [0, 1].map(idx => ({
-        ...fakeElement(),
+        ...makeElement(),
         dataset: { idx: String(idx) },
         closest(selector) {
             return selector === '.rv-filmstrip-item' ? this : null;
         },
     }));
-    const filmstrip = fakeElement();
+    const filmstrip = makeElement();
     filmstrip.children = items;
     filmstrip.querySelector = selector => {
         const match = selector.match(/data-idx="(\d+)"/);
@@ -1236,7 +1254,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
 
     viewer.viewport.setManualAlignment(4, 5);
     assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +4x +5y');
@@ -1347,7 +1365,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
 
     assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
     viewer.viewport.setAlignmentPreset('left-1');
@@ -1364,7 +1382,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
 
     viewer.setMode('overlay');
     viewer.state.activeClipIdx = viewer.state.rightClipIdx;
@@ -1392,7 +1410,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({
+    const { element: makeElement, viewer } = loadViewer({
         clipCount: 4,
         savedState: {
             mode: 'diff',
@@ -1423,7 +1441,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer, storage, storageKey } = loadViewer({
+    const { element: makeElement, viewer, storage, storageKey } = loadViewer({
         clipCount: 4,
         savedState: {
             paletteOrientation: 'vertical',
@@ -1457,12 +1475,12 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
 
     viewer.dom.filterChips = [
-        { ...fakeElement(), textContent: 'All (10)', dataset: { categoryKey: '__fc_all__' } },
-        { ...fakeElement(), textContent: 'Dark (3)', dataset: { categoryKey: 'dark' } },
-        { ...fakeElement(), textContent: 'Motion', dataset: { categoryKey: 'motion' } },
+        { ...makeElement(), textContent: 'All (10)', dataset: { categoryKey: '__fc_all__' } },
+        { ...makeElement(), textContent: 'Dark (3)', dataset: { categoryKey: 'dark' } },
+        { ...makeElement(), textContent: 'Motion', dataset: { categoryKey: 'motion' } },
     ];
 
     viewer.updateFilterChips();
@@ -1492,7 +1510,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 2 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
     viewer.pointerInteraction = {
         isPanning: true,
         activePointerId: 7,
@@ -1543,7 +1561,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 2 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
     viewer.lens.state.report.enabled = true;
     viewer.lens.state.point = { u: 0.25, v: 2 / 9 };
     viewer.lens.refreshes = 0;
@@ -1566,7 +1584,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
     const routed = {};
     for (const mode of ['slider', 'overlay', 'diff', 'blink', 'grid']) {
         let panStarts = 0;
@@ -1646,7 +1664,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({
+    const { element: makeElement, viewer } = loadViewer({
         clipCount: 4,
         savedState: { mode: 'grid' },
     });
@@ -1660,7 +1678,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer, reviewMetrics } = loadViewer({
+    const { element: makeElement, viewer, reviewMetrics } = loadViewer({
         clipCount: 4,
         savedState: { inspectorOpen: false, inspectorTab: 'review' },
     });
@@ -1671,7 +1689,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({
+    const { element: makeElement, viewer } = loadViewer({
         clipCount: 2,
         savedState: { fitMode: 'width' },
     });
@@ -1696,7 +1714,7 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
     viewer.dom.modal.classList.remove('open');
     viewer.dom.infoModal.classList.remove('open');
     const keyEvent = key => ({
@@ -1717,10 +1735,10 @@ summary.blinkGesturePause = { combinations: 30, timerAndControlsAgree: true };
 }
 
 async function assertDeferredDiffCannotCommitAfterGridNavigation() {
-    const { viewer, window, deferredImages } = loadViewer({ clipCount: 2 });
-    viewer.dom.currentFrameLabel = fakeElement();
-    viewer.dom.currentFrameCategoryDivider = fakeElement();
-    viewer.dom.currentFrameCategory = fakeElement();
+    const { element: makeElement, viewer, window, deferredImages } = loadViewer({ clipCount: 2 });
+    viewer.dom.currentFrameLabel = makeElement();
+    viewer.dom.currentFrameCategoryDivider = makeElement();
+    viewer.dom.currentFrameCategory = makeElement();
 
     const gridEvents = { active: false, renders: 0 };
     viewer.gridView = {
@@ -1781,7 +1799,7 @@ async function assertMainImageUnavailableState() {
     const results = {};
 
     for (const { mode, failedSide, clipIndex } of modes) {
-        const { viewer, deferredImages, window, document } = loadViewer({ clipCount: 2 });
+        const { element: makeElement, viewer, deferredImages, window, document } = loadViewer({ clipCount: 2 });
         viewer.state.mode = mode;
         viewer.updateImages();
         if (mode === 'diff') {
@@ -1863,7 +1881,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { viewer, window } = loadViewer({ clipCount: 2 });
+        const { element: makeElement, viewer, window } = loadViewer({ clipCount: 2 });
         viewer.state.mode = 'blink';
         viewer.updateImages();
         viewer.dom.leftImg.dispatch('error');
@@ -1891,7 +1909,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { viewer } = loadViewer({ clipCount: 2 });
+        const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
         viewer.state.mode = 'slider';
         viewer.updateImages();
         const staleError = viewer.dom.leftImg.listenerCallbacks('error')[0];
@@ -1904,7 +1922,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { viewer } = loadViewer({ clipCount: 2 });
+        const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
         viewer.state.mode = 'slider';
         viewer.updateImages();
         viewer.dom.leftImg.dispatch('load');
@@ -1918,7 +1936,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { viewer } = loadViewer({ clipCount: 2 });
+        const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
         viewer.gridView = { render() {} };
         viewer.state.mode = 'slider';
         viewer.updateImages();
@@ -1932,7 +1950,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { viewer, deferredImages, window } = loadViewer({ clipCount: 2 });
+        const { element: makeElement, viewer, deferredImages, window } = loadViewer({ clipCount: 2 });
         viewer.gridView = { render() {} };
         viewer.state.mode = 'slider';
         viewer.updateImages();
@@ -1957,7 +1975,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { viewer } = loadViewer({ clipCount: 2 });
+        const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
         viewer.state.mode = 'slider';
         viewer.updateImages();
         viewer.dom.rightImg.dispatch('error');
@@ -1974,7 +1992,7 @@ async function assertMainImageUnavailableState() {
 }
 
 {
-    const { viewer } = loadViewer({ clipCount: 2 });
+    const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
     const viewport = viewer.viewport;
     const rect = {
         left: 100, top: 600, width: 300, height: 44, right: 400, bottom: 644,
@@ -2015,7 +2033,7 @@ async function assertMainImageUnavailableState() {
 }
 
 {
-    const { viewer, window } = loadViewer({ clipCount: 2 });
+    const { element: makeElement, viewer, window } = loadViewer({ clipCount: 2 });
     const viewport = viewer.viewport;
     viewer.dom.viewportPalette.getBoundingClientRect = () => ({
         left: 100, top: 600, width: 300, height: 44, right: 400, bottom: 644,
@@ -2131,10 +2149,10 @@ async function assertMainImageUnavailableState() {
     };
 }
 
-Promise.all([
-    assertDeferredDiffCannotCommitAfterGridNavigation(),
-    assertMainImageUnavailableState(),
-])
+(async () => [
+    await assertDeferredDiffCannotCommitAfterGridNavigation(),
+    await assertMainImageUnavailableState(),
+])()
     .then(([deferredDiffResult, unavailableResult]) => {
         summary.deferredDiffGridNavigation = deferredDiffResult;
         summary.mainImageUnavailable = unavailableResult;
