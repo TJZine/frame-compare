@@ -158,9 +158,15 @@ known-current images.
 
 The verifier sets `FRAME_COMPARE_TEST_MEDIA_CACHE` to
 `/workspace/generated/test-media-cache` (host `generated/test-media-cache`) for u4
-media only. Entries use `<cache>/<generator>/<key>/`, keyed by exact generator
-source and complete FFmpeg version output. Tests use temporary symlinks, keeping
-indexes outside the cache; unset the variable for temporary generation. Run the
+media only. Entries use `<cache>/<generator>/<key>/`, keyed by exact
+`tests/integration/alignment_u4_media_recipes.py` source and complete `ffmpeg -version`
+output. Assertion-only and store-only edits retain the cache. Recipes generate on
+demand, publishing each file with temporary file + atomic replace; the complete gate
+passes `FRAME_COMPARE_U4_MEDIA_FULL=1` to generate all 37 files. Focused
+`--pytest-path` runs remain demand-driven. Temporary symlinks keep indexes outside the
+cache; unset the cache variable for lazy temporary generation. Worker stats are
+written as JSON under `FRAME_COMPARE_E2E_ARTIFACTS`; measurements live in
+`tests/integration/NOTES-u4-media-preparation.md`. Run the
 verifier one at a time from a checkout because cache pruning cannot overlap.
 CI starts cold, adds no media cache, and retains Docker `--no-cache`.
 

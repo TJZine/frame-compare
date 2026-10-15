@@ -317,10 +317,19 @@ known-current images.
 The verifier exports `FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache`
 (host `generated/test-media-cache`). Only u4 media is cached, under
 `<cache>/<generator>/<key>/`; E2E media is regenerated. The SHA-256 key includes the
-exact generator source and complete `ffmpeg -version` output, obtained with an
-explicit timeout. Generation publishes by same-filesystem rename and prunes only
-that generator's old keys. Tests consume temporary symlinks so source indexes stay
-outside the cache. Unset the variable to generate in temporary storage as before.
+exact `tests/integration/alignment_u4_media_recipes.py` source and complete
+`ffmpeg -version` output, obtained with an explicit timeout. Assertion-only and
+store-only edits retain cached media. Recipes generate on demand with their declared
+prerequisites; each file publishes atomically by temporary file + replace. The full
+verifier passes `FRAME_COMPARE_U4_MEDIA_FULL=1` to prepare all 37 files; focused
+`--pytest-path` runs remain demand-driven. Only that generator's obsolete keys and
+temporary files are pruned while a session-held `.verifier.lock` protects generation
+and use. The lock file is never pruned. Tests consume temporary symlinks so source
+indexes stay outside the cache. Unset the cache variable for lazy temporary generation.
+Worker preparation stats (key, created/reused recipes, per-recipe seconds) are JSON
+files under `FRAME_COMPARE_E2E_ARTIFACTS`; see
+`tests/integration/NOTES-u4-media-preparation.md`
+for measured cold/focused and full-matrix costs.
 Run the verifier one at a time from a checkout: overlapping pruning is unsupported.
 No CI cache was added; Docker CI retains `--no-cache` and cold regeneration receives
 no warm-cache speedup.
