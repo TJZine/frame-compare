@@ -53,7 +53,7 @@ source by the plan owner and are incorporated below.
 | Appendix A viewer probe | Reproduced: Diff and Blink restore pair `0:1` with current `(0,0)` and persisted `0:1` overwritten to neutral | State/persistence through the Node fixture |
 | Variant of Appendix A (3 clips; set `(2,2)` on same-source `0:0` before leaving Slider) | **New manifestation:** destination `0:1` becomes `(2,2)` in state and storage | Same mechanism as CQ1; folded into CQ1 |
 | Appendix B metric enum probe (needs `PYTHONPATH=.` to import `tests`) | Reproduced: list/dict values escape as `TypeError`; invalid string recovers as `corrupted` | Actual reader with memory delivery |
-| Appendix C decoder/timeout probe | Reproduced on Python 3.13.16 (int limit 4300) for VSView, metrics, TMDB, history; all four timeouts accept `inf` | Actual decoders/models |
+| Appendix C decoder/timeout probe | Reproduced on Python 3.13.16 (int limit 4300): VSView result, metrics, and TMDB leak `RecursionError` (deep) and `ValueError` (long integer); history leaks `RecursionError` but already isolates the long integer as an unavailable entry; all four timeouts accept `inf` | Actual decoders/models |
 | **New** config-loader probe (real temporary files) | `load_config` and `load_raw_config` raise raw `RecursionError` (deep inline tables) and `ValueError` (5,000-digit int); ordinary malformed TOML raises typed `ConfigParseError` | Confirms a CQ10 sibling at the user-config owner |
 | Appendix D fixture probe | Reproduced `{"firstDocumentOwnsFocus":false,"secondDocumentOwnsForeignFocus":true}` | Test-support defect |
 | Source read: `build_portable.ps1` `Main` | `Remove-Item -Recurse -Force -LiteralPath $OutDir` precedes `Get-Manifest` | CQ15 mechanism; no Windows execution |
@@ -136,8 +136,11 @@ abstraction, dependency upgrades, CI/workflow redesign, and release publication.
 
 ## 5. Coverage matrix
 
-Every supported finding and subpart maps to exactly one owning package (CQ22 has
-distinct sub-items with distinct owners).
+Every supported finding and CQ21 subpart maps to exactly one owning package. CQ22 is
+split into distinct sub-items with distinct owners; its last row is the same-pass
+documentation each behavior-changing package owns for its own sections. CQ21d is
+split by owner: P1 replaces spelling checks for the builder/installer, P2 for the
+updater.
 
 | ID | Classification | Package | Outcome that closes it |
 | --- | --- | --- | --- |
@@ -180,7 +183,7 @@ CQ7 and CQ14 do not appear in this matrix by design (see §11).
 | P3 | Viewer fixture ownership, harness assertions, pair transitions | CQ20, CQ21a, CQ1 | High (S2 defect) | none |
 | P4 | Persisted-input recovery and finite timeouts | CQ10, CQ19 | High (S2 enum defect) | none |
 | P5 | One acquired run configuration and doctor selection | CQ8, CQ18 | High (S2 defect) | none |
-| P6 | Alignment decision and resolution ownership | CQ5, CQ21c, CQ2 | Medium | none |
+| P6 | Alignment decision and resolution ownership | CQ5, CQ21c, CQ2 | Medium | none (soft: P4 first for `alignment_reuse_cache.py`) |
 | P7 | Selection domain, failure kinds, metric acquisition | CQ6, CQ9, CQ4 | Medium | P5 and P10 merged; P4 merged (soft: `cache_io.py`) |
 | P8 | Applied tonemap facts and render geometry | CQ11, CQ12 | High (S2 defect) | none (coordinate `render/prepare.py` with P5) |
 | P9 | Structured render pipeline | CQ3 | Medium | P7, P8, P10 merged |
@@ -196,11 +199,15 @@ CQ7 and CQ14 do not appear in this matrix by design (see §11).
 | `src/frame_compare/orchestration/preparation.py`, `coordinator.py`, `tools/alignment_benchmark.py` | P5 (acquisition), P7 (domain, required read) | P5 first |
 | `orchestration/execution_types.py`, `phase_output_application.py`, `phase_post_render.py` | P10, P7, P9 (and P8 for `phase_post_render.py` tonemap summary) | P10 first (smallest); then P7/P8 in either order; P9 last |
 | `render/prepare.py` | P5 (delete `cli_overrides` branch), P8 (applied facts) | Either order; second rebases a small hunk |
-| `render/batch/expansion.py` | P8 (geometry), P9 (jobs) | P8 first |
+| `render/batch/expansion.py`, `render/types.py` (`RenderedClipFacts`) | P8 (geometry, applied tonemap facts), P9 (jobs, result types) | P8 first |
+| `orchestration/phase_render.py` | P7 (selection reads, selection-row helper), P8 (active-rect provenance mapping ~16/~239), P9 (rewrite to jobs) | P7 and P8 in either order; P9 last |
+| `orchestration/active_rect.py` | P7 (domain builder calls `metric_cache_request_for_clip`), P8 (new `ClipActiveRectSource → ActivePictureProvenance` mapping) | Either order; small hunks |
 | `analysis/cache_io.py` | P4 (decode), P7 (`acquire_required_metrics`) | P4 first (small) |
+| `services/alignment_reuse_cache.py`, `services/alignment_manual_overrides.py` | P4 (decode catches), P6 (candidate; reuse-cache refactor) | P4 first (small); P6 rebases |
+| `tests/orchestration/test_phase_tasks.py`, `tests/orchestration/test_execute_run_cache_modes.py` | P4 (cache-only corruption cases), P7 (CQ4/6/9) | P4 first; P7 rebases |
+| `tests/orchestration/test_phase_alignment_contract.py` | P6 (`ComparisonResolution` fixture), P9 (render artifact consumer) | P6 first or rebase |
 | `tests/services/test_alignment_frozen_strings.py`, `tests/vsview/test_alignment_review_panel.py` | P6 (CQ21c and review-map signature) | Same package; CQ21c step precedes CQ2 step |
 | `tests/integration/test_alignment_u4_acceptance.py` | P11 (recipes), P7 (`RunContext`/`PrepState` constructors at ~808, ~1118) | Either order; second rebases; never run two Docker verifiers concurrently in one checkout |
-| `tests/orchestration/test_phase_tasks.py` | P7 only (CQ4/6/9) | One owner |
 | Docker verifier media cache (`generated/test-media-cache`) | P5–P9, P11 gates | One verifier at a time per checkout |
 | `docs/current-architecture.md`, `docs/current-cli-contract.md` | P0, P5–P9 | Each package edits only its sections; integration owner resolves textual conflicts |
 
@@ -1844,7 +1851,7 @@ recorded.
 | P8 | Logic, lint-imports | **Required** | **Required** (payload consumers) | **Required** | **Required** (+ pixel proof if graph changes) | **Required** (hosted verify; `vs/` changed) | — |
 | P9 | Logic, lint-imports | **Required** | — | — | **Required** | **Required** (hosted verify; render path) | — |
 | P10 | Logic | **Required** | — | — | — | — | — |
-| P11 | ruff/pyright | focused cache tests | — | — | **Required** + measurements | — | — |
+| P11 | ruff/pyright; `tests/workflows/test_docker_integration_contract.py` and `tests/workflows/test_onboarding_docs.py` (verifier script edited) | focused cache tests | — | — | **Required** + measurements | — | — |
 
 No package changes VSView plugin discovery, launch, Qt callbacks, or generated native
 sessions, so no Linux GUI verifier or visible-Qt acceptance is required; P4's VSView
@@ -1884,6 +1891,7 @@ job is not a pass.
 | CLI `doctor` | P5 | `--root/--config`; no upward search | New options; JSON unchanged | none |
 | CLI preview | P5 | Values from effective config | `input` row shows resolved path | none |
 | Config validation | P4 | `inf` timeouts and parser-limit TOML rejected | Typed config errors | none |
+| Selection error JSON (`FC-4012`) | P7 | Internal `kind` added | `kind` not serialized; message/details byte-identical (tested) | none |
 | `RunRequest` / internal APIs | P5–P9 | Reshaped | Internal; atomic caller migration | none |
 | Windows builder | P1 | Refuses occupied output | Maintainers delete disposable output | none |
 | Windows source installer | P1 | Versioned bundle folder; user-data policy | Existing pointer remains valid | none |
@@ -1922,9 +1930,13 @@ fixture, runner, support-module boundaries (P3, P6, P11, P1/P2).
 
 If D1 is answered “refuse”, P1 replaces the Move step with the refusal message; all
 other P1 work is unchanged. If D3a selects strict mode, add the config field, typed
-error, and tests to P8 before its payload work merges. If D4 is rejected, CQ18 cannot
-be completed without a second fallback owner; record that explicitly rather than
-shipping a copy of the shim rule.
+error, and tests to P8 before its payload work merges. D4 has two parts. Adding
+`--root/--config` to doctor (with shim injection) is what lets CQ18 reuse run's
+selection owner; if that part is rejected, CQ18 cannot be completed without a second
+copy of the shim's fallback rule, so record CQ18 as blocked rather than shipping the
+copy. Dropping the upward search is a consistency choice; if it is rejected, doctor
+keeps the upward search only when `--root` is omitted, and the CLI contract documents
+that difference from run.
 
 ## 11. Excluded scope
 
@@ -1967,7 +1979,11 @@ The supported scope is complete only when every item is checked with recorded ev
 (SHA, command, result) or explicitly recorded as an open acceptance requirement with
 the reason it could not be obtained.
 
-- [ ] P0: three public passages corrected; strict docs build.
+- [ ] Decisions D1–D4 answered (or the recommended defaults explicitly confirmed)
+      before the package that depends on each merges (D1 → P1; D2 → P2; D3a/D3b → P8;
+      D4 → P5).
+- [ ] P0: review-report links fixed so the strict docs build is usable; three public
+      passages corrected; strict docs build passes.
 - [ ] P1: no code removes an existing output root; failure leaves state byte-identical;
       D1 policy implemented; Windows PS7 fixtures and hosted verify recorded.
 - [ ] P2: one version grammar owner across extraction/range/generator/bundle info/smoke;
