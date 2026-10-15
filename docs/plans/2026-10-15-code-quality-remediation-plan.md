@@ -2506,13 +2506,13 @@ final-report-only fallback; the parent retrieves on its next activation.
 
 | Package | Owner / role / chat | Base and integration | State / evidence / remaining acceptance |
 | --- | --- | --- | --- |
-| P1 | worker / medium; `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | worker `14b599a2` → integrated `21691a97` | Implemented/integrated; deep reviewer `01a13ed5-7e47-7ea0-9201-1f47b6a097f0` active; Windows acceptance open |
+| P1 | worker / medium; `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | original `14b599a2` → integrated `21691a97`; fixes assigned from `aa5319cc` | Five deep-review findings returned for remediation; NOT review-cleared; Windows acceptance open |
 | P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | worker `7ccdb965/986abc2e/149ef433` → integrated `8e32ee40/54e80bb6/983658b8` | Implemented/integrated/independently reviewed, no findings; final-source Node/report/22-browser proof passed; full Wave A composition pending |
 | P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Implemented/integrated/independently reviewed, no findings; focused + full native at `94efe8cd` passed; final-head gate pending |
 | P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | worker `f0c67e62` → integrated `94efe8cd` | Implemented/integrated/independently reviewed, no findings; full native/static integration at `94efe8cd` passed; final-head gate pending |
 | P0 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `260670cc` → integrated `23d2f59f` | Implemented/integrated/independently reviewed, no findings; 5 CLI-doc tests + strict docs passed; Wave A composition pending |
 | P5 | worker / medium; `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | `30515500`; worktree `9676` | Active; full acquisition/doctor scope; P10 shared-file ordering tracked |
-| P6 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | assigned current integrated `44a11213`; worktree `9bdf` | Active; complete CQ5/CQ21c/CQ2; reviewed P4 prerequisite retained; native/Docker gates deferred |
+| P6 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `2313b659/f871e88c/977cc3f7` → integrated `1f7ae791/fae10b01/af500389` | Implemented/integrated; deep reviewer `01a13ee0-8b57-7573-9de8-4374f0fc445e` active; native/Docker gates open |
 | P8 | Reused worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | assigned current integrated `21691a97`; worktree `9bb4` | Active; full applied-fact/payload1.3/geometry migration; browser/Docker/native/platform gates deferred |
 | P11 | worker / medium; `01a13ed0-043c-75f0-9554-afb21690373c` | `30515500`; worktree `a638` | Active; full recipe/store/cache + before/after measurements; exclusive Docker lease granted |
 | P2 | Wave B after integrated, reviewed P1 prerequisite | — | Grammar/transaction scope pending; PS5.1/7/Windows/signing acceptance open |
@@ -2818,3 +2818,72 @@ explicit missing diagnostic and O1 imports. Config-only ownership demonstrated n
 eager native imports. Candidate9676 not yet reviewed; full frozen P5 review remains
 pending. No human clarification needed; P5 full-native/browser and P11 Docker leases
 unchanged. Other active implementation/review prerequisites remain pending callbacks.
+
+
+### P1 deep-review findings and remediation ownership
+
+Deep reviewer/xhigh `01a13ed5-7e47-7ea0-9201-1f47b6a097f0` completed exact
+`94efe8cd..21691a97` full13-file P1 review: NOT cleared. Findings source-validated,
+Windows reproduction remains open. All five routed verbatim with contracts/evidence
+to original P1 worker5016 for fixes or evidence-based dispute, then same reviewer
+focused recheck. No orchestrator code adjudication. New fix base is current
+`aa5319ccae1edab9a5c465c1ff333d415b0d1e5f`; isolated scoped commits only.
+
+| Finding | Severity | Required resolution / current disposition |
+| --- | --- | --- |
+| P1-F1 stale/incoherent active-pointer snapshot across build and overlapping activation | P1 | Snapshot once coherently after build; own migration/activation/reversal against overlap; build-boundary pointer-change proof. Worker remediation pending. |
+| P1-F2 lexical path checks miss junction/reparse-ancestor aliases of previous/cache/protected roots | P2 | Safe physical ancestry/identity or refusal of unprovable aliases before mutation, preserve supported volume behavior; junction proof. Worker remediation pending. |
+| P1-F3 recovery diagnostics can repeat failing pointer read and abort before locations/errors | P2 | Best-effort probes always report known folders/pointer and original+recovery errors; locked/unreadable-pointer proof. Worker remediation pending. |
+| P1-F4 rooted-but-not-fully-qualified pointers can resolve against unrelated process paths | P2 | Fully-qualified pointer requirement, drive/root-relative malformed-pointer fixtures. Worker remediation pending. |
+| P1-F5 activation rollback tests miss real shim restoration/final exact pointer bytes/failure boundary | P2 coverage | Seed/overwrite/restore bin sentinels, old installer reserialization, required boundary marker/new target, artifact/order/exact bytes proof. Worker remediation pending. |
+
+Reviewer otherwise confirmed ordinary reservation/Move/Leave/reversal, final build
+path/fingerprint rationale, helper/API migration/provenance/security checks/docs;
+no additional bounded composition finding. Reviewer Windows-suite execution248
+collected consistent122pass/126platformskip, diff clean; no PS runtime. P2 remains
+undispatched until reviewed P1 prerequisite. D1 unchanged; this is scoped preservation
+correctness remediation, not new policy or updater transaction sharing.
+
+### P6 integration and deep review
+
+Worker froze clean `977cc3f79c0c0ffe6cfd86542c441a531d807cb1` from44a11213; parent
+verified3-commit range/file list and cherry-picked cleanly to1f7ae791/fae10b01/
+`af500389fa06ac037c3759b30a1066cc603b553a` fromaa5319cc.27files+1535/-973; architecture
+merge clean. Worker reports all P6 steps/CQ5/CQ21c/CQ2 complete, pure resolution map,
+candidate publication, migrated/deleted callers and retained freshness/authority.
+Actual final proof817+51 focused passes/no skips including real Qt/panel/contract,
+new unit/on-diskA–D and cancellation/failure proof. Restored deliberate producer
+break:11producer/parity failures while94panel/contract pass, restored290pass. Old/new
+writer differential bytes equal for computed2953 and interactive+fallback3210;
+existing deterministic regression passed. Pyright0/0, ruff/format518, bandit/imports/
+strict docs/diff/hooks clean. Full native and Docker real-phase/cache gate OPEN;
+no GUI/whole-track-resource gate required. No source changes after callback.
+
+Separate deep reviewer/xhigh `01a13ee0-8b57-7573-9de8-4374f0fc445e`, worktree794e,
+exact currentHEADaf500389 and assignment confirmed with supported read_thread;
+review rangeaa5319cc..af500389, complete authority/evidence/cache/test migration and
+bounded P4 interaction scope. No browser/Docker lease. Findings pending; full Wave A
+composition still required. Original P6 worker idle/reusable for review fixes.
+
+### P5 final-source native proof progress and additional error edge
+
+P5 released browser/full-native lease after canonical full native exit0 on frozen
+production`b9ca34f2cabb5f47cbd0608af25d46df5e98698d` (base30515500):106inspected native/
+media/live/Windows skips, ZERO browser skips/no failures. Unique worktree-local
+profiles/TMPDIR wrapper cleaned; no matching owned Chrome processes. Initial unisolated
+attempt intentionally interrupted and NOT counted; only isolated rerun counted.
+Final requested adversarial proof-only cases being added, then complete handoff.
+P8 now owns exclusive browser/full-native lease when stable focused implementation
+ready. P11 Docker lease remains active; no competing resource run authorized.
+
+P5 valid nested JSON proof exposed pre-existing formatter recursion in BOTH existing
+and new environment-only loaders. Corrected worker details: helper
+`config/error_formatting.py:_to_json_value`; depth2000 valid analysis JSON leaks at
+recursion limits1000/default and2000, produces ConfigValidationError at2500/3000.
+Earlier helper/limit report corrected and relayed. No formatter change authorized yet.
+Targeted read-only reviewer/high adjudication assigned to01a13ece-fcf0-7da1-afb9-c63eb44a89a8
+against committed owners and frozenP5 source: reproduce actual default behavior,
+determine supported P4/P5/O2 obligation vs separate unpromoted issue, recommend bounded
+owner remedy if required. No broad audit or speculative scope. P5 instructed finish
+independent handoff and report pending edge without silently changing P4 policy.
+Final P5 code review and edge disposition remain pending.
