@@ -474,6 +474,9 @@ Source builds and source install entrypoints require PowerShell 7 or newer befor
 bootstrap, sync, or output changes. Published-bundle installation, launch, and
 updates retain Windows PowerShell 5.1 support; exercise BOM-less UTF-8 install
 state from a non-ASCII bundle path under that interpreter.
+Windows portable pytest fixtures clear inherited `PSModulePath` for each test so
+Python-launched PS5.1 and PS7 initialize their own compatible module paths. The
+fixture restores the parent process environment after each test.
 
 For source-install changes, run `tests/windows_portable` on Windows with PowerShell
 7. Manually rerun source installation with populated config/media/generated

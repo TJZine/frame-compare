@@ -108,7 +108,7 @@ def _write_mock_bundle(*, bundle_dir: Path) -> Path:
     bundle_app_fc = bundle_dir / "app" / "src" / "frame_compare"
     bundle_app_fc.mkdir(parents=True)
     version_py = bundle_app_fc / "version.py"
-    version_py.write_text(_OLD_VERSION_CONTENT, encoding="utf-8")
+    version_py.write_bytes(_OLD_VERSION_CONTENT.encode("utf-8"))
 
     python_dir = bundle_dir / "python"
     python_dir.mkdir(parents=True)
@@ -790,7 +790,9 @@ def _run_updater_functions(
             "-NoProfile",
             "-Command",
             "$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; . $env:UPDATER; "
-            + body,
+            + "try { "
+            + body
+            + " } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }",
         ],
         env=os.environ | {"UPDATER": str(updater), "BUNDLE": str(bundle)} | extra,
         capture_output=True,
@@ -1108,7 +1110,8 @@ def test_source_replacement_failure_keeps_current_or_recoverable_tree(
         bundle,
         injection
         + r"""
-$inventory = @(Get-Content -LiteralPath $env:INVENTORY -Raw | ConvertFrom-Json)
+$inventoryData = Get-Content -LiteralPath $env:INVENTORY -Raw | ConvertFrom-Json
+$inventory = @($inventoryData)
 $held = $null
 try {
   $held = Acquire-UpdateLock $env:BUNDLE
