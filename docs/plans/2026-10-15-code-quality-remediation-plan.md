@@ -2502,13 +2502,13 @@ final-report-only fallback; the parent retrieves on its next activation.
 | --- | --- | --- | --- |
 | P1 | worker / medium; `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | `9741fcc9`; worktree `5016` | Active; priority installation-preservation work; all P1 steps and CQ21d builder/installer portion; independent review and Windows acceptance pending |
 | P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | `9741fcc9`; worktree `9bb4` | Active; complete fixture/runner/transition package; separate planned commits; Node and real-browser evidence pending |
-| P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | `9741fcc9`; worktree `9bdf` | Active; all decoder owners and four timeout fields; focused/full proof pending |
+| P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Implemented/integrated; independent reviewer `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` active; 724 focused tests passed; full native gate pending |
 | P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | `9741fcc9`; worktree `b49f` | Active; bounded warning propagation with joined behavioral proof; independent review pending |
-| P0 | Ready, next bounded dispatch | — | Steps 1–5 pending; step 0 already complete |
-| P5 | Next practical batch | — | Single acquired config + doctor; P10 shared-file ordering tracked |
+| P0 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | new commit after `c2b62b05`, product-equivalent integrated base | Active; steps 1–5 assigned; step 0 already complete |
+| P5 | worker / medium; `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | `30515500`; worktree `9676` | Active; full acquisition/doctor scope; P10 shared-file ordering tracked |
 | P6 | Next practical batch after P4 shared-owner changes | — | Full CQ5/CQ21c/CQ2 scope pending |
 | P8 | Next practical batch after P3/P10 shared-owner changes | — | Full applied-fact/payload/geometry scope pending |
-| P11 | Next practical batch | — | Recipe/store/cache and measurements pending; Docker lease required |
+| P11 | worker / medium; `01a13ed0-043c-75f0-9554-afb21690373c` | `30515500`; worktree `a638` | Active; full recipe/store/cache + before/after measurements; exclusive Docker lease granted |
 | P2 | Wave B after integrated, reviewed P1 prerequisite | — | Grammar/transaction scope pending; PS5.1/7/Windows/signing acceptance open |
 | P7 | Wave B after integrated, reviewed P5/P10 (and P4/P6 shared changes) | — | Full CQ6/CQ9/CQ4 scope pending |
 | P9 | Wave C after integrated, reviewed P7/P8/P10 | — | Complete structured-render migration pending |
@@ -2537,3 +2537,44 @@ scoped commits under parent Git ownership; assign independent review to stable
 package/batch inputs, including P1 deep review. Dispatch P0 and remaining Wave A
 packages in practical batches while honoring shared-file ordering. Full Wave A
 composition review is required before dependent work is accepted.
+
+
+### P4 integration and second dispatch
+
+- P4 worker completion: `c2b62b055669f26bf6dc1ce77b005277af3ec414`, based on
+  `9741fcc91eb5b28f1e8689971229b39a3876959a`; 32 changed files, +444/-32.
+  Parent verified commit range/file list and integrated cleanly as
+  `3051550054fb19050b35c7743b9b4c780675262a`. No substantive orchestrator code review.
+- Worker reports all P4 decoder-table owners, typed user/env/preset failures,
+  wrong-shape enums, finite constraints on exactly four operation timeouts, and
+  matching timeout doc paragraphs implemented; optional TMDB byte cap omitted.
+- Actual worker evidence: explicit focused pytest selection covering utils,
+  analysis/cache identity/serialization/acquisition, config, CLI JSON/imports,
+  VSView result contract, alignment review/workflow, TMDB/history/overrides/reuse,
+  probe/cache-only orchestration and CLI-doc contract: **724 passed, no skips**.
+  Preset test-only narrowing assertion then rerun: **23 passed**. Pyright 0 errors/
+  warnings; ruff + format clean (513 files); bandit gate clean; lint-imports 2 kept,
+  0 broken; strict Zensical build clean; diff check/hooks passed. Full native suite
+  deferred under resource coordination, explicitly open. P4 needs no Docker/GUI gate.
+- Independent P4 reviewer: preset reviewer, `gpt-6.1-sol` / high, chat
+  `01a13ece-fcf0-7da1-afb9-c63eb44a89a8`, worktree `cec8`, exact reviewed range
+  `6c047405bfb1a73e6c8b5a68e3bccefa216c05f6` → `30515500`. Complete P4
+  package/test/failure-policy coverage assigned read-only; findings not yet returned.
+  Package review does not replace Wave A composition review.
+- P0 assigned as a new scoped commit in the existing P4 worker/chat/context; no
+  amendment of P4 permitted. Product-equivalent base differs only in parent ledger
+  ancestry. P0 production source is unchanged by contract.
+- P5 and P11 created from current integrated task state; actual HEADs observed at
+  `30515500`; chat identities and full assignments confirmed through `read_thread`.
+  Their original human authorization/callback references match the ledger above.
+- P3 released the browser lease after observing **22 real Chrome browser cases
+  passed, no skips**, including its new full transition probe. This is preliminary
+  worker evidence; P3 final source identity/static closeout and independent review
+  remain pending. No browser lease currently assigned; full integrated native gate
+  will use stable source under a named owner.
+- P11 exclusively owns task-repository Docker verifier/compose/image/media-cache
+  execution until release, including unchanged-baseline measurement before extraction.
+  No global pruning or unrelated-project resource changes authorized. P5 Docker
+  and full-native gates remain pending resource/stable-input coordination.
+- Pending children: P1, P3, P10, P0 (reused P4), P5, P11, P4 reviewer. No findings
+  dispositions yet. Next useful trigger is a meaningful callback; no idle polling.
