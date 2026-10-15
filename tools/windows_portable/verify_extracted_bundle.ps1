@@ -35,13 +35,7 @@ if (!(Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
   throw "Portable bundle ZIP not found: $ZipPath"
 }
 
-function Test-PathWithin([string]$Path, [string]$Parent) {
-  $parentPrefix = $Parent.TrimEnd(
-    [System.IO.Path]::DirectorySeparatorChar,
-    [System.IO.Path]::AltDirectorySeparatorChar
-  ) + [System.IO.Path]::DirectorySeparatorChar
-  return $Path.StartsWith($parentPrefix, [System.StringComparison]::OrdinalIgnoreCase)
-}
+. (Join-Path $PSScriptRoot "path_safety.ps1")
 
 $extractPathRoot = [System.IO.Path]::GetPathRoot($ExtractRoot)
 if (
@@ -70,12 +64,6 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-
-public static class FrameCompareNativeDirectory {
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool CreateDirectory(string path, IntPtr securityAttributes);
-}
 
 public sealed class FrameCompareProcessJob : IDisposable {
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
@@ -267,21 +255,6 @@ public sealed class FrameCompareCappedFileStream : Stream {
 }
 "@
 
-function New-AtomicallyReservedDirectory([string]$Path) {
-  [System.IO.Directory]::CreateDirectory((Split-Path -Parent $Path)) | Out-Null
-  if ([FrameCompareNativeDirectory]::CreateDirectory($Path, [IntPtr]::Zero)) {
-    return
-  }
-  $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-  if ($errorCode -eq 183) {
-    throw "ExtractRoot must not already exist; choose a fresh verification directory: $Path"
-  }
-  throw [System.ComponentModel.Win32Exception]::new(
-    $errorCode,
-    "Could not atomically reserve ExtractRoot: $Path"
-  )
-}
-
 function Assert-SafeWindowsSegment([string]$Segment, [string]$EntryName) {
   if (
     [string]::IsNullOrEmpty($Segment) -or
@@ -384,7 +357,7 @@ try {
   }
   Write-Host "WINDOWS_EXTRACTED_PROOF zip_layout=ok zip=$ZipPath"
 
-  New-AtomicallyReservedDirectory -Path $ExtractRoot
+  $null = New-AtomicallyReservedDirectory -Path $ExtractRoot
   Write-Host "WINDOWS_EXTRACTED_PROOF extraction_root_reserved=ok root=$ExtractRoot"
   foreach ($validatedEntry in $validatedEntries) {
     $destinationPath = [System.IO.Path]::GetFullPath(
@@ -847,6 +820,7 @@ foreach ($source in $inventorySources) {
 $requiredSourceScripts = @(
   ".github/workflows/windows-portable-build.yml",
   "tools/windows_portable/build_portable.ps1",
+  "tools/windows_portable/path_safety.ps1",
   "tools/windows_portable/runtime_smoke.py",
   "tools/windows_portable/bundle_info.schema.json",
   "tools/windows_portable/manifest.windows-x64.json",

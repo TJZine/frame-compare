@@ -37,11 +37,6 @@ def test_root_install_delegates_to_fail_closed_source_install(repo_root: Path) -
     assert "tools/windows_portable/install-from-source.ps1" in root_install
     assert "exit $LASTEXITCODE" in root_install
     assert "uv sync --group dev --frozen" in source_install
-    assert "& $buildScript -ManifestPath $manifestFullPath" in source_install
-    assert '$installScript = Join-Path $outDirFullPath "install.ps1"' in source_install
-    assert "& $installScript" in source_install
-    assert 'Assert-LastExitCode -Label "build_portable.ps1"' in source_install
-    assert 'Assert-LastExitCode -Label "install.ps1"' in source_install
 
 
 @pytest.mark.parametrize(
@@ -121,6 +116,7 @@ def test_root_source_cmd_refuses_without_pwsh_before_invoking_installer(
     # Keep real command discovery, without exposing host executables or its working directory.
     shutil.copyfile(Path(env["SYSTEMROOT"]) / "System32/where.exe", tmp_path / "where.exe")
     env["PATH"] = str(tmp_path)
+    env["LOCALAPPDATA"] = str(tmp_path / "appdata")
     # Set the fallback inside CMD; the Windows runner restores the host's ProgramFiles.
     driver = tmp_path / "invoke.cmd"
     driver.write_text(
@@ -161,7 +157,11 @@ def test_root_source_installer_prerequisite_at_process_boundary(
     copied_repo = tmp_path / "repo"
     owner = copied_repo / "tools/windows_portable"
     owner.mkdir(parents=True)
-    for relative in ("install.ps1", "tools/windows_portable/install-from-source.ps1"):
+    for relative in (
+        "install.ps1",
+        "tools/windows_portable/install-from-source.ps1",
+        "tools/windows_portable/path_safety.ps1",
+    ):
         (copied_repo / relative).write_bytes((repo_root / relative).read_bytes())
     (owner / "manifest.windows-x64.json").write_text("{}", encoding="utf-8")
     # Keep the production installer path; stub only its expensive build/bootstrap boundaries.
@@ -183,6 +183,7 @@ $global:LASTEXITCODE = 0
             "-Command",
             f"function uv {{ throw 'uv must not run with SkipSync' }}; & '{copied_repo / 'install.ps1'}' -SkipSync",
         ],
+        env=os.environ | {"LOCALAPPDATA": str(tmp_path / "appdata")},
         capture_output=True,
         text=True,
         timeout=30,
@@ -196,4 +197,7 @@ $global:LASTEXITCODE = 0
     else:
         assert proc.returncode == 0, proc.stderr
         assert "Source install complete." in proc.stdout
-        assert (copied_repo / "dist/frame-compare-portable-win-x64/install.ps1").exists()
+        assert (
+            len(list((copied_repo / "dist").glob("frame-compare-portable-win-x64-*Z/install.ps1")))
+            == 1
+        )

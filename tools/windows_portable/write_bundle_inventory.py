@@ -31,6 +31,7 @@ SOURCE_SCRIPTS = (
     ".github/workflows/windows-portable-build.yml",
     ".github/workflows/windows-portable.yml",
     "tools/windows_portable/build_portable.ps1",
+    "tools/windows_portable/path_safety.ps1",
     "tools/windows_portable/runtime_smoke.py",
     "tools/windows_portable/build_update.ps1",
     "tools/windows_portable/bundle_info.schema.json",

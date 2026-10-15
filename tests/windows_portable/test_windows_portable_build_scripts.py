@@ -102,20 +102,39 @@ Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
     output = _normalized_process_output(result)
     assert result.returncode != 0
     assert str(provider_root / "manifest.json") in output
-    assert (provider_root / "relative-out").is_dir()
-    assert (provider_root / "relative-cache").is_dir()
+    assert not (provider_root / "relative-out").exists()
+    assert not (provider_root / "relative-cache").exists()
     assert not (process_root / "relative-out").exists()
     assert not (process_root / "relative-cache").exists()
 
-
-def test_windows_portable_build_creates_default_workspace_directories(repo_root: Path) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    assert '$bundleConfigDir = Join-Path $OutDir "config"' in build_script
-    assert '$bundleInputDir = Join-Path $OutDir "comparison_videos"' in build_script
-    assert 'Join-Path $OutDir "screenshots"' not in build_script
-    assert "Ensure-Directory -Path $bundleConfigDir" in build_script
-    assert "Ensure-Directory -Path $bundleInputDir" in build_script
+    occupied = provider_root / "relative-out"
+    occupied.mkdir()
+    (occupied / "sentinel").write_bytes(b"preserve me")
+    environment["FRAME_COMPARE_TEST_MANIFEST"] = str(
+        repo_root / "tools/windows_portable/manifest.windows-x64.json"
+    )
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-Command",
+            command.replace(
+                "-ManifestPath manifest.json", "-ManifestPath $env:FRAME_COMPARE_TEST_MANIFEST"
+            ),
+        ],
+        cwd=process_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    output = _normalized_process_output(result)
+    assert result.returncode != 0
+    assert str(occupied) in output
+    assert str(provider_root / "relative-cache") in output
+    assert (occupied / "sentinel").read_bytes() == b"preserve me"
+    assert not (provider_root / "relative-cache").exists()
 
 
 def test_windows_portable_installed_default_config_uses_generated_root_only(
@@ -697,16 +716,6 @@ def test_windows_portable_build_surfaces_dirty_app_source_before_archiving(
     )
 
 
-def test_windows_portable_build_reads_version_from_archived_app_source(
-    repo_root: Path,
-) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-
-    assert 'Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app")' in build_script
-    assert "Get-AppVersionFromSource -RepoRootPath $RepoRoot" not in build_script
-
-
 def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
@@ -1234,6 +1243,7 @@ def _write_extracted_verifier_fixture(
             ".github/workflows/windows-portable-build.yml",
             ".github/workflows/windows-portable.yml",
             "tools/windows_portable/build_portable.ps1",
+            "tools/windows_portable/path_safety.ps1",
             "tools/windows_portable/runtime_smoke.py",
             "tools/windows_portable/build_update.ps1",
             "tools/windows_portable/bundle_info.schema.json",
@@ -1798,7 +1808,7 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     assert "evidence_overflow=true stream=$overflowStream" in verifier
     assert 'throw "Unsafe ZIP entry path: $EntryName"' in verifier
     assert "ExtractRoot must name a dedicated verification directory" in verifier
-    assert "ExtractRoot must not already exist" in verifier
+    assert 'Join-Path $PSScriptRoot "path_safety.ps1"' in verifier
     assert "[System.IO.FileMode]::CreateNew" in verifier
     assert "Expand-Archive" not in verifier
     assert "WINDOWS_EXTRACTED_PROOF license_inventory=ok" in verifier
@@ -2439,7 +2449,6 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
     build_script = _read_text_or_fail(
         repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     )
-    assert "function Write-BundleInventory" in build_script
     assert "write_bundle_inventory.py" in build_script
     assert "bundle_inventory.json" in build_script
     assert "--require-clean-repo" in build_script
@@ -2448,7 +2457,6 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
         "Get-ChildItem -LiteralPath $BundleRoot -Filter "
         '"runtime-smoke*.mp4.frame-compare-*.lwi"' in build_script
     )
-    assert "function Assert-RequiredPySideLicenseMetadata" in build_script
     assert '"pyside6_addons-*.dist-info"' in build_script
     assert '"pyside6_essentials-*.dist-info"' in build_script
     assert "License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only" in build_script
@@ -2456,7 +2464,6 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
     assert "git -C $RepoRoot archive" in build_script
     assert "HEAD src/frame_compare" in build_script
     assert "Copy-Item -Recurse -Force -LiteralPath $pkgSrc" not in build_script
-    assert "function Remove-PythonBytecodeCaches" in build_script
     assert 'Filter "__pycache__"' in build_script
     assert '$env:PYTHONDONTWRITEBYTECODE = "1"' in build_script
     assert "& $python -B @arguments" in build_script

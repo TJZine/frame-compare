@@ -423,7 +423,16 @@ recovery requirement.
   or out-of-bounds results are rejected; panel metadata never supplies the result path
   or frame counts.
 - screenshot output directories and generated HTML reports
-- Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
+- Windows source installs build verified bundles under
+  `dist/frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z` (UTC); the AppData
+  active-bundle pointer selects the workspace. The builder validates inputs before
+  atomically reserving the final output path, refuses occupied/unsafe paths, and
+  cleans up only its own reservation on failure. Building at the final path keeps
+  the requirements-lock fingerprint unchanged for CI's fixed build location.
+  Source reinstalls move non-empty `config/`, `comparison_videos/`, and `generated/`
+  folders by default (`-UserData Leave` opts out), reverse moves on activation
+  failure even after pointer replacement, and restore previous shims. They never
+  delete previous bundles. Recovery failures preserve and report remaining paths.
 
 `frame_compare.vs.runtime_contract` is the sole component-identity owner for the
 coordinated media stack. It emits narrow analysis, probe, alignment, and index

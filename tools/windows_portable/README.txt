@@ -34,8 +34,22 @@ NOTES:
     with it because their source paths changed.
   - Source builds require PowerShell 7 or newer before bootstrap or output changes.
     For source builds (`tools\windows_portable\install-from-source.cmd`), use:
-      .\dist\frame-compare-portable-win-x64\
-    as the bundle root (not the repository root).
+      .\dist\frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z\
+    as the bundle root (UTC timestamp, not the repository root). Every source
+    reinstall builds and verifies a fresh bundle before activating it. The shim
+    always uses the active bundle recorded in AppData, regardless of your cwd.
+    Non-empty config\, comparison_videos\, and generated\ folders move from the
+    previous active bundle by default. Use install.cmd -UserData Leave to opt out;
+    the folders then remain in the old bundle, and the shim may select an older
+    AppData fallback config if the new bundle has no config\config.toml.
+    Move requires same-volume renames. Failed moves or activation reverse the
+    moves and restore the previous pointer/shims; a recovery failure reports all
+    remaining paths for manual repair without deleting user folders.
+    Moving media makes path-keyed caches recompute once; absolute config paths
+    are not rewritten. Old bundles are never deleted: remove them manually only
+    after accepting the new installation.
+    The direct builder refuses occupied or unsafe output folders. Maintainers
+    must explicitly remove disposable build output before reusing its path.
   - A complete runtime reinstall requires a fresh, empty folder. Overlaying a full
     ZIP onto an existing bundle root is unsupported. Preserve user configuration,
     input clips, and generated data; copy only those user files to the new bundle

@@ -466,11 +466,25 @@ bootstrap, sync, or output changes. Published-bundle installation, launch, and
 updates retain Windows PowerShell 5.1 support; exercise BOM-less UTF-8 install
 state from a non-ASCII bundle path under that interpreter.
 
+For source-install changes, run `tests/windows_portable` on Windows with PowerShell
+7. Manually rerun source installation with populated config/media/generated
+sentinels using both default Move and `-UserData Leave`, and inject a manifest
+failure. Verify old runtime/code and the previous pointer survive failures, moved
+folders reverse on failed activation before and after pointer replacement, and the
+shim launches the new bundle after success. Old bundles must remain for manual
+removal. Source targets use a UTC timestamp; direct maintainer/CI builds retain the
+same final path to preserve the requirements-lock fingerprint. Static tests and
+non-Windows skips do not establish these filesystem observations.
+
 Canonical verification path:
 
 1. Validate the update public key and manifest schemas.
 2. Download every artifact with exact byte-size and SHA-256 verification.
-3. Build the portable bundle and validate its deterministic ZIP layout, native
+3. The builder refuses occupied or unsafe output paths. Remove disposable candidate
+   output explicitly before rebuilding; never remove a populated installed bundle.
+   Build twice at the same final path (removing only the disposable first build)
+   and compare `bundle_info.requirements_lock_sha256`; it must remain identical.
+   Build the portable bundle and validate its deterministic ZIP layout, native
    plugin manifests, license inventory, source provenance, and runtime fingerprint.
 4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
    verify R81/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.13.0,
