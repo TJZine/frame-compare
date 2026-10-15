@@ -2542,13 +2542,13 @@ and responsibility text were always correct. Role files do not grant child permi
 
 The approved CQ mapping in section 5 remains canonical. No supported group or CQ21
 subpart is dropped; CQ7/CQ14 remain excluded. Current integration source before this
-ledger-only commit is `3af4041d15a6b9172f1804153a7836dabdec77ae`.
+ledger-only commit is `04d5c90bc7014abfc76331ddb02f5afb8b8197e0`.
 
 | Package | Worker source → integrated identity | Implementation / independent review / acceptance |
 | --- | --- | --- |
 | P0 / CQ22 prose | `260670cc` → `23d2f59f` | Complete, reviewed no findings; 5 CLI-doc tests + strict docs passed. Step 0 not repeated. |
-| P1 / CQ15,CQ21d builder | `14b599a2` → `21691a97`; fixes `b920d48a` → `3af4041d` | Implemented; five original deep-review findings accepted/fixed by worker; same reviewer recheck active, NOT cleared yet. Windows proof open. |
-| P2 / CQ16,CQ17,CQ21d updater | Not dispatched | Wait for reviewed P1 prerequisite; complete grammar/transaction/backup scope still required. |
+| P1 / CQ15,CQ21d builder | `14b599a2` → `21691a97`; fixes `b920d48a` → `3af4041d` | Implemented; all five findings independently RESOLVED at 3af4041d, source prerequisite cleared. Windows proof open. |
+| P2 / CQ16,CQ17,CQ21d updater | Active in 5016 from reviewed `04d5c90b` | Full grammar/transaction/backup/CQ21d scope assigned after P1 source clears; platform/signing acceptance remains required. |
 | P3 / CQ1,CQ20,CQ21a | `7ccdb965/986abc2e/149ef433` → `8e32ee40/54e80bb6/983658b8` | Complete, independently reviewed no findings; Node and 22 real-browser passes. Final Wave A union pending. |
 | P4 / CQ10,CQ19 | `c2b62b05` → `30515500`; F1 `a79528de` → `b2dcd6aa` | Original package reviewed/native passed; narrow F1 reopened then independently RESOLVED, both real loaders + CLI proved. Final integrated native pending. |
 | P5 / CQ8,CQ18 | original `b9ca34f2/1d03dbfe`; rebased/integrated `b2232196/1ba2f13b` | Complete, independently reviewed no new findings; inherited F1 closed at b2. Docker, current native and installed Windows shim proof open. |
@@ -2557,7 +2557,7 @@ ledger-only commit is `3af4041d15a6b9172f1804153a7836dabdec77ae`.
 | P8 / CQ11,CQ12,CQ22 geometry | original `165eb46a/4ce11247`; rebased `e09d684c/306631b9` → `bc182b07/698095cd` | Complete and integrated; early deep review and current P5/P6/P10 integration recheck no findings. Standalone browser passes; clean canonical native, Docker and Windows open. |
 | P9 / CQ3 | Not dispatched | Wait for reviewed/integrated P7/P8/P10. Full structured jobs/results and ungrouped-path deletion still required. |
 | P10 / CQ13 | `f0c67e62` → `94efe8cd` | Complete, independent review no findings; joined warning/result/summary/record proof + native gate at 94 passed. |
-| P11 / CQ21b | original `d3250f4e/c542928b`; rebase onto `698095cd` active | Stable code reviewed no findings; actual measurements + cold Docker 295-pass gate complete at original source. Final notes review and current integration pending. |
+| P11 / CQ21b | original `d3250f4e/c542928b`; rebased `e4f502a2/881b0fde` → integrated `722da1ec/04d5c90b` | Code, final notes and current Wave A boundary independently reviewed, no findings; original cold Docker 295-pass proof valid, combined-head gate open. |
 
 ### Meaningful implementation evidence and reviewed ranges
 
@@ -2645,9 +2645,9 @@ proof above close supported P4/P5/O2 acceptance; no broad framework/cycle audit.
 findings below. Worker accepted all and returned b920d48a, cleanly integrated as
 3af4041d (9 files, +657/-79). Same reviewer rechecking exact `698095cd..3af4041d`,
 including added actual bundle-installer caller and previous-bundle compatibility.
-No finding is considered resolved until that recheck returns.
+Recheck returned: all five findings independently RESOLVED, no new actionable issue. Reviewer traced live/borrowed lock ownership and pre-lock previous installer compatibility; current source prerequisite is clear, target-runtime acceptance remains open.
 
-| Finding | Severity | Implemented response awaiting recheck |
+| Finding | Severity | Independently resolved implementation |
 | --- | --- | --- |
 | F1 stale/incoherent pointer across build/overlap | P1 | Single bytes+parse snapshot; fresh post-build acquisition under shared source/bundle activation lock, owned/borrowed handle cleanup; A→B→C and two-process exclusion/reuse fixtures. |
 | F2 lexical containment misses physical aliases | P2 | Refuse reparse/unreadable ancestry before mutation/reservation, physical-path restriction documented; junction fixtures; no drive-root cross-volume guessing. |
@@ -2655,7 +2655,7 @@ No finding is considered resolved until that recheck returns.
 | F4 rooted but not fully-qualified pointer | P2 | Fully-qualified strict pointer validation; populated drive/root-relative traps treated absent. |
 | F5 rollback tests miss shim/order/failure boundary | P2 coverage | Real overwritten/restored bin sentinels, exact pointer bytes, explicit failure markers/candidate counts/events, bundle owned/borrowed lock and non-ASCII UTF-8 tests. |
 
-Original P1 macOS suite: 122 passed/126 skipped. Fix suite: 122 passed/146 skipped,
+Original P1 macOS suite: 122 passed/126 skipped. Fix worker suite: 122 passed/146 skipped; reviewer integrated suite: 122 passed/147 skipped (extra P5 shim/doctor vector),
 static/type/strict docs/diff clean. No PowerShell syntax/execution pass. Additional
 bundle installer caller adds PS5.1+PS7 lock/UTF-8 proof to required Windows acceptance.
 D1 and final-path fingerprint behavior retained; no updater transaction sharing.
@@ -2725,20 +2725,53 @@ no publication/credentials/PR merge inferred from verification work.
 
 - P11 explicitly RELEASED Docker lease: scoped compose down/network removal complete,
   no owned containers; unique images, warm cache and evidence retained, no global
-  pruning. Its current rebase from 30515500 onto 698095cd has NO runtime lease.
+  pruning. Its rebased code/notes are integrated at 04d5c90b; no current Docker lease.
 - P8 RELEASED browser/full-native lease with owned profiles/processes cleaned; its
-  rebase/current integration used focused nonbrowser proof only. No current browser
-  owner. Future heavy full-native and Docker gates will run sequentially on stable
-  inputs, accounting for the observed host process failures.
-- P7 active in 9676 from b2; no browser/Docker lease. P1 same deep-review fix recheck
-  active. P5/P4-F1 reviewer idle/reusable. P8/P6 deep reviewer idle/reusable after
-  no-findings current-source recheck. P11 worker rebase and notes reviewer pending.
-- Next: integrate returned current P11 code/notes, finish P1 recheck/fixes, delegate
-  full Wave A union review, then stable combined native/browser and Docker proof.
-  P7 independent work proceeds on reviewed prerequisites. Dispatch P2 only after P1
-  source clears; P9 only after reviewed P7/P8/P10. Complete final cumulative review
+  rebase/current integration used focused nonbrowser proof only. Verifier b49f now exclusively owns browser/full-native execution at exact 04d5c90b,
+  with Docker idle. Heavy native and Docker gates run sequentially on stable inputs,
+  accounting for the observed host process failures.
+- P7 active in 9676 from b2; no browser/Docker lease. P2 active in 5016 from 04d5c90b, after P1 source cleared. All four reviewers
+  assigned Wave A integrated boundaries at 04d5c90b; P11 boundary complete, other
+  boundaries pending. P11 worker idle/reusable for the next combined Docker gate.
+- Next: collect Wave A union review and current native/browser result, then assign
+  combined Docker proof after native lease releases. P2/P7 independent work proceeds
+  on reviewed prerequisites; P9 only after reviewed P7/P8/P10. Complete final cumulative review
   and section 13 without calling outstanding acceptance passed.
 - Preserve valid source/environment-bound evidence; rerun invalidated checks.
   When only children remain, end the turn and resume on meaningful authorized
   callbacks; no sleeps or idle polling. This ledger consolidates earlier repeated
   dispatch updates; Git and child final reports retain their full provenance.
+
+
+### Wave A stable integration checkpoint at 04d5c90b
+
+P11 worker rebased to698095cd without conflicts; implementation patch identical,
+notes add20-line provenance only. Parent clean-cherry-picked e4f502a2/881b0fde to
+722da1ec/04d5c90b, including nonconflicting P1/P11 runbook paragraphs. Worker29cache/
+workflow/onboarding and74request/alignment/resolution passes, type/static/docs clean.
+Independent P11 reviewer validated all21ASTs and measured executable U4 AST after
+only P5 request/import normalization, exact note preservation, and current P5/P6/P8
+U4/verifier seams. Final notes review independently checked raw295-pass runtime log,
+JSON counts/sums, keys/hashes, completeFFmpeg bytes, images and timing distinctions.
+No findings; inspected runtime evidence is not reviewer execution or final-head gate.
+
+All nine Wave A packages are present at exact04d5c90b. Independent wave review is
+partitioned below; union covers every package and explicit cross-package interfaces.
+Prior package review is reused only after current-source/equivalence inspection.
+No single boundary conclusion establishes the whole wave; orchestrator assembles
+coverage and routes findings without personal substantive review.
+
+| Boundary / reviewer | Owned wave scope and explicit integration interfaces | Status at exact 04d5c90b |
+| --- | --- | --- |
+| A / 01a13ece-fcf0-7da1-afb9-c63eb44a89a8, reviewer/high | P0/P3/P4/P5/P10: CLI/config/JSON/viewer/persistence/warnings; P6 records, P8 payload/facts and P11 request construction interfaces | Assigned, pending |
+| B / 01a13ee0-8b57-7573-9de8-4374f0fc445e, deep/xhigh | P6/P8 authority/native/render/report; P5 inputs, P4 failure policy, P10 warnings, P11 real phase/cache/smoke interfaces | Assigned, pending |
+| C / 01a13ed5-7e47-7ea0-9201-1f47b6a097f0, deep/xhigh | P1 preservation/activation/provenance; P5 doctor shim, P8 runtime smoke, P0 acceptance docs and P11 runbook coexistence | Assigned, pending (P1 F1–F5 source already resolved at3af4041d) |
+| D / 01a13ee3-a368-7772-90c2-9c84da0890a7, reviewer/high | P11 recipe/cache/verifier/notes and U4 config/authority/runtime interfaces to P5/P6/P8 | COMPLETE, no findings; unchanged-source/AST and evidence inspection, no new runtime run |
+
+Verifier b49f explicitly assigned clean-detach04d5c90b, one actual Chrome standalone
+module then one canonical native if standalone passes, plus integrated static/import/
+security/strict-doc checks. Unique owned profiles/TMPDIR, exact source/log/JUnit,
+skip accounting and no repeated workaround attempts. Docker idle until verifier
+release; current native/Docker acceptance pending. P2 assignment is full steps1–6,
+reviewed base04d5c90b, same Windows worker5016; P1 lock/safeguards preserved and no
+runtime/signing/publication authority inferred. P7 remains independently active.
