@@ -7,6 +7,7 @@ import json
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from frame_compare.analysis.sampling import PERFORMANCE_BURST_COUNT, PERFORMANCE_SAMPLING_FRACTION
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.vs.runtime_contract import media_runtime_identity
 
@@ -76,9 +77,12 @@ def _performance_identity() -> dict[str, object]:
         "performance_mode": "performance",
         "media_runtime": media_runtime_identity("analysis"),
         "temporal_sampling": {
-            "fraction": {"numerator": 1, "denominator": 4},
+            "fraction": {
+                "numerator": PERFORMANCE_SAMPLING_FRACTION.numerator,
+                "denominator": PERFORMANCE_SAMPLING_FRACTION.denominator,
+            },
             "budget_rounding": "ceil",
-            "max_bursts": 8,
+            "max_bursts": PERFORMANCE_BURST_COUNT,
             "placement": "centered_contiguous_strata",
         },
         "decoder": {"source": "default", "options": None},

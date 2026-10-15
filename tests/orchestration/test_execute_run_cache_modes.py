@@ -135,7 +135,9 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
         overrides=CLIConfigOverrides(no_upload=True),
     )
 
-    def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
+    def _fake_calculate_metrics(
+        request: MetricCacheRequest, **_kwargs: object
+    ) -> MetricsAcquisition:
         return MetricsAcquisition(
             metrics=_frame_metrics(
                 luminance=[0.1] * 100,
@@ -322,7 +324,7 @@ def test_execute_run_optional_analysis_failure_retains_initial_frame_plan(
     )
     create_video_files(tmp_path / "comparison_videos", "a_source.mkv", "b_comp.mkv")
 
-    def _fail_metrics(**_kwargs: object) -> MetricsAcquisition:
+    def _fail_metrics(_request: MetricCacheRequest, **_kwargs: object) -> MetricsAcquisition:
         raise MetricsCalculationError("analysis unavailable")
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fail_metrics)

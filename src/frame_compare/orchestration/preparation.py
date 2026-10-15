@@ -87,7 +87,6 @@ from frame_compare.services.run_info import (
 )
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import ParsedMetadata, TmdbMetadata
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.cancellation import cancellation_checkpoint, raise_if_cancelling
 from frame_compare.utils.paths import (
     require_managed_descendant,
@@ -292,31 +291,13 @@ def _validate_cache_state(
         )
 
     if request.from_cache_only and not request.skip_analysis:
-        fingerprint = cache_io.compute_cache_key(
-            input_videos,
-            config.analysis,
+        cache_io.acquire_required_metrics(
+            metric_request,
+            video_paths=input_videos,
+            config=config.analysis,
+            cache_dir=workspace.cache_dir,
             selection_domain=selection_domain,
-            metric_request=metric_request,
         )
-        cache_result = cache_io.load_cached_metrics_for_request(
-            workspace.cache_dir,
-            fingerprint,
-            request=metric_request,
-        )
-        if not cache_result.success:
-            cache_path = cache_io.find_metrics_cache_file(workspace.cache_dir, fingerprint)
-            expected_cache_path = workspace.cache_dir / cache_io.metrics_cache_filename(
-                input_videos, fingerprint
-            )
-            error_cache_path = cache_path or expected_cache_path
-            if cache_result.reason == "corrupted":
-                raise CacheCorruptionError(error_cache_path)
-            if cache_result.reason == "version_mismatch":
-                found = cache_io.read_cache_version(error_cache_path) or "unknown"
-                raise CacheVersionMismatchError(found, str(cache_io.CACHE_VERSION))
-            raise MetricsCalculationError(
-                f"Cached metrics missing or mismatched ({cache_result.reason})."
-            )
 
 
 def _cached_probe_snapshots_for_cache_only(

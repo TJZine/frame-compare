@@ -19,9 +19,7 @@ from frame_compare.analysis.metric_identity import (
 from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
-    MetricActiveRect,
     MetricCacheRequest,
-    MetricFrameRange,
     MetricsAcquisition,
     MetricsMetadata,
 )
@@ -140,7 +138,9 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
         overrides=CLIConfigOverrides(no_upload=True),
     )
 
-    def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
+    def _fake_calculate_metrics(
+        request: MetricCacheRequest, **_kwargs: object
+    ) -> MetricsAcquisition:
         return MetricsAcquisition(
             metrics=_frame_metrics(
                 luminance=[0.1] * 100,
@@ -453,29 +453,22 @@ enable = false
     )
 
     def _fake_calculate_metrics(
+        request: MetricCacheRequest,
         *,
         video_paths: list[Path],
         config: AnalysisConfig,
         cache_dir: Path,
-        analysis_source_path: Path | None = None,
-        metric_active_rect: MetricActiveRect | None = None,
-        metric_frame_range: MetricFrameRange | None = None,
         selection_domain: str | None = None,
         **_kwargs: object,
     ) -> MetricsAcquisition:
-        resolved_analysis_source_path = (
-            video_paths[0] if analysis_source_path is None else analysis_source_path
-        )
+        resolved_analysis_source_path = request.analysis_source_path or video_paths[0]
+        metric_frame_range = request.metric_frame_range
+        metric_active_rect = request.metric_active_rect
         cache_fingerprint = cache_io.compute_cache_key(
             video_paths,
             config,
             selection_domain=selection_domain,
-            metric_request=MetricCacheRequest(
-                analysis_source_path=resolved_analysis_source_path,
-                metric_frame_range=metric_frame_range,
-                effective_fps=Fraction(24, 1),
-                metric_active_rect=metric_active_rect,
-            ),
+            metric_request=request,
         )
         stats_by_path = {path: path.stat() for path in video_paths}
         metrics = FrameMetrics(
@@ -537,7 +530,7 @@ enable = false
     assert (tmp_path / "custom_generated" / "clip_probe.toml").exists()
     assert not any(input_dir.glob("*/generated/cache/analysis/*.compframes"))
 
-    def _fail_calculate_metrics(**_kwargs: object) -> NoReturn:
+    def _fail_calculate_metrics(request: MetricCacheRequest, **_kwargs: object) -> NoReturn:
         raise AssertionError("from-cache-only should load the shared analysis cache")
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fail_calculate_metrics)

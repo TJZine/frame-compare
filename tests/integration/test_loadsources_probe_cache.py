@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from frame_compare.analysis.metrics import calculate_metrics
+from frame_compare.analysis.types import MetricCacheRequest
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import RuntimeConfig
@@ -256,7 +257,11 @@ def test_real_render_and_metric_fallbacks_apply_cache_limit(
         assert core.max_cache_size == 1024
         core.max_cache_size = original
         metrics = calculate_metrics(
-            [runtime_clip], config.analysis, tmp_path / "cache", memory_limit_mb=1024
+            MetricCacheRequest(analysis_source_path=None),
+            memory_limit_mb=1024,
+            video_paths=[runtime_clip],
+            config=config.analysis,
+            cache_dir=tmp_path / "cache",
         )
         assert metrics.metrics.metadata.frame_count == 144
         assert core.max_cache_size == 1024

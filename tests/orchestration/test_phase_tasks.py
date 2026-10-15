@@ -30,6 +30,7 @@ from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
     FrameSelection,
+    MetricCacheRequest,
     MetricsAcquisition,
     MetricsMetadata,
     SelectionBreakdown,
@@ -143,8 +144,9 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
     confirmation_requests: list[FullWindowRetryConfirmationRequest] = []
     progress = ConfirmationProgressSpy()
 
-    def _calculate_metrics(**kwargs: Any) -> MetricsAcquisition:
-        frame_range = kwargs["metric_frame_range"]
+    def _calculate_metrics(request: MetricCacheRequest, **kwargs: Any) -> MetricsAcquisition:
+        frame_range = request.metric_frame_range
+        assert frame_range is not None
         calculate_ranges.append((frame_range.start, frame_range.end_exclusive))
         return MetricsAcquisition(
             metrics=constrained_metrics if frame_range.start == 40 else full_metrics,
@@ -214,7 +216,7 @@ def test_run_analyze_phase_satisfied_selection_never_prompts(
     monkeypatch.setattr(
         phase_selection,
         "calculate_metrics",
-        lambda **_kwargs: MetricsAcquisition(
+        lambda _request, **_kwargs: MetricsAcquisition(
             metrics=_metrics_for_range(start=40, end=60), disposition="computed"
         ),
     )
@@ -273,7 +275,7 @@ def test_run_analyze_phase_refused_or_failed_prompt_is_fatal_without_retry(
     monkeypatch.setattr(
         phase_selection,
         "calculate_metrics",
-        lambda **_kwargs: MetricsAcquisition(
+        lambda _request, **_kwargs: MetricsAcquisition(
             metrics=_metrics_for_range(start=40, end=60), disposition="computed"
         ),
     )
@@ -329,12 +331,12 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
     monkeypatch.setattr(
         phase_selection,
         "calculate_metrics",
-        lambda **kwargs: MetricsAcquisition(
+        lambda _request, **kwargs: MetricsAcquisition(
             metrics=sparse_full_metrics
-            if kwargs["metric_frame_range"].start == 0
+            if _request.metric_frame_range.start == 0
             else _metrics_for_range(
-                start=kwargs["metric_frame_range"].start,
-                end=kwargs["metric_frame_range"].end_exclusive,
+                start=_request.metric_frame_range.start,
+                end=_request.metric_frame_range.end_exclusive,
             ),
             disposition="computed",
         ),
@@ -603,7 +605,9 @@ def test_run_analyze_phase_cache_only_metadata_mismatch_does_not_recompute(
     def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
         return CacheLoadResult(success=False, reason="mismatched_inputs")
 
-    def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
+    def _fake_calculate_metrics(
+        request: MetricCacheRequest, **_kwargs: object
+    ) -> MetricsAcquisition:
         raise AssertionError("cache-only analyze phase must not recompute metrics")
 
     monkeypatch.setattr(
@@ -1105,14 +1109,14 @@ def test_run_analyze_phase_reports_actual_acquisition_after_cache_changes(
         reads += 1
         return real_reader(cache_dir, fingerprint)
 
-    def acquire(**kwargs: Any) -> MetricsAcquisition:
+    def acquire(request: MetricCacheRequest, **kwargs: Any) -> MetricsAcquisition:
         # Change persisted cache state at the acquisition boundary. An earlier
         # orchestration prediction would describe the opposite disposition.
         if initial_hit:
             cache_path.unlink()
         else:
             phase_selection.cache_io.save_metrics_cache(primed, ctx.workspace.cache_dir)
-        return metrics_owner.calculate_metrics(**kwargs)
+        return metrics_owner.calculate_metrics(request, **kwargs)
 
     monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", reader)
     monkeypatch.setattr(phase_selection, "calculate_metrics", acquire)

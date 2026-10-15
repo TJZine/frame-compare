@@ -7,11 +7,12 @@ import json
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
 from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.types import (
@@ -27,6 +28,7 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
@@ -58,6 +60,42 @@ def _cache_path_sort_key(path: Path) -> str:
 
 def _sorted_video_paths(video_paths: list[Path]) -> list[Path]:
     return sorted(video_paths, key=_cache_path_sort_key)
+
+
+def keyed_metric_request(
+    request: MetricCacheRequest, video_paths: list[Path]
+) -> MetricCacheRequest:
+    """Fill the source fallback without resolving optional range/FPS identity."""
+    if request.analysis_source_path is None and video_paths:
+        return replace(request, analysis_source_path=video_paths[0])
+    return request
+
+
+def acquire_required_metrics(
+    request: MetricCacheRequest,
+    *,
+    video_paths: list[Path],
+    config: AnalysisConfig,
+    cache_dir: Path,
+    selection_domain: str | None,
+) -> FrameMetrics:
+    """Read required cache state at the caller's lifecycle boundary; never compute."""
+    request = keyed_metric_request(request, video_paths)
+    fingerprint = compute_cache_key(
+        video_paths, config, selection_domain=selection_domain, metric_request=request
+    )
+    result = load_cached_metrics_for_request(cache_dir, fingerprint, request)
+    if result.success and result.metrics is not None:
+        return result.metrics
+    error_path = find_metrics_cache_file(cache_dir, fingerprint) or (
+        cache_dir / metrics_cache_filename(video_paths, fingerprint)
+    )
+    if result.reason == "corrupted":
+        raise CacheCorruptionError(error_path)
+    if result.reason == "version_mismatch":
+        found = read_cache_version(error_path) or "unknown"
+        raise CacheVersionMismatchError(found, str(CACHE_VERSION))
+    raise MetricsCalculationError(f"Cached metrics missing or mismatched ({result.reason}).")
 
 
 def compute_cache_key(

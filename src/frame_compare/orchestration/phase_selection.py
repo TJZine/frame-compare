@@ -15,7 +15,6 @@ from frame_compare.analysis.errors import (
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.selection import select_frames, select_random_frames
 from frame_compare.analysis.types import (
-    CacheLoadResult,
     FrameMetrics,
     FrameSelection,
     SelectionBreakdown,
@@ -34,7 +33,6 @@ from frame_compare.orchestration.full_window_retry import (
     recover_from_exclusion_selection_failure,
 )
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
@@ -308,40 +306,24 @@ def _run_analyze_phase_once(
         fallback_detection_mode=ctx.config.screenshots.active_rect_detection.value,
     )
     if require_cache_only:
-        fingerprint = cache_io.compute_cache_key(
-            input_videos,
-            ctx.config.analysis,
-            selection_domain=selection_domain,
-            metric_request=metric_request,
-        )
-        cache_result = cache_io.load_cached_metrics_for_request(
-            workspace.cache_dir,
-            fingerprint,
-            request=metric_request,
-        )
-        metrics = _require_cached_metrics(
-            cache_result=cache_result,
+        metrics = cache_io.acquire_required_metrics(
+            metric_request,
+            video_paths=input_videos,
+            config=ctx.config.analysis,
             cache_dir=workspace.cache_dir,
-            input_videos=input_videos,
-            fingerprint=fingerprint,
+            selection_domain=selection_domain,
         )
         metrics_cache_hit = True
     else:
         acquisition = calculate_metrics(
+            metric_request,
             video_paths=input_videos,
-            analysis_source_path=ctx.analysis_clip.path,
             config=ctx.config.analysis,
             memory_limit_mb=ctx.config.runtime.memory_limit_mb,
             cache_dir=workspace.cache_dir,
             reporter=ctx.reporter,
             vs_loader=vs_loader,
             selection_domain=selection_domain,
-            effective_fps=ctx.analysis_clip.effective_fps,
-            metric_frame_range=metric_request.metric_frame_range,
-            metric_active_rect=metric_request.metric_active_rect,
-            active_rect_source=metric_request.active_rect_source,
-            active_rect_detection_mode=metric_request.active_rect_detection_mode,
-            active_rect_algorithm_id=metric_request.active_rect_algorithm_id,
         )
         metrics = acquisition.metrics
         metrics_cache_hit = acquisition.disposition == "hit"
@@ -367,28 +349,6 @@ def _selected_frames_summary(count: int) -> str:
     if count == 1:
         return "1 frame selected"
     return f"{count} frames selected"
-
-
-def _require_cached_metrics(
-    *,
-    cache_result: CacheLoadResult,
-    cache_dir: Path,
-    input_videos: list[Path],
-    fingerprint: str,
-) -> FrameMetrics:
-    if cache_result.success and cache_result.metrics is not None:
-        return cache_result.metrics
-
-    cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
-    expected_cache_path = cache_dir / cache_io.metrics_cache_filename(input_videos, fingerprint)
-    error_cache_path = cache_path or expected_cache_path
-    reason = cache_result.reason
-    if reason == "corrupted":
-        raise CacheCorruptionError(error_cache_path)
-    if reason == "version_mismatch":
-        found = cache_io.read_cache_version(error_cache_path) or "unknown"
-        raise CacheVersionMismatchError(found, str(cache_io.CACHE_VERSION))
-    raise MetricsCalculationError(f"Cached metrics missing or mismatched ({reason}).")
 
 
 def _select_frames_for_selection_domain(
