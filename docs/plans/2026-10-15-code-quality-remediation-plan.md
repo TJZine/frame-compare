@@ -2458,3 +2458,62 @@ the reason it could not be obtained.
       implicit caller migration or deletion, no temporary compatibility layer, CQ7/CQ14
       untouched, no runtime acceptance claimed without evidence.
 - [ ] This plan's marker changed to `Status: Historical` with an outcome line.
+
+
+## 14. Implementation dispatch and evidence ledger
+
+Implementation authorized by the maintainer on 2026-10-15 in orchestrator chat
+`01a13ec5-b5a2-7cc3-880c-8ce92c075fac`, host `local`, human turn
+`01a13ec5-c10d-7540-aada-c7fcad5ea7df`, user message
+`01a13ec5-c54a-70c1-b1be-2d525121bac8` (retrieved with `read_thread`). The human
+explicitly authorizes implementation/review/verification children, assignments and
+follow-ups, meaningful blocker/decision/completion callbacks to this orchestrator,
+isolated worktrees from current task state, scoped local commits, and integration
+under one Git owner. Children must retrieve this original human turn before callbacks
+unless trusted human authorization is already in context. Retrieval failure means
+final-report-only fallback; the parent retrieves on its next activation.
+
+### Initial baseline and resources
+
+- Actual checkout: `/Users/tristan/Software/frame-compare`, branch `v0.7.0`, clean
+  HEAD `9fe932ede7ea333018e60c81720e29b60a089890`. No pre-existing implementation
+  edits. No historical/default-branch reset or switch performed.
+- Project resolved through `list_projects`:
+  `local-5fa7d782ab3f3ef0c782bc2a261e2e12`, host `local`, matching this checkout.
+- Current presets read from `.codex/agents/`: worker = `gpt-6.1-sol` / medium;
+  worker_luna = `gpt-5.6-luna` / xhigh; reviewer = `gpt-6.1-sol` / high;
+  deep_reviewer = `gpt-6.1-sol` / xhigh. Responsibility instructions travel in each
+  assignment; role files do not establish child permissions.
+- Observed capabilities: macOS arm64; uv 0.12.21; Python 3.13.16; Node 24.14.0;
+  Docker daemon 29.8.2 responds; native Chrome exists; Qt/VSView import successfully;
+  VapourSynth R81 imports but native `lsmas` and `placebo` are absent. No `pwsh` or
+  `powershell` executable found. These are capability observations, not gate passes.
+- Exclusive resources: orchestrator alone mutates integration checkout/index/branch
+  and this plan; workers commit only in their own worktrees. Docker verifier/image/
+  media-cache runs require a controller-issued lease (none granted initially).
+  Browser profiles must be worktree-local; shared native/browser acceptance and full
+  integrated gates run on stable inputs under a named owner. No child edits the
+  canonical plan. Children own relevant product documentation only in package sections.
+- P0 step 0 remains completed planning evidence; it is not new implementation work.
+
+### Dispatch / acceptance state
+
+| Package | Owner / role / chat | Base and integration | State / evidence / remaining acceptance |
+| --- | --- | --- | --- |
+| P1 | First batch; worker / medium; ID pending | Initial baseline plus ledger | Priority installation-preservation work; all P1 steps and CQ21d builder/installer portion; independent review and Windows acceptance pending |
+| P3 | First batch; worker / medium; ID pending | Initial baseline plus ledger | Complete fixture/runner/transition package; separate planned commits; Node and real-browser evidence pending |
+| P4 | First batch; worker / medium; ID pending | Initial baseline plus ledger | All decoder owners and four timeout fields; focused/full proof pending |
+| P10 | First batch; worker_luna / xhigh; ID pending | Initial baseline plus ledger | Bounded warning propagation with joined behavioral proof; independent review pending |
+| P0 | Ready, next bounded dispatch | — | Steps 1–5 pending; step 0 already complete |
+| P5 | Next practical batch | — | Single acquired config + doctor; P10 shared-file ordering tracked |
+| P6 | Next practical batch after P4 shared-owner changes | — | Full CQ5/CQ21c/CQ2 scope pending |
+| P8 | Next practical batch after P3/P10 shared-owner changes | — | Full applied-fact/payload/geometry scope pending |
+| P11 | Next practical batch | — | Recipe/store/cache and measurements pending; Docker lease required |
+| P2 | Wave B after integrated, reviewed P1 prerequisite | — | Grammar/transaction scope pending; PS5.1/7/Windows/signing acceptance open |
+| P7 | Wave B after integrated, reviewed P5/P10 (and P4/P6 shared changes) | — | Full CQ6/CQ9/CQ4 scope pending |
+| P9 | Wave C after integrated, reviewed P7/P8/P10 | — | Complete structured-render migration pending |
+
+Each wave requires independent integrated review, including cross-package composition.
+No package is accepted from a completion callback alone. Final cumulative review and
+all applicable stable-head gates remain pending. This section records implementation
+progress without altering approved design, coverage, compatibility, or exclusions.
