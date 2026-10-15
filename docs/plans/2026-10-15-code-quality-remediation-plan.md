@@ -2938,3 +2938,22 @@ This clears ONLY original source. Current integrated range001755f5..f9eec86d was
 reissued explicitly for focused P8/P11/rebase equivalence/composition recheck; no P9
 dispatch until it clears. Native verifier atf9 still pending; source-bound Docker
 required afterward. No worker remediation requested by original review.
+
+
+P7 current native verification PASSED at exactf9eec86d, clean b49f detached source:
+3770total,**3607passed/163skipped/0failures/errors**,exit0. ActualChrome/browser cases
+executed; no browser skips. Same skip breakdown as Wave A:5plugins,6mediaopt-in,
+3resources,2live,147Windows/PowerShell/CMD. Artifacts owned by b49f under
+`.tmp/p7-native.ls6ip9/{native.xml,native.log}`; canonical-n4-loadgroup command with
+nativeChrome,worktreeTMPDIR/basetemp/JUnit. Pyright0/0,ruff/format529,bandit0medium/high,
+imports2kept(185files/809dependencies),strictdocs1.46s/diffclean. No source changes,
+Docker or Windows claim. Owned Chrome processes/dump profiles cleaned; browser/native
+lease RELEASED. No standalone browser repeat needed because full gate executed it.
+
+Verifiera638 now assigned exactf9eec86d clean detach from04d5c90b, exclusive Docker
+lease, unique rebuilt current-source images/scoped canonical FULL verifier with valid
+warm media cache/all37full matrix. Actual P7 metrics/selection/domain/phase/cache/E2E
+proof required, no static substitution or stale images. No concurrent heavy native
+run, global pruning or source fixes; report failures to owners. Current P7 deep
+composition recheck and Docker result pending; P9not dispatched until source clears.
+P2isolated implementation continues. Only pending children remain.
