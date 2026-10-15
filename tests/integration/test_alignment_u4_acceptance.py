@@ -25,6 +25,7 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution_types import AlignPhaseOutput, PrepState
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.orchestration.types import RunDependencies
 from frame_compare.services import alignment_video
 from frame_compare.services.alignment import align_clips_from_request
@@ -235,9 +236,11 @@ def _phase_context(
         workspace=workspace,
         reference=reference,
         comparisons=[comparison],
-        analysis_selection_domain="u4-phase",
-        selection_window=SelectionWindow(0, reference.probe.num_frames),
-        analysis_clip=reference,
+        selection_domain=PreparedSelectionDomain(
+            token="u4-phase",
+            selection_window=SelectionWindow(0, reference.probe.num_frames),
+            analysis_clip=reference,
+        ),
     )
 
 
@@ -545,9 +548,7 @@ def _configured_prep_alignment(
         workspace=prep.workspace,
         reference=prep.clips[0],
         comparisons=prep.clips[1:],
-        analysis_selection_domain=prep.analysis_selection_domain,
-        selection_window=prep.selection_window,
-        analysis_clip=prep.analysis_clip,
+        selection_domain=prep.selection_domain,
     )
     output = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
     return prep, output

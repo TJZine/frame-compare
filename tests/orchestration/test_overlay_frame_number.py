@@ -14,6 +14,7 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.render.geometry import RenderGeometryPlan
 from frame_compare.render.types import RenderedFrameResult
 from frame_compare.utils.media_facts import RenderedFrameFacts
@@ -117,9 +118,12 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
         reporter=None,
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
+            analysis_clip=None,
+        ),
     )
 
     output = run_render_phase(

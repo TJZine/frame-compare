@@ -142,8 +142,8 @@ def test_execute_prep_analysis_source_fastest(
             make_run_request(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
         )
     )
-    assert prep.analysis_clip is not None
-    assert prep.analysis_clip.path.name == expected
+    assert prep.selection_domain.analysis_clip is not None
+    assert prep.selection_domain.analysis_clip.path.name == expected
     if diagnostic is not None:
         assert diagnostic in prep.load_source_diagnostics
 
@@ -184,5 +184,5 @@ def test_execute_prep_analysis_source_fastest_skipped_analysis_does_not_benchmar
         )
     )
 
-    assert prep.analysis_clip is None
+    assert prep.selection_domain.analysis_clip is None
     assert loader.loaded == [input_dir / "00-reference.mkv", input_dir / "01-encode.mkv"]

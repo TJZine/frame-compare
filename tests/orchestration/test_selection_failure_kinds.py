@@ -1,5 +1,6 @@
 """Recovery classification comes from producers, never diagnostic wording."""
 
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -126,7 +127,10 @@ def test_real_producers_classify_without_changing_public_payload(
                 if case == "initial"
                 else ctx.reference
             )
-            ctx.selection_window = SelectionWindow(0, 10 if case == "initial" else 2)
+            ctx.selection_domain = replace(
+                ctx.selection_domain,
+                selection_window=SelectionWindow(0, 10 if case == "initial" else 2),
+            )
             ctx.config.analysis = AnalysisConfig(
                 user_frames=[0], random_frame_count=0 if case == "initial" else 2
             )

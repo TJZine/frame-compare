@@ -186,9 +186,9 @@ def test_execute_prep_analysis_source_reference_selects_selected_reference(
         )
     )
 
-    assert prep.analysis_clip is not None
-    assert prep.analysis_clip is prep.clips[0]
-    assert prep.analysis_clip.path == input_dir / "01-reference.mkv"
+    assert prep.selection_domain.analysis_clip is not None
+    assert prep.selection_domain.analysis_clip is prep.clips[0]
+    assert prep.selection_domain.analysis_clip.path == input_dir / "01-reference.mkv"
 
 
 def test_execute_prep_analysis_source_selector_does_not_reorder_clips(tmp_path: Path) -> None:
@@ -215,8 +215,8 @@ analysis_source = "02-analysis.mkv"
         "01-encode.mkv",
         "02-analysis.mkv",
     ]
-    assert prep.analysis_clip is not None
-    assert prep.analysis_clip.path.name == "02-analysis.mkv"
+    assert prep.selection_domain.analysis_clip is not None
+    assert prep.selection_domain.analysis_clip.path.name == "02-analysis.mkv"
 
 
 def test_execute_prep_analysis_selection_domain_differs_by_analysis_source(
@@ -246,13 +246,13 @@ def test_execute_prep_analysis_selection_domain_differs_by_analysis_source(
     assert [clip.path for clip in reference_prep.clips] == [
         clip.path for clip in configured_prep.clips
     ]
-    assert reference_prep.analysis_selection_domain != configured_prep.analysis_selection_domain
+    assert reference_prep.selection_domain.token != configured_prep.selection_domain.token
     assert (
-        json.loads(reference_prep.analysis_selection_domain)["analysis_source_path"]
+        json.loads(reference_prep.selection_domain.token)["analysis_source_path"]
         == (input_dir / "00-reference.mkv").as_posix()
     )
     assert (
-        json.loads(configured_prep.analysis_selection_domain)["analysis_source_path"]
+        json.loads(configured_prep.selection_domain.token)["analysis_source_path"]
         == (input_dir / "01-analysis.mkv").as_posix()
     )
 
@@ -292,8 +292,8 @@ def test_execute_prep_invalid_analysis_source_selector_is_ignored_when_analysis_
         )
     )
 
-    assert prep.analysis_clip is None
-    assert prep.analysis_selection_domain == ""
+    assert prep.selection_domain.analysis_clip is None
+    assert prep.selection_domain.token == ""
 
 
 def test_execute_prep_applies_source_trim_and_active_rect_overrides(tmp_path: Path) -> None:

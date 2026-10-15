@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from frame_compare.orchestration.context import RunContext
+from dataclasses import replace
+
+from frame_compare.orchestration.context import RunContext, SelectionSnapshot
 from frame_compare.orchestration.execution_types import (
     AlignPhaseOutput,
     AnalyzePhaseOutput,
@@ -23,9 +25,11 @@ __all__ = ["apply_phase_output"]
 def apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
     match output:
         case FramePlanPhaseOutput() as phase_output:
-            state.selected_frames[:] = phase_output.selected_frames
-            ctx.selection_breakdown = phase_output.selection_breakdown
-            ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
+            ctx.selection = SelectionSnapshot(
+                frames=tuple(phase_output.selected_frames),
+                breakdown=phase_output.selection_breakdown,
+                details_by_source_frame=phase_output.selection_details_by_source_frame,
+            )
             state.frame_plan_warnings[:] = phase_output.warnings
             state.warnings.extend(phase_output.warnings)
         case AnalyzePhaseOutput() as phase_output:
@@ -34,27 +38,32 @@ def apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: PhaseO
                     if warning in state.warnings:
                         state.warnings.remove(warning)
                 state.frame_plan_warnings.clear()
-            state.selected_frames[:] = phase_output.selected_frames
             state.artifacts.metrics_cache_hit = phase_output.metrics_cache_hit
             state.artifacts.metrics_cache_status = (
                 "hit" if phase_output.metrics_cache_hit else "miss"
             )
-            ctx.selection_breakdown = phase_output.selection_breakdown
-            ctx.selection_details_by_source_frame = phase_output.selection_details_by_source_frame
-            ctx.analysis_metrics = phase_output.analysis_metrics
+            ctx.selection = SelectionSnapshot(
+                frames=tuple(phase_output.selected_frames),
+                breakdown=phase_output.selection_breakdown,
+                details_by_source_frame=phase_output.selection_details_by_source_frame,
+                analysis_metrics=phase_output.analysis_metrics,
+            )
             state.warnings.extend(phase_output.warnings)
         case AlignPhaseOutput() as phase_output:
             ctx.reference = phase_output.reference
             ctx.comparisons = phase_output.comparisons
-            state.selected_frames[:] = phase_output.selected_frames
+            ctx.selection = replace(
+                ctx.selection,
+                frames=tuple(phase_output.selected_frames),
+                breakdown=phase_output.selection_breakdown
+                if phase_output.selection_breakdown is not None
+                else ctx.selection.breakdown,
+                details_by_source_frame=phase_output.selection_details_by_source_frame
+                if phase_output.selection_details_by_source_frame is not None
+                else ctx.selection.details_by_source_frame,
+            )
             state.warnings.extend(phase_output.warnings)
             state.vsview_review_seconds = max(0.0, phase_output.review_seconds)
-            if phase_output.selection_breakdown is not None:
-                ctx.selection_breakdown = phase_output.selection_breakdown
-            if phase_output.selection_details_by_source_frame is not None:
-                ctx.selection_details_by_source_frame = (
-                    phase_output.selection_details_by_source_frame
-                )
         case RenderPhaseOutput() as phase_output:
             state.artifacts.render = phase_output.render
             state.warnings.extend(phase_output.render.warnings)

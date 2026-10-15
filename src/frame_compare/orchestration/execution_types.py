@@ -12,7 +12,6 @@ from frame_compare.analysis.types import (
     SelectionDetail,
     SelectionDetailsByFrame,
 )
-from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.types import (
@@ -27,8 +26,8 @@ from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 if TYPE_CHECKING:
-    from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
     from frame_compare.orchestration.phases import Phase
+    from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 
 
 @dataclass
@@ -165,7 +164,6 @@ class ExecutionState:
     """Mutable execution state shared explicitly by phase construction."""
 
     artifacts: RunArtifacts = field(default_factory=RunArtifacts)
-    selected_frames: list[int] = field(default_factory=list[int])
     frame_plan_warnings: list[RunWarning] = field(default_factory=list[RunWarning])
     phase_timings: dict[str, float] = field(default_factory=dict[str, float])
     # Measured VSView review wait for the human summary (memory only: never a
@@ -194,10 +192,7 @@ class PrepState:
     preflight_warnings: list[RunWarning]
     preflight_duration: float
     load_sources_start: float
-    analysis_selection_domain: str
-    selection_window: SelectionWindow
-    analysis_clip: ClipState | None = None
-    full_window_retry_override: FullWindowRetryOverride | None = None
+    selection_domain: PreparedSelectionDomain
     load_source_diagnostics: list[str] = field(default_factory=list[str])
 
 

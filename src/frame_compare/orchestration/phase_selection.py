@@ -22,7 +22,6 @@ from frame_compare.analysis.types import (
     SelectionDetailsByFrame,
 )
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.orchestration.active_rect import metric_cache_request_for_clip
 from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
@@ -32,6 +31,7 @@ from frame_compare.orchestration.full_window_retry import (
     raise_if_full_window_retry_runtime_failed,
     recover_from_exclusion_selection_failure,
 )
+from frame_compare.orchestration.selection_domain import metric_request_for_domain
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
@@ -208,7 +208,7 @@ def _dropped_user_frame_warnings(
 
 
 def _selection_window_for_context(ctx: RunContext) -> tuple[int, int]:
-    window = ctx.selection_window
+    window = ctx.selection_domain.selection_window
     if window.frame_count > 0:
         return window.start_frame, window.frame_count
     return 0, ctx.reference.effective_num_frames()
@@ -278,8 +278,8 @@ def run_analyze_phase(
             *_dropped_user_frame_warnings(
                 config=ctx.config.analysis,
                 reference=ctx.reference,
-                window_start=ctx.selection_window.start_frame,
-                frame_count=ctx.selection_window.frame_count,
+                window_start=ctx.selection_domain.selection_window.start_frame,
+                frame_count=ctx.selection_domain.selection_window.frame_count,
             ),
             *recovery_warnings,
         ],
@@ -296,15 +296,11 @@ def _run_analyze_phase_once(
     require_cache_only: bool = False,
     vs_loader: VSLoader | None = None,
 ) -> AnalyzePhaseOutput:
-    if ctx.analysis_clip is None:
+    if ctx.selection_domain.analysis_clip is None:
         raise MetricsCalculationError("Analysis source was not resolved for metric analysis.")
 
-    selection_domain = ctx.analysis_selection_domain
-    metric_request = metric_cache_request_for_clip(
-        ctx.analysis_clip,
-        selection_window=ctx.selection_window,
-        fallback_detection_mode=ctx.config.screenshots.active_rect_detection.value,
-    )
+    selection_domain = ctx.selection_domain.token
+    metric_request = metric_request_for_domain(ctx.selection_domain, ctx.config)
     if require_cache_only:
         metrics = cache_io.acquire_required_metrics(
             metric_request,
@@ -330,8 +326,8 @@ def _run_analyze_phase_once(
     selection = _select_frames_for_selection_domain(
         metrics=metrics,
         reference=ctx.reference,
-        analysis_clip=ctx.analysis_clip,
-        selection_window=ctx.selection_window,
+        analysis_clip=ctx.selection_domain.analysis_clip,
+        selection_window=ctx.selection_domain.selection_window,
         config=ctx.config.analysis,
     )
     return AnalyzePhaseOutput(

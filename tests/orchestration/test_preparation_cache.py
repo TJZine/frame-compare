@@ -81,10 +81,10 @@ def _prepared_metric_cache_fingerprint(source_paths: list[Path], *, prep: PrepSt
     return cache_io.compute_cache_key(
         source_paths,
         prep.config.analysis,
-        selection_domain=prep.analysis_selection_domain,
+        selection_domain=prep.selection_domain.token,
         metric_request=metric_cache_request_for_clip(
-            prep.analysis_clip,
-            selection_window=prep.selection_window,
+            prep.selection_domain.analysis_clip,
+            selection_window=prep.selection_domain.selection_window,
             fallback_detection_mode=prep.config.screenshots.active_rect_detection.value,
         ),
     )
@@ -165,7 +165,7 @@ def test_execute_prep_no_cache_uses_analysis_active_rect_fingerprint(tmp_path: P
     full_frame_fingerprint = cache_io.compute_cache_key(
         [source_path],
         prep_for_domain.config.analysis,
-        selection_domain=prep_for_domain.analysis_selection_domain,
+        selection_domain=prep_for_domain.selection_domain.token,
     )
     metrics_dir = tmp_path / "generated" / "cache" / "analysis"
     metrics_dir.mkdir(parents=True, exist_ok=True)
@@ -441,8 +441,8 @@ def test_execute_prep_preserves_explicit_reference_effective_fps_cache_domain_wh
         )
     )
 
-    assert prep.analysis_selection_domain is not None
-    selection_domain = json.loads(prep.analysis_selection_domain)
+    assert prep.selection_domain.token is not None
+    selection_domain = json.loads(prep.selection_domain.token)
     assert selection_domain["reference_path"] == (input_dir / "00-reference.mkv").as_posix()
     assert selection_domain["clips"][0]["effective_fps"] == {"numerator": 24, "denominator": 1}
     assert selection_domain["selection_window"] == {

@@ -132,7 +132,7 @@ def test_execute_prep_effective_fps(
     assert [clip.source_fps for clip in prep.clips] == source_fps
     assert [clip.effective_fps for clip in prep.clips] == effective_fps
     if reference is not None:
-        selection_domain = json.loads(prep.analysis_selection_domain)
+        selection_domain = json.loads(prep.selection_domain.token)
         assert selection_domain["reference_path"] == (input_dir / reference).as_posix()
         assert [clip["effective_fps"] for clip in selection_domain["clips"]] == domain_fps
 

@@ -5,7 +5,6 @@ from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from frame_compare.analysis.window import SelectionWindow
 from frame_compare.services.types import AlignmentSource
 from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
@@ -17,7 +16,7 @@ from frame_compare.vs.types import HDRMetadata
 if TYPE_CHECKING:
     from frame_compare.analysis.types import FrameMetrics, SelectionBreakdown, SelectionDetail
     from frame_compare.config.schema import ConfigSchema
-    from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
+    from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
     from frame_compare.orchestration.types import FullWindowRetryConfirmationFn
     from frame_compare.services.release_identity import ReleaseIdentity
     from frame_compare.utils.progress_protocol import ProgressReporter
@@ -126,21 +125,26 @@ class ClipState:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SelectionSnapshot:
+    """Selected comparison frames and their source-coordinate evidence."""
+
+    frames: tuple[int, ...] = ()
+    breakdown: SelectionBreakdown | None = None
+    details_by_source_frame: dict[int, SelectionDetail] | None = None
+    analysis_metrics: FrameMetrics | None = None
+
+
 @dataclass
 class RunContext:
     config: ConfigSchema
     workspace: WorkspacePaths
     reference: ClipState
     comparisons: list[ClipState]
-    analysis_selection_domain: str
-    selection_window: SelectionWindow
-    analysis_clip: ClipState | None = None
+    selection_domain: PreparedSelectionDomain
+    selection: SelectionSnapshot = field(default_factory=SelectionSnapshot)
     reporter: ProgressReporter | None = None
-    selection_breakdown: SelectionBreakdown | None = None
-    selection_details_by_source_frame: dict[int, SelectionDetail] | None = None
-    analysis_metrics: FrameMetrics | None = None
     confirm_full_window_retry: FullWindowRetryConfirmationFn | None = None
-    full_window_retry_override: FullWindowRetryOverride | None = None
     run_warnings: list[RunWarning] | None = None
     preflight_warnings: list[RunWarning] | None = None
     no_color: bool = False

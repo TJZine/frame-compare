@@ -16,7 +16,6 @@ from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration.active_rect import (
-    metric_cache_request_for_clip,
     propagate_resolved_aspect_ratio_evidence,
 )
 from frame_compare.orchestration.active_rect_content import (
@@ -60,8 +59,10 @@ from frame_compare.orchestration.probing.probe_props import (
 )
 from frame_compare.orchestration.run_inputs import resolve_run_workspace
 from frame_compare.orchestration.selection_domain import (
-    build_analysis_selection_domain_token,
+    PreparedSelectionDomain,
+    build_prepared_selection_domain,
     build_selection_domain_clips_with_diagnostics,
+    metric_request_for_domain,
 )
 from frame_compare.orchestration.source_labels import resolve_source_label_details
 from frame_compare.orchestration.source_selection import resolve_source_selection
@@ -572,7 +573,7 @@ async def execute_prep(
     prevalidated_clips: list[ClipState] | None = None
     prevalidated_analysis_clip: ClipState | None = None
     prevalidated_selection_window: SelectionWindow | None = None
-    prevalidated_selection_domain: str | None = None
+    prevalidated_selection_domain: PreparedSelectionDomain | None = None
     prevalidated_snapshots_by_path: dict[Path, ClipProbeSnapshot] | None = None
     full_window_retry_override = None
     load_source_diagnostics: list[str] = []
@@ -623,23 +624,20 @@ async def execute_prep(
         prevalidated_analysis_clip = prevalidated_analysis_selection.clip
         if prevalidated_analysis_selection.warning is not None:
             load_source_diagnostics.append(prevalidated_analysis_selection.warning.text)
-        prevalidated_selection_domain = build_analysis_selection_domain_token(
+        prevalidated_selection_domain = build_prepared_selection_domain(
             clips=prevalidated_clips,
             analysis_clip=prevalidated_analysis_clip,
             config=config,
             selection_window=prevalidated_selection_window,
+            override=full_window_retry_override,
         )
         _validate_cache_state(
             request=request,
             workspace=workspace,
             config=config,
             input_videos=input_videos,
-            selection_domain=prevalidated_selection_domain,
-            metric_request=metric_cache_request_for_clip(
-                prevalidated_analysis_clip,
-                selection_window=prevalidated_selection_window,
-                fallback_detection_mode=config.screenshots.active_rect_detection.value,
-            ),
+            selection_domain=prevalidated_selection_domain.token,
+            metric_request=metric_request_for_domain(prevalidated_selection_domain, config),
         )
 
     workspace, metadata_prefetch = await _resolve_run_directory(
@@ -709,36 +707,28 @@ async def execute_prep(
             analysis_clip = analysis_selection.clip
             if analysis_selection.warning is not None:
                 load_source_diagnostics.append(analysis_selection.warning.text)
-            selection_domain = build_analysis_selection_domain_token(
-                clips=clips,
-                analysis_clip=analysis_clip,
-                config=config,
-                selection_window=selection_window,
-            )
-        else:
-            selection_domain = ""
+        selection_domain = build_prepared_selection_domain(
+            clips=clips,
+            analysis_clip=analysis_clip,
+            config=config,
+            selection_window=selection_window,
+            override=full_window_retry_override,
+        )
         if request.no_cache:
             _validate_cache_state(
                 request=request,
                 workspace=workspace,
                 config=config,
                 input_videos=input_videos,
-                selection_domain=selection_domain,
-                metric_request=metric_cache_request_for_clip(
-                    analysis_clip,
-                    selection_window=selection_window,
-                    fallback_detection_mode=config.screenshots.active_rect_detection.value,
-                ),
+                selection_domain=selection_domain.token,
+                metric_request=metric_request_for_domain(selection_domain, config),
             )
 
     return PrepState(
         workspace=workspace,
         config=config,
         input_videos=input_videos,
-        analysis_selection_domain=selection_domain,
-        analysis_clip=analysis_clip,
-        full_window_retry_override=full_window_retry_override,
-        selection_window=selection_window,
+        selection_domain=selection_domain,
         clips=clips,
         artifacts=artifacts,
         metadata_prefetch=metadata_prefetch,

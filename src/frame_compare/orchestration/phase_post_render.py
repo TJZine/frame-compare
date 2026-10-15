@@ -23,10 +23,9 @@ from frame_compare.orchestration.execution_types import (
 )
 from frame_compare.orchestration.phase_selection import (
     map_aligned_to_source_frame,
-    selection_detail_for_frame,
-    selection_label_for_frame,
 )
 from frame_compare.orchestration.presentation import clip_role
+from frame_compare.orchestration.selection_rows import selection_rows
 from frame_compare.orchestration.slowpics_metadata import (
     resolve_slowpics_collection_metadata,
 )
@@ -406,32 +405,17 @@ def _report_selection_detail(detail: SelectionDetail | None) -> SourceFrameSelec
 
 
 def report_frame_details_for_frames(ctx: RunContext, *, frames: list[int]) -> list[FrameDetail]:
-    if ctx.selection_breakdown is None and ctx.selection_details_by_source_frame is None:
+    if ctx.selection.breakdown is None and ctx.selection.details_by_source_frame is None:
         return []
 
-    frame_details: list[FrameDetail] = []
-    for aligned_frame in frames:
-        source_frame = map_aligned_to_source_frame(
-            clip=ctx.reference,
-            aligned_frame=aligned_frame,
+    return [
+        frame_detail_for_comparison_frame(
+            comparison_frame=row.frame,
+            selection_detail=_report_selection_detail(row.detail),
+            selection_label=row.label,
         )
-        detail = selection_detail_for_frame(
-            source_frame,
-            ctx.selection_details_by_source_frame,
-        )
-        selection_label = (
-            detail.label
-            if detail is not None
-            else selection_label_for_frame(source_frame, ctx.selection_breakdown)
-        )
-        frame_details.append(
-            frame_detail_for_comparison_frame(
-                comparison_frame=aligned_frame,
-                selection_detail=_report_selection_detail(detail),
-                selection_label=selection_label,
-            )
-        )
-    return frame_details
+        for row in selection_rows(ctx, frames=frames)
+    ]
 
 
 def run_post_report_cleanup_phase(

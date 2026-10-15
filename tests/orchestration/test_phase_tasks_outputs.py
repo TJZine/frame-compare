@@ -98,7 +98,7 @@ def test_run_render_phase_maps_comparison_and_source_frames_and_preserves_facts(
     ctx.config.screenshots.overlay_mode = OverlayMode.NONE
     ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=20)
     ctx.comparisons = [comparison.with_trim(trim_start_frames=1, trim_end_frame_inclusive=18)]
-    ctx.selection_breakdown = SelectionBreakdown(quantile_dark=[4])
+    ctx.selection = replace(ctx.selection, breakdown=SelectionBreakdown(quantile_dark=[4]))
     captured = _capture_detailed_render(
         monkeypatch,
         tmp_path,

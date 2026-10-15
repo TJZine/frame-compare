@@ -9,10 +9,9 @@ from frame_compare.orchestration.context import ClipProbeSnapshot, ClipState, Ru
 from frame_compare.orchestration.execution_types import RenderArtifacts, RenderPhaseOutput
 from frame_compare.orchestration.phase_selection import (
     map_aligned_to_source_frame,
-    selection_detail_for_frame,
-    selection_label_for_frame,
 )
 from frame_compare.orchestration.presentation import clip_role
+from frame_compare.orchestration.selection_rows import selection_rows
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.release_identity import format_micro_descriptor
 from frame_compare.utils.media_facts import (
@@ -39,21 +38,7 @@ def run_render_phase(
     clips = [ctx.reference, *ctx.comparisons]
     output_dir = ctx.workspace.screenshots_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-    reference_frames = [
-        map_aligned_to_source_frame(clip=ctx.reference, aligned_frame=frame) for frame in frames
-    ]
-    selection_labels = [
-        detail.label
-        if (
-            detail := selection_detail_for_frame(
-                source_frame,
-                ctx.selection_details_by_source_frame,
-            )
-        )
-        is not None
-        else selection_label_for_frame(source_frame, ctx.selection_breakdown)
-        for source_frame in reference_frames
-    ]
+    selection_labels = [row.label for row in selection_rows(ctx, frames=frames)]
 
     requests: list[ScreenshotBatchRequest] = []
     expected_frames: dict[str, list[int]] = {}

@@ -289,9 +289,7 @@ async def align_pair(
         workspace=prep.workspace,
         reference=prep.clips[0],
         comparisons=prep.clips[1:],
-        analysis_selection_domain=prep.analysis_selection_domain,
-        selection_window=prep.selection_window,
-        analysis_clip=prep.analysis_clip,
+        selection_domain=prep.selection_domain,
     )
     phase = await run_align_phase(
         ctx,

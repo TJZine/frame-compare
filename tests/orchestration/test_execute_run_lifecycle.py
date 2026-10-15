@@ -26,6 +26,7 @@ from frame_compare.orchestration.execution_types import (
     RenderPhaseOutput,
     RunArtifacts,
 )
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.orchestration.types import ReservedRunCapture, RunResult
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.run_result_record import read_run_result
@@ -115,7 +116,6 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
         workspace=_workspace(tmp_path, run_subdir=None),
         config=ConfigSchema(),
         input_videos=[tmp_path / "reference.mkv"],
-        analysis_selection_domain="test-selection-domain",
         clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
         artifacts=RunArtifacts(
             post_upload_actions=(shortcut,),
@@ -125,7 +125,11 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
         preflight_warnings=[RunWarning("sources", "warning", "preflight: warned")],
         preflight_duration=0.0,
         load_sources_start=_zero_monotonic_timer(),
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )
 
     async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
@@ -191,8 +195,11 @@ def test_execute_run_propagates_collection_warning_once_through_result_summary_a
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=_zero_monotonic_timer(),
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )
     capture = ReservedRunCapture(
         workspace=workspace,
@@ -332,14 +339,17 @@ def test_execute_run_closes_execution_section_without_masking_phase_failure(
         workspace=_workspace(tmp_path, run_subdir=None),
         config=ConfigSchema(),
         input_videos=[tmp_path / "reference.mkv"],
-        analysis_selection_domain="test-selection-domain",
         clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
         artifacts=RunArtifacts(),
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=_zero_monotonic_timer(),
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )
     events: list[str] = []
     phase_error = RuntimeError("phase failed")
@@ -396,14 +406,17 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
         workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
-        analysis_selection_domain="test-selection-domain",
         clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
         artifacts=RunArtifacts(),
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=_zero_monotonic_timer(),
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )
 
     async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
@@ -487,14 +500,17 @@ def test_execute_run_webhook_action_warning_is_warning_only(
         workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
-        analysis_selection_domain="test-selection-domain",
         clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
         artifacts=RunArtifacts(),
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=_zero_monotonic_timer(),
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )
 
     async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
@@ -569,14 +585,17 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
         workspace=_workspace(tmp_path, run_subdir=None),
         config=config,
         input_videos=[tmp_path / "reference.mkv"],
-        analysis_selection_domain="test-selection-domain",
         clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
         artifacts=RunArtifacts(),
         metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=_zero_monotonic_timer(),
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )
 
     async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
@@ -898,8 +917,9 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
             preflight_warnings=[],
             preflight_duration=0.0,
             load_sources_start=time.monotonic(),
-            analysis_selection_domain="test",
-            selection_window=SelectionWindow(0, 100),
+            selection_domain=PreparedSelectionDomain(
+                token="test", selection_window=SelectionWindow(0, 100), analysis_clip=None
+            ),
         )
 
     def interrupt() -> None:

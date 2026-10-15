@@ -461,18 +461,21 @@ def test_run_report_phase_passes_reference_source_frame_details(
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=20)
-    ctx.selection_breakdown = SelectionBreakdown(quantile_bright=[5])
-    ctx.selection_details_by_source_frame = {
-        4: SelectionDetail(
-            frame_index=4,
-            label="User",
-            source="analysis",
-            timecode="00:00:00.167",
-            score=0.5,
-            clip_role="analyze",
-            notes="user_override",
-        )
-    }
+    ctx.selection = replace(ctx.selection, breakdown=SelectionBreakdown(quantile_bright=[5]))
+    ctx.selection = replace(
+        ctx.selection,
+        details_by_source_frame={
+            4: SelectionDetail(
+                frame_index=4,
+                label="User",
+                source="analysis",
+                timecode="00:00:00.167",
+                score=0.5,
+                clip_role="analyze",
+                notes="user_override",
+            )
+        },
+    )
     render = _render_artifacts(
         screenshots_by_label={
             "Reference": [
@@ -648,10 +651,8 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
     ctx.config.slowpics.confirm_upload_after_report = True
     ctx.config.report.enable = True
     report_path = tmp_path / "report.html"
-    state = ExecutionState(
-        artifacts=RunArtifacts(report_path=report_path, report_succeeded=True),
-        selected_frames=[10],
-    )
+    ctx.selection = replace(ctx.selection, frames=(10,))
+    state = ExecutionState(artifacts=RunArtifacts(report_path=report_path, report_succeeded=True))
     reporter = _RecordingProgressReporter()
     ctx.reporter = reporter
     publish_calls = 0
@@ -706,7 +707,8 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
     ctx.config.slowpics.auto_upload = True
     ctx.config.slowpics.confirm_upload_after_report = True
     ctx.config.report.enable = True
-    state = ExecutionState(artifacts=RunArtifacts(), selected_frames=[10])
+    ctx.selection = replace(ctx.selection, frames=(10,))
+    state = ExecutionState(artifacts=RunArtifacts())
     reporter = _RecordingProgressReporter()
     ctx.reporter = reporter
 
@@ -772,10 +774,8 @@ async def test_report_confirmed_report_payload_uses_no_slowpics_url(
     ctx.config.slowpics.auto_upload = True
     ctx.config.slowpics.confirm_upload_after_report = True
     ctx.config.report.enable = True
-    state = ExecutionState(
-        artifacts=RunArtifacts(slowpics_url="https://slow.pics/c/stale"),
-        selected_frames=[10],
-    )
+    ctx.selection = replace(ctx.selection, frames=(10,))
+    state = ExecutionState(artifacts=RunArtifacts(slowpics_url="https://slow.pics/c/stale"))
     captured_slowpics_url: str | None = "not-captured"
 
     def _capture_report(*_args: object, **kwargs: object) -> ReportPhaseOutput:
@@ -923,6 +923,7 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
     )
     monkeypatch.setattr("frame_compare.orchestration.phases.log.warning", _capture_warning)
 
+    ctx.selection = replace(ctx.selection, frames=(10,))
     state = ExecutionState(
         artifacts=RunArtifacts(
             render=_render_artifacts(
@@ -932,8 +933,7 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
                 },
                 screenshot_dir=tmp_path / "screenshots",
             )
-        ),
-        selected_frames=[10],
+        )
     )
     async with httpx.AsyncClient() as client:
         phases = build_phases_after_align(

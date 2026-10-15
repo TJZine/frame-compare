@@ -445,7 +445,8 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
         )
 
     monkeypatch.setattr(alignment_audio, "probe_streams", unavailable_probe)
-    state = ExecutionState(selected_frames=[0, 1, 2])
+    ctx.selection = replace(ctx.selection, frames=(0, 1, 2))
+    state = ExecutionState()
     request = make_run_request(
         root=tmp_path,
         config=ctx.config,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -40,18 +41,24 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     luminance[1] = 0.01
     luminance[50] = 0.99
     luminance[60] = 1.0
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=luminance,
-        motion=[0.0 for _ in range(100)],
-        frame_count=100,
-        fps=ctx.reference.effective_fps,
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=luminance,
+            motion=[0.0 for _ in range(100)],
+            frame_count=100,
+            fps=ctx.reference.effective_fps,
+        ),
     )
+    assert ctx.selection.analysis_metrics is not None
     initial_selection = select_frames(
-        metrics=ctx.analysis_metrics,
+        metrics=ctx.selection.analysis_metrics,
         config=ctx.config.analysis,
     )
-    ctx.selection_breakdown = initial_selection.breakdown
-    ctx.selection_details_by_source_frame = dict(initial_selection.selection_details)
+    ctx.selection = replace(ctx.selection, breakdown=initial_selection.breakdown)
+    ctx.selection = replace(
+        ctx.selection, details_by_source_frame=dict(initial_selection.selection_details)
+    )
 
     def _fake_align_clips_from_request(
         *_args: object, **_kwargs: object
@@ -117,8 +124,10 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     )
     ctx.reference = align_output.reference
     ctx.comparisons = align_output.comparisons
-    ctx.selection_breakdown = align_output.selection_breakdown
-    ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
+    ctx.selection = replace(ctx.selection, breakdown=align_output.selection_breakdown)
+    ctx.selection = replace(
+        ctx.selection, details_by_source_frame=align_output.selection_details_by_source_frame
+    )
 
     phase_render.run_render_phase(
         ctx,
@@ -299,8 +308,10 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
     align_output = _run_align_phase(ctx, selected_frames=[0, 66])
     ctx.reference = align_output.reference
     ctx.comparisons = align_output.comparisons
-    ctx.selection_breakdown = align_output.selection_breakdown
-    ctx.selection_details_by_source_frame = align_output.selection_details_by_source_frame
+    ctx.selection = replace(ctx.selection, breakdown=align_output.selection_breakdown)
+    ctx.selection = replace(
+        ctx.selection, details_by_source_frame=align_output.selection_details_by_source_frame
+    )
     render = _render_artifacts(
         screenshots_by_label={
             "Reference": [tmp_path / "screenshots" / "reference.png"],

@@ -176,6 +176,16 @@ def build_phases_before_align(
     workspace: WorkspacePaths,
     vs_loader: VSLoader | None = None,
 ) -> list[Phase]:
+    def _run_align_with_current_selection(ctx: RunContext):
+        return run_align_phase(
+            ctx,
+            selected_frames=list(ctx.selection.frames),
+            vs_loader=vs_loader,
+            verbose=request.verbose,
+            quiet=request.quiet,
+            json_output=request.json_output,
+        )
+
     return [
         _create_timed_phase(
             "frame_plan",
@@ -211,14 +221,7 @@ def build_phases_before_align(
             "align",
             "align",
             lambda config: not config.audio_alignment.enable,
-            partial(
-                run_align_phase,
-                selected_frames=state.selected_frames,
-                vs_loader=vs_loader,
-                verbose=request.verbose,
-                quiet=request.quiet,
-                json_output=request.json_output,
-            ),
+            _run_align_with_current_selection,
             state=state,
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
@@ -257,13 +260,13 @@ def build_phases_after_align(
             client=http_client,
             metadata=state.artifacts.resolved_metadata,
             render=state.artifacts.render,
-            selected_frames=state.selected_frames,
+            selected_frames=list(ctx.selection.frames),
         )
 
     def _run_report_with_current_artifacts(ctx: RunContext) -> ReportPhaseOutput:
         return run_report_phase(
             ctx,
-            frames=state.selected_frames,
+            frames=list(ctx.selection.frames),
             render=state.artifacts.render,
             metadata=state.artifacts.resolved_metadata,
             slowpics_url=None
@@ -290,16 +293,15 @@ def build_phases_after_align(
             report_succeeded=state.artifacts.report_succeeded,
         )
 
+    def _run_render_with_current_selection(ctx: RunContext):
+        return run_render_phase(ctx, frames=list(ctx.selection.frames), runner=ffmpeg_runner)
+
     render_metadata_phases = [
         _create_timed_phase(
             "render",
             "render",
             None,
-            partial(
-                run_render_phase,
-                frames=state.selected_frames,
-                runner=ffmpeg_runner,
-            ),
+            _run_render_with_current_selection,
             state=state,
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,

@@ -79,6 +79,23 @@ boundaries. `frame_compare.orchestration.types` owns the public run request,
 dependency, result, and callback DTO contract; internal phase outputs and
 mutable preparation/execution carriers live in
 `frame_compare.orchestration.execution_types`.
+
+`RunContext.selection` is one frozen `SelectionSnapshot`: comparison-relative frame
+indices, reference-source breakdown/details, and analysis-source metric evidence.
+`apply_phase_output` is its only production writer. FramePlan clears metric evidence,
+Analyze replaces the full snapshot, and Align replaces frames/evidence together with
+the reference/comparison trims. Align, render, publish, and report read the current
+snapshot when they execute; phase construction does not capture a mutable frame list.
+`selection_rows` maps comparison frames through the current reference trim and supplies
+the same source-detail/label lookup to render overlays and report frame details.
+
+`PreparedSelectionDomain` carries the trim-relative shared window, pre-alignment
+analysis clip, cache-domain token, and accepted full-window retry override. Preparation
+and recovery build and replace that value together. It carries no effective config or
+second live clip collection. `metric_request_for_domain` constructs a request only at
+Analyze and the existing cache-only/no-cache preparation boundaries, preserving
+warn-only Analyze validation timing for ordinary runs.
+
 `RunDependencies` supplies aware UTC wall time for persisted start/completion
 timestamps and a separate monotonic timer for preflight, source loading, phases,
 and total success/failure durations. Persisted `duration_seconds` comes from that
@@ -137,14 +154,19 @@ sanitized warning summaries.
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
 builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
 identity in schema v8 payload metadata, and orchestration only passes the effective
-analysis config, active-rect-aware selection-domain token, analysis-owned metric
-active rectangle, active-rect provenance, and exact source-frame metric range into
-the analysis/cache owner.
+analysis config, active-rect-aware selection-domain token, and one intact
+`MetricCacheRequest` into the analysis/cache owner. Computation and metadata consume
+that same request. Keying fills an absent analysis-source path only; absent range/FPS
+remain distinct from explicit full-range/source-FPS values until computation resolves
+them. Performance sampling identity derives its fraction and burst count from the
+sampling owner's constants, retaining the algorithm-version decision boundary.
 `frame_compare.analysis.metrics.calculate_metrics` owns normal cache acquisition
 and returns a `MetricsAcquisition` containing the metrics and the actual `hit` or
 `computed` disposition. Analyze presentation consumes that result without a
-predictive cache read. Cache-only preparation still validates before reserving
-output, and cache-only analysis reads again without permission to compute.
+predictive cache read. `cache_io.acquire_required_metrics` owns required-cache
+classification and reading at two distinct lifecycle points: cache-only preparation
+validates before reserving output, and cache-only Analyze reacquires without permission
+to compute. The first read is not memoized.
 Analyze is required for cache-only execution: a failed second acquisition aborts
 the run before rendering or publishing rather than using the initial frame plan.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:

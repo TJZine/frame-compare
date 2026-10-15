@@ -166,12 +166,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             workspace=prep.workspace,
             reference=reference,
             comparisons=comparisons,
-            analysis_selection_domain=prep.analysis_selection_domain,
-            analysis_clip=prep.analysis_clip,
-            selection_window=prep.selection_window,
+            selection_domain=prep.selection_domain,
             reporter=reporter,
             confirm_full_window_retry=local_deps.confirm_full_window_retry,
-            full_window_retry_override=prep.full_window_retry_override,
             run_warnings=state.warnings,
             preflight_warnings=prep.preflight_warnings,
             no_color=request.no_color,
@@ -215,10 +212,10 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         emit_execution_section_start(reporter, no_color=request.no_color)
         try:
             await execute_phases(phase_plan.before_align, context, reporter)
-            selected_frame_count = len(state.selected_frames)
+            selected_frame_count = len(list(context.selection.frames))
             emit_final_selection_report(
-                selected_frames=state.selected_frames,
-                breakdown=context.selection_breakdown,
+                selected_frames=list(context.selection.frames),
+                breakdown=context.selection.breakdown,
                 verbose=request.verbose,
                 json_output=request.json_output,
                 quiet=request.quiet,
@@ -239,7 +236,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                     reference=context.reference,
                     comparisons=context.comparisons,
                 ),
-                selected_frames=state.selected_frames,
+                selected_frames=list(context.selection.frames),
                 alignment_warnings=[
                     warning for warning in state.warnings if warning.source == "alignment"
                 ],
@@ -259,7 +256,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         run_end = local_deps.clock()
         result = _assemble_run_result(
             artifacts=prep.artifacts,
-            selected_frames=state.selected_frames,
+            selected_frames=list(context.selection.frames),
             context=context,
             preflight_warnings=prep.preflight_warnings,
             phase_timings=state.phase_timings,

@@ -185,7 +185,7 @@ def test_execute_prep_selection_domain_includes_resolved_active_rect_identity(
         )
     )
 
-    selection_domain = json.loads(prep.analysis_selection_domain)
+    selection_domain = json.loads(prep.selection_domain.token)
     assert selection_domain["active_rect_policy"] == {
         "detection_mode": "aspect_ratio",
         "algorithm_id": "active_rect_resolution_v2",
@@ -249,7 +249,7 @@ def test_execute_prep_auto_content_refinement_updates_selection_domain_after_win
         "content-derived",
         "auto",
     )
-    selection_domain = json.loads(prep.analysis_selection_domain)
+    selection_domain = json.loads(prep.selection_domain.token)
     assert selection_domain["active_rect_policy"] == {
         "detection_mode": "auto",
         "algorithm_id": "active_rect_resolution_v2",
@@ -313,7 +313,7 @@ def test_execute_prep_auto_propagates_supported_content_ratio_to_unresolved_clip
         ClipActiveRect(0, 10, 100, 60, "content-derived", "auto"),
         ClipActiveRect(0, 10, 100, 60, "aspect-ratio-derived", "auto"),
     ]
-    selection_domain = json.loads(prep.analysis_selection_domain)
+    selection_domain = json.loads(prep.selection_domain.token)
     assert selection_domain["clips"][2]["active_rect"] == {
         "x": 0,
         "y": 10,

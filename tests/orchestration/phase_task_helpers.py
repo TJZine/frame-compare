@@ -23,6 +23,7 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution_types import AlignPhaseOutput, RenderArtifacts
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.render.types import RenderedClipFacts
 from frame_compare.services.release_identity import ReleaseIdentity
 from frame_compare.utils.media_facts import (
@@ -210,9 +211,11 @@ def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> R
         workspace=_workspace(tmp_path),
         reference=reference,
         comparisons=[] if comparisons is None else comparisons,
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
-        analysis_clip=reference,
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=reference,
+        ),
     )
 
 

@@ -32,6 +32,7 @@ from frame_compare.orchestration.execution_types import (
     RunArtifacts,
 )
 from frame_compare.orchestration.phase_output_application import apply_phase_output
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.run_warnings import RunWarning
@@ -64,7 +65,6 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
             tmp_path / "comp_a.mkv",
             tmp_path / "comp_b.mkv",
         ],
-        analysis_selection_domain="test-selection-domain",
         clips=[
             clip_state(tmp_path / "ref.mkv", label="Reference"),
             clip_state(tmp_path / "comp_a.mkv", label="Encode 1"),
@@ -75,7 +75,11 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=0.0,
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )
 
     plan = build_execution_phase_plan(
@@ -172,9 +176,9 @@ def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) 
         ),
     )
 
-    assert state.selected_frames == [0, 66]
-    assert ctx.selection_breakdown == breakdown
-    assert ctx.selection_details_by_source_frame == details
+    assert list(ctx.selection.frames) == [0, 66]
+    assert ctx.selection.breakdown == breakdown
+    assert ctx.selection.details_by_source_frame == details
 
 
 def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -> None:
@@ -225,7 +229,7 @@ def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -
         ),
     )
 
-    assert state.selected_frames == [4, 20]
+    assert list(ctx.selection.frames) == [4, 20]
     assert [warning.text for warning in state.warnings] == [
         "preflight warning",
         "accepted override warning",
@@ -355,7 +359,7 @@ def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -
 
     assert ctx.reference is reference
     assert ctx.comparisons == [comparison]
-    assert state.selected_frames == [0, 2, 50]
+    assert list(ctx.selection.frames) == [0, 2, 50]
     assert [warning.text for warning in state.warnings] == [
         "pre-existing warning",
         "align: encode_b low confidence; left unapplied and untrimmed",
