@@ -1077,7 +1077,14 @@ before focus moves into the drawer.
 
 `assets/viewport.js` owns zoom clamping and pointer anchoring, pan bounds and Grid
 normalization, fit/reset/reveal math, transient pointer/pinch mechanics, directional
-pair-alignment normalization and offsets, and Lens/Grid viewport refreshes. It mutates
+pair-alignment normalization and offsets, and Lens/Grid viewport refreshes.
+`currentAlignment()` derives a normalized copy from the selected directional pair's
+`pairAlignments` entry; missing entries mean neutral. Offset edits write that map,
+while `rawAlignX`/`rawAlignY` remain transient input drafts. Visiting a pair or
+resetting its offset does not create a neutral entry. The root viewer's `selectPair`
+owns source selection, mode-driven distinct-pair repair, draft clearing, and Blink's
+active-source validity; other modes retain an active source outside the pair.
+It mutates
 the root viewer's canonical state and routes persistence back through the root; it does
 not create a second state or storage owner. The owner holds an explicit reference to
 the root viewer rather than inheriting the root prototype, and consumers call the

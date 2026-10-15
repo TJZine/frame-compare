@@ -20,67 +20,67 @@ async function lensContracts() {
 
     function createElementFactory(documentFor = () => null) {
         return function element(rect = { left: 0, top: 0, width: 0, height: 0 }) {
-        const attributes = new Map();
-        const classes = new Set();
-        const capturedPointers = new Set();
-        let currentRect = { ...rect };
-        let srcValue = '';
-        const element = {
-            ...domMechanics(documentFor),
-            hidden: false,
-            disabled: false,
-            checked: false,
-            value: '',
-            textContent: '',
-            dataset: {},
-            naturalWidth: 1920,
-            naturalHeight: 1080,
-            complete: true,
-            srcAssignments: 0,
-            currentSrc: '',
-            style: {
-                values: {},
-                setProperty(name, value) { this.values[name] = value; },
-            },
-            classList: {
-                toggle(name, force) {
-                    if (force) classes.add(name);
-                    else classes.delete(name);
+            const attributes = new Map();
+            const classes = new Set();
+            const capturedPointers = new Set();
+            let currentRect = { ...rect };
+            let srcValue = '';
+            const element = {
+                ...domMechanics(documentFor),
+                hidden: false,
+                disabled: false,
+                checked: false,
+                value: '',
+                textContent: '',
+                dataset: {},
+                naturalWidth: 1920,
+                naturalHeight: 1080,
+                complete: true,
+                srcAssignments: 0,
+                currentSrc: '',
+                style: {
+                    values: {},
+                    setProperty(name, value) { this.values[name] = value; },
                 },
-                contains(name) { return classes.has(name); },
-            },
-            setAttribute(name, value) { attributes.set(name, String(value)); },
-            getAttribute(name) { return attributes.get(name) ?? null; },
-            removeAttribute(name) {
-                attributes.delete(name);
-                if (name === 'src') srcValue = '';
-            },
-            getBoundingClientRect() {
-                return {
-                    ...currentRect,
-                    right: currentRect.left + currentRect.width,
-                    bottom: currentRect.top + currentRect.height,
-                };
-            },
-            setRect(nextRect) { currentRect = { ...nextRect }; },
-            closest() { return null; },
-            querySelector() { return this.children[0] || null; },
-            setPointerCapture(pointerId) { capturedPointers.add(pointerId); },
-            releasePointerCapture(pointerId) {
-                if (!capturedPointers.delete(pointerId)) return;
-                this.dispatch('lostpointercapture', { pointerId });
-            },
-            hasPointerCapture(pointerId) { return capturedPointers.has(pointerId); },
-        };
-        Object.defineProperty(element, 'src', {
-            configurable: true,
-            get() { return srcValue; },
-            set(value) {
-                srcValue = String(value ?? '');
-                element.srcAssignments += 1;
-            },
-        });
-        return element;
+                classList: {
+                    toggle(name, force) {
+                        if (force) classes.add(name);
+                        else classes.delete(name);
+                    },
+                    contains(name) { return classes.has(name); },
+                },
+                setAttribute(name, value) { attributes.set(name, String(value)); },
+                getAttribute(name) { return attributes.get(name) ?? null; },
+                removeAttribute(name) {
+                    attributes.delete(name);
+                    if (name === 'src') srcValue = '';
+                },
+                getBoundingClientRect() {
+                    return {
+                        ...currentRect,
+                        right: currentRect.left + currentRect.width,
+                        bottom: currentRect.top + currentRect.height,
+                    };
+                },
+                setRect(nextRect) { currentRect = { ...nextRect }; },
+                closest() { return null; },
+                querySelector() { return this.children[0] || null; },
+                setPointerCapture(pointerId) { capturedPointers.add(pointerId); },
+                releasePointerCapture(pointerId) {
+                    if (!capturedPointers.delete(pointerId)) return;
+                    this.dispatch('lostpointercapture', { pointerId });
+                },
+                hasPointerCapture(pointerId) { return capturedPointers.has(pointerId); },
+            };
+            Object.defineProperty(element, 'src', {
+                configurable: true,
+                get() { return srcValue; },
+                set(value) {
+                    srcValue = String(value ?? '');
+                    element.srcAssignments += 1;
+                },
+            });
+            return element;
         };
     }
 

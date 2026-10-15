@@ -193,9 +193,9 @@ async function inspectorContracts() {
         state: {
             inspectorOpen: false,
             inspectorTab: 'frame',
-            alignmentPreset: 'default',
-            alignX: 0,
-            alignY: 0,
+
+
+
             mode: 'overlay',
             data: { clips: [] },
         },
@@ -228,6 +228,7 @@ async function inspectorContracts() {
         viewport: {
             currentPairAlignmentKey() { return '0:1'; },
             alignmentPresetLabel() { return 'Default'; },
+            currentAlignment() { return { alignmentPreset: 'none', alignX: 0, alignY: 0 }; },
             formatSignedPixels(value, axis) { return `${axis}:${value}`; },
         },
         persistViewerState() {},
@@ -379,6 +380,7 @@ async function inspectorContracts() {
             viewport: {
                 currentPairAlignmentKey() { return '0:1'; },
                 alignmentPresetLabel() { return 'Default'; },
+            currentAlignment() { return { alignmentPreset: 'none', alignX: 0, alignY: 0 }; },
                 formatSignedPixels(value, axis) { return `${axis}:${value}`; },
             },
         };

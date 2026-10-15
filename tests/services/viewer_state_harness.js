@@ -91,87 +91,86 @@ function payloadWithClipCount(clipCount) {
 
 function createElementFactory(documentFor) {
     return function makeElement() {
-    const classes = new Set();
-    const attributes = new Map();
-    let definitionValues = null;
-    const inspectorPrimary = { value: null };
-    return {
-        ...domMechanics(documentFor),
-        value: '',
-        textContent: '',
-        disabled: false,
-        hidden: false,
-        inert: false,
-        tabIndex: 0,
-        dataset: {},
-        tagName: 'DIV',
-        isContentEditable: false,
-        isConnected: true,
-        classList: {
-            toggle(name, force) {
-                const enabled = force === undefined ? !classes.has(name) : Boolean(force);
-                if (enabled) classes.add(name);
-                else classes.delete(name);
-                return enabled;
+        const classes = new Set();
+        const attributes = new Map();
+        let definitionValues = null;
+        const inspectorPrimary = { value: null };
+        return {
+            ...domMechanics(documentFor),
+            value: '',
+            textContent: '',
+            disabled: false,
+            hidden: false,
+            inert: false,
+            tabIndex: 0,
+            dataset: {},
+            tagName: 'DIV',
+            isContentEditable: false,
+            isConnected: true,
+            classList: {
+                toggle(name, force) {
+                    const enabled = force === undefined ? !classes.has(name) : Boolean(force);
+                    if (enabled) classes.add(name);
+                    else classes.delete(name);
+                    return enabled;
+                },
+                contains(name) {
+                    return classes.has(name);
+                },
+                add(...names) {
+                    names.forEach((name) => classes.add(name));
+                },
+                remove(...names) {
+                    names.forEach((name) => classes.delete(name));
+                },
             },
-            contains(name) {
-                return classes.has(name);
+            setAttribute(name, value) {
+                attributes.set(name, String(value));
+                this[name] = value;
             },
-            add(...names) {
-                names.forEach((name) => classes.add(name));
+            getAttribute(name) {
+                // HTMLImageElement.src assignments reflect into the src attribute.
+                if (name === 'src') return this.src ?? null;
+                return attributes.has(name) ? attributes.get(name) : null;
             },
-            remove(...names) {
-                names.forEach((name) => classes.delete(name));
+            removeAttribute(name) {
+                attributes.delete(name);
+                delete this[name];
             },
-        },
-        setAttribute(name, value) {
-            attributes.set(name, String(value));
-            this[name] = value;
-        },
-        getAttribute(name) {
-            // HTMLImageElement.src assignments reflect into the src attribute.
-            if (name === 'src') return this.src ?? null;
-            return attributes.has(name) ? attributes.get(name) : null;
-        },
-        removeAttribute(name) {
-            attributes.delete(name);
-            delete this[name];
-        },
-        closest() {
-            return null;
-        },
-        scrollIntoView() {},
-        querySelector(selector) {
-            if (selector === '.rv-inspector-clip-primary') {
-                if (!inspectorPrimary.value) inspectorPrimary.value = makeElement();
-                return inspectorPrimary.value;
-            }
-            return null;
-        },
-        querySelectorAll(selector) {
-            if (selector === '.rv-inspector-clip-heading span') {
-                return [makeElement(), makeElement()];
-            }
-            if (selector === 'dd') {
-                if (definitionValues === null) {
-                    definitionValues = Array.from({ length: 7 }, () => makeElement());
+            closest() {
+                return null;
+            },
+            scrollIntoView() {},
+            querySelector(selector) {
+                if (selector === '.rv-inspector-clip-primary') {
+                    if (!inspectorPrimary.value) inspectorPrimary.value = makeElement();
+                    return inspectorPrimary.value;
                 }
-                return definitionValues;
-            }
-            return [];
-        },
-        style: {
-            values: {},
-            setProperty(name, value) {
-                this.values[name] = value;
+                return null;
             },
-            removeProperty(name) {
-                delete this.values[name];
+            querySelectorAll(selector) {
+                if (selector === '.rv-inspector-clip-heading span') {
+                    return [makeElement(), makeElement()];
+                }
+                if (selector === 'dd') {
+                    if (definitionValues === null) {
+                        definitionValues = Array.from({ length: 7 }, () => makeElement());
+                    }
+                    return definitionValues;
+                }
+                return [];
             },
-        },
+            style: {
+                values: {},
+                setProperty(name, value) {
+                    this.values[name] = value;
+                },
+                removeProperty(name) {
+                    delete this.values[name];
+                },
+            },
+        };
     };
-}
-
 }
 
 function renderedText(element) {
@@ -289,9 +288,7 @@ function loadViewer({ clipCount, savedState = null }) {
     viewer.state.panX = 0;
     viewer.state.panY = 0;
     viewer.state.revealPercent = 50;
-    viewer.state.alignmentPreset = 'none';
-    viewer.state.alignX = 0;
-    viewer.state.alignY = 0;
+
     viewer.state.pairAlignments = {};
     viewer.state.rawAlignX = null;
     viewer.state.rawAlignY = null;
@@ -530,7 +527,7 @@ async function assertMainImageUnavailableState() {
     ];
 
     for (const { mode, failedSide, clipIndex } of modes) {
-        const { element: makeElement, viewer, deferredImages, window, document } = loadViewer({ clipCount: 2 });
+        const { viewer, deferredImages, window, document } = loadViewer({ clipCount: 2 });
         viewer.state.mode = mode;
         viewer.updateImages();
         if (mode === 'diff') {
@@ -606,7 +603,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { element: makeElement, viewer, window } = loadViewer({ clipCount: 2 });
+        const { viewer, window } = loadViewer({ clipCount: 2 });
         viewer.state.mode = 'blink';
         viewer.updateImages();
         viewer.dom.leftImg.dispatch('error');
@@ -634,7 +631,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
+        const { viewer } = loadViewer({ clipCount: 2 });
         viewer.state.mode = 'slider';
         viewer.updateImages();
         const staleError = viewer.dom.leftImg.listenerCallbacks('error')[0];
@@ -647,7 +644,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
+        const { viewer } = loadViewer({ clipCount: 2 });
         viewer.state.mode = 'slider';
         viewer.updateImages();
         viewer.dom.leftImg.dispatch('load');
@@ -661,7 +658,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
+        const { viewer } = loadViewer({ clipCount: 2 });
         viewer.gridView = { render() {} };
         viewer.state.mode = 'slider';
         viewer.updateImages();
@@ -675,7 +672,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { element: makeElement, viewer, deferredImages, window } = loadViewer({ clipCount: 2 });
+        const { viewer, deferredImages, window } = loadViewer({ clipCount: 2 });
         viewer.gridView = { render() {} };
         viewer.state.mode = 'slider';
         viewer.updateImages();
@@ -700,7 +697,7 @@ async function assertMainImageUnavailableState() {
     }
 
     {
-        const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
+        const { viewer } = loadViewer({ clipCount: 2 });
         viewer.state.mode = 'slider';
         viewer.updateImages();
         viewer.dom.rightImg.dispatch('error');
@@ -795,7 +792,7 @@ for (const pauseCause of ['running', 'explicit', 'reduced-motion']) {
 }
 
 function viewerStorageKey() {
-    const { element: makeElement, viewer, format } = loadViewer({ clipCount: 4 });
+    const { viewer, format } = loadViewer({ clipCount: 4 });
     assert.equal(
         viewer.state.storageKey,
         'frame-compare:report-viewer:report_viewer_state_contract:viewport',
@@ -838,7 +835,7 @@ function defaultPairRule() {
 }
 
 function restoreFourClip() {
-    const { element: makeElement, viewer } = loadViewer({
+    const { viewer } = loadViewer({
         clipCount: 4,
         savedState: {
             mode: 'diff',
@@ -869,14 +866,14 @@ function restoreFourClip() {
     assert.equal(viewer.state.revealPercent, 100);
     assert.equal(viewer.state.filmstripCollapsed, false);
     assert.equal(viewer.state.filmstripSize, 'normal');
-    assert.equal(viewer.state.alignX, 5);
-    assert.equal(viewer.state.alignY, -2);
+    assert.equal(viewer.viewport.currentAlignment().alignX, 5);
+    assert.equal(viewer.viewport.currentAlignment().alignY, -2);
     assert.deepEqual(Object.keys(viewer.state.pairAlignments).sort(), ['0:1', '1:0']);
     assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +5x -2y');
 }
 
 function malformedAlignmentRestore() {
-    const { element: makeElement, viewer } = loadViewer({
+    const { viewer } = loadViewer({
         clipCount: 2,
         savedState: {
             alignmentPreset: 'custom',
@@ -886,9 +883,9 @@ function malformedAlignmentRestore() {
     });
 
     assert.deepEqual(Object.keys(viewer.state.pairAlignments), []);
-    assert.equal(viewer.state.alignmentPreset, 'none');
-    assert.equal(viewer.state.alignX, 0);
-    assert.equal(viewer.state.alignY, 0);
+    assert.equal(viewer.viewport.currentAlignment().alignmentPreset, 'none');
+    assert.equal(viewer.viewport.currentAlignment().alignX, 0);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 0);
 
     const malformedStorage = loadViewer({
         clipCount: 2,
@@ -901,13 +898,13 @@ function malformedAlignmentRestore() {
     malformedStorage.storage.set(malformedStorage.storageKey, '{malformed');
     malformedStorage.viewer.restorePersistedState();
     assert.deepEqual(Object.keys(malformedStorage.viewer.state.pairAlignments), ['0:1']);
-    assert.equal(malformedStorage.viewer.state.alignmentPreset, 'custom');
-    assert.equal(malformedStorage.viewer.state.alignX, 6);
-    assert.equal(malformedStorage.viewer.state.alignY, -7);
+    assert.equal(malformedStorage.viewer.viewport.currentAlignment().alignmentPreset, 'custom');
+    assert.equal(malformedStorage.viewer.viewport.currentAlignment().alignX, 6);
+    assert.equal(malformedStorage.viewer.viewport.currentAlignment().alignY, -7);
 }
 
 function invalidSelectionRestore() {
-    const { element: makeElement, viewer } = loadViewer({
+    const { viewer } = loadViewer({
         clipCount: 2,
         savedState: {
             mode: 'diff',
@@ -926,13 +923,13 @@ function invalidSelectionRestore() {
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 1);
     assert.equal(viewer.state.activeClipIdx, 0);
-    assert.equal(viewer.state.alignX, 2);
-    assert.equal(viewer.state.alignY, 4);
+    assert.equal(viewer.viewport.currentAlignment().alignX, 2);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 4);
     assert.deepEqual(Object.keys(viewer.state.pairAlignments), ['0:1']);
 }
 
 function filmstripState() {
-    const { element: makeElement, viewer, storage, storageKey } = loadViewer({
+    const { viewer, storage, storageKey } = loadViewer({
         clipCount: 4,
         savedState: {
             filmstripCollapsed: true,
@@ -954,7 +951,7 @@ function filmstripState() {
 }
 
 function invalidFilmstripStateFallback() {
-    const { element: makeElement, viewer } = loadViewer({
+    const { viewer } = loadViewer({
         clipCount: 4,
         savedState: {
             filmstripCollapsed: 'yes',
@@ -1055,21 +1052,14 @@ function inspectorBlinkKeyboardState() {
     assert.equal(saved.blinkIntervalMs, 300);
     assert.equal(saved.blinkPaused, undefined);
     assert.equal(saved.blinkPauseRequested, undefined);
-    assert.deepEqual(JSON.parse(JSON.stringify({
-        inspectorOpen: saved.inspectorOpen,
-        inspectorTab: saved.inspectorTab,
-        lensExcludedFromViewport: !Object.hasOwn(saved, 'pixelLensEnabled'),
-        rovingTabWrapped: true,
-        blinkPausedPersisted: Object.hasOwn(saved, 'blinkPaused'),
-        closedInspectorInert: viewer.dom.inspector.inert,
-        closedInspectorTabIndex: viewer.dom.btnInspectorClose.getAttribute('tabindex'),
-        restoredKeyboardFocusToOrigin,
-        clearedKeyboardFocusRestoreTarget: viewer.state.inspectorRestoreFocus === null,
-    })), {"inspectorOpen": false, "inspectorTab": "clips", "lensExcludedFromViewport": true, "rovingTabWrapped": true, "blinkPausedPersisted": false, "closedInspectorInert": true, "closedInspectorTabIndex": "-1", "restoredKeyboardFocusToOrigin": true, "clearedKeyboardFocusRestoreTarget": true});
+    assert.equal(viewer.dom.inspector.inert, true);
+    assert.equal(viewer.dom.btnInspectorClose.getAttribute('tabindex'), '-1');
+    assert.equal(restoredKeyboardFocusToOrigin, true);
+    assert.equal(viewer.state.inspectorRestoreFocus, null);
 }
 
 function inspectorClipMetadata() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 1 });
+    const { viewer } = loadViewer({ clipCount: 1 });
     viewer.inspector.setOpen(true, { focus: false, save: false });
     const card = viewer.dom.inspectorClips.children[0];
     const heading = card.children[0].children[0].textContent;
@@ -1090,7 +1080,7 @@ function inspectorClipMetadata() {
 }
 
 function inspectorFrameIdentity() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
+    const { viewer } = loadViewer({ clipCount: 2 });
     viewer.state.activeCategoryKey = '__fc_all__';
     viewer.inspector.setOpen(true, { focus: false, save: false });
     assert.equal(viewer.dom.inspectorFrameIdentity.textContent, '10 · Selected');
@@ -1099,7 +1089,7 @@ function inspectorFrameIdentity() {
 }
 
 function inspectorFrameSources() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
+    const { viewer } = loadViewer({ clipCount: 2 });
     viewer.inspector.setOpen(true, { focus: false, save: false });
     assert.deepEqual(JSON.parse(JSON.stringify(viewer.dom.inspectorSourceFrames.children.map(
         row => row.children.map(
@@ -1192,22 +1182,13 @@ function modalKeyboardAccessibility() {
     assert.equal(helpEscape.propagationStopped, true);
     assert.equal(infoEscape.propagationStopped, true);
 
-    assert.deepEqual(JSON.parse(JSON.stringify({
-        helpFocusTrappedAndRestored: (
-            helpTab.defaultPrevented
-            && helpShiftTab.defaultPrevented
-            && helpEscape.defaultPrevented
-        ),
-        infoFocusTrappedAndRestored: (
-            infoTab.defaultPrevented
-            && infoShiftTab.defaultPrevented
-            && infoEscape.defaultPrevented
-        ),
-    })), {"helpFocusTrappedAndRestored": true, "infoFocusTrappedAndRestored": true});
+    for (const event of [helpTab, helpShiftTab, helpEscape, infoTab, infoShiftTab, infoEscape]) {
+        assert.equal(event.defaultPrevented, true, `dialog ${event.key} default prevented`);
+    }
 }
 
 function escapeOrder() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
+    const { viewer } = loadViewer({ clipCount: 4 });
 
     viewer.bindAlignmentEvents();
     viewer.inspector.setOpen(true);
@@ -1245,7 +1226,7 @@ function escapeOrder() {
 }
 
 function blinkControls() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
+    const { viewer } = loadViewer({ clipCount: 4 });
 
     viewer.windowReducedMotion = true;
     const originalReducedMotionActive = viewer.reducedMotionActive;
@@ -1263,7 +1244,7 @@ function blinkControls() {
 }
 
 function blinkToggle() {
-    const { element: makeElement, format } = loadViewer({ clipCount: 2 });
+    const { format } = loadViewer({ clipCount: 2 });
 
     assert.equal(format.formatFileSize(1), '1.00 B');
     assert.equal(format.formatFileSize(1023), '1023.00 B');
@@ -1289,7 +1270,7 @@ function blinkToggle() {
 }
 
 function blinkLabels() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
+    const { viewer } = loadViewer({ clipCount: 4 });
 
     viewer.state.mode = 'blink';
     viewer.state.activeClipIdx = viewer.state.leftClipIdx;
@@ -1305,7 +1286,7 @@ function blinkLabels() {
 }
 
 function keyboardGuard() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
+    const { viewer } = loadViewer({ clipCount: 4 });
     const button = { tagName: 'BUTTON', isContentEditable: false };
     const textarea = { tagName: 'TEXTAREA', isContentEditable: false };
     const contentEditable = { tagName: 'DIV', isContentEditable: true };
@@ -1358,7 +1339,7 @@ function radioGroupKeyboard() {
 }
 
 function frameKeyboard() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
+    const { viewer } = loadViewer({ clipCount: 4 });
     let prevented = false;
     viewer.dom.modal.classList.remove('open');
     viewer.dom.infoModal.classList.remove('open');
@@ -1406,72 +1387,72 @@ function filmstripKeyboard() {
 }
 
 function pairSwitchFourClip() {
-    const { element: makeElement, viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
+    const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
 
     viewer.viewport.setManualAlignment(4, 5);
     assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +4x +5y');
     viewer.setRightClip(2);
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 2);
-    assert.equal(viewer.state.alignX, 0);
-    assert.equal(viewer.state.alignY, 0);
+    assert.equal(viewer.viewport.currentAlignment().alignX, 0);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 0);
     assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
 
     viewer.viewport.setManualAlignment(-1, 8);
     viewer.setRightClip(1);
-    assert.equal(viewer.state.alignX, 4);
-    assert.equal(viewer.state.alignY, 5);
+    assert.equal(viewer.viewport.currentAlignment().alignX, 4);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 5);
     assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +4x +5y');
 
     viewer.setRightClip(2);
-    assert.equal(viewer.state.alignX, -1);
-    assert.equal(viewer.state.alignY, 8);
+    assert.equal(viewer.viewport.currentAlignment().alignX, -1);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 8);
 
     viewer.setRightClip(3);
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 3);
-    assert.equal(viewer.state.alignX, 0);
-    assert.equal(viewer.state.alignY, 0);
+    assert.equal(viewer.viewport.currentAlignment().alignX, 0);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 0);
 
     viewer.viewport.setManualAlignment(21, -3);
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 3);
     assert.equal(viewer.state.rightClipIdx, 0);
-    assert.equal(viewer.state.alignX, 0);
-    assert.equal(viewer.state.alignY, 0);
+    assert.equal(viewer.viewport.currentAlignment().alignX, 0);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 0);
 
     viewer.viewport.setManualAlignment(-21, 3);
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 3);
-    assert.equal(viewer.state.alignX, 21);
-    assert.equal(viewer.state.alignY, -3);
+    assert.equal(viewer.viewport.currentAlignment().alignX, 21);
+    assert.equal(viewer.viewport.currentAlignment().alignY, -3);
 
     viewer.setRightClip(2);
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 2);
-    assert.equal(viewer.state.alignX, -1);
-    assert.equal(viewer.state.alignY, 8);
+    assert.equal(viewer.viewport.currentAlignment().alignX, -1);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 8);
 
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 2);
     assert.equal(viewer.state.rightClipIdx, 0);
-    assert.equal(viewer.state.alignX, 0);
-    assert.equal(viewer.state.alignY, 0);
+    assert.equal(viewer.viewport.currentAlignment().alignX, 0);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 0);
 
     viewer.viewport.setManualAlignment(12, 13);
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 2);
-    assert.equal(viewer.state.alignX, -1);
-    assert.equal(viewer.state.alignY, 8);
+    assert.equal(viewer.viewport.currentAlignment().alignX, -1);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 8);
 
     viewer.setRightClip(3);
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 3);
     assert.equal(viewer.state.rightClipIdx, 0);
-    assert.equal(viewer.state.alignX, -21);
-    assert.equal(viewer.state.alignY, 3);
+    assert.equal(viewer.viewport.currentAlignment().alignX, -21);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 3);
 
     const saved = persisted(storage, storageKey);
     assert.deepEqual(saved.pairAlignments['0:1'], {
@@ -1504,19 +1485,19 @@ function pairSwitchFourClip() {
 }
 
 function alignmentStatus() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
+    const { viewer } = loadViewer({ clipCount: 4 });
 
     assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
     viewer.viewport.setAlignmentPreset('left-1');
-    assert.equal(viewer.state.alignX, -1);
-    assert.equal(viewer.state.alignY, 0);
+    assert.equal(viewer.viewport.currentAlignment().alignX, -1);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 0);
     assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: preset left 1px');
     viewer.viewport.setAlignmentPreset('none');
     assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
 }
 
 function singleModeAlignment() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
+    const { viewer } = loadViewer({ clipCount: 4 });
 
     viewer.setMode('overlay');
     viewer.state.activeClipIdx = viewer.state.rightClipIdx;
@@ -1536,7 +1517,7 @@ function singleModeAlignment() {
 }
 
 function directionalFourClip() {
-    const { element: makeElement, viewer } = loadViewer({
+    const { viewer } = loadViewer({
         clipCount: 4,
         savedState: {
             mode: 'diff',
@@ -1551,18 +1532,18 @@ function directionalFourClip() {
 
     assert.equal(viewer.state.leftClipIdx, 1);
     assert.equal(viewer.state.rightClipIdx, 0);
-    assert.equal(viewer.state.alignX, -6);
-    assert.equal(viewer.state.alignY, -7);
+    assert.equal(viewer.viewport.currentAlignment().alignX, -6);
+    assert.equal(viewer.viewport.currentAlignment().alignY, -7);
 
     viewer.swapPairClips();
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 1);
-    assert.equal(viewer.state.alignX, 6);
-    assert.equal(viewer.state.alignY, 7);
+    assert.equal(viewer.viewport.currentAlignment().alignX, 6);
+    assert.equal(viewer.viewport.currentAlignment().alignY, 7);
 }
 
 function paletteOrientationState() {
-    const { element: makeElement, viewer, storage, storageKey } = loadViewer({
+    const { viewer, storage, storageKey } = loadViewer({
         clipCount: 4,
         savedState: {
             paletteOrientation: 'vertical',
@@ -1589,10 +1570,7 @@ function paletteOrientationState() {
     assert.equal(viewer2.state.paletteOrientation, 'horizontal');
 
     const saved = persisted(storage, storageKey);
-    assert.deepEqual(JSON.parse(JSON.stringify({
-        restoredOrientation: 'vertical',
-        savedOrientation: saved.paletteOrientation,
-    })), {"restoredOrientation": "vertical", "savedOrientation": "vertical"});
+    assert.equal(saved.paletteOrientation, 'vertical');
 }
 
 function activeFilterBadge() {
@@ -1624,7 +1602,7 @@ function activeFilterBadge() {
 }
 
 function lensPanIndependence() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
+    const { viewer } = loadViewer({ clipCount: 2 });
     viewer.pointerInteraction = {
         isPanning: true,
         activePointerId: 7,
@@ -1670,7 +1648,7 @@ function lensPanIndependence() {
 }
 
 function lensLayoutRefresh() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
+    const { viewer } = loadViewer({ clipCount: 2 });
     viewer.lens.state.report.enabled = true;
     viewer.lens.state.point = { u: 0.25, v: 2 / 9 };
     viewer.lens.refreshes = 0;
@@ -1687,7 +1665,7 @@ function lensLayoutRefresh() {
 }
 
 function deferredTouchOwnership() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
+    const { viewer } = loadViewer({ clipCount: 4 });
     const routed = {};
     for (const mode of ['slider', 'overlay', 'diff', 'blink', 'grid']) {
         let panStarts = 0;
@@ -1761,7 +1739,7 @@ function deferredTouchOwnership() {
 }
 
 function gridModeBoundary() {
-    const { element: makeElement, viewer } = loadViewer({
+    const { viewer } = loadViewer({
         clipCount: 4,
         savedState: { mode: 'grid' },
     });
@@ -1771,7 +1749,7 @@ function gridModeBoundary() {
 }
 
 function lazyReviewController() {
-    const { element: makeElement, viewer, reviewMetrics } = loadViewer({
+    const { viewer, reviewMetrics } = loadViewer({
         clipCount: 4,
         savedState: { inspectorOpen: false, inspectorTab: 'review' },
     });
@@ -1781,7 +1759,7 @@ function lazyReviewController() {
 }
 
 function restoredWidthFitNoVisibleRadio() {
-    const { element: makeElement, viewer } = loadViewer({
+    const { viewer } = loadViewer({
         clipCount: 2,
         savedState: { fitMode: 'width' },
     });
@@ -1792,21 +1770,17 @@ function restoredWidthFitNoVisibleRadio() {
     viewer.dom.stage.getBoundingClientRect = () => ({ width: 800, height: 1080 });
     viewer.dom.sizerImg.getBoundingClientRect = () => ({ width: 1600, height: 1080 });
     viewer.viewport.applyFitMode({ resetPan: true });
-    const zoomUsedWidthMath = viewer.state.zoom === 0.5;
+    assert.equal(viewer.state.zoom, 0.5);
 
     viewer.viewport.updateFitButtons();
     const checkedStates = viewer.dom.fitBtns.map((btn) => btn.getAttribute('aria-checked'));
     const tabIndexes = viewer.dom.fitBtns.map((btn) => btn.tabIndex);
-    assert.deepEqual(JSON.parse(JSON.stringify({
-        fitModeRestored: viewer.state.fitMode === 'width',
-        zoomUsedWidthMath,
-        noRadioChecked: checkedStates.every((state) => state === 'false'),
-        exactlyOneKeyboardReachable: tabIndexes.filter((value) => value === 0).length === 1,
-    })), {"fitModeRestored": true, "zoomUsedWidthMath": true, "noRadioChecked": true, "exactlyOneKeyboardReachable": true});
+    assert.ok(checkedStates.every(state => state === 'false'));
+    assert.equal(tabIndexes.filter(value => value === 0).length, 1);
 }
 
 function gridShortcut() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 4 });
+    const { viewer } = loadViewer({ clipCount: 4 });
     viewer.dom.modal.classList.remove('open');
     viewer.dom.infoModal.classList.remove('open');
     const keyEvent = key => ({
@@ -1816,18 +1790,14 @@ function gridShortcut() {
     });
     viewer.setMode('slider');
     viewer.handleKey(keyEvent('g'));
-    const lowerSelectsGrid = viewer.state.mode === 'grid';
+    assert.equal(viewer.state.mode, 'grid');
     viewer.setMode('slider');
     viewer.handleKey(keyEvent('G'));
-    const upperSelectsGrid = viewer.state.mode === 'grid';
-    assert.deepEqual(JSON.parse(JSON.stringify({
-        lowerSelectsGrid,
-        upperSelectsGrid,
-    })), {"lowerSelectsGrid": true, "upperSelectsGrid": true});
+    assert.equal(viewer.state.mode, 'grid');
 }
 
 function proximityStateMachine() {
-    const { element: makeElement, viewer } = loadViewer({ clipCount: 2 });
+    const { viewer } = loadViewer({ clipCount: 2 });
     const viewport = viewer.viewport;
     const rect = {
         left: 100, top: 600, width: 300, height: 44, right: 400, bottom: 644,
@@ -1864,11 +1834,13 @@ function proximityStateMachine() {
         && viewport.resolvePaletteProximity({ ...base, loadActive: true, distance: 500 }) === 'near'
         && viewport.resolvePaletteProximity({ ...base, finePointer: false, distance: 500 }) === 'near'
     );
-    assert.deepEqual(JSON.parse(JSON.stringify({ thresholds, hysteresis, overrides })), {"thresholds": true, "hysteresis": true, "overrides": true});
+    assert.ok(thresholds, 'proximity thresholds');
+    assert.ok(hysteresis, 'proximity hysteresis');
+    assert.ok(overrides, 'proximity overrides');
 }
 
 function paletteProximityWiring() {
-    const { element: makeElement, viewer, window } = loadViewer({ clipCount: 2 });
+    const { viewer, window } = loadViewer({ clipCount: 2 });
     const viewport = viewer.viewport;
     viewer.dom.viewportPalette.getBoundingClientRect = () => ({
         left: 100, top: 600, width: 300, height: 44, right: 400, bottom: 644,
@@ -1957,34 +1929,110 @@ function paletteProximityWiring() {
     viewer.paletteProximity.loadUntil = Date.now() - 1;
     flushTimeouts();
     const noPointerFadesAfterLoad = viewer.dom.viewportPalette.getAttribute('data-proximity') === 'far';
-    assert.deepEqual(JSON.parse(JSON.stringify({
-        startsNear,
-        loadOverride,
-        farWhenDistant,
-        hysteresisHoldsFar,
-        nearWhenClose,
-        dragOverride,
-        alignPopoverOverride,
-        lensPopoverOverride,
-        pointerLeaveSetsFar,
-        coarseStaysNear,
-        coarseLeaveStaysNear,
-        mediaInitFine,
-        mediaChangeGates,
-        loadHoldsNear,
-        loadExpiryRecomputes,
-        rafDefers,
-        leaveCancelsQueuedFrame,
-        rafFlushApplies,
-        nanHoldsFar,
-        reinitCancelsQueuedFrame,
-        leaveDuringLoadHoldsNear,
-        leaveDuringLoadFadesAfterLoad,
-        noPointerFadesAfterLoad,
-    })), {"startsNear": true, "loadOverride": true, "farWhenDistant": true, "hysteresisHoldsFar": true, "nearWhenClose": true, "dragOverride": true, "alignPopoverOverride": true, "lensPopoverOverride": true, "pointerLeaveSetsFar": true, "coarseStaysNear": true, "coarseLeaveStaysNear": true, "mediaInitFine": true, "mediaChangeGates": true, "loadHoldsNear": true, "loadExpiryRecomputes": true, "rafDefers": true, "leaveCancelsQueuedFrame": true, "rafFlushApplies": true, "nanHoldsFar": true, "reinitCancelsQueuedFrame": true, "leaveDuringLoadHoldsNear": true, "leaveDuringLoadFadesAfterLoad": true, "noPointerFadesAfterLoad": true});
+    assert.ok(startsNear, 'startsNear');
+    assert.ok(loadOverride, 'loadOverride');
+    assert.ok(farWhenDistant, 'farWhenDistant');
+    assert.ok(hysteresisHoldsFar, 'hysteresisHoldsFar');
+    assert.ok(nearWhenClose, 'nearWhenClose');
+    assert.ok(dragOverride, 'dragOverride');
+    assert.ok(alignPopoverOverride, 'alignPopoverOverride');
+    assert.ok(lensPopoverOverride, 'lensPopoverOverride');
+    assert.ok(pointerLeaveSetsFar, 'pointerLeaveSetsFar');
+    assert.ok(coarseStaysNear, 'coarseStaysNear');
+    assert.ok(coarseLeaveStaysNear, 'coarseLeaveStaysNear');
+    assert.ok(mediaInitFine, 'mediaInitFine');
+    assert.ok(mediaChangeGates, 'mediaChangeGates');
+    assert.ok(loadHoldsNear, 'loadHoldsNear');
+    assert.ok(loadExpiryRecomputes, 'loadExpiryRecomputes');
+    assert.ok(rafDefers, 'rafDefers');
+    assert.ok(leaveCancelsQueuedFrame, 'leaveCancelsQueuedFrame');
+    assert.ok(rafFlushApplies, 'rafFlushApplies');
+    assert.ok(nanHoldsFar, 'nanHoldsFar');
+    assert.ok(reinitCancelsQueuedFrame, 'reinitCancelsQueuedFrame');
+    assert.ok(leaveDuringLoadHoldsNear, 'leaveDuringLoadHoldsNear');
+    assert.ok(leaveDuringLoadFadesAfterLoad, 'leaveDuringLoadFadesAfterLoad');
+    assert.ok(noPointerFadesAfterLoad, 'noPointerFadesAfterLoad');
+}
+
+function pairOffsetModeTransitions() {
+    for (const clipCount of [2, 3]) {
+        for (const mode of ['diff', 'blink']) {
+            for (const savedOffset of [false, true]) {
+                for (const sameSourceOffset of [false, true]) {
+                    const { viewer, storage, storageKey } = loadViewer({ clipCount });
+                    viewer.setMode('slider');
+                    if (savedOffset) viewer.viewport.setManualAlignment(7, 3);
+                    viewer.setRightClip(0);
+                    if (sameSourceOffset) viewer.viewport.setManualAlignment(2, 2);
+                    viewer.viewport.setRawAlignmentInput('x', '99');
+                    viewer.viewport.setRawAlignmentInput('y', '-');
+                    viewer.setMode(mode);
+                    const expected = savedOffset
+                        ? { alignmentPreset: 'custom', alignX: 7, alignY: 3 }
+                        : { alignmentPreset: 'none', alignX: 0, alignY: 0 };
+                    assert.equal(viewer.viewport.currentPairAlignmentKey(), '0:1');
+                    assert.deepEqual(JSON.parse(JSON.stringify(viewer.viewport.currentAlignment())), expected);
+                    assert.equal(viewer.state.rawAlignX, null);
+                    assert.equal(viewer.state.rawAlignY, null);
+                    const saved = persisted(storage, storageKey);
+                    assert.deepEqual(saved.pairAlignments['0:1'], savedOffset ? expected : undefined);
+                    assert.deepEqual(saved.pairAlignments['0:0'], sameSourceOffset
+                        ? { alignmentPreset: 'custom', alignX: 2, alignY: 2 } : undefined);
+                    viewer.restorePersistedState();
+                    assert.deepEqual(JSON.parse(JSON.stringify(viewer.viewport.currentAlignment())), expected);
+                    const copy = viewer.viewport.currentAlignment();
+                    copy.alignX = 999;
+                    assert.equal(viewer.viewport.currentAlignment().alignX, expected.alignX);
+                }
+            }
+        }
+    }
+}
+
+function selectionDraftsAndActiveSource() {
+    const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
+    viewer.state.activeClipIdx = 3;
+    viewer.setLeftClip(0);
+    assert.equal(viewer.state.activeClipIdx, 3);
+    viewer.setMode('overlay');
+    assert.equal(viewer.state.activeClipIdx, 3);
+    viewer.setMode('diff');
+    assert.equal(viewer.state.activeClipIdx, 3);
+    viewer.setMode('blink');
+    assert.equal(viewer.state.activeClipIdx, 0);
+    viewer.setRightClip(2);
+    assert.equal(viewer.state.activeClipIdx, 2);
+    viewer.setRightClip(0); // Repair occurs before resolving the requested active side.
+    assert.equal(viewer.state.activeClipIdx, 1);
+    viewer.viewport.setRawAlignmentInput('x', '4.');
+    viewer.setLeftClip(undefined);
+    assert.equal(viewer.state.rawAlignX, null);
+    viewer.viewport.setRawAlignmentInput('x', '4.');
+    viewer.setMode('diff'); // An unchanged key preserves its draft.
+    assert.equal(viewer.state.rawAlignX, '4.');
+    viewer.viewport.setAlignmentPreset('custom');
+    assert.equal(viewer.state.rawAlignX, '4.');
+    viewer.viewport.setAlignmentPreset('left-1');
+    assert.equal(viewer.state.rawAlignX, null);
+    assert.equal(viewer.viewport.currentAlignment().alignX, -1);
+    viewer.resetCurrentPairAlignment();
+    assert.equal(viewer.viewport.currentAlignment().alignX, 0);
+    assert.deepEqual(persisted(storage, storageKey).pairAlignments, {});
+    viewer.viewport.setManualAlignment(2, 3);
+    viewer.setRightClip(2);
+    viewer.viewport.setManualAlignment(4, 5);
+    viewer.resetAllPairAlignments();
+    assert.deepEqual(persisted(storage, storageKey).pairAlignments, {});
+    const single = loadViewer({ clipCount: 1 });
+    single.viewer.setMode('blink');
+    single.viewer.viewport.setManualAlignment(2, 2);
+    assert.equal(single.viewer.viewport.currentPairAlignmentKey(), '0:0');
+    assert.equal(single.viewer.viewport.currentAlignment().alignX, 2);
 }
 
 module.exports = {
+    pairOffsetModeTransitions,
+    selectionDraftsAndActiveSource,
     fixtureIsolation,
     blinkGesturePause,
     viewerStorageKey,

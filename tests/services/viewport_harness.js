@@ -69,9 +69,7 @@ async function viewportContracts() {
                 panX: 0,
                 panY: 0,
                 revealPercent: 50,
-                alignmentPreset: 'none',
-                alignX: 0,
-                alignY: 0,
+
                 pairAlignments: {},
                 leftClipIdx: 0,
                 rightClipIdx: 1,
@@ -108,8 +106,7 @@ async function viewportContracts() {
             syncRadioGroupTabStops() {},
             persistViewerState() {
                 persistence.calls += 1;
-                this.viewport.storeCurrentPairAlignment();
-            },
+                },
             updateInspectorData() {},
             updateBlinkControls() {},
         };
@@ -121,15 +118,12 @@ async function viewportContracts() {
 
     viewport.setZoom(10);
     assert.equal(viewer.state.zoom, 4);
-    const upperZoomBound = viewer.state.zoom === 4;
     viewport.setZoom(0);
     assert.equal(viewer.state.zoom, 0.25);
-    const zoomBounds = upperZoomBound && viewer.state.zoom === 0.25;
     viewer.state.zoom = 2;
     const baseCanvasSize = viewport.baseCanvasSize();
     assert.equal(baseCanvasSize.width, 100);
     assert.equal(baseCanvasSize.height, 50);
-    const canonicalStateShared = baseCanvasSize.width === 100 && baseCanvasSize.height === 50;
 
     viewer.state.zoom = 1;
     viewer.state.panX = 0;
@@ -138,24 +132,17 @@ async function viewportContracts() {
     assert.equal(viewer.state.zoom, 2);
     assert.equal(viewer.state.panX, -25);
     assert.equal(viewer.state.panY, 0);
-    const pointerAnchor = viewer.state.zoom === 2
-        && viewer.state.panX === -25
-        && viewer.state.panY === 0;
 
     viewer.state.panX = 999;
     viewer.state.panY = -999;
     viewport.clampPan();
     assert.deepEqual([viewer.state.panX, viewer.state.panY], [50, -25]);
-    const panClamped = viewer.state.panX === 50 && viewer.state.panY === -25;
 
     viewer.state.zoom = 1;
     viewer.state.fitMode = 'width';
     viewport.applyFitMode({ resetPan: true });
     assert.equal(viewer.state.zoom, 0.5);
     assert.deepEqual([viewer.state.panX, viewer.state.panY], [0, 0]);
-    const fitApplied = viewer.state.zoom === 0.5
-        && viewer.state.panX === 0
-        && viewer.state.panY === 0;
 
     viewer.state.mode = 'grid';
     viewer.gridView.isActive = () => true;
@@ -163,9 +150,6 @@ async function viewportContracts() {
     viewer.state.panY = 0;
     viewport.panByPixels(20, -10, 0, 0, { save: false });
     assert.deepEqual([viewer.state.panX, viewer.state.panY], [0.1, -0.1]);
-    const panClampAndGridConversion = panClamped
-        && viewer.state.panX === 0.1
-        && viewer.state.panY === -0.1;
 
     viewer.state.mode = 'slider';
     viewer.state.zoom = 2;
@@ -174,10 +158,6 @@ async function viewportContracts() {
     viewport.resetViewport();
     assert.equal(viewer.state.zoom, 1);
     assert.deepEqual([viewer.state.panX, viewer.state.panY], [0, 0]);
-    const fitAndReset = fitApplied
-        && viewer.state.zoom === 1
-        && viewer.state.panX === 0
-        && viewer.state.panY === 0;
 
     viewer.state.pairAlignments = {
         '0:1': { alignmentPreset: 'custom', alignX: 4, alignY: -3 },
@@ -188,8 +168,7 @@ async function viewportContracts() {
     assert.deepEqual(Object.keys(viewer.state.pairAlignments).sort(), ['0:1', '1:0']);
     viewer.state.leftClipIdx = 1;
     viewer.state.rightClipIdx = 0;
-    viewport.loadCurrentPairAlignment();
-    assert.deepEqual([viewer.state.alignX, viewer.state.alignY], [1, 0]);
+    assert.deepEqual([viewer.viewport.currentAlignment().alignX, viewer.viewport.currentAlignment().alignY], [1, 0]);
 
     viewport.setManualAlignment(-7, 5);
     assert.equal(viewer.state.pairAlignments['1:0'].alignmentPreset, 'custom');
@@ -197,18 +176,12 @@ async function viewportContracts() {
         [viewer.state.pairAlignments['1:0'].alignX, viewer.state.pairAlignments['1:0'].alignY],
         [-7, 5],
     );
-    const directionalAlignment = viewer.state.alignX === -7
-        && viewer.state.alignY === 5
-        && viewer.state.pairAlignments['1:0'].alignmentPreset === 'custom';
 
     viewer.state.revealPercent = 37;
     viewport.updateSlider();
     assert.equal(viewer.dom.canvas.style.values['--reveal-percent'], '37%');
     assert.equal(viewer.dom.leftLayer.style.values['--reveal-percent'], '37%');
     assert.equal(viewer.dom.divider.style.values['--reveal-percent'], '37%');
-    const reveal = [viewer.dom.canvas, viewer.dom.leftLayer, viewer.dom.divider].every(
-        item => item.style.values['--reveal-percent'] === '37%',
-    );
 
     const refreshBefore = { ...refresh };
     const persistenceCalls = persistence.calls;
@@ -217,13 +190,8 @@ async function viewportContracts() {
     const lensRefreshDelta = refresh.lens - refreshBefore.lens;
     assert.ok(gridRefreshDelta > 0);
     assert.ok(lensRefreshDelta > 0);
-    const gridAndLensRefresh = gridRefreshDelta > 0 && lensRefreshDelta > 0;
-    const storageDelegated = persistence.calls === persistenceCalls + 1
-        && viewer.state.zoom === 3;
-
-
-
-    assert.equal(storageDelegated, true);
+    assert.equal(persistence.calls, persistenceCalls + 1);
+    assert.equal(viewer.state.zoom, 3);
 
 }
 

@@ -87,9 +87,6 @@ const ReportViewer = {
         panX: 0,
         panY: 0,
         revealPercent: 50,
-        alignmentPreset: 'none',
-        alignX: 0,
-        alignY: 0,
         pairAlignments: {},
         blinkInterval: null,
         blinkPauseRequested: false,
@@ -952,14 +949,29 @@ const ReportViewer = {
         return idx;
     },
 
-    ensureDistinctPairSelection(mode = this.state.mode) {
-        if (!this.modeUsesDistinctPair(mode) || this.clipCount() <= 1) return;
-        if (this.state.leftClipIdx !== this.state.rightClipIdx) return;
-
-        this.state.rightClipIdx = this.nextDistinctClipIndex(
-            this.state.rightClipIdx,
-            this.state.leftClipIdx,
-        );
+    selectPair(selection = {}, { render = true } = {}) {
+        const { left, right, mode = this.state.mode, activate } = selection;
+        const previousKey = this.viewport.currentPairAlignmentKey();
+        this.state.mode = mode;
+        this.state.leftClipIdx = this.clipIndexOrDefault(left, this.state.leftClipIdx);
+        this.state.rightClipIdx = this.clipIndexOrDefault(right, this.state.rightClipIdx);
+        if (this.modeUsesDistinctPair(mode) && this.clipCount() > 1
+            && this.state.leftClipIdx === this.state.rightClipIdx) {
+            this.state.rightClipIdx = this.nextDistinctClipIndex(
+                this.state.rightClipIdx, this.state.leftClipIdx,
+            );
+        }
+        if (activate === 'left') this.state.activeClipIdx = this.state.leftClipIdx;
+        if (activate === 'right') this.state.activeClipIdx = this.state.rightClipIdx;
+        if (mode === 'blink' && this.state.activeClipIdx !== this.state.leftClipIdx
+            && this.state.activeClipIdx !== this.state.rightClipIdx) {
+            this.state.activeClipIdx = this.state.leftClipIdx;
+        }
+        if (Object.hasOwn(selection, 'left') || Object.hasOwn(selection, 'right')
+            || previousKey !== this.viewport.currentPairAlignmentKey()) {
+            this.viewport.clearRawAlignmentInputs();
+        }
+        if (render) this.render();
     },
 
     defaultPairIndexes() {
@@ -972,55 +984,20 @@ const ReportViewer = {
 
     applyDefaultSelection() {
         const [left, right] = this.defaultPairIndexes();
-
-        this.state.leftClipIdx = left;
-        this.state.rightClipIdx = right;
-        this.state.activeClipIdx = left;
-        this.ensureDistinctPairSelection();
+        this.selectPair({ left, right, activate: 'left' }, { render: false });
     },
 
     setLeftClip(idx) {
-        const nextIndex = this.clipIndexOrDefault(idx, this.state.leftClipIdx);
-        this.viewport.storeCurrentPairAlignment();
-        this.state.leftClipIdx = nextIndex;
-        this.ensureDistinctPairSelection();
-        this.viewport.loadCurrentPairAlignment();
-        if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
-        this.render();
+        this.selectPair({ left: idx });
     },
 
     setRightClip(idx) {
-        const nextIndex = this.clipIndexOrDefault(idx, this.state.rightClipIdx);
-        this.viewport.storeCurrentPairAlignment();
-        this.state.rightClipIdx = nextIndex;
-        this.ensureDistinctPairSelection();
-        this.viewport.loadCurrentPairAlignment();
-        if (this.state.mode === 'blink') {
-            this.state.activeClipIdx = this.state.rightClipIdx;
-        }
-        if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
-        this.render();
+        this.selectPair({ right: idx, activate: this.state.mode === 'blink' ? 'right' : undefined });
     },
 
     swapPairClips() {
         if (this.state.mode === 'overlay' || this.state.mode === 'grid' || this.clipCount() <= 1) return;
-
-        this.viewport.storeCurrentPairAlignment();
-        const previousLeft = this.state.leftClipIdx;
-        this.state.leftClipIdx = this.state.rightClipIdx;
-        this.state.rightClipIdx = previousLeft;
-        this.viewport.loadCurrentPairAlignment();
-        if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
-        this.render();
-    },
-
-    keepBlinkActiveInPair() {
-        if (
-            this.state.activeClipIdx !== this.state.leftClipIdx &&
-            this.state.activeClipIdx !== this.state.rightClipIdx
-        ) {
-            this.state.activeClipIdx = this.state.leftClipIdx;
-        }
+        this.selectPair({ left: this.state.rightClipIdx, right: this.state.leftClipIdx });
     },
 
     viewerStorageKey() {
@@ -1041,14 +1018,10 @@ const ReportViewer = {
 
         if (!saved || typeof saved !== 'object') return;
 
-        if (['slider', 'overlay', 'diff', 'blink', 'grid'].includes(saved.mode)) {
-            this.state.mode = saved.mode;
-        }
+        const mode = this.validMode(saved.mode) ? saved.mode : this.state.mode;
         if (['actual', 'width', 'height', 'custom'].includes(saved.fitMode)) {
             this.state.fitMode = saved.fitMode;
         }
-        this.state.leftClipIdx = this.clipIndexOrDefault(saved.leftClipIdx, this.state.leftClipIdx);
-        this.state.rightClipIdx = this.clipIndexOrDefault(saved.rightClipIdx, this.state.rightClipIdx);
         this.state.activeClipIdx = this.clipIndexOrDefault(saved.activeClipIdx, this.state.activeClipIdx);
         this.state.zoom = this.viewport.clampZoom(saved.zoom);
         this.state.panX = this.numberOrDefault(saved.panX, 0);
@@ -1082,17 +1055,15 @@ const ReportViewer = {
         ) {
             this.state.currentFrameIdx = saved.currentFrameIdx;
         }
-        this.ensureDistinctPairSelection();
+        this.selectPair({ mode, left: saved.leftClipIdx, right: saved.rightClipIdx }, { render: false });
         this.state.pairAlignments = this.viewport.normalizedPairAlignments(saved.pairAlignments);
-        this.viewport.loadCurrentPairAlignment();
+        this.viewport.clearRawAlignmentInputs();
         this.normalizeCurrentFrameForFilter();
-        if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
     },
 
     persistViewerState() {
         const storage = this.localStorage();
         if (!this.state.storageKey || !storage) return false;
-        this.viewport.storeCurrentPairAlignment();
 
         const payload = {
             currentFrameIdx: this.state.currentFrameIdx,
@@ -1281,14 +1252,14 @@ const ReportViewer = {
     },
     resetCurrentPairAlignment() {
         delete this.state.pairAlignments[this.viewport.currentPairAlignmentKey()];
-        this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
+        this.viewport.clearRawAlignmentInputs();
         this.viewport.applyAlignment();
         this.persistViewerState();
     },
 
     resetAllPairAlignments() {
         this.state.pairAlignments = {};
-        this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
+        this.viewport.clearRawAlignmentInputs();
         this.viewport.applyAlignment();
         this.persistViewerState();
     },
@@ -1650,9 +1621,7 @@ const ReportViewer = {
             this.state.panX = base.width > 0 ? this.state.panX / base.width : 0;
             this.state.panY = base.height > 0 ? this.state.panY / base.height : 0;
         }
-        this.state.mode = mode;
-        this.ensureDistinctPairSelection(mode);
-        if (mode === 'blink') this.keepBlinkActiveInPair();
+        this.selectPair({ mode }, { render: false });
 
         if (this.state.blinkInterval && mode !== 'blink') {
             clearInterval(this.state.blinkInterval);

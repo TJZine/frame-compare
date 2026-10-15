@@ -10,6 +10,7 @@ import subprocess
 from dataclasses import replace
 from html.parser import HTMLParser
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, cast
 
 import pytest
@@ -34,7 +35,7 @@ from frame_compare.utils.media_facts import (
 )
 from frame_compare.vs.types import TonemapSettings
 
-# Chrome launches share a profile; keep this module on one xdist worker.
+# Keep the browser acceptance module on one xdist worker for bounded host load.
 pytestmark = pytest.mark.xdist_group("browser")
 
 _ONE_PIXEL_PNG = base64.b64decode(
@@ -109,6 +110,12 @@ def _run_browser_dump(
         "--dump-dom",
         report_path.as_uri(),
     ]
+    with TemporaryDirectory(prefix="chrome-dump-", dir=report_path.parent) as profile:
+        command.insert(1, f"--user-data-dir={profile}")
+        return _run_browser_dump_command(command)
+
+
+def _run_browser_dump_command(command: list[str]) -> subprocess.CompletedProcess[str]:
     for attempt in range(2):
         try:
             return subprocess.run(
@@ -950,6 +957,107 @@ def test_applied_tonemap_disclosure_is_focusable_toggleable_and_scrollable(
             parser.document_attributes[attribute],
             parser.document_attributes,
         )
+
+
+def _append_pair_offset_mode_transition_probe(report_path: Path) -> None:
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const viewer = ReportViewer;
+    const storageKey = viewer.viewerStorageKey();
+    const results = [];
+    const clickMode = mode => document.querySelector(`[data-mode="${mode}"]`).click();
+    const selectRight = index => {
+        const select = document.getElementById('right-select');
+        select.value = String(index);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const typeOffset = (x, y) => {
+        for (const [axis, value] of [['x', x], ['y', y]]) {
+            const input = document.getElementById(`align-${axis}`);
+            input.value = String(value);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('blur'));
+        }
+    };
+    for (const mode of ['diff', 'blink']) {
+        for (const savedOffset of [false, true]) {
+            for (const sameSourceOffset of [false, true]) {
+                localStorage.removeItem(storageKey);
+                viewer.restorePersistedState();
+                clickMode('slider');
+                selectRight(1);
+                if (savedOffset) typeOffset(7, 3);
+                selectRight(0);
+                if (sameSourceOffset) typeOffset(2, 2);
+                clickMode(mode);
+                const canvas = getComputedStyle(viewer.dom.canvas);
+                const saved = JSON.parse(localStorage.getItem(storageKey));
+                const current = viewer.viewport.currentAlignment();
+                const result = {
+                    mode, savedOffset, sameSourceOffset,
+                    pair: viewer.viewport.currentPairAlignmentKey(),
+                    current,
+                    stored: saved.pairAlignments['0:1'] || null,
+                    storedSameSource: saved.pairAlignments['0:0'] || null,
+                    x: canvas.getPropertyValue('--align-x').trim(),
+                    y: canvas.getPropertyValue('--align-y').trim(),
+                    transform: getComputedStyle(document.querySelector('.rv-right')).transform,
+                    status: document.getElementById('alignment-status').textContent.trim(),
+                };
+                viewer.restorePersistedState();
+                result.restored = viewer.viewport.currentAlignment();
+                results.push(result);
+            }
+        }
+    }
+    document.documentElement.dataset.pairOffsetTransitions = JSON.stringify(results);
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_pair_offsets_survive_same_source_slider_mode_repair(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+    report_path = _generated_report(tmp_path)
+    _append_pair_offset_mode_transition_probe(report_path)
+    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+    assert parser.document_attributes is not None
+    encoded = parser.document_attributes.get("data-pair-offset-transitions")
+    assert encoded is not None, parser.document_attributes
+    cases = json.loads(encoded)
+    assert len(cases) == 8
+    for case in cases:
+        expected = {
+            "alignmentPreset": "custom" if case["savedOffset"] else "none",
+            "alignX": 7 if case["savedOffset"] else 0,
+            "alignY": 3 if case["savedOffset"] else 0,
+        }
+        assert case["pair"] == "0:1", case
+        assert case["current"] == expected, case
+        assert case["restored"] == expected, case
+        assert case["stored"] == (expected if case["savedOffset"] else None), case
+        assert case["storedSameSource"] == (
+            {"alignmentPreset": "custom", "alignX": 2, "alignY": 2}
+            if case["sameSourceOffset"]
+            else None
+        ), case
+        assert case["x"] == f"{expected['alignX']}px", case
+        assert case["y"] == f"{expected['alignY']}px", case
+        assert case["status"] == (
+            "Offset: custom +7x +3y" if case["savedOffset"] else "Offset: none"
+        ), case
+        if case["mode"] == "diff":
+            assert case["transform"] == (
+                "matrix(1, 0, 0, 1, 7, 3)" if case["savedOffset"] else "matrix(1, 0, 0, 1, 0, 0)"
+            ), case
 
 
 def _append_width_fit_restore_probe(report_path: Path) -> None:
