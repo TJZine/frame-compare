@@ -222,7 +222,10 @@ Skip the TMDB lookup.
 Saved by `--write-config`
 :   No
 
-Do not read or write the analysis cache.
+Refresh the matching shared analysis cache entry: remove it during preparation,
+recompute analysis, and persist a fresh entry. Unrelated analysis entries,
+alignment reuse, and TMDB caches are preserved. See the
+[run command contract](../current-cli-contract.md#run-command-contract).
 
 #### `--from-cache-only` { #run-from-cache-only .fc-key }
 
@@ -294,10 +297,12 @@ commands. See
 
 ## Doctor
 
-Doctor checks VapourSynth, L-SMASH-Works, vs-placebo, FFMS2, FFmpeg, VSView, and the
-optional slow.pics and TMDB integrations. `--json` emits the report as JSON. Doctor
-exits with the dependency error code when a required check fails. The slow.pics check
-contacts the service.
+Doctor checks VapourSynth, L-SMASH-Works, vs-placebo, FFMS2, FFmpeg/ffprobe, and
+VSView. Its TMDB check validates local configuration and credential format only.
+Doctor makes no network requests; slow.pics connectivity is exercised when
+publishing. `--json` emits the report as JSON. Doctor exits with the dependency
+error code when a required check fails. See the
+[doctor command contract](../current-cli-contract.md#doctor-command-contract).
 
 ## Preset
 

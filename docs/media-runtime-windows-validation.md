@@ -319,7 +319,9 @@ Verify with old and newly generated data:
 - Alignment reuse misses when the standalone FFmpeg lineage differs.
 - Render/run metadata records the complete candidate runtime contract.
 - `--from-cache-only` fails closed when only stale cache data exists.
-- `--no-cache` does not read or persist reusable cache data.
+- `--no-cache` removes the matching analysis entry, recomputes, and persists a fresh
+  entry; repeated runs without it then hit. See the
+  [run command contract](current-cli-contract.md#run-command-contract).
 - Repeated candidate runs produce valid cache hits without changing selected frames.
 - Unrelated cache scopes are not invalidated without a documented reason.
 
