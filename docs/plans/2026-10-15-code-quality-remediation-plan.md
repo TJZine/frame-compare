@@ -2764,7 +2764,7 @@ coverage and routes findings without personal substantive review.
 | Boundary / reviewer | Owned wave scope and explicit integration interfaces | Status at exact 04d5c90b |
 | --- | --- | --- |
 | A / 01a13ece-fcf0-7da1-afb9-c63eb44a89a8, reviewer/high | P0/P3/P4/P5/P10: CLI/config/JSON/viewer/persistence/warnings; P6 records, P8 payload/facts and P11 request construction interfaces | Assigned, pending |
-| B / 01a13ee0-8b57-7573-9de8-4374f0fc445e, deep/xhigh | P6/P8 authority/native/render/report; P5 inputs, P4 failure policy, P10 warnings, P11 real phase/cache/smoke interfaces | Assigned, pending |
+| B / 01a13ee0-8b57-7573-9de8-4374f0fc445e, deep/xhigh | P6/P8 authority/native/render/report; P5 inputs, P4 failure policy, P10 warnings, P11 real phase/cache/smoke interfaces | COMPLETE, no findings; unchanged application-source proof and explicit current U4/native interface tracing |
 | C / 01a13ed5-7e47-7ea0-9201-1f47b6a097f0, deep/xhigh | P1 preservation/activation/provenance; P5 doctor shim, P8 runtime smoke, P0 acceptance docs and P11 runbook coexistence | COMPLETE, no findings; P1 source/test equivalence verified, relevant cross-boundary callers traced, Windows execution still open |
 | D / 01a13ee3-a368-7772-90c2-9c84da0890a7, reviewer/high | P11 recipe/cache/verifier/notes and U4 config/authority/runtime interfaces to P5/P6/P8 | COMPLETE, no findings; unchanged-source/AST and evidence inspection, no new runtime run |
 
@@ -2817,3 +2817,16 @@ No P2 live work inspected and no platform pass inferred. Boundaries A/B still pe
 D already complete; current native gate passed, combined Docker running under a638
 lease. P2/P7 implementation isolated, P9 prerequisite not ready. Only pending child
 results remain; resume through meaningful authorized callbacks, no idle polling.
+
+
+Wave A boundary B completed at exact04d5c90b: no actionable finding or missing
+composition obligation. Reviewer proved ALLsrc and relevant service/render/
+orchestration/VS tests plus both runtime smokes unchanged since reviewed698095cd,
+reused valid P6/P8 proof without repeat pytest, traced current U4 acquisition→real
+alignment phase/cache plus applied-fact/report/warning/geometry/currentness/cleanup
+interfaces.21extracted ASTs/31pair mappings match prior source;13U4test ASTs preserved
+apart from store annotation,2path-access substitutions manually traced without lost
+authority/cache assertion. Cumulative diff clean; no runtime execution claimed.
+Parent's separately observed04d5 native pass remains applicable. Boundaries B/C/D
+complete with no findings; A and combined current Docker remain pending. No other
+independent integration is ready; P2/P7 work and their later reviews remain active.
