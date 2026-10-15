@@ -2502,8 +2502,8 @@ final-report-only fallback; the parent retrieves on its next activation.
 | --- | --- | --- | --- |
 | P1 | worker / medium; `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | worker `14b599a2` → integrated `21691a97` | Implemented/integrated; deep reviewer `01a13ed5-7e47-7ea0-9201-1f47b6a097f0` active; Windows acceptance open |
 | P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | worker `7ccdb965/986abc2e/149ef433` → integrated `8e32ee40/54e80bb6/983658b8` | Implemented/integrated/independently reviewed, no findings; final-source Node/report/22-browser proof passed; full Wave A composition pending |
-| P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Implemented/integrated/independently reviewed, no findings; 724 focused passes; full native gate open |
-| P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | worker `f0c67e62` → integrated `94efe8cd` | Implemented/integrated/independently reviewed, no findings; worker running verification-only full native gate at `94efe8cd` |
+| P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Implemented/integrated/independently reviewed, no findings; focused + full native at `94efe8cd` passed; final-head gate pending |
+| P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | worker `f0c67e62` → integrated `94efe8cd` | Implemented/integrated/independently reviewed, no findings; full native/static integration at `94efe8cd` passed; final-head gate pending |
 | P0 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `260670cc` → integrated `23d2f59f` | Implemented/integrated/independently reviewed, no findings; 5 CLI-doc tests + strict docs passed; Wave A composition pending |
 | P5 | worker / medium; `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | `30515500`; worktree `9676` | Active; full acquisition/doctor scope; P10 shared-file ordering tracked |
 | P6 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | assigned current integrated `44a11213`; worktree `9bdf` | Active; complete CQ5/CQ21c/CQ2; reviewed P4 prerequisite retained; native/Docker gates deferred |
@@ -2732,3 +2732,35 @@ Reviewer remained clean/read-only at94efe8cd, now idle/reusable for focused rech
 or later wave work. Pending callbacks: P1 deep review; P5/P6/P8/P11 implementation;
 P10 stable-input native verifier. No useful independent integration or dispatch is
 ready until those prerequisites/results arrive; no idle polling.
+
+
+### Stable integrated native verification at94efe8cd
+
+Verifier worker_luna/xhigh `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` completed assigned
+verification-only work on exact
+`94efe8cdd2abe86caa1136849d25122cd17d5e03` (P0/P3/P4/P10; before P1 integration).
+Clean permitted detached switch in isolated b49f; no source/test/docs/plan edits or
+commits. Original human authorization re-retrieved before callback.
+
+Actual canonical command:
+`REPORT_BROWSER="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" uv run --no-sync pytest -q -n4 --dist loadgroup`.
+Verifier reports completed100%, collection3611, explicit skipped105, therefore
+**3506 passed,105 skipped,0 failures/xfails**. Chrome coverage actually ran, with no
+browser skips. Skip breakdown:5 absent native plugins (4lsmas,1placebo),6 opt-in media
+E2E,3 opt-in continuous-alignment resource,2 opt-in live slow.pics,89 Windows/
+PowerShell/CMD semantics. Serial windows_portable confirmation also passed with same
+89 platform skips (this source predates P1's additional preservation fixtures).
+Neither those skips nor native suite pass establish Docker/media/Windows acceptance.
+
+Integrated pyright0/0/0, ruff/check format513, bandit0 medium/high, lint-imports2 kept
+(183files/791dependencies) and diff check all passed at same exact SHA. No Docker
+used; P11 lease retained. Browser owned-profile/process cleanup checked with no
+remaining matching Chrome processes; browser lease RELEASED. Verifier now idle and
+reusable for later source-bound integrated gates.
+
+This closes P4/P10 full-native requirements at the reviewed relevant source and
+supports P0/P3/P4/P10 composition; it is not final-head verification for P1/P5/P6/P8/
+P11 or later waves. Reuse while relevant source/environment remain unchanged; rerun
+applicable invalidated gates on final stable integrated inputs. Pending callbacks:
+P1 deep review, P5/P6/P8/P11 implementation. No current browser owner; P11 retains
+exclusive Docker ownership. P2/P7/P9 remain dependency-gated and undispatched.
