@@ -195,7 +195,7 @@ CQ7 and CQ14 do not appear in this matrix by design (see §11).
 
 | Shared file or resource | Packages | Rule |
 | --- | --- | --- |
-| `tools/windows_portable/build_portable.ps1` | P1 (`Main`, output reservation), P2 (`Write-BundleInfo` version validation) | P1 merges first; P2 rebases |
+| `tools/windows_portable/build_portable.ps1`, `version_utils.ps1` | P1 (`Main`, output reservation), P2 (grammar through `version_utils.ps1`, which the builder dot-sources) | P1 merges first; P2 rebases |
 | `tools/windows_portable/verify_extracted_bundle.ps1`, `write_bundle_inventory.py`, `tools/windows_portable/README.txt`, runbook Windows section | P1 (`path_safety.ps1` extraction, provenance, source-build docs), P2 (version helper entries, provenance, update/rollback docs) | P1 first; P2 rebases |
 | `tests/windows_portable/test_windows_portable_build_scripts.py` | P1, P2, P8 (asserts on `runtime_smoke.py` text ~364–501, ~748) | P1, then P2; P8 rebases its small hunk |
 | `tools/windows_portable/runtime_smoke.py`, `tools/docker_runtime_smoke.py` | P8 (`apply_tonemap` result type) | P8 only; note the build-scripts test dependency above |
@@ -213,7 +213,7 @@ CQ7 and CQ14 do not appear in this matrix by design (see §11).
 | `tests/services/test_alignment_frozen_strings.py`, `tests/vsview/test_alignment_review_panel.py` | P6 (CQ21c and review-map signature) | Same package; CQ21c step precedes CQ2 step |
 | `tests/integration/test_alignment_u4_acceptance.py` | P11 (recipes), P7 (`RunContext`/`PrepState` constructors at ~808, ~1118), P5 (`RunRequest(root=root)` ~1113) | Either order; second rebases; never run two Docker verifiers concurrently in one checkout |
 | Docker verifier media cache (`generated/test-media-cache`) | P5–P9, P11 gates | One verifier at a time per checkout |
-| `docs/current-architecture.md`, `docs/current-cli-contract.md` | P0, P4 (finite timeouts), P5–P9 | Each package edits only its sections; integration owner resolves textual conflicts |
+| `docs/current-architecture.md`, `docs/current-cli-contract.md` | P0, P1 (architecture ~426), P4 (finite timeouts), P5–P9 | Each package edits only its sections; integration owner resolves textual conflicts |
 
 ### 6.2 Execution waves
 
@@ -335,8 +335,13 @@ Supporting facts used by the design:
 *Builder (`build_portable.ps1`): validate first, atomically reserve the final output,
 build in place, and clean up only what this run reserved.*
 
-1. Before any filesystem mutation: resolve paths; read and validate the manifest and
-   `artifacts`; validate relationships:
+1. Before any filesystem mutation: resolve paths; read and validate the manifest,
+   including the fields today checked late (`manifest_version` and
+   `bundle.runtime_fingerprints`, read in `Write-BundleInfo` ~773–782) and every
+   artifact `destination` (each must be a relative path that stays strictly inside the
+   bundle root; today `Install-Artifact` joins it unchecked, ~201–202, and a value such
+   as `.` would make `Expand-ArchiveFile` delete and recreate the root, ~159–162);
+   normalize trailing separators on every compared path; validate relationships:
    - `OutDir` must not exist (a file, a directory, or a reparse point). There is no
      overwrite flag: maintainers delete disposable output explicitly.
    - `OutDir` must not be a drive root and must not equal or contain the current
@@ -345,17 +350,24 @@ build in place, and clean up only what this run reserved.*
      it may lie inside `RepoRoot` only beneath `RepoRoot\dist`. `CacheDir` and
      `OutDir` must not nest either way. (Being inside the current directory is
      allowed: the builder's own default is `$PWD\dist\…`.)
-   - Error messages name the resolved paths, which keeps the existing proof that
-     relative paths resolve against the provider location.
+   - Relationship and occupied-path refusals name the resolved paths; the existing
+     proof that relative paths resolve against the provider location moves to an
+     occupied-`OutDir` refusal (the manifest-missing error names only the manifest).
 2. Reserve `OutDir` itself with the existing atomic reservation
    (`New-AtomicallyReservedDirectory`, `verify_extracted_bundle.ps1` ~270–283, whose
-   create-new semantics refuse an existing path, Win32 error 183). Move it, its
-   native interop type (~64–65 `Add-Type` block it depends on), and `Test-PathWithin`
-   (~38–44) into one dot-sourced build-time helper,
+   native create-new call refuses an existing path, Win32 error 183). Move it and
+   `Test-PathWithin` (~38–44) into one dot-sourced build-time helper,
    `tools/windows_portable/path_safety.ps1`, used by both the verifier and the
-   builder; add that file to `SOURCE_SCRIPTS` in `write_bundle_inventory.py` (~30–48)
-   and to the build-scripts provenance fixture (`test_windows_portable_build_scripts.py`
-   ~1233–1251).
+   builder. Its interop type `FrameCompareNativeDirectory` (~72–78) currently shares
+   one `Add-Type` block (~65–268) with `FrameCompareProcessJob` and the bounded-stream
+   class, so split out only that C# type into the helper, guarded by a
+   type-already-loaded check so dot-sourcing twice cannot fail; the verifier keeps its
+   other types. Give the function a label parameter (its error 183 message is
+   hard-coded to `ExtractRoot`, ~277). Add the helper to `SOURCE_SCRIPTS` in
+   `write_bundle_inventory.py` (~30–49) and to the build-scripts provenance fixture
+   (`test_windows_portable_build_scripts.py` ~1233–1251). The reservation may create
+   a missing parent such as `dist\` (~271); that is the only mutation left on failure
+   and touches no existing file.
 3. Build in place at the final path, exactly as today, so the lock header and
    `requirements_lock_sha256` stay identical to today's CI output.
 4. On any failure after a successful reservation, remove only that reserved
@@ -374,30 +386,43 @@ build in place, and clean up only what this run reserved.*
 activation after verification, explicit user-data policy.*
 
 1. Default `-OutDir` becomes a fresh sibling under `dist\`:
-   `frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>` (local time; the application
+   `frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z` (UTC, so a clock fall-back
+   cannot repeat a name; the application
    version is recorded in `bundle_info.json`, so it is not needed in the name and no
    second version source is introduced). An explicit `-OutDir` that exists is refused
    by the builder before mutation.
 2. Read the current pointer's `bundle_path` (if any) as the previous bundle. The
    installer never deletes or rewrites the previous bundle's runtime or code.
-3. Build and verify first. Only then handle user data, then run the new bundle's
-   `install.ps1` to activate it.
+3. Build and verify first (“verify” is the builder completing successfully,
+   including its existing runtime-smoke and bundle-inventory steps). Only then handle
+   user data, then run the new bundle's `install.ps1` to activate it.
 4. User data: new parameter `-UserData Move|Leave` on `install-from-source.ps1`,
    forwarded by root `install.ps1` (which today forwards only `-SkipSync`;
    `install.cmd` already forwards `%*`). Only the documented user locations
    `config\`, `comparison_videos\`, and `generated\` are considered, and a location
    counts as user data only when it is **non-empty**; no other file is inferred to be
    user-owned or disposable.
-   - `Move`: precondition checks before any move: previous and new bundles are on the
-     same volume (rename cannot cross volumes; if they differ, `Move` is unavailable
-     and the installer refuses activation with instructions); each non-empty source
-     folder exists; each target folder in the new bundle is absent or empty. Then, for
-     each non-empty source folder: remove the new bundle's empty placeholder folder
-     (re-checking that it is empty), rename the source folder into the new bundle.
+   - The previous bundle counts as absent (activate directly, no data handling) when
+     the pointer is missing or malformed, its `bundle_path` does not exist, it has no
+     `bundle_info.json`, or it equals the new `OutDir`. The installer refuses when the
+     new bundle is inside or contains the previous one.
+   - `Move`: precondition checks before any move: each non-empty source folder exists;
+     each target folder in the new bundle is absent or empty. Then, for each non-empty
+     source folder: remove the new bundle's empty placeholder folder (re-checking that
+     it is empty) and rename the source folder into the new bundle. A rename failing
+     because source and target are on different volumes (Win32 error 17; detected by
+     the failed rename rather than by comparing drive roots, which misses mount points)
+     means `Move` is unavailable: reverse and refuse activation with instructions.
      All-or-nothing: if any step fails, reverse completed renames and recreate removed
-     empty placeholders, and do not activate. If the new bundle's `install.ps1` fails
-     after the moves, reverse the moves the same way so the data returns to the
-     still-active previous bundle.
+     empty placeholders, and do not activate.
+   - Activation failure after `Move`: the bundle `install.ps1` replaces the `bin`
+     shims (~49–53), then switches the pointer (~55–62), then writes the state
+     `config.toml` and `PATH` (~64–99), so it can fail after switching the pointer.
+     On failure, re-read `state\config.json`; if it names the new bundle, first restore
+     the previous pointer (temporary file and replace), then reverse the moves so the
+     data is back in the active bundle; then re-run the previous bundle's
+     `install.ps1` to restore its `bin` shims. If any reversal step fails, stop and
+     report exactly where every folder and the pointer now are; never delete.
    - `Leave`: activate without moving; the message lists the non-empty folders left
      behind and warns that the shim may now select an older AppData state config if
      the new bundle has no `config\config.toml`.
@@ -474,7 +499,9 @@ path). No compatibility path keeps the old destructive behavior.
   not treated as user data; different-volume `Move` refuses activation; injected build
   failure leaves the pointer and previous bundle byte-identical; an injected rename
   failure reverses completed moves, restores placeholders, and does not activate; an
-  injected `install.ps1` failure after moves returns the data to the previous bundle.
+  injected `install.ps1` failure **before** and **after** its pointer write returns the
+  data and the pointer to the previous bundle; stale, missing, self-referencing, and
+  nested previous-bundle pointers follow the rules above.
 - Migrate `test_root_source_installer_prerequisite_at_process_boundary`
   (`test_windows_portable_install_entrypoints.py` ~146–199): it runs the real source
   installer against the host `LOCALAPPDATA` and asserts the fixed
@@ -566,8 +593,10 @@ install.
   - `verify_extracted_bundle.ps1` adds it to `requiredEntries` (~365–379);
   - `write_bundle_inventory.py` adds it to `SOURCE_SCRIPTS` (~30–48), with the
     provenance fixture (`test_windows_portable_build_scripts.py` ~1233–1251);
-  - test harnesses that copy only the updater (`test_windows_portable_update_apply_e2e.py`
-    ~70–83, `test_windows_portable_install_uninstall_e2e.py` ~93–99) copy it too.
+  - test harnesses: the updater-only copy in `test_windows_portable_update_apply_e2e.py`
+    (~70–83) copies it too, and the `managed_bin_files` list in
+    `test_windows_portable_install_uninstall_e2e.py` (~93–99), used for both bundle
+    shim sources and `bin` expectations, gains it.
 - Grammar (Windows PowerShell 5.1 compatible, case-sensitive `-cmatch`, ASCII
   `[0-9]` because .NET `\d` matches Unicode digits, `\z` rather than `$` because .NET
   `$` also matches before a trailing newline, component length capped so
@@ -605,27 +634,34 @@ install.
 
 *Source-tree replacement transaction (updater-only).*
 - A small journal, `app\.frame_compare_replacement.json`
-  `{schema_version, operation, state: "staged" | "promoting" | "committed", started_at}`,
-  written by temporary file and move at each state change, makes interrupted states
-  unambiguous.
+  `{schema_version, operation, state: "staging" | "promoting" | "committed", started_at}`,
+  makes interrupted states unambiguous. Each state change writes a temporary file and
+  then `[IO.File]::Replace` (or `[IO.File]::Move` when no journal exists yet), because
+  `Move-Item -Force` over an existing file is not documented as atomic; repair ignores
+  and removes a leftover journal temporary file, which never blocks the next write.
 - `Repair-InterruptedReplacement -BundlePath` runs **immediately after
   `Acquire-UpdateLock` in both apply and rollback**, before apply's version read,
   target-exists check, or stale-`.old` deletion (all of which would otherwise refuse
   or destroy recovery material):
   - no journal: if `.old` or `.new` exist without a journal, refuse with their paths
     (unknown state; never guess);
-  - `staged` (crash before any rename): remove `.new`; target untouched;
+  - `staging` (crash while copying into or verifying `.new`, or before any rename):
+    remove `.new`, complete or partial; target untouched;
   - `promoting` (crash during or after the two renames, before commit): if `.old`
     exists, the previous tree is intact there and the current target (if any) never
     passed smoke, so move a present target aside to `.failed-<timestamp>` and rename
-    `.old` back; if `.old` does not exist, no rename happened and the target is
-    untouched; then remove `.new`;
+    `.old` back; if `.old` does not exist and the target exists, no rename happened and
+    the target is untouched; if neither `.old` nor the target exists, refuse with
+    paths; then remove `.new`;
   - `committed` (crash while removing `.old`): remove the leftover `.old`;
   - then delete the journal. Today's unconditional stale-`.new`/`.old` deletion at
-    ~894–900 is replaced by this function.
+    ~894–900 is replaced by this function. Repair is the only mutation allowed before
+    version validation, and it only restores or removes transaction directories.
+    `.failed-*` directories are retained for diagnosis; a successful commit removes all
+    but the newest one.
 - `Invoke-SourceTreeReplacement -BundlePath -TargetDir -CandidateDir -ExpectedInventory -ExpectedVersion`,
   called with the update lock held and after repair:
-  1. Stage the candidate into `.new` (copy); journal `staged`.
+  1. Journal `staging`; stage the candidate into `.new` (copy).
   2. Verify `.new` against `ExpectedInventory` (exact relative path set, byte sizes,
      SHA-256).
   3. Journal `promoting`; rename target → `.old`, then `.new` → target
@@ -637,7 +673,8 @@ install.
   recovery itself fails, keep every directory and the journal, and report the paths
   and the manual recovery step. Never delete-then-copy.
 - Apply passes its authenticated, extracted, hash-checked payload directory and the
-  signed manifest's file list as the inventory. Rollback passes the backup's
+  signed manifest's file list as the inventory, with the manifest's
+  `app/src/frame_compare/` path prefix (~841) stripped to target-relative paths. Rollback passes the backup's
   `frame_compare` directory and the backup's own inventory.
 - Signed archive authentication/extraction and backup identity/selection remain with
   their callers.
@@ -677,8 +714,9 @@ exist (ambiguous between “crashed before commit” and “crashed while commit
    vectors and Python/PowerShell vector tests; add `re.ASCII` to the release-contract
    regexes.
 2. Migrate extraction, Python fallback, range admission, and smoke verification;
-   migrate `build_update.ps1` validation and `min` derivation; validate
-   `Write-BundleInfo` `app_version` in `build_portable.ps1` (after P1 merges).
+   migrate `build_update.ps1` validation and `min` derivation. `Write-BundleInfo`
+   obtains `app_version` through `Get-AppVersionFromSource`, so the grammar check
+   added to `version_utils.ps1` covers bundle info without a separate builder edit.
 3. Add backup-ID refusal, `backup.json` creation/verification beside the existing
    `compatibility.json`, partial-backup cleanup, and purge of incomplete backups.
 4. Add the journal, `Repair-InterruptedReplacement` (called right after the lock in
@@ -700,7 +738,8 @@ exist (ambiguous between “crashed before commit” and “crashed while commit
   recovery.
 - Transaction and rollback failure injection, comparing `_snapshot_bytes` of the
   current tree: unreadable backup file, truncated backup (inventory mismatch), copy
-  failure, rename failure, smoke failure, and each interrupted journal state (`staged`;
+  failure, rename failure, smoke failure, and each interrupted journal state
+  (`staging` with a partial `.new`;
   `promoting` after only the first rename; `promoting` after both renames;
   `committed` with a leftover `.old`)
   repaired correctly by the next apply **and** the next rollback; `.old`/`.new`
