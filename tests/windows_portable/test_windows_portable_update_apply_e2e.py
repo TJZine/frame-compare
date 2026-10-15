@@ -751,7 +751,7 @@ def _complete_backup(bundle: Path, backup_id: str, version: str = "1.0.0") -> Pa
     parent = bundle / "app/.update_backups" / backup_id
     code = parent / "frame_compare"
     code.mkdir(parents=True)
-    (code / "version.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
+    (code / "version.py").write_bytes(f'__version__ = "{version}"\n'.encode())
     (parent / "compatibility.json").write_text(
         json.dumps(
             {
