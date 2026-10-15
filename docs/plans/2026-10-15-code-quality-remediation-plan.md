@@ -2764,3 +2764,26 @@ P11 or later waves. Reuse while relevant source/environment remain unchanged; re
 applicable invalidated gates on final stable integrated inputs. Pending callbacks:
 P1 deep review, P5/P6/P8/P11 implementation. No current browser owner; P11 retains
 exclusive Docker ownership. P2/P7/P9 remain dependency-gated and undispatched.
+
+
+### P5 bounded D4 source contradiction and lease transfer
+
+P5 worker reports `config/loader.py` at30515500 interprets `load_config(None)` as
+`cwd/config/config.toml`, while P5/D4's absent selected-root default case requires
+defaults+environment. A conflicting cwd workspace config could therefore affect a
+different explicitly selected root. This is concrete evidence contradicting the
+plan's assumed call semantics, not authorization for a new public policy. Worker
+will add an explicit bounded defaults+environment route and regression preserving
+D4 intent, typed environment errors, runtime-free selection and existing diagnostics.
+Technical validation assigned read-only to reviewer/high
+`01a13ece-fcf0-7da1-afb9-c63eb44a89a8` against committed owner/callers and proposed
+route; final P5 code review still required at stable source. Reviewer disposition
+pending. Orchestrator does not personally adjudicate source/diff.
+
+Worker preliminary P5 evidence before this correction:1297 focused nonbrowser passes,
+pyright/ruff/import/security/docs clean; not final-source evidence after correction.
+P5 granted exclusive browser/full-native lease now that94efe8cd verifier released it:
+stabilize/identify correction then run canonical native suite with actual Chrome and
+owned unique profile cleanup. Docker lease remains P11; Windows shim observation
+remains open. P6/P8 continue focused nonbrowser implementation. No browser overlap
+authorized; P5 must explicitly release on completion/blocker.
