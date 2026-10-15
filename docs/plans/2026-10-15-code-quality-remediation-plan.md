@@ -2490,503 +2490,255 @@ the reason it could not be obtained.
 
 ## 14. Implementation dispatch and evidence ledger
 
-Implementation authorized by the maintainer on 2026-10-15 in orchestrator chat
-`01a13ec5-b5a2-7cc3-880c-8ce92c075fac`, host `local`, human turn
-`01a13ec5-c10d-7540-aada-c7fcad5ea7df`, user message
-`01a13ec5-c54a-70c1-b1be-2d525121bac8` (retrieved with `read_thread`). The human
-explicitly authorizes implementation/review/verification children, assignments and
-follow-ups, meaningful blocker/decision/completion callbacks to this orchestrator,
-isolated worktrees from current task state, scoped local commits, and integration
-under one Git owner. Children must retrieve this original human turn before callbacks
-unless trusted human authorization is already in context. Retrieval failure means
-final-report-only fallback; the parent retrieves on its next activation.
+### Authorization, baseline, and ownership
 
-### Initial baseline and resources
+The original HUMAN implementation authorization is retrievable with `read_thread`:
+parent chat `01a13ec5-b5a2-7cc3-880c-8ce92c075fac`, host `local`, turn
+`01a13ec5-c10d-7540-aada-c7fcad5ea7df`, userMessage
+`01a13ec5-c54a-70c1-b1be-2d525121bac8` (2026-10-15). It authorizes these implementation,
+review and verification chats, assignments/follow-ups, meaningful blocker/decision/
+completion callbacks, isolated current-state worktrees, scoped local commits and
+one-owner integration. Children verified the original human message before callbacks;
+a controller quotation/file alone is not authorization. If retrieval fails, finish
+in the child for nonblocking parent retrieval on the next activation. No unrelated
+messages, release publication, deployment, credential changes or PR merges authorized.
 
-- Actual checkout: `/Users/tristan/Software/frame-compare`, branch `v0.7.0`, clean
-  HEAD `9fe932ede7ea333018e60c81720e29b60a089890`. No pre-existing implementation
-  edits. No historical/default-branch reset or switch performed.
-- Project resolved through `list_projects`:
-  `local-5fa7d782ab3f3ef0c782bc2a261e2e12`, host `local`, matching this checkout.
-- Current presets read from `.codex/agents/`: worker = `gpt-6.1-sol` / medium;
-  worker_luna = `gpt-5.6-luna` / xhigh; reviewer = `gpt-6.1-sol` / high;
-  deep_reviewer = `gpt-6.1-sol` / xhigh. Responsibility instructions travel in each
-  assignment; role files do not establish child permissions.
-- Observed capabilities: macOS arm64; uv 0.12.21; Python 3.13.16; Node 24.14.0;
-  Docker daemon 29.8.2 responds; native Chrome exists; Qt/VSView import successfully;
-  VapourSynth R81 imports but native `lsmas` and `placebo` are absent. No `pwsh` or
-  `powershell` executable found. These are capability observations, not gate passes.
-- Exclusive resources: orchestrator alone mutates integration checkout/index/branch
-  and this plan; workers commit only in their own worktrees. Docker verifier/image/
-  media-cache runs require a controller-issued lease (none granted initially).
-  Browser profiles must be worktree-local; shared native/browser acceptance and full
-  integrated gates run on stable inputs under a named owner. No child edits the
-  canonical plan. Children own relevant product documentation only in package sections.
-- P0 step 0 remains completed planning evidence; it is not new implementation work.
+Initial checkout `/Users/tristan/Software/frame-compare`: clean branch `v0.7.0`,
+HEAD `9fe932ede7ea333018e60c81720e29b60a089890`; no implementation edits to preserve.
+Project resolved through `list_projects`: `local-5fa7d782ab3f3ef0c782bc2a261e2e12`,
+local host, same checkout. No historical/default reset or branch switch performed.
+First dispatch base `9741fcc91eb5b28f1e8689971229b39a3876959a` adds only this ledger.
+P0 step 0 was already complete and was not redone as implementation.
 
-### Dispatch / acceptance state
+Orchestrator owns the integration checkout/index/branch and this canonical plan;
+children commit only in their assigned isolated worktrees and own relevant product
+docs. Orchestrator inspects metadata/file lists/evidence and delegates production
+work, substantive review, technical disputes and code conflict resolution. All
+created chat identities/assignments were confirmed with supported list/read tools;
+pending client IDs were never used for messaging. Worktree roots below mean
+`/Users/tristan/.codex/worktrees/<id>/frame-compare`.
 
-| Package | Owner / role / chat | Base and integration | State / evidence / remaining acceptance |
-| --- | --- | --- | --- |
-| P1 | worker / medium; `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | original `14b599a2` → integrated `21691a97`; fixes assigned from `aa5319cc` | Five deep-review findings returned for remediation; NOT review-cleared; Windows acceptance open |
-| P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | worker `7ccdb965/986abc2e/149ef433` → integrated `8e32ee40/54e80bb6/983658b8` | Implemented/integrated/independently reviewed, no findings; final-source Node/report/22-browser proof passed; full Wave A composition pending |
-| P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Original decoder package reviewed/native passed at `94efe8cd`; narrow P4-F1 diagnostic recursion reopened, fix assigned; final acceptance pending |
-| P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | worker `f0c67e62` → integrated `94efe8cd` | Implemented/integrated/independently reviewed, no findings; full native/static integration at `94efe8cd` passed; final-head gate pending |
-| P0 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `260670cc` → integrated `23d2f59f` | Implemented/integrated/independently reviewed, no findings; 5 CLI-doc tests + strict docs passed; Wave A composition pending |
-| P5 | worker / medium; `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | rebased/integrated `b2232196/1ba2f13b` from `47e9712b` | Implemented/integrated; full independent review active; original native pass + rebased1278focused passes; Docker/Windows/current native acceptance open |
-| P6 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `2313b659/f871e88c/977cc3f7` → integrated `1f7ae791/fae10b01/af500389` | Implemented/integrated/independently reviewed, no findings;599reviewer focused passes; native/Docker gates open |
-| P8 | Reused worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | assigned current integrated `21691a97`; worktree `9bb4` | Active; full applied-fact/payload1.3/geometry migration; browser/Docker/native/platform gates deferred |
-| P11 | worker / medium; `01a13ed0-043c-75f0-9554-afb21690373c` | `30515500`; worktree `a638` | Active; full recipe/store/cache + before/after measurements; exclusive Docker lease granted |
-| P2 | Wave B after integrated, reviewed P1 prerequisite | — | Grammar/transaction scope pending; PS5.1/7/Windows/signing acceptance open |
-| P7 | Wave B after integrated, reviewed P5/P10 (and P4/P6 shared changes) | — | Full CQ6/CQ9/CQ4 scope pending |
-| P9 | Wave C after integrated, reviewed P7/P8/P10 | — | Complete structured-render migration pending |
+Presets were read by their `name`, model, reasoning and responsibility text, then
+passed explicitly. `worker.toml`: gpt-6.1-sol/medium; `worker-luna.toml` (alias
+worker_luna): gpt-5.6-luna/xhigh; `reviewer.toml`: gpt-6.1-sol/high;
+`deep-reviewer.toml` (alias deep_reviewer): gpt-6.1-sol/xhigh. Initial underscore
+filename pointers for the two hyphenated files were corrected; resolved settings
+and responsibility text were always correct. Role files do not grant child permissions.
 
-Each wave requires independent integrated review, including cross-package composition.
-No package is accepted from a completion callback alone. Final cumulative review and
-all applicable stable-head gates remain pending. This section records implementation
-progress without altering approved design, coverage, compatibility, or exclusions.
-
-
-Dispatch identities confirmed with `list_threads` plus `read_thread` assignment
-retrieval; all four worktree HEADs independently observed at
-`9741fcc91eb5b28f1e8689971229b39a3876959a`. Worktree roots are
-`/Users/tristan/.codex/worktrees/<id>/frame-compare`. All callback routes target the
-orchestrator/host recorded above; human retrieval verification is required in each
-child. Pending setup client IDs have been resolved; no pending ID is used for messaging.
-
-First-batch resource lease: P3 exclusively owns real-browser execution with unique
-owned temporary profiles. P4/P10 were instructed to defer full native suites (which
-include browser tests) until lease transfer or integrated verification; focused
-nonbrowser checks and static gates continue. No Docker lease is active. No package
-implementation, independent review, or runtime acceptance is yet recorded.
-
-Next activation: retrieve meaningful child callbacks/completion evidence; integrate
-scoped commits under parent Git ownership; assign independent review to stable
-package/batch inputs, including P1 deep review. Dispatch P0 and remaining Wave A
-packages in practical batches while honoring shared-file ordering. Full Wave A
-composition review is required before dependent work is accepted.
-
-
-### P4 integration and second dispatch
-
-- P4 worker completion: `c2b62b055669f26bf6dc1ce77b005277af3ec414`, based on
-  `9741fcc91eb5b28f1e8689971229b39a3876959a`; 32 changed files, +444/-32.
-  Parent verified commit range/file list and integrated cleanly as
-  `3051550054fb19050b35c7743b9b4c780675262a`. No substantive orchestrator code review.
-- Worker reports all P4 decoder-table owners, typed user/env/preset failures,
-  wrong-shape enums, finite constraints on exactly four operation timeouts, and
-  matching timeout doc paragraphs implemented; optional TMDB byte cap omitted.
-- Actual worker evidence: explicit focused pytest selection covering utils,
-  analysis/cache identity/serialization/acquisition, config, CLI JSON/imports,
-  VSView result contract, alignment review/workflow, TMDB/history/overrides/reuse,
-  probe/cache-only orchestration and CLI-doc contract: **724 passed, no skips**.
-  Preset test-only narrowing assertion then rerun: **23 passed**. Pyright 0 errors/
-  warnings; ruff + format clean (513 files); bandit gate clean; lint-imports 2 kept,
-  0 broken; strict Zensical build clean; diff check/hooks passed. Full native suite
-  deferred under resource coordination, explicitly open. P4 needs no Docker/GUI gate.
-- Independent P4 reviewer: preset reviewer, `gpt-6.1-sol` / high, chat
-  `01a13ece-fcf0-7da1-afb9-c63eb44a89a8`, worktree `cec8`, exact reviewed range
-  `6c047405bfb1a73e6c8b5a68e3bccefa216c05f6` → `30515500`. Complete P4
-  package/test/failure-policy coverage assigned read-only; findings not yet returned.
-  Package review does not replace Wave A composition review.
-- P0 assigned as a new scoped commit in the existing P4 worker/chat/context; no
-  amendment of P4 permitted. Product-equivalent base differs only in parent ledger
-  ancestry. P0 production source is unchanged by contract.
-- P5 and P11 created from current integrated task state; actual HEADs observed at
-  `30515500`; chat identities and full assignments confirmed through `read_thread`.
-  Their original human authorization/callback references match the ledger above.
-- P3 released the browser lease after observing **22 real Chrome browser cases
-  passed, no skips**, including its new full transition probe. This is preliminary
-  worker evidence; P3 final source identity/static closeout and independent review
-  remain pending. No browser lease currently assigned; full integrated native gate
-  will use stable source under a named owner.
-- P11 exclusively owns task-repository Docker verifier/compose/image/media-cache
-  execution until release, including unchanged-baseline measurement before extraction.
-  No global pruning or unrelated-project resource changes authorized. P5 Docker
-  and full-native gates remain pending resource/stable-input coordination.
-- Pending children: P1, P3, P10, P0 (reused P4), P5, P11, P4 reviewer. No findings
-  dispositions yet. Next useful trigger is a meaningful callback; no idle polling.
-
-
-P0 callback received and integrated: worker `260670cc8d2c813f32af4d18df77760f915cbadd`
-(range after unchanged P4 `c2b62b05`) cherry-picked cleanly to
-`23d2f59ff539973f4be38f586a8b069a665ad322`; exactly two documentation files,
-+13/-6. Worker observed 5 CLI-doc tests passed, strict Zensical build no issues,
-diff check/hooks clean. No product/browser/Docker/native gate needed for P0.
-P4 reviewer additionally assigned exact P0 range `e7e05b1d..23d2f59f` using committed
-source, separate conclusions required. P0 implementation complete; independent review
-and full Wave A composition acceptance pending. P4/P0 worker currently idle and reusable.
-
-
-Resource correction from P3: the earlier browser release was premature. Final
-undefined-selector draft clearing and test/readability edits invalidated the earlier
-22-case pass for final-source acceptance. P3 retains/reclaims the exclusive browser
-lease for a repeat at stable final source, using owned `.tmp/p3-browser-final`
-profiles; its exit/final identity is pending. P10 reminded to defer full native
-(which includes browser) and report focused/static completion without waiting on
-that gate. Earlier 22-case pass remains evidence only for its earlier source.
-
-
-### Independent P0/P4 conclusions and P3 integration
-
-Reviewer `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` verified original human authorization
-and completed read-only reviews of P4 `6c047405..30515500` and P0
-`e7e05b1d..23d2f59f`: **no actionable findings or design contradictions**. All P4
-per-owner table policies, typed failures, decode-only catches/hooks, four finite
-timeouts, two cache reads/no-compute failure, retained deterministic schemas/bytes
-and documentation inspected; P0 prose checked against actual source/contract/anchors.
-Reviewer ran 71 + 49 passing test executions across overlapping focused selections
-(no skips, not 120 distinct tests), read-only using worker interpreter with reviewer
-source on PYTHONPATH; diff checks clean. Worker 724/static/docs evidence reused, not
-misrepresented as reviewer reruns. P4 full native gate open; P0 runtime acceptance
-complete for its docs scope. Wave A composition and final cumulative review pending.
-
-P6 full package assigned to reused P4/P0 worker, same worker model/medium reasoning,
-after reviewed P4 integration. Start from then-current `44a11213` in isolated `9bdf`;
-scoped conventional commits only, all nine steps/CQ5/CQ21c/CQ2 and retained authority
-proof specified. P5 acquisition, P11 recipes, CQ7/CQ14 excluded; full-native/browser
-and Docker deferred for stable input/resource coordination.
-
-P3 final callback froze clean worker head `149ef433fdfdc661528087a0ce32962bb170e960`.
-Parent verified three-commit range/file list and cleanly cherry-picked all three to
-`8e32ee40`, `54e80bb6`, `983658b865ef479b9edfcdea66c2944379d13709`, from parent
-`44a11213`; 20 files +3562/-3948. Relevant code unchanged by integration. Worker
-reports full fixture ownership, named-runner/assertion consolidation and derived pair
-state migration/deletions complete; no CQ7/CQ14/payload/storage drift. Actual final
-source proof: 9 bridge invocations pass; 84 report service tests pass; **22 native
-Chrome browser cases pass/no skips** after final edits, unique owned profiles cleaned.
-Focused scenario/env selector and restored deliberate-failure/unknown-name proofs
-recorded; ruff/format/pyright/diff clean. No native/media gate needed for P3.
-Browser lease now released at final-source completion (supersedes premature release).
-P3 independent full-package review assigned to reused reviewer/high, exact stable
-range `44a11213..983658b8`, including every assertion migration/selection/persistence
-obligation and exclusions. Not yet accepted from worker callback alone.
-
-
-### P10/P1 integration, P8 dispatch and current leases
-
-P10 worker froze `f0c67e62301da9d3da4ed21eb45953ea35f5d910`; parent verified
-range/file list and cherry-picked cleanly to `94efe8cdd2abe86caa1136849d25122cd17d5e03`.
-Five files +197/-3. Joined execute_run proof observes exactly one mismatch warning in
-result, terminal and persisted completed_with_warnings record, preserves URL/title/
-explicit association, rejects unexpected HTTP and keeps success JSON shape. Worker
-reports focused publish/phase-plan/lifecycle/metadata/record/CLI-output selections and
-ruff/format/pyright/bandit/import/diff checks passed. Full native not yet passed.
-Independent reviewer/high `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` additionally assigned
-P10 exact `9c6d0ba7..94efe8cd` and bounded composition among P0/P3/P4/P10; complete
-Wave A composition review still required later.
-
-P10 worker now owns VERIFICATION ONLY at exact integrated `94efe8cd` in existing
-`b49f`, source frozen/no fixes/commits. Canonical full native gate plus integrated
-static/import/security checks assigned with explicit skip/runtime accounting.
-Exclusive browser lease granted to this verifier after final P3 release; Docker
-lease remains P11. Subsequent P1 integration does not change this run's source
-identity; do not report it as final-head proof. Evidence/lease release pending.
-
-P1 worker froze `14b599a20287dfb96fcb18daa10066a5e2b9c5eb` from `9741fcc9`.
-Parent verified single-commit range/file list and integrated cleanly as
-`21691a9782b09bb98cc0ee64a7f504de3c40f3cd` (architecture auto-merge; no technical
-conflict). Thirteen files +859/-127. Worker reports all P1 builder reservation,
-validation, source-install Move/Leave reversal, failure fixtures, provenance and
-documentation scope complete. Actual Windows-portable pytest on macOS: **122 passed,
-126 skipped**; no pwsh/powershell means NO PowerShell syntax/execution/Windows
-filesystem acceptance. Pyright 0/0, ruff/format, strict docs, diff/hooks passed.
-Required Windows PS7 fixtures, real mounted-volume/manual populated Move/Leave/bad-
-manifest rerun + shim observation, same-final-path double-build fingerprint,
-runbook bundle steps3–4 and maintainer-hosted verify remain OPEN.
-
-Independent P1 deep reviewer/xhigh `01a13ed5-7e47-7ea0-9201-1f47b6a097f0`, worktree
-`4a89`, assigned exact `94efe8cd..21691a97` complete high-consequence transaction,
-tests/docs/provenance scope, including bounded integration seams; reviewed findings
-pending. Actual child/assignment confirmed via read_thread. Preset filename is
-`.codex/agents/deep-reviewer.toml` (alias deep_reviewer); worker_luna filename is
-`.codex/agents/worker-luna.toml`. Handoff spelling corrected; originally resolved
-models/reasoning/responsibility text from preset glob were correct and unchanged.
-
-P8 full package assigned to reused P3 worker/medium `01a13ec8-7014-7c63-bcf2-3cc807db28a9`
-from current integrated `21691a97`, complete CQ11/CQ12/CQ22 disclosure/geometry scope,
-D3a/D3b preserved. No P9/CQ7/CQ14 graph/range/resampling expansion; P5 prepare.py
-boundary and P1 runtime-smoke-test overlap explicitly coordinated. Full native,
-real-browser, Docker and Windows acceptance remain required; P10/P11 resource leases
-prevent premature concurrent gate execution. Worker owns focused nonbrowser proof.
-
-P11 meaningful baseline callback: exact unchanged U4 acceptance source SHA256
-`d5a6cde1a9e3e98150b79ce428e5c7b235632f39cf0c423caba868f5f45b27a8`, baseline
-focused run generating all37 assets; separate recipe/store implementation and seven
-VS-free tests (including distinct-process lock overlap) reported passing. Dedicated
-compose project `frame-compare-p11-a638`, image `frame-compare:p11-a638-test`, worktree
-artifacts/cache; no global pruning. Docker lease retained for all approved baseline/
-post-change measurements and full canonical gate. This is progress, not completion.
-
-Pending active work: P5/P6/P8/P11 implementation, P3/P10 reviewer, P1 deep reviewer,
-P10 integrated verifier. P1 worker idle/reusable for review fixes and eventual P2
-only after reviewed prerequisite. No P2/P7/P9 dispatch yet; no pending child setup IDs.
-
-
-### Independent P3/P10 review and partial Wave A composition
-
-Reviewer/high `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` completed P3 exact range
-`44a112137684f1c5d878d6ae22d51f1083a19149..983658b865ef479b9edfcdea66c2944379d13709`
-and P10 exact range
-`9c6d0ba717a7cc7c6e39b45894dd1aa4072d6294..94efe8cdd2abe86caa1136849d25122cd17d5e03`:
-**no actionable findings or decisions required**. All20 P3 files and all5 P10 files
-inspected against complete approved package obligations.
-
-P3 reviewer compared prior/new JS assertions and traced every plan-named sole-Python
-observation before mirror deletion; reviewed fixture document closure, seven harness
-runner contracts, map-only offset authority/all selection and persistence cases,
-retained loader proof/exclusions, browser probe and architecture. Reviewer ran9 bridge
-invocations/no skips at exact983658b8, plus in-memory runner unknown-name/async-order/
-named-stack/continue-and-summary failure controls, and diff check. Reviewer verified
-worker149ef433 vs integrated983658b8 have no differences in relevant report assets,
-browser, harness/runner or report tests, validating reuse of worker84 report passes,
-22 actual Chrome passes/no skips and static evidence. No browser/Docker reviewer run;
-no P3 runtime gap identified. This does not establish final Wave A composition.
-
-P10 reviewer traced actual producer/execution/application/warning/result/summary/
-persistence/JSON owners and all keyword constructor callers; joined transport proof
-retains URL/title/explicit association and one warning in result/record/terminal,
-post-action warning independence, accepted publish-failure limitation and success
-JSON omission. Existing docs accurate. Reviewer ran61 passing/no-skip lifecycle,
-phase-plan, metadata and phase-post-render tests at exact94efe8cd; diff check clean.
-Full native acceptance remains pending separate verifier.
-
-Bounded composition at94efe8cd covers P0/P3/P4/P10: P0 prose agrees, P3 schema/test
-infrastructure unchanged by decode/warning integration, P4 production files identical
-to reviewed30515500, P10 joined proof exercises P4 persisted record reader with new
-warning metadata. No interaction findings. Explicit uncovered Wave A union:
-P1/P5/P6/P8/P11 and final combined interactions; delegate full Wave A review later.
-Reviewer remained clean/read-only at94efe8cd, now idle/reusable for focused rechecks
-or later wave work. Pending callbacks: P1 deep review; P5/P6/P8/P11 implementation;
-P10 stable-input native verifier. No useful independent integration or dispatch is
-ready until those prerequisites/results arrive; no idle polling.
-
-
-### Stable integrated native verification at94efe8cd
-
-Verifier worker_luna/xhigh `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` completed assigned
-verification-only work on exact
-`94efe8cdd2abe86caa1136849d25122cd17d5e03` (P0/P3/P4/P10; before P1 integration).
-Clean permitted detached switch in isolated b49f; no source/test/docs/plan edits or
-commits. Original human authorization re-retrieved before callback.
-
-Actual canonical command:
-`REPORT_BROWSER="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" uv run --no-sync pytest -q -n4 --dist loadgroup`.
-Verifier reports completed100%, collection3611, explicit skipped105, therefore
-**3506 passed,105 skipped,0 failures/xfails**. Chrome coverage actually ran, with no
-browser skips. Skip breakdown:5 absent native plugins (4lsmas,1placebo),6 opt-in media
-E2E,3 opt-in continuous-alignment resource,2 opt-in live slow.pics,89 Windows/
-PowerShell/CMD semantics. Serial windows_portable confirmation also passed with same
-89 platform skips (this source predates P1's additional preservation fixtures).
-Neither those skips nor native suite pass establish Docker/media/Windows acceptance.
-
-Integrated pyright0/0/0, ruff/check format513, bandit0 medium/high, lint-imports2 kept
-(183files/791dependencies) and diff check all passed at same exact SHA. No Docker
-used; P11 lease retained. Browser owned-profile/process cleanup checked with no
-remaining matching Chrome processes; browser lease RELEASED. Verifier now idle and
-reusable for later source-bound integrated gates.
-
-This closes P4/P10 full-native requirements at the reviewed relevant source and
-supports P0/P3/P4/P10 composition; it is not final-head verification for P1/P5/P6/P8/
-P11 or later waves. Reuse while relevant source/environment remain unchanged; rerun
-applicable invalidated gates on final stable integrated inputs. Pending callbacks:
-P1 deep review, P5/P6/P8/P11 implementation. No current browser owner; P11 retains
-exclusive Docker ownership. P2/P7/P9 remain dependency-gated and undispatched.
-
-
-### P5 bounded D4 source contradiction and lease transfer
-
-P5 worker reports `config/loader.py` at30515500 interprets `load_config(None)` as
-`cwd/config/config.toml`, while P5/D4's absent selected-root default case requires
-defaults+environment. A conflicting cwd workspace config could therefore affect a
-different explicitly selected root. This is concrete evidence contradicting the
-plan's assumed call semantics, not authorization for a new public policy. Worker
-will add an explicit bounded defaults+environment route and regression preserving
-D4 intent, typed environment errors, runtime-free selection and existing diagnostics.
-Technical validation assigned read-only to reviewer/high
-`01a13ece-fcf0-7da1-afb9-c63eb44a89a8` against committed owner/callers and proposed
-route; final P5 code review still required at stable source. Reviewer disposition
-pending. Orchestrator does not personally adjudicate source/diff.
-
-Worker preliminary P5 evidence before this correction:1297 focused nonbrowser passes,
-pyright/ruff/import/security/docs clean; not final-source evidence after correction.
-P5 granted exclusive browser/full-native lease now that94efe8cd verifier released it:
-stabilize/identify correction then run canonical native suite with actual Chrome and
-owned unique profile cleanup. Docker lease remains P11; Windows shim observation
-remains open. P6/P8 continue focused nonbrowser implementation. No browser overlap
-authorized; P5 must explicitly release on completion/blocker.
-
-
-### P5 adjudication resolved: bounded mechanism correction accepted
-
-Independent reviewer/high `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` ACCEPTED the
-worker's concrete D4 correction after inspecting committed30515500 owners/callers
-(unchanged at reviewer94efe8cd) and real temporary-file reproduction: absent selected
-root plus cwd tmdb.enabled=false causes `load_config(None)` to read unrelated cwd;
-explicit absent path raises FC-1001. The approved intent is coherent; only “passed as
-None” prescription was wrong. P5 package text corrected above before implementation
-integration. No new public policy/decision or broad planning.
-
-Reviewer identified existing bounded no-TOML schema facility and required reuse of
-P4-aware `EnvironmentSettingsSource`. Do not alter default-only get_default_config/
-validate_raw_config_payload or actual implicit-cwd load_config(None) consumers, chdir,
-or magic-path fallback. Default-absence route must avoid any cwd stat/read, honor
-normal env, preserve SettingsError/ValidationError sanitization and FC-1003; explicit
-bad config stays doctor diagnostic, selection syntax/escape/portable containment
-still happens first. Run missing-config admission remains strict as specified.
-Reviewer requirements sent to P5: conflicting valid AND malformed cwd TOML ignored,
-valid env honored, malformed/deep env/inf timeout/strict memory errors remain typed,
-explicit missing diagnostic and O1 imports. Config-only ownership demonstrated no
-eager native imports. Candidate9676 not yet reviewed; full frozen P5 review remains
-pending. No human clarification needed; P5 full-native/browser and P11 Docker leases
-unchanged. Other active implementation/review prerequisites remain pending callbacks.
-
-
-### P1 deep-review findings and remediation ownership
-
-Deep reviewer/xhigh `01a13ed5-7e47-7ea0-9201-1f47b6a097f0` completed exact
-`94efe8cd..21691a97` full13-file P1 review: NOT cleared. Findings source-validated,
-Windows reproduction remains open. All five routed verbatim with contracts/evidence
-to original P1 worker5016 for fixes or evidence-based dispute, then same reviewer
-focused recheck. No orchestrator code adjudication. New fix base is current
-`aa5319ccae1edab9a5c465c1ff333d415b0d1e5f`; isolated scoped commits only.
-
-| Finding | Severity | Required resolution / current disposition |
+| Child ID | Preset / scopes | Worktree / callback |
 | --- | --- | --- |
-| P1-F1 stale/incoherent active-pointer snapshot across build and overlapping activation | P1 | Snapshot once coherently after build; own migration/activation/reversal against overlap; build-boundary pointer-change proof. Worker remediation pending. |
-| P1-F2 lexical path checks miss junction/reparse-ancestor aliases of previous/cache/protected roots | P2 | Safe physical ancestry/identity or refusal of unprovable aliases before mutation, preserve supported volume behavior; junction proof. Worker remediation pending. |
-| P1-F3 recovery diagnostics can repeat failing pointer read and abort before locations/errors | P2 | Best-effort probes always report known folders/pointer and original+recovery errors; locked/unreadable-pointer proof. Worker remediation pending. |
-| P1-F4 rooted-but-not-fully-qualified pointers can resolve against unrelated process paths | P2 | Fully-qualified pointer requirement, drive/root-relative malformed-pointer fixtures. Worker remediation pending. |
-| P1-F5 activation rollback tests miss real shim restoration/final exact pointer bytes/failure boundary | P2 coverage | Seed/overwrite/restore bin sentinels, old installer reserialization, required boundary marker/new target, artifact/order/exact bytes proof. Worker remediation pending. |
+| `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | worker: P1 and review remediation | `5016`; verified parent above |
+| `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | worker: P3, then P8/rebase | `9bb4`; verified parent above |
+| `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker: P4, P0, P6, P4-F1 | `9bdf`; verified parent above |
+| `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | worker_luna: P10; verification-only integrated native gate and P8 runtime diagnosis | `b49f`; verified parent above |
+| `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | worker: P5/rebase, now P7 | `9676`; verified parent above |
+| `01a13ed0-043c-75f0-9554-afb21690373c` | worker: P11, measurements/runtime gate, current rebase | `a638`; verified parent above |
+| `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` | reviewer: P0/P4/P3/P10/P5, D4/F1 adjudication and recheck | `cec8`; verified parent above |
+| `01a13ed5-7e47-7ea0-9201-1f47b6a097f0` | deep_reviewer: P1 and focused fix recheck | `4a89`; verified parent above |
+| `01a13ee0-8b57-7573-9de8-4374f0fc445e` | deep_reviewer: P6, P8 and integration recheck | `794e`; verified parent above |
+| `01a13ee3-a368-7772-90c2-9c84da0890a7` | reviewer: P11 stable code, final notes and later integration | `22db`; verified parent above |
 
-Reviewer otherwise confirmed ordinary reservation/Move/Leave/reversal, final build
-path/fingerprint rationale, helper/API migration/provenance/security checks/docs;
-no additional bounded composition finding. Reviewer Windows-suite execution248
-collected consistent122pass/126platformskip, diff clean; no PS runtime. P2 remains
-undispatched until reviewed P1 prerequisite. D1 unchanged; this is scoped preservation
-correctness remediation, not new policy or updater transaction sharing.
+### Package/CQ coverage and current source identities
 
-### P6 integration and deep review
+The approved CQ mapping in section 5 remains canonical. No supported group or CQ21
+subpart is dropped; CQ7/CQ14 remain excluded. Current integration source before this
+ledger-only commit is `3af4041d15a6b9172f1804153a7836dabdec77ae`.
 
-Worker froze clean `977cc3f79c0c0ffe6cfd86542c441a531d807cb1` from44a11213; parent
-verified3-commit range/file list and cherry-picked cleanly to1f7ae791/fae10b01/
-`af500389fa06ac037c3759b30a1066cc603b553a` fromaa5319cc.27files+1535/-973; architecture
-merge clean. Worker reports all P6 steps/CQ5/CQ21c/CQ2 complete, pure resolution map,
-candidate publication, migrated/deleted callers and retained freshness/authority.
-Actual final proof817+51 focused passes/no skips including real Qt/panel/contract,
-new unit/on-diskA–D and cancellation/failure proof. Restored deliberate producer
-break:11producer/parity failures while94panel/contract pass, restored290pass. Old/new
-writer differential bytes equal for computed2953 and interactive+fallback3210;
-existing deterministic regression passed. Pyright0/0, ruff/format518, bandit/imports/
-strict docs/diff/hooks clean. Full native and Docker real-phase/cache gate OPEN;
-no GUI/whole-track-resource gate required. No source changes after callback.
+| Package | Worker source → integrated identity | Implementation / independent review / acceptance |
+| --- | --- | --- |
+| P0 / CQ22 prose | `260670cc` → `23d2f59f` | Complete, reviewed no findings; 5 CLI-doc tests + strict docs passed. Step 0 not repeated. |
+| P1 / CQ15,CQ21d builder | `14b599a2` → `21691a97`; fixes `b920d48a` → `3af4041d` | Implemented; five original deep-review findings accepted/fixed by worker; same reviewer recheck active, NOT cleared yet. Windows proof open. |
+| P2 / CQ16,CQ17,CQ21d updater | Not dispatched | Wait for reviewed P1 prerequisite; complete grammar/transaction/backup scope still required. |
+| P3 / CQ1,CQ20,CQ21a | `7ccdb965/986abc2e/149ef433` → `8e32ee40/54e80bb6/983658b8` | Complete, independently reviewed no findings; Node and 22 real-browser passes. Final Wave A union pending. |
+| P4 / CQ10,CQ19 | `c2b62b05` → `30515500`; F1 `a79528de` → `b2dcd6aa` | Original package reviewed/native passed; narrow F1 reopened then independently RESOLVED, both real loaders + CLI proved. Final integrated native pending. |
+| P5 / CQ8,CQ18 | original `b9ca34f2/1d03dbfe`; rebased/integrated `b2232196/1ba2f13b` | Complete, independently reviewed no new findings; inherited F1 closed at b2. Docker, current native and installed Windows shim proof open. |
+| P6 / CQ2,CQ5,CQ21c | `2313b659/f871e88c/977cc3f7` → `1f7ae791/fae10b01/af500389` | Complete, deep review no findings; native/Docker real-phase-cache acceptance open. |
+| P7 / CQ4,CQ6,CQ9 | Active from reviewed `b2dcd6aa` in 9676 | Full package assigned after reviewed P5/P10/P4/P6 prerequisites. Literal baseline cache vectors required before migration; native/Docker gates deferred. |
+| P8 / CQ11,CQ12,CQ22 geometry | original `165eb46a/4ce11247`; rebased `e09d684c/306631b9` → `bc182b07/698095cd` | Complete and integrated; early deep review and current P5/P6/P10 integration recheck no findings. Standalone browser passes; clean canonical native, Docker and Windows open. |
+| P9 / CQ3 | Not dispatched | Wait for reviewed/integrated P7/P8/P10. Full structured jobs/results and ungrouped-path deletion still required. |
+| P10 / CQ13 | `f0c67e62` → `94efe8cd` | Complete, independent review no findings; joined warning/result/summary/record proof + native gate at 94 passed. |
+| P11 / CQ21b | original `d3250f4e/c542928b`; rebase onto `698095cd` active | Stable code reviewed no findings; actual measurements + cold Docker 295-pass gate complete at original source. Final notes review and current integration pending. |
 
-Separate deep reviewer/xhigh `01a13ee0-8b57-7573-9de8-4374f0fc445e`, worktree794e,
-exact currentHEADaf500389 and assignment confirmed with supported read_thread;
-review rangeaa5319cc..af500389, complete authority/evidence/cache/test migration and
-bounded P4 interaction scope. No browser/Docker lease. Findings pending; full Wave A
-composition still required. Original P6 worker idle/reusable for review fixes.
+### Meaningful implementation evidence and reviewed ranges
 
-### P5 final-source native proof progress and additional error edge
+Commands/results are source-bound. Full command selections and detailed file lists
+remain retrievable in the identified child final reports; counts below do not add
+overlapping selections as distinct cases. Static results include actual pyright,
+ruff/check format, bandit/import contracts and strict docs where stated.
 
-P5 released browser/full-native lease after canonical full native exit0 on frozen
-production`b9ca34f2cabb5f47cbd0608af25d46df5e98698d` (base30515500):106inspected native/
-media/live/Windows skips, ZERO browser skips/no failures. Unique worktree-local
-profiles/TMPDIR wrapper cleaned; no matching owned Chrome processes. Initial unisolated
-attempt intentionally interrupted and NOT counted; only isolated rerun counted.
-Final requested adversarial proof-only cases being added, then complete handoff.
-P8 now owns exclusive browser/full-native lease when stable focused implementation
-ready. P11 Docker lease remains active; no competing resource run authorized.
+- **P0/P4:** reviewer exact `e7e05b1d..23d2f59f` and `6c047405..30515500`, no findings.
+  P0 2 prose files, strict docs and 5 CLI-doc passes. P4 32 files, all decode-table
+  owners, four finite timeouts and typed config/env/preset/cache/review policies;
+  worker 724 focused passes/no skips plus 23 preset rechecks, static/import/security/
+  strict docs clean. Reviewer 71+49 overlapping focused executions, no skips.
+- **P3:** exact `44a11213..983658b8`, complete 20-file review including all sole-Python
+  obligations before deleting mirrors. Worker 84 report passes, 9 bridge invocations,
+  22 Chrome/no-skip passes after final edit, focused env selector and restored
+  deliberate-failure/unknown-name proof. Reviewer 9 bridge passes plus in-memory
+  async/error/selection controls; relevant worker/integrated files byte-identical.
+  No schema/storage change or CQ7/CQ14 drift.
+- **P10:** exact `9c6d0ba7..94efe8cd`, no findings; reviewer 61 focused passes. Actual
+  joined execute_run proves one collection warning in result/terminal/record, status
+  completed_with_warnings, URL/title/explicit TMDB association, unexpected HTTP
+  refusal and unchanged success JSON. Independent bounded P0/P3/P4/P10 composition
+  found no interaction issue; not final Wave A union.
+- **P6:** exact `aa5319cc..af500389`, all 27 files and retained authority table,
+  deep review no findings. Worker 817+51 disjoint focused passes/no skips including
+  Qt panel/contract, real on-disk A–D, authority/currentness/cancellation; restored
+  producer break fails 11 producer/parity cases while 94 panel/contract pass, then
+  restored 290 pass. Old/new writers equal at identical inputs/timestamp (computed
+  2953 bytes; interactive+fallback 3210). Static/import/security/docs clean.
+  Reviewer 599 disjoint focused passes (388+211), no skips, moved-builder/scenario
+  AST equivalence and bounded P4/service/phase composition; no runtime gate claimed.
+- **P5:** original 57-file package full native passed at b9ca34f2 with 106 inspected
+  platform/media skips and zero browser skips, plus 1300 focused and 123 proof-only
+  passes. Parent aborted an attempted cherry-pick onto 47e9712b on command-doc and
+  alignment-contract conflicts; original worker rebased, preserving P0 prose, P6
+  resolution/save fixtures and migrating P10's new acquired request. Returned
+  `47e9712b..1ba2f13b` was fast-forwarded exactly; 1278 focused passes/no skips,
+  static/import/strict docs clean. Reviewer exact same range, 539 disjoint focused
+  passes, no new findings; all migrations/deletions, conditional color cleanup,
+  config-only preview, intentional injected refreshes and no-TOML doctor route
+  inspected. Old full native is not current integrated proof.
+- **P4-F1:** exact fix `424e4648..b2dcd6aa`, 4 files (+186/-4), bounded common
+  diagnostic conversion before recursion at depth 16 with fixed non-sensitive marker.
+  Worker 438 focused passes/no skips, static/security/import clean. Reviewer 137
+  passes and original default-limit reproductions through BOTH actual file/env
+  loaders and CLI: typed FC-1003, exit 2, one JSON, bounded serializable details,
+  no secret sentinel; shallow and malformed-parser controls retained. RESOLVED.
+- **P8:** early exact `21691a97..4ce11247`, all 56 files deep-reviewed no findings,
+  450 reviewer focused passes/no skips and explicit inference-test retirement map.
+  No fallback graph/props/range change found; conditional extra pixel gate not
+  triggered. Worker rebase onto 424e4648 preserved P5 config-only resolver and both
+  request/tonemap fixture imports; 883 focused + 35 composition passes/no skips,
+  static/import/security/docs clean. Parent cleanly integrated as bc182b07/698095cd.
+  Reviewer current range `b2dcd6aa..698095cd`: 52/56 paths byte-identical to early
+  source, four differences are integrated docs/prepare/test imports, P6 authority
+  owners unchanged. 246 fresh focused passes, plus actual combined render+collection
+  warnings observed exactly once each; no findings. Docker/Windows/native limits
+  below remain open.
+- **P11:** reviewer exact `30515500..d3250f4e`, 8 code/docs files, no findings.
+  29 VS-free cache/workflow/onboarding cases pass, including real distinct-process
+  lock overlap; 21 extracted ASTs identical, baseline/new 37/37 writer arguments
+  and order equal; no-VS import blocker proof (37 recipes/31 pairs), diff clean.
+  Final evidence-only c542928b adds the ninth file, measurement notes. Worker
+  static/type/bash syntax checks pass. Final notes and rebased-source recheck pending.
 
-P5 valid nested JSON proof exposed pre-existing formatter recursion in BOTH existing
-and new environment-only loaders. Corrected worker details: helper
-`config/error_formatting.py:_to_json_value`; depth2000 valid analysis JSON leaks at
-recursion limits1000/default and2000, produces ConfigValidationError at2500/3000.
-Earlier helper/limit report corrected and relayed. No formatter change authorized yet.
-Targeted read-only reviewer/high adjudication assigned to01a13ece-fcf0-7da1-afb9-c63eb44a89a8
-against committed owners and frozenP5 source: reproduce actual default behavior,
-determine supported P4/P5/O2 obligation vs separate unpromoted issue, recommend bounded
-owner remedy if required. No broad audit or speculative scope. P5 instructed finish
-independent handoff and report pending edge without silently changing P4 policy.
-Final P5 code review and edge disposition remain pending.
+### Bounded source contradictions and finding dispositions
 
+**D4 mechanism correction (resolved):** committed `load_config(None)` intentionally
+selects cwd TOML, so it could not implement doctor's absent selected-root default.
+Reviewer reproduced conflicting cwd config and confirmed existing no-TOML schema +
+custom EnvironmentSettingsSource route. P5 uses explicit defaults+environment,
+preserving existing None consumers, typed errors and pure-default/raw APIs; valid
+and malformed conflicting cwd files are never stat/read. Package text above was
+corrected before integration; accepted D4 public behavior never changed.
 
-### P5 reconciled integration and typed-error remediation
+**P4-F1 (resolved):** valid balanced JSON could decode but trigger raw RecursionError
+while formatting Pydantic input. Reviewer reproduced default Python recursion limit
+1000 and real CLI non-JSON exit 1 on existing/P5 loaders. Root owner is
+`src/frame_compare/error_formatting.py:_to_json_value` (corrected from an initial
+worker path/limit report). Bounded diagnostics fix and two-loader/CLI independent
+proof above close supported P4/P5/O2 acceptance; no broad framework/cycle audit.
 
-P5 original complete package30515500..b9ca34f2+1d03dbfe:57files+1456/-1011,
-full native pass atb9ca34f2 (106platform/media skips,zero browser skips),1300focused
-and123proof-only passes/static/docs clean. Initial parent cherry-pick onto47e9712b
-conflicted only commands.md and phase_alignment_contract; parent ABORTED, leaving
-clean47e9712b. Original worker rebased two commits, preserving P0 prose/P6 fixtures
-and migrating automerged P10 joined test request. Returned current package
-`47e9712bc7347778d385861048fd3e036083583b..1ba2f13b3f612d8a9ca3cfa9db52264628bc08f9`,
-commits`b2232196962afb5a4a407b806f3ed2a97b25ad3c` +`1ba2f13b`;57files+1462/-1012.
-Parent FAST-FORWARDED exact frozen returned series, clean. No orchestrator source
-conflict resolution/review. Rebased1278focused passes/no skips including P6 authority
-and P10 joined warning,pyright0/0,ruff/format520,imports2kept,strictdocs/diff clean.
-Original full-native result is not current integrated acceptance. Docker and Windows
-AppData-only shim observation remain open. Full P5 review now assigned reviewer/high
-01a13ece-fcf0-7da1-afb9-c63eb44a89a8 at exact47e9712b..1ba2f13b, including rebase
-seams, complete migrations/deletions and D4 correction; findings pending.
+**P1 deep review:** original exact `94efe8cd..21691a97`, 13 files; source-validated
+findings below. Worker accepted all and returned b920d48a, cleanly integrated as
+3af4041d (9 files, +657/-79). Same reviewer rechecking exact `698095cd..3af4041d`,
+including added actual bundle-installer caller and previous-bundle compatibility.
+No finding is considered resolved until that recheck returns.
 
-Same reviewer CONFIRMED P4-F1/S3 is supported P4/P5/O2 obligation, not separate
-investigation. Correct owner is root`src/frame_compare/error_formatting.py:_to_json_value`
-(not config/ subdir). Real Python3.13.16 DEFAULT recursionlimit1000: valid analysis
-listdepth2000/TMDBdepth1000 rawRecursionError in both existing/new loader; actual
-CLI balanceddepth990/1000 exits1/nonJSON vs shallower typedFC1003. Decoder malformed
-controls still typed. Relevant committed source byte-identical across reviewedP4/
-current/P5; no P5 regression. P4 table/tests refined above. Original P4 worker9bdf
-assigned bounded diagnostic conversion+sanitization fix, preserving shallow behavior,
-no global limit/broad catch/framework/cycle audit; same reviewer focused recheck.
-P5 now integrated, worker explicitly instructed base/rebase own fix onto1ba2f13b and
-prove BOTH actual loader routes+CLI before final handoff. No fake new-route proof.
+| Finding | Severity | Implemented response awaiting recheck |
+| --- | --- | --- |
+| F1 stale/incoherent pointer across build/overlap | P1 | Single bytes+parse snapshot; fresh post-build acquisition under shared source/bundle activation lock, owned/borrowed handle cleanup; A→B→C and two-process exclusion/reuse fixtures. |
+| F2 lexical containment misses physical aliases | P2 | Refuse reparse/unreadable ancestry before mutation/reservation, physical-path restriction documented; junction fixtures; no drive-root cross-volume guessing. |
+| F3 diagnostics can fail before reporting | P2 | Best-effort pointer/status probes retain all paths and original+recovery causes; locked-pointer fixture. |
+| F4 rooted but not fully-qualified pointer | P2 | Fully-qualified strict pointer validation; populated drive/root-relative traps treated absent. |
+| F5 rollback tests miss shim/order/failure boundary | P2 coverage | Real overwritten/restored bin sentinels, exact pointer bytes, explicit failure markers/candidate counts/events, bundle owned/borrowed lock and non-ASCII UTF-8 tests. |
 
-### Further independent review and stable runtime progress
+Original P1 macOS suite: 122 passed/126 skipped. Fix suite: 122 passed/146 skipped,
+static/type/strict docs/diff clean. No PowerShell syntax/execution pass. Additional
+bundle installer caller adds PS5.1+PS7 lock/UTF-8 proof to required Windows acceptance.
+D1 and final-path fingerprint behavior retained; no updater transaction sharing.
 
-P6 deep reviewer/xhigh01a13ee0-8b57-7573-9de8-4374f0fc445e completed exact
-aa5319cc..af500389 complete27files and bounded P4/services composition: NO actionable
-findings. Independently traced every authority/currentness/candidate/persistence/
-cancellation/fixture migration obligation and retained proof table. Actual599passes/
-no skips in2disjoint focused selections (388+211),including Qt panel/contract; AST
-moved-builder/scenario equivalence and diff clean. Worker serializer/static/docs
-proof reused,not rerun. Full native/Docker real phase-cache gates OPEN. Reviewer now
-reused for P8 early frozen-code review, exact21691a97..`4ce11247d85e5f0fa7ba5dcbe27c5780b92ec83e`,
-commits165eb46a+4ce11247,56files+1161/-961, all P8 identity/disclosure/geometry/test-
-retirement obligations and exclusions; candidate not integrated, later P5/P6 source-
-bound recheck required. No reviewer browser/Docker lease.
+### Runtime capabilities, measurements and acceptance limits
 
-P8 first native run at165eb46a:3499pass/142expected native/media/platform skip/2Chrome
-process-exit2 failures (allocator/display-link diagnostics,768x720 and3440x1440).
-Both isolated fresh-profile reruns passed2/2,no skips; other20browser cases passed.
-DO NOT call first canonical run passed. Product unchanged; docs-only4ce11247 fixes
-remaining1.2 references;5CLI-doc+strictdocs pass. Canonical repeat running at4ce with
-P8 browser lease retained. Focused532+40+3joined passes/static clean reported; final
-full handoff pending. Docker/Windows runtime acceptance open.
+Initial actual host: macOS arm64, uv 0.12.21, Python 3.13.16, Node 24.14.0, Docker
+server 29.8.2 responding; native Chrome present, Qt/VSView imports and VS R81 work,
+but native lsmas/placebo absent. Neither pwsh nor powershell available. These facts
+are capabilities, not platform acceptance.
 
-P11 stable-code early reviewer/high01a13ee3-a368-7772-90c2-9c84da0890a7,worktree22db,
-identity/assignment confirmed; exact30515500..d3250f4e,8files: NO material findings.
-Actual29VS-free cache/workflow/onboarding cases pass;21graph/writer ASTs identical,
-stubbed baseline/new declarations37/37arguments+order identical; no-VS import blocker
-proof37recipes/31pairs;diff clean. Notes absent intentionally; no uncommitted notes
-or runtime acceptance claimed. Required final notes/commands/stats/source identities,
-cold full Docker and P5/P7 integration recheck remain OPEN. Worker real measurements:
-baseline cold focused37files348.038s/assertion-only37files302.987s;new cold2files20.689s,
-assertion-only0created/2reused6.727s,realCRF-edit focused2files17.028s/full37files301.757s.
-Temporary edits restored/SHA checked. Canonical cold full Docker RUNNING,leaseP11 held.
+**Passed integrated native:** verifier b49f at exact
+`94efe8cdd2abe86caa1136849d25122cd17d5e03` ran
+`REPORT_BROWSER="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" uv run --no-sync pytest -q -n4 --dist loadgroup`:
+3506 passed, 105 skipped, no failures/xfails; actual Chrome ran/no browser skips.
+Skips: 5 plugins, 6 media opt-in, 3 resource opt-in, 2 live publishing, 89 Windows.
+Pyright 0/0, ruff/format 513, bandit medium/high 0, imports 2 kept, diff clean.
+This predates P1/P5/P6/P8/P11 and is not final-head proof. P5 b9 native pass likewise
+remains source-bound; interrupted unisolated initial attempt was not counted.
 
-Current pending useful results: P1 fixes→deep recheck, P4-F1 fix→typed proof/recheck,
-P5 full review, P8 native completion/code review/integration, P11 Docker+notes/final
-review. P2/P7 prerequisites not review-cleared yet; P9 still depends on P7/P8/P10.
+**P8 runtime remains open:** first canonical native at 165eb46a: 3499 pass/142
+platform-media skips/2 Chrome process failures; second at 4ce11247: 3498 pass/142
+skips/3 process failures in different cases. BOTH gates FAILED. Exact first failed
+cases reran 2/2 pass; standalone full browser at 4ce passed 22/22, no skips, 20.464s.
+Verification-only b49f independently inspected stable `.tmp/p8-native-final`,
+`p8-native-repeat`, `p8-browser-recheck`, `p8-browser-standalone` log/XML artifacts in
+9bb4: all failures are actual Chrome dump-dom exit 2 before viewer assertions,
+macOS display-link/allocator/teardown-watchdog diagnostics. Browser xdist_group and
+unique per-test profiles verified; no shared/stale profile cause evidenced. No
+conclusive product/harness defect or single root cause established. Load sensitivity
+is an inference, not fact. No flag/harness changes or unbounded retry-to-green.
+Next proof: stable integrated source, Docker idle, one isolated browser module then
+canonical native if it passes; inspect a failure rather than repeat blindly.
 
+**P11 actual Docker/measurement proof:** cold full verifier at d3250f4e, dedicated
+compose project `frame-compare-p11-a638`, rebuilt unique image tags: 295 passed in
+580.38s, zero skips/nonpasses; runtime/plugin/Vulkan/provenance/real render,
+production tooling absence, actual app and host-generated mount proofs passed.
+Whole command including builds 624.230s; final c542928b only adds notes. Full cache
+37 mkv files, no indexes/temps. Real worker stats record:
+`generated/e2e/run.RTJ1wD/u4-media-gw0-785750887267421694638e8b8703726b.json`.
+Recorded measurements (single observations, no general speedup claim):
 
-P8 bounded runtime update at frozen4ce11247: second canonical full-native finished
-3643cases,3498passed/142expectedplatform-media skips/3Chrome subprocess-exit2 failures
-(encoded-path,tonemap-disclosure,1920x1080@1.5),different cases from first run. Worker
-reports display-link/allocator/teardown-watchdog diagnostics,not viewer assertion
-failures; this does NOT establish environmental causation or a passing gate. First
-run and second run both FAILED; isolated prior2case rerun passed. One final standalone
-full browser run is in progress to distinguish concurrent-worker load; no flag/harness
-changes or product edits, no unbounded retry-to-green. P8 retains browser lease until
-its observed exit/owned cleanup,then completion will explicitly leave clean full-
-native acceptance OPEN. Docker/Windows also OPEN. Continue independent implementation
-and review while unavailable/flaky target proof is honestly tracked.
+| Observation | Created/reused | Elapsed seconds |
+| --- | --- | --- |
+| Baseline cold focused | 37/0 | 348.038 |
+| Baseline after assertion edit | 37/0 | 302.987 |
+| New cold focused | 2/0 | 20.689 |
+| New after assertion edit | 0/2 | 6.727 |
+| Real CRF recipe edit, focused | 2/0 | 17.028 |
+| Independently cold edited full | 37/0 | 301.757 |
+| Restored cold canonical full | 37/0 | 624.230 (materialization 355.238) |
+
+Both deliberate edits restored/SHA-checked. Committed notes record complete FFmpeg
+stdout, source/key/image identities, exact commands and measurement distinctions;
+raw logs remain untracked in a638 `generated/p11-measurements/`. Reviewer inspection
+of final notes pending. Old gate is not current combined P5/P6/P8 runtime acceptance.
+
+**Open Windows requirements:** P1 PS7 preservation/build/junction/concurrency/recovery,
+new bundle PS5.1+7 lock/UTF-8, fixed-final-path double-build fingerprint, runbook 3–4,
+manual populated Move/Leave/bad-manifest/shim and hosted verify; P5 AppData-only
+installed doctor-vs-run observation; P8 hosted verify; later P2/P9 matrix requirements.
+No skips/static tests substitute for these. P2 signing status will be honest and
+no publication/credentials/PR merge inferred from verification work.
+
+### Resources and next coordination
+
+- P11 explicitly RELEASED Docker lease: scoped compose down/network removal complete,
+  no owned containers; unique images, warm cache and evidence retained, no global
+  pruning. Its current rebase from 30515500 onto 698095cd has NO runtime lease.
+- P8 RELEASED browser/full-native lease with owned profiles/processes cleaned; its
+  rebase/current integration used focused nonbrowser proof only. No current browser
+  owner. Future heavy full-native and Docker gates will run sequentially on stable
+  inputs, accounting for the observed host process failures.
+- P7 active in 9676 from b2; no browser/Docker lease. P1 same deep-review fix recheck
+  active. P5/P4-F1 reviewer idle/reusable. P8/P6 deep reviewer idle/reusable after
+  no-findings current-source recheck. P11 worker rebase and notes reviewer pending.
+- Next: integrate returned current P11 code/notes, finish P1 recheck/fixes, delegate
+  full Wave A union review, then stable combined native/browser and Docker proof.
+  P7 independent work proceeds on reviewed prerequisites. Dispatch P2 only after P1
+  source clears; P9 only after reviewed P7/P8/P10. Complete final cumulative review
+  and section 13 without calling outstanding acceptance passed.
+- Preserve valid source/environment-bound evidence; rerun invalidated checks.
+  When only children remain, end the turn and resume on meaningful authorized
+  callbacks; no sleeps or idle polling. This ledger consolidates earlier repeated
+  dispatch updates; Git and child final reports retain their full provenance.
