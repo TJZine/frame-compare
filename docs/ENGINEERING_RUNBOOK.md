@@ -475,6 +475,16 @@ shim launches the new bundle after success. Old bundles must remain for manual
 removal. Source targets use a UTC timestamp; direct maintainer/CI builds retain the
 same final path to preserve the requirements-lock fingerprint. Static tests and
 non-Windows skips do not establish these filesystem observations.
+The installer re-reads a single pointer byte snapshot after the build under the
+exclusive `state/source-install.lock` handle. Source migration, bundle activation,
+and source rollback retain that handle; a direct current-bundle installer acquires
+it itself. Verify overlapping activation refuses before shim/pointer/data changes,
+then succeeds after the handle closes (the lock file intentionally remains).
+Also cover pointer changes at the build boundary, locked-pointer recovery diagnostics,
+byte-exact pointer and shim restoration, malformed drive/root-relative pointers,
+and junction aliases into previous user data, cache, or protected build roots.
+Reparse ancestry is refused rather than inferring physical containment from a
+lexical path. Cross-volume user-data renames still fail at the rename operation.
 
 Canonical verification path:
 

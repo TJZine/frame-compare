@@ -443,8 +443,12 @@ never searches parent directories.
   the requirements-lock fingerprint unchanged for CI's fixed build location.
   Source reinstalls move non-empty `config/`, `comparison_videos/`, and `generated/`
   folders by default (`-UserData Leave` opts out), reverse moves on activation
-  failure even after pointer replacement, and restore previous shims. They never
-  delete previous bundles. Recovery failures preserve and report remaining paths.
+  failure even after pointer replacement, and restore previous shims. A fresh
+  pointer byte snapshot after building owns migration and rollback under an
+  exclusive activation lock shared with current bundle installation. Reparse-point
+  ancestry is refused where physical containment is unproven; stored pointers must
+  be fully qualified. They never delete previous bundles. Recovery diagnostics
+  preserve and report all known paths even when the pointer cannot be read.
 
 `frame_compare.vs.runtime_contract` is the sole component-identity owner for the
 coordinated media stack. It emits narrow analysis, probe, alignment, and index

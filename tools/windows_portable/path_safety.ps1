@@ -21,6 +21,7 @@ public static class FrameCompareNativeDirectory {
 }
 
 function New-AtomicallyReservedDirectory([string]$Path, [string]$Label = "ExtractRoot") {
+  Assert-NoReparsePointAncestor -Path $Path -Label $Label
   [System.IO.Directory]::CreateDirectory((Split-Path -Parent $Path)) | Out-Null
   if ([FrameCompareNativeDirectory]::CreateDirectory($Path, [IntPtr]::Zero)) {
     return $Path
@@ -33,4 +34,25 @@ function New-AtomicallyReservedDirectory([string]$Path, [string]$Label = "Extrac
     $errorCode,
     "Could not atomically reserve ${Label}: $Path"
   )
+}
+
+# Prefix comparisons are meaningful only when no existing ancestor redirects the
+# path. Refuse junctions, symlinks, mount points, and unreadable ancestry rather
+# than claiming containment from a lexical spelling.
+function Assert-NoReparsePointAncestor([string]$Path, [string]$Label) {
+  $ancestor = [IO.Path]::GetFullPath($Path)
+  while (![string]::IsNullOrEmpty($ancestor)) {
+    try {
+      $item = Get-Item -LiteralPath $ancestor -Force -ErrorAction Stop
+      if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "$Label has a reparse-point ancestor; choose a physical path: $Path (ancestor: $ancestor)"
+      }
+    } catch [System.Management.Automation.ItemNotFoundException] {
+      # Missing suffixes are expected for fresh output paths. Continue through
+      # their existing parents, where redirects or access errors still matter.
+    }
+    $parent = Split-Path -Parent $ancestor
+    if ($parent -eq $ancestor) { break }
+    $ancestor = $parent
+  }
 }

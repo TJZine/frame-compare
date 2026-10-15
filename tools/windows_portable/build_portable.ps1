@@ -39,6 +39,9 @@ $RepoRoot = [System.IO.Path]::TrimEndingDirectorySeparator($RepoRoot)
 $currentLocation = [System.IO.Path]::TrimEndingDirectorySeparator($currentLocation)
 
 function Assert-BuildInputs([object]$Manifest) {
+  foreach ($path in @($OutDir, $CacheDir, $RepoRoot, $currentLocation, $PSScriptRoot, (Split-Path -Parent $ManifestPath))) {
+    Assert-NoReparsePointAncestor -Path $path -Label "Build path"
+  }
   $manifestVersion = Get-RequiredProperty $Manifest "manifest_version" "manifest"
   if (($manifestVersion -isnot [int] -and $manifestVersion -isnot [long]) -or $manifestVersion -ne 2) {
     throw "Unsupported portable manifest version (expected 2)."

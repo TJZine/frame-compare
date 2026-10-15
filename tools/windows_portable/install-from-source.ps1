@@ -171,30 +171,46 @@ if (!(Test-Path -LiteralPath $manifestFullPath)) {
 
 . (Join-Path $PSScriptRoot "path_safety.ps1")
 $pointerPath = Join-Path $env:LOCALAPPDATA "Programs\FrameCompare\state\config.json"
+function Read-PreviousBundle() {
+  # A single byte snapshot owns both interpretation and rollback. An inaccessible
+  # existing pointer is unsafe, whereas absent/malformed/stale state is a first install.
+  try { $bytes = [IO.File]::ReadAllBytes($pointerPath) }
+  catch [IO.FileNotFoundException] { return $null }
+  catch [IO.DirectoryNotFoundException] { return $null }
+  try {
+    $pointer = [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    if ($pointer -isnot [pscustomobject] -or
+        ($pointer.schema_version -isnot [int] -and $pointer.schema_version -isnot [long]) -or
+        $pointer.schema_version -ne 1 -or $pointer.install_type -ne "portable_bundle" -or
+        $pointer.bundle_path -isnot [string] -or
+        !([IO.Path]::IsPathFullyQualified($pointer.bundle_path))) {
+      return $null
+    }
+    $candidate = [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($pointer.bundle_path))
+  } catch {
+    # Decode/shape errors are malformed state, never partially enabled migration.
+    return $null
+  }
+  if (!(Test-Path -LiteralPath $candidate -PathType Container) -or
+      !(Test-Path -LiteralPath (Join-Path $candidate "bundle_info.json") -PathType Leaf) -or
+      $candidate -eq [IO.Path]::TrimEndingDirectorySeparator($outDirFullPath)) {
+    return $null
+  }
+  Assert-NoReparsePointAncestor -Path $candidate -Label "Previous bundle"
+  if ((Test-PathWithin $outDirFullPath $candidate) -or
+      (Test-PathWithin $candidate $outDirFullPath)) {
+    throw "New bundle $outDirFullPath must not nest with previous bundle $candidate"
+  }
+  return [pscustomobject]@{ Bundle = $candidate; PointerBytes = $bytes }
+}
+
+Assert-NoReparsePointAncestor -Path $outDirFullPath -Label "New bundle"
+Assert-NoReparsePointAncestor -Path $pointerPath -Label "Install state"
+# This pre-build read guards containment only. Never use it for migration/rollback
+# after a long build: another installer may have activated a different bundle.
+$null = Read-PreviousBundle
 $previousBundle = $null
 $previousPointerBytes = $null
-try {
-  $pointer = Get-Content -LiteralPath $pointerPath -Raw | ConvertFrom-Json
-  if ($pointer.schema_version -ne 1 -or $pointer.install_type -ne "portable_bundle" -or
-      $pointer.bundle_path -isnot [string] -or
-      !([IO.Path]::IsPathRooted($pointer.bundle_path))) {
-    throw "Malformed active-bundle pointer."
-  }
-  $candidate = [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($pointer.bundle_path))
-  if ((Test-Path -LiteralPath $candidate -PathType Container) -and
-      (Test-Path -LiteralPath (Join-Path $candidate "bundle_info.json") -PathType Leaf) -and
-      $candidate -ne [IO.Path]::TrimEndingDirectorySeparator($outDirFullPath)) {
-    $previousBundle = $candidate
-    $previousPointerBytes = [IO.File]::ReadAllBytes($pointerPath)
-  }
-} catch {
-  # Missing, malformed, or stale pointers have no previous bundle to migrate.
-}
-if ($null -ne $previousBundle -and
-    ((Test-PathWithin $outDirFullPath $previousBundle) -or
-     (Test-PathWithin $previousBundle $outDirFullPath))) {
-  throw "New bundle $outDirFullPath must not nest with previous bundle $previousBundle"
-}
 
 function Test-NonEmptyDirectory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) { return $false }
@@ -214,13 +230,19 @@ function Write-PreviousPointer() {
   }
 }
 
+function Get-RecoveryPathStatus([string]$Path) {
+  try {
+    if (Test-Path -LiteralPath $Path -ErrorAction Stop) { return "exists" }
+    return "absent"
+  } catch { return "status unavailable: $($_.Exception.Message)" }
+}
+
 function Write-RecoveryLocations([object[]]$Folders) {
   Write-Warning "Recovery stopped. Pointer: $pointerPath"
-  if (Test-Path -LiteralPath $pointerPath) {
-    Write-Warning (Get-Content -LiteralPath $pointerPath -Raw)
-  }
+  try { Write-Warning ([IO.File]::ReadAllText($pointerPath)) }
+  catch { Write-Warning "Pointer contents unavailable: $($_.Exception.Message)" }
   foreach ($folder in $Folders) {
-    Write-Warning "User folder $($folder.Name): previous=$($folder.Source) (exists=$(Test-Path -LiteralPath $folder.Source)); new=$($folder.Target) (exists=$(Test-Path -LiteralPath $folder.Target))"
+    Write-Warning "User folder $($folder.Name): previous=$($folder.Source) ($(Get-RecoveryPathStatus $folder.Source)); new=$($folder.Target) ($(Get-RecoveryPathStatus $folder.Target))"
   }
   Write-Warning "No remaining user folders were deleted. Recover these paths before retrying installation."
 }
@@ -229,6 +251,7 @@ $folders = @()
 $moved = [Collections.Generic.List[object]]::new()
 $placeholders = [Collections.Generic.List[string]]::new()
 $activationStarted = $false
+$activationLock = $null
 Push-Location $repoRoot
 try {
   if (-not $SkipSync) {
@@ -243,6 +266,27 @@ try {
   Assert-LastExitCode -Label "build_portable.ps1"
   $installScript = Join-Path $outDirFullPath "install.ps1"
   if (!(Test-Path -LiteralPath $installScript)) { throw "Bundle installer not found: $installScript" }
+
+  # Serialize source-install migration, activation, and recovery. Keep the file
+  # after closing: unlinking a lock file can let different handles own different
+  # files at the same path. A crashed process releases the exclusive handle.
+  $stateDirectory = Split-Path -Parent $pointerPath
+  Assert-NoReparsePointAncestor -Path $stateDirectory -Label "Install state"
+  [IO.Directory]::CreateDirectory($stateDirectory) | Out-Null
+  $activationLockPath = Join-Path $stateDirectory "source-install.lock"
+  Assert-NoReparsePointAncestor -Path $activationLockPath -Label "Activation lock"
+  try {
+    $activationLock = [IO.File]::Open($activationLockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+  } catch {
+    throw "Cannot own source-install activation lock $activationLockPath. Another source install may be activating; retry after it finishes. $($_.Exception.Message)"
+  }
+  # Re-read after the build AND after owning the activation boundary. Derive the
+  # previous bundle and byte-exact rollback material from the same snapshot.
+  $previous = Read-PreviousBundle
+  if ($null -ne $previous) {
+    $previousBundle = $previous.Bundle
+    $previousPointerBytes = $previous.PointerBytes
+  }
 
   if ($null -ne $previousBundle) {
     $folders = @(foreach ($name in @("config", "comparison_videos", "generated")) {
@@ -275,7 +319,7 @@ try {
 
   Write-Host "Installing shim from built bundle..."
   $activationStarted = $true
-  & $installScript
+  & $installScript -ActivationLock $activationLock
   if ($null -eq $LASTEXITCODE) { throw "install.ps1 terminated unexpectedly." }
   Assert-LastExitCode -Label "install.ps1"
 } catch {
@@ -299,17 +343,19 @@ try {
       if (!(Test-Path -LiteralPath $placeholder)) { [IO.Directory]::CreateDirectory($placeholder) | Out-Null }
     }
     if ($activationStarted -and $null -ne $previousBundle) {
-      & (Join-Path $previousBundle "install.ps1")
+      & (Join-Path $previousBundle "install.ps1") -ActivationLock $activationLock
       Assert-LastExitCode -Label "previous bundle install.ps1 (shim restoration)"
       # Preserve the original pointer bytes even if reinstall serialized it differently.
       Write-PreviousPointer
     }
   } catch {
+    $recoveryFailure = $_
     Write-RecoveryLocations -Folders $folders
-    throw "Installation failed: $($failure.Exception.Message). Recovery failed: $($_.Exception.Message)"
+    throw "Installation failed: $($failure.Exception.Message). Recovery failed: $($recoveryFailure.Exception.Message)"
   }
   throw $failure
 } finally {
+  if ($null -ne $activationLock) { $activationLock.Dispose() }
   Pop-Location
 }
 
