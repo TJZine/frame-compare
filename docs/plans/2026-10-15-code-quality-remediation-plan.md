@@ -4,7 +4,7 @@ search:
 ---
 
 Status: Historical
-Outcome: P0–P11 implemented and independently source-reviewed; local Mac/Linux native, browser, media/Docker, distribution and PowerShell 7 Linux language proof passed at implementation source `425b52ad1fa0c2962e774b14c6ede6fe63680a27`. Overall acceptance remains OPEN for the explicitly recorded Windows PowerShell 5.1/7, portable/manual/fingerprint and signed-hosted requirements (section 14); skipped or unavailable proof is not a pass.
+Outcome: P0–P11 implemented and independently source-reviewed; local Mac/Linux native, browser, media/Docker, distribution and PowerShell 7 Linux language proof passed at implementation source `425b52ad1fa0c2962e774b14c6ede6fe63680a27`. Local Windows acceptance passed at corrected candidate `262f624655ebc35b046c6993ba1c85282b994064`, including PowerShell 5.1/7, portable/manual/fingerprint and packaged updater/render proof. Overall acceptance remains OPEN for protected signing and exact-SHA hosted verification pending maintainer authorization (section 14); fixture signing is not protected-signing acceptance.
 Scope: Implementation plan for the twenty supported code-quality change groups (CQ1–CQ6, CQ8–CQ13, CQ15–CQ22, including all four CQ21 subparts) from the 2026-10-15 planning handoff. CQ7 and CQ14 are excluded investigations. This plan does not itself authorize implementation, release, or publication.
 Owner: Maintainer (Tristan Zine); plan prepared by a Claude Code planning session
 Source: `v0.7.0` at `53d0a2ce` (documentation-only report commit on top of reviewed product revision `e036bc348431c948314019318d40f642c0923784`; `git diff e036bc3 53d0a2c` touches only the two review reports)
@@ -2507,15 +2507,22 @@ Initial clean checkout: `/Users/tristan/Software/frame-compare`, branch `v0.7.0`
 `9fe932ede7ea333018e60c81720e29b60a089890`. Project resolved with supported tools as
 `local-5fa7d782ab3f3ef0c782bc2a261e2e12`, host `local`. No historical/default reset.
 Complete implementation source is **`425b52ad1fa0c2962e774b14c6ede6fe63680a27`**;
-subsequent parent commits change only this canonical plan/ledger. Runtime and
-archive evidence below is explicitly tied to425, not relabeled as later Git SHAs.
+subsequent original-parent commits through handoff236 change only this canonical
+plan/ledger. Runtime and archive evidence from that run remains tied to425. The
+authorized Windows corrections and fresh acceptance at262f are recorded below.
 
-**Overall acceptance is not closed.** Required Windows execution/manual/fingerprint/
-signed-hosted proof remains open in the table below because no native Windows host
-with PowerShell5.1/7 was available; signing credentials/protected hosted verification
-remain maintainer-owned. Historical marks the completed local implementation run,
-not a declaration that unobserved platforms passed. Unchecked section13 package and
-integrated-Windows items are those open acceptance requirements, not deferred code.
+**Local Windows acceptance now passes at
+`262f624655ebc35b046c6993ba1c85282b994064`; overall acceptance remains OPEN.**
+The initial handoff236 run exposed P2 defects; the authorized corrections received
+focused verification and independent review, followed by a fresh 399/0/0 Windows
+suite, same-path builds, populated-data preservation, installed configuration/render/GPU
+proof, and real-bundle fixture-signed updater apply/rollback and refusal proof.
+The latest Windows subsection below owns the current result; earlier failures remain
+recorded as failures. Protected hosted verification and real protected signing remain
+unobserved and pending maintainer authorization. Original Mac/Linux evidence remains
+scoped to425; these Windows helper/fixture corrections change no application Python
+source or dependency lock. CQ7/CQ14 remain excluded. Unchecked section13 obligations
+are not implicitly checked off by this local result.
 
 ### Authorization and ownership
 
@@ -2696,11 +2703,11 @@ Later current full gates reused all37 without ceremonial regeneration.
 
 | Package/profile | Required outstanding proof | Exact missing condition |
 | --- | --- | --- |
-| P1 Windows preservation/builder |PS7 occupied/path/junction/concurrency/locked-pointer/Move/Leave/failure fixtures;PS5.1+7 bundle lock/UTF8;fixed-final-path double-build fingerprint;runbook3–4;populated manual rerun and actual shim |Native Windows host with both interpreters and actual portable runtime;manual user-data/GPU/platform observations;matching-SHA hosted verify |
-| P2 Windows updater/install |PS5.1+7 signed apply/rollback/all failure/interruption/version fixtures;non-ASCII BOM-less install/uninstall;matching/mismatched runtime/dependency cases;runbook5–6 |Native Windows interpreters/filesystem/process behavior;maintainer signing credentials/confirmation and protected hosted verification at accepted SHA |
-| P5 installed doctor |AppData-only selected config yields doctor/run agreement through installed shim |Native installed Windows bundle/PowerShell environment |
-| P8/P9 packaged render |Hosted portable verification of changed application tonemap/render paths |Maintainer-dispatched protected Windows verify at accepted source;physical/platform proof remains distinct |
-| Integrated final Windows/signing |Recorded matching-SHA hosted/manual acceptance and signed-package status |Source made available on approved protected ref;maintainer environment approval/credentials. Signing is documented-only,not executed here. |
+| P1 Windows preservation/builder | Local fixtures, populated manual Move/Leave/recovery, real builds, fingerprint and extracted-bundle proof now passed as recorded below; matching-SHA hosted verification remains open | Approved protected candidate ref and hosted environment approval |
+| P2 Windows updater/install | Corrections independently reviewed; fresh canonical suite399 passed/0 failed/0 skipped, including69 updater cases per interpreter. Real-bundle fixture-signed apply/rollback,200-file backup inventories, both mismatch refusals and non-ASCII BOM-less install/uninstall passed under PS5.1 and7 | Real protected signing and approved exact-SHA hosted verification remain unobserved |
+| P5 installed doctor | Local AppData-only doctor/run agreement passed under both interpreters, including conflicting-root and invalid-selected-config controls | No remaining local selection gap; integrated hosted verification remains open |
+| P8/P9 packaged render | Local installed VS/FFmpeg render and real HDR libplacebo assertions passed; bundled-runtime and RTX 5080 GPU proof passed | Protected hosted verification remains open; private-media physical acceptance is a distinct claim |
+| Integrated final Windows/signing | Local acceptance passed at exact corrected candidate262f; protected signed-hosted proof remains open | Candidate must be made available on an approved protected ref with maintainer authorization and protected environment approval; record actual workflow URL/resolved SHA/artifacts/result. No protected signing was performed |
 
 Optional live publishing/resource tests were not required by unchanged scope;
 visible-Qt/LinuxGUI and whole-track resource proof were not triggered by these packages.
@@ -2725,3 +2732,517 @@ adds no new links/contracts; product/runtime evidence remains source425. Parent
 Git status is clean after local commits. No implementation/review/local verification
 child work remains. Overall acceptance stays OPEN for the explicit Windows matrix;
 no signing/hosted/physical-platform pass is inferred.
+
+### Initial native Windows acceptance, 2026-10-15 (historical failure)
+
+The correction/rerun subsection below supersedes this run's open local gaps.
+Its failures and original evidence remain intact.
+
+**Original result: local P1 preservation/build and P5/P8/P9 packaged proof established;
+P2 and overall acceptance FAILED/OPEN.** This is acceptance of the implemented
+remediation, not a restarted audit. CQ7/CQ14 remain excluded. No production source,
+test assertion, dependency lock, credential, branch protection or workflow was changed.
+The only tracked change in this acceptance run is this section.
+
+**Source acquisition:** clean `C:\Software\video\frame-compare`, branch `v0.7.0`,
+initial HEAD `5d18886aa52260fdec18a20936d2742ebc605138`. Inspected status/branch/HEAD
+before fetching. First `git fetch origin v0.7.0` safely fast-forwarded to
+`001755f52ed80b457061f46322442fd15be91c62`; both requested commits were initially
+unavailable from origin. After the maintainer made the handoff available, repeated
+the status/fetch/ancestry checks and used `git merge --ff-only --no-stat
+origin/v0.7.0`. Exact tested HEAD is
+**`236ec9de46cef1276085cb14ea276e5405d1da3f`**, with no later source commits.
+`git diff --name-only 425b52ad1fa0c2962e774b14c6ede6fe63680a27 HEAD` contains only
+this canonical plan: prior production-source evidence remains source-equivalent.
+No reset, force-switch, overwrite, merge commit, publication or signing-key migration occurred.
+
+**Environment:** native Windows 10 Home x64, version/build `10.0.19045`;
+Windows PowerShell `5.1.19041.7725`; PowerShell Core `7.6.4`; Git
+`2.56.0.windows.1`; uv `0.8.17`. Frozen contributor environment uses
+`.venv\Scripts\python.exe`, CPython `3.13.7` (MSC 1944, AMD64). Managed Python
+`3.13.16` is also installed; the actual portable bundle uses its pinned embedded
+Python `3.13.16`. Global Python is `3.14.0` and was not the acceptance interpreter.
+`uv sync --group dev --extra vsview --frozen` passed again at the correct handoff.
+Hosted workflow pins uv `0.13.1`; no toolchain-equivalence claim is made for a
+hosted run that did not occur. GitHub CLI was absent; no global tool installation
+was performed.
+
+GPU: NVIDIA GeForce RTX 5080, driver `617.14` / Windows `32.0.16.1714`.
+`vulkaninfo --summary` enumerated the physical discrete GPU, instance `1.4.341`,
+device API `1.4.351`, conformance `1.4.3.3`. It also emitted stale ReShade/Rockstar
+layer-file errors and overlay-layer warnings; these were preserved. Actual bundled
+libplacebo frame execution subsequently succeeded, so GPU availability is supported
+by application execution as well as enumeration.
+
+All local evidence paths below are relative to
+`C:\Software\video\frame-compare\generated\windows-acceptance\2026-10-15\` unless
+an absolute artifact path is given. These ignored logs/artifacts are retained locally,
+not uploaded hosted artifacts. `source-acquisition.log`, `prerequisites.log`, the
+command JSON files and diagnostic drivers retain exact commands and observations.
+
+#### Automated Windows results and interpreter coverage
+
+Ran serially, without xdist or concurrent test suites:
+
+```powershell
+uv run --no-sync pytest -q -rs tests/windows_portable --junitxml=generated/windows-acceptance/2026-10-15/windows-automated.xml
+```
+
+**399 collected/executed: 315 passed, 84 failed, 0 errors, 0 skipped; exit 1,
+428.236 seconds.** There are no skips to excuse or missing interpreters to count
+as passes. All 84 failures are in `test_windows_portable_update_apply_e2e.py`.
+The complete original failure traces are in `windows-automated.xml`; the PowerShell
+transcript `windows-automated.log` records the invocation/exit but did not capture
+the native pytest output completely. JUnit is the canonical detailed failure record.
+
+| Selection | Windows PowerShell 5.1 | PowerShell 7 | Evidence/limit |
+| --- | --- | --- | --- |
+| Updater E2E, 138 total | 69 executed: 12 passed, 57 failed | 69 executed: 42 passed, 27 failed | Includes signed version admission, interruption, backup and injected-failure cases; failing cases do not establish their intended downstream assertions |
+| Shared version vectors | Passed | Passed | Each executes 44 vectors: 27 validity, 7 ordering, 10 range |
+| Bundle install/uninstall lifecycle | Passed | Passed | Two parameterized lifecycle cases executed |
+| Bundle activation lock/UTF-8 | All 3 ownership cases passed | All 3 ownership cases passed | Native source-preservation module, non-ASCII bundle path |
+| Source preservation module | Source build requires PS7 | 57 passed, 0 skipped | Real Windows occupied/unsafe outputs, malformed pointers, junctions, concurrent activation, locked pointers, recovery and Move/Leave fixtures |
+
+An attempted shell-level removal of `PSModulePath` before a piped updater rerun
+did **not** normalize the actual PS5.1 child environment: 138 executed, 54 passed,
+84 failed, 0 skipped, exit 1, 291.420 seconds. Preserve
+`updater-clean-env.{log,xml}` as that failed attempt, not a corrected-environment pass.
+A subsequent Python-controlled process environment demonstrably restored legacy
+`Get-FileHash` lookup. Four focused existing cases then produced **1 passed,
+3 failed, 0 skipped**, 8.379 seconds: backup-ID collision passed; fixture array shape,
+atomic replacement and RSA signing failures remained. Exact selection and environment
+proof are in `normalized-updater-command.json`, `normalized-updater-environment.json`
+and `normalized-updater-diagnosis.{log,xml}`. No assertions were changed.
+
+#### P1 real build and preservation observations
+
+Validated the committed update public key with
+`tools/windows_portable/validate_update_public_key.ps1 -PublicKeyPath
+tools/windows_portable/update_public_key.xml`: passed, 384-byte modulus. Validated
+the portable manifest with PS7 `Test-Json -SchemaFile
+tools/windows_portable/manifest.schema.json`. The suite also exercised the existing
+manifest/update/bundle schema contracts. All **13 pinned artifacts** matched exact
+size and SHA-256 in the real builder and the separately retained
+`artifact-validation.json`; no fallback URL or pin modification was used.
+
+Real builder command (absolute paths retained in `build-first.ps1` and logs):
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_portable.ps1 -ManifestPath tools/windows_portable/manifest.windows-x64.json -RepoRoot C:\Software\video\frame-compare -OutDir C:\Software\video\frame-compare\dist\windows-acceptance-236ec9de\final -CacheDir C:\Software\video\frame-compare\.portable_cache
+```
+
+The first successful build was packaged while pristine and copied to a separate
+disposable `previous` bundle. Only the original, never-installed `final` directory
+was removed after checking its resolved scope and the active pointer. The second
+real build used **the identical final path**, through the real source installer
+with `-SkipSync -OutDir ...\final -CacheDir ...\.portable_cache` and default Move.
+Both `bundle_info.requirements_lock_sha256` values are exactly:
+
+```text
+3ddc742d4794fd070ca584ebff5532104969c96752c7f385262c41647e5c1bc4
+```
+
+`bundle-info-first.json`, `second-bundle_info.json`, both requirements files and
+inventories retain this comparison. All real builds used source HEAD236 with clean
+tracked source. Subsequent real source builds for Leave and both failure boundaries
+also completed the required runtime smoke before activation.
+
+Manual driver observations, using disposable roots and isolated LOCALAPPDATA/APPDATA:
+
+- Default Move transferred populated config/media/generated sentinels to the new
+  bundle, retained old runtime/code, activated the new pointer, and launched version
+  through the actual installed shim.
+- Explicit `-UserData Leave` retained those populated folders in the previous bundle,
+  left the new workspace empty, and successfully launched the newly installed shim.
+- Injected failures at the real pointer `Move-Item` boundary, before and after its
+  replacement, returned nonzero with the expected marker. Both reversed moved folders,
+  restored the **exact pointer bytes and all shim-file hashes**, and launched the
+  restored installed shim successfully.
+- A malformed-manifest rerun failed without changing pointer/shims or user sentinels.
+- Automated native fixtures separately passed junction/unsafe-output/concurrent-lock/
+  locked-pointer cases with their original sensitive assertions.
+- Compared the retained old bundle's complete `app/`, `python/`, `vs/` and `ffmpeg/`
+  trees against the pristine ZIP: **7,546 files / 1,051,479,957 bytes, zero mismatches**.
+  `previous-runtime-code-preservation.json` retains per-file hashes.
+
+`manual-source-results.json`, `source-default-move.log`, `source-explicit-leave.log`,
+`source-failure-{before,after}-pointer.log`, `source-bad-manifest.log` and corresponding
+command JSON files retain the observations. The initial disposable driver stopped on
+an incorrect observer filename (`version.py`); the resumed driver used the actual
+`__init__.py` and completed. That driver error was not a product failure or a pass.
+Old bundles and failed activation candidates remain for inspection/manual removal.
+The temporary user PATH modifications were restored, including registry value type.
+
+#### Packaged P5/P8/P9 and real GPU proof
+
+Pristine portable artifact:
+`C:\Software\video\frame-compare\dist\windows-acceptance-236ec9de\portable.zip`,
+**416,174,734 bytes**, SHA-256
+`2203db1c88ff183d78f7a838b9de0567861aa173735e0d03785817e8ec03bfe8`.
+The diagnostic packager sorts entries, fixes timestamps and maps the canonical
+`frame-compare-portable-win-x64/` root; it does not substitute for the hosted
+workflow's own packaging run. The unchanged canonical
+`verify_extracted_bundle.ps1` passed with `-ExpectedCommitSha
+236ec9de46cef1276085cb14ea276e5405d1da3f`, extracting to disposable
+`dist\windows-acceptance-236ec9de\extrait-bundlé`. Provenance, deterministic layout,
+inventory, licenses, Qt WebEngine exclusion, required native components, candidate
+help/version/doctor and installed-shim help/version parity passed.
+See `extracted-verifier.{stdout,stderr}.txt`, `extracted-doctor.json` and the retained
+extraction `command-evidence/` files.
+
+Actual bundled-runtime smoke passed every required phase: package imports, runtime
+contract, VS environment, L-SMASH generated-media frame, placebo API, application
+tonemap, direct placebo frame and combined preloaded VS/Qt/VSView process. R81/API4.3,
+L-SMASH1310, placebo2.0.4, BestSource22, VSView0.13.0, PySide6 6.11.2, vspackrgb2.0.0,
+LGPL FFmpeg8.1 build and intentional FFMS2 absence were observed. Actual alignment
+entry-point/panel/metadata/result validation, Qt deployment and offscreen GUI
+launch/owned cleanup markers passed. Application tonemap produced RGBS/32-bit with
+`libplacebo_runtime_usable=true`; direct GPU placebo produced RGB48/16-bit. No Vulkan
+unavailable skip occurred. Full runtime fingerprint is
+`b47d64de188aab069cf3c3b9d51add6d0b3416c5ee175b4c0646b72436219320`.
+
+Through the real installed shim under **both PS5.1 and PS7**, non-ASCII BOM-less
+installation, version launch and uninstall passed. AppData-only selected config
+gave doctor/run agreement while a conflicting malformed root config was ignored.
+An invalid selected AppData config produced a failed doctor config check and run
+exit2 with structured error JSON. Doctor's overall exit0 for this optional failed
+check is the existing contract, not a hidden success claim. Positive run selection
+used the documented dry-run payload (which has `dry_run`, not a `success` key).
+See `appdata-*` logs and `packaged-results.json`.
+
+Existing `tests/e2e/test_media_render.py` assertions passed through the installed
+shim for **M1 VapourSynth and M2 FFmpeg**. Existing
+`test_media_tonemap.py::test_media_hdr_tonemap` assertions passed for **M4**, including
+report payload/applied libplacebo facts, target200 and actual PNG dimensions/modes.
+The Windows LGPL bundle lacks the Docker fixture's GPL x265 encoder. An initial
+FFV1 fixture yielded unspecified primaries/transfer and did not exercise HDR;
+its failed observation is retained. An initial AV1 encode also lacked those fields;
+its metadata/probe artifacts are retained. The final libaom AV1 fixture uses explicit
+frame `setparams`, and ffprobe verifies 10-bit PQ/BT.2020 before application execution.
+No product assertion was relaxed. See `hdr-render-result.json`,
+`hdr-av1-ffprobe.json`, `M4-av1.*`, `packaged-media-artifacts/` and
+`packaged-media-artifacts-av1/`. These are generated-fixture/physical-GPU observations,
+not private HDR10/Dolby Vision corpus or perceptual-comparison acceptance.
+
+#### P2 failures, concrete corrections and retained partial proof
+
+Built a real code-only update with unchanged `build_update.ps1 -BundleDir
+<extracted bundle> -RepoRoot <repo> -OutFile ...\real-update-unsigned.zip`.
+Generated a **fixture-only** 2048-bit key outside the repository using the existing
+PS7 key generator and signed a separate `real-update-fixture-signed.zip`. Only the
+disposable installed updater's public key was replaced; the committed release public
+key and real protected signing configuration were untouched. This establishes
+fixture signing only.
+
+Actual real-runtime apply under PS5.1 failed signature verification. PS7 matching-
+runtime apply and rollback both failed atomic JSON replacement. The installed source
+remained hash-identical after each attempt. The real backup created before failure
+has both identity records and a verified **200-file** exact path/size/hash inventory,
+app version0.7.0 and matching full-runtime/requirements fingerprints; see
+`real-backup-validation.json`, backup `20261015194502`, `real-runtime-*` logs and
+`packaged-results.json`. Refusal substeps for mismatched runtime/dependencies and
+malformed/schema2 state were reached in the PS7 canonical E2E before its later apply
+failure, but that whole E2E case remains failed. Passing version-helper vectors do
+not establish the blocked signed-admission or exact-smoke transitions.
+
+Concrete correction requirements, without changing source in this acceptance run:
+
+1. **Production atomic JSON replacement:** updater `Write-AtomicJson` calls
+   `[IO.File]::Replace($temporary, $Path, $null)`. PowerShell marshals ordinary null
+   as an empty string here. Native probes reproduce failure under both PS5.1
+   (illegal path) and PS7 (empty path), leaving the old target intact. The same probe
+   with `[NullString]::Value` succeeds on both. Preserve atomic replacement and
+   transaction recovery; do not replace it with delete/copy. Evidence:
+   `diagnostic-probes.json`, actual matching-runtime apply/rollback failures.
+2. **Production PS5.1 public RSA import:** both signer and updater helpers read
+   absent optional private fields through strict XML member access. PS5.1 throws on
+   missing `P`; fallback `FromXmlString` then rejects the comment-prefixed public
+   document. A controlled probe imports the private key successfully, reproduces
+   both public-key failures, and imports the public RSA root element successfully.
+   Correct optional-node lookup/canonical public XML import in both owners without
+   changing key material or weakening verification. Evidence:
+   `rsa-import-probe.{ps1,json}` and real PS5.1 signature refusal.
+3. **Verification environment:** Python-launched PS5.1 inherited PS7 module paths,
+   making legacy `Get-FileHash` unavailable despite it working in a direct legacy
+   shell. Normalize the subprocess environment at the actual Python launch boundary
+   or otherwise select the proper legacy module. A proven clean child resolves the
+   command; the focused backup-collision case then passes. No machine-wide environment
+   setting was changed. Evidence: `powershell51-*`, `normalized-updater-*`.
+4. **PS5.1 injected-failure fixture shape:**
+   `@(Get-Content ... | ConvertFrom-Json)` captures a nested `System.Object[]` for the
+   one-element inventory in PS5.1, so intended smoke/rename/hash assertions fail
+   earlier with missing `path`. A direct assignment followed by array wrapping yields
+   a PSCustomObject on both interpreters. Repair that fixture boundary, retaining all
+   assertions and injected failure markers. Evidence:
+   `inventory-array-shape-probe.json` and normalized focused failure.
+
+No source correction is accepted or independently reviewed by this run. Required
+next proof is focused verification and independent review of actual corrections,
+then the full serial Windows suite and real-runtime apply/rollback/failure matrix
+at the resulting exact candidate SHA. Rebuild/rerun affected packaged evidence if
+those changes invalidate it. Stable/RC/downgrade success, exact smoke rejection,
+all interruption/injection paths and complete backup retention must not be declared
+accepted from the currently failing cases.
+
+#### Protected hosted/signing status and remaining acceptance gaps
+
+Candidate prepared: **`236ec9de46cef1276085cb14ea276e5405d1da3f`**, repository
+`TJZine/frame-compare`, operation `verify`, channel `rc`, environment
+`release-candidate`. Read-only GitHub branch metadata resolved that exact SHA and
+reported **`protected=false`** for `v0.7.0`. The checked-in secret-free workflow guard
+requires a protected selected branch or conventionally named protected release tag,
+whose head equals `expected_sha`. Do not dispatch from the unprotected branch or
+change protection/credentials to bypass this requirement.
+
+Prepared command, **not executed**:
+
+```powershell
+gh workflow run windows-portable.yml --repo TJZine/frame-compare --ref v0.7.0 -f operation=verify -f channel=rc -f expected_sha=236ec9de46cef1276085cb14ea276e5405d1da3f
+```
+
+Before dispatch, maintainers must provide appropriate authorization and an approved
+protected ref at the accepted candidate head, with required `release-candidate`
+environment approval/allowed-ref rules and the real protected signing configuration.
+The documented signing-secret migration/negative-access prerequisites were not
+inspected or changed here. **Workflow URL: none; resolved local/prepared SHA:236;
+hosted result: NOT RUN; uploaded artifacts: none; real protected signing:
+documented-only/unobserved.** Fixture-signed ZIPs are not protected-signing acceptance.
+See `hosted-preparation.json`.
+
+Remaining blocking gaps are therefore (a) the P2 corrections and complete native
+rerun/review/real update proof, and (b) successful exact-SHA protected hosted verification
+with observed real signing and recorded URL/resolved SHA/artifacts/result. Separate
+private-media HDR10/Dolby Vision, timing/index/cache migration and perceptual physical
+workstation acceptance was not supplied by these generated-fixture tests. No release
+publication, merge, credential change or signing-key migration is authorized or performed.
+
+Windows verification processes completed; temporary PATH changes were restored.
+Disposable previous/current/failure bundles, isolated AppData, ZIPs and logs remain
+for inspection. Unrelated worktrees, caches and processes were preserved. Overall
+acceptance remains **OPEN**.
+
+Final ledger validation: `git diff --check` passed; the strict documentation command
+`uv run --locked --group docs zensical build --clean --strict` passed with no issues
+(1.66 seconds; seven locked docs packages installed). Logs:
+`acceptance-docs-build.log` and `.exit.txt`. `artifact-manifest.json` records sizes
+and SHA-256 for the pristine portable ZIP, unsigned real update and fixture-signed
+real update. Final read-only GitHub check at 15:51 America/New_York still resolved
+HEAD236 and `protected=false`. Only this canonical-plan path is modified; no source
+correction or release commit was created.
+
+
+### Windows updater correction and acceptance rerun, 2026-10-15
+
+**Current result: local P1/P2/P5/P8/P9 Windows acceptance PASSED; overall acceptance
+remains OPEN only for the required protected hosted/signing proof.** At the end of runtime acceptance, no release,
+merge, push, credential change, signing-key migration, or protected dispatch had occurred.
+Distinct private-media physical-workstation acceptance remains a separate, unclaimed
+media-runtime-refresh obligation; generated fixtures do not establish it.
+
+**Exact source and preservation.** Continued the inspected `v0.7.0` checkout from
+handoff `236ec9de46cef1276085cb14ea276e5405d1da3f`, preserving its uncommitted
+section14 evidence. The user explicitly authorized corrections, independent review,
+and rerun. Two local Conventional Commits contain the corrections:
+`14162ee69373fef790cb4091a3725c45410bb990` and
+**`262f624655ebc35b046c6993ba1c85282b994064` (tested candidate HEAD)**.
+During runtime acceptance, no reset/forced checkout or remote mutation occurred.
+Relative to236, only
+`sign_update.ps1`, `shim/frame-compare-update.ps1`, updater E2E fixtures, the new
+Windows test `conftest.py`, and the runbook changed. Application source, `uv.lock`,
+`pyproject.toml`, committed public key and workflows are unchanged. Earlier425/236
+platform/package evidence is not relabeled as262f proof. Every fresh bundle inventory
+records262f; only this plan was uncommitted after the correction commits. The user
+subsequently authorized committing this ledger and pushing `v0.7.0`, while keeping
+protected signing and hosted verification pending maintainer authorization.
+
+Corrections address the observed owners:
+
+- RSA parameter lookup uses XML nodes, allowing absent private parameters in a public
+  key under strict mode. The PS5.1 CSP fallback receives the canonical RSA root XML,
+  excluding the declaration/comment accepted by key generation.
+- Atomic JSON `File.Replace` receives `[NullString]::Value` for its absent backup
+  filename; ordinary PowerShell null previously marshaled as an invalid empty path.
+- The updater executable writes the complete exception message directly to stderr
+  with exit1, preserving required refusal/recovery paths instead of host-formatted,
+  wrapped diagnostics. Dot-sourced functions still throw.
+- Windows tests clear inherited `PSModulePath` per test and restore it afterward, so
+  Python-launched PS5.1 loads its own compatible modules. No machine/user setting
+  or interpreter availability assertion is bypassed.
+- Fixtures write intentional LF source/backup bytes and unwrap JSON inventory before
+  array coercion on PS5.1. The direct-function fixture captures raw exception text.
+  All existing assertions and test cases remain; none was weakened or removed.
+
+**Independent review.** `/root/updater_review` independently traced source, callers,
+fixture semantics and failure XML, then reviewed the final correction at262f: no
+remaining actionable findings. It made no edits and ran no competing runtime suites.
+`review-code` was unavailable; read-only review used the `develop-code` contract.
+Final reviewed updater SHA-256:
+`69391185dcc9f89ddd8a78efb7ae3d788b318629f005d8fd9d559860dd61d509`;
+updater test SHA-256:
+`6bdb6ba9e95a83a41139963da6b7dda00f7b72d71a48c555b32173d6df56e51a`.
+Full scope/result is retained in `updater-fix/independent-review.json`.
+
+**Environment and commands.** Native Windows 10 Home x64, 10.0.19045/build 19045;
+Windows PowerShell 5.1.19041.7725; PowerShell 7.6.4; contributor Python 3.13.7;
+bundled Python 3.13.16; Git 2.56.0.windows.1; uv0.8.17. NVIDIA GeForce RTX 5080,
+driver 617.14; Vulkan was physically usable, with no GPU/runtime skip. Prerequisites
+and Git range/status are in `updater-fix/prerequisites-final.log`. The locked
+contributor restore passed:
+
+```powershell
+uv sync --group dev --extra vsview --frozen
+uv run --no-sync pytest -q -rs tests/windows_portable --junitxml=generated/windows-acceptance/2026-10-15/updater-fix/windows-acceptance-final.xml
+```
+
+All native suites, builds and installed media/update operations ran serially.
+Preserved results (pass/fail/skip):
+
+| Run/source | Passed | Failed | Skipped | Evidence in `updater-fix/` |
+| --- | ---: | ---: | ---: | --- |
+| First focused correction attempt, before14162 | 6 | 3 | 0 | `focused.log`, `.xml` |
+| Corrected focused selection at14162 | 9 | 0 | 0 | `focused-corrected.log`, `.xml` |
+| First full suite at14162 | 386 | 13 | 0 | `windows-acceptance.log`, `.xml`, `.exit.txt` |
+| Remaining failure selection, reviewed working correction before262f | 13 | 0 | 0 | `remaining-focused.log`, `.xml`, `.exit.txt` |
+| Final complete suite at262f,462.670s | **399** | **0** | **0** | `windows-acceptance-final.log`, `.xml`, `.exit.txt` |
+
+The first full rerun exposed ten byte-equality failures from a CRLF backup fixture
+versus LF original, plus three PS5.1 formatted-diagnostic failures. Actual rollback
+returned0 in those ten cases; correcting fixture bytes preserves the byte-exact
+assertion. All13 cases passed focused verification before the final full run.
+The original315/84/0 handoff result above remains a failed run.
+
+Final JUnit confirms69 updater E2E cases under **each** interpreter,44 shared version
+vectors per interpreter (27 validity/7 ordering/10 range), parameterized bundle
+install/uninstall and install-entrypoint cases under both,57 native source-preservation
+cases, and all remaining applicable structural/runtime checks. There were no skips
+to excuse. The matrix includes stable/RC/downgrade and exact-version smoke controls;
+complete/incomplete/colliding backups and retention; both commands repairing
+staging/promoting/committed journals; unknown-state refusal; injected copy, rename,
+hash/size/path-set, launcher, smoke and failed-recovery behavior. Source-preservation
+cases cover occupied/unsafe outputs, junction ancestry, overlapping activation,
+locked pointers, build-boundary pointer changes and recovery ordering. Machine-readable
+module/interpreter counts are in `windows-acceptance-final-summary.json`.
+Changed Python files passed Ruff, format and Pyright (0 errors/0 warnings); both changed
+PowerShell scripts parsed, and the final scripts executed in the full native gate.
+
+**Fresh real builds and populated preservation.** The retained drivers invoke the
+unchanged runbook entrypoints and save every exact child command/log:
+
+```powershell
+.venv/Scripts/python.exe generated/windows-acceptance/2026-10-15/updater-fix/build-candidate.py
+.venv/Scripts/python.exe generated/windows-acceptance/2026-10-15/updater-fix/manual-source.py
+.venv/Scripts/python.exe generated/windows-acceptance/2026-10-15/updater-fix/packaged-proof.py
+```
+
+The committed public key and manifest schemas validated. Both real
+`build_portable.ps1 -RepoRoot ... -OutDir ... -CacheDir ...` builds passed at the
+**same final path**:
+`C:\Software\video\frame-compare\dist\windows-acceptance-262f6246\frame-compare-portable-win-x64`.
+Only the explicitly checked disposable, never-installed first output was removed.
+Both `bundle_info.requirements_lock_sha256` values equal
+**`22618eb6b6d734fea3893452084f6ba6fea96e8647ea50a8033e131b19fbe5ab`**.
+The previous236 fingerprint used a different final path; it is not an equality
+comparison against this path-dependent export. The media-runtime fingerprint remains
+`b47d64de188aab069cf3c3b9d51add6d0b3416c5ee175b4c0646b72436219320`.
+Both builders validate every pinned artifact's byte size/hash, deterministic inventory,
+source provenance, native plugins, licenses and project metadata. Both full bundled
+runtime proofs passed all eight phases and offscreen GUI launch/cleanup: R81/API 4.3,
+L-SMASH 1310, placebo 2.0.4, VSView 0.13.0,PySide6 6.11.2, BestSource, vspackrgb and LGPL
+FFmpeg8.1.3, with FFMS2 absent. Application tonemapping produced RGBS/32-bit with
+`libplacebo_runtime_usable=true`; direct vs-placebo produced RGB48/16-bit, including
+after Qt. Entry-point loading, panel construction and sidecar validation passed.
+
+Manual real source installation used separate disposable roots and isolated AppData,
+with populated config/media/generated sentinels. Default Move and explicit Leave
+passed; manifest failure and injected activation failures before/after pointer
+replacement retained or reversed all sentinels, restored exact pointer/shim bytes,
+and allowed installed-shim `version` afterward. All **7,670 retained runtime/code
+files,1,052,427,017 bytes** matched original sizes and SHA-256 after the sequence.
+Old and failed bundles remain for inspection. Original User PATH value/type was
+restored exactly. See `manual-source-results.json`, the16 observation records,
+`previous-runtime-code-before.json`, and individual source-install command/log files.
+
+**Fresh installed/package/updater proof.** The workflow-style portable ZIP passed
+`verify_extracted_bundle.ps1` with `-ExpectedCommitSha262f...`; candidate and installed
+help/version, doctor JSON, inventory/provenance and native deployment checks passed.
+Extraction path `extrait-bundlé` supplied the non-ASCII path control. Under both PS5.1
+and7, install/version/uninstall passed, state JSON was BOM-less UTF-8 and selected the
+exact bundle path, configuration survived uninstall, and reinstall succeeded.
+AppData-only doctor/run selection agreed under both interpreters despite malformed
+conflicting root config; invalid selected AppData config appeared in doctor details
+and run refused with JSON/exit2. Positive dry-run used its real `dry_run` contract.
+
+Through the installed shim, existing M1 VapourSynth, M2 FFmpeg and M4 HDR/libplacebo
+render assertions all passed, including report facts, selected frames, RGB output
+sizes and configured 200-nit tonemap. The 4-frame HDR fixture is 10-bit AV1 with explicit
+PQ/BT.2020 bitstream parameters, verified by ffprobe; LGPL libaom replaces unavailable
+GPL x265. This correct fixture avoids the earlier FFV1/unspecified-metadata proof
+mistakes without changing application assertions. Reports and PNGs remain under
+`packaged-media-artifacts/`.
+
+`build_update.ps1` created the real code-only ZIP from this bundle/source and its
+schema validated. A separately generated 2048-bit fixture key outside the repository
+signed it; only disposable AppData received its public key. **This is fixture signing,
+not acceptance using the real protected signing configuration.** Both PS5.1 and7
+successfully applied and rolled back against the real bundled runtime, physically
+replacing the source directory each time. Each complete backup matched all200 source
+paths/sizes/hashes and version 0.7.0, with matching compatibility identity. Source and
+user config were preserved, post-rollback installed-shim launch passed, and no
+transaction journal/.tmp/.old/.new remained. Independently fixture-signed runtime-
+and dependency-mismatch packages were refused under both interpreters before source
+or config changes. Detailed records: `packaged-results.json` (48 observations),
+`real-backup-*.json`, `real-backup-identity-*.json`, individual command/stdout/stderr
+files, and `installed-source-before.json`. User PATH was restored exactly again.
+Existing installations need a fresh full-bundle reinstall to receive the AppData
+updater/helper correction; a code-only ZIP cannot update that helper.
+
+**Artifacts and retained evidence.** All new logs, commands, reviewed hashes, JUnit,
+drivers, source/backup inventories and reports are under
+`C:\Software\video\frame-compare\generated\windows-acceptance\2026-10-15\updater-fix`.
+Bundles/ZIPs remain under
+`C:\Software\video\frame-compare\dist\windows-acceptance-262f6246`.
+Earlier236 evidence remains in its original directories. `artifact-manifest-final.json`
+records critical artifact/log sizes and SHA-256. Portable ZIP: 425,718,034 bytes,
+SHA-256 `7624f1ed9d144edd9679fdb0411e794d32bb0ba5428a6e898b66c34337c70f38`.
+Unsigned real update: 721,898 bytes,
+`90d5e959bb6459471094beb26e827ed318844c6c65ca71e56b5cbb30d06c4970`.
+Fixture-signed real update: 722,298 bytes,
+`e80831e8200c35fd82eea34d35d8c16a392ee75011554f84bc9f92416f1dd57b`.
+
+**Remaining acceptance: protected signing/hosted verification, pending authorization.**
+Exact locally tested source candidate is
+**`262f624655ebc35b046c6993ba1c85282b994064`**. The subsequent user instruction
+authorizes pushing the two fix commits and this documentation-only acceptance ledger
+to `v0.7.0`. This ledger commit changes no tested implementation. A future hosted
+verification must use the exact final approved ref head, including the ledger commit;
+the original262f SHA must not be passed with a later branch head. Maintainers must
+approve a protected branch head or protected conventional release-tag head,
+authorize the verification, and provide the required
+`release-candidate` environment reviewer approval/allowed-ref rules and real protected
+signing configuration. They must confirm the runbook's signing-secret migration and
+negative-access prerequisites; none was modified or inferred here. Prepared command:
+
+```powershell
+$ExpectedSha = (git rev-parse HEAD).Trim() # Clean checkout of the approved protected ref head
+gh workflow run windows-portable.yml --repo TJZine/frame-compare --ref v0.7.0 -f operation=verify -f channel=rc -f expected_sha=$ExpectedSha
+```
+
+**Workflow URL:none; resolved hosted SHA:none; hosted result:NOT RUN; hosted
+artifacts:none; real protected signing:documented-only/unobserved.** The required
+successful exact-SHA workflow URL, resolved SHA, observed signing result and uploaded
+artifacts remain the blocking acceptance gap. `hosted-preparation-final.json` records
+the original262f pending handoff; the final approved ref head must be resolved again
+before any authorized dispatch. Committing/pushing this ledger does not authorize
+hosted verification or signing. No release publication, merge, credential change, protection
+change or signing-key migration is authorized by this task. Overall acceptance stays
+**OPEN** until this proof is observed.
+
+
+Final ledger checks: strict documentation build
+`uv run --locked --group docs zensical build --clean --strict` passed with no issues;
+`git diff --check` passed. Documentation logs are
+`updater-fix/acceptance-docs-build-final.log` and `.exit.txt`. Independent ledger
+cross-check against JUnit/build/manual/package/artifact/hosted records found no
+remaining material overclaim after correcting the opening Outcome summary. The plan's
+design and coverage matrix are preserved. Verification processes completed, temporary
+User PATH changes were restored, and raw failures/fixtures/bundles remain available.
