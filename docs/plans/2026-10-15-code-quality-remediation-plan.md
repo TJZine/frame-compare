@@ -2765,7 +2765,7 @@ coverage and routes findings without personal substantive review.
 | --- | --- | --- |
 | A / 01a13ece-fcf0-7da1-afb9-c63eb44a89a8, reviewer/high | P0/P3/P4/P5/P10: CLI/config/JSON/viewer/persistence/warnings; P6 records, P8 payload/facts and P11 request construction interfaces | Assigned, pending |
 | B / 01a13ee0-8b57-7573-9de8-4374f0fc445e, deep/xhigh | P6/P8 authority/native/render/report; P5 inputs, P4 failure policy, P10 warnings, P11 real phase/cache/smoke interfaces | Assigned, pending |
-| C / 01a13ed5-7e47-7ea0-9201-1f47b6a097f0, deep/xhigh | P1 preservation/activation/provenance; P5 doctor shim, P8 runtime smoke, P0 acceptance docs and P11 runbook coexistence | Assigned, pending (P1 F1–F5 source already resolved at3af4041d) |
+| C / 01a13ed5-7e47-7ea0-9201-1f47b6a097f0, deep/xhigh | P1 preservation/activation/provenance; P5 doctor shim, P8 runtime smoke, P0 acceptance docs and P11 runbook coexistence | COMPLETE, no findings; P1 source/test equivalence verified, relevant cross-boundary callers traced, Windows execution still open |
 | D / 01a13ee3-a368-7772-90c2-9c84da0890a7, reviewer/high | P11 recipe/cache/verifier/notes and U4 config/authority/runtime interfaces to P5/P6/P8 | COMPLETE, no findings; unchanged-source/AST and evidence inspection, no new runtime run |
 
 Verifier b49f explicitly assigned clean-detach04d5c90b, one actual Chrome standalone
@@ -2805,3 +2805,15 @@ including phase/cache matrix and new applied-result smoke/payload. No source fix
 blind repeats/global pruning/credentials; failure callbacks route to owners.
 Combined Docker result and remaining Wave A boundary reviews pending; Windows proof
 still open. P2/P7 isolated implementation continues.
+
+
+Wave A boundary C completed at exact04d5c90b: no actionable finding or missing source
+obligation. Reviewer independently proved tools/windows_portable, corresponding
+tests/root installer/Windows guides and acceptance prose byte-identical since reviewed
+3af4041d, reused122pass/147skip source-valid proof without rerun, traced current P5
+shim/config selection, P8 builder/runtime-smoke result consumers, helper provenance/
+copy/inventory, P0 cache prose and P11 runbook separation. F1–F5 remain resolved.
+No P2 live work inspected and no platform pass inferred. Boundaries A/B still pending,
+D already complete; current native gate passed, combined Docker running under a638
+lease. P2/P7 implementation isolated, P9 prerequisite not ready. Only pending child
+results remain; resume through meaningful authorized callbacks, no idle polling.
