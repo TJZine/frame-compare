@@ -3332,3 +3332,45 @@ This command is documented only, **not dispatched**. Protected signing and hoste
 signed verification remain pending separate maintainer authorization; no workflow
 URL, resolved signed SHA or signed artifacts exist for this transition. Fixture
 signing does not satisfy that gate. Overall remediation acceptance remains **OPEN**.
+
+### Maintenance App configuration and unsigned hosted result, 2026-10-15
+
+The maintainer supplied App `tjzine-frame-compare-maintenance`, numeric ID **5338382**
+and Client ID `Iv23li2MXuV1OTGCxdql`, authorizing completion of its setup. The
+`BRANCH_MAINTENANCE_CLIENT_ID` environment variable was saved and read back in
+`branch-maintenance`; the `BRANCH_MAINTENANCE_PRIVATE_KEY` secret's **presence only**
+was confirmed. Its value was never retrieved. Ruleset25204173 now grants only this
+Integration an `always` bypass on exact `refs/heads/pre-release`, preserving all
+existing rules. Main/archive rules and maintenance environment protections were
+verified unchanged. Independent review approved the concrete delta, and the GitHub
+plugin independently read back the configured bypass. No browser access is needed.
+Private-App installation/permissions metadata and token creation remain unobserved
+with the available connection; these settings alone are not operational proof.
+
+Unsigned hosted verification now **passed** for PR head
+**`eb6d332ffe59af68bc0dc648b6f091906bbec3cc`**, checking out merge
+**`7575e96f8c2af01d1f49619ba29ab4e065f0c370`** against base `35792220`:
+[CI](https://github.com/TJZine/frame-compare/actions/runs/38820447581),
+[documentation](https://github.com/TJZine/frame-compare/actions/runs/38820447566),
+[Docker](https://github.com/TJZine/frame-compare/actions/runs/38820447565) and
+[Windows portable](https://github.com/TJZine/frame-compare/actions/runs/38820447646).
+The Windows job ran the full suite, built and smoke-tested the bundle, verified its
+extraction, built/checked the unsigned update and uploaded both artifacts:
+`frame-compare-portable-win-x64` (12013527514) and
+`frame-compare-update-win-x64` (12014090903). The full suite listed86 skips for
+unavailable/opt-in media, browsers, network and POSIX-specific proof; none was a
+Windows-portable interpreter skip. Hosted direct GPU proof explicitly skipped for
+unavailable Vulkan; application tonemapping passed its fallback-aware path. These
+are not GPU/native-media passes. Earlier local physical-host evidence retains its
+separate source scope. Signing, attestation, migration and release jobs were skipped
+as intended for an unsigned PR; they do not count as passed.
+
+Retained local evidence under `generated/branch-workflow/2026-10-15` includes
+`maintenance-app-{before,plan,after}.json`, Client ID readback,
+`hosted-unsigned-observed.json` (artifact digests and job/step results), and the
+complete `hosted-unsigned-116715466397.log`. The following ledger-only commit changes
+neither tested source nor workflows; signed dispatch must still resolve its eventual
+protected integration head exactly. PR #138 remains open. App token creation and
+postpublication recreation require their first observed approved run; protected
+signing/migration remain separately unauthorized. No branch recreation, publication
+or signed verification was performed. Overall acceptance remains **OPEN**.
