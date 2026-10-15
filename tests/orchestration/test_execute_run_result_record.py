@@ -12,7 +12,9 @@ from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.errors import NoVideosFoundError
+from frame_compare.orchestration.run_inputs import build_run_request
 from frame_compare.services.run_result_record import read_run_result
+from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
@@ -46,12 +48,12 @@ class AdvancingTimer:
 
 
 def _request(root: Path) -> RunRequest:
-    return RunRequest(
+    return make_run_request(
         root=root,
         skip_analysis=True,
         skip_metadata=True,
         quiet=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
 
 
@@ -180,7 +182,7 @@ def test_failure_uses_monotonic_duration_during_backward_wall_clock_jump(
 
 def test_failure_before_reservation_creates_no_result(tmp_path: Path) -> None:
     with pytest.raises(ConfigNotFoundError):
-        asyncio.run(execute_run(_request(tmp_path)))
+        build_run_request(root=tmp_path)
 
     assert list(tmp_path.rglob("run_result.toml")) == []
 

@@ -14,7 +14,6 @@ from frame_compare.utils.media_facts import PresentationState
 if TYPE_CHECKING:
     import vapoursynth as vs
 
-    from frame_compare.config.overrides import TonemapCliOverrides
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.render.backend.ffmpeg import FFmpegRunner
     from frame_compare.vs.types import SourceInfo, TonemapSettings
@@ -26,12 +25,10 @@ def should_tonemap(source_info: SourceInfo, config: ConfigSchema) -> bool:
     return source_info.is_hdr and config.color.enable_tonemap
 
 
-def resolve_tonemap_settings(
-    config: ConfigSchema, cli_overrides: TonemapCliOverrides | None = None
-) -> TonemapSettings:
+def resolve_tonemap_settings(config: ConfigSchema) -> TonemapSettings:
     from frame_compare.vs.tonemap import get_preset_settings
 
-    preset = (cli_overrides or {}).get("tm_preset") or config.color.preset
+    preset = config.color.preset
     settings = get_preset_settings(preset)
 
     explicit_color_fields = config.color.model_fields_set
@@ -44,14 +41,6 @@ def resolve_tonemap_settings(
         settings = replace(settings, gamma_lift=config.color.gamma_lift)
     if "contrast_recovery" in explicit_color_fields:
         settings = replace(settings, contrast_recovery=config.color.contrast_recovery)
-
-    if cli_overrides:
-        target_val = cli_overrides.get("tm_target")
-        if target_val is not None:
-            settings = replace(settings, target_nits=target_val)
-        curve_val = cli_overrides.get("tm_curve")
-        if curve_val is not None:
-            settings = replace(settings, tone_curve=curve_val)
 
     return settings
 

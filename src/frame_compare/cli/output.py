@@ -30,10 +30,8 @@ from frame_compare.utils.terminal_theme import (
 )
 
 if TYPE_CHECKING:
-    from frame_compare.config.overrides import TonemapCliOverrides
-    from frame_compare.config.schema import ConfigSchema
-    from frame_compare.orchestration.coordinator import RunRequest, RunResult
-    from frame_compare.vs.types import TonemapSettings
+    from frame_compare.orchestration.coordinator import RunResult
+    from frame_compare.orchestration.run_inputs import AcquiredRunConfig
 
 
 STYLE_UNIT = "dim"
@@ -166,36 +164,26 @@ def _add_separator(table: Table) -> None:
     table.add_row("", "")
 
 
-def _resolve_preview_tonemap_settings(config: ConfigSchema, request: RunRequest) -> TonemapSettings:
-    from frame_compare.render.prepare import resolve_tonemap_settings
-
-    overrides: TonemapCliOverrides = {
-        "tm_preset": request.config_overrides.tm_preset,
-        "tm_target": request.config_overrides.tm_target_nits,
-        "tm_curve": request.config_overrides.tm_curve,
-    }
-    return resolve_tonemap_settings(config, overrides)
-
-
 def print_at_a_glance(
     console: Console,
     *,
-    request: RunRequest,
-    config: ConfigSchema,
-    root: Path,
-    config_path: Path,
+    inputs: AcquiredRunConfig,
+    no_cache: bool,
+    from_cache_only: bool,
+    skip_analysis: bool,
+    skip_metadata: bool,
+    no_upload_flag: bool,
     verbose: bool = False,
 ) -> None:
-    from frame_compare.orchestration.preflight import resolve_paths
+    from frame_compare.orchestration.run_inputs import resolve_run_workspace
+    from frame_compare.render.prepare import resolve_tonemap_settings
 
-    workspace = resolve_paths(config, root)
-    overrides = request.config_overrides
-
+    config = inputs.config
+    root, config_path = inputs.root, inputs.config_path
+    workspace = resolve_run_workspace(inputs)
     vsview_status: str | None = None
-    use_vsview = config.audio_alignment.use_vsview or overrides.force_interactive_alignment
-    force_interactive = (
-        config.audio_alignment.force_interactive or overrides.force_interactive_alignment
-    )
+    use_vsview = config.audio_alignment.use_vsview
+    force_interactive = config.audio_alignment.force_interactive
     if use_vsview or force_interactive:
         from frame_compare.vsview.adapter import (
             VSViewAvailabilityStatus,
@@ -220,32 +208,14 @@ def print_at_a_glance(
     else:
         ffmpeg_available = True
     workspace_root = root.resolve()
-    input_path = overrides.input_dir if overrides.input_dir is not None else workspace.input_dir
+    input_path = workspace.input_dir
     analysis = config.analysis
-    user_frames = (
-        overrides.user_frames if overrides.user_frames is not None else analysis.user_frames
-    )
-    random_frame_count = (
-        overrides.random_frame_count
-        if overrides.random_frame_count is not None
-        else analysis.random_frame_count
-    )
-    dark_frame_count = (
-        overrides.dark_frame_count
-        if overrides.dark_frame_count is not None
-        else analysis.dark_frame_count
-    )
-    bright_frame_count = (
-        overrides.bright_frame_count
-        if overrides.bright_frame_count is not None
-        else analysis.bright_frame_count
-    )
-    motion_frame_count = (
-        overrides.motion_frame_count
-        if overrides.motion_frame_count is not None
-        else analysis.motion_frame_count
-    )
-    random_seed = overrides.seed if overrides.seed is not None else analysis.random_seed
+    user_frames = analysis.user_frames
+    random_frame_count = analysis.random_frame_count
+    dark_frame_count = analysis.dark_frame_count
+    bright_frame_count = analysis.bright_frame_count
+    motion_frame_count = analysis.motion_frame_count
+    random_seed = analysis.random_seed
     requested_total = (
         len(user_frames)
         + random_frame_count
@@ -253,19 +223,19 @@ def print_at_a_glance(
         + bright_frame_count
         + motion_frame_count
     )
-    overlay_mode = overrides.overlay_mode or config.screenshots.overlay_mode
+    overlay_mode = config.screenshots.overlay_mode
     tonemap_enabled = config.color.enable_tonemap
     alignment_enabled = config.audio_alignment.enable
-    upload_enabled = config.slowpics.auto_upload and not overrides.no_upload
+    upload_enabled = config.slowpics.auto_upload
     report_confirmed_upload = upload_enabled and config.slowpics.confirm_upload_after_report
     glyphs = glyphs_for_console(console)
 
     source_policy = config.sources.analysis_source.replace("_", " ")
     cache_policy = (
         "cache only"
-        if request.from_cache_only
+        if from_cache_only
         else "refresh current entry"
-        if request.no_cache
+        if no_cache
         else "read and write"
     )
     if analysis.ignore_lead_seconds == 0.0 and analysis.ignore_trail_seconds == 0.0:
@@ -287,7 +257,7 @@ def print_at_a_glance(
             f"active area {_humanize(config.screenshots.active_rect_detection.value).lower()}",
         ]
     )
-    tonemap_settings = _resolve_preview_tonemap_settings(config, request)
+    tonemap_settings = resolve_tonemap_settings(config)
     if not tonemap_enabled:
         tonemap_text = _styled_value("disabled")
     else:
@@ -324,11 +294,9 @@ def print_at_a_glance(
         review_text = _dot_join(["HTML report", "opens when done"])
     else:
         review_text = _styled_value("HTML report")
-    metadata_text = "TMDB lookup" if not request.skip_metadata else "disabled"
+    metadata_text = "TMDB lookup" if not skip_metadata else "disabled"
     if not upload_enabled:
-        publishing_text = _styled_value(
-            "disabled by --no-upload" if overrides.no_upload else "disabled"
-        )
+        publishing_text = _styled_value("disabled by --no-upload" if no_upload_flag else "disabled")
     elif report_confirmed_upload:
         publishing_text = _dot_join(
             [
@@ -390,7 +358,7 @@ def print_at_a_glance(
         f"{_humanize(config.analysis.performance_mode.value).lower()} profile",
         f"{source_policy} source",
     ]
-    if request.skip_analysis:
+    if skip_analysis:
         analysis_parts.append("skipped for this run")
     _add_kv(table, "analysis", _dot_join(analysis_parts))
     _add_kv(table, "cache", _styled_value(cache_policy))

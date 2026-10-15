@@ -13,7 +13,7 @@ from rich.console import Console
 
 from frame_compare.cli.output import print_at_a_glance, print_result_summary
 from frame_compare.config.loader import get_default_config
-from frame_compare.config.overrides import CLIConfigOverrides
+from frame_compare.config.overrides import CLIConfigOverrides, apply_cli_overrides
 from frame_compare.config.schema import AnalysisPerformanceMode, ConfigSchema
 from frame_compare.config.schema_enums import (
     OverlayMode,
@@ -21,7 +21,8 @@ from frame_compare.config.schema_enums import (
     ScreenshotGeometryMode,
     Visibility,
 )
-from frame_compare.orchestration import RunRequest, RunResult
+from frame_compare.orchestration import RunResult
+from frame_compare.orchestration.run_inputs import AcquiredRunConfig
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.run_warnings import RunWarning
 
@@ -122,22 +123,6 @@ def _workspace_path(*parts: str) -> Path:
     return Path(os.path.sep, "workspace", *parts)
 
 
-def _request(
-    *,
-    no_upload: bool = False,
-    skip_analysis: bool = False,
-    no_cache: bool = False,
-    from_cache_only: bool = False,
-) -> RunRequest:
-    return RunRequest(
-        root=_workspace_path(),
-        skip_analysis=skip_analysis,
-        no_cache=no_cache,
-        from_cache_only=from_cache_only,
-        config_overrides=CLIConfigOverrides(no_upload=no_upload),
-    )
-
-
 def _missing_executable(_name: str) -> str:
     raise FileNotFoundError(_name)
 
@@ -170,10 +155,16 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(
 
     print_at_a_glance(
         console,
-        request=_request(no_upload=True, no_cache=no_cache, from_cache_only=from_cache_only),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=True)),
+        ),
+        no_cache=no_cache,
+        from_cache_only=from_cache_only,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=True,
     )
 
     output = _render(console)
@@ -209,10 +200,16 @@ def test_run_plan_reports_auto_renderer_when_ffmpeg_is_not_forced(
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=_config(),
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(_config(), CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -237,10 +234,16 @@ def test_at_a_glance_reports_non_executable_ffmpeg_override_as_unavailable(
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=_config(),
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(_config(), CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     assert "(unavailable)" in _rendered_row_value(_render(console), "tools")
@@ -256,10 +259,16 @@ def test_at_a_glance_marks_ffmpeg_audio_disabled_in_tools_row(
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -289,10 +298,16 @@ def test_at_a_glance_prints_previous_offsets_effective_mode(
 
         print_at_a_glance(
             console,
-            request=_request(),
-            config=config,
-            root=_workspace_path(),
-            config_path=_workspace_path("config", "config.toml"),
+            inputs=AcquiredRunConfig(
+                _workspace_path(),
+                _workspace_path("config", "config.toml"),
+                apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+            ),
+            no_cache=False,
+            from_cache_only=False,
+            skip_analysis=False,
+            skip_metadata=False,
+            no_upload_flag=False,
         )
 
         output = _render(console)
@@ -310,10 +325,16 @@ def test_at_a_glance_marks_analysis_mode_skipped_for_this_run(
 
     print_at_a_glance(
         console,
-        request=_request(skip_analysis=True),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=True,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     analysis_mode_row = _rendered_row_value(_render(console), "analysis")
@@ -333,16 +354,22 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=_workspace_path("[root]"),
-        config_path=_workspace_path("config", "[file].toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path("[root]"),
+            _workspace_path("[root]", "config", "[file].toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
     assert "root" in output
     assert str(_workspace_path("[root]")) in output
-    assert str(_workspace_path("config", "[file].toml")) in output
+    assert "config/[file].toml" in output
     assert "[bold]input[end]" in output
     assert "[cyan]generated[end]" in output
 
@@ -367,10 +394,16 @@ def test_at_a_glance_prints_vsview_availability_when_probe_succeeds(
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -407,10 +440,16 @@ def test_at_a_glance_prints_vsview_probe_failure(monkeypatch: MonkeyPatch) -> No
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -463,10 +502,16 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -495,10 +540,16 @@ def test_run_plan_preserves_output_hierarchy(monkeypatch: MonkeyPatch) -> None:
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=_config(),
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(_config(), CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -533,10 +584,16 @@ def test_run_plan_no_color_uses_native_wrapping_without_truncation(
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=root,
-        config_path=root / "config" / "config.toml",
+        inputs=AcquiredRunConfig(
+            root,
+            root / "config" / "config.toml",
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -558,10 +615,16 @@ def test_run_plan_wraps_complete_key_labels_at_very_narrow_width(
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=_config(),
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(_config(), CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     compact_output = "".join(_render(console).replace("│", "").split())
@@ -674,10 +737,16 @@ def test_verbose_run_plan_path_presentation_adds_absolute_detail(
     console = _console()
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=root,
-        config_path=root / "config" / "config.toml",
+        inputs=AcquiredRunConfig(
+            root,
+            root / "config" / "config.toml",
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
         verbose=True,
     )
 

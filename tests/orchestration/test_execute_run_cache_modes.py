@@ -23,9 +23,10 @@ from frame_compare.config.loader import load_config
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.orchestration import phase_selection
-from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.orchestration.execution_types import PublishPhaseOutput
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
@@ -126,12 +127,12 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
         encoding="utf-8",
     )
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         no_cache=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
 
     def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
@@ -179,12 +180,12 @@ def test_execute_run_from_cache_only_fails_when_probe_cache_missing(
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
@@ -276,7 +277,7 @@ def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
     monkeypatch.setattr(phase_selection, "calculate_metrics", _unexpected_compute)
     monkeypatch.setattr("frame_compare.orchestration.execution.run_publish_phase", _publish)
     runner = FakeFFmpegRunner()
-    request = RunRequest(root=tmp_path, from_cache_only=True, skip_metadata=True)
+    request = make_run_request(root=tmp_path, from_cache_only=True, skip_metadata=True)
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=runner)
 
     if second_read == "valid":
@@ -328,10 +329,10 @@ def test_execute_run_optional_analysis_failure_retains_initial_frame_plan(
     runner = FakeFFmpegRunner()
     result = asyncio.run(
         execute_run(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=runner),
         )
@@ -375,12 +376,12 @@ def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
         config=quality_config,
     )
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -439,12 +440,12 @@ def test_execute_run_from_cache_only_uses_scoped_cache(
         video_paths=paths,
         analysis_source_path=input_dir / analysis_filename,
     )
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     diagnostics_by_stage: dict[str, list[str]] = {}
 
@@ -521,12 +522,12 @@ enable = false
     )
     full_frame_cache_path.write_text("{}", encoding="utf-8")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
@@ -581,12 +582,12 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
     }
     cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
@@ -607,12 +608,12 @@ def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "a_source.mkv", "b_comp.mkv")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 

@@ -4,20 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict, cast
-
-from pydantic import BaseModel
+from typing import cast
 
 from frame_compare.config.loader import validate_raw_config_payload
 from frame_compare.config.persistence import dump_config_with_explicit_color
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.config.utils import deep_merge
-
-
-class TonemapCliOverrides(TypedDict, total=False):
-    tm_preset: TonemapPreset | None
-    tm_target: int | None
-    tm_curve: ToneCurve | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,34 +89,7 @@ def apply_cli_overrides(
 
     updated = validate_raw_config_payload(merged, redact_inputs=False)
 
-    _restore_explicit_fields(updated, config, overrides)
     return updated
-
-
-def _restore_explicit_fields(
-    updated: BaseModel,
-    original: BaseModel,
-    overrides: dict[str, object],
-) -> None:
-    """Preserve which nested config fields were explicitly supplied."""
-    _replace_model_fields_set(updated, original.model_fields_set | set(overrides))
-    for key in type(updated).model_fields:
-        updated_child = getattr(updated, key, None)
-        original_child = getattr(original, key, None)
-        if isinstance(updated_child, BaseModel) and isinstance(original_child, BaseModel):
-            value = overrides.get(key, {})
-            if isinstance(value, dict):
-                _restore_explicit_fields(
-                    updated_child, original_child, cast(dict[str, object], value)
-                )
-            else:
-                _replace_model_fields_set(updated_child, original_child.model_fields_set)
-
-
-def _replace_model_fields_set(model: BaseModel, fields: set[str]) -> None:
-    fields_set = model.model_fields_set
-    fields_set.clear()
-    fields_set.update(fields)
 
 
 def _cli_override_values(cli_args: CLIConfigOverrides) -> dict[str, object]:

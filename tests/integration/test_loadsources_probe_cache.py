@@ -12,7 +12,7 @@ from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import RuntimeConfig
-from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.render.prepare import prepare_clip_for_render
 from frame_compare.utils.subproc import run_subprocess
@@ -20,6 +20,7 @@ from frame_compare.vs.env import detect_plugins, ensure_vs_environment
 from frame_compare.vs.errors import VapourSynthError, VapourSynthNotFoundError
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.types import SourceInfo
+from tests.run_request_support import make_run_request
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -99,12 +100,12 @@ async def test_loadsources_writes_clip_probe_cache_file(
     _write_minimal_config(workspace_root)
     input_videos = _prepare_workspace(workspace_root, mock_video_path)
 
-    request = RunRequest(
+    request = make_run_request(
         root=workspace_root,
         quiet=True,
         skip_analysis=True,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=DefaultVSLoader())
     result = await execute_run(request, deps=deps)
@@ -140,12 +141,12 @@ async def test_loadsources_reuses_clip_probe_cache_file(
     _write_minimal_config(workspace_root)
     _prepare_workspace(workspace_root, mock_video_path)
 
-    request = RunRequest(
+    request = make_run_request(
         root=workspace_root,
         quiet=True,
         skip_analysis=True,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=DefaultVSLoader())
     result = await execute_run(request, deps=deps)
@@ -220,11 +221,11 @@ def test_configured_run_uses_shared_real_loader(
     try:
         result = asyncio.run(
             execute_run(
-                RunRequest(
+                make_run_request(
                     root=tmp_path,
                     skip_metadata=True,
                     quiet=True,
-                    config_overrides=CLIConfigOverrides(no_upload=True),
+                    overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 RunDependencies(vs_loader=injected_loader),
             )

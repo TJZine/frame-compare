@@ -24,6 +24,7 @@ from frame_compare.config.errors import (
     ConfigValidationError,
 )
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.schema_sources import EnvironmentSettingsSource
 from frame_compare.errors import normalize_pydantic_errors
 from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
@@ -123,15 +124,40 @@ def load_config(
             {"model_config": SettingsConfigDict(**new_config_dict)},
         )
 
+    return _load_settings(settings_cls, merged_overrides, source_path)
+
+
+def load_environment_config() -> ConfigSchema:
+    """Load defaults and the normal environment chain without any TOML lookup."""
+    settings_cls = _toml_suppressed_settings_schema(
+        "EnvironmentOnlySchema", _environment_settings_sources
+    )
+    return _load_settings(settings_cls, {}, Path("config/config.toml"))
+
+
+def _environment_settings_sources(
+    cls: type[BaseSettings],
+    settings_cls: type[BaseSettings],
+    init_settings: PydanticBaseSettingsSource,
+    env_settings: PydanticBaseSettingsSource,
+    dotenv_settings: PydanticBaseSettingsSource,
+    file_secret_settings: PydanticBaseSettingsSource,
+) -> tuple[PydanticBaseSettingsSource, ...]:
+    return init_settings, EnvironmentSettingsSource(settings_cls), file_secret_settings
+
+
+def _load_settings(
+    settings_cls: type[ConfigSchema], overrides: dict[str, object], source_path: Path
+) -> ConfigSchema:
     try:
         # Pydantic validates inputs at runtime, so we cast to Any to bypass static checks
         # on kwargs unpacking.
-        return settings_cls(**cast(Any, merged_overrides))
+        return settings_cls(**cast(Any, overrides))
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigParseError(config_path or Path("config/config.toml"), str(exc)) from None
+        raise ConfigParseError(source_path, str(exc)) from None
     except UnicodeDecodeError:
         raise ConfigParseError(
-            config_path or Path("config/config.toml"),
+            source_path,
             "configuration is not valid UTF-8",
         ) from None
     except SettingsError:

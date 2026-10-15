@@ -477,12 +477,14 @@ def _quote_powershell(value: str) -> str:
     return f"'{escaped}'"
 
 
-def _format_suggested_run_command(
-    root: Path, config_path: Path, *, is_windows: bool, dry_run: bool
+def _format_suggested_command(
+    root: Path, config_path: Path, *, command: str, is_windows: bool, dry_run: bool = False
 ) -> str:
-    """Build one never-executed ``run`` suggestion pinned to this exact workspace/config."""
+    """Build one never-executed suggestion pinned to this exact workspace/config."""
     quote = _quote_powershell if is_windows else shlex.quote
-    command = f"frame-compare run --root {quote(str(root))} --config {quote(str(config_path))}"
+    command = (
+        f"frame-compare {command} --root {quote(str(root))} --config {quote(str(config_path))}"
+    )
     if dry_run:
         command += " --dry-run"
     return command
@@ -491,13 +493,14 @@ def _format_suggested_run_command(
 def _print_next_steps(*, root: Path, config_path: Path, is_windows: bool, no_color: bool) -> None:
     """Suggest the verified diagnose/preview/execute commands for this exact selection."""
     _print_heading("Next steps:", err=True, no_color=no_color)
-    typer.echo("  1. Diagnose the runtime: frame-compare doctor", err=True)
-    preview_command = _format_suggested_run_command(
-        root, config_path, is_windows=is_windows, dry_run=True
+    preview_command = _format_suggested_command(
+        root, config_path, command="run", is_windows=is_windows, dry_run=True
     )
-    run_command = _format_suggested_run_command(
-        root, config_path, is_windows=is_windows, dry_run=False
+    run_command = _format_suggested_command(root, config_path, command="run", is_windows=is_windows)
+    doctor_command = _format_suggested_command(
+        root, config_path, command="doctor", is_windows=is_windows
     )
+    typer.echo(f"  1. Diagnose the runtime: {doctor_command}", err=True)
     typer.echo(f"  2. Preview this configuration (dry run): {preview_command}", err=True)
     typer.echo(f"  3. Run it: {run_command}", err=True)
     typer.echo(

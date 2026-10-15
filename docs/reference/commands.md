@@ -28,9 +28,9 @@ For exact output streams and JSON fields, see the
 the config file; relative paths resolve from `--root`, and the default is
 `config/config.toml`.
 
-`run`, `wizard`, `preset apply`, `preset save`, `history list`, and `history open`
+`run`, `doctor`, `wizard`, `preset apply`, `preset save`, `history list`, and `history open`
 accept both options. `preset list` accepts `--config` but ignores it and reads
-presets from `<root>/config/presets`. `doctor` and `version` accept neither option.
+presets from `<root>/config/presets`. `version` accepts neither option.
 
 The installed Windows shim supplies the bundle or AppData config when you omit
 `--config`; see the contract's [shared path rules](../current-cli-contract.md#shared-path-resolution-rules).
@@ -296,6 +296,13 @@ commands. See
 [Your first comparison](../getting-started/first-comparison.md).
 
 ## Doctor
+
+`--root`/`-r` and `--config`/`-c` select the same configuration as `run`.
+The root defaults to `.`; doctor does not search parent directories. The installed
+Windows shim injects its selected bundle or AppData config for doctor too.
+An absent default config uses defaults and environment; an explicit config load
+failure appears in the TMDB diagnostic. Invalid or escaping paths fail through the
+normal typed command error.
 
 Doctor checks VapourSynth, L-SMASH-Works, vs-placebo, FFMS2, FFmpeg/ffprobe, and
 VSView. Its TMDB check validates local configuration and credential format only.

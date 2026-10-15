@@ -12,7 +12,7 @@ import pytest
 from frame_compare.config.loader import load_config
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import phase_alignment, phase_post_render
-from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
     RunArtifacts,
@@ -28,6 +28,7 @@ from frame_compare.services.types import (
     AlignmentResult,
     TmdbMetadata,
 )
+from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
@@ -108,11 +109,11 @@ enable = false
 
     ffmpeg = FakeFFmpegRunner()
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg)
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(random_frame_count=3, no_upload=True),
+        overrides=CLIConfigOverrides(random_frame_count=3, no_upload=True),
     )
 
     result = asyncio.run(execute_run(request, deps=deps))
@@ -164,11 +165,11 @@ enable = false
     with pytest.raises(AudioAlignmentError) as raised:
         asyncio.run(
             execute_run(
-                RunRequest(
+                make_run_request(
                     root=tmp_path,
                     skip_analysis=True,
                     skip_metadata=True,
-                    config_overrides=CLIConfigOverrides(random_frame_count=1, no_upload=True),
+                    overrides=CLIConfigOverrides(random_frame_count=1, no_upload=True),
                 ),
                 deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg),
             )
@@ -225,11 +226,11 @@ enable = true
 
     result = asyncio.run(
         execute_run(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(random_frame_count=1),
+                overrides=CLIConfigOverrides(random_frame_count=1),
             ),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),

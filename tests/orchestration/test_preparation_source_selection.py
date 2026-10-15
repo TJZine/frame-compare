@@ -16,7 +16,7 @@ from frame_compare.orchestration.errors import (
     DuplicateSourceStemError,
     SourceSelectionError,
 )
-from frame_compare.orchestration.types import RunDependencies, RunRequest
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.vs.types import SourceInfo
 from tests.orchestration.preparation_test_support import (
     METRIC_CONFIG,
@@ -29,6 +29,7 @@ from tests.orchestration.preparation_test_support import (
 from tests.orchestration.preparation_test_support import (
     create_video_files as _create_video_files,
 )
+from tests.run_request_support import make_run_request
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -83,7 +84,7 @@ label = "Same"
     with pytest.raises(SourceSelectionError, match="duplicate explicit source label"):
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, FailIfLoaded())),
             )
         )
@@ -104,7 +105,7 @@ def test_execute_prep_preserves_deterministic_four_clip_order_and_labels(tmp_pat
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
@@ -138,7 +139,7 @@ def test_execute_prep_explicit_reference_moves_selected_source_to_front(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
@@ -159,7 +160,7 @@ def test_execute_prep_reference_auto_behaves_like_omitted_reference(tmp_path: Pa
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
@@ -180,7 +181,7 @@ def test_execute_prep_analysis_source_reference_selects_selected_reference(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
@@ -204,7 +205,7 @@ analysis_source = "02-analysis.mkv"
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
@@ -226,7 +227,7 @@ def test_execute_prep_analysis_selection_domain_differs_by_analysis_source(
     _create_config(tmp_path, content=METRIC_CONFIG)
     reference_prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
@@ -237,7 +238,7 @@ def test_execute_prep_analysis_selection_domain_differs_by_analysis_source(
     )
     configured_prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
@@ -267,7 +268,7 @@ def test_execute_prep_invalid_analysis_source_selector_fails_when_metrics_requir
     with pytest.raises(SourceSelectionError) as exc_info:
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
             )
         )
@@ -286,7 +287,7 @@ def test_execute_prep_invalid_analysis_source_selector_is_ignored_when_analysis_
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
@@ -310,7 +311,7 @@ def test_execute_prep_applies_source_trim_and_active_rect_overrides(tmp_path: Pa
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
@@ -342,7 +343,7 @@ def test_execute_prep_reference_source_trims_constrain_effective_frame_domain(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
@@ -365,7 +366,7 @@ def test_execute_prep_rejects_source_trims_that_remove_every_frame(tmp_path: Pat
     with pytest.raises(SourceSelectionError, match="source trims remove every frame"):
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
             )
         )
@@ -380,7 +381,7 @@ def test_execute_prep_rejects_duplicate_source_stems_before_probe(tmp_path: Path
     with pytest.raises(DuplicateSourceStemError):
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, loader)),
             )
         )

@@ -30,11 +30,12 @@ from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration import phase_selection, preparation
-from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.services.alignment_manual_overrides import MANUAL_OVERRIDES_FILE
 from frame_compare.services.run_folder import RunFolderReservation, reserve_run_folder
 from frame_compare.vs.types import SourceInfo
+from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
@@ -131,12 +132,12 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     manual_overrides_path = run_generated_dir / MANUAL_OVERRIDES_FILE
     manual_overrides_path.write_text('version = "1"\n', encoding="utf-8")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         no_cache=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
 
     def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
@@ -177,12 +178,12 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_probe_cach
     run_name = _reserve_expected_source_run_name(tmp_path)
     run_dir = tmp_path / "generated" / run_name
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
@@ -204,12 +205,12 @@ def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
     cache_dir = tmp_path / "generated" / "cache" / "analysis"
     write_metrics_cache(cache_dir, source_path=source_path, config=config)
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -236,11 +237,11 @@ def test_execute_prep_external_input_reserves_outputs_only_under_generated(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(
+            make_run_request(
                 root=root,
                 skip_analysis=True,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(input_dir=external_input, no_upload=True),
+                overrides=CLIConfigOverrides(input_dir=external_input, no_upload=True),
             ),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),
@@ -273,11 +274,11 @@ def test_execute_prep_creates_missing_generated_root_only_during_reservation(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
@@ -304,11 +305,11 @@ def test_execute_prep_external_generated_root_owns_run_and_shared_state(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
@@ -360,11 +361,11 @@ def test_execute_prep_reserves_under_resolved_generated_root_symlink(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
@@ -404,11 +405,11 @@ def test_execute_prep_rejects_junctioned_reserved_run_directory(
     with pytest.raises(PathEscapesRootError):
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(
+                make_run_request(
                     root=tmp_path,
                     skip_analysis=True,
                     skip_metadata=True,
-                    config_overrides=CLIConfigOverrides(no_upload=True),
+                    overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 deps=RunDependencies(vs_loader=FakeVSLoader()),
             )
@@ -515,11 +516,11 @@ enable = false
 
     first = asyncio.run(
         execute_run(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_analysis=False,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(
                 vs_loader=AnalysisCapableVSLoader(),
@@ -543,12 +544,12 @@ enable = false
 
     second = asyncio.run(
         execute_run(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 from_cache_only=True,
                 skip_analysis=False,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(
                 vs_loader=AnalysisCapableVSLoader(),
@@ -593,12 +594,12 @@ def test_execute_run_cache_only_run_folder_probe_snapshot_excludes_unrelated_sha
 
     result = asyncio.run(
         execute_run(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 from_cache_only=True,
                 skip_analysis=False,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(
                 vs_loader=AnalysisCapableVSLoader(),
@@ -634,11 +635,11 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
         config=config,
     )
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -671,12 +672,12 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
     config = load_config(tmp_path / "config" / "config.toml")
     write_metrics_cache(run_generated_dir / "cache", source_path=source_path, config=config)
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 

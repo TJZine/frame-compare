@@ -26,6 +26,7 @@ from tests.alignment_review_test_support import (
     unavailable_audio_attempt,
 )
 from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
+from tests.run_request_support import make_run_request
 from tests.services.alignment_resolution_test_support import save_resolutions
 
 
@@ -380,7 +381,6 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
     )
     from frame_compare.orchestration.execution_types import ExecutionState, MetadataPrefetch
     from frame_compare.orchestration.phases import PhaseStatus, execute_phases
-    from frame_compare.orchestration.types import RunRequest
     from frame_compare.services import alignment_audio
     from frame_compare.services.errors import AlignmentSourceIdentityError
     from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
@@ -446,8 +446,11 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
 
     monkeypatch.setattr(alignment_audio, "probe_streams", unavailable_probe)
     state = ExecutionState(selected_frames=[0, 1, 2])
-    request = RunRequest(
-        root=tmp_path, skip_metadata=True, config_overrides=CLIConfigOverrides(no_upload=True)
+    request = make_run_request(
+        root=tmp_path,
+        config=ctx.config,
+        skip_metadata=True,
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     align = build_phases_before_align(
         request=request,

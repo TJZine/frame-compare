@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -23,7 +22,6 @@ from frame_compare.cli.output import (
     print_at_a_glance,
     print_result_summary,
 )
-from frame_compare.config.effective import load_effective_config
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import (
@@ -34,9 +32,11 @@ from frame_compare.config.schema import (
     Visibility,
 )
 from frame_compare.errors import FrameCompareError
-from frame_compare.orchestration.preflight import (
-    resolve_selected_config_path,
-    validate_and_normalize_config_paths,
+from frame_compare.orchestration.run_inputs import (
+    AcquiredRunConfig,
+    acquire_run_config,
+    refresh_report_auto_open_preference,
+    select_run_config_path,
 )
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
 from frame_compare.utils.run_warnings import RunWarning
@@ -64,8 +64,6 @@ if TYPE_CHECKING:
         SlowpicsUploadConfirmationFn,
         SlowpicsUploadConfirmationRequest,
     )
-
-type EffectiveConfigLoader = Callable[[], ConfigSchema]
 
 
 class RunnerLike(Protocol):
@@ -203,14 +201,12 @@ class RunCliOptions:
     verbose: bool
 
 
-def build_run_request_from_cli(options: RunCliOptions) -> RunRequest:
+def build_run_request_from_cli(options: RunCliOptions, inputs: AcquiredRunConfig) -> RunRequest:
     """Build the single CLI-to-runtime request mapping used by run branches."""
     from frame_compare.orchestration.coordinator import RunRequest
 
     return RunRequest(
-        root=options.root,
-        config_path=options.config_path,
-        config_overrides=options.config_overrides,
+        inputs=inputs,
         no_cache=options.no_cache,
         from_cache_only=options.from_cache_only,
         skip_analysis=options.skip_analysis,
@@ -260,56 +256,49 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
     )
 
     try:
-        resolve_selected_config_path(args.config_path, args.resolved_root)
+        select_run_config_path(args.config_path, args.resolved_root)
         run_options = parse_run_options(args, no_color=effective_no_color)
-        resolve_effective_config, load_effective_config = build_effective_config_loaders(
-            args,
-            deps,
-            run_options,
+        inputs = acquire_run_config(
+            root=args.resolved_root,
+            config_path=args.config_path,
+            overrides=run_options.config_overrides,
+            load_config_fn=deps.load_config,
         )
-
-        effective_config = load_effective_config()
-        normalized_config = validate_and_normalize_config_paths(
-            effective_config,
-            args.resolved_root,
-        )
+        config = inputs.config
         validate_dry_run_mode_contract(args)
         if args.dry_run:
-            validate_run_contracts(args, deps, normalized_config)
+            validate_run_contracts(args, deps, config)
             validate_cache_flag_contract(args)
-            handle_dry_run(args, normalized_config, console)
+            handle_dry_run(args, config, console)
             return
 
         log_level = (
-            "WARNING"
-            if args.quiet
-            else ("DEBUG" if args.verbose else normalized_config.logging.level.value)
+            "WARNING" if args.quiet else ("DEBUG" if args.verbose else config.logging.level.value)
         )
-        log_format = "json" if args.json_output else normalized_config.logging.format.value
+        log_format = "json" if args.json_output else config.logging.format.value
         deps.configure_logging(level=log_level, log_format=log_format)
 
         if args.diagnose_paths:
-            handle_diagnose_paths(args.resolved_root, args.config_path, normalized_config)
+            handle_diagnose_paths(inputs.root, inputs.config_path, inputs.config)
             return
 
         if args.write_config:
-            validate_write_config_contracts(effective_config)
-            deps.write_config_to(args.config_path, effective_config)
+            validate_write_config_contracts(config)
+            deps.write_config_to(inputs.config_path, inputs.config)
             return
 
-        validate_run_contracts(args, deps, normalized_config)
+        validate_run_contracts(args, deps, config)
         validate_cache_flag_contract(args)
-        request = build_run_request_from_cli(run_options)
+        request = build_run_request_from_cli(run_options, inputs)
 
         if not args.json_output and not args.quiet:
-            print_run_preview(console, args, request, load_effective_config)
+            print_run_preview(console, args, inputs)
 
         run_dependencies = build_runner_dependencies(
             args=args,
             deps=deps,
-            config=normalized_config,
             console=console,
-            resolve_effective_config=resolve_effective_config,
+            inputs=inputs,
         )
         result = deps.runner.run(request, dependencies=run_dependencies)
     except FrameCompareError as error:
@@ -333,7 +322,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         result,
         args=args,
         deps=deps,
-        config=load_effective_config(),
+        config=inputs.config,
     )
     print_result_summary(
         console,
@@ -347,10 +336,10 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         result,
         args=args,
         deps=deps,
-        resolve_effective_config=resolve_effective_config,
+        inputs=inputs,
         suppress_report_open=(
             slowpics_browser_open_attempted(post_upload_actions)
-            or report_confirmed_slowpics_enabled(load_effective_config())
+            or report_confirmed_slowpics_enabled(inputs.config)
         ),
     )
 
@@ -359,16 +348,16 @@ def build_runner_dependencies(
     *,
     args: RunCliRawArgs,
     deps: RunCommandDeps,
-    config: ConfigSchema,
     console: Console,
-    resolve_effective_config: EffectiveConfigLoader,
+    inputs: AcquiredRunConfig,
 ) -> RunDependencies | None:
+    config = inputs.config
     confirm_slowpics_upload = (
         build_confirm_slowpics_upload_callback(
             args=args,
             deps=deps,
             console=console,
-            resolve_effective_config=resolve_effective_config,
+            inputs=inputs,
             visibility=config.slowpics.visibility,
         )
         if report_confirmed_slowpics_enabled(config)
@@ -430,7 +419,7 @@ def build_confirm_slowpics_upload_callback(
     args: RunCliRawArgs,
     deps: RunCommandDeps,
     console: Console,
-    resolve_effective_config: EffectiveConfigLoader,
+    inputs: AcquiredRunConfig,
     visibility: Visibility,
 ) -> SlowpicsUploadConfirmationFn:
     visibility_text = visibility.value
@@ -442,7 +431,7 @@ def build_confirm_slowpics_upload_callback(
             request.report_path,
             args=args,
             deps=deps,
-            resolve_effective_config=resolve_effective_config,
+            inputs=inputs,
         )
         details = Table.grid(padding=(0, 2))
         details.add_column(style="dim", no_wrap=True)
@@ -622,29 +611,6 @@ def _frame_selection_cli_error(
     )
 
 
-def build_effective_config_loaders(
-    args: RunCliRawArgs,
-    deps: RunCommandDeps,
-    options: RunCliOptions,
-) -> tuple[EffectiveConfigLoader, EffectiveConfigLoader]:
-    resolved_config: ConfigSchema | None = None
-
-    def _resolve_effective_config() -> ConfigSchema:
-        return load_effective_config(
-            args.config_path,
-            cli_overrides=options.config_overrides,
-            load_config_fn=deps.load_config,
-        )
-
-    def _load_effective_config() -> ConfigSchema:
-        nonlocal resolved_config
-        if resolved_config is None:
-            resolved_config = _resolve_effective_config()
-        return resolved_config
-
-    return _resolve_effective_config, _load_effective_config
-
-
 def handle_dry_run(args: RunCliRawArgs, config: ConfigSchema, console: Console) -> None:
     """Build and render the CLI-owned plan before runtime request construction."""
     from frame_compare.cli.dry_run import (
@@ -664,18 +630,15 @@ def handle_dry_run(args: RunCliRawArgs, config: ConfigSchema, console: Console) 
     print_dry_run_plan(console, plan, quiet=args.quiet)
 
 
-def print_run_preview(
-    console: Console,
-    args: RunCliRawArgs,
-    request: RunRequest,
-    load_effective_config: EffectiveConfigLoader,
-) -> None:
+def print_run_preview(console: Console, args: RunCliRawArgs, inputs: AcquiredRunConfig) -> None:
     print_at_a_glance(
         console,
-        request=request,
-        config=load_effective_config(),
-        root=args.resolved_root,
-        config_path=args.config_path,
+        inputs=inputs,
+        no_cache=args.no_cache,
+        from_cache_only=args.from_cache_only,
+        skip_analysis=args.skip_analysis,
+        skip_metadata=args.skip_metadata,
+        no_upload_flag=args.no_upload,
         verbose=args.verbose,
     )
 
@@ -698,7 +661,7 @@ def maybe_open_run_report(
     *,
     args: RunCliRawArgs,
     deps: RunCommandDeps,
-    resolve_effective_config: EffectiveConfigLoader,
+    inputs: AcquiredRunConfig,
     suppress_report_open: bool = False,
 ) -> bool:
     if result.report_path is None:
@@ -707,7 +670,7 @@ def maybe_open_run_report(
         result.report_path,
         args=args,
         deps=deps,
-        resolve_effective_config=resolve_effective_config,
+        inputs=inputs,
         suppress_report_open=suppress_report_open,
     )
 
@@ -717,20 +680,14 @@ def maybe_open_report_path(
     *,
     args: RunCliRawArgs,
     deps: RunCommandDeps,
-    resolve_effective_config: EffectiveConfigLoader,
+    inputs: AcquiredRunConfig,
     suppress_report_open: bool = False,
 ) -> bool:
     if suppress_report_open or args.json_output or args.quiet or not deps.stdout_is_tty:
         return False
 
-    try:
-        cfg = resolve_effective_config()
-    except FrameCompareError:
-        # Default to opening when config cannot be reloaded so successful runs
-        # still surface the generated report in interactive sessions.
-        cfg = None
-
-    if cfg is None or cfg.report.auto_open:
+    auto_open = refresh_report_auto_open_preference(inputs, load_config_fn=deps.load_config)
+    if auto_open is None or auto_open:
         return deps.open_report(report_path)
     return False
 

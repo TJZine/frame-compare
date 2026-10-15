@@ -139,4 +139,7 @@ def test_apply_cli_overrides_preserves_implicit_color_target_for_unrelated_overr
     new_config = apply_cli_overrides(config, CLIConfigOverrides(random_frame_count=12))
 
     assert new_config.analysis.random_frame_count == 12
-    assert new_config.color.model_fields_set == {"preset"}
+    assert not (
+        {"target_nits", "tone_curve", "gamma_lift", "contrast_recovery"}
+        & new_config.color.model_fields_set
+    )

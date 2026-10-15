@@ -24,7 +24,6 @@ from frame_compare.orchestration.execution_types import (
 )
 from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.types import (
-    RunRequest,
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
@@ -51,6 +50,7 @@ from tests.orchestration.phase_task_helpers import (
     _render_artifacts,
     _RenderRunner,
 )
+from tests.run_request_support import make_run_request
 
 
 class _RecordingProgressReporter(NullProgressReporter):
@@ -672,7 +672,7 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
 
     async with httpx.AsyncClient() as client:
         phases = build_phases_after_align(
-            request=RunRequest(root=tmp_path),
+            request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
             http_client=client,
@@ -731,7 +731,7 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
 
     async with httpx.AsyncClient() as client:
         phases = build_phases_after_align(
-            request=RunRequest(root=tmp_path),
+            request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
             http_client=client,
@@ -787,7 +787,7 @@ async def test_report_confirmed_report_payload_uses_no_slowpics_url(
     )
 
     phases = build_phases_after_align(
-        request=RunRequest(root=tmp_path),
+        request=make_run_request(root=tmp_path),
         monotonic_timer=lambda: 0.0,
         ffmpeg_runner=cast(Any, _RenderRunner()),
         http_client=None,
@@ -935,7 +935,7 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
     )
     async with httpx.AsyncClient() as client:
         phases = build_phases_after_align(
-            request=RunRequest(root=tmp_path),
+            request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
             http_client=client,

@@ -11,10 +11,6 @@ import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import MetricCacheRequest
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.effective import (
-    build_preflight_input_dir_override,
-    resolve_effective_config,
-)
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
@@ -40,6 +36,7 @@ from frame_compare.orchestration.context import (
     ClipState,
 )
 from frame_compare.orchestration.errors import (
+    DirectoryNotFoundError,
     FastestAnalysisSourceCacheOnlyError,
     MixedSourceFpsError,
 )
@@ -50,7 +47,7 @@ from frame_compare.orchestration.execution_types import (
 )
 from frame_compare.orchestration.full_window_retry import compute_selection_window_with_recovery
 from frame_compare.orchestration.phase_post_render import resolve_run_metadata
-from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
+from frame_compare.orchestration.preflight import discover_inputs
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
     load_clip_probe_cache,
@@ -61,6 +58,7 @@ from frame_compare.orchestration.probing.probe_props import (
     compute_preserved_frame_props,
     compute_tonemap_prop_keys,
 )
+from frame_compare.orchestration.run_inputs import resolve_run_workspace
 from frame_compare.orchestration.selection_domain import (
     build_analysis_selection_domain_token,
     build_selection_domain_clips_with_diagnostics,
@@ -538,16 +536,13 @@ async def execute_prep(
         from_cache_only=request.from_cache_only,
     )
 
-    preflight = prepare_preflight(
-        root=request.root,
-        config_path=request.config_path,
-        overrides=build_preflight_input_dir_override(request.config_overrides.input_dir),
-    )
+    workspace = resolve_run_workspace(request.inputs)
+    config = request.inputs.config
+    if not workspace.input_dir.exists():
+        raise DirectoryNotFoundError(workspace.input_dir)
     preflight_duration = max(0.0, deps.monotonic_timer() - preflight_start)
 
     load_sources_start = deps.monotonic_timer()
-    workspace = preflight.workspace
-    config = resolve_effective_config(preflight.config, request.config_overrides)
     if deps.vs_loader is None:
         from frame_compare.vs.loader import DefaultVSLoader
 
@@ -673,7 +668,7 @@ async def execute_prep(
         input_videos=input_videos,
         deps=deps,
         preflight_duration=preflight_duration,
-        preflight_warnings=list(preflight.warnings),
+        preflight_warnings=[],
         run_warnings=artifacts.warnings,
     )
 
@@ -766,7 +761,7 @@ async def execute_prep(
         clips=clips,
         artifacts=artifacts,
         metadata_prefetch=metadata_prefetch,
-        preflight_warnings=[*preflight.warnings, *source_warnings],
+        preflight_warnings=list(source_warnings),
         preflight_duration=preflight_duration,
         load_sources_start=load_sources_start,
         load_source_diagnostics=load_source_diagnostics,

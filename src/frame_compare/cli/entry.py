@@ -44,6 +44,7 @@ from frame_compare.cli.wizard_command import (
 from frame_compare.config.loader import TomlPayload, load_config
 from frame_compare.config.presets import apply_preset, list_presets, save_preset
 from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset
+from frame_compare.orchestration.doctor_types import DoctorConfigSelection
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging
 from frame_compare.utils.terminal import no_color_requested, stream_is_tty
@@ -72,12 +73,14 @@ runner = _RunnerProxy()
 
 
 def run_doctor(
-    checks: list[DoctorCheck] | None = None, reporter: ProgressReporter | None = None
+    checks: list[DoctorCheck] | None = None,
+    reporter: ProgressReporter | None = None,
+    selection: DoctorConfigSelection | None = None,
 ) -> DoctorReport:
     """Lazy doctor entry point to keep CLI import VS-independent."""
     from frame_compare.orchestration.doctor import run_doctor as runtime_run_doctor
 
-    return runtime_run_doctor(checks=checks, reporter=reporter)
+    return runtime_run_doctor(checks=checks, reporter=reporter, selection=selection)
 
 
 app = typer.Typer(
@@ -350,7 +353,8 @@ def run(
     ),
 ) -> None:
     """Compare video sources and generate screenshots and an optional report."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
+    resolved_root = root.resolve()
+    config_path = config if config is not None else Path("config/config.toml")
     args = RunCliRawArgs(
         resolved_root=resolved_root,
         config_path=config_path,
@@ -428,11 +432,15 @@ def wizard(
 
 @app.command()
 def doctor(
+    root: Path = _option(Path("."), "--root", "-r", help="Workspace root."),
+    config: Path | None = _option(None, "--config", "-c", help="Selected configuration file."),
     json_output: bool = _option(False, "--json", help="Emit the diagnostic report as JSON."),
 ) -> None:
     """Check required runtimes and optional integrations."""
     handle_doctor(
         json_output,
+        root=root,
+        config_path=config,
         run_doctor=run_doctor,
         handle_error=handle_error,
         no_color=no_color_requested(),

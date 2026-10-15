@@ -439,3 +439,26 @@ def test_stabilize_typer_help_width_ignores_non_positive_explicit_width(
     stabilize_typer_help_width(terminal_width)
 
     assert typer_rich_utils.MAX_WIDTH == 120
+
+
+@pytest.mark.parametrize(
+    "module", ["frame_compare.orchestration.run_inputs", "frame_compare.cli.entry"]
+)
+def test_acquisition_and_cli_import_without_runtime_dependencies(module: str) -> None:
+    code = """
+import importlib
+import sys
+importlib.import_module(sys.argv[1])
+assert 'httpx' not in sys.modules
+assert 'frame_compare.orchestration.types' not in sys.modules
+assert 'frame_compare.vs.loader' not in sys.modules
+assert 'vapoursynth' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, module],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

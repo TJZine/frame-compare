@@ -27,6 +27,7 @@ from frame_compare.config.schema import (
     Visibility,
 )
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
+from frame_compare.orchestration.run_inputs import AcquiredRunConfig
 from frame_compare.orchestration.types import (
     FullWindowRetryConfirmationRequest,
     SlowpicsUploadConfirmationRequest,
@@ -214,15 +215,20 @@ def test_confirmation_callback_uses_nested_prompt_and_returns_confirmed(
 
     callback = build_confirm_slowpics_upload_callback(
         args=replace(_base_args(), quiet=False),
-        deps=_deps(
-            DepsOptions(
-                stdout_is_tty=True,
-                confirm_upload=_confirm_upload,
+        deps=replace(
+            _deps(
+                DepsOptions(
+                    stdout_is_tty=True,
+                    confirm_upload=_confirm_upload,
+                ),
+                opened,
             ),
-            opened,
+            load_config=lambda config_path=None, overrides=None: get_default_config(),
         ),
         console=Console(file=output, no_color=True),
-        resolve_effective_config=get_default_config,
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+        ),
         visibility=visibility,
     )
 
@@ -298,15 +304,17 @@ def test_full_window_retry_confirmation_is_not_injected_for_unattended_modes(
     config.analysis.ignore_lead_seconds = 240.0
     dependencies = build_runner_dependencies(
         args=replace(_base_args(), **args_update),
-        deps=_deps(
-            DepsOptions(
-                stdin_is_tty=deps_update.get("stdin_is_tty", False),
-                stdout_is_tty=deps_update.get("stdout_is_tty", False),
-            )
+        deps=replace(
+            _deps(
+                DepsOptions(
+                    stdin_is_tty=deps_update.get("stdin_is_tty", False),
+                    stdout_is_tty=deps_update.get("stdout_is_tty", False),
+                )
+            ),
+            load_config=lambda config_path=None, overrides=None: config,
         ),
-        config=config,
         console=Console(file=StringIO(), no_color=True),
-        resolve_effective_config=lambda: config,
+        inputs=AcquiredRunConfig(Path("/workspace"), Path("/workspace/config/config.toml"), config),
     )
 
     assert dependencies is None
@@ -319,17 +327,20 @@ def test_full_window_retry_confirmation_is_injected_only_for_nonzero_interactive
 
     dependencies = build_runner_dependencies(
         args=replace(_base_args(), quiet=False),
-        deps=interactive_deps,
-        config=config,
+        deps=replace(interactive_deps, load_config=lambda config_path=None, overrides=None: config),
         console=Console(file=StringIO(), no_color=True),
-        resolve_effective_config=lambda: config,
+        inputs=AcquiredRunConfig(Path("/workspace"), Path("/workspace/config/config.toml"), config),
     )
     zero_margin_dependencies = build_runner_dependencies(
         args=replace(_base_args(), quiet=False),
-        deps=interactive_deps,
-        config=get_default_config(),
+        deps=replace(
+            interactive_deps,
+            load_config=lambda config_path=None, overrides=None: get_default_config(),
+        ),
         console=Console(file=StringIO(), no_color=True),
-        resolve_effective_config=get_default_config,
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
+        ),
     )
 
     assert dependencies is not None
@@ -344,15 +355,20 @@ def test_confirmation_callback_prints_report_path(auto_open: bool) -> None:
     output = StringIO()
     callback = build_confirm_slowpics_upload_callback(
         args=replace(_base_args(), quiet=False),
-        deps=_deps(
-            DepsOptions(
-                stdout_is_tty=True,
-                open_report=lambda _path: False,
-                confirm_upload=lambda _text, *, default: False,
-            )
+        deps=replace(
+            _deps(
+                DepsOptions(
+                    stdout_is_tty=True,
+                    open_report=lambda _path: False,
+                    confirm_upload=lambda _text, *, default: False,
+                )
+            ),
+            load_config=lambda config_path=None, overrides=None: config,
         ),
         console=Console(file=output, no_color=True, force_terminal=False),
-        resolve_effective_config=lambda: config,
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+        ),
         visibility=Visibility.PUBLIC,
     )
     assert (
@@ -373,11 +389,14 @@ def test_confirmation_panel_fits_narrow_no_color_console(width: int) -> None:
     output = StringIO()
     callback = build_confirm_slowpics_upload_callback(
         args=replace(_base_args(), quiet=False),
-        deps=_deps(
-            DepsOptions(
-                stdout_is_tty=True,
-                confirm_upload=lambda _text, *, default: False,
-            )
+        deps=replace(
+            _deps(
+                DepsOptions(
+                    stdout_is_tty=True,
+                    confirm_upload=lambda _text, *, default: False,
+                )
+            ),
+            load_config=lambda config_path=None, overrides=None: config,
         ),
         console=Console(
             file=output,
@@ -385,7 +404,9 @@ def test_confirmation_panel_fits_narrow_no_color_console(width: int) -> None:
             no_color=True,
             force_terminal=False,
         ),
-        resolve_effective_config=lambda: config,
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+        ),
         visibility=Visibility.UNLISTED,
     )
 
@@ -448,26 +469,46 @@ def test_maybe_open_run_report_is_suppressed_for_quiet_args() -> None:
     maybe_open_run_report(
         result,
         args=replace(_base_args(), json_output=True),
-        deps=_deps(DepsOptions(stdout_is_tty=True), opened),
-        resolve_effective_config=get_default_config,
+        deps=replace(
+            _deps(DepsOptions(stdout_is_tty=True), opened),
+            load_config=lambda config_path=None, overrides=None: get_default_config(),
+        ),
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+        ),
     )
     maybe_open_run_report(
         result,
         args=replace(_base_args(), quiet=True),
-        deps=_deps(DepsOptions(stdout_is_tty=True), opened),
-        resolve_effective_config=get_default_config,
+        deps=replace(
+            _deps(DepsOptions(stdout_is_tty=True), opened),
+            load_config=lambda config_path=None, overrides=None: get_default_config(),
+        ),
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+        ),
     )
     maybe_open_run_report(
         result,
         args=_base_args(),
-        deps=_deps(DepsOptions(stdout_is_tty=False), opened),
-        resolve_effective_config=get_default_config,
+        deps=replace(
+            _deps(DepsOptions(stdout_is_tty=False), opened),
+            load_config=lambda config_path=None, overrides=None: get_default_config(),
+        ),
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+        ),
     )
     maybe_open_run_report(
         RunResult(success=True),
         args=_base_args(),
-        deps=_deps(DepsOptions(stdout_is_tty=True), opened),
-        resolve_effective_config=get_default_config,
+        deps=replace(
+            _deps(DepsOptions(stdout_is_tty=True), opened),
+            load_config=lambda config_path=None, overrides=None: get_default_config(),
+        ),
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+        ),
     )
 
     assert opened == []
@@ -482,21 +523,36 @@ def test_maybe_open_run_report_respects_config_and_reload_failure() -> None:
     maybe_open_run_report(
         result,
         args=replace(_base_args(), quiet=False),
-        deps=_deps(DepsOptions(stdout_is_tty=True), opened),
-        resolve_effective_config=lambda: disabled,
+        deps=replace(
+            _deps(DepsOptions(stdout_is_tty=True), opened),
+            load_config=lambda _path: (lambda: disabled)(),
+        ),
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+        ),
     )
     maybe_open_run_report(
         result,
         args=replace(_base_args(), quiet=False),
-        deps=_deps(DepsOptions(stdout_is_tty=True), opened),
-        resolve_effective_config=lambda: enabled,
+        deps=replace(
+            _deps(DepsOptions(stdout_is_tty=True), opened),
+            load_config=lambda _path: (lambda: enabled)(),
+        ),
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+        ),
     )
     maybe_open_run_report(
         result,
         args=replace(_base_args(), quiet=False),
-        deps=_deps(DepsOptions(stdout_is_tty=True), opened),
-        resolve_effective_config=lambda: (_ for _ in ()).throw(
-            ConfigNotFoundError(Path("missing.toml"))
+        deps=replace(
+            _deps(DepsOptions(stdout_is_tty=True), opened),
+            load_config=lambda _path: (
+                lambda: (_ for _ in ()).throw(ConfigNotFoundError(Path("missing.toml")))
+            )(),
+        ),
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
         ),
     )
 
@@ -659,8 +715,13 @@ def test_report_auto_open_can_be_suppressed_by_slowpics_browser_attempt() -> Non
     maybe_open_run_report(
         RunResult(success=True, report_path=Path("report.html")),
         args=replace(_base_args(), quiet=False),
-        deps=_deps(DepsOptions(stdout_is_tty=True), opened),
-        resolve_effective_config=get_default_config,
+        deps=replace(
+            _deps(DepsOptions(stdout_is_tty=True), opened),
+            load_config=lambda config_path=None, overrides=None: get_default_config(),
+        ),
+        inputs=AcquiredRunConfig(
+            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+        ),
         suppress_report_open=True,
     )
 

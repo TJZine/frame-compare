@@ -36,6 +36,7 @@ from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import SourceInfo
+from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
@@ -59,11 +60,11 @@ def test_execute_run_returns_success_and_records_preflight_timing(
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -139,7 +140,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
 
     result = asyncio.run(
         execute_run(
-            RunRequest(root=tmp_path, quiet=True),
+            make_run_request(config=ConfigSchema(), root=tmp_path, quiet=True),
             deps=RunDependencies(monotonic_timer=_zero_monotonic_timer),
         )
     )
@@ -271,7 +272,9 @@ def test_execute_run_propagates_collection_warning_once_through_result_summary_a
         transport = httpx.MockTransport(reject_unexpected_http)
         async with httpx.AsyncClient(transport=transport) as client:
             return await execute_run(
-                RunRequest(root=tmp_path, skip_analysis=True, skip_metadata=True),
+                make_run_request(
+                    root=tmp_path, config=config, skip_analysis=True, skip_metadata=True
+                ),
                 deps=RunDependencies(
                     ffmpeg_runner=FakeFFmpegRunner(),
                     http_client=client,
@@ -365,7 +368,7 @@ def test_execute_run_closes_execution_section_without_masking_phase_failure(
     with pytest.raises(RuntimeError) as exc_info:
         asyncio.run(
             execute_run(
-                RunRequest(root=tmp_path),
+                make_run_request(config=ConfigSchema(), root=tmp_path),
                 deps=RunDependencies(monotonic_timer=_zero_monotonic_timer),
             )
         )
@@ -444,7 +447,8 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
     )
     monkeypatch.setattr(Path, "unlink", fake_unlink)
 
-    request = RunRequest(
+    request = make_run_request(
+        config=ConfigSchema(),
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
@@ -522,7 +526,8 @@ def test_execute_run_webhook_action_warning_is_warning_only(
         fake_publish_phase,
     )
 
-    request = RunRequest(
+    request = make_run_request(
+        config=ConfigSchema(),
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
@@ -604,7 +609,8 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
         fake_report_phase,
     )
 
-    request = RunRequest(
+    request = make_run_request(
+        config=ConfigSchema(),
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
@@ -631,11 +637,11 @@ def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeHDRVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -643,11 +649,11 @@ def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
         asyncio.run(execute_run(request, deps=deps))
 
 
-def test_execute_run_propagates_config_not_found_error(tmp_path: Path) -> None:
-    request = RunRequest(root=tmp_path)
+def test_run_acquisition_propagates_config_not_found_error(tmp_path: Path) -> None:
+    from frame_compare.orchestration.run_inputs import build_run_request
 
     with pytest.raises(ConfigNotFoundError):
-        asyncio.run(execute_run(request))
+        build_run_request(root=tmp_path)
 
 
 def test_execute_run_applies_cli_overrides_before_phase_execution(
@@ -671,11 +677,11 @@ enable = false
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv", "comp.mkv")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(
+        overrides=CLIConfigOverrides(
             tm_preset=TonemapPreset.FILMIC,
             tm_target_nits=203,
             overlay_mode=OverlayMode.DIAGNOSTIC,
@@ -744,11 +750,11 @@ enable = false
 
     monkeypatch.setattr(phase_post_render, "publish_to_slowpics", _unexpected_publish)
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=False),
+        overrides=CLIConfigOverrides(no_upload=False),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -765,11 +771,11 @@ def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: 
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
 
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
@@ -818,11 +824,11 @@ def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
 
     monkeypatch.setattr(coordinator, "execute_phases", _unexpected_execute_phases)
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=MixedFpsVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -1086,12 +1092,12 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             execute_run(
-                RunRequest(
+                make_run_request(
                     root=tmp_path,
                     quiet=True,
                     skip_analysis=True,
                     skip_metadata=True,
-                    config_overrides=CLIConfigOverrides(no_upload=True),
+                    overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 RunDependencies(vs_loader=InterruptedLoader(), ffmpeg_runner=FakeFFmpegRunner()),
             )
@@ -1155,12 +1161,12 @@ def test_reservation_is_captured_before_interrupted_run_info_writer(
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             execute_run(
-                RunRequest(
+                make_run_request(
                     root=tmp_path,
                     quiet=True,
                     skip_analysis=True,
                     skip_metadata=True,
-                    config_overrides=CLIConfigOverrides(no_upload=True),
+                    overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
             )

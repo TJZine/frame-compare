@@ -59,6 +59,7 @@ from frame_compare.cli.run_command import (
     confirm_full_window_retry_on_stderr,
 )
 from frame_compare.config.schema import ConfigSchema, Visibility
+from frame_compare.orchestration.run_inputs import AcquiredRunConfig
 from frame_compare.services.alignment_reuse_prompt import _read_reuse_response
 from frame_compare.orchestration.types import (
     FullWindowRetryConfirmationRequest, SlowpicsUploadConfirmationRequest,
@@ -87,7 +88,7 @@ async def main():
         else:
             callback = build_confirm_slowpics_upload_callback(
                 args=base_args(), deps=deps(DepsOptions(confirm_upload=typer.confirm)),
-                console=Console(stderr=True), resolve_effective_config=ConfigSchema,
+                console=Console(stderr=True), inputs=AcquiredRunConfig(Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()),
                 visibility=Visibility.PUBLIC,
             )
             callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html")))

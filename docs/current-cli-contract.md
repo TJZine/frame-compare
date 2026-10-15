@@ -104,6 +104,7 @@ described under Output Modes.
 These commands share the same root/config path resolution rules:
 
 - `run`
+- `doctor`
 - `wizard`
 - `preset apply`
 - `preset save`
@@ -122,7 +123,7 @@ once and may name a normal external directory; empty or whitespace-only values,
 including values that become empty after environment expansion, are invalid. Its
 managed descendants remain contained beneath that resolved generated-data root.
 Containment follows symlinks and expands environment variables in config path values,
-so invalid config paths fail through the standard typed path error. `run`, `wizard`, `preset apply`,
+so invalid config paths fail through the standard typed path error. `run`, `doctor`, `wizard`, `preset apply`,
 `preset save`, and both `history` subcommands validate their selected config
 destination before config reads or writes; `run` also validates generated-data
 root structure before diagnostics, config writes, or runtime entry. `preset list`
@@ -149,7 +150,7 @@ History does not require the configured input directory or current video files t
 exist, keeping recorded outcomes readable after media moves.
 
 For the installed Windows portable shim, the shim runs the bundle launcher from the
-bundle root and injects a default `--config` for `run`, `wizard`, supported
+bundle root and injects a default `--config` for `run`, `doctor`, `wizard`, supported
 `preset` subcommands, and `history list`/`history open` when the user did not pass
 `--config`. For subgroup commands the injection occurs after the subcommand and
 before any positional history run name or preset name. The injected default
@@ -979,8 +980,9 @@ recovery requirement.
   - `--json` was not used
   - `--quiet` was not used
   - stdout is attached to a TTY
-  - the CLI can reload the effective config and `report.auto_open` is true, or the
-    post-run config reload fails and the CLI falls back to opening the report anyway
+  - `refresh_report_auto_open_preference` rereads the selected config through the
+    injected loader and `report.auto_open` is true, or that refresh fails and the CLI
+    falls back to opening the report anyway
 
 There is currently no dedicated `run` flag for `report.auto_open`; it is a config-only
 surface.
@@ -1656,6 +1658,16 @@ The implemented `[logging]` surface contains only:
 - `level = "INFO"`, accepting `DEBUG`, `INFO`, `WARNING`, or `ERROR`
 - `format = "console"`, accepting `console` or `json`
 
+For `run`, `orchestration.run_inputs.acquire_run_config` loads TOML and environment
+once and applies CLI overrides before admission. Logging, preview, callback policy,
+preparation, execution, and post-actions use that same acquired configuration;
+preparation rechecks filesystem containment and discovers current sources without
+reloading settings. The preview input row uses the resolved input directory.
+Environment variables in `--config` are expanded for acquisition, `--diagnose-paths`,
+and the secret-safe `--write-config` destination. The preflight timing excludes
+configuration acquisition. Only the named report auto-open preference refresh
+rereads settings later, before an interactive report-open attempt.
+
 For `run`, logging is configured only after the effective config loads and
 validates. `--quiet` forces level `WARNING`; otherwise `--verbose` forces
 `DEBUG`; otherwise `[logging].level` applies. `--json` forces JSON-formatted
@@ -2033,12 +2045,11 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   temporary cleanup remains best effort.
 - After a successful write, or a true no-op, `wizard` prints a compact `Next steps`
   block to stderr: diagnose with `frame-compare doctor`, preview with `run --dry-run`,
-  then `run`. Both suggested `run` commands always carry the exact resolved `--root`
+  then `run`. All three suggestions always carry the exact resolved `--root`
   and the exact selected `--config` path, which is the same file already named in the
   no-op/write confirmation, including the Windows portable fallback file when that
   exception applies, so a suggestion cannot silently target a different workspace or
-  config. `doctor` is suggested with no options, matching its actual supported
-  surface. These are suggestions only; the wizard never executes them. POSIX values
+  config. These are suggestions only; the wizard never executes them. POSIX values
   are quoted with `shlex.quote`; Windows values use PowerShell literal single-quoted
   strings with every single-quote delimiter, including typographic ones, doubled; the
   block names which shell its quoting targets. No
@@ -2055,6 +2066,14 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 ## `doctor` Command Contract
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
+- `--root/-r` defaults to `.`; `--config/-c` selects a file relative to that root,
+  defaulting to `config/config.toml`. Selection uses the same owner as `run`, including
+  the exact Windows portable state-file exception and shim injection. Doctor never
+  searches parent directories. Environment variables retain their normal precedence.
+- Invalid or escaping selected paths are typed top-level failures. An explicit
+  missing, nonregular, unreadable, malformed, or invalid config is a failed TMDB check
+  with config details. An absent default config uses defaults plus environment.
+  This does not change the doctor JSON schema.
 - `doctor` makes no HTTP requests and does not test slow.pics reachability. The
   `tmdb_api_key` check validates local configuration and credential format only;
   it does not contact TMDB. slow.pics connectivity is exercised by the

@@ -12,11 +12,10 @@ from frame_compare.analysis.types import (
     SelectionDetail,
 )
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.overrides import CLIConfigOverrides
-from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration import execution
 from frame_compare.orchestration.context import RunContext
-from frame_compare.orchestration.coordinator import RunDependencies, RunRequest
+from frame_compare.orchestration.coordinator import RunDependencies
 from frame_compare.orchestration.execution import (
     build_execution_phase_plan,
     build_phases_before_align,
@@ -36,6 +35,7 @@ from frame_compare.orchestration.phase_output_application import apply_phase_out
 from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.run_warnings import RunWarning
+from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state, execution_context
 from .phase_task_helpers import _context, _frame_metrics, _render_artifacts, _workspace
@@ -79,7 +79,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     )
 
     plan = build_execution_phase_plan(
-        request=RunRequest(root=tmp_path),
+        request=make_run_request(config=ConfigSchema(), root=tmp_path),
         deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
         prep=prep,
         state=ExecutionState(artifacts=prep.artifacts),
@@ -101,7 +101,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
 
     config.audio_alignment.force_interactive = True
     forced_plan = build_execution_phase_plan(
-        request=RunRequest(root=tmp_path),
+        request=make_run_request(config=ConfigSchema(), root=tmp_path),
         deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
         prep=prep,
         state=ExecutionState(artifacts=prep.artifacts),
@@ -122,7 +122,7 @@ def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
     state = ExecutionState(artifacts=RunArtifacts())
 
     phases = build_phases_before_align(
-        request=RunRequest(root=tmp_path, skip_analysis=True),
+        request=make_run_request(config=ConfigSchema(), root=tmp_path, skip_analysis=True),
         config=ConfigSchema(),
         monotonic_timer=lambda: 0.0,
         state=state,
@@ -139,42 +139,6 @@ def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
 
     assert analyze_phase.skip_condition is not None
     assert analyze_phase.skip_condition(config) is True
-
-
-def test_run_request_config_overrides_capture_runtime_override_contract(tmp_path: Path) -> None:
-    request = RunRequest(
-        root=tmp_path,
-        config_overrides=CLIConfigOverrides(
-            input_dir=tmp_path / "comparison_videos",
-            tm_preset=TonemapPreset.FILMIC,
-            tm_target_nits=203,
-            overlay_mode=OverlayMode.DIAGNOSTIC,
-            user_frames=[4, 8],
-            random_frame_count=12,
-            dark_frame_count=2,
-            bright_frame_count=3,
-            motion_frame_count=4,
-            seed=123,
-            no_upload=True,
-            force_interactive_alignment=True,
-        ),
-    )
-
-    overrides = request.config_overrides
-
-    assert overrides.input_dir == tmp_path / "comparison_videos"
-    assert overrides.tm_preset == TonemapPreset.FILMIC
-    assert overrides.tm_target_nits == 203
-    assert overrides.tm_curve is None
-    assert overrides.user_frames == [4, 8]
-    assert overrides.random_frame_count == 12
-    assert overrides.dark_frame_count == 2
-    assert overrides.bright_frame_count == 3
-    assert overrides.motion_frame_count == 4
-    assert overrides.seed == 123
-    assert overrides.overlay_mode == OverlayMode.DIAGNOSTIC
-    assert overrides.no_upload is True
-    assert overrides.force_interactive_alignment is True
 
 
 def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) -> None:

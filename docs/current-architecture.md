@@ -29,9 +29,12 @@ Frame Compare is a CLI-first packaged Python app with importable internal module
 The CLI keeps VS-heavy imports lazy through proxy functions so help text and simple commands do not import the full runtime stack at module import time.
 
 `config.overrides.CLIConfigOverrides` owns typed persistent CLI overrides. Parsing
-creates one value carried by both `RunCliOptions.config_overrides` and
-`RunRequest.config_overrides`; effective-config resolution and preparation consume
-it directly. Raw flag parsing and run-mode controls remain CLI-owned.
+creates one value consumed by `orchestration.run_inputs.acquire_run_config`.
+That dependency-light owner selects and loads TOML/environment once, applies CLI
+overrides, and validates configured paths. Admission, callbacks, preview, preparation,
+execution, and post-actions consume `RunRequest.inputs: AcquiredRunConfig`.
+Programmatic callers use `build_run_request`; the CLI constructs its request from
+the value already acquired. Raw flag parsing and run-mode controls remain CLI-owned.
 
 Preparation creates the run's default `DefaultVSLoader` immediately after
 resolving effective config, before loading sources. Injected loaders remain
@@ -46,10 +49,12 @@ frame caching, not total process memory or audio-alignment buffers.
 
 The main run path is:
 
-1. Resolve root and config.
-2. Prepare preflight and workspace paths, containing config and writable state
-   beneath the resolved workspace root while permitting external media reads.
-3. Discover input clips.
+1. Select and acquire the run configuration once before admission and preview.
+2. Recompute workspace path facts and containment at each use through
+   `resolve_run_workspace`, permitting external media reads. Preparation consumes
+   the admitted configuration without reloading it or reapplying overrides.
+3. Check the input directory and discover input clips once during preparation;
+   acquisition does not freeze source existence.
 4. Validate shared analysis cache mode flags when needed.
 5. Create a fresh run folder for every run that proceeds to output reservation.
 6. Load or compute clip probe data.
@@ -269,6 +274,13 @@ Frame Compare-owned indexes before reuse. See
 recovery requirement.
 
 ### Configuration persistence
+
+`orchestration.run_inputs` owns the selected run configuration. The only intentional
+later config reads are named `refresh_report_auto_open_preference` calls before an
+interactive report open (including the pre-upload confirmation path). They reread
+only the selected file's report preference through the CLI's injected loader; they
+do not replace admitted run settings. Doctor shares `select_run_config_path` and
+never searches parent directories.
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated

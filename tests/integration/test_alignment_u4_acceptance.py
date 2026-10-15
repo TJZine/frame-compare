@@ -30,7 +30,7 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution_types import AlignPhaseOutput, PrepState
-from frame_compare.orchestration.types import RunDependencies, RunRequest
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.services import alignment_video
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_audio import (
@@ -52,6 +52,7 @@ from tests.orchestration.phase_task_helpers import _create_config, _run_align_ph
 from tests.orchestration.preparation_test_support import (
     create_config as _create_prep_config,
 )
+from tests.run_request_support import make_run_request
 from tests.services.alignment_request_test_support import alignment_request
 
 pytestmark = pytest.mark.xdist_group("alignment-u4")
@@ -1110,7 +1111,7 @@ def _configured_prep_alignment(
     _create_prep_config(root, content=_MATCH_FPS_PREP_CONFIG)
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=root),
+            make_run_request(root=root),
             RunDependencies(vs_loader=DefaultVSLoader()),
         )
     )
