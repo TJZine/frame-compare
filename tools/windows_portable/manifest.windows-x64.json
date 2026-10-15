@@ -233,24 +233,24 @@
       "source_commit": "3cfd23f257ecb62b0cbd81eaaca092e18ae8e579"
     },
     {
-      "id": "vsview-0.12.1-wheel",
+      "id": "vsview-0.13.0-wheel",
       "name": "VSView",
-      "version": "0.12.1",
-      "url": "https://files.pythonhosted.org/packages/a4/e1/9179b6da07cb4153ec6818ee4ba256cf5fca15ccc1f6e3bdf6e4fd27e8cf/vsview-0.12.1-py3-none-any.whl",
-      "source_url": "https://files.pythonhosted.org/packages/e4/1c/e1eac58c9a8df00de8a91235e00921dbbd6116a0c68c50e4949c9e0d9081/vsview-0.12.1.tar.gz",
-      "sha256": "984b3cdce0e8743ada9e5b7677b91b4540c69f6790098579b13e0260766aeb64",
-      "bytes": 2279401,
+      "version": "0.13.0",
+      "url": "https://files.pythonhosted.org/packages/b8/fb/2a45e7f193a12cb6f1b349f97b919930f6eaee6e030ec08d3c813b4f19c2/vsview-0.13.0-py3-none-any.whl",
+      "source_url": "https://files.pythonhosted.org/packages/7e/db/f8ad9ae29983fac6d318e254b63d44279574bdd0adea91dbdac2b222662c/vsview-0.13.0.tar.gz",
+      "sha256": "94e33b760db62cbe7c440dd19fc3b262694c802d29c3c08d474e72d2bd8f3687",
+      "bytes": 2285313,
       "license": {
-        "spdx": "EUPL-1.2 AND MIT AND Apache-2.0 AND ISC AND OFL-1.1",
-        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.12.1/LICENSE",
+        "spdx": "EUPL-1.2 AND (MIT AND Apache-2.0 AND ISC AND OFL-1.1)",
+        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.13.0/LICENSE",
         "notes": "The wheel carries the application and bundled font/icon license texts under dist-info/licenses."
       },
       "install": { "type": "python_wheel" },
-      "release_date": "2026-10-09",
+      "release_date": "2026-10-14",
       "source_kind": "release",
-      "source_ref": "vsview/v0.12.1",
-      "source_sha256": "0c00a25539488fd059786c762ffec022c9e3c8dbf9ec5d1a1afac912b6963afc",
-      "source_bytes": 13883419
+      "source_ref": "vsview/v0.13.0",
+      "source_sha256": "8487eb9f74e96d797e705395dba46c462627ddb5f8bb2ec34d3e128f06d8e534",
+      "source_bytes": 21799251
     },
     {
       "id": "cyclopts-5.2.0-wheel",

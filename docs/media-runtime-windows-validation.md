@@ -35,7 +35,7 @@ The expected candidate profile is:
 | FFMS2 | Absent from the Windows baseline |
 | vs-placebo | 2.0.4 |
 | BestSource (VSView/UI only) | 22 |
-| VSView / CLI parser | 0.12.0 / Cyclopts 5.2.0 |
+| VSView / CLI parser | 0.13.0 / Cyclopts 5.2.0 |
 | vspackrgb | 2.0.0 (Rust extension) |
 | PySide6 family | 6.11.2 |
 | FFmpeg | `n8.1.3-9-g29e619e767`, BtbN win64 LGPL 8.1 build `autobuild-2026-09-30-13-08` |

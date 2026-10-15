@@ -292,7 +292,7 @@ def test_windows_portable_manifest_pins_exact_vsview_windows_graph(repo_root: Pa
     )
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
     expected = {
-        "vsview-0.12.1-wheel": ("0.12.1", 2279401),
+        "vsview-0.13.0-wheel": ("0.13.0", 2285313),
         "cyclopts-5.2.0-wheel": ("5.2.0", 289196),
         "pyside6-6.11.2-win-amd64-wheel": ("6.11.2", 578382),
         "pyside6-addons-6.11.2-win-amd64-wheel": ("6.11.2", 168208836),
@@ -326,7 +326,7 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
     lock = tomllib.loads(_read_text_or_fail(repo_root / "uv.lock"))
     packages = {package["name"]: package for package in lock["package"]}
     artifact_ids = {
-        "vsview": "vsview-0.12.1-wheel",
+        "vsview": "vsview-0.13.0-wheel",
         "cyclopts": "cyclopts-5.2.0-wheel",
         "pyside6": "pyside6-6.11.2-win-amd64-wheel",
         "pyside6-addons": "pyside6-addons-6.11.2-win-amd64-wheel",
@@ -1217,16 +1217,16 @@ def _write_extracted_verifier_fixture(
                 "version": version,
             }
             for name, version in (
-                ("jetpytools", "3.1.2"),
+                ("jetpytools", "3.2.0"),
                 ("PySide6", "6.11.2"),
                 ("PySide6_Addons", "6.11.2"),
                 ("PySide6_Essentials", "6.11.2"),
                 ("shiboken6", "6.11.2"),
                 ("vapoursynth-bestsource", "22"),
                 ("vspackrgb", "2.0.0"),
-                ("VSView", "0.12.1"),
+                ("VSView", "0.13.0"),
                 ("cyclopts", "5.2.0"),
-                ("vsjetengine", "1.8.0"),
+                ("vsjetengine", "1.8.1"),
             )
         ],
         "schema_version": 2,
@@ -1967,7 +1967,7 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
     shim.mkdir()
 
     distributions = {
-        "jetpytools": ("3.1.2", "MIT"),
+        "jetpytools": ("3.2.0", "MIT"),
         "PySide6": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "PySide6-Addons": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "PySide6-Essentials": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
@@ -1977,9 +1977,9 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         "vapoursynth-lsmas": ("1310.0.0.0", "ISC AND LGPL-2.1-or-later"),
         "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
         "vspackrgb": ("2.0.0", "MIT"),
-        "VSView": ("0.12.0", "EUPL-1.2"),
+        "VSView": ("0.13.0", "EUPL-1.2"),
         "cyclopts": ("5.2.0", "Apache-2.0"),
-        "vsjetengine": ("1.8.0", "EUPL-1.2"),
+        "vsjetengine": ("1.8.1", "EUPL-1.2"),
     }
     for index, (name, (version, license_expression)) in enumerate(distributions.items()):
         dist_info = site_packages / f"package_{index}-{version}.dist-info"
