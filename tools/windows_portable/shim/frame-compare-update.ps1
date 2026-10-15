@@ -1,3 +1,9 @@
+$versionHelper = Join-Path $PSScriptRoot "frame-compare-version.ps1"
+if (!(Test-Path -LiteralPath $versionHelper -PathType Leaf)) {
+  throw "Updater version helper missing: $versionHelper. Reinstall the complete portable bundle."
+}
+. $versionHelper
+
 function Get-OptionalStringProperty([object]$Object, [string]$Name) {
   if ($null -eq $Object) {
     return ""
@@ -456,32 +462,15 @@ function Get-PayloadVersionFromManifest([object]$Manifest) {
 }
 
 function Invoke-SmokeCheck([string]$BundlePath, [string]$ExpectedVersion) {
-  $bundleLauncher = Join-Path $BundlePath "frame-compare.ps1"
-  if (!(Test-Path -LiteralPath $bundleLauncher)) {
-    throw "Bundle launcher not found: $bundleLauncher"
-  }
-
-  $versionOutput = & $bundleLauncher version 2>&1
-  $exitCode = $LASTEXITCODE
-  if ($exitCode -ne 0) {
-    throw "Smoke check failed: frame-compare version exited with code $exitCode"
-  }
-  $joined = ($versionOutput -join "`n")
-  if ($joined -match [regex]::Escape($ExpectedVersion)) {
-    return
-  }
-
-  $pythonExe = Join-PathParts -Root $BundlePath -Parts @("python", "python.exe")
-  if (!(Test-Path -LiteralPath $pythonExe)) {
-    throw "Smoke check failed: expected version '$ExpectedVersion' not found in output."
-  }
-  $pyOut = & $pythonExe -c "import frame_compare; print(frame_compare.__version__)" 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    throw "Smoke check failed: python import check exited with code $LASTEXITCODE"
-  }
-  $pyVersion = ($pyOut -join "").Trim()
-  if ($pyVersion -ne $ExpectedVersion) {
-    throw "Smoke check failed: expected version '$ExpectedVersion', got '$pyVersion'"
+  $launcher = Join-Path $BundlePath "frame-compare.ps1"
+  if (!(Test-Path -LiteralPath $launcher -PathType Leaf)) { throw "Bundle launcher not found: $launcher" }
+  $output = & $launcher version 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "Smoke check failed: frame-compare version exited with code $LASTEXITCODE" }
+  $reported = Get-VersionFromCommandOutput -OutputLines $output
+  if ($reported -eq "") { $reported = Get-PythonAppVersion $BundlePath }
+  if ([string]::IsNullOrEmpty($reported) -or
+      (Compare-FrameCompareVersion $reported $ExpectedVersion) -ne 0) {
+    throw "Smoke check failed: expected version '$ExpectedVersion', got '$reported'"
   }
 }
 
@@ -495,14 +484,17 @@ function Invoke-PurgeBackups([string]$BundlePath, [int]$Keep = 5) {
     return 0
   }
   $dirs = @(Get-ChildItem -LiteralPath $backupRoot -Directory | Sort-Object Name -Descending)
-  if ($dirs.Count -le $Keep) {
-    Write-Host "Backup retention already satisfied (count=$($dirs.Count), keep=$Keep)."
-    return 0
+  $installedCompatibility = Get-InstalledBundleCompatibilityContract $BundlePath
+  $complete = @($dirs | Where-Object {
+    (Get-BackupCompatibilityError $_.FullName $installedCompatibility) -eq "" -and
+    (Get-BackupCompletenessError $_.FullName) -eq ""
+  })
+  $retained = @($complete | Select-Object -First $Keep | ForEach-Object { $_.FullName })
+  $removed = 0
+  foreach ($dir in $dirs) {
+    if ($dir.FullName -notin $retained) { Remove-Item -LiteralPath $dir.FullName -Recurse -Force; $removed++ }
   }
-  for ($i = $Keep; $i -lt $dirs.Count; $i++) {
-    Remove-Item -LiteralPath $dirs[$i].FullName -Recurse -Force
-  }
-  Write-Host "Purged $($dirs.Count - $Keep) old backup(s); kept $Keep."
+  Write-Host "Purged $removed backup(s); kept $($retained.Count) complete backups."
   return 0
 }
 
@@ -520,6 +512,7 @@ function Invoke-ListBackups([string]$BundlePath) {
   $installedCompatibility = Get-InstalledBundleCompatibilityContract -BundlePath $BundlePath
   foreach ($dir in $dirs) {
     $compatibilityError = Get-BackupCompatibilityError -BackupParent $dir.FullName -InstalledCompatibility $installedCompatibility
+    if ($compatibilityError -eq "") { $compatibilityError = Get-BackupCompletenessError $dir.FullName }
     if ([string]::IsNullOrWhiteSpace($compatibilityError)) {
       Write-Host $dir.Name
     } else {
@@ -561,39 +554,14 @@ function Verify-ManifestSignature(
   }
 }
 
-function Test-StringInRange([string]$Value, [string]$Min, [string]$Max) {
-  if ([string]::IsNullOrWhiteSpace($Value) -or [string]::IsNullOrWhiteSpace($Min)) {
-    return $false
-  }
-  try { $valueVersion = [System.Version]::Parse($Value) } catch { return $false }
-  try { $minVersion = [System.Version]::Parse($Min) } catch { return $false }
-
-  if ($valueVersion.CompareTo($minVersion) -lt 0) {
-    return $false
-  }
-
-  if (![string]::IsNullOrWhiteSpace($Max)) {
-    try { $maxVersion = [System.Version]::Parse($Max) } catch { return $false }
-    if ($valueVersion.CompareTo($maxVersion) -gt 0) {
-      return $false
-    }
-  }
-  return $true
-}
-
 function Get-VersionFromCommandOutput([object[]]$OutputLines) {
   foreach ($line in $OutputLines) {
     $text = [string]$line
     if ([string]::IsNullOrWhiteSpace($text)) {
       continue
     }
-    $trimmed = $text.Trim()
-    if ($trimmed -match '^frame-compare\s+([0-9]+(?:\.[0-9]+){1,3})$') {
-      return $Matches[1]
-    }
-    if ($trimmed -match '^([0-9]+(?:\.[0-9]+){1,3})$') {
-      return $Matches[1]
-    }
+    $candidate = $text.Trim() -creplace '^frame-compare[ \t]+', ''
+    if ($null -ne (ConvertTo-FrameCompareVersion $candidate)) { return $candidate }
   }
   return ""
 }
@@ -610,6 +578,10 @@ function Get-BundleAppVersion([string]$BundlePath) {
     }
   }
 
+  return Get-PythonAppVersion $BundlePath
+}
+
+function Get-PythonAppVersion([string]$BundlePath) {
   $pythonExe = Join-PathParts -Root $BundlePath -Parts @("python", "python.exe")
   if (!(Test-Path -LiteralPath $pythonExe)) {
     return ""
@@ -618,7 +590,7 @@ function Get-BundleAppVersion([string]$BundlePath) {
   if ($LASTEXITCODE -ne 0) {
     return ""
   }
-  return (($result -join "").Trim())
+  return (Get-VersionFromCommandOutput -OutputLines $result)
 }
 
 function Copy-DirectoryContents([string]$SourceDir, [string]$DestinationDir) {
@@ -628,11 +600,198 @@ function Copy-DirectoryContents([string]$SourceDir, [string]$DestinationDir) {
   }
 }
 
-function Restore-FromBackup([string]$BackupDir, [string]$TargetDir) {
-  if (Test-Path -LiteralPath $TargetDir) {
-    Invoke-WithRetry -Label "Remove failed target dir" -Action { Remove-Item -LiteralPath $TargetDir -Recurse -Force }
+function Get-TreeInventory([string]$Root) {
+  if (!(Test-Path -LiteralPath $Root -PathType Container)) { throw "Source tree missing: $Root" }
+  $rootItem = Get-Item -LiteralPath $Root -Force
+  if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Reparse source tree refused: $Root" }
+  $prefix = [IO.Path]::GetFullPath($Root).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+  $items = @(Get-ChildItem -LiteralPath $Root -Recurse -Force -ErrorAction Stop | Sort-Object FullName)
+  foreach ($item in $items) {
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Reparse source entry refused: $($item.FullName)" }
+    if (!$item.PSIsContainer) {
+      [pscustomobject]@{
+        path = $item.FullName.Substring($prefix.Length).Replace('\', '/')
+        sha256 = Get-Sha256HexForFile $item.FullName
+        bytes = [int64]$item.Length
+      }
+    }
   }
-  Copy-Item -LiteralPath $BackupDir -Destination $TargetDir -Recurse -Force
+}
+
+function Assert-TreeInventory([string]$Root, [object[]]$ExpectedInventory) {
+  if ($ExpectedInventory.Count -eq 0) { throw "Empty source inventory: $Root" }
+  $expected = New-Object 'Collections.Generic.Dictionary[string,object]' ([StringComparer]::Ordinal)
+  $caseNames = New-Object 'Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+  foreach ($entry in $ExpectedInventory) {
+    $path = Get-RequiredStringProperty $entry "path" "source inventory"
+    Assert-SafeRelativePath $path "source inventory"
+    if ($path.Contains('\') -or !$caseNames.Add($path)) { throw "Duplicate or noncanonical inventory path: $path" }
+    $hash = Get-RequiredStringProperty $entry "sha256" "source inventory"
+    $bytes = [int64]0
+    if ($hash -cnotmatch '^[a-f0-9]{64}$' -or
+        ![int64]::TryParse((Get-RequiredStringProperty $entry "bytes" "source inventory"), [ref]$bytes) -or $bytes -lt 0) {
+      throw "Invalid inventory hash/size: $path"
+    }
+    $expected.Add($path, $entry)
+  }
+  $actual = @(Get-TreeInventory $Root)
+  if ($actual.Count -ne $expected.Count) { throw "Source inventory path-set mismatch: $Root" }
+  foreach ($file in $actual) {
+    if (!$expected.ContainsKey($file.path)) { throw "Unexpected source inventory path: $($file.path)" }
+    $entry = $expected[$file.path]
+    if ($file.sha256 -cne $entry.sha256 -or $file.bytes -ne [int64]$entry.bytes) {
+      throw "Source inventory hash/size mismatch: $($file.path)"
+    }
+  }
+}
+
+function Write-AtomicJson([string]$Path, [object]$Value) {
+  $temporary = $Path + ".tmp"
+  [IO.File]::WriteAllText($temporary, (($Value | ConvertTo-Json -Depth 8) + "`n"), [Text.UTF8Encoding]::new($false))
+  if ([IO.File]::Exists($Path)) { [IO.File]::Replace($temporary, $Path, $null) }
+  else { [IO.File]::Move($temporary, $Path) }
+}
+
+function Read-CompleteBackup([string]$BackupParent) {
+  $recordPath = Join-Path $BackupParent "backup.json"
+  if (!(Test-Path -LiteralPath $recordPath -PathType Leaf)) { throw "backup completeness record missing: $recordPath" }
+  $recordText = Get-Content -LiteralPath $recordPath -Raw -Encoding UTF8 -ErrorAction Stop
+  if (!$recordText.TrimStart().StartsWith("{")) { throw "Invalid backup completeness record: $recordPath" }
+  $record = $recordText | ConvertFrom-Json
+  if (($record.schema_version -isnot [int] -and $record.schema_version -isnot [long]) -or
+      $record.schema_version -ne 1 -or $null -eq (ConvertTo-FrameCompareVersion $record.app_version)) {
+    throw "Invalid backup completeness record: $recordPath"
+  }
+  $files = @($record.files)
+  Assert-TreeInventory -Root (Join-Path $BackupParent "frame_compare") -ExpectedInventory $files
+  return $record
+}
+
+function Get-BackupCompletenessError([string]$BackupParent) {
+  try { $null = Read-CompleteBackup $BackupParent; return "" }
+  catch { return "backup completeness unavailable: $($_.Exception.Message)" }
+}
+
+function New-CompleteBackup([string]$BundlePath, [string]$TargetDir, [object]$Compatibility, [string]$Version, [string]$BackupId) {
+  if ($null -eq (ConvertTo-FrameCompareVersion $Version)) { throw "Malformed backup app version '$Version'" }
+  $inventory = @(Get-TreeInventory $TargetDir)
+  $backupRoot = Get-BackupRoot $BundlePath
+  Ensure-Directory $backupRoot
+  $parent = Get-SafeChildPath $backupRoot $BackupId "backup id"
+  if (Test-Path -LiteralPath $parent) { throw "Backup id already exists; refusing to merge: $parent" }
+  $created = $false
+  try {
+    New-Item -ItemType Directory -Path $parent -ErrorAction Stop | Out-Null
+    $created = $true
+    $copy = Join-Path $parent "frame_compare"
+    Copy-Item -LiteralPath $TargetDir -Destination $copy -Recurse -Force -ErrorAction Stop
+    Assert-TreeInventory -Root $copy -ExpectedInventory $inventory
+    Write-AtomicJson -Path (Join-Path $parent "compatibility.json") -Value $Compatibility
+    # Last write is the completeness marker; neither record lives inside the copy.
+    Write-AtomicJson -Path (Join-Path $parent "backup.json") -Value ([ordered]@{
+      schema_version = 1; app_version = $Version; files = $inventory
+    })
+    return $parent
+  } catch {
+    if ($created) { Remove-Item -LiteralPath $parent -Recurse -Force -ErrorAction Stop }
+    throw
+  }
+}
+
+function Get-ReplacementPaths([string]$BundlePath) {
+  $target = Join-PathParts $BundlePath @("app", "src", "frame_compare")
+  return @{ Target = $target; New = "$target.new"; Old = "$target.old";
+    Journal = (Join-PathParts $BundlePath @("app", ".frame_compare_replacement.json")) }
+}
+
+function Repair-InterruptedReplacement([string]$BundlePath) {
+  $paths = Get-ReplacementPaths $BundlePath
+  $temporary = $paths.Journal + ".tmp"
+  try {
+    foreach ($path in @($paths.Target, $paths.New, $paths.Old)) {
+      if (Test-Path -LiteralPath $path) {
+        $item = Get-Item -LiteralPath $path -Force
+        if (!$item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Unsafe transaction tree: $path" }
+      }
+    }
+    if (Test-Path -LiteralPath $paths.Journal) {
+      $journalItem = Get-Item -LiteralPath $paths.Journal -Force
+      if ($journalItem.PSIsContainer -or ($journalItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Unsafe replacement journal: $($paths.Journal)" }
+    }
+    if (!(Test-Path -LiteralPath $paths.Journal -PathType Leaf)) {
+      if ((Test-Path -LiteralPath $paths.New) -or (Test-Path -LiteralPath $paths.Old)) {
+        throw "Unknown replacement state: .old/.new exists without a journal."
+      }
+    } else {
+      $journalText = Get-Content -LiteralPath $paths.Journal -Raw -Encoding UTF8
+      if (!$journalText.TrimStart().StartsWith("{")) { throw "Invalid replacement journal." }
+      $journal = $journalText | ConvertFrom-Json
+      if (($journal.schema_version -isnot [int] -and $journal.schema_version -isnot [long]) -or
+          $journal.schema_version -ne 1 -or $journal.operation -cnotin @("apply", "rollback") -or
+          $journal.state -cnotin @("staging", "promoting", "committed") -or
+          [string]::IsNullOrWhiteSpace([string]$journal.started_at)) { throw "Invalid replacement journal." }
+      $started = [DateTime]::MinValue
+      if ($journal.started_at -isnot [DateTime] -and
+          ![DateTime]::TryParse([string]$journal.started_at, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$started)) {
+        throw "Invalid replacement journal timestamp."
+      }
+      $targetExists = Test-Path -LiteralPath $paths.Target
+      $oldExists = Test-Path -LiteralPath $paths.Old
+      if ($journal.state -ceq "staging") {
+        if (!$targetExists -or $oldExists) { throw "Staging journal does not describe an untouched target." }
+      } elseif ($journal.state -ceq "promoting") {
+        if ($oldExists) {
+          if ($targetExists) {
+            $failed = $paths.Target + ".failed-" + [DateTime]::UtcNow.ToString("yyyyMMddHHmmssfffffff") + "-" + [guid]::NewGuid().ToString("N")
+            Invoke-WithRetry -Label "Retain uncommitted target" -Action { Move-Item -LiteralPath $paths.Target -Destination $failed -ErrorAction Stop }
+          }
+          Invoke-WithRetry -Label "Restore previous source tree" -Action { Move-Item -LiteralPath $paths.Old -Destination $paths.Target -ErrorAction Stop }
+        } elseif (!$targetExists) { throw "Promoting journal has neither target nor .old." }
+      } else {
+        if (!$targetExists -or (Test-Path -LiteralPath $paths.New)) { throw "Committed journal has missing target or unexpected .new." }
+        if ($oldExists) { Invoke-WithRetry -Label "Remove committed previous tree" -Action { Remove-Item -LiteralPath $paths.Old -Recurse -Force -ErrorAction Stop } }
+      }
+      if (Test-Path -LiteralPath $paths.New) { Remove-Item -LiteralPath $paths.New -Recurse -Force -ErrorAction Stop }
+      Remove-Item -LiteralPath $paths.Journal -Force -ErrorAction Stop
+    }
+    # An interrupted atomic write is never authoritative and cannot block retry.
+    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force -ErrorAction Stop }
+  } catch {
+    throw "Replacement recovery refused/failed: $($_.Exception.Message). Retained paths: target=$($paths.Target); old=$($paths.Old); new=$($paths.New); journal=$($paths.Journal); failed=$($paths.Target).failed-*. Restore the previous .old by rename after moving any target aside; retain the journal until the trees are reconciled."
+  }
+}
+
+function Invoke-SourceTreeReplacement([string]$BundlePath, [string]$TargetDir, [string]$CandidateDir, [object[]]$ExpectedInventory, [string]$ExpectedVersion, [string]$Operation) {
+  if ($null -eq (ConvertTo-FrameCompareVersion $ExpectedVersion)) { throw "Malformed target app version '$ExpectedVersion'" }
+  if ($Operation -cnotin @("apply", "rollback")) { throw "Invalid replacement operation: $Operation" }
+  $paths = Get-ReplacementPaths $BundlePath
+  if ($TargetDir -cne $paths.Target -or !(Test-Path -LiteralPath $TargetDir -PathType Container)) { throw "Invalid replacement target: $TargetDir" }
+  if ((Test-Path -LiteralPath $paths.Old) -or (Test-Path -LiteralPath $paths.New) -or (Test-Path -LiteralPath $paths.Journal)) { throw "Replacement requires repaired transaction paths." }
+  $journal = [ordered]@{ schema_version = 1; operation = $Operation; state = "staging"; started_at = [DateTime]::UtcNow.ToString("o") }
+  $committed = $false
+  try {
+    Write-AtomicJson $paths.Journal $journal
+    Copy-DirectoryContents -SourceDir $CandidateDir -DestinationDir $paths.New
+    Assert-TreeInventory -Root $paths.New -ExpectedInventory $ExpectedInventory
+    $journal.state = "promoting"
+    Write-AtomicJson $paths.Journal $journal
+    Invoke-WithRetry -Label "Rename current frame_compare to .old" -Action { Move-Item -LiteralPath $TargetDir -Destination $paths.Old -ErrorAction Stop }
+    Invoke-WithRetry -Label "Rename .new into place" -Action { Move-Item -LiteralPath $paths.New -Destination $TargetDir -ErrorAction Stop }
+    Invoke-SmokeCheck -BundlePath $BundlePath -ExpectedVersion $ExpectedVersion
+    $journal.state = "committed"
+    Write-AtomicJson $paths.Journal $journal
+    $committed = $true
+    Repair-InterruptedReplacement $BundlePath
+    $failed = @(Get-ChildItem -LiteralPath (Split-Path -Parent $TargetDir) -Directory -Filter "frame_compare.failed-*" | Sort-Object Name -Descending)
+    $failed | Select-Object -Skip 1 | Remove-Item -Recurse -Force -ErrorAction Stop
+  } catch {
+    $failure = $_
+    if (!$committed) {
+      try { Repair-InterruptedReplacement $BundlePath }
+      catch { throw "Replacement failed: $($failure.Exception.Message). $($_.Exception.Message)" }
+    }
+    throw $failure
+  }
 }
 
 function Invoke-Rollback([string]$BundlePath, [string]$BackupId) {
@@ -650,10 +809,13 @@ function Invoke-Rollback([string]$BundlePath, [string]$BackupId) {
   if (![string]::IsNullOrWhiteSpace($compatibilityError)) {
     throw "Rollback refused: $compatibilityError."
   }
+  $completenessError = Get-BackupCompletenessError $backupParent
+  if ($completenessError -ne "") { throw "Rollback refused: $completenessError" }
 
   $lockInfo = $null
   try {
     $lockInfo = Acquire-UpdateLock -BundlePath $BundlePath
+    Repair-InterruptedReplacement -BundlePath $BundlePath
     # Another update may have pruned this backup after the unlocked preflight.
     if (!(Test-Path -LiteralPath $backupDir -PathType Container)) {
       throw "Backup id not found: $BackupId"
@@ -665,7 +827,8 @@ function Invoke-Rollback([string]$BundlePath, [string]$BackupId) {
     }
 
     $targetDir = Join-PathParts -Root $BundlePath -Parts @("app", "src", "frame_compare")
-    Restore-FromBackup -BackupDir $backupDir -TargetDir $targetDir
+    $record = Read-CompleteBackup $backupParent
+    Invoke-SourceTreeReplacement -BundlePath $BundlePath -TargetDir $targetDir -CandidateDir $backupDir -ExpectedInventory @($record.files) -ExpectedVersion $record.app_version -Operation "rollback"
     Write-Host "Rollback applied from backup: $BackupId"
     return 0
   } finally {
@@ -685,15 +848,11 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     "FrameCompareUpdate",
     [guid]::NewGuid().ToString("N")
   )
-  $backupId = ""
-  $backupDir = ""
   $targetDir = Join-PathParts -Root $BundlePath -Parts @("app", "src", "frame_compare")
-  $oldDir = "$targetDir.old"
-  $newDir = "$targetDir.new"
 
   try {
     $lockInfo = Acquire-UpdateLock -BundlePath $BundlePath
-    Ensure-Directory -Path $tempRoot
+    Repair-InterruptedReplacement -BundlePath $BundlePath
 
     $zipStream = [System.IO.File]::Open(
       $resolvedZip,
@@ -787,13 +946,31 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
       throw "Unsupported signature_file '$signatureFile' (expected 'update-manifest.sig')"
     }
 
+    foreach ($field in @("from_app_version_min", "to_app_version")) {
+      $property = $manifest.PSObject.Properties[$field]
+      if ($null -eq $property -or $property.Value -isnot [string]) { throw "Malformed app version field '$field' in update manifest." }
+    }
     $fromVersionMin = Get-RequiredStringProperty -Object $manifest -Name "from_app_version_min" -Context "manifest"
     $fromVersionMax = Get-OptionalStringProperty -Object $manifest -Name "from_app_version_max"
+    $targetVersion = Get-PayloadVersionFromManifest -Manifest $manifest
+    foreach ($versionText in @($fromVersionMin, $targetVersion)) {
+      if ($null -eq (ConvertTo-FrameCompareVersion $versionText)) { throw "Malformed app version '$versionText' in update manifest." }
+    }
+    $maximumProperty = $manifest.PSObject.Properties["from_app_version_max"]
+    if ($null -ne $maximumProperty -and $null -ne $maximumProperty.Value -and
+        ($maximumProperty.Value -isnot [string] -or $null -eq (ConvertTo-FrameCompareVersion $fromVersionMax))) {
+      throw "Malformed maximum app version '$fromVersionMax'."
+    }
+    $targetLine = ConvertTo-FrameCompareVersion $targetVersion
+    $minimumLine = ConvertTo-FrameCompareVersion $fromVersionMin
+    if ($targetLine.Major -ne $minimumLine.Major -or $targetLine.Minor -ne $minimumLine.Minor) {
+      throw "Target version must stay within the signed minimum's major.minor line."
+    }
     $installedVersion = Get-BundleAppVersion -BundlePath $BundlePath
     if ([string]::IsNullOrWhiteSpace($installedVersion)) {
       throw "Installed app version could not be determined; refusing code-only update. Reinstall the complete portable bundle."
     }
-    if (!(Test-StringInRange -Value $installedVersion -Min $fromVersionMin -Max $fromVersionMax)) {
+    if (!(Test-FrameCompareVersionInRange -Value $installedVersion -Min $fromVersionMin -Max $fromVersionMax)) {
       throw "Installed app version '$installedVersion' is outside supported range [$fromVersionMin, $fromVersionMax]."
     }
 
@@ -892,93 +1069,12 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
       throw "Installed target path not found: $targetDir"
     }
 
-    if (Test-Path -LiteralPath $newDir) {
-      Invoke-WithRetry -Label "Cleanup existing .new directory" -Action { Remove-Item -LiteralPath $newDir -Recurse -Force }
-    }
-    if (Test-Path -LiteralPath $oldDir) {
-      Invoke-WithRetry -Label "Cleanup existing .old directory" -Action { Remove-Item -LiteralPath $oldDir -Recurse -Force }
-    }
-
-    $backupRoot = Get-BackupRoot -BundlePath $BundlePath
-    Ensure-Directory -Path $backupRoot
-    $backupId = (Get-Date).ToString("yyyyMMddHHmmss")
-    $backupDir = Join-Path (Join-Path $backupRoot $backupId) "frame_compare"
-    Ensure-Directory -Path (Split-Path -Parent $backupDir)
-    Copy-Item -LiteralPath $targetDir -Destination $backupDir -Recurse -Force
-    $backupIdentityPath = Join-Path (Split-Path -Parent $backupDir) "compatibility.json"
-    $backupIdentityJson = $installedCompatibility | ConvertTo-Json
-    [System.IO.File]::WriteAllText($backupIdentityPath, $backupIdentityJson, [System.Text.UTF8Encoding]::new($false))
-
-    Copy-DirectoryContents -SourceDir $payloadDir -DestinationDir $newDir
-    try {
-      Invoke-WithRetry -Label "Rename current frame_compare to .old" -Action { Move-Item -LiteralPath $targetDir -Destination $oldDir -Force }
-      Invoke-WithRetry -Label "Rename .new into place" -Action { Move-Item -LiteralPath $newDir -Destination $targetDir -Force }
-    } catch {
-      $renameError = $_
-      Write-Host "Rename failed; restoring original installation."
-      try {
-        if (Test-Path -LiteralPath $targetDir) {
-          Invoke-WithRetry -Label "Remove partial target after rename failure" -Action { Remove-Item -LiteralPath $targetDir -Recurse -Force }
-        }
-      } catch {
-        Write-Warning "Cleanup step failed (remove partial target after rename failure): $($_.Exception.Message)"
-      }
-
-      try {
-        if (Test-Path -LiteralPath $newDir) {
-          Invoke-WithRetry -Label "Remove .new after rename failure" -Action { Remove-Item -LiteralPath $newDir -Recurse -Force }
-        }
-      } catch {
-        Write-Warning "Cleanup step failed (remove .new after rename failure): $($_.Exception.Message)"
-      }
-
-      $restoredFromOld = $false
-      if (Test-Path -LiteralPath $oldDir) {
-        try {
-          Invoke-WithRetry -Label "Restore .old after rename failure" -Action { Move-Item -LiteralPath $oldDir -Destination $targetDir -Force }
-          $restoredFromOld = $true
-        } catch {
-          Write-Warning "Cleanup step failed (restore .old after rename failure): $($_.Exception.Message)"
-        }
-      }
-
-      if (
-        -not $restoredFromOld -and
-        ![string]::IsNullOrWhiteSpace($backupDir) -and
-        (Test-Path -LiteralPath $backupDir)
-      ) {
-        try {
-          Restore-FromBackup -BackupDir $backupDir -TargetDir $targetDir
-        } catch {
-          Write-Warning "Cleanup step failed (restore backup after rename failure): $($_.Exception.Message)"
-        }
-      }
-
-      throw $renameError
-    }
-
-    try {
-      $targetVersion = Get-PayloadVersionFromManifest -Manifest $manifest
-      Invoke-SmokeCheck -BundlePath $BundlePath -ExpectedVersion $targetVersion
-    } catch {
-      Write-Host "Smoke check failed; rolling back update."
-      if (Test-Path -LiteralPath $targetDir) {
-        Invoke-WithRetry -Label "Remove failed target after smoke check failure" -Action { Remove-Item -LiteralPath $targetDir -Recurse -Force }
-      }
-      if (Test-Path -LiteralPath $oldDir) {
-        Invoke-WithRetry -Label "Restore .old after smoke check failure" -Action { Move-Item -LiteralPath $oldDir -Destination $targetDir -Force }
-      } elseif (![string]::IsNullOrWhiteSpace($backupDir) -and (Test-Path -LiteralPath $backupDir)) {
-        Restore-FromBackup -BackupDir $backupDir -TargetDir $targetDir
-      }
-      throw
-    }
-
-    if (Test-Path -LiteralPath $oldDir) {
-      Invoke-WithRetry -Label "Remove .old after successful update" -Action { Remove-Item -LiteralPath $oldDir -Recurse -Force }
-    }
-    if (Test-Path -LiteralPath $newDir) {
-      Invoke-WithRetry -Label "Remove .new after successful update" -Action { Remove-Item -LiteralPath $newDir -Recurse -Force }
-    }
+    $backupId = [DateTime]::UtcNow.ToString("yyyyMMddHHmmss")
+    $null = New-CompleteBackup -BundlePath $BundlePath -TargetDir $targetDir -Compatibility $installedCompatibility -Version $installedVersion -BackupId $backupId
+    $relativeInventory = @($manifestFiles | ForEach-Object {
+      [pscustomobject]@{ path = $_.path.Substring("app/src/frame_compare/".Length); sha256 = $_.sha256; bytes = $_.bytes }
+    })
+    Invoke-SourceTreeReplacement -BundlePath $BundlePath -TargetDir $targetDir -CandidateDir $payloadDir -ExpectedInventory $relativeInventory -ExpectedVersion $targetVersion -Operation "apply"
 
     Invoke-PurgeBackups -BundlePath $BundlePath -Keep 5 | Out-Null
     Write-Host "Update applied successfully."

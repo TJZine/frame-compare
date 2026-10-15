@@ -45,6 +45,7 @@ SOURCE_SCRIPTS = (
     "tools/windows_portable/sign_update.ps1",
     "tools/windows_portable/update_manifest.schema.json",
     "tools/windows_portable/shim/frame-compare-update.ps1",
+    "tools/windows_portable/shim/frame-compare-version.ps1",
     "tools/windows_portable/validate_update_public_key.ps1",
     "tools/windows_portable/write_bundle_inventory.py",
 )

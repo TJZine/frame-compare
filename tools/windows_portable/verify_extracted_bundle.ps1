@@ -348,6 +348,7 @@ try {
     "frame-compare-portable-win-x64/licenses/THIRD_PARTY_NOTICES.txt",
     "frame-compare-portable-win-x64/shim/frame-compare.cmd",
     "frame-compare-portable-win-x64/shim/frame-compare-update.cmd",
+    "frame-compare-portable-win-x64/shim/frame-compare-version.ps1",
     "frame-compare-portable-win-x64/shim/frame-compare-update.ps1"
   )
   foreach ($requiredEntry in $requiredEntries) {
@@ -821,6 +822,7 @@ $requiredSourceScripts = @(
   ".github/workflows/windows-portable-build.yml",
   "tools/windows_portable/build_portable.ps1",
   "tools/windows_portable/path_safety.ps1",
+  "tools/windows_portable/shim/frame-compare-version.ps1",
   "tools/windows_portable/runtime_smoke.py",
   "tools/windows_portable/bundle_info.schema.json",
   "tools/windows_portable/manifest.windows-x64.json",

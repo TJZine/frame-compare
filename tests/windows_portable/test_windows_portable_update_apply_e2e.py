@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from ._helpers import powershell_exe as _powershell_exe
 from ._helpers import snapshot_bytes as _snapshot_bytes
 from ._helpers import write_valid_config_json as _write_valid_config_json
 
@@ -25,18 +24,33 @@ _POWERSHELL_SIGN_TIMEOUT_SECONDS = 30.0
 _POWERSHELL_APPLY_TIMEOUT_SECONDS = 30.0
 
 
+@pytest.fixture(params=["powershell", "pwsh"])
+def update_exe(request: pytest.FixtureRequest) -> str:
+    if os.name != "nt":
+        pytest.skip("Windows PowerShell 5.1/7 updater E2E required")
+    executable = shutil.which(request.param)
+    if executable is None:
+        pytest.skip(f"{request.param} unavailable")
+    return executable
+
+
 def _generate_rsa_keypair(
     *,
     exe: str,
     repo_root: Path,
     tmp_path: Path,
 ) -> tuple[Path, str]:
+    # Key generation is a PS7.3+ build tool; the updater itself is exercised with
+    # the selected legacy/modern interpreter, independently of signing tooling.
+    keygen_exe = shutil.which("pwsh")
+    if keygen_exe is None:
+        pytest.skip("PowerShell 7.3+ key-generation tool required for signed updater fixtures")
     private_key_path = tmp_path / "private_key.xml"
     public_key_path = tmp_path / "public_key.xml"
     keygen_script = repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1"
     proc = subprocess.run(
         [
-            exe,
+            keygen_exe,
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
@@ -80,6 +94,10 @@ def _setup_update_install(
     )
     shim_update_ps1 = shim_dir / "frame-compare-update.ps1"
     shim_update_ps1.write_text(repo_update_script.read_text(encoding="utf-8"), encoding="utf-8")
+    shutil.copyfile(
+        repo_update_script.with_name("frame-compare-version.ps1"),
+        shim_dir / "frame-compare-version.ps1",
+    )
 
     public_key_path = shim_dir / "update_public_key.xml"
     public_key_path.write_text(public_key_xml, encoding="utf-8")
@@ -155,6 +173,9 @@ def _build_update_zip(
     requirements_fingerprint: str = _REQ_HASH,
     archive_name: str = "update.zip",
     payload_content: str = _NEW_VERSION_CONTENT,
+    target_version: str = "1.0.1",
+    minimum: str = "1.0.0",
+    maximum: str | None = "1.1.0",
 ) -> Path:
     update_staging = tmp_path / f"{Path(archive_name).stem}_staging"
     update_staging.mkdir()
@@ -168,9 +189,9 @@ def _build_update_zip(
     manifest_data = {
         "schema_version": 2,
         "target_platform": "windows-x64",
-        "to_app_version": "1.0.1",
-        "from_app_version_min": "1.0.0",
-        "from_app_version_max": "1.1.0",
+        "to_app_version": target_version,
+        "from_app_version_min": minimum,
+        "from_app_version_max": maximum,
         "expected_requirements_lock_sha256": requirements_fingerprint,
         "expected_media_runtime_fingerprint": runtime_fingerprint,
         "signature_algorithm": "rsa-sha256-pkcs1",
@@ -267,6 +288,20 @@ def _assert_update_applied(*, bundle_dir: Path, version_py: Path) -> None:
     backups = list(backup_root.iterdir())
     assert len(backups) == 1
     backup_version_py = backups[0] / "frame_compare" / "version.py"
+    record = json.loads((backups[0] / "backup.json").read_text(encoding="utf-8"))
+    assert record == {
+        "schema_version": 1,
+        "app_version": "1.0.0",
+        "files": [
+            {
+                "path": "version.py",
+                "sha256": hashlib.sha256(_OLD_VERSION_CONTENT.encode()).hexdigest(),
+                "bytes": len(_OLD_VERSION_CONTENT.encode()),
+            }
+        ],
+    }
+    assert not (backups[0] / "frame_compare/backup.json").exists()
+    assert not (backups[0] / "frame_compare/compatibility.json").exists()
     assert backup_version_py.read_text(encoding="utf-8") == _OLD_VERSION_CONTENT
     assert json.loads((backups[0] / "compatibility.json").read_text(encoding="utf-8-sig")) == {
         "media_runtime_fingerprint": _RUNTIME_HASH,
@@ -323,10 +358,10 @@ def _run_update_command(
 
 
 @pytest.mark.integration
-def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> None:
-    exe = _powershell_exe()
-    if exe is None:
-        pytest.skip("pwsh/powershell not available")
+def test_windows_portable_update_apply_e2e(
+    tmp_path: Path, repo_root: Path, update_exe: str
+) -> None:
+    exe = update_exe
 
     private_key_path, public_key_xml = _generate_rsa_keypair(
         exe=exe,
@@ -547,12 +582,9 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
 
 @pytest.mark.integration
 def test_windows_portable_update_refuses_pre_native_panel_bundle(
-    tmp_path: Path,
-    repo_root: Path,
+    tmp_path: Path, repo_root: Path, update_exe: str
 ) -> None:
-    exe = _powershell_exe()
-    if exe is None:
-        pytest.skip("pwsh/powershell not available")
+    exe = update_exe
 
     private_key_path, public_key_xml = _generate_rsa_keypair(
         exe=exe,
@@ -600,13 +632,9 @@ def test_windows_portable_update_refuses_pre_native_panel_bundle(
 @pytest.mark.integration
 @pytest.mark.parametrize("invalid_value", [None, "not-a-sha256", "A" * 64])
 def test_windows_portable_update_refuses_invalid_installed_runtime_identity(
-    tmp_path: Path,
-    repo_root: Path,
-    invalid_value: str | None,
+    tmp_path: Path, repo_root: Path, invalid_value: str | None, update_exe: str
 ) -> None:
-    exe = _powershell_exe()
-    if exe is None:
-        pytest.skip("pwsh/powershell not available")
+    exe = update_exe
 
     private_key_path, public_key_xml = _generate_rsa_keypair(
         exe=exe,
@@ -657,11 +685,9 @@ def test_windows_portable_update_refuses_invalid_installed_runtime_identity(
     "identity", ["matching", "missing", "runtime", "requirements", "malformed"]
 )
 def test_windows_rollback_checks_backup_identity_without_mutating_on_refusal(
-    tmp_path: Path, repo_root: Path, identity: str
+    tmp_path: Path, repo_root: Path, identity: str, update_exe: str
 ) -> None:
-    exe = _powershell_exe()
-    if exe is None:
-        pytest.skip("pwsh/powershell not available")
+    exe = update_exe
     bundle_dir, updater, _ = _setup_update_install(
         tmp_path=tmp_path, repo_root=repo_root, public_key_xml=""
     )
@@ -683,6 +709,23 @@ def test_windows_rollback_checks_backup_identity_without_mutating_on_refusal(
             "invalid json" if identity == "malformed" else json.dumps(compatibility),
             encoding="utf-8",
         )
+    backup_file = backup_code / "version.py"
+    (backup_parent / "backup.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "app_version": "1.0.1",
+                "files": [
+                    {
+                        "path": "version.py",
+                        "sha256": hashlib.sha256(backup_file.read_bytes()).hexdigest(),
+                        "bytes": backup_file.stat().st_size,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     before = _snapshot_bytes(bundle_dir)
     listing = _run_update_command(
         exe=exe, env=os.environ.copy(), shim_update_ps1=updater, args=["list-backups"]
@@ -702,3 +745,568 @@ def test_windows_rollback_checks_backup_identity_without_mutating_on_refusal(
         assert rollback.returncode != 0
         assert "Rollback refused" in rollback.stdout + rollback.stderr
         assert _snapshot_bytes(bundle_dir) == before
+
+
+def _complete_backup(bundle: Path, backup_id: str, version: str = "1.0.0") -> Path:
+    parent = bundle / "app/.update_backups" / backup_id
+    code = parent / "frame_compare"
+    code.mkdir(parents=True)
+    (code / "version.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
+    (parent / "compatibility.json").write_text(
+        json.dumps(
+            {
+                "requirements_lock_sha256": _REQ_HASH,
+                "media_runtime_fingerprint": _RUNTIME_HASH,
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = (code / "version.py").read_bytes()
+    (parent / "backup.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "app_version": version,
+                "files": [
+                    {
+                        "path": "version.py",
+                        "sha256": hashlib.sha256(payload).hexdigest(),
+                        "bytes": len(payload),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return parent
+
+
+def _run_updater_functions(
+    exe: str, updater: Path, bundle: Path, body: str, **extra: str
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            exe,
+            "-NoProfile",
+            "-Command",
+            "$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; . $env:UPDATER; "
+            + body,
+        ],
+        env=os.environ | {"UPDATER": str(updater), "BUNDLE": str(bundle)} | extra,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("installed", "target", "minimum", "maximum", "allowed"),
+    [
+        ("1.0.0rc1", "1.0.0rc2", "1.0.0", None, True),
+        ("1.0.0rc2", "1.0.0", "1.0.0", None, True),
+        ("1.0.0", "1.0.0rc2", "1.0.0", None, True),
+        ("1.0.1", "1.0.0rc2", "1.0.0", None, True),
+        ("1.0.0", "1.1.0rc1", "1.1.0", None, False),
+        ("1.0.0rc2", "1.0.0rc3", "1.0.0rc1", "1.0.0rc2", True),
+        ("invalid", "1.0.1", "1.0.0", None, False),
+        ("1.0.0", "invalid", "1.0.0", None, False),
+        ("1.0.0", "1.0.1", "invalid", None, False),
+        ("1.0.0", "1.0.1", "1.0.0", "invalid", False),
+        ("1.0.0", "1.0.1", "1.0.0", "", False),
+    ],
+)
+def test_signed_update_version_admission(
+    tmp_path: Path,
+    repo_root: Path,
+    update_exe: str,
+    installed: str,
+    target: str,
+    minimum: str,
+    maximum: str | None,
+    allowed: bool,
+) -> None:
+    private, public = _generate_rsa_keypair(exe=update_exe, repo_root=repo_root, tmp_path=tmp_path)
+    bundle, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml=public
+    )
+    version_file = _write_mock_bundle(bundle_dir=bundle)
+    version_file.write_text(f'__version__ = "{installed}"\n', encoding="utf-8")
+    # A malformed reported installed version must not be rescued by an unrelated
+    # host Python import in this generated bundle fixture.
+    if installed == "invalid":
+        (bundle / "python/python.exe").unlink()
+    before = _snapshot_bytes(bundle)
+    archive = _build_update_zip(
+        tmp_path=tmp_path,
+        payload_content=f'__version__ = "{target}"\n',
+        target_version=target,
+        minimum=minimum,
+        maximum=maximum,
+    )
+    env = _sign_update_zip(
+        exe=update_exe,
+        repo_root=repo_root,
+        update_zip_path=archive,
+        private_key_path=private,
+        expected_public_key_path=updater.parent / "update_public_key.xml",
+    )
+    result = _apply_update(
+        exe=update_exe, env=env, bundle_dir=bundle, shim_update_ps1=updater, update_zip_path=archive
+    )
+    if allowed:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert version_file.read_text(encoding="utf-8") == f'__version__ = "{target}"\n'
+        backup = next((bundle / "app/.update_backups").iterdir())
+        assert (
+            json.loads((backup / "backup.json").read_text(encoding="utf-8"))["app_version"]
+            == installed
+        )
+    else:
+        assert result.returncode != 0
+        assert any(
+            marker in result.stdout + result.stderr
+            for marker in ("Malformed", "outside supported range", "could not be determined")
+        )
+        assert _snapshot_bytes(bundle) == before
+        assert not (bundle / "app/.update_backups").exists()
+
+
+@pytest.mark.parametrize(("expected", "reported"), [("0.8.0", "0.8.0rc1"), ("1.0.1", "1.0.10")])
+def test_signed_update_exact_smoke_mismatch_recovers(
+    tmp_path: Path, repo_root: Path, update_exe: str, expected: str, reported: str
+) -> None:
+    private, public = _generate_rsa_keypair(exe=update_exe, repo_root=repo_root, tmp_path=tmp_path)
+    bundle, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml=public
+    )
+    version = _write_mock_bundle(bundle_dir=bundle)
+    minimum = ".".join(expected.split(".")[:2]) + ".0"
+    version.write_text(f'__version__ = "{minimum}"\n', encoding="utf-8")
+    before = _snapshot_bytes(version.parent)
+    archive = _build_update_zip(
+        tmp_path=tmp_path,
+        payload_content=f'__version__ = "{reported}"\n',
+        target_version=expected,
+        minimum=minimum,
+        maximum=None,
+    )
+    env = _sign_update_zip(
+        exe=update_exe,
+        repo_root=repo_root,
+        update_zip_path=archive,
+        private_key_path=private,
+        expected_public_key_path=updater.parent / "update_public_key.xml",
+    )
+    result = _apply_update(
+        exe=update_exe, env=env, bundle_dir=bundle, shim_update_ps1=updater, update_zip_path=archive
+    )
+    assert result.returncode != 0
+    assert f"expected version '{expected}', got '{reported}'" in result.stdout + result.stderr
+    assert _snapshot_bytes(version.parent) == before
+    failed = list(version.parent.parent.glob("frame_compare.failed-*"))
+    assert len(failed) == 1
+    assert (failed[0] / "version.py").read_text(encoding="utf-8") == f'__version__ = "{reported}"\n'
+    assert not (bundle / "app/.frame_compare_replacement.json").exists()
+
+
+@pytest.mark.parametrize("operation", ["apply", "rollback"])
+@pytest.mark.parametrize(
+    "state", ["staging", "promoting-before", "promoting-first", "promoting-both", "committed"]
+)
+def test_update_commands_repair_interrupted_journals(
+    tmp_path: Path, repo_root: Path, update_exe: str, operation: str, state: str
+) -> None:
+    private, public = _generate_rsa_keypair(exe=update_exe, repo_root=repo_root, tmp_path=tmp_path)
+    bundle, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml=public
+    )
+    version = _write_mock_bundle(bundle_dir=bundle)
+    before = _snapshot_bytes(version.parent)
+    backup = _complete_backup(bundle, "20260101000000")
+    target = version.parent
+    new = target.with_name("frame_compare.new")
+    old = target.with_name("frame_compare.old")
+    if state in {"staging", "promoting-before", "promoting-first", "promoting-both"}:
+        new.mkdir()
+        (new / "version.py").write_text('__version__ = "2.2.2"\n', encoding="utf-8")
+    if state in {"promoting-first", "promoting-both"}:
+        target.rename(old)
+    if state == "promoting-both":
+        new.rename(target)
+        for name in ("frame_compare.failed-20000101", "frame_compare.failed-20000102"):
+            stale = target.parent / name
+            stale.mkdir()
+            (stale / "diagnostic").write_bytes(b"older failure")
+    if state == "committed":
+        old.mkdir()
+        (old / "prior").write_bytes(b"previous committed tree")
+    journal = bundle / "app/.frame_compare_replacement.json"
+    journal.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "operation": operation,
+                "state": "promoting" if state.startswith("promoting") else state,
+                "started_at": "2026-10-15T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    journal.with_suffix(".json.tmp").write_bytes(b"partial atomic journal write")
+    if operation == "apply":
+        archive = _build_update_zip(tmp_path=tmp_path)
+        env = _sign_update_zip(
+            exe=update_exe,
+            repo_root=repo_root,
+            update_zip_path=archive,
+            private_key_path=private,
+            expected_public_key_path=updater.parent / "update_public_key.xml",
+        )
+        result = _apply_update(
+            exe=update_exe,
+            env=env,
+            bundle_dir=bundle,
+            shim_update_ps1=updater,
+            update_zip_path=archive,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert version.read_text(encoding="utf-8") == _NEW_VERSION_CONTENT
+    else:
+        result = _run_update_command(
+            exe=update_exe,
+            env=os.environ.copy(),
+            shim_update_ps1=updater,
+            args=["rollback", backup.name],
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _snapshot_bytes(target) == before
+    assert not journal.exists() and not journal.with_suffix(".json.tmp").exists()
+    assert not new.exists() and not old.exists()
+    if state == "promoting-both":
+        failed = list(target.parent.glob("frame_compare.failed-*"))
+        assert (
+            len(failed) == 1
+            and (failed[0] / "version.py").read_text(encoding="utf-8") == '__version__ = "2.2.2"\n'
+        )
+
+
+@pytest.mark.parametrize("operation", ["apply", "rollback"])
+@pytest.mark.parametrize("state", ["orphan-new", "orphan-old", "invalid-journal", "missing-both"])
+def test_update_commands_refuse_unknown_replacement_state(
+    tmp_path: Path, repo_root: Path, update_exe: str, operation: str, state: str
+) -> None:
+    private, public = _generate_rsa_keypair(exe=update_exe, repo_root=repo_root, tmp_path=tmp_path)
+    bundle, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml=public
+    )
+    version = _write_mock_bundle(bundle_dir=bundle)
+    backup = _complete_backup(bundle, "20260101000000")
+    if state.startswith("orphan"):
+        path = version.parent.with_name("frame_compare." + state.split("-")[1])
+        path.mkdir()
+        (path / "sentinel").write_bytes(b"retain unknown tree")
+    else:
+        journal = {
+            "schema_version": 1,
+            "operation": operation,
+            "state": "unknown" if state == "invalid-journal" else "promoting",
+            "started_at": "2026-10-15T00:00:00Z",
+        }
+        (bundle / "app/.frame_compare_replacement.json").write_text(
+            json.dumps(journal), encoding="utf-8"
+        )
+        if state == "missing-both":
+            shutil.rmtree(version.parent)
+    before = _snapshot_bytes(bundle)
+    if operation == "apply":
+        archive = _build_update_zip(tmp_path=tmp_path)
+        env = _sign_update_zip(
+            exe=update_exe,
+            repo_root=repo_root,
+            update_zip_path=archive,
+            private_key_path=private,
+            expected_public_key_path=updater.parent / "update_public_key.xml",
+        )
+        result = _apply_update(
+            exe=update_exe,
+            env=env,
+            bundle_dir=bundle,
+            shim_update_ps1=updater,
+            update_zip_path=archive,
+        )
+    else:
+        result = _run_update_command(
+            exe=update_exe,
+            env=os.environ.copy(),
+            shim_update_ps1=updater,
+            args=["rollback", backup.name],
+        )
+    assert result.returncode != 0
+    assert "Replacement recovery refused/failed" in result.stdout + result.stderr
+    assert "frame_compare.old" in result.stdout + result.stderr
+    assert "frame_compare.new" in result.stdout + result.stderr
+    assert _snapshot_bytes(bundle) == before
+
+
+@pytest.mark.parametrize("operation", ["apply", "rollback"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "copy",
+        "inventory",
+        "size",
+        "path-set",
+        "wrong-path",
+        "rename",
+        "smoke",
+        "launcher",
+        "recovery",
+    ],
+)
+def test_source_replacement_failure_keeps_current_or_recoverable_tree(
+    tmp_path: Path, repo_root: Path, update_exe: str, operation: str, failure: str
+) -> None:
+    bundle, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml="unused"
+    )
+    version = _write_mock_bundle(bundle_dir=bundle)
+    before = _snapshot_bytes(version.parent)
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    payload = _NEW_VERSION_CONTENT.encode()
+    (candidate / "version.py").write_bytes(payload)
+    inventory = [
+        {"path": "version.py", "sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload)}
+    ]
+    if failure == "inventory":
+        inventory[0]["sha256"] = "0" * 64
+    elif failure == "size":
+        inventory[0]["bytes"] = len(payload) + 1
+    elif failure == "path-set":
+        (candidate / "unexpected.py").write_bytes(payload)
+    elif failure == "wrong-path":
+        (candidate / "version.py").rename(candidate / "other.py")
+    elif failure == "launcher":
+        (bundle / "frame-compare.ps1").write_text("exit 1\n", encoding="utf-8")
+    inventory_path = tmp_path / "inventory.json"
+    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+    injection = {
+        "copy": r"function Copy-DirectoryContents { param($SourceDir,$DestinationDir) Ensure-Directory $DestinationDir; Set-Content (Join-Path $DestinationDir 'partial') partial; throw 'injected stage copy failure' }; ",
+        "inventory": "",
+        "size": "",
+        "path-set": "",
+        "wrong-path": "",
+        "launcher": "",
+        "rename": r"function Invoke-WithRetry { param($Action,$Label) if ($Label -eq 'Rename .new into place') { throw 'injected promote failure' }; & $Action }; ",
+        "smoke": r"function Invoke-SmokeCheck { throw 'injected smoke failure' }; ",
+        "recovery": r"function Invoke-WithRetry { param($Action,$Label) if ($Label -eq 'Rename .new into place') { throw 'injected promote failure' }; if ($Label -eq 'Restore previous source tree') { throw 'injected recovery rename failure' }; & $Action }; ",
+    }[failure]
+    result = _run_updater_functions(
+        update_exe,
+        updater,
+        bundle,
+        injection
+        + r"""
+$inventory = @(Get-Content -LiteralPath $env:INVENTORY -Raw | ConvertFrom-Json)
+$held = $null
+try {
+  $held = Acquire-UpdateLock $env:BUNDLE
+  Repair-InterruptedReplacement $env:BUNDLE
+  Invoke-SourceTreeReplacement -BundlePath $env:BUNDLE -TargetDir (Join-Path $env:BUNDLE 'app/src/frame_compare') -CandidateDir $env:CANDIDATE -ExpectedInventory $inventory -ExpectedVersion '1.0.1' -Operation $env:OPERATION
+} finally { Release-UpdateLock $held }
+""",
+        INVENTORY=str(inventory_path),
+        CANDIDATE=str(candidate),
+        OPERATION=operation,
+    )
+    assert result.returncode != 0
+    expected = {
+        "copy": "injected stage copy failure",
+        "inventory": "Source inventory hash/size mismatch",
+        "size": "Source inventory hash/size mismatch",
+        "path-set": "Source inventory path-set mismatch",
+        "wrong-path": "Unexpected source inventory path",
+        "launcher": "Smoke check failed: frame-compare version exited with code 1",
+        "rename": "injected promote failure",
+        "smoke": "injected smoke failure",
+        "recovery": "injected recovery rename failure",
+    }[failure]
+    assert expected in result.stdout + result.stderr
+    journal = bundle / "app/.frame_compare_replacement.json"
+    old = version.parent.with_name("frame_compare.old")
+    new = version.parent.with_name("frame_compare.new")
+    if failure == "recovery":
+        assert not version.parent.exists() and _snapshot_bytes(old) == before
+        assert new.exists() and journal.exists()
+        assert "Retained paths:" in result.stdout + result.stderr
+        repaired = _run_updater_functions(
+            update_exe,
+            updater,
+            bundle,
+            "$held = Acquire-UpdateLock $env:BUNDLE; try { Repair-InterruptedReplacement $env:BUNDLE } finally { Release-UpdateLock $held }",
+        )
+        assert repaired.returncode == 0, repaired.stdout + repaired.stderr
+    assert _snapshot_bytes(version.parent) == before
+    assert not old.exists() and not new.exists() and not journal.exists()
+
+
+@pytest.mark.parametrize(
+    "mutation", ["missing", "malformed", "truncated", "bad-version", "unreadable"]
+)
+def test_incomplete_backups_are_unavailable_before_lock(
+    tmp_path: Path, repo_root: Path, update_exe: str, mutation: str
+) -> None:
+    bundle, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml="unused"
+    )
+    version = _write_mock_bundle(bundle_dir=bundle)
+    backup = _complete_backup(bundle, "20260101000000", "1.0.1")
+    record = backup / "backup.json"
+    if mutation == "missing":
+        record.unlink()
+    elif mutation == "malformed":
+        record.write_text("{", encoding="utf-8")
+    elif mutation == "truncated":
+        (backup / "frame_compare/version.py").write_bytes(b"truncated")
+    elif mutation == "bad-version":
+        parsed = json.loads(record.read_text(encoding="utf-8"))
+        parsed["app_version"] = "1.0.0rc0"
+        record.write_text(json.dumps(parsed), encoding="utf-8")
+    before = _snapshot_bytes(bundle)
+    result = _run_updater_functions(
+        update_exe,
+        updater,
+        bundle,
+        r"""
+$held = $null
+try {
+  if ($env:MUTATION -eq 'unreadable') {
+    $held = [IO.File]::Open((Join-Path $env:BACKUP 'frame_compare/version.py'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+  }
+  Invoke-ListBackups $env:BUNDLE | Out-Null
+  try { Invoke-Rollback $env:BUNDLE '20260101000000'; throw 'rollback unexpectedly succeeded' }
+  catch {
+    if ($_.Exception.Message -notlike 'Rollback refused:*') { throw }
+    Write-Host $_.Exception.Message
+  }
+  if (Test-Path -LiteralPath (Join-Path $env:BUNDLE 'app/.update_lock')) { throw 'preflight created a lock' }
+} finally { if ($null -ne $held) { $held.Dispose() } }
+""",
+        MUTATION=mutation,
+        BACKUP=str(backup),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "unavailable:" in result.stdout and "Rollback refused:" in result.stdout
+    assert "completeness" in result.stdout
+    assert _snapshot_bytes(bundle) == before
+    assert version.read_text(encoding="utf-8") == _OLD_VERSION_CONTENT
+
+
+@pytest.mark.parametrize("failure", ["collision", "copy", "verify"])
+def test_backup_creation_refuses_collision_and_removes_partial_copy(
+    tmp_path: Path, repo_root: Path, update_exe: str, failure: str
+) -> None:
+    bundle, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml="unused"
+    )
+    version = _write_mock_bundle(bundle_dir=bundle)
+    backup = bundle / "app/.update_backups/20260101000000"
+    if failure == "collision":
+        backup.mkdir(parents=True)
+        (backup / "sentinel").write_bytes(b"occupied backup must survive")
+    before = _snapshot_bytes(bundle)
+    injection = ""
+    if failure == "copy":
+        injection = r"""
+function Copy-Item {
+  param($LiteralPath,$Destination,[switch]$Recurse,[switch]$Force,$ErrorAction)
+  [IO.Directory]::CreateDirectory($Destination) | Out-Null
+  [IO.File]::WriteAllText((Join-Path $Destination 'partial'), 'partial copied data')
+  throw 'injected backup copy failure'
+}
+"""
+    if failure == "verify":
+        injection = r"""
+function Copy-Item {
+  param($LiteralPath,$Destination,[switch]$Recurse,[switch]$Force,$ErrorAction)
+  Microsoft.PowerShell.Management\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -Recurse -Force -ErrorAction Stop
+  [IO.File]::WriteAllText((Join-Path $Destination 'version.py'), 'truncated copy')
+}
+"""
+    result = _run_updater_functions(
+        update_exe,
+        updater,
+        bundle,
+        injection
+        + r"""
+$lockInfo = $null
+try {
+  $lockInfo = Acquire-UpdateLock $env:BUNDLE
+  $compatibility = Get-InstalledBundleCompatibilityContract $env:BUNDLE
+  New-CompleteBackup -BundlePath $env:BUNDLE -TargetDir (Join-Path $env:BUNDLE 'app/src/frame_compare') -Compatibility $compatibility -Version '1.0.0' -BackupId '20260101000000'
+} finally { Release-UpdateLock $lockInfo }
+""",
+    )
+    assert result.returncode != 0
+    expected = {
+        "collision": "Backup id already exists",
+        "copy": "injected backup copy failure",
+        "verify": "Source inventory hash/size mismatch",
+    }[failure]
+    assert expected in result.stdout + result.stderr
+    assert _snapshot_bytes(bundle) == before
+    assert version.read_text(encoding="utf-8") == _OLD_VERSION_CONTENT
+    assert backup.exists() == (failure == "collision")
+
+
+def test_backup_retention_counts_only_complete_compatible_backups(
+    tmp_path: Path, repo_root: Path, update_exe: str
+) -> None:
+    bundle, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml="unused"
+    )
+    _write_mock_bundle(bundle_dir=bundle)
+    complete = [_complete_backup(bundle, f"2026010{index}000000") for index in range(1, 8)]
+    incomplete = _complete_backup(bundle, "20260201000000")
+    (incomplete / "backup.json").unlink()
+    invalid_identity = _complete_backup(bundle, "20260202000000")
+    (invalid_identity / "compatibility.json").write_text("{", encoding="utf-8")
+    result = _run_update_command(
+        exe=update_exe, env=os.environ.copy(), shim_update_ps1=updater, args=["purge-backups"]
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sorted(path.name for path in (bundle / "app/.update_backups").iterdir()) == [
+        path.name for path in complete[2:]
+    ]
+    assert not (bundle / "app/.update_lock").exists()
+
+
+def test_backup_purge_respects_update_lock_owner(
+    tmp_path: Path, repo_root: Path, update_exe: str
+) -> None:
+    bundle, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml="unused"
+    )
+    _write_mock_bundle(bundle_dir=bundle)
+    _complete_backup(bundle, "20260101000000")
+    before = _snapshot_bytes(bundle)
+    result = _run_updater_functions(
+        update_exe,
+        updater,
+        bundle,
+        r"""
+$held = Acquire-UpdateLock $env:BUNDLE
+try {
+  try { Invoke-FrameCompareUpdate -ArgsValues @('purge-backups','--keep','0'); throw 'purge unexpectedly ran' }
+  catch {
+    if ($_.Exception.Message -notlike 'Another update appears to be running*') { throw }
+    Write-Host 'purge refused while owner held lock'
+  }
+  if (!$held['stream'].CanWrite) { throw 'contender closed owner stream' }
+} finally { Release-UpdateLock $held }
+""",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "purge refused while owner held lock" in result.stdout
+    assert _snapshot_bytes(bundle) == before

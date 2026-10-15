@@ -74,6 +74,12 @@ def test_builder_preserves_existing_state(
         "manifest.schema.json",
     ):
         shutil.copyfile(repo_root / "tools/windows_portable" / name, owner / name)
+        if name == "version_utils.ps1":
+            (owner / "shim").mkdir(exist_ok=True)
+            shutil.copyfile(
+                repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
+                owner / "shim/frame-compare-version.ps1",
+            )
     manifest = json.loads(
         (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text()
     )
@@ -176,6 +182,7 @@ def source_fixture(tmp_path: Path, repo_root: Path) -> tuple[Path, Path, Path]:
         "frame-compare.ps1",
         "frame-compare.cmd",
         "frame-compare-update.ps1",
+        "frame-compare-version.ps1",
         "frame-compare-update.cmd",
         "update_public_key.xml",
     ):
@@ -209,7 +216,7 @@ Set-Content -LiteralPath (Join-Path $OutDir 'bundle_info.json') -Value '{}'
 Set-Content -LiteralPath (Join-Path $OutDir 'install.ps1') -Value @'
 $bin = Join-Path $env:LOCALAPPDATA 'Programs/FrameCompare/bin'
 New-Item -ItemType Directory -Path $bin -Force | Out-Null
-foreach ($name in @('frame-compare.ps1', 'frame-compare.cmd', 'frame-compare-update.ps1', 'frame-compare-update.cmd', 'update_public_key.xml')) {
+foreach ($name in @('frame-compare.ps1', 'frame-compare.cmd', 'frame-compare-update.ps1', 'frame-compare-version.ps1', 'frame-compare-update.cmd', 'update_public_key.xml')) {
   Set-Content -LiteralPath (Join-Path $bin $name) -Value "new $name"
 }
 Add-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'activation-events') -Value 'new-shims-written'
@@ -416,6 +423,12 @@ def test_builder_uses_committed_version_and_empty_workspace(
         "manifest.windows-x64.json",
     ):
         shutil.copyfile(repo_root / "tools/windows_portable" / name, owner / name)
+        if name == "version_utils.ps1":
+            (owner / "shim").mkdir(exist_ok=True)
+            shutil.copyfile(
+                repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
+                owner / "shim/frame-compare-version.ps1",
+            )
     init = root / "src/frame_compare/__init__.py"
     init.parent.mkdir(parents=True)
     init.write_text('__version__ = "1.2.3"\n')
@@ -739,6 +752,12 @@ def test_builder_refuses_junction_ancestry_before_mutation(
         "manifest.windows-x64.json",
     ):
         shutil.copyfile(repo_root / "tools/windows_portable" / name, owner / name)
+        if name == "version_utils.ps1":
+            (owner / "shim").mkdir(exist_ok=True)
+            shutil.copyfile(
+                repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
+                owner / "shim/frame-compare-version.ps1",
+            )
     cache = tmp_path / "cache"
     cache.mkdir()
     sentinel = cache / "sentinel"
@@ -827,6 +846,7 @@ def test_bundle_activation_coordinates_with_source_install_lock(
         "frame-compare.ps1",
         "frame-compare.cmd",
         "frame-compare-update.ps1",
+        "frame-compare-version.ps1",
         "frame-compare-update.cmd",
         "update_public_key.xml",
     )

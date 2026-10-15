@@ -1113,6 +1113,7 @@ def _write_extracted_verifier_fixture(
         "shim/frame-compare.cmd",
         "shim/frame-compare-update.cmd",
         "shim/frame-compare-update.ps1",
+        "shim/frame-compare-version.ps1",
     ):
         path = bundle / relative_path
         path.write_text("", encoding="utf-8")
@@ -1257,6 +1258,7 @@ def _write_extracted_verifier_fixture(
             "tools/windows_portable/sign_update.ps1",
             "tools/windows_portable/update_manifest.schema.json",
             "tools/windows_portable/shim/frame-compare-update.ps1",
+            "tools/windows_portable/shim/frame-compare-version.ps1",
             "tools/windows_portable/validate_update_public_key.ps1",
             "tools/windows_portable/write_bundle_inventory.py",
         ],
@@ -1800,6 +1802,7 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
         "frame-compare-portable-win-x64/licenses/THIRD_PARTY_NOTICES.txt",
         "frame-compare-portable-win-x64/shim/frame-compare.cmd",
         "frame-compare-portable-win-x64/shim/frame-compare-update.cmd",
+        "frame-compare-portable-win-x64/shim/frame-compare-version.ps1",
         "frame-compare-portable-win-x64/shim/frame-compare-update.ps1",
     ):
         assert required_entry in verifier

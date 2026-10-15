@@ -7,6 +7,16 @@ notes used by the guarded publication workflow.
 
 ## Unreleased
 
+### Fixed
+
+- Support stable and release-candidate versions in Windows code updates, with exact
+  target verification and journaled source replacement for both apply and rollback.
+  Complete backup inventories prevent restoring truncated backups. Existing RC
+  installations need one full bundle reinstall to obtain the new updater and shared
+  version helper: code-only ZIPs do not replace the AppData `bin` updater. Use a
+  fresh bundle folder and preserve user configuration, media, and generated data.
+  Same-line stable/RC transitions and signed-range downgrades remain supported.
+
 ## [0.7.0]
 
 ### Changed

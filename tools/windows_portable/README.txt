@@ -111,10 +111,32 @@ UPDATING (Code-Only Update Package):
     frame-compare-update purge-backups --keep 5
 
   Safety behavior:
-    - Each backup records its bundle's media-runtime and requirements-lock identity.
-      list-backups marks missing, malformed, or mismatched identity as unavailable;
-      rollback refuses it before any file change. Legacy backups without identity
-      cannot be restored or migrated.
+    - Each backup has compatibility.json (media-runtime and requirements-lock identity)
+      and backup.json (schema, app version, exact source-file paths/sizes/SHA-256).
+      backup.json is written last beside frame_compare\ as the completeness marker.
+      list-backups marks missing/invalid/mismatched identity or incomplete inventories
+      unavailable; rollback refuses them before creating its update lock. Legacy
+      backups missing either record cannot be restored or migrated. Backup IDs must
+      be fresh. Failed backup copies are removed; purge retains five complete,
+      compatible backups, so incomplete backups cannot displace usable ones.
+    - Stable/RC grammar is MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCHrcN (ASCII digits,
+      no leading zeroes, N >= 1, components at most nine digits). RCs precede their
+      final release. Updates stay in the signed minimum's major.minor line. A stable
+      minimum admits its base's RCs; an RC minimum uses strict ordering; max is
+      inclusive. Same-line stable-to-RC updates and downgrades remain allowed when
+      the signed installed-version range admits them. The target smoke check must
+      report exactly the target version, with a successful launcher.
+    - Both apply and rollback use one stage/verify/rename/smoke/commit transaction.
+      app\.frame_compare_replacement.json records staging/promoting/committed with
+      atomic replacement. The next apply or rollback repairs interrupted work under
+      the update lock before reading the installed version. Unjournaled .old/.new
+      trees are refused with paths. Recovery failures retain trees and the journal
+      with manual-repair guidance. Failed promoted trees remain as
+      app\src\frame_compare.failed-*; a successful commit keeps only the newest.
+    - The updater/helper in the AppData bin folder is replaced only by a full bundle
+      installation, never by a code-only ZIP. Existing RC installs with the old
+      updater need one full bundle reinstall to obtain RC support and safe rollback.
+      Install into a fresh folder and preserve user data; never overlay a runtime.
     - Signature verification is mandatory. Missing or invalid signatures are always
       refused; the updater has no interactive unsigned bypass.
     - Archive processing is bounded before extraction by compressed size, entry count,

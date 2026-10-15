@@ -31,12 +31,14 @@ $shimPs1Source = Join-Path $shimSource "frame-compare.ps1"
 $shimCmdSource = Join-Path $shimSource "frame-compare.cmd"
 $updateShimPs1Source = Join-Path $shimSource "frame-compare-update.ps1"
 $updateShimCmdSource = Join-Path $shimSource "frame-compare-update.cmd"
+$versionHelperSource = Join-Path $shimSource "frame-compare-version.ps1"
 $updatePublicKeySource = Join-Path $shimSource "update_public_key.xml"
 if (
   !(Test-Path -LiteralPath $shimPs1Source) -or
   !(Test-Path -LiteralPath $shimCmdSource) -or
   !(Test-Path -LiteralPath $updateShimPs1Source) -or
   !(Test-Path -LiteralPath $updateShimCmdSource) -or
+  !(Test-Path -LiteralPath $versionHelperSource) -or
   !(Test-Path -LiteralPath $updatePublicKeySource)
 ) {
   throw "Shim files are missing under: $shimSource"
@@ -71,6 +73,7 @@ try {
   Copy-Item -LiteralPath $shimCmdSource -Destination (Join-Path $binDir "frame-compare.cmd") -Force
   Copy-Item -LiteralPath $updateShimPs1Source -Destination (Join-Path $binDir "frame-compare-update.ps1") -Force
   Copy-Item -LiteralPath $updateShimCmdSource -Destination (Join-Path $binDir "frame-compare-update.cmd") -Force
+  Copy-Item -LiteralPath $versionHelperSource -Destination (Join-Path $binDir "frame-compare-version.ps1") -Force
   Copy-Item -LiteralPath $updatePublicKeySource -Destination (Join-Path $binDir "update_public_key.xml") -Force
 
   $config = @{

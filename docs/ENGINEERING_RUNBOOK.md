@@ -534,10 +534,29 @@ Canonical verification path:
    dependency graph with the new application code, even when the media-runtime
    fingerprint and L-SMASH index token are unchanged. The current full bundle
    advertises `bundle_info.schema_version` 3.
-   Each update backup must record the bundle's media-runtime and requirements-lock
-   fingerprints. Verify that `list-backups` marks missing, malformed, or mismatched
-   backup identity as unavailable and that `rollback` refuses it before creating a
-   lock or changing files. Identity-less legacy backups are not migrated. A full
+   Run updater E2E with both Windows PowerShell 5.1 and PowerShell 7. Verify the
+   shared ASCII stable/RC vectors and same-line RC→RC, RC→stable, stable→RC and
+   downgrade admission; stable minima admit their base's RCs, RC minima use strict
+   order, and maximum bounds are inclusive. Refuse next-minor and malformed values;
+   exact smoke must reject 0.8.0 versus 0.8.0rc1 and 1.0.1 versus 1.0.10.
+   Each backup retains `compatibility.json` and gains `backup.json` beside its
+   `frame_compare/` tree. Verify exact path/size/hash inventory and app version;
+   the completeness marker is written last, failed copies are removed, and occupied
+   backup IDs refuse instead of merging. List/rollback require both records with
+   matching identity and a complete tree; unavailable backups refuse before lock
+   creation. Purge keeps five complete, compatible backups and removes incomplete
+   ones. Legacy backups missing either record are not migrated.
+   Exercise both commands repairing every staging/promoting/committed journal
+   interruption immediately after the lock, before any version/target check. The
+   `app/.frame_compare_replacement.json` journal uses temporary-file plus atomic
+   File.Replace/File.Move writes. Unknown .old/.new trees without a journal refuse
+   with paths. Inject copy, rename, hash/size and smoke failures; current source must
+   be intact or retained recoverably alongside the journal and reported paths.
+   Never delete-then-copy restoration. Failed promoted trees remain as
+   `app/src/frame_compare.failed-*`; successful commit keeps only the newest.
+   The AppData bin updater/helper requires a full bundle install to change. Existing
+   RC installs using the old updater need one full reinstall into a fresh folder;
+   code-only updates cannot deliver this updater repair. A full
    runtime reinstall uses a fresh, empty directory, preserves user configuration
    and data, and never overlays a full ZIP onto an existing root.
 6. Sign the update ZIP when updater or release-package logic changes.
