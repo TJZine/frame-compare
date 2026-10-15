@@ -2504,7 +2504,7 @@ final-report-only fallback; the parent retrieves on its next activation.
 | P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | `9741fcc9`; worktree `9bb4` | Active; complete fixture/runner/transition package; separate planned commits; Node and real-browser evidence pending |
 | P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Implemented/integrated; independent reviewer `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` active; 724 focused tests passed; full native gate pending |
 | P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | `9741fcc9`; worktree `b49f` | Active; bounded warning propagation with joined behavioral proof; independent review pending |
-| P0 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | new commit after `c2b62b05`, product-equivalent integrated base | Active; steps 1–5 assigned; step 0 already complete |
+| P0 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `260670cc` → integrated `23d2f59f` | Implemented/integrated; 5 CLI-doc tests + strict docs passed; independent reviewer shared with P4 active; step 0 not redone |
 | P5 | worker / medium; `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | `30515500`; worktree `9676` | Active; full acquisition/doctor scope; P10 shared-file ordering tracked |
 | P6 | Next practical batch after P4 shared-owner changes | — | Full CQ5/CQ21c/CQ2 scope pending |
 | P8 | Next practical batch after P3/P10 shared-owner changes | — | Full applied-fact/payload/geometry scope pending |
@@ -2578,3 +2578,13 @@ composition review is required before dependent work is accepted.
   and full-native gates remain pending resource/stable-input coordination.
 - Pending children: P1, P3, P10, P0 (reused P4), P5, P11, P4 reviewer. No findings
   dispositions yet. Next useful trigger is a meaningful callback; no idle polling.
+
+
+P0 callback received and integrated: worker `260670cc8d2c813f32af4d18df77760f915cbadd`
+(range after unchanged P4 `c2b62b05`) cherry-picked cleanly to
+`23d2f59ff539973f4be38f586a8b069a665ad322`; exactly two documentation files,
++13/-6. Worker observed 5 CLI-doc tests passed, strict Zensical build no issues,
+diff check/hooks clean. No product/browser/Docker/native gate needed for P0.
+P4 reviewer additionally assigned exact P0 range `e7e05b1d..23d2f59f` using committed
+source, separate conclusions required. P0 implementation complete; independent review
+and full Wave A composition acceptance pending. P4/P0 worker currently idle and reusable.
