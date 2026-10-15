@@ -355,6 +355,10 @@ build in place, and clean up only what this run reserved.*
      it may lie inside `RepoRoot` only beneath `RepoRoot\dist`. `CacheDir` and
      `OutDir` must not nest either way. (Being inside the current directory is
      allowed: the builder's own default is `$PWD\dist\…`.)
+   - Containment must account for physical junction/reparse-ancestor aliases of
+     previous/cache/protected paths before mutation, or safely refuse unprovable
+     aliases while preserving required supported volume behavior (P1-F2). Lexical
+     `GetFullPath` prefix checks alone do not prove this obligation.
    - Relationship and occupied-path refusals name the resolved paths; the existing
      proof that relative paths resolve against the provider location moves to an
      occupied-`OutDir` refusal (the manifest-missing error names only the manifest).
@@ -396,8 +400,15 @@ activation after verification, explicit user-data policy.*
    version is recorded in `bundle_info.json`, so it is not needed in the name and no
    second version source is introduced). An explicit `-OutDir` that exists is refused
    by the builder before mutation.
-2. Read the current pointer's `bundle_path` (if any) as the previous bundle. The
-   installer never deletes or rewrites the previous bundle's runtime or code.
+2. Read the current pointer for previous-bundle path-safety checks before build.
+   After build, before data handling, own migration/activation/reversal exclusively
+   and reacquire one coherent pointer snapshot: read bytes once, parse those same
+   bytes, and require a fully-qualified absolute bundle path. Revalidate previous/new
+   relationships from that fresh snapshot; retain ownership through success or
+   reversal so overlapping source installs cannot activate empty bundles or restore
+   stale pointers. These refinements address independent implementation-review
+   findings P1-F1/F4 without changing D1. The installer never deletes or rewrites
+   the previous bundle's runtime or code.
 3. Build and verify first (“verify” is the builder completing successfully,
    including its existing runtime-smoke and bundle-inventory steps). Only then handle
    user data, then run the new bundle's `install.ps1` to activate it.
@@ -428,6 +439,10 @@ activation after verification, explicit user-data policy.*
      data is back in the active bundle; then re-run the previous bundle's
      `install.ps1` to restore its `bin` shims. If any reversal step fails, stop and
      report exactly where every folder and the pointer now are; never delete.
+     Diagnostic pointer/status reads are best-effort and must not prevent reporting
+     all known paths plus the original and recovery errors (P1-F3). Rollback fixtures
+     must observe actual shim restoration, final exact pointer bytes, and an explicit
+     reached-failure marker, rather than accepting unrelated early refusals (P1-F5).
    - `Leave`: activate without moving; the message lists the non-empty folders left
      behind and warns that the shim may now select an older AppData state config if
      the new bundle has no `config\config.toml`.
@@ -1037,6 +1052,7 @@ execution/completion; real-browser case recorded.
 | `config/loader.py` `load_raw_config` (~153–163) | same mapping | typed config error for wizard paths |
 | `config/presets.py` (~52–63) | same mapping to `PresetInvalidError(preset_path, parse_details)` | typed `FC-1005` preset failure |
 | `config/schema_sources.py` `EnvironmentSettingsSource` (~27–37, complex-value decoding for `FRAME_COMPARE_*` JSON variables) | convert `RecursionError` to `ValueError` where the complex value is decoded, so pydantic-settings' existing `SettingsError` path applies (a long integer already becomes `ConfigValidationError` `FC-1003` today) | typed `FC-1003` config failure for deeply nested environment JSON (planning review reproduced a raw `RecursionError` with `FRAME_COMPARE_TMDB` set to 10,000 nested brackets) |
+| `error_formatting.py` `_to_json_value` / `normalize_pydantic_errors` | bound diagnostic conversion depth before recursive traversal; preserve ordinary shallow structure and secret redaction; never stringify truncated input | successfully decoded but invalid deeply nested environment JSON still becomes sanitized, JSON-serializable `FC-1003`, not a raw normalization `RecursionError` (P4-F1 implementation-review refinement) |
 
 The existing `(RecursionError, ValueError)` handling for embedded evidence at
 `alignment_review_contract.py` ~446–448 switches to the shared constant so one
@@ -1081,6 +1097,12 @@ slow.pics and TMDB `timeout_seconds` entries) and `docs/reference/configuration.
   `ConfigValidationError` for a deeply nested `FRAME_COMPARE_TMDB` JSON value; CLI-level
   JSON error tests in `tests/cli/test_run_json_errors.py` observe a single typed error
   object for both; `tests/config/test_presets.py` (~63) observes `PresetInvalidError`.
+- P4-F1 downstream diagnostic proof (refinement confirmed during implementation):
+  use valid balanced deeply nested list/dict environment values at the default
+  recursion limit through both real config loader routes and `run --json`; assert
+  typed `FC-1003`, exit 2 and one JSON object, bounded serializable normalized details,
+  no nested secret sentinel, and unchanged shallow normalization/redaction. Retain
+  malformed deep-parser controls. No global recursion-limit change or cycle audit.
 - CQ19: extend `tests/config/test_schema.py` (~66–70 non-finite pattern, ~252–256),
   `tests/config/test_slowpics.py` (~103–107), and `tests/config/test_loader.py` for
   `inf` from TOML and from `FRAME_COMPARE_TMDB__TIMEOUT_SECONDS=inf`, expecting
@@ -2508,11 +2530,11 @@ final-report-only fallback; the parent retrieves on its next activation.
 | --- | --- | --- | --- |
 | P1 | worker / medium; `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | original `14b599a2` → integrated `21691a97`; fixes assigned from `aa5319cc` | Five deep-review findings returned for remediation; NOT review-cleared; Windows acceptance open |
 | P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | worker `7ccdb965/986abc2e/149ef433` → integrated `8e32ee40/54e80bb6/983658b8` | Implemented/integrated/independently reviewed, no findings; final-source Node/report/22-browser proof passed; full Wave A composition pending |
-| P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Implemented/integrated/independently reviewed, no findings; focused + full native at `94efe8cd` passed; final-head gate pending |
+| P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Original decoder package reviewed/native passed at `94efe8cd`; narrow P4-F1 diagnostic recursion reopened, fix assigned; final acceptance pending |
 | P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | worker `f0c67e62` → integrated `94efe8cd` | Implemented/integrated/independently reviewed, no findings; full native/static integration at `94efe8cd` passed; final-head gate pending |
 | P0 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `260670cc` → integrated `23d2f59f` | Implemented/integrated/independently reviewed, no findings; 5 CLI-doc tests + strict docs passed; Wave A composition pending |
-| P5 | worker / medium; `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | `30515500`; worktree `9676` | Active; full acquisition/doctor scope; P10 shared-file ordering tracked |
-| P6 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `2313b659/f871e88c/977cc3f7` → integrated `1f7ae791/fae10b01/af500389` | Implemented/integrated; deep reviewer `01a13ee0-8b57-7573-9de8-4374f0fc445e` active; native/Docker gates open |
+| P5 | worker / medium; `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | rebased/integrated `b2232196/1ba2f13b` from `47e9712b` | Implemented/integrated; full independent review active; original native pass + rebased1278focused passes; Docker/Windows/current native acceptance open |
+| P6 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `2313b659/f871e88c/977cc3f7` → integrated `1f7ae791/fae10b01/af500389` | Implemented/integrated/independently reviewed, no findings;599reviewer focused passes; native/Docker gates open |
 | P8 | Reused worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | assigned current integrated `21691a97`; worktree `9bb4` | Active; full applied-fact/payload1.3/geometry migration; browser/Docker/native/platform gates deferred |
 | P11 | worker / medium; `01a13ed0-043c-75f0-9554-afb21690373c` | `30515500`; worktree `a638` | Active; full recipe/store/cache + before/after measurements; exclusive Docker lease granted |
 | P2 | Wave B after integrated, reviewed P1 prerequisite | — | Grammar/transaction scope pending; PS5.1/7/Windows/signing acceptance open |
@@ -2887,3 +2909,71 @@ determine supported P4/P5/O2 obligation vs separate unpromoted issue, recommend 
 owner remedy if required. No broad audit or speculative scope. P5 instructed finish
 independent handoff and report pending edge without silently changing P4 policy.
 Final P5 code review and edge disposition remain pending.
+
+
+### P5 reconciled integration and typed-error remediation
+
+P5 original complete package30515500..b9ca34f2+1d03dbfe:57files+1456/-1011,
+full native pass atb9ca34f2 (106platform/media skips,zero browser skips),1300focused
+and123proof-only passes/static/docs clean. Initial parent cherry-pick onto47e9712b
+conflicted only commands.md and phase_alignment_contract; parent ABORTED, leaving
+clean47e9712b. Original worker rebased two commits, preserving P0 prose/P6 fixtures
+and migrating automerged P10 joined test request. Returned current package
+`47e9712bc7347778d385861048fd3e036083583b..1ba2f13b3f612d8a9ca3cfa9db52264628bc08f9`,
+commits`b2232196962afb5a4a407b806f3ed2a97b25ad3c` +`1ba2f13b`;57files+1462/-1012.
+Parent FAST-FORWARDED exact frozen returned series, clean. No orchestrator source
+conflict resolution/review. Rebased1278focused passes/no skips including P6 authority
+and P10 joined warning,pyright0/0,ruff/format520,imports2kept,strictdocs/diff clean.
+Original full-native result is not current integrated acceptance. Docker and Windows
+AppData-only shim observation remain open. Full P5 review now assigned reviewer/high
+01a13ece-fcf0-7da1-afb9-c63eb44a89a8 at exact47e9712b..1ba2f13b, including rebase
+seams, complete migrations/deletions and D4 correction; findings pending.
+
+Same reviewer CONFIRMED P4-F1/S3 is supported P4/P5/O2 obligation, not separate
+investigation. Correct owner is root`src/frame_compare/error_formatting.py:_to_json_value`
+(not config/ subdir). Real Python3.13.16 DEFAULT recursionlimit1000: valid analysis
+listdepth2000/TMDBdepth1000 rawRecursionError in both existing/new loader; actual
+CLI balanceddepth990/1000 exits1/nonJSON vs shallower typedFC1003. Decoder malformed
+controls still typed. Relevant committed source byte-identical across reviewedP4/
+current/P5; no P5 regression. P4 table/tests refined above. Original P4 worker9bdf
+assigned bounded diagnostic conversion+sanitization fix, preserving shallow behavior,
+no global limit/broad catch/framework/cycle audit; same reviewer focused recheck.
+P5 now integrated, worker explicitly instructed base/rebase own fix onto1ba2f13b and
+prove BOTH actual loader routes+CLI before final handoff. No fake new-route proof.
+
+### Further independent review and stable runtime progress
+
+P6 deep reviewer/xhigh01a13ee0-8b57-7573-9de8-4374f0fc445e completed exact
+aa5319cc..af500389 complete27files and bounded P4/services composition: NO actionable
+findings. Independently traced every authority/currentness/candidate/persistence/
+cancellation/fixture migration obligation and retained proof table. Actual599passes/
+no skips in2disjoint focused selections (388+211),including Qt panel/contract; AST
+moved-builder/scenario equivalence and diff clean. Worker serializer/static/docs
+proof reused,not rerun. Full native/Docker real phase-cache gates OPEN. Reviewer now
+reused for P8 early frozen-code review, exact21691a97..`4ce11247d85e5f0fa7ba5dcbe27c5780b92ec83e`,
+commits165eb46a+4ce11247,56files+1161/-961, all P8 identity/disclosure/geometry/test-
+retirement obligations and exclusions; candidate not integrated, later P5/P6 source-
+bound recheck required. No reviewer browser/Docker lease.
+
+P8 first native run at165eb46a:3499pass/142expected native/media/platform skip/2Chrome
+process-exit2 failures (allocator/display-link diagnostics,768x720 and3440x1440).
+Both isolated fresh-profile reruns passed2/2,no skips; other20browser cases passed.
+DO NOT call first canonical run passed. Product unchanged; docs-only4ce11247 fixes
+remaining1.2 references;5CLI-doc+strictdocs pass. Canonical repeat running at4ce with
+P8 browser lease retained. Focused532+40+3joined passes/static clean reported; final
+full handoff pending. Docker/Windows runtime acceptance open.
+
+P11 stable-code early reviewer/high01a13ee3-a368-7772-90c2-9c84da0890a7,worktree22db,
+identity/assignment confirmed; exact30515500..d3250f4e,8files: NO material findings.
+Actual29VS-free cache/workflow/onboarding cases pass;21graph/writer ASTs identical,
+stubbed baseline/new declarations37/37arguments+order identical; no-VS import blocker
+proof37recipes/31pairs;diff clean. Notes absent intentionally; no uncommitted notes
+or runtime acceptance claimed. Required final notes/commands/stats/source identities,
+cold full Docker and P5/P7 integration recheck remain OPEN. Worker real measurements:
+baseline cold focused37files348.038s/assertion-only37files302.987s;new cold2files20.689s,
+assertion-only0created/2reused6.727s,realCRF-edit focused2files17.028s/full37files301.757s.
+Temporary edits restored/SHA checked. Canonical cold full Docker RUNNING,leaseP11 held.
+
+Current pending useful results: P1 fixes→deep recheck, P4-F1 fix→typed proof/recheck,
+P5 full review, P8 native completion/code review/integration, P11 Docker+notes/final
+review. P2/P7 prerequisites not review-cleared yet; P9 still depends on P7/P8/P10.
