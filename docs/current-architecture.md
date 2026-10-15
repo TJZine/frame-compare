@@ -657,17 +657,20 @@ counts, video checks, and review check points.
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
 prompt/table helper, including TTY fallback behavior and no-color rendering.
-`frame_compare.services.types.AlignmentProvenance` carries service-owned
-write-source provenance such as `computed_this_run`,
-`interactive_confirmed_this_run`, `shared_computed_offsets`,
-`shared_previous_offsets`, and
-`preexisting_manual_override`; shared-cache writes require at least one current-run
-computed or interactively confirmed result and otherwise admit only trusted current-run
-or shared-computed provenance rather than inferring eligibility from the final flattened
-`AlignmentResult.source`. Shared cache schema v2 remains
-accepted-authority-only and does not serialize the richer attempt. Warm cache entries
-therefore report historical stream/chunk details as unavailable rather than
-inventing them.
+`frame_compare.services.types.ComparisonResolution` carries each comparison's current
+result, write origin, original evidence, and optional computed fallback in one frozen
+record. Evidence availability is derived from the retained attempt. The alignment
+service keeps one map of these records; `alignment_resolution.confirm_manual` replaces
+one record without changing the original attempt, and retains an applied computed
+result as the fallback when appropriate.
+`alignment_reuse_cache.prepare_reusable_source_set` admits complete source sets with
+matching comparison identities, trusted current-run or shared-computed authority,
+required stability, and at least one current-run computation or confirmation. The
+writer consumes that prepared candidate and rechecks source freshness before and
+inside locked atomic publication. A mixed publication refreshes the shared acceptance
+time for all entries. Shared cache schema v2 remains accepted-authority-only and does
+not serialize the richer attempt. Warm cache entries therefore report historical
+stream/chunk details as unavailable rather than inventing them.
 
 Native alignment review is deliberately split across the existing owners. The
 `frame_compare.vsview.session_script` owner reserves the script path and generates

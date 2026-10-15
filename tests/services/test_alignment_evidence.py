@@ -279,7 +279,7 @@ def test_extended_video_evidence_maximum_target_budget_stays_bounded() -> None:
 def test_native_projection_of_large_attempt_omits_rows() -> None:
     from frame_compare.services.alignment import _build_audio_review_map
     from frame_compare.services.alignment_keys import alignment_key
-    from frame_compare.services.types import AlignmentProvenance, AlignmentResult
+    from frame_compare.services.types import AlignmentResult, ComparisonResolution
 
     reference = Path("reference.mkv")
     comparison = Path("comparison.mkv")
@@ -301,13 +301,11 @@ def test_native_projection_of_large_attempt_omits_rows() -> None:
     payloads = _build_audio_review_map(
         reference=reference,
         comparisons=[comparison],
-        results_map={key: result},
-        provenances={
-            key: AlignmentProvenance(
+        resolutions={
+            key: ComparisonResolution(
                 result=result,
                 comparison_cache_key="key",
-                provenance="computed_this_run",
-                evidence_availability="current_attempt",
+                origin="computed_this_run",
             )
         },
     )

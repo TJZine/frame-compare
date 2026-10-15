@@ -14,8 +14,7 @@ from rich.text import Text
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.types import (
     AlignmentConfig,
-    AlignmentProvenance,
-    AlignmentResult,
+    ComparisonResolution,
 )
 from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
@@ -70,25 +69,26 @@ def _format_stream_summary(attempt: AudioAlignmentAttempt) -> str:
 
 
 def _normal_evidence_rows(
-    *, ordinal: int, result: AlignmentResult, provenance: AlignmentProvenance
+    *, ordinal: int, resolution: ComparisonResolution
 ) -> tuple[_StyledRow, ...]:
+    result = resolution.result
     prefix = f"Comparison {ordinal} - "
     offset = result.frame_offset
     if result.applied and offset is not None:
-        if provenance.provenance == "shared_computed_offsets":
+        if resolution.origin == "shared_computed_offsets":
             heading = "Accepted audio alignment reused"
             detail = (
                 "Historical chunk and selected-stream details are unavailable; "
                 "no audio analysis ran this time."
             )
-        elif provenance.provenance == "shared_previous_offsets":
+        elif resolution.origin == "shared_previous_offsets":
             heading = "Manually confirmed alignment reused"
             detail = (
                 "Historical audio details are unavailable."
                 if result.audio_attempt is None
                 else None
             )
-        elif result.source == "manual" or provenance.provenance in {
+        elif result.source == "manual" or resolution.origin in {
             "interactive_confirmed_this_run",
             "preexisting_manual_override",
         }:
@@ -250,7 +250,7 @@ def _render_alignment_evidence_panel(
 def print_pre_review_summary(
     *,
     request: AlignmentRequest,
-    results_map: dict[str, AlignmentResult],
+    resolutions: dict[str, ComparisonResolution],
     progress: ProgressReporter | None,
     no_color: bool,
 ) -> None:
@@ -260,7 +260,7 @@ def print_pre_review_summary(
     states: list[tuple[str, bool]] = []
     for comparison in request.comparisons:
         key = alignment_key(request.reference.path, comparison.path)
-        result = results_map[key]
+        result = resolutions[key].result
         short = comparison.short_name or comparison.label or comparison.path.name
         states.append((short, result.applied))
     actionable = any(not applied for _, applied in states)
@@ -288,8 +288,7 @@ def print_pre_review_summary(
 def present_alignment_evidence(
     *,
     request: AlignmentRequest,
-    results_map: dict[str, AlignmentResult],
-    provenances: dict[str, AlignmentProvenance],
+    resolutions: dict[str, ComparisonResolution],
     config: AlignmentConfig,
     progress: ProgressReporter | None,
     verbose: bool,
@@ -310,8 +309,8 @@ def present_alignment_evidence(
     needs_review_count = 0
     for ordinal, comparison in enumerate(request.comparisons, start=1):
         key = alignment_key(request.reference.path, comparison.path)
-        result = results_map[key]
-        provenance = provenances[key]
+        resolution = resolutions[key]
+        result = resolution.result
         decision = result.audio_attempt.decision if result.audio_attempt is not None else None
         human_actionable = not result.applied
         json_actionable = human_actionable or (
@@ -336,8 +335,7 @@ def present_alignment_evidence(
             continue
         normal_rows = _normal_evidence_rows(
             ordinal=ordinal,
-            result=result,
-            provenance=provenance,
+            resolution=resolution,
         )
         normal_lines = [value for _key, value, _style in normal_rows]
         verbose_lines: list[str] = []

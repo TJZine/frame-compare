@@ -26,6 +26,7 @@ from tests.alignment_review_test_support import (
     unavailable_audio_attempt,
 )
 from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
+from tests.services.alignment_resolution_test_support import save_resolutions
 
 
 def test_alignment_request_uses_untrimmed_probe_frame_count(
@@ -289,10 +290,9 @@ def test_primed_cache_source_drift_after_request_freezing_cannot_apply_trims(
         CACHE_FILE_NAME,
         comparison_cache_key,
         load_reusable_offset_entries,
-        save_reusable_offsets,
     )
     from frame_compare.services.errors import AudioAlignmentError
-    from frame_compare.services.types import AlignmentProvenance
+    from frame_compare.services.types import ComparisonResolution
     from tests.alignment_review_test_support import frame_lag, trusted_audio_attempt
 
     comparison_path = tmp_path / "comparison_videos" / "encode.mkv"
@@ -330,14 +330,13 @@ def test_primed_cache_source_drift_after_request_freezing_cannot_apply_trims(
         audio_attempt=trusted_audio_attempt(frame_offset=3),
         stability=trusted_audio_attempt(frame_offset=3).stability,
     )
-    save_reusable_offsets(
+    save_resolutions(
         frozen,
         [
-            AlignmentProvenance(
+            ComparisonResolution(
                 result=accepted,
                 comparison_cache_key=comparison_cache_key(frozen.comparisons[0]),
-                provenance="computed_this_run",
-                evidence_availability="current_attempt",
+                origin="computed_this_run",
             )
         ],
     )

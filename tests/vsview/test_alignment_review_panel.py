@@ -23,7 +23,7 @@ from vsview.vsenv import QtEventLoop
 
 from frame_compare.services.alignment import _build_audio_review_map
 from frame_compare.services.alignment_keys import alignment_key
-from frame_compare.services.types import AlignmentProvenance, AlignmentResult
+from frame_compare.services.types import AlignmentResult, ComparisonResolution
 from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
 )
@@ -496,13 +496,11 @@ def test_actual_native_payload_omits_rows_and_matches_full_terminal_and_panel_co
     native_review = _build_audio_review_map(
         reference=reference,
         comparisons=[comparison],
-        results_map={key: result},
-        provenances={
-            key: AlignmentProvenance(
+        resolutions={
+            key: ComparisonResolution(
                 result=result,
                 comparison_cache_key="key",
-                provenance="computed_this_run",
-                evidence_availability="current_attempt",
+                origin="computed_this_run",
             )
         },
     )[key]

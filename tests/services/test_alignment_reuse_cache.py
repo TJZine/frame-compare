@@ -18,13 +18,12 @@ from frame_compare.services.alignment_reuse_cache import (
     CACHE_VERSION,
     comparison_cache_key,
     load_reusable_offset_entries,
-    save_reusable_offsets,
     source_set_cache_key,
 )
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
-    AlignmentProvenance,
     AlignmentResult,
+    ComparisonResolution,
 )
 from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
@@ -37,6 +36,7 @@ from frame_compare.utils.types import (
     AlignmentRequest,
 )
 from tests.alignment_review_test_support import frame_lag, trusted_audio_attempt
+from tests.services.alignment_resolution_test_support import save_resolutions
 
 _DEFAULT_STABILITY = AlignmentStabilitySummary(
     "insufficient_evidence", 0, None, None, None, None, None, None
@@ -116,27 +116,27 @@ def _result(
     )
 
 
-def _provenance(
+def _resolution(
     request: AlignmentRequest,
     *,
     result: AlignmentResult | None = None,
     provenance: str = "computed_this_run",
     comparison_index: int = 0,
     computed_result: AlignmentResult | None = None,
-) -> AlignmentProvenance:
-    return AlignmentProvenance(
+) -> ComparisonResolution:
+    return ComparisonResolution(
         result=_result(request, comparison_index=comparison_index) if result is None else result,
         comparison_cache_key=comparison_cache_key(request.comparisons[comparison_index]),
-        provenance=provenance,  # type: ignore[arg-type]
-        computed_result=computed_result,
+        origin=provenance,  # type: ignore[arg-type]
+        computed_fallback=computed_result,
     )
 
 
 def _write_computed(request: AlignmentRequest) -> None:
-    save_reusable_offsets(
+    save_resolutions(
         request,
         [
-            _provenance(
+            _resolution(
                 request,
                 result=_result(request, correlation_score=0.876),
             )
@@ -181,7 +181,7 @@ def test_stability_summary_round_trips_in_current_cache_schema(tmp_path: Path) -
     )
     result = replace(_result(request), stability=summary)
 
-    save_reusable_offsets(request, [_provenance(request, result=result)])
+    save_resolutions(request, [_resolution(request, result=result)])
     loaded = load_reusable_offset_entries(request)
 
     assert loaded is not None
@@ -195,7 +195,7 @@ def test_shared_reuse_cache_does_not_write_computed_entry_without_stability(
     request = _request(tmp_path)
     result = replace(_result(request), stability=None)
 
-    save_reusable_offsets(request, [_provenance(request, result=result)])
+    save_resolutions(request, [_resolution(request, result=result)])
 
     assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
 
@@ -222,7 +222,7 @@ def test_computed_this_run_provisional_result_is_not_write_eligible(
         audio_attempt=provisional,
     )
 
-    save_reusable_offsets(request, [_provenance(request, result=result)])
+    save_resolutions(request, [_resolution(request, result=result)])
 
     assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
 
@@ -234,7 +234,7 @@ def test_computed_this_run_without_trusted_attempt_is_not_write_eligible(
     request = _request(tmp_path)
     result = replace(_result(request), audio_attempt=None)
 
-    save_reusable_offsets(request, [_provenance(request, result=result)])
+    save_resolutions(request, [_resolution(request, result=result)])
 
     assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
 
@@ -285,10 +285,10 @@ def test_stale_estimator_policy_shared_entry_misses_without_schema_change(
             "ALIGNMENT_ESTIMATOR_POLICY",
             "stale-alignment-policy",
         )
-        save_reusable_offsets(
+        save_resolutions(
             request,
             [
-                _provenance(
+                _resolution(
                     request,
                     result=_result(request),
                 )
@@ -386,16 +386,16 @@ def test_shared_cache_persists_confirmed_entry_while_shared_computed_stays_compu
         algorithm=None,
         source="manual",
     )
-    save_reusable_offsets(
+    save_resolutions(
         complete_request,
         [
-            _provenance(
+            _resolution(
                 complete_request,
                 comparison_index=0,
                 result=shared,
                 provenance="shared_computed_offsets",
             ),
-            _provenance(
+            _resolution(
                 complete_request,
                 comparison_index=1,
                 result=confirmed,
@@ -420,10 +420,10 @@ def test_shared_reuse_cache_round_trips_interactive_confirmed_entry_with_score_o
     tmp_path: Path,
 ) -> None:
     request = _request(tmp_path)
-    save_reusable_offsets(
+    save_resolutions(
         request,
         [
-            _provenance(
+            _resolution(
                 request,
                 result=_result(request, correlation_score=0.123, source="manual"),
                 provenance="interactive_confirmed_this_run",
@@ -460,10 +460,10 @@ def test_shared_reuse_cache_round_trips_interactive_entry_with_computed_fallback
         algorithm=None,
         source="manual",
     )
-    save_reusable_offsets(
+    save_resolutions(
         request,
         [
-            _provenance(
+            _resolution(
                 request,
                 result=confirmed,
                 provenance="interactive_confirmed_this_run",
@@ -492,9 +492,9 @@ def test_incomplete_requested_source_set_is_not_written_or_reused(tmp_path: Path
     second = _clip(_touch_clip(tmp_path / "comp_b.mkv", b"second"), label="Encode 2", stream=2)
     complete_request = replace(request, comparisons=[request.comparisons[0], second])
 
-    save_reusable_offsets(
+    save_resolutions(
         complete_request,
-        [_provenance(complete_request, comparison_index=0)],
+        [_resolution(complete_request, comparison_index=0)],
         accepted_at="2026-06-06T12:00:00Z",
     )
 
@@ -508,11 +508,11 @@ def test_shared_reuse_cache_can_load_requested_subset_from_full_source_set(
     second = _clip(_touch_clip(tmp_path / "comp_b.mkv", b"second"), label="Encode 2", stream=2)
     complete_request = replace(request, comparisons=[request.comparisons[0], second])
 
-    save_reusable_offsets(
+    save_resolutions(
         complete_request,
         [
-            _provenance(complete_request, comparison_index=0),
-            _provenance(complete_request, comparison_index=1),
+            _resolution(complete_request, comparison_index=0),
+            _resolution(complete_request, comparison_index=1),
         ],
         accepted_at="2026-06-06T12:00:00Z",
     )
@@ -717,7 +717,7 @@ def test_shared_reuse_cache_replaces_v1_without_migrating_entries(tmp_path: Path
         encoding="utf-8",
     )
 
-    save_reusable_offsets(request, [_provenance(request)])
+    save_resolutions(request, [_resolution(request)])
 
     data = _cache_data(request)
     assert data["version"] == "2"
@@ -730,16 +730,16 @@ def test_shared_reuse_cache_replaces_v1_without_migrating_entries(tmp_path: Path
     "provenance",
     ["shared_previous_offsets", "preexisting_manual_override"],
 )
-def test_shared_reuse_cache_does_not_write_ineligible_provenance(
+def test_shared_reuse_cache_does_not_write_ineligible_resolution(
     tmp_path: Path,
     provenance: str,
 ) -> None:
     request = _request(tmp_path)
 
-    save_reusable_offsets(
+    save_resolutions(
         request,
         [
-            _provenance(
+            _resolution(
                 request,
                 result=_result(request, source="cached"),
                 provenance=provenance,
@@ -763,7 +763,7 @@ def test_shared_reuse_cache_does_not_write_unapplied_results(tmp_path: Path) -> 
         source="computed",
         applied=False,
     )
-    save_reusable_offsets(request, [_provenance(request, result=result)])
+    save_resolutions(request, [_resolution(request, result=result)])
     assert not (request.shared_alignment_cache_dir / CACHE_FILE_NAME).exists()
 
 
@@ -940,10 +940,10 @@ def test_shared_reuse_cache_writes_by_typed_comparison_identity_not_result_label
 ) -> None:
     request = _request(tmp_path)
 
-    save_reusable_offsets(
+    save_resolutions(
         request,
         [
-            _provenance(
+            _resolution(
                 request,
                 result=_result(request, comparison_clip="Encode (display label)"),
             )
@@ -985,19 +985,19 @@ def test_shared_reuse_cache_identity_excludes_source_frame_count(tmp_path: Path)
     )
 
 
-def test_shared_reuse_cache_ignores_unrelated_ineligible_provenance_items(
+def test_shared_reuse_cache_ignores_unrelated_ineligible_resolution_items(
     tmp_path: Path,
 ) -> None:
     request = _request(tmp_path)
 
-    save_reusable_offsets(
+    save_resolutions(
         request,
         [
-            _provenance(request),
-            AlignmentProvenance(
+            _resolution(request),
+            ComparisonResolution(
                 result=_result(request, source="cached"),
                 comparison_cache_key="unrelated-comparison",
-                provenance="shared_previous_offsets",
+                origin="shared_previous_offsets",
             ),
         ],
         accepted_at="2026-06-06T12:00:00Z",
@@ -1025,7 +1025,7 @@ def test_frozen_source_drift_rejects_primed_cache_and_write(
     with pytest.raises(AudioAlignmentError, match="changed since preparation"):
         load_reusable_offset_entries(request)
     with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-        save_reusable_offsets(request, [_provenance(request)])
+        save_resolutions(request, [_resolution(request)])
     assert cache_file.read_bytes() == original_cache
 
 
@@ -1146,5 +1146,5 @@ def test_parser_limits_ignore_cache_and_write_fresh(tmp_path: Path, content: str
     path.parent.mkdir(parents=True)
     path.write_text(content, encoding="utf-8")
     assert load_reusable_offset_entries(request) is None
-    save_reusable_offsets(request, [_provenance(request)])
+    save_resolutions(request, [_resolution(request)])
     assert load_reusable_offset_entries(request) is not None

@@ -41,10 +41,10 @@ from frame_compare.services.alignment_presentation import (
 from frame_compare.services.alignment_vsview import format_vsview_review_message
 from frame_compare.services.types import (
     AlignmentConfig,
-    AlignmentProvenance,
     AlignmentResult,
     AlignmentReviewSummary,
     AlignmentSource,
+    ComparisonResolution,
 )
 from frame_compare.utils.alignment_evidence import (
     AudioChunkRun,
@@ -84,6 +84,7 @@ from tests.services.alignment_evidence_test_support import (
     stream,
 )
 from tests.services.alignment_request_test_support import alignment_request
+from tests.services.alignment_resolution_test_support import resolutions_for_results
 
 
 def _provisional_result(reference: Path, comparison: Path) -> AlignmentResult:
@@ -163,13 +164,11 @@ def _present(
     key = alignment_key(request.reference.path, request.comparisons[0].path)
     present_alignment_evidence(
         request=request,
-        results_map={key: result},
-        provenances={
-            key: AlignmentProvenance(
+        resolutions={
+            key: ComparisonResolution(
                 result=result,
                 comparison_cache_key="key",
-                provenance="computed_this_run",
-                evidence_availability="current_attempt",
+                origin="computed_this_run",
             )
         },
         config=config,
@@ -987,7 +986,7 @@ def test_align_pre_review_summary_uses_frozen_fragments(
 
     print_pre_review_summary(
         request=request,
-        results_map=results_map,
+        resolutions=resolutions_for_results(results_map),
         progress=RichProgressReporter(no_color=True),
         no_color=True,
     )

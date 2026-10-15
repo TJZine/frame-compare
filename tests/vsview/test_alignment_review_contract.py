@@ -10,7 +10,7 @@ import pytest
 
 from frame_compare.services.alignment import _build_audio_review_map
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
-from frame_compare.services.types import AlignmentProvenance, AlignmentResult
+from frame_compare.services.types import AlignmentResult, ComparisonResolution
 from frame_compare.utils.alignment_evidence import (
     MAX_ALIGNMENT_EVIDENCE_BYTES,
     AlignmentStabilitySummary,
@@ -611,17 +611,15 @@ def test_build_audio_review_map_bounds_native_projection_for_many_chunks() -> No
         applied=False,
         audio_attempt=attempt,
     )
-    provenance = AlignmentProvenance(
+    provenance = ComparisonResolution(
         result=result,
         comparison_cache_key="ref:a",
-        provenance="computed_this_run",
-        evidence_availability="current_attempt",
+        origin="computed_this_run",
     )
     payloads = _build_audio_review_map(
         reference=reference,
         comparisons=[comparison],
-        results_map={"ref:a": result},
-        provenances={"ref:a": provenance},
+        resolutions={"ref:a": provenance},
     )
 
     review = payloads["ref:a"]

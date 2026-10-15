@@ -63,7 +63,7 @@ def test_missing_loader_is_a_video_unavailable_provisional_result(
     monkeypatch.setattr(
         alignment_service,
         "save_reusable_offsets",
-        lambda request, provenances: saved.append((request, provenances)),
+        lambda request, candidate: saved.append((request, candidate)),
     )
 
     (result,) = _run(request, config)
