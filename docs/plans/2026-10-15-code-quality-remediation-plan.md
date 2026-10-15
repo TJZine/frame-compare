@@ -2775,3 +2775,33 @@ skip accounting and no repeated workaround attempts. Docker idle until verifier
 release; current native/Docker acceptance pending. P2 assignment is full steps1–6,
 reviewed base04d5c90b, same Windows worker5016; P1 lock/safeguards preserved and no
 runtime/signing/publication authority inferred. P7 remains independently active.
+
+
+### Wave A native gate passed; combined Docker dispatched
+
+Verification-only b49f completed exact `04d5c90bc7014abfc76331ddb02f5afb8b8197e0`.
+Standalone actual Chrome:22passed,0skip,27.497s; artifacts
+`.tmp/wave-a-browser.i6MzLR/browser.xml`. Then canonical full native with
+`REPORT_BROWSER` native Chrome, worktree-local `TMPDIR`, owned basetemp and JUnit:
+3749total,**3586passed/163skipped/0failures/errors**,exit0. Artifacts
+`.tmp/wave-a-native.Bj1bpc/native.xml`. All browser cases ran/no browser skips;
+previous P8 cases passed. Skips:5native/plugins,6mediaopt-in,3resourceopt-in,2live,
+147Windows/PowerShell/CMD. No target-runtime pass inferred from skips.
+
+Same-source pyright0/0,ruff/check format525,bandit0medium/high,imports2kept
+(184files/803dependencies),diffclean. Zensical initially absent in child environment;
+actual locked docs-group run `uv run --locked --group docs zensical build --clean --strict`
+installed7lockedpackages without lockfile change and passed,no issues. No source
+edits/commits. Owned dump profiles/processes cleaned; only intentional per-case input
+profiles remain. Browser/full-native lease RELEASED. Both old P8 canonical failures
+remain historical failures; current source gate now supplies passing native proof.
+
+P11 worker a638 assigned VERIFICATION ONLY on exact04d5c90b, permitted clean detach
+from881b0fde, rebuilt unique current-source images/scoped compose and canonical FULL
+Docker verifier. Exclusive Docker lease granted after native release; no concurrent
+heavy browser/native run. Warm valid recipe cache retained (cold proof already done),
+all37/full matrix still required. Must cover actual P5/P6/P8 runtime composition,
+including phase/cache matrix and new applied-result smoke/payload. No source fixes,
+blind repeats/global pruning/credentials; failure callbacks route to owners.
+Combined Docker result and remaining Wave A boundary reviews pending; Windows proof
+still open. P2/P7 isolated implementation continues.
