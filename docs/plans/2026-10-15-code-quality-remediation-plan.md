@@ -2542,7 +2542,7 @@ and responsibility text were always correct. Role files do not grant child permi
 
 The approved CQ mapping in section 5 remains canonical. No supported group or CQ21
 subpart is dropped; CQ7/CQ14 remain excluded. Current integration source before this
-ledger-only commit is `04d5c90bc7014abfc76331ddb02f5afb8b8197e0`.
+ledger-only commit is `f9eec86dd972d4fe4cb684558b0deb60584c4bf2` (Wave A plus integrated P7).
 
 | Package | Worker source → integrated identity | Implementation / independent review / acceptance |
 | --- | --- | --- |
@@ -2553,7 +2553,7 @@ ledger-only commit is `04d5c90bc7014abfc76331ddb02f5afb8b8197e0`.
 | P4 / CQ10,CQ19 | `c2b62b05` → `30515500`; F1 `a79528de` → `b2dcd6aa` | Original package reviewed/native passed; narrow F1 reopened then independently RESOLVED, both real loaders + CLI proved. Final integrated native pending. |
 | P5 / CQ8,CQ18 | original `b9ca34f2/1d03dbfe`; rebased/integrated `b2232196/1ba2f13b` | Complete, independently reviewed no new findings; inherited F1 closed at b2. Docker, current native and installed Windows shim proof open. |
 | P6 / CQ2,CQ5,CQ21c | `2313b659/f871e88c/977cc3f7` → `1f7ae791/fae10b01/af500389` | Complete, deep review no findings; native and real phase/cache Docker gate passed at 04d5c90b. |
-| P7 / CQ4,CQ6,CQ9 | original `4ea3ec04/0a2222ce/5a6f03ba` from b2; current rebase onto 715b8e20 active in 9676 | All three parts implemented, 1481 focused passes; deep review of stable original source active, current integration and native/Docker proof pending. |
+| P7 / CQ4,CQ6,CQ9 | original `4ea3ec04/0a2222ce/5a6f03ba`; rebased `a2257207/fb840295/e971b136` → integrated `8c70dfb5/badc1b48/f9eec86d` | Complete implementation/integration; 1545 current focused passes; complete independent deep review and native/Docker acceptance pending. |
 | P8 / CQ11,CQ12,CQ22 geometry | original `165eb46a/4ce11247`; rebased `e09d684c/306631b9` → `bc182b07/698095cd` | Complete and integrated; early deep review and current P5/P6/P10 integration recheck no findings. Standalone/current native and Docker passed at 04d5c90b; Windows hosted acceptance open. |
 | P9 / CQ3 | Not dispatched | Wait for reviewed/integrated P7/P8/P10. Full structured jobs/results and ungrouped-path deletion still required. |
 | P10 / CQ13 | `f0c67e62` → `94efe8cd` | Complete, independent review no findings; joined warning/result/summary/record proof + native gate at 94 passed. |
@@ -2898,3 +2898,29 @@ complete P7 original stable review/baseline provenance and later current-source 
 no live rebase treated as reviewed. P2 isolated implementation continues in5016.
 No heavy-runtime lease currently held; wait for stable changed source before next
 gates. Pending child results are the only useful next work; no idle polling.
+
+
+### P7 integrated current source and verification ownership
+
+Worker9676 clean-rebased ONLY three P7 commits onto715b8e20 with ZERO conflicts.
+CQ6/CQ9 patches identical; CQ4 import context preserves P8 canonical-provenance
+owner. Exact source715b8e20..e971b136:51files,+1424/-609. Baseline fixture/test remain
+byte-identical,source_shab2 unchanged. P8facts/payload/geometry/one-warning and P11
+recipe/store/PAIRS/full-demand/real-phase assertions untouched; U4 only domain import/
+context/copy migrated. Fresh1545focused passes/no skips plus7VS-free media-cache
+passes; type0/0,ruff/format529,imports2kept,bandit/strictdocs/diffclean.
+
+Parent verified range/file list and clean-cherry-picked to8c70dfb5/badc1b48/
+`f9eec86dd972d4fe4cb684558b0deb60584c4bf2`,from001755f5; no further source changes.
+Independent deep reviewer01a13ee0 now has COMPLETE current P7 range
+`001755f52ed80b457061f46322442fd15be91c62..f9eec86dd972d4fe4cb684558b0deb60584c4bf2`,
+original stable baseline provenance and rebase/complete Wave A composition scope.
+No review clearance inferred from worker completion; source findings pending.
+
+Verifierb49f granted exclusive browser/full-native at exactf9eec86d, one canonical
+fullsuite plus relevant integrated static/import/security/docs. No redundant standalone
+preflight (current browser assets unchanged and Wave A actual proof valid); actual
+Chrome/unique owned profiles/JUnit,skips explicit,no blind rerun or product fixes.
+Docker lease released/idle until native finishes; P7real media/cache gate REQUIRED
+then. P2implementation remains isolated5016. P9not dispatched until reviewed P7.
+Only pending child work remains; no idle polling.
