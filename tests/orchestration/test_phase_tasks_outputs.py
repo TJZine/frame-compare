@@ -65,7 +65,7 @@ def _result_for_requests(
             source_total_frames=request.source_total_frames,
             signal=request.signal,
             presentation_state=PresentationState.SDR,
-            tonemap_settings=None,
+            tonemap=None,
             geometry=geometry,
         )
     return RenderedBatchResult(screenshots, frame_facts, clip_facts)
@@ -289,3 +289,62 @@ def test_run_render_phase_rejects_backend_source_frame_mismatch(
 
     with pytest.raises(ValueError, match="do not match source mapping"):
         phase_render.run_render_phase(ctx, frames=[1], runner=cast(Any, _RenderRunner()))
+
+
+def test_render_phase_emits_one_warning_for_mixed_applied_tonemap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frame_compare.vs.types import (
+        AppliedTonemap,
+        FallbackTonemap,
+        ResolvedSourcePeak,
+        TonemapFallbackCause,
+        TonemapSettings,
+    )
+    from tests.tonemap_test_support import libplacebo_tonemap
+
+    ctx = _context(
+        tmp_path,
+        comparisons=[
+            _clip(tmp_path / "a.mkv", label="Fallback A"),
+            _clip(tmp_path / "b.mkv", label="Fallback B"),
+        ],
+    )
+    settings = TonemapSettings(target_nits=203)
+
+    def render(**kwargs: Any) -> RenderedBatchResult:
+        result = _result_for_requests(kwargs["batch_requests"], tmp_path)
+        for index, (label, facts) in enumerate(result.clip_facts_by_label.items()):
+            applied = (
+                libplacebo_tonemap(settings)
+                if index == 0
+                else AppliedTonemap(
+                    settings,
+                    FallbackTonemap(
+                        "frame_compare_peak_scaled_rational_v1",
+                        203,
+                        False,
+                        ResolvedSourcePeak(1000, "default"),
+                        TonemapFallbackCause.PLUGIN_UNAVAILABLE
+                        if index == 1
+                        else TonemapFallbackCause.RUNTIME_CALL_FAILED,
+                    ),
+                )
+            )
+            result.clip_facts_by_label[label] = replace(
+                facts, tonemap=applied, presentation_state=PresentationState.HDR_TONEMAPPED
+            )
+        return result
+
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch_detailed", render
+    )
+    output = phase_render.run_render_phase(ctx, frames=[1], runner=cast(Any, _RenderRunner()))
+    assert output.render is not None
+    assert len(output.render.warnings) == 1
+    warning = output.render.warnings[0]
+    assert warning.source == "render"
+    assert "Fallback A (plugin_unavailable)" in warning.message
+    assert "Fallback B (runtime_call_failed)" in warning.message
+    assert "Reference" not in warning.message

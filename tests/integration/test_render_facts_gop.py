@@ -139,7 +139,7 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
             source_resolution=(64, 64),
             signal=signal,
             presentation_state=PresentationState.SDR,
-            tonemap_settings=None,
+            tonemap=None,
             geometry=geometry,
             font_path=None,
         )
@@ -182,7 +182,7 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
             size_bytes=fixture.stat().st_size,
             signal=signal,
             presentation_state=PresentationState.SDR,
-            tonemap_settings=None,
+            tonemap=None,
             active_picture=geometry.active_picture,
             images=[
                 ReportImageInfo(result.path, index, result.facts)
@@ -206,7 +206,6 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
             rendering=ReportRenderingInfo(
                 overlay_mode=OverlayMode.MINIMAL,
                 include_frame_number=True,
-                tonemap_settings=None,
                 geometry_by_label=dict.fromkeys(results_by_backend, geometry),
             ),
         ),

@@ -23,7 +23,8 @@ def test_apply_tonemap_enabled_false_returns_clip_unchanged():
 
     result = apply_tonemap(mock_clip, settings)
 
-    assert result is mock_clip
+    assert result.clip is mock_clip
+    assert result.applied is None
 
 
 @pytest.mark.parametrize(

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.props import detect_hdr, get_optional_int_prop, get_optional_range_prop
-from frame_compare.vs.types import HDRMetadata, TonemapSettings
+from frame_compare.vs.types import HDRMetadata, ResolvedSourcePeak, TonemapSettings
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -214,3 +214,14 @@ def _set_unspecified_signal(props: dict[str, object], key: str, value: object) -
     """Fill one missing color signal without overriding explicit frame metadata."""
     if _specified_int_prop(props, key) is None and isinstance(value, int):
         props[key] = value
+
+
+def resolve_source_peak(
+    settings: TonemapSettings, metadata: HDRMetadata | None
+) -> ResolvedSourcePeak:
+    """Resolve the peak used by either graph, retaining the original precedence."""
+    if settings.source_peak is not None:
+        return ResolvedSourcePeak(settings.source_peak, "configured")
+    if metadata is not None and metadata.max_cll:
+        return ResolvedSourcePeak(metadata.max_cll, "max_cll")
+    return ResolvedSourcePeak(1000, "default")

@@ -7,13 +7,12 @@ from pathlib import Path
 from frame_compare.config.schema import ConfigSchema, OverlayMode
 from frame_compare.config.schema_enums import ScreenshotAlignedScalePolicy, ScreenshotGeometryMode
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
+from frame_compare.render.errors import RenderError
 from frame_compare.render.geometry import (
     GeometryRect,
     RenderGeometryOptions,
     RenderGeometryPlan,
     SourceGeometry,
-    active_picture_provenance_from_rect_source,
-    active_rect_source_from_provenance,
     plan_render_geometry,
 )
 from frame_compare.render.naming import generate_screenshot_path, validate_screenshot_paths
@@ -147,7 +146,7 @@ def expand_batch_render_requests(
             source_total_frames=source_total_frames,
             signal=batch.signal,
             presentation_state=state,
-            tonemap_settings=source.tonemap_settings,
+            tonemap=source.tonemap,
             geometry=geometry,
         )
         ranges[batch.label] = range(start, start + len(batch.source_frames))
@@ -174,7 +173,7 @@ def expand_batch_render_requests(
                     source_resolution=source_resolution,
                     signal=batch.signal,
                     presentation_state=state,
-                    tonemap_settings=source.tonemap_settings,
+                    tonemap=source.tonemap,
                     geometry=geometry,
                     font_path=None,
                     origin=plan.overlay_origin,
@@ -225,18 +224,16 @@ def _geometry_plans(
             else request.source_resolution
         )
         active = request.active_picture
-        if width <= 0 or height <= 0:
-            # Path-only convenience calls may lack decoded dimensions, but the
-            # canonical active-picture facts still provide a valid bounded
-            # extent for geometry planning.
-            width = max(width, active.x + active.width)
-            height = max(height, active.y + active.height)
+        if active.x + active.width > width or active.y + active.height > height:
+            raise RenderError(
+                reason=f"active picture for {request.label!r} is outside prepared source dimensions {width}x{height}"
+            )
         sources.append(
             SourceGeometry(
                 width=width,
                 height=height,
                 active_rect=GeometryRect(active.x, active.y, active.width, active.height),
-                active_rect_source=active_rect_source_from_provenance(active.provenance),
+                provenance=active.provenance,
                 label=request.label,
             )
         )
@@ -249,9 +246,6 @@ def _geometry_plans(
         tuple(sources),
         mode=mode,
         options=RenderGeometryOptions(
-            # Active-picture facts and provenance arrive canonically on the
-            # request; expansion must not re-detect or replace them from config.
-            active_rect_detection="provided",
             aligned_scale_policy=config.screenshots.aligned_scale_policy.value,
             aligned_target_size=_target_size(config),
         ),
@@ -269,13 +263,12 @@ def _target_size(config: ConfigSchema) -> tuple[int, int] | None:
 
 
 def _geometry_facts(plan: RenderGeometryPlan) -> RenderedGeometryFacts:
-    provenance = active_picture_provenance_from_rect_source(plan.active_rect_source)
     active = ActivePictureFacts(
         x=plan.active_rect.x,
         y=plan.active_rect.y,
         width=plan.active_rect.width,
         height=plan.active_rect.height,
-        provenance=provenance,
+        provenance=plan.provenance,
         is_full_frame=plan.active_rect == plan.source_rect,
     )
     return RenderedGeometryFacts(

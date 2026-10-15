@@ -23,7 +23,7 @@ async function inspectorContracts() {
             filename: 'exact.release.name.mkv',
         },
         signal: { is_hdr: true },
-        presentation: { state: 'hdr_tonemapped', tone_curve: 'bt2390', target_nits: 203 },
+        presentation: { state: 'hdr_tonemapped', tonemap: {implementation: 'libplacebo', algorithm: 'bt2390', target_nits: 203, source_peak_nits: 1000, source_peak_origin: 'default', effective_controls: {}, fallback_cause: null} },
     };
 
     assert.equal(format.clipDisplay(clip), 'Control identity');
@@ -103,7 +103,19 @@ async function inspectorContracts() {
     assert.equal(format.stageLabelNeedsRangeWord('My Explicit'), true);
     assert.equal(format.stageLabelNeedsRangeWord('Cut (HDR) · GRP'), false);
     assert.equal(format.formatSignal({ is_hdr: true, transfer: 16, range: 'limited' }), 'HDR · PQ · Limited');
-    assert.equal(format.formatPresentation(clip), 'Tonemapped · BT.2390 → 203 nits');
+    assert.equal(format.formatPresentation(clip), 'Tonemapped · BT.2390 → 203 nits · source peak 1000 nits (default)');
+    const fallback = {
+        implementation: 'fallback', algorithm: 'frame_compare_peak_scaled_rational_v1',
+        target_nits: 203, source_peak_nits: 609, source_peak_origin: 'max_cll',
+        effective_controls: { target_nits: 203, gamma_lift: true }, fallback_cause: 'runtime_call_failed',
+    };
+    assert.equal(format.formatPresentation({presentation: {state: 'hdr_tonemapped', tonemap: fallback}}),
+        'Tonemapped · fallback (peak-scaled) → 203 nits · source peak 609 nits (max_cll) · runtime call failed');
+    assert.equal(format.formatTonemapSummary({ran: true, requested: {tone_curve: 'spline'}, shared: {
+        implementation: fallback.implementation, algorithm: fallback.algorithm,
+        effective_controls: fallback.effective_controls,
+    }}), 'fallback (peak-scaled) · 203 nits');
+    assert.equal(format.formatTonemapSummary({ran: true, shared: null}), 'Applied · varies by source');
     assert.equal(format.formatActivePicture(null, [1920, 1080]), '1920×1080 · full frame');
     assert.equal(
         format.formatActivePicture({ width: 1920, height: 800, x: 0, y: 140, provenance: 'dolby_vision_l5' }, [3840, 2160]),
@@ -293,7 +305,7 @@ async function inspectorContracts() {
             provenance: 'dolby_vision_l5',
             is_full_frame: false,
         },
-        presentation: { state: 'hdr_tonemapped', tone_curve: 'bt2390', target_nits: 100 },
+        presentation: { state: 'hdr_tonemapped', tonemap: {implementation: 'libplacebo', algorithm: 'bt2390', target_nits: 100, source_peak_nits: 1000, source_peak_origin: 'default', effective_controls: {}, fallback_cause: null} },
     };
     const cardExplicitClip = {
         display: {
@@ -421,7 +433,7 @@ async function inspectorContracts() {
             ['Length', '143,487 frames · 1:39:44'],
             ['Size', '17.00 GiB'],
             ['FPS', '23.976 fps'],
-            ['Presentation', 'Tonemapped · BT.2390 → 100 nits'],
+            ['Presentation', 'Tonemapped · BT.2390 → 100 nits · source peak 1000 nits (default)'],
             ['Signal', 'HDR · BT.2020 / PQ / BT.2020nc · Limited · DV RPU'],
         ]);
         assert.equal(tableStub.dom.inspectorClipsShared.hidden, true);

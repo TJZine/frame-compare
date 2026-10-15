@@ -1003,7 +1003,7 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
 
 ### Report And Overlay Metadata Contract
 
-- Newly generated standalone reports use payload version `1.2`. Each clip carries a
+- Newly generated standalone reports use payload version `1.3`. Each clip carries a
   presentation-only `display` object with full primary identity, release descriptor,
   ordinary-control label, constrained micro label, and exact filename. These strings
   are assembled once from prepared release identity and explicit-label state. They do
@@ -1012,9 +1012,9 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   number is the common comparison-domain frame; every image separately records its
   mapped untrimmed source frame, exact-frame picture type, and selected-frame Dolby
   Vision RPU presence when available.
-- Existing payload v1.1 HTML reports remain self-contained and viewable as generated;
+- Existing payload v1.1/v1.2 HTML reports remain self-contained and viewable as generated;
   Frame Compare does not rewrite or migrate them. Because the payload version
-  participates in report ID generation, a newly generated v1.2 report may use a new
+  participates in report ID generation, a newly generated v1.3 report may use a new
   browser-local viewer/review storage key. Review JSON is valid only for the exact report
   ID and payload version; there is no cross-version review-state migration or import.
 - The existing Frame inspector follows the images visible in Single, Slider, Diff,
@@ -1025,7 +1025,14 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   and informative release identity, retain the complete wrapping filename, and wrap
   compact source signal, presentation, file-size, and non-full active-picture facts
   without horizontal panel scrolling. Report Information owns the Rendering
-  disclosure, including resolved tonemap settings when tonemapping ran.
+  disclosure, including the shared applied transform when tonemapping ran; the Clips
+  inspector shows each clip's implementation, algorithm, resolved source peak and
+  origin, and fallback cause; per-clip effective controls remain in the payload. Payload `clips[].presentation` contains
+  `state` and `tonemap` (applied facts or null), replacing the old flat requested curve
+  and target fields. `rendering.tonemap` contains `ran`, `requested` settings (or null
+  for mixed requests), and a `shared` implementation/algorithm/effective-controls
+  projection only when all tonemapped clips agree. Per-clip peaks and fallback causes
+  do not prevent a shared run summary.
 - The primary report toolbar keeps frame navigation, view modes, and mode-specific
   context/alignment in three stable CSS-owned zones on wide screens. It becomes a
   two-row layout at medium widths and a stacked layout at narrow widths without
@@ -1044,11 +1051,21 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   Unparseable date text is shown unchanged.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
-  `src` values, timestamps, transient browser state, and clip display strings.
+  `src` values, timestamps, transient browser state, clip display strings, requested
+  tonemap settings, and fallback causes. Applied implementation, algorithm, effective
+  controls and resolved per-clip peaks participate in identity. Identical output via
+  different fallback causes shares identity; regenerated 1.3 reports start fresh
+  browser-local state and reject 1.2 review imports.
 - `screenshots.overlay_mode` has four exact presentation levels: `none` bakes no text;
   `minimal` carries source identity plus compact frame/type/size context; `standard`
   adds selection and source/output context; `diagnostic` adds only observed signal,
   applied tonemap, HDR static, exceptional geometry, and proven exact-frame facts.
+- When vs-placebo is unavailable, unusable, or fails at runtime, Frame Compare keeps
+  its existing fallback policy and discloses `frame_compare_peak_scaled_rational_v1`
+  per clip, rather than the requested curve. Diagnostic overlays say
+  `Tonemap: fallback (peak-scaled) → <target> nits`; one render warning names all
+  affected clips and their cause classes. Signature/configuration errors remain fatal.
+  The pre-run CLI preview describes requested settings, not applied output facts.
 - Picture type is collected from the exact selected original source frame. Its absence
   is nonfatal and is omitted from baked text rather than inferred from keyframe status.
 - Selected-frame Dolby Vision RPU presence is collected from that same original

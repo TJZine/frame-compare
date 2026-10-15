@@ -91,7 +91,7 @@ def _overlay(mode: OverlayMode = OverlayMode.MINIMAL, *, frame: int = 0) -> Over
         source_resolution=resolution,
         signal=SourceSignalFacts(is_hdr=False),
         presentation_state=PresentationState.SDR,
-        tonemap_settings=None,
+        tonemap=None,
         geometry=RenderedGeometryFacts(
             source_size=resolution,
             active_picture=ActivePictureFacts(0, 0, *resolution, "full_frame", True),
@@ -530,13 +530,18 @@ def _geometry_plan(
 ) -> RenderGeometryPlan:
     crop_rect = crop_rect or GeometryRect(1, 0, 2, 4)
     pad = pad or GeometryMargins(left=1, right=1)
-    source = SourceGeometry(width=source_size[0], height=source_size[1])
+    source = SourceGeometry(
+        width=source_size[0],
+        height=source_size[1],
+        active_rect=crop_rect,
+        provenance="dimension_derived",
+    )
     source_rect = GeometryRect(0, 0, source.width, source.height)
     return RenderGeometryPlan(
         source=source,
         source_rect=source_rect,
         active_rect=crop_rect,
-        active_rect_source="dimension-derived",
+        provenance="dimension_derived",
         crop_rect=crop_rect,
         crop=GeometryMargins(left=crop_rect.x, right=source.width - crop_rect.right),
         cropped_size=(crop_rect.width, crop_rect.height),
@@ -545,7 +550,6 @@ def _geometry_plan(
         final_canvas_size=final_canvas_size,
         content_origin=(pad.left, pad.top),
         overlay_origin=(pad.left + 10, pad.top + 10),
-        source_overlay_origin=(crop_rect.x + 10, crop_rect.y + 10),
     )
 
 

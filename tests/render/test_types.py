@@ -39,7 +39,7 @@ def _clip_facts() -> RenderedClipFacts:
         source_total_frames=10,
         signal=SourceSignalFacts(is_hdr=False),
         presentation_state=PresentationState.SDR,
-        tonemap_settings=None,
+        tonemap=None,
         geometry=_geometry(),
     )
 
@@ -63,7 +63,7 @@ def test_overlay_config_is_immutable_and_keeps_source_domain() -> None:
         source_resolution=(1920, 1080),
         signal=SourceSignalFacts(is_hdr=False),
         presentation_state=PresentationState.SDR,
-        tonemap_settings=None,
+        tonemap=None,
         geometry=_geometry(),
         font_path=None,
     )

@@ -47,7 +47,7 @@ def _prepared(*, state: PresentationState = PresentationState.SDR) -> PreparedRe
         source_total_frames=101,
         source_is_hdr=state != PresentationState.SDR,
         presentation_state=state,
-        tonemap_settings=None,
+        tonemap=None,
     )
 
 

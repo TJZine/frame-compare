@@ -66,7 +66,7 @@ def _clip_facts(width: int = 1920, height: int = 1080) -> RenderedClipFacts:
         source_total_frames=240,
         signal=SourceSignalFacts(is_hdr=False),
         presentation_state=PresentationState.SDR,
-        tonemap_settings=None,
+        tonemap=None,
         geometry=geometry,
     )
 

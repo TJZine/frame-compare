@@ -100,7 +100,7 @@ async function reviewControllerContracts() {
         return JSON.stringify({
             format: 'frame-compare-review',
             schema_version: 1,
-            report: { id: reportId, payload_version: '1.2' },
+            report: { id: reportId, payload_version: '1.3' },
             reviews,
             exported_at: '2026-07-14T16:30:00.000Z',
         });
@@ -175,7 +175,7 @@ async function reviewControllerContracts() {
             currentFrameIdx: 0,
             data: {
                 report_id: reportId,
-                version: '1.2',
+                version: '1.3',
                 frames: [{}, {}, {}, {}],
                 clips: [clipDisplay('Reference'), clipDisplay('Encode')],
             },
@@ -205,7 +205,7 @@ async function reviewControllerContracts() {
                     currentFrameIdx: 0,
                     data: {
                         report_id: reportId,
-                        version: '1.2',
+                        version: '1.3',
                         frames: [{}],
                         clips: [clipDisplay('Reference')],
                     },

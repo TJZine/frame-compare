@@ -988,13 +988,26 @@ link's safe http(s) href; no viewer script re-derives it. The viewer's Inspector
 the Report Information source cards, Opens in, and Default pair at startup; renderer.py
 emits only their containers.
 
-Report payload v1.2 carries one orchestration-built, presentation-only display profile
+Tonemap dispatch returns a `TonemapResult`: the prepared graph and immutable
+`AppliedTonemap` facts. `LibplaceboTonemap` and `FallbackTonemap` retain the actual
+algorithm, controls and resolved source peak; requested `TonemapSettings` remain
+separate. The shared peak resolver preserves configured → MaxCLL → 1000-nit
+precedence. Fallback reasons are plugin unavailable, runtime unusable, and runtime
+call failed. Preparation, rendered clip facts, diagnostic overlays, orchestration,
+and report serialization carry the same per-clip facts. One render warning aggregates
+fallback clips. The fallback graph and frame properties are unchanged.
+
+Report payload v1.3 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
 provenance, shared formatters, stable roles, and set-level collision handling once per
 report, joining profile segments with `·` (slow.pics image names keep the `|`
 separator; burned-in screenshot text is the clip label and does not use release
 descriptors). Report controls consume control or micro names,
 while Inspector/info and ARIA surfaces consume primary identity and exact filename.
+Per-clip presentation contains applied tonemap facts; the rendering summary derives a
+shared implementation/algorithm/control projection, excluding clip-specific peaks and
+causes. Identity includes applied output facts and excludes requested settings and
+fallback causes in both clip and rendering projections.
 Stage labels show the control name plus muted resolution and size, adding an
 HDR/SDR word only when the name has none; toolbar selects cap at `20rem` with an
 end ellipsis and carry the full name on each option. Canonical clip labels continue
@@ -1171,9 +1184,11 @@ consumes it through render-local request fields. Screenshot rendering still owns
 geometry and writer policy inside `frame_compare.render`: `frame_compare.render.geometry` plans
 optional aligned crop/scale/pad geometry, mod-safe crop rectangles, fit-to-target
 scale/canvas policy, padding, and overlay origins. Render batch expansion treats
-prepared active rectangles as already resolved for normal orchestration requests,
-while direct render batch calls without provenance can still use render-local
-static geometry inference; render does not sample content. Native screenshot
+required canonical active-picture facts as resolved for every batch request and
+checks containment against the prepared dimensions before planning. `SourceGeometry`
+requires a rectangle and canonical provenance; render has no inference mode, candidate
+ranking, or provenance translation. Orchestration projects its cache-stable
+`ClipActiveRectSource` vocabulary to canonical provenance at the render boundary. Native screenshot
 render remains full-frame. The FFmpeg backend applies geometry filters after
 exact frame selection, and the VapourSynth path chooses between the Pillow writer
 and eligible `core.fpng.Write` output without changing CLI import-time behavior.

@@ -52,13 +52,12 @@ function payloadWithClipCount(clipCount) {
         },
         presentation: {
             state: 'sdr',
-            tone_curve: null,
-            target_nits: null,
+            tonemap: null,
         },
         active_picture: null,
     }));
     return {
-        version: '1.2',
+        version: '1.3',
         report_id: 'report_viewer_state_contract',
         generated_at: '2026-06-02T12:00:00+00:00',
         title: 'Viewer State Contract',

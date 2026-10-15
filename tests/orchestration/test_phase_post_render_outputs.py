@@ -51,6 +51,7 @@ from tests.orchestration.phase_task_helpers import (
     _RenderRunner,
 )
 from tests.run_request_support import make_run_request
+from tests.tonemap_test_support import libplacebo_tonemap
 
 
 class _RecordingProgressReporter(NullProgressReporter):
@@ -376,11 +377,11 @@ def test_run_report_phase_discloses_shared_tonemap_setting(
     )
     settings = TonemapSettings(target_nits=203)
     render.clip_facts_by_label["Reference"] = replace(
-        render.clip_facts_by_label["Reference"], tonemap_settings=settings
+        render.clip_facts_by_label["Reference"], tonemap=libplacebo_tonemap(settings)
     )
     if comparison_hdr:
         render.clip_facts_by_label["Encode 1"] = replace(
-            render.clip_facts_by_label["Encode 1"], tonemap_settings=settings
+            render.clip_facts_by_label["Encode 1"], tonemap=libplacebo_tonemap(settings)
         )
     captured: dict[str, Any] = {}
 
@@ -395,7 +396,8 @@ def test_run_report_phase_discloses_shared_tonemap_setting(
         ctx, frames=[1], render=render, metadata=None, slowpics_url=None
     )
 
-    assert captured["report_data"].rendering.tonemap_settings == settings
+    assert captured["report_data"].clips[0].tonemap == libplacebo_tonemap(settings)
+    assert (captured["report_data"].clips[1].tonemap is not None) == comparison_hdr
 
 
 def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(

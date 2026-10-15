@@ -135,7 +135,7 @@ def _render_artifacts(
                 source_total_frames=100,
                 signal=SourceSignalFacts(is_hdr=False),
                 presentation_state=PresentationState.SDR,
-                tonemap_settings=None,
+                tonemap=None,
                 geometry=geometry,
             )
             for label in screenshots_by_label

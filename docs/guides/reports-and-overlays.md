@@ -107,7 +107,12 @@ It lists the title, report ID, generated time, content, the **Opens in** view, t
 default
 pair, the slow.pics link when uploaded, and every source. Its **Rendering** section
 states
-whether Frame Compare applied tonemapping and which settings it used.
+whether tonemapping ran and the shared applied transform and controls, or that the
+transform varies by source. The Clips inspector shows each source's actual transform,
+resolved source peak and origin, and any fallback cause. Requested settings remain
+separate in the report payload. New reports use payload 1.3 and new report identities;
+existing saved reports stay viewable, and review imports require an exact report ID
+and payload version.
 
 <figure class="fc-figure fc-figure--narrow">
   <img src="../images/report-information.webp" alt="Report Information dialog listing the title, report ID, generated time, content, the Opens in view, the default pair, and the sources." loading="lazy">

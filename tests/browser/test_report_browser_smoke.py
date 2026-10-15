@@ -14,6 +14,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, cast
 
 import pytest
+from tests.tonemap_test_support import libplacebo_tonemap
 
 from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.config.schema_enums import ViewerMode
@@ -261,7 +262,7 @@ def _generated_report(
                 presentation_state=(
                     PresentationState.HDR_TONEMAPPED if tonemapped else PresentationState.SDR
                 ),
-                tonemap_settings=TonemapSettings() if tonemapped else None,
+                tonemap=libplacebo_tonemap(TonemapSettings()) if tonemapped else None,
                 active_picture=geometry.active_picture,
                 images=[
                     ReportImageInfo(
@@ -287,7 +288,6 @@ def _generated_report(
             rendering=ReportRenderingInfo(
                 overlay_mode=OverlayMode.DIAGNOSTIC,
                 include_frame_number=True,
-                tonemap_settings=TonemapSettings() if tonemapped else None,
                 geometry_by_label={
                     clip.label or clip.name: geometry_by_name[clip.name] for clip in clips
                 },
@@ -866,7 +866,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const summary = disclosure?.querySelector('summary');
     const settings = disclosure?.querySelector('dl');
     const advancedLabels = [
-        'Dynamic peak detection', 'Contrast recovery', 'Gamma lift', 'Source peak',
+        'Dynamic peak detection', 'Contrast recovery', 'Gamma lift',
         'Destination minimum', 'Knee offset', 'Smoothing period', 'Percentile',
         'Scene thresholds', 'Gamut mapping',
         'Metadata mode', 'Dolby Vision metadata use',
@@ -884,7 +884,7 @@ document.addEventListener('DOMContentLoaded', () => {
     );
     document.documentElement.dataset.tonemapSummary = String(
         document.querySelector('[data-rendering-tonemap-summary]')?.textContent
-        === 'Reference · BT.2390 · 100 nits'
+        === 'BT.2390 · 100 nits'
     );
     document.documentElement.dataset.tonemapDisclosureInitial = String(
         Boolean(

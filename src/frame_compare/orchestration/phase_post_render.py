@@ -355,7 +355,7 @@ def run_report_phase(
                 size_bytes=clip_facts.size_bytes,
                 signal=clip_facts.signal,
                 presentation_state=clip_facts.presentation_state,
-                tonemap_settings=clip_facts.tonemap_settings,
+                tonemap=clip_facts.tonemap,
                 active_picture=clip_facts.geometry.active_picture,
                 images=images,
                 label=clip.label,
@@ -369,21 +369,6 @@ def run_report_phase(
                 ),
             )
         )
-    applied_settings = next(
-        (
-            facts.tonemap_settings
-            for facts in render.clip_facts_by_label.values()
-            if facts.tonemap_settings is not None
-        ),
-        None,
-    )
-    if applied_settings is not None and any(
-        facts.tonemap_settings is not None and facts.tonemap_settings != applied_settings
-        for facts in render.clip_facts_by_label.values()
-    ):
-        raise ValueError(
-            "report rendering disclosure cannot represent mixed effective tonemap settings"
-        )
     report_data = ReportData(
         clips=clip_info,
         frames=frames,
@@ -392,7 +377,6 @@ def run_report_phase(
             # batch expansion has no post-render override or fallback for them.
             overlay_mode=ctx.config.screenshots.overlay_mode,
             include_frame_number=ctx.config.screenshots.include_frame_number,
-            tonemap_settings=applied_settings,
             geometry_by_label={
                 label: facts.geometry for label, facts in render.clip_facts_by_label.items()
             },

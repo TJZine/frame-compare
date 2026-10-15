@@ -7,7 +7,7 @@ import vapoursynth as vs
 from frame_compare.config.schema import ToneCurve
 from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.tonemap import apply_tonemap
-from frame_compare.vs.types import HDRMetadata, TonemapSettings
+from frame_compare.vs.types import HDRMetadata, TonemapFallbackCause, TonemapResult, TonemapSettings
 
 
 @patch("frame_compare.vs.env.detect_plugins")
@@ -22,6 +22,7 @@ def test_apply_tonemap_uses_libplacebo_when_available(
     with patch("vapoursynth.core", MagicMock()) as mock_core:
         settings = TonemapSettings(enabled=True)
 
+        mock_libplacebo.return_value = TonemapResult(mock_clip, None)
         apply_tonemap(mock_clip, settings)
 
         mock_runtime_usable.assert_called_once_with()
@@ -58,7 +59,9 @@ def test_apply_tonemap_uses_fallback_when_libplacebo_missing(
 
     apply_tonemap(mock_clip, settings)
 
-    mock_fallback.assert_called_once_with(mock_clip, settings, None)
+    mock_fallback.assert_called_once_with(
+        mock_clip, settings, None, cause=TonemapFallbackCause.PLUGIN_UNAVAILABLE
+    )
     mock_libplacebo.assert_not_called()
 
 
@@ -207,7 +210,8 @@ def test_apply_tonemap_fallback_cases(case: str) -> None:
                     return_value=case == "runtime_failure",
                 ) as runtime_usable,
                 patch(
-                    "frame_compare.vs.tonemap_libplacebo.apply_libplacebo", return_value=None
+                    "frame_compare.vs.tonemap_libplacebo.apply_libplacebo",
+                    return_value=TonemapFallbackCause.RUNTIME_CALL_FAILED,
                 ) as libplacebo,
                 patch(
                     "frame_compare.vs.tonemap_fallback.fallback_tonemap",
@@ -221,5 +225,46 @@ def test_apply_tonemap_fallback_cases(case: str) -> None:
                 fallback.assert_called_once()
             else:
                 libplacebo.assert_not_called()
-                fallback.assert_called_once_with(clip, settings, None)
-    assert result is fallback_result
+                fallback.assert_called_once_with(
+                    clip, settings, None, cause=TonemapFallbackCause.RUNTIME_UNUSABLE
+                )
+    if case == "metadata_missing":
+        assert result.clip is fallback_result
+        assert result.applied is not None
+        assert result.applied.transform.source_peak.nits == 5678
+    else:
+        assert result is fallback_result
+
+
+@pytest.mark.parametrize("cause", list(TonemapFallbackCause))
+def test_dispatch_retains_actual_fallback_cause_and_resolved_peak(
+    cause: TonemapFallbackCause,
+) -> None:
+    from frame_compare.vs.types import FallbackTonemap
+
+    clip = MagicMock()
+    clip.format.id = vs.RGBS
+    clip.std.Expr.return_value = clip
+    clip.get_frame.return_value.props = {"_Matrix": 0, "_Transfer": 16, "_Primaries": 9}
+    metadata = HDRMetadata(None, 609, None, 9, 16, 0)
+    with (
+        patch(
+            "frame_compare.vs.env.detect_plugins",
+            return_value={"libplacebo": cause != TonemapFallbackCause.PLUGIN_UNAVAILABLE},
+        ),
+        patch(
+            "frame_compare.vs.tonemap._libplacebo_runtime_usable",
+            return_value=cause != TonemapFallbackCause.RUNTIME_UNUSABLE,
+        ),
+        patch(
+            "frame_compare.vs.tonemap_libplacebo.apply_libplacebo",
+            return_value=TonemapFallbackCause.RUNTIME_CALL_FAILED,
+        ),
+    ):
+        result = apply_tonemap(clip, TonemapSettings(target_nits=203), metadata)
+    assert result.clip is clip
+    assert result.applied is not None
+    assert isinstance(result.applied.transform, FallbackTonemap)
+    assert result.applied.transform.cause == cause
+    assert result.applied.transform.source_peak.nits == 609
+    assert result.applied.transform.source_peak.origin == "max_cll"

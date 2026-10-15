@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from frame_compare.orchestration.active_rect import active_picture_provenance_from_rect_source
 from frame_compare.orchestration.context import ClipProbeSnapshot, ClipState, RunContext
 from frame_compare.orchestration.execution_types import RenderArtifacts, RenderPhaseOutput
 from frame_compare.orchestration.phase_selection import (
@@ -13,7 +14,6 @@ from frame_compare.orchestration.phase_selection import (
 )
 from frame_compare.orchestration.presentation import clip_role
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
-from frame_compare.render.geometry import active_picture_provenance_from_rect_source
 from frame_compare.services.release_identity import format_micro_descriptor
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
@@ -22,6 +22,7 @@ from frame_compare.utils.media_facts import (
 )
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.props import range_label_from_props
+from frame_compare.vs.types import FallbackTonemap
 
 _MASTERING_LUMINANCE = re.compile(r"L\((\d+(?:\.\d+)?|\.\d+),(\d+(?:\.\d+)?|\.\d+)\)")
 
@@ -108,6 +109,20 @@ def run_render_phase(
                     f"{label}; screenshots were rendered without picture-type metadata",
                 )
             )
+
+    fallbacks = [
+        f"{label} ({facts.tonemap.transform.cause.value})"
+        for label, facts in rendered.clip_facts_by_label.items()
+        if facts.tonemap is not None and isinstance(facts.tonemap.transform, FallbackTonemap)
+    ]
+    if fallbacks:
+        warnings.append(
+            RunWarning(
+                "render",
+                "warning",
+                "render: fallback tonemap (peak-scaled) applied to " + "; ".join(fallbacks),
+            )
+        )
 
     screenshot_total = sum(len(paths) for paths in rendered.screenshots_by_label.values())
     source_total = len(rendered.screenshots_by_label)

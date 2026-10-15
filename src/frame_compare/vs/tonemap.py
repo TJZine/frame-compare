@@ -13,7 +13,7 @@ from frame_compare.vs import (
     tonemap_runtime,
 )
 from frame_compare.vs.tonemap_presets import get_preset_settings
-from frame_compare.vs.types import HDRMetadata, TonemapSettings
+from frame_compare.vs.types import HDRMetadata, TonemapFallbackCause, TonemapResult, TonemapSettings
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -33,10 +33,10 @@ def apply_tonemap(
     clip: vs.VideoNode,
     settings: TonemapSettings,
     hdr_metadata: HDRMetadata | None = None,
-) -> vs.VideoNode:
+) -> TonemapResult:
     """Apply HDR to SDR tonemapping."""
     if not settings.enabled:
-        return clip
+        return TonemapResult(clip, None)
     raise_if_cancelling()
     tonemap_conversion.validate_target_nits(settings)
 
@@ -47,13 +47,18 @@ def apply_tonemap(
     plugins = env.detect_plugins(core)
 
     raise_if_cancelling()
-    if plugins.get("libplacebo", False) and _libplacebo_runtime_usable():
+    if not plugins.get("libplacebo", False):
+        cause = TonemapFallbackCause.PLUGIN_UNAVAILABLE
+    elif not _libplacebo_runtime_usable():
+        cause = TonemapFallbackCause.RUNTIME_UNUSABLE
+    else:
         raise_if_cancelling()
         result = tonemap_libplacebo.apply_libplacebo(clip, settings, core, hdr_metadata)
-        if result is not None:
+        if isinstance(result, TonemapResult):
             return result
+        cause = result
     raise_if_cancelling()
-    return tonemap_fallback.fallback_tonemap(clip, settings, hdr_metadata)
+    return tonemap_fallback.fallback_tonemap(clip, settings, hdr_metadata, cause=cause)
 
 
 __all__ = [

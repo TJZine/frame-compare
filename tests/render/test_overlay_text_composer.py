@@ -14,7 +14,8 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
     SourceSignalFacts,
 )
-from frame_compare.vs.types import TonemapSettings
+from frame_compare.vs.types import AppliedTonemap, TonemapSettings
+from tests.tonemap_test_support import libplacebo_tonemap
 
 
 def _geometry(*, transformed: bool = False) -> RenderedGeometryFacts:
@@ -45,7 +46,7 @@ def _config(
     source_resolution: tuple[int, int] = (3840, 2160),
     signal: SourceSignalFacts | None = None,
     presentation_state: PresentationState = PresentationState.SDR,
-    tonemap_settings: TonemapSettings | None = None,
+    tonemap: AppliedTonemap | None = None,
     geometry: RenderedGeometryFacts | None = None,
 ) -> OverlayConfig:
     return OverlayConfig(
@@ -60,7 +61,7 @@ def _config(
         source_resolution=source_resolution,
         signal=signal or SourceSignalFacts(is_hdr=False),
         presentation_state=presentation_state,
-        tonemap_settings=tonemap_settings,
+        tonemap=tonemap,
         geometry=geometry or _geometry(),
         font_path=None,
     )
@@ -95,7 +96,7 @@ def _hdr_config(*, dovi: bool = False) -> OverlayConfig:
         file_size_bytes=int((54.72 if dovi else 17.42) * 1024**3),
         signal=signal,
         presentation_state=PresentationState.HDR_TONEMAPPED,
-        tonemap_settings=TonemapSettings(),
+        tonemap=libplacebo_tonemap(TonemapSettings()),
         geometry=_geometry(transformed=dovi),
     )
 

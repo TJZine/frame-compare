@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.render.backend.ffmpeg import FFmpegRunner
-    from frame_compare.vs.types import SourceInfo, TonemapSettings
+    from frame_compare.vs.types import AppliedTonemap, SourceInfo, TonemapSettings
 
 log = structlog.get_logger()
 
@@ -73,14 +73,14 @@ def _apply_vs_tonemap_and_labeling(
     loaded_clip: vs.VideoNode,
     source_info: SourceInfo,
     config: ConfigSchema,
-) -> tuple[vs.VideoNode, TonemapSettings | None]:
+) -> tuple[vs.VideoNode, AppliedTonemap | None]:
     raise_if_cancelling()
     if should_tonemap(source_info, config):
         from frame_compare.vs.tonemap import apply_tonemap
 
         settings = resolve_tonemap_settings(config)
-        loaded_clip = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata)
-        return loaded_clip, settings
+        result = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata)
+        return result.clip, result.applied
     return loaded_clip, None
 
 
@@ -172,7 +172,7 @@ def prepare_clip_for_render(
     prepared_clip: vs.VideoNode | Path = clip_path
     resolution = (0, 0)
     diagnostic_source: vs.VideoNode | Path = clip_path
-    tonemap_settings: TonemapSettings | None = None
+    tonemap: AppliedTonemap | None = None
     source_info: SourceInfo | None = None
     vs_load_failure: Exception | None = None
     fallback_source_is_hdr: bool | None = None
@@ -189,7 +189,7 @@ def prepare_clip_for_render(
             prepared_clip = source_info.clip
             resolution = (source_info.width, source_info.height)
 
-            prepared_clip, tonemap_settings = _apply_vs_tonemap_and_labeling(
+            prepared_clip, tonemap = _apply_vs_tonemap_and_labeling(
                 prepared_clip, source_info, config
             )
 
@@ -237,7 +237,7 @@ def prepare_clip_for_render(
     )
     presentation_state = (
         PresentationState.HDR_TONEMAPPED
-        if tonemap_settings is not None
+        if tonemap is not None
         else PresentationState.HDR_TONEMAP_OFF
         if resolved_source_is_hdr
         else PresentationState.SDR
@@ -249,5 +249,5 @@ def prepare_clip_for_render(
         source_total_frames=source_info.num_frames if source_info is not None else None,
         source_is_hdr=resolved_source_is_hdr,
         presentation_state=presentation_state,
-        tonemap_settings=tonemap_settings,
+        tonemap=tonemap,
     )

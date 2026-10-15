@@ -331,7 +331,7 @@ def prove_apply_tonemap_frame() -> None:
     import vapoursynth as vs
 
     from frame_compare.vs.tonemap import _libplacebo_runtime_usable, apply_tonemap
-    from frame_compare.vs.types import TonemapSettings
+    from frame_compare.vs.types import LibplaceboTonemap, TonemapSettings
 
     core = vs.core
     tonemap_clip = core.std.BlankClip(
@@ -341,7 +341,12 @@ def prove_apply_tonemap_frame() -> None:
 
     libplacebo_runtime_usable = _libplacebo_runtime_usable()
     app_out = apply_tonemap(tonemap_clip, TonemapSettings(enabled=True))
-    app_frame = app_out.get_frame(0)
+    assert_true(app_out.applied is not None, "apply_tonemap omitted applied facts")
+    assert_true(
+        isinstance(app_out.applied.transform, LibplaceboTonemap) == libplacebo_runtime_usable,
+        "apply_tonemap implementation does not match runtime capability",
+    )
+    app_frame = app_out.clip.get_frame(0)
     assert_true(
         app_frame.width == 16 and app_frame.height == 16, "apply_tonemap frame render failed"
     )

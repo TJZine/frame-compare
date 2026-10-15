@@ -13,7 +13,7 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
     SourceSignalFacts,
 )
-from frame_compare.vs.types import TonemapSettings
+from frame_compare.vs.types import AppliedTonemap
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -46,7 +46,7 @@ class OverlayConfig:
     source_resolution: tuple[int, int]
     signal: SourceSignalFacts
     presentation_state: PresentationState
-    tonemap_settings: TonemapSettings | None
+    tonemap: AppliedTonemap | None
     geometry: RenderedGeometryFacts
     font_path: Path | None
     origin: tuple[int, int] | None = None
@@ -63,7 +63,7 @@ class PreparedRenderSource:
     source_total_frames: int | None
     source_is_hdr: bool
     presentation_state: PresentationState
-    tonemap_settings: TonemapSettings | None
+    tonemap: AppliedTonemap | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +75,7 @@ class RenderedClipFacts:
     source_total_frames: int | None
     signal: SourceSignalFacts
     presentation_state: PresentationState
-    tonemap_settings: TonemapSettings | None
+    tonemap: AppliedTonemap | None
     geometry: RenderedGeometryFacts
 
 

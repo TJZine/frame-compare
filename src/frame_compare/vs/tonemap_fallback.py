@@ -7,10 +7,18 @@ from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.tonemap_conversion import (
     apply_post_processing,
     resolve_hdr_tonemap_inputs,
+    resolve_source_peak,
     to_rgbs,
     validate_target_nits,
 )
-from frame_compare.vs.types import HDRMetadata, TonemapSettings
+from frame_compare.vs.types import (
+    AppliedTonemap,
+    FallbackTonemap,
+    HDRMetadata,
+    TonemapFallbackCause,
+    TonemapResult,
+    TonemapSettings,
+)
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -20,7 +28,9 @@ def fallback_tonemap(
     clip: vs.VideoNode,
     settings: TonemapSettings,
     hdr_metadata: HDRMetadata | None = None,
-) -> vs.VideoNode:
+    *,
+    cause: TonemapFallbackCause,
+) -> TonemapResult:
     target_nits = validate_target_nits(settings)
     inputs = resolve_hdr_tonemap_inputs(clip, hdr_metadata)
     clip = to_rgbs(
@@ -30,9 +40,8 @@ def fallback_tonemap(
     )
     hdr_metadata = inputs.hdr_metadata
 
-    source_peak_nits = settings.source_peak
-    if source_peak_nits is None:
-        source_peak_nits = hdr_metadata.max_cll if hdr_metadata and hdr_metadata.max_cll else 1000
+    source_peak = resolve_source_peak(settings, hdr_metadata)
+    source_peak_nits = source_peak.nits
 
     try:
         # VapourSynth float RGB has a nominal 0–1 range.
@@ -53,4 +62,16 @@ def fallback_tonemap(
             hint="Check fallback parameters",
         ) from e
 
-    return apply_post_processing(clip, settings)
+    return TonemapResult(
+        apply_post_processing(clip, settings),
+        AppliedTonemap(
+            settings,
+            FallbackTonemap(
+                "frame_compare_peak_scaled_rational_v1",
+                target_nits,
+                settings.gamma_lift,
+                source_peak,
+                cause,
+            ),
+        ),
+    )

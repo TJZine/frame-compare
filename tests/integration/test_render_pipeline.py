@@ -42,7 +42,7 @@ def _overlay_config() -> OverlayConfig:
         source_resolution=(100, 100),
         signal=SourceSignalFacts(is_hdr=False),
         presentation_state=PresentationState.SDR,
-        tonemap_settings=None,
+        tonemap=None,
         geometry=geometry,
         font_path=None,
         font_size=24,

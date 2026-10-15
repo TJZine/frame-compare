@@ -18,14 +18,36 @@ def test_plan_render_geometry_rejects_non_positive_source_dimensions(
     width: int, height: int
 ) -> None:
     with pytest.raises(ValueError, match="source dimensions must be positive"):
-        plan_render_geometry((SourceGeometry(width=width, height=height),), mode="native")
+        plan_render_geometry(
+            (
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, width, height),
+                    provenance="full_frame",
+                    width=width,
+                    height=height,
+                ),
+            ),
+            mode="native",
+        )
 
 
 def test_plan_render_geometry_aligned_scales_proportionally_and_centers_padding():
     plans = plan_render_geometry(
         (
-            SourceGeometry(width=1000, height=500, label="wide"),
-            SourceGeometry(width=800, height=800, label="square"),
+            SourceGeometry(
+                active_rect=GeometryRect(0, 0, 1000, 500),
+                provenance="full_frame",
+                width=1000,
+                height=500,
+                label="wide",
+            ),
+            SourceGeometry(
+                active_rect=GeometryRect(0, 0, 800, 800),
+                provenance="full_frame",
+                width=800,
+                height=800,
+                label="square",
+            ),
         ),
         mode="aligned",
     )
@@ -46,8 +68,20 @@ def test_plan_render_geometry_aligned_scales_proportionally_and_centers_padding(
 def test_plan_render_geometry_clamps_overlay_origin_to_padded_content_bounds():
     plans = plan_render_geometry(
         (
-            SourceGeometry(width=1000, height=500, label="wide"),
-            SourceGeometry(width=800, height=800, label="square"),
+            SourceGeometry(
+                active_rect=GeometryRect(0, 0, 1000, 500),
+                provenance="full_frame",
+                width=1000,
+                height=500,
+                label="wide",
+            ),
+            SourceGeometry(
+                active_rect=GeometryRect(0, 0, 800, 800),
+                provenance="full_frame",
+                width=800,
+                height=800,
+                label="square",
+            ),
         ),
         mode="aligned",
         overlay_margin=1000,
@@ -72,28 +106,28 @@ def test_plan_render_geometry_aligned_three_sources_mixed_dimensions_with_explic
                 width=1920,
                 height=1080,
                 active_rect=GeometryRect(240, 140, 1440, 800),
-                active_rect_source="explicit",
+                provenance="explicit",
                 label="reference",
             ),
             SourceGeometry(
                 width=1440,
                 height=800,
                 active_rect=GeometryRect(0, 0, 1440, 800),
-                active_rect_source="explicit",
+                provenance="explicit",
                 label="encode-a",
             ),
             SourceGeometry(
                 width=1280,
                 height=720,
                 active_rect=GeometryRect(0, 0, 1280, 720),
-                active_rect_source="explicit",
+                provenance="explicit",
                 label="encode-b",
             ),
         ),
         mode="aligned",
     )
 
-    assert [plan.active_rect_source for plan in plans] == ["explicit"] * 3
+    assert [plan.provenance for plan in plans] == ["explicit"] * 3
     assert plans[0].crop == GeometryMargins(left=240, top=140, right=240, bottom=140)
     assert plans[0].scaled_size == (1440, 800)
     assert plans[1].crop == GeometryMargins()
@@ -102,57 +136,7 @@ def test_plan_render_geometry_aligned_three_sources_mixed_dimensions_with_explic
     assert plans[2].scaled_size == (1422, 800)
     assert [plan.final_canvas_size for plan in plans] == [(1440, 800)] * 3
     assert plans[2].pad == GeometryMargins(left=9, right=9)
-    assert plans[0].source_overlay_origin == (250, 150)
     assert plans[0].overlay_origin == (10, 10)
-
-
-def test_plan_render_geometry_prefers_safe_provided_active_rect_over_dimension_fallback():
-    plans = plan_render_geometry(
-        (
-            SourceGeometry(
-                width=1920,
-                height=1080,
-                active_rect=GeometryRect(160, 0, 1600, 1080),
-                active_rect_source="metadata",
-            ),
-            SourceGeometry(width=1440, height=1080),
-        ),
-        mode="aligned",
-    )
-
-    provided = plans[0]
-    derived = plans[1]
-    assert provided.active_rect_source == "metadata"
-    assert provided.crop == GeometryMargins(left=160, right=160)
-    assert provided.final_canvas_size == (1600, 1080)
-    assert provided.source_overlay_origin == (170, 10)
-
-    assert derived.active_rect_source == "dimension-derived"
-    assert derived.pad == GeometryMargins(left=80, right=80)
-    assert derived.overlay_origin == (90, 10)
-
-
-def test_plan_render_geometry_invalid_active_rect_falls_back_to_dimension_derived_rect():
-    plans = plan_render_geometry(
-        (
-            SourceGeometry(width=1920, height=1080, active_rect=GeometryRect(0, 0, 0, 1080)),
-            SourceGeometry(width=1440, height=1080),
-        ),
-        mode="aligned",
-    )
-
-    assert plans[0].active_rect_source == "dimension-derived"
-    assert plans[0].active_rect == GeometryRect(240, 0, 1440, 1080)
-
-
-def test_plan_render_geometry_invalid_active_rect_falls_back_to_full_frame_without_axis_match():
-    (plan,) = plan_render_geometry(
-        (SourceGeometry(width=1920, height=1080, active_rect=GeometryRect(-1, 0, 100, 100)),),
-        mode="aligned",
-    )
-
-    assert plan.active_rect_source == "full-frame"
-    assert plan.active_rect == GeometryRect(0, 0, 1920, 1080)
 
 
 @pytest.mark.parametrize(
@@ -160,8 +144,20 @@ def test_plan_render_geometry_invalid_active_rect_falls_back_to_full_frame_witho
     [
         pytest.param(
             (
-                SourceGeometry(width=1920, height=1080, label="reference"),
-                SourceGeometry(width=1280, height=720, label="encode"),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 1920, 1080),
+                    provenance="full_frame",
+                    width=1920,
+                    height=1080,
+                    label="reference",
+                ),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 1280, 720),
+                    provenance="full_frame",
+                    width=1280,
+                    height=720,
+                    label="encode",
+                ),
             ),
             "native",
             RenderGeometryOptions(),
@@ -190,7 +186,7 @@ def test_plan_render_geometry_invalid_active_rect_falls_back_to_full_frame_witho
                     width=1920,
                     height=1080,
                     active_rect=GeometryRect(0, 140, 1920, 800),
-                    active_rect_source="content-derived",
+                    provenance="content_derived",
                     label="reference",
                 ),
             ),
@@ -199,7 +195,7 @@ def test_plan_render_geometry_invalid_active_rect_falls_back_to_full_frame_witho
             (
                 {
                     "active_rect": GeometryRect(0, 140, 1920, 800),
-                    "active_rect_source": "content-derived",
+                    "provenance": "content_derived",
                     "crop_rect": GeometryRect(0, 0, 1920, 1080),
                     "crop": GeometryMargins(),
                     "cropped_size": (1920, 1080),
@@ -239,139 +235,19 @@ def test_geometry_native_geometry(
     [
         pytest.param(
             (
-                SourceGeometry(width=1920, height=1080, label="pillarboxed"),
-                SourceGeometry(width=1440, height=1080, label="active"),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 1921, 1081),
+                    provenance="full_frame",
+                    width=1921,
+                    height=1081,
+                    label="odd",
+                ),
             ),
             "aligned",
             RenderGeometryOptions(),
             (
                 {
-                    "active_rect_source": "dimension-derived",
-                    "active_rect": GeometryRect(240, 0, 1440, 1080),
-                    "crop": GeometryMargins(left=240, right=240),
-                    "cropped_size": (1440, 1080),
-                    "final_canvas_size": (1440, 1080),
-                    "overlay_origin": (10, 10),
-                    "source_overlay_origin": (250, 10),
-                },
-                {
-                    "crop": GeometryMargins(),
-                    "final_canvas_size": (1440, 1080),
-                    "overlay_origin": (10, 10),
-                },
-            ),
-            False,
-            id="aligned_same_height_center_crops_wider_source",
-        ),
-        pytest.param(
-            (
-                SourceGeometry(width=1920, height=1080, label="wide"),
-                SourceGeometry(width=1600, height=1080, label="mid"),
-                SourceGeometry(width=1440, height=1080, label="active"),
-            ),
-            "aligned",
-            RenderGeometryOptions(),
-            (
-                {
-                    "active_rect": GeometryRect(240, 0, 1440, 1080),
-                    "crop": GeometryMargins(left=240, right=240),
-                    "final_canvas_size": (1440, 1080),
-                },
-                {
-                    "active_rect": GeometryRect(80, 0, 1440, 1080),
-                    "crop": GeometryMargins(left=80, right=80),
-                    "final_canvas_size": (1440, 1080),
-                },
-                {
-                    "active_rect": GeometryRect(0, 0, 1440, 1080),
-                    "crop": GeometryMargins(),
-                    "final_canvas_size": (1440, 1080),
-                },
-            ),
-            False,
-            id="aligned_three_sources_same_height_center_crops_wider_sources",
-        ),
-        pytest.param(
-            (
-                SourceGeometry(width=1920, height=1080, label="letterboxed"),
-                SourceGeometry(width=1920, height=800, label="active"),
-            ),
-            "aligned",
-            RenderGeometryOptions(),
-            (
-                {
-                    "active_rect_source": "dimension-derived",
-                    "active_rect": GeometryRect(0, 140, 1920, 800),
-                    "crop": GeometryMargins(top=140, bottom=140),
-                    "cropped_size": (1920, 800),
-                    "final_canvas_size": (1920, 800),
-                    "source_overlay_origin": (10, 150),
-                },
-                {"crop": GeometryMargins(), "final_canvas_size": (1920, 800)},
-            ),
-            False,
-            id="aligned_same_width_center_crops_taller_source",
-        ),
-        pytest.param(
-            (
-                SourceGeometry(width=1920, height=1080, label="tall"),
-                SourceGeometry(width=1920, height=900, label="mid"),
-                SourceGeometry(width=1920, height=800, label="active"),
-            ),
-            "aligned",
-            RenderGeometryOptions(),
-            (
-                {
-                    "active_rect": GeometryRect(0, 140, 1920, 800),
-                    "crop": GeometryMargins(top=140, bottom=140),
-                    "final_canvas_size": (1920, 800),
-                },
-                {
-                    "active_rect": GeometryRect(0, 50, 1920, 800),
-                    "crop": GeometryMargins(top=50, bottom=50),
-                    "final_canvas_size": (1920, 800),
-                },
-                {
-                    "active_rect": GeometryRect(0, 0, 1920, 800),
-                    "crop": GeometryMargins(),
-                    "final_canvas_size": (1920, 800),
-                },
-            ),
-            False,
-            id="aligned_three_sources_same_width_center_crops_taller_sources",
-        ),
-    ],
-)
-def test_geometry_geometry_axis(
-    sources: tuple[SourceGeometry, ...],
-    mode: GeometryMode,
-    options: RenderGeometryOptions,
-    expected: tuple[dict[str, object], ...],
-    bounded: bool,
-) -> None:
-    plans = plan_render_geometry(sources, mode=mode, options=options)
-    assert len(plans) == len(expected)
-    for plan, fields in zip(plans, expected, strict=True):
-        for field, value in fields.items():
-            assert getattr(plan, field) == value
-    if bounded:
-        assert all(
-            plan.scaled_size[0] <= plan.final_canvas_size[0]
-            and plan.scaled_size[1] <= plan.final_canvas_size[1]
-            for plan in plans
-        )
-
-
-@pytest.mark.parametrize(
-    "sources, mode, options, expected, bounded",
-    [
-        pytest.param(
-            (SourceGeometry(width=1921, height=1081, label="odd"),),
-            "aligned",
-            RenderGeometryOptions(),
-            (
-                {
-                    "active_rect_source": "full-frame",
+                    "provenance": "full_frame",
                     "active_rect": GeometryRect(0, 0, 1921, 1081),
                     "crop_rect": GeometryRect(0, 0, 1920, 1080),
                     "crop": GeometryMargins(right=1, bottom=1),
@@ -387,15 +263,15 @@ def test_geometry_geometry_axis(
                     width=100,
                     height=80,
                     active_rect=GeometryRect(0, 9, 100, 62),
-                    active_rect_source="content-derived",
+                    provenance="content_derived",
                     label="odd-content",
                 ),
             ),
             "aligned",
-            RenderGeometryOptions(active_rect_detection="provided"),
+            RenderGeometryOptions(),
             (
                 {
-                    "active_rect_source": "content-derived",
+                    "provenance": "content_derived",
                     "active_rect": GeometryRect(0, 9, 100, 62),
                     "crop_rect": GeometryRect(0, 10, 100, 60),
                     "crop": GeometryMargins(top=10, bottom=10),
@@ -410,12 +286,12 @@ def test_geometry_geometry_axis(
                     width=10,
                     height=10,
                     active_rect=GeometryRect(1, 1, 2, 2),
-                    active_rect_source="content-derived",
+                    provenance="content_derived",
                     label="tiny-odd-content",
                 ),
             ),
             "aligned",
-            RenderGeometryOptions(active_rect_detection="provided"),
+            RenderGeometryOptions(),
             ({"active_rect": GeometryRect(1, 1, 2, 2), "crop_rect": GeometryRect(1, 1, 2, 2)},),
             False,
             id="aligned_preserves_tiny_odd_active_rect_when_no_even_crop_fits-0",
@@ -426,12 +302,12 @@ def test_geometry_geometry_axis(
                     width=10,
                     height=10,
                     active_rect=GeometryRect(1, 1, 1, 1),
-                    active_rect_source="content-derived",
+                    provenance="content_derived",
                     label="tiny-odd-content",
                 ),
             ),
             "aligned",
-            RenderGeometryOptions(active_rect_detection="provided"),
+            RenderGeometryOptions(),
             ({"active_rect": GeometryRect(1, 1, 1, 1), "crop_rect": GeometryRect(1, 1, 1, 1)},),
             False,
             id="aligned_preserves_tiny_odd_active_rect_when_no_even_crop_fits-1",
@@ -463,12 +339,30 @@ def test_geometry_geometry_mod(
     [
         pytest.param(
             (
-                SourceGeometry(width=1920, height=800, label="fhd-a"),
-                SourceGeometry(width=1920, height=800, label="fhd-b"),
-                SourceGeometry(width=3840, height=2160, label="uhd"),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 1920, 800),
+                    provenance="full_frame",
+                    width=1920,
+                    height=800,
+                    label="fhd-a",
+                ),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 1920, 800),
+                    provenance="full_frame",
+                    width=1920,
+                    height=800,
+                    label="fhd-b",
+                ),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 3840, 2160),
+                    provenance="full_frame",
+                    width=3840,
+                    height=2160,
+                    label="uhd",
+                ),
             ),
             "aligned",
-            RenderGeometryOptions(active_rect_detection="provided"),
+            RenderGeometryOptions(),
             (
                 {
                     "final_canvas_size": (3840, 2160),
@@ -483,9 +377,27 @@ def test_geometry_geometry_mod(
         ),
         pytest.param(
             (
-                SourceGeometry(width=1920, height=800, label="fhd-a"),
-                SourceGeometry(width=1920, height=800, label="fhd-b"),
-                SourceGeometry(width=3840, height=2160, label="uhd"),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 1920, 800),
+                    provenance="full_frame",
+                    width=1920,
+                    height=800,
+                    label="fhd-a",
+                ),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 1920, 800),
+                    provenance="full_frame",
+                    width=1920,
+                    height=800,
+                    label="fhd-b",
+                ),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 280, 3840, 1600),
+                    provenance="aspect_ratio_derived",
+                    width=3840,
+                    height=2160,
+                    label="uhd",
+                ),
             ),
             "aligned",
             RenderGeometryOptions(aligned_scale_policy="smallest_active"),
@@ -499,8 +411,20 @@ def test_geometry_geometry_mod(
         ),
         pytest.param(
             (
-                SourceGeometry(width=1920, height=800, label="reference"),
-                SourceGeometry(width=3840, height=2160, label="uhd"),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 1920, 800),
+                    provenance="full_frame",
+                    width=1920,
+                    height=800,
+                    label="reference",
+                ),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 3840, 2160),
+                    provenance="full_frame",
+                    width=3840,
+                    height=2160,
+                    label="uhd",
+                ),
             ),
             "aligned",
             RenderGeometryOptions(aligned_scale_policy="reference_active"),
@@ -517,12 +441,23 @@ def test_geometry_geometry_mod(
         ),
         pytest.param(
             (
-                SourceGeometry(width=1920, height=800, label="fhd"),
-                SourceGeometry(width=3840, height=2160, label="uhd"),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 1920, 800),
+                    provenance="full_frame",
+                    width=1920,
+                    height=800,
+                    label="fhd",
+                ),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 3840, 2160),
+                    provenance="full_frame",
+                    width=3840,
+                    height=2160,
+                    label="uhd",
+                ),
             ),
             "aligned",
             RenderGeometryOptions(
-                active_rect_detection="provided",
                 aligned_scale_policy="explicit_size",
                 aligned_target_size=(3840, 2160),
             ),
@@ -539,13 +474,23 @@ def test_geometry_geometry_mod(
         ),
         pytest.param(
             (
-                SourceGeometry(width=1921, height=801, label="odd-wide"),
-                SourceGeometry(width=1281, height=721, label="odd-small"),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 1921, 801),
+                    provenance="full_frame",
+                    width=1921,
+                    height=801,
+                    label="odd-wide",
+                ),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 1281, 721),
+                    provenance="full_frame",
+                    width=1281,
+                    height=721,
+                    label="odd-small",
+                ),
             ),
             "aligned",
-            RenderGeometryOptions(
-                active_rect_detection="provided", aligned_scale_policy="largest_active"
-            ),
+            RenderGeometryOptions(aligned_scale_policy="largest_active"),
             (
                 {"final_canvas_size": (1920, 800)},
                 {"final_canvas_size": (1920, 800)},
@@ -555,11 +500,23 @@ def test_geometry_geometry_mod(
         ),
         pytest.param(
             (
-                SourceGeometry(width=2000, height=500, label="wide"),
-                SourceGeometry(width=800, height=1000, label="tall"),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 2000, 500),
+                    provenance="full_frame",
+                    width=2000,
+                    height=500,
+                    label="wide",
+                ),
+                SourceGeometry(
+                    active_rect=GeometryRect(0, 0, 800, 1000),
+                    provenance="full_frame",
+                    width=800,
+                    height=1000,
+                    label="tall",
+                ),
             ),
             "aligned",
-            RenderGeometryOptions(active_rect_detection="provided"),
+            RenderGeometryOptions(),
             (
                 {"final_canvas_size": (2000, 1000), "scaled_size": (2000, 500)},
                 {"final_canvas_size": (2000, 1000), "scaled_size": (800, 1000)},
@@ -590,201 +547,24 @@ def test_geometry_geometry_target(
 
 
 @pytest.mark.parametrize(
-    "sources, mode, options, expected, bounded",
-    [
-        pytest.param(
-            (
-                SourceGeometry(width=1920, height=800, label="fhd-a"),
-                SourceGeometry(width=1920, height=800, label="fhd-b"),
-                SourceGeometry(width=3840, height=2160, label="uhd"),
-            ),
-            "aligned",
-            RenderGeometryOptions(),
-            (
-                {"final_canvas_size": (3840, 1600), "scaled_size": (3840, 1600)},
-                {"final_canvas_size": (3840, 1600), "scaled_size": (3840, 1600)},
-                {
-                    "active_rect_source": "aspect-ratio-derived",
-                    "active_rect": GeometryRect(0, 280, 3840, 1600),
-                    "final_canvas_size": (3840, 1600),
-                    "scaled_size": (3840, 1600),
-                },
-            ),
-            False,
-            id="aligned_aspect_ratio_largest_active_fight_club_shape",
-        ),
-        pytest.param(
-            (
-                SourceGeometry(width=1920, height=800, label="fhd-a"),
-                SourceGeometry(width=1920, height=800, label="fhd-b"),
-                SourceGeometry(width=3840, height=2160, label="uhd"),
-            ),
-            "aligned",
-            RenderGeometryOptions(active_rect_detection="auto"),
-            (
-                {},
-                {},
-                {
-                    "active_rect_source": "aspect-ratio-derived",
-                    "active_rect": GeometryRect(0, 280, 3840, 1600),
-                },
-            ),
-            False,
-            id="auto_uses_static_aspect_ratio_fallback",
-        ),
-        pytest.param(
-            (
-                SourceGeometry(
-                    width=3840,
-                    height=2160,
-                    active_rect=GeometryRect(0, 280, 3840, 1600),
-                    active_rect_source="content-derived",
-                    label="uhd",
-                ),
-            ),
-            "aligned",
-            RenderGeometryOptions(active_rect_detection="provided"),
-            (
-                {
-                    "active_rect_source": "content-derived",
-                    "active_rect": GeometryRect(0, 280, 3840, 1600),
-                },
-            ),
-            False,
-            id="aligned_accepts_content_derived_active_rect",
-        ),
-        pytest.param(
-            (
-                SourceGeometry(
-                    width=1920,
-                    height=1080,
-                    active_rect=GeometryRect(0, 140, 1920, 800),
-                    active_rect_source="content-derived",
-                ),
-                SourceGeometry(
-                    width=1440,
-                    height=900,
-                    active_rect=GeometryRect(0, 150, 1440, 600),
-                    active_rect_source="content-derived",
-                ),
-                SourceGeometry(width=3840, height=2160),
-            ),
-            "aligned",
-            RenderGeometryOptions(active_rect_detection="auto"),
-            (
-                {},
-                {},
-                {
-                    "active_rect_source": "aspect-ratio-derived",
-                    "active_rect": GeometryRect(0, 280, 3840, 1600),
-                },
-            ),
-            False,
-            id="uses_supported_content_derived_ratio",
-        ),
-        pytest.param(
-            (SourceGeometry(width=3840, height=2160, label="single"),),
-            "aligned",
-            RenderGeometryOptions(),
-            ({"active_rect_source": "full-frame"},),
-            False,
-            id="aspect_ratio_does_not_crop_single_or_ultrawide_outlier-0",
-        ),
-        pytest.param(
-            (
-                SourceGeometry(width=3000, height=1000, label="ultrawide"),
-                SourceGeometry(width=3840, height=2160, label="uhd-a"),
-                SourceGeometry(width=3840, height=2160, label="uhd-b"),
-            ),
-            "aligned",
-            RenderGeometryOptions(),
-            (
-                {"active_rect_source": "full-frame"},
-                {"active_rect_source": "full-frame"},
-                {"active_rect_source": "full-frame"},
-            ),
-            False,
-            id="aspect_ratio_does_not_crop_single_or_ultrawide_outlier-1",
-        ),
-        pytest.param(
-            (
-                SourceGeometry(
-                    width=1920,
-                    height=1080,
-                    active_rect=GeometryRect(0, 140, 1920, 800),
-                    active_rect_source="explicit",
-                    label="explicit",
-                ),
-                SourceGeometry(width=3840, height=2160, label="uhd"),
-            ),
-            "aligned",
-            RenderGeometryOptions(),
-            (
-                {"active_rect_source": "explicit"},
-                {
-                    "active_rect_source": "aspect-ratio-derived",
-                    "active_rect": GeometryRect(0, 280, 3840, 1600),
-                },
-            ),
-            False,
-            id="aspect_ratio_uses_explicit_or_metadata_single_evidence",
-        ),
-        pytest.param(
-            (
-                SourceGeometry(width=3000, height=500, label="very-wide-a"),
-                SourceGeometry(width=3000, height=500, label="very-wide-b"),
-                SourceGeometry(width=1920, height=2160, label="tall"),
-            ),
-            "aligned",
-            RenderGeometryOptions(),
-            (
-                {},
-                {},
-                {"active_rect_source": "full-frame"},
-            ),
-            False,
-            id="aspect_ratio_respects_removal_limit",
-        ),
-        pytest.param(
-            (
-                SourceGeometry(width=2000, height=1000, label="ref-a"),
-                SourceGeometry(width=2000, height=1000, label="ref-b"),
-                SourceGeometry(width=2400, height=1000, label="wide-a"),
-                SourceGeometry(width=2400, height=1000, label="wide-b"),
-                SourceGeometry(width=3840, height=2160, label="uhd"),
-            ),
-            "aligned",
-            RenderGeometryOptions(),
-            (
-                {},
-                {},
-                {},
-                {},
-                {
-                    "active_rect_source": "aspect-ratio-derived",
-                    "active_rect": GeometryRect(0, 120, 3840, 1920),
-                },
-            ),
-            False,
-            id="aspect_ratio_prefers_reference_ratio_on_tie",
-        ),
-    ],
+    "rect",
+    [GeometryRect(0, 0, 0, 1080), GeometryRect(-1, 0, 100, 100), GeometryRect(1900, 0, 100, 100)],
 )
-def test_geometry_geometry_ratio(
-    sources: tuple[SourceGeometry, ...],
-    mode: GeometryMode,
-    options: RenderGeometryOptions,
-    expected: tuple[dict[str, object], ...],
-    bounded: bool,
-) -> None:
-    plans = plan_render_geometry(sources, mode=mode, options=options)
-    assert len(plans) == len(expected)
-    for plan, fields in zip(plans, expected, strict=True):
-        for field, value in fields.items():
-            assert getattr(plan, field) == value
-    if bounded:
-        assert all(
-            plan.scaled_size[0] <= plan.final_canvas_size[0]
-            and plan.scaled_size[1] <= plan.final_canvas_size[1]
-            for plan in plans
-        )
+@pytest.mark.parametrize("mode", ["native", "aligned"])
+def test_invalid_active_rectangle_is_rejected(rect: GeometryRect, mode: GeometryMode) -> None:
+    with pytest.raises(ValueError, match="active rectangle"):
+        plan_render_geometry((SourceGeometry(1920, 1080, rect, "explicit"),), mode=mode)
+
+
+def test_provided_fight_club_geometry_preserves_scale_and_canvas() -> None:
+    plans = plan_render_geometry(
+        (
+            SourceGeometry(1920, 800, GeometryRect(0, 0, 1920, 800), "full_frame"),
+            SourceGeometry(1920, 800, GeometryRect(0, 0, 1920, 800), "full_frame"),
+            SourceGeometry(3840, 2160, GeometryRect(0, 280, 3840, 1600), "aspect_ratio_derived"),
+        ),
+        mode="aligned",
+    )
+    assert [plan.final_canvas_size for plan in plans] == [(3840, 1600)] * 3
+    assert [plan.scaled_size for plan in plans] == [(3840, 1600)] * 3
+    assert plans[2].crop == GeometryMargins(top=280, bottom=280)

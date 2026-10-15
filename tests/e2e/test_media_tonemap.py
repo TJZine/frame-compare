@@ -34,7 +34,8 @@ def test_media_hdr_tonemap(
     arguments = ["run", "--json", "--skip-metadata", "--no-upload", "--root", str(root.root)]
     result = run_cli(root.root, arguments, timeout=60)
     summary, run_dir, report = render_summary(result)
-    settings = report["rendering"]["tonemap"]["settings"]
+    settings = report["rendering"]["tonemap"]["requested"]
+    assert report["rendering"]["tonemap"]["shared"]["implementation"] == "libplacebo"
     summary["tonemap"] = (
         None
         if settings is None

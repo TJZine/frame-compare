@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, assert_never
 
 from frame_compare.analysis.types import MetricActiveRect, MetricCacheRequest, MetricFrameRange
 from frame_compare.analysis.window import SelectionWindow
@@ -19,6 +19,7 @@ from frame_compare.orchestration.context import (
     ClipState,
 )
 from frame_compare.orchestration.errors import SourceSelectionError
+from frame_compare.utils.media_facts import ActivePictureProvenance
 
 ASPECT_RATIO_MATCH_REL_TOLERANCE = 0.005
 ASPECT_RATIO_MIN_CROP_REL_DELTA = 0.005
@@ -472,3 +473,23 @@ def _rect(
         detection_mode=mode,
         algorithm_id=ACTIVE_RECT_RESOLUTION_ALGORITHM,
     )
+
+
+def active_picture_provenance_from_rect_source(
+    source: ClipActiveRectSource,
+) -> ActivePictureProvenance:
+    """Project orchestration's cache-stable source vocabulary to canonical facts."""
+    match source:
+        case "explicit":
+            return "explicit"
+        case "metadata":
+            return "dolby_vision_l5"
+        case "dimension-derived":
+            return "dimension_derived"
+        case "aspect-ratio-derived":
+            return "aspect_ratio_derived"
+        case "content-derived":
+            return "content_derived"
+        case "full-frame":
+            return "full_frame"
+    assert_never(source)
