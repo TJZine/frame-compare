@@ -3171,3 +3171,31 @@ PS7Linux15parse/44pure-vector proof accepted only for language/grammar. P2review
 independently hash-checked all15sources+driver against9ae and current425, confirming
 that limited proof without runtime rerun. No acceptance blocker from rejected P2-F1.
 Only final reviewer/runtime/distribution children remain useful pending work.
+
+
+Final COMPLETE-source Docker PASSED at EXACT425b52ad in cleana638, one canonical
+rebuilt full run: **298total/298passed/0failures/errors/skips/xfail/xpass**,179.71s.
+All runtime/plugins/provenance/doctor/fixtures/softwareVulkan/realframes, native/FFmpeg
+P9jobs plus prior contracts, full e2e/integration/vs, production-tooling absence,
+actual productionapp and post-removal report/PNG/TOML/cache/probe mount checks passed.
+Relevant renderorchestrator6/pipeline4/VS2/GOPfacts1,mediarender2/alignment2/cache1/
+tonemap1,U4acceptance38(phase-cache9,FPS3,retimed3),U4cache7,probe/metrics6,strategyVS5.
+Current proof is new425,not earlier f9. RuntimeLinuxarm64/Debian-trixie/Python3.13.16/
+VS R81/LSMASH1310/FFMS2 5.0/placebo2.0.4/FFmpeg7.1.5 unchanged. Warm0created/37reused,
+no indexes/temps; actualstats `generated/e2e/run.MAh7gI/u4-media-gw0-68e0f3fa6e2d458d82595e2ac5506119.json`.
+
+Scoped projectframe-compare-final-a638-425b52ad, generated override ONLY image tags/
+JUnit. Artifacts a638 `generated/final-425b52ad/{docker-gate.log,junit.xml,result.json,compose.yml}`.
+Testimage sha256:663e7328341c26942e794961a563f600e3b12ba2b9f18c4d5d8183729f4924e8;
+runimage sha256:fc58358a54ec9ae55c3602e073a84feb675c0a44a189b904d924575a3a194f2b.
+Owned compose/network removed,zero scoped containers; final Docker lease RELEASED,
+no source edits/globalprune/Windows/signing claim. Complete source now has passing
+native/browser/static/import/security/docs AND real-media Docker at same425.
+
+Verifierb49f now assigned existing runbook Python Distribution Verification on exact
+425: fresh owned wheel/sdist output, existing verifier, freshPython3.13venv, wheel
+install and actual installed help/version outside checkout/PYTHONPATH, packaged-
+origin and relevant reportasset/newmodule inspection as needed. No new code/tests or
+invented test-only packaging requirement, no host/project dependency/lock changes or
+publication. Artifacts source-bound; fresh cumulative source review still pending.
+Windowsplatform/PS5.1/PS7filesystem/signed-hosted acceptance stays OPEN.
