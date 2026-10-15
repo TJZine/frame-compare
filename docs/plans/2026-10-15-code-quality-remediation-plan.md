@@ -2717,7 +2717,11 @@ global pruning or unrelated-user cleanup. Worktrees/chats remain available for
 retrieval and later Windows acceptance; no pending implementation/review child work.
 Parent working tree clean after local commits; source was not pushed or released.
 
-Final ledger/outcome strict docs check is assigned to verifierb49f on the resulting
-ledger-only commit. Its source-bound result will be recorded below; no product gate
-rerun is required for plain evidence/lifecycle prose. Overall acceptance stays open
-for the matrix above even after that documentation check passes.
+Final ledger/outcome check PASSED in verifierb49f at exact
+`0c45d15fb2d7714baa23cad4d738aafeb60be37f`: strict Zensical build no issues(1.29s),
+CLI-documentation5passes,diffclean,only canonical-plan path differs from425. No
+source/test/product change or heavy gate rerun. This final evidence-recording prose
+adds no new links/contracts; product/runtime evidence remains source425. Parent
+Git status is clean after local commits. No implementation/review/local verification
+child work remains. Overall acceptance stays OPEN for the explicit Windows matrix;
+no signing/hosted/physical-platform pass is inferred.
