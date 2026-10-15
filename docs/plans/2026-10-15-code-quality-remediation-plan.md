@@ -2500,14 +2500,14 @@ final-report-only fallback; the parent retrieves on its next activation.
 
 | Package | Owner / role / chat | Base and integration | State / evidence / remaining acceptance |
 | --- | --- | --- | --- |
-| P1 | worker / medium; `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | `9741fcc9`; worktree `5016` | Active; priority installation-preservation work; all P1 steps and CQ21d builder/installer portion; independent review and Windows acceptance pending |
+| P1 | worker / medium; `01a13ec8-367e-7e43-9c36-7e30d3cf8baa` | worker `14b599a2` → integrated `21691a97` | Implemented/integrated; deep reviewer `01a13ed5-7e47-7ea0-9201-1f47b6a097f0` active; Windows acceptance open |
 | P3 | worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | worker `7ccdb965/986abc2e/149ef433` → integrated `8e32ee40/54e80bb6/983658b8` | Implemented/integrated; independent reviewer active; final-source Node/report/22-browser proof passed |
 | P4 | worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `c2b62b05` → integrated `30515500` | Implemented/integrated/independently reviewed, no findings; 724 focused passes; full native gate open |
-| P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | `9741fcc9`; worktree `b49f` | Active; bounded warning propagation with joined behavioral proof; independent review pending |
+| P10 | worker_luna / xhigh; `01a13ec8-eeb0-7822-a12f-b2a8265eb3f5` | worker `f0c67e62` → integrated `94efe8cd` | Implemented/integrated; independent reviewer active; worker reused for verification-only full native gate at `94efe8cd` |
 | P0 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | worker `260670cc` → integrated `23d2f59f` | Implemented/integrated/independently reviewed, no findings; 5 CLI-doc tests + strict docs passed; Wave A composition pending |
 | P5 | worker / medium; `01a13ecf-7fe9-7c31-a0fd-3282824918c8` | `30515500`; worktree `9676` | Active; full acquisition/doctor scope; P10 shared-file ordering tracked |
 | P6 | Reused worker / medium; `01a13ec8-b5f3-75b0-82b7-2eb5989cc9c6` | assigned current integrated `44a11213`; worktree `9bdf` | Active; complete CQ5/CQ21c/CQ2; reviewed P4 prerequisite retained; native/Docker gates deferred |
-| P8 | Next practical batch after P3/P10 shared-owner changes | — | Full applied-fact/payload/geometry scope pending |
+| P8 | Reused worker / medium; `01a13ec8-7014-7c63-bcf2-3cc807db28a9` | assigned current integrated `21691a97`; worktree `9bb4` | Active; full applied-fact/payload1.3/geometry migration; browser/Docker/native/platform gates deferred |
 | P11 | worker / medium; `01a13ed0-043c-75f0-9554-afb21690373c` | `30515500`; worktree `a638` | Active; full recipe/store/cache + before/after measurements; exclusive Docker lease granted |
 | P2 | Wave B after integrated, reviewed P1 prerequisite | — | Grammar/transaction scope pending; PS5.1/7/Windows/signing acceptance open |
 | P7 | Wave B after integrated, reviewed P5/P10 (and P4/P6 shared changes) | — | Full CQ6/CQ9/CQ4 scope pending |
@@ -2633,3 +2633,63 @@ Browser lease now released at final-source completion (supersedes premature rele
 P3 independent full-package review assigned to reused reviewer/high, exact stable
 range `44a11213..983658b8`, including every assertion migration/selection/persistence
 obligation and exclusions. Not yet accepted from worker callback alone.
+
+
+### P10/P1 integration, P8 dispatch and current leases
+
+P10 worker froze `f0c67e62301da9d3da4ed21eb45953ea35f5d910`; parent verified
+range/file list and cherry-picked cleanly to `94efe8cdd2abe86caa1136849d25122cd17d5e03`.
+Five files +197/-3. Joined execute_run proof observes exactly one mismatch warning in
+result, terminal and persisted completed_with_warnings record, preserves URL/title/
+explicit association, rejects unexpected HTTP and keeps success JSON shape. Worker
+reports focused publish/phase-plan/lifecycle/metadata/record/CLI-output selections and
+ruff/format/pyright/bandit/import/diff checks passed. Full native not yet passed.
+Independent reviewer/high `01a13ece-fcf0-7da1-afb9-c63eb44a89a8` additionally assigned
+P10 exact `9c6d0ba7..94efe8cd` and bounded composition among P0/P3/P4/P10; complete
+Wave A composition review still required later.
+
+P10 worker now owns VERIFICATION ONLY at exact integrated `94efe8cd` in existing
+`b49f`, source frozen/no fixes/commits. Canonical full native gate plus integrated
+static/import/security checks assigned with explicit skip/runtime accounting.
+Exclusive browser lease granted to this verifier after final P3 release; Docker
+lease remains P11. Subsequent P1 integration does not change this run's source
+identity; do not report it as final-head proof. Evidence/lease release pending.
+
+P1 worker froze `14b599a20287dfb96fcb18daa10066a5e2b9c5eb` from `9741fcc9`.
+Parent verified single-commit range/file list and integrated cleanly as
+`21691a9782b09bb98cc0ee64a7f504de3c40f3cd` (architecture auto-merge; no technical
+conflict). Thirteen files +859/-127. Worker reports all P1 builder reservation,
+validation, source-install Move/Leave reversal, failure fixtures, provenance and
+documentation scope complete. Actual Windows-portable pytest on macOS: **122 passed,
+126 skipped**; no pwsh/powershell means NO PowerShell syntax/execution/Windows
+filesystem acceptance. Pyright 0/0, ruff/format, strict docs, diff/hooks passed.
+Required Windows PS7 fixtures, real mounted-volume/manual populated Move/Leave/bad-
+manifest rerun + shim observation, same-final-path double-build fingerprint,
+runbook bundle steps3–4 and maintainer-hosted verify remain OPEN.
+
+Independent P1 deep reviewer/xhigh `01a13ed5-7e47-7ea0-9201-1f47b6a097f0`, worktree
+`4a89`, assigned exact `94efe8cd..21691a97` complete high-consequence transaction,
+tests/docs/provenance scope, including bounded integration seams; reviewed findings
+pending. Actual child/assignment confirmed via read_thread. Preset filename is
+`.codex/agents/deep-reviewer.toml` (alias deep_reviewer); worker_luna filename is
+`.codex/agents/worker-luna.toml`. Handoff spelling corrected; originally resolved
+models/reasoning/responsibility text from preset glob were correct and unchanged.
+
+P8 full package assigned to reused P3 worker/medium `01a13ec8-7014-7c63-bcf2-3cc807db28a9`
+from current integrated `21691a97`, complete CQ11/CQ12/CQ22 disclosure/geometry scope,
+D3a/D3b preserved. No P9/CQ7/CQ14 graph/range/resampling expansion; P5 prepare.py
+boundary and P1 runtime-smoke-test overlap explicitly coordinated. Full native,
+real-browser, Docker and Windows acceptance remain required; P10/P11 resource leases
+prevent premature concurrent gate execution. Worker owns focused nonbrowser proof.
+
+P11 meaningful baseline callback: exact unchanged U4 acceptance source SHA256
+`d5a6cde1a9e3e98150b79ce428e5c7b235632f39cf0c423caba868f5f45b27a8`, baseline
+focused run generating all37 assets; separate recipe/store implementation and seven
+VS-free tests (including distinct-process lock overlap) reported passing. Dedicated
+compose project `frame-compare-p11-a638`, image `frame-compare:p11-a638-test`, worktree
+artifacts/cache; no global pruning. Docker lease retained for all approved baseline/
+post-change measurements and full canonical gate. This is progress, not completion.
+
+Pending active work: P5/P6/P8/P11 implementation, P3/P10 reviewer, P1 deep reviewer,
+P10 integrated verifier. P1 worker idle/reusable for review fixes and eventual P2
+only after reviewed prerequisite. No P2/P7/P9 dispatch yet; no pending child setup IDs.
