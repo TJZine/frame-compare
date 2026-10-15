@@ -60,7 +60,7 @@ source by the plan owner and are incorporated below.
 | Source read: `build_update.ps1` payload | Code-only update ZIPs contain only `app/src/frame_compare`; the installed updater lives in `%LOCALAPPDATA%\Programs\FrameCompare\bin` and is replaced only by a bundle `install.ps1` | Determines how CQ16/CQ17 fixes reach users |
 | Source read: updater `Invoke-SmokeCheck` | Target verification uses `-match [regex]::Escape($ExpectedVersion)`, a substring test (`0.8.0` matches `0.8.0rc1`; `1.0.1` matches `1.0.10`) | Additional exact-target defect inside CQ16 scope |
 | Browser smoke with `REPORT_BROWSER=/opt/pw-browsers/chromium-1194/chrome-linux/chrome` | 18 failed, 3 passed: harness reports `Chrome never became ready` | **Capability gap** in this container (browser launch), not a product signal |
-| `uv run --no-sync zensical build --clean --strict` (docs group installed) | Aborted: all warnings originate in the two review reports' host-absolute links; none from this plan | Existing docs-gate blocker, handled as P0 step 0 |
+| `uv run --no-sync zensical build --clean --strict` (docs group installed) | First run aborted: every warning came from the two review reports' host-absolute `.md` links, none from this plan. After converting those links (P0 step 0, done during planning) the strict build passed with no warnings | Docs gate usable for P0 and later packages |
 | `docker info` | Daemon unavailable | **Capability gap**: Docker media gate not runnable here |
 | `pwsh`/`powershell` | Not installed | **Capability gap**: no PowerShell or Windows observation |
 
@@ -257,11 +257,15 @@ compatibility, rollback, and exit criteria.
 it. No mandatory documentation framework.
 
 **Steps.**
-0. Prerequisite for this package's docs gate: the strict site build currently aborts
-   at `53d0a2ce` because the two 2026-10-15 review reports under `docs/reviews/` use
-   host-absolute `/Users/tristan/...` links (22 “page does not exist” warnings; this
-   plan contributes none). Convert those links to repository-relative links or code
-   spans without changing report content, so the strict build can serve as evidence.
+0. **Done during planning (2026-10-15, maintainer-approved).** The strict site build
+   aborted at `53d0a2ce` because the two 2026-10-15 review reports under
+   `docs/reviews/` used host-absolute `/Users/tristan/...` links to `.md` files
+   (22 “page does not exist” warnings; this plan contributed none). Links to docs
+   pages became relative links (line-number targets mapped to the section anchors
+   they pointed into), and links to files outside the site (`AGENTS.md`,
+   `.agents/project.md`, host skill files) became code spans; report wording is
+   unchanged, and links to source files (not checked by the build) were left as they
+   were. The strict build then passed with no warnings.
 1. Rewrite the doctor paragraph: list runtime checks; state that TMDB is checked
    from local configuration and credential format only, that doctor makes no network
    requests, and that slow.pics connectivity is exercised only by publishing.
@@ -428,7 +432,7 @@ activation after verification, explicit user-data policy.*
      behind and warns that the shim may now select an older AppData state config if
      the new bundle has no `config\config.toml`.
    - Default when the previous bundle holds non-empty user folders and `-UserData` is
-     absent: **see decision D1** (recommended: `Move`).
+     absent: **`Move`** (decision D1, accepted).
    - If there is no previous bundle or no non-empty user folder, activate directly.
    - Moving media changes absolute source paths, so path-keyed caches miss once and
      recompute; absolute paths inside the user's config are not rewritten. The
@@ -443,8 +447,8 @@ activation after verification, explicit user-data policy.*
 - **Refuse-only installer** (smaller: refuse the occupied default output and tell the
   user to delete/rename it): safe, but breaks the documented “rerun `install.cmd`”
   source-update path and pushes data handling onto users at the exact moment the
-  report found data loss. It remains the fallback if D1 rejects any automated move:
-  the builder's refusal alone already removes the destructive path.
+  report found data loss. D1 chose `Move`, so this is not used; note that the
+  builder's refusal alone already removes the destructive path.
 - **Shared transaction code with the updater (P2):** the builder produces a whole
   user-owned root activated by a pointer under PowerShell 7; the updater swaps only
   `app\src\frame_compare` under a lock on Windows PowerShell 5.1. They share the
@@ -1857,7 +1861,7 @@ class TonemapResult: clip: vs.VideoNode; applied: AppliedTonemap | None   # None
   (or 1000) and two ordinary HDR sources would otherwise never share a summary; each
   clip's presentation shows its own resolved peak. `shared` is null only when
   implementations, algorithms, or effective controls differ across tonemapped clips.
-- Fallback policy (decision D3a, recommended default): keep the permitted runtime
+- Fallback policy (decision D3a, accepted): keep the permitted runtime
   fallback, disclose it per clip, and add one `RunWarning("render", …)` naming the
   clips that fell back and the cause class. Preserve fatal configuration/signature
   errors, source-prop precedence, range-expansion restrictions, cancellation
@@ -1865,7 +1869,7 @@ class TonemapResult: clip: vs.VideoNode; applied: AppliedTonemap | None   # None
 - CLI pre-run preview keeps showing requested settings (a plan). Applied facts appear
   in overlay, report, and the warning.
 
-**Serialized compatibility and identity (decision D3b, recommended default).** Bump
+**Serialized compatibility and identity (decision D3b, accepted).** Bump
 report payload `REPORT_VERSION` (`payload.py` ~29) from `1.2` to `1.3`:
 - `clips[].presentation`: `{state, tonemap}` where `tonemap` is `{implementation,
   algorithm, target_nits, source_peak_nits, source_peak_origin, effective_controls,
@@ -2347,9 +2351,13 @@ policy, typed config/preset errors (P4); CQ12 deletion list (P8); CQ17 transacti
 `backup.json` with strict legacy policy (P2); CQ19 four fields only (P4); CQ20/CQ21
 fixture, runner, support-module boundaries (P3, P6, P11, P1/P2).
 
-### Decisions that need maintainer input (independent work proceeds with the recommended default)
+### Maintainer decisions
 
-| ID | Question | Options and consequences | Recommended default |
+Resolved on 2026-10-15: the maintainer accepted the recommended default for every
+item below. The packages above already specify these choices; changing one later
+requires updating the affected package before its implementation merges.
+
+| ID | Question | Options and consequences | Decision (accepted recommendation) |
 | --- | --- | --- | --- |
 | **D1** (CQ15, P1) | When a source reinstall finds user data (non-empty `config\`, `comparison_videos\`, or `generated\`) in the previous active bundle and no `-UserData` choice was given, what happens? | **Move** (rename the non-empty folders into the new bundle on the same volume, all-or-nothing, reversed if activation fails, then activate): keeps the documented “rerun install.cmd” workflow; data follows the AppData state config's bundle-relative paths. **Refuse to activate** (build, verify, print instructions, exit non-zero): no automatic data handling, but every rerun needs a flag. **Leave**: activates while data stays invisible in the old folder. | **Move**, with `-UserData Leave` as opt-out. The builder's refusal of occupied output is independent of D1 and ships regardless. |
 | **D2** (CQ16, P2) | Stable↔RC admission semantics | Allow RC→RC, RC→stable, stable→RC within one `major.minor` line (stable `min` admits its RCs) and keep today's admission of same-line downgrades vs. forbid stable→RC code updates (RC requires full bundle) and/or add a new downgrade refusal | Allow within the line and keep downgrade admission, as specified in P2 |
@@ -2357,15 +2365,10 @@ fixture, runner, support-module boundaries (P3, P6, P11, P1/P2).
 | **D3b** (CQ11, P8) | Payload/identity compatibility | Bump to 1.3 with applied-fact identity (regenerated reports get new IDs; browser state starts fresh) vs. additive 1.2 fields (still changes IDs; misrepresents the contract) | Bump to 1.3 |
 | **D4** (CQ18, P5) | Public `doctor` CLI change | Add `--root/--config`, shim injects for doctor, drop upward search (consistent with run) vs. keep upward search when `--root` is absent (two root policies) | Add options; match run's selection exactly |
 
-If D1 is answered “refuse”, P1 replaces the Move step with the refusal message; all
-other P1 work is unchanged. If D3a selects strict mode, add the config field, typed
-error, and tests to P8 before its payload work merges. D4 has two parts. Adding
-`--root/--config` to doctor (with shim injection) is what lets CQ18 reuse run's
-selection owner; if that part is rejected, CQ18 cannot be completed without a second
-copy of the shim's fallback rule, so record CQ18 as blocked rather than shipping the
-copy. Dropping the upward search is a consistency choice; if it is rejected, doctor
-keeps the upward search only when `--root` is omitted, and the CLI contract documents
-that difference from run.
+Notes on the accepted choices: D1's builder refusal of occupied output is
+independent of the user-data choice. D4 has two parts: adding `--root/--config` with
+shim injection is what lets CQ18 reuse run's selection owner, and dropping the upward
+search keeps doctor's selection identical to run's.
 
 ## 11. Excluded scope
 
@@ -2408,11 +2411,11 @@ The supported scope is complete only when every item is checked with recorded ev
 (SHA, command, result) or explicitly recorded as an open acceptance requirement with
 the reason it could not be obtained.
 
-- [ ] Decisions D1–D4 answered (or the recommended defaults explicitly confirmed)
-      before the package that depends on each merges (D1 → P1; D2 → P2; D3a/D3b → P8;
-      D4 → P5).
-- [ ] P0: review-report links fixed so the strict docs build is usable; three public
-      passages corrected; strict docs build passes.
+- [x] Decisions D1–D4: the maintainer accepted the recommended defaults on
+      2026-10-15 (D1 → P1; D2 → P2; D3a/D3b → P8; D4 → P5).
+- [x] P0 step 0: review-report links fixed; strict docs build passed with no warnings
+      (2026-10-15).
+- [ ] P0: three public passages corrected; strict docs build passes.
 - [ ] P1: no code removes an existing output root; failure cleanup removes only a
       directory the run reserved; failure leaves existing state byte-identical; CI
       requirements fingerprint unchanged; D1 policy implemented with reversal on

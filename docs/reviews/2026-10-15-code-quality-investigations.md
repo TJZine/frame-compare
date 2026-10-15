@@ -9,7 +9,7 @@ search:
 - Repository: `/Users/tristan/Software/frame-compare`
 - Reviewed source: `e036bc348431c948314019318d40f642c0923784`
 - Status: Investigation handoff; neither candidate is a recommended refactor yet
-- Related supported scope: [Code quality planning handoff](/Users/tristan/Software/frame-compare/docs/reviews/2026-10-15-code-quality-planning-handoff.md)
+- Related supported scope: [Code quality planning handoff](2026-10-15-code-quality-planning-handoff.md)
 
 The repository-wide assessment found twenty supported correction/improvement groups and two candidates that need distinguishing evidence. The maintainer asked to keep the latter separate:
 

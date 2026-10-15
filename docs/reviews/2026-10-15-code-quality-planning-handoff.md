@@ -13,7 +13,7 @@ search:
 - Verified source revision: `e036bc348431c948314019318d40f642c0923784`
 - Observed branch: `v0.7.0`
 
-This handoff now incorporates a repository-wide code-health review, expanded at the maintainer's request after the initial focused assessment. It identifies twenty supported correction or improvement groups. At the maintainer's request, two candidates needing further evidence (CQ7 and CQ14) are kept in a [separate investigation report](/Users/tristan/Software/frame-compare/docs/reviews/2026-10-15-code-quality-investigations.md). The most consequential added finding is a Windows source-install rebuild path that recursively deletes an existing user-populated bundle. Other confirmed issues concern config admission authority, malformed persisted input, actual tonemap disclosure, updater version support, diagnostic selection, and test-fixture isolation.
+This handoff now incorporates a repository-wide code-health review, expanded at the maintainer's request after the initial focused assessment. It identifies twenty supported correction or improvement groups. At the maintainer's request, two candidates needing further evidence (CQ7 and CQ14) are kept in a [separate investigation report](2026-10-15-code-quality-investigations.md). The most consequential added finding is a Windows source-install rebuild path that recursively deletes an existing user-populated bundle. Other confirmed issues concern config admission authority, malformed persisted input, actual tonemap disclosure, updater version support, diagnostic selection, and test-fixture isolation.
 
 The architectural opportunities give related state one owner, preserve meaningful domain distinctions, and remove coordination that callers currently perform by hand. Plan all supported items below, including small corrections and test-support work; do not turn every item into a standalone large refactor. The proposed interfaces are design candidates, not prescribed class names or a completed implementation plan. The recipient should choose coherent package boundaries, account for full migration and deletion work, and produce an executable plan.
 
@@ -102,9 +102,9 @@ The dimension coverage and no-finding notes later in this report distinguish a w
 
 ## Repository obligations and design standards
 
-Read the current [agent entrypoint](/Users/tristan/Software/frame-compare/AGENTS.md), [project profile](/Users/tristan/Software/frame-compare/.agents/project.md), [architecture](/Users/tristan/Software/frame-compare/docs/current-architecture.md), and the relevant sections of the [CLI contract](/Users/tristan/Software/frame-compare/docs/current-cli-contract.md) before finalizing the plan. These sources own repository obligations. This report supplies findings and planning inputs rather than a replacement instruction system.
+Read the current agent entrypoint (`AGENTS.md`), project profile (`.agents/project.md`), [architecture](../current-architecture.md), and the relevant sections of the [CLI contract](../current-cli-contract.md) before finalizing the plan. These sources own repository obligations. This report supplies findings and planning inputs rather than a replacement instruction system.
 
-The relevant shared guidance is [design-code](/Users/tristan/.agents/skills/design-code/SKILL.md), especially its [decision and migration guidance](/Users/tristan/.agents/skills/design-code/references/decisions-and-migration.md), [review-code](/Users/tristan/.agents/skills/review-code/SKILL.md), and [verify-code](/Users/tristan/.agents/skills/verify-code/SKILL.md). Use [develop-code](/Users/tristan/.agents/skills/develop-code/SKILL.md) when implementation is subsequently authorized. These are responsibility-specific tools, not a requirement to run every stage for this planning handoff.
+The relevant shared guidance is design-code (`/Users/tristan/.agents/skills/design-code/SKILL.md` on the review host), especially its decision and migration guidance (`/Users/tristan/.agents/skills/design-code/references/decisions-and-migration.md` on the review host), review-code (`/Users/tristan/.agents/skills/review-code/SKILL.md` on the review host), and verify-code (`/Users/tristan/.agents/skills/verify-code/SKILL.md` on the review host). Use develop-code (`/Users/tristan/.agents/skills/develop-code/SKILL.md` on the review host) when implementation is subsequently authorized. These are responsibility-specific tools, not a requirement to run every stage for this planning handoff.
 
 Frame Compare is a Python 3.13+ CLI-first packaged application for deterministic frame comparison, audio/video alignment, tonemapping, static offline reports, and optional publishing. Internal import paths are convenience surfaces unless explicitly supported; API documentation alone does not require keeping obsolete internal entry points.
 
@@ -366,7 +366,7 @@ Also delete preview's second override policy. [print_at_a_glance](/Users/tristan
 
 Migrate CLI request construction, admission/dependencies/preview/post-actions, orchestration request/preparation/preflight, runner/coordinator composition, [the alignment benchmark's direct preparation call](/Users/tristan/Software/frame-compare/tools/alignment_benchmark.py:266), and maintained request builders. Preserve runtime-free simple commands, dry-run side-effect boundaries, raw wizard edits, secret-safe persistence, source freshness, and containment checks at actual use boundaries.
 
-The [post-run auto-open refresh](/Users/tristan/Software/frame-compare/docs/current-cli-contract.md:970) is intentional and tested; retain it as a separately named preference refresh. An execution snapshot does not freeze every future preference read.
+The [post-run auto-open refresh](../current-cli-contract.md#report-auto-open-ownership) is intentional and tested; retain it as a separately named preference refresh. An execution snapshot does not freeze every future preference read.
 
 Retain the request-config, dry-run, preview, logging precedence, preparation/cache/lifecycle/benchmark/import tests; in particular the [report-open suite](/Users/tristan/Software/frame-compare/tests/cli/test_run_report_open.py) and [color roundtrip suite](/Users/tristan/Software/frame-compare/tests/config/test_color_roundtrip.py). Add a changed-config-after-admission observation proving stable runtime policy and callbacks while the intentional post-run preference refresh still sees later edits.
 
@@ -431,7 +431,7 @@ Retain [dispatch/fallback tests](/Users/tristan/Software/frame-compare/tests/vs/
 
 [Batch expansion](/Users/tristan/Software/frame-compare/src/frame_compare/render/batch/expansion.py:248) is the sole production caller of `plan_render_geometry` and always passes `active_rect_detection="provided"`. Every screenshot batch request requires canonical `ActivePictureFacts`. Other consumers of render's dimension/aspect inference are tests, and no registered public entry point requires that internal fallback.
 
-Nevertheless, [render geometry](/Users/tristan/Software/frame-compare/src/frame_compare/render/geometry.py:285) retains dimension inference, aspect candidates/ranking, removal thresholds, and inference provenance, duplicating live [orchestration resolution](/Users/tristan/Software/frame-compare/src/frame_compare/orchestration/active_rect.py:299). The [architecture's direct-call inference claim](/Users/tristan/Software/frame-compare/docs/current-architecture.md:1143) is stale relative to the required request and actual caller.
+Nevertheless, [render geometry](/Users/tristan/Software/frame-compare/src/frame_compare/render/geometry.py:285) retains dimension inference, aspect candidates/ranking, removal thresholds, and inference provenance, duplicating live [orchestration resolution](/Users/tristan/Software/frame-compare/src/frame_compare/orchestration/active_rect.py:299). The [architecture's direct-call inference claim](../current-architecture.md) is stale relative to the required request and actual caller.
 
 Make render geometry consume dimensions plus resolved active-picture facts and own only native/full-frame projection, mod-safe crop, scale/canvas choice, padding, and overlay origins. Delete dormant detection modes/options, candidate helpers/constants, and unnecessary canonical-to-render-provenance-to-canonical translation. Retain orchestration inference/content propagation and its cache-identity consequences.
 
@@ -551,9 +551,9 @@ For CQ15–CQ17 and related edits, replace only incidental spelling checks with 
 
 **Classification:** confirmed documentation defects, S3 Low, High confidence. These are corrections to actual product/acceptance claims, not workflow redesign.
 
-[The public doctor reference](/Users/tristan/Software/frame-compare/docs/reference/commands.md:297) still says an optional slow.pics check contacts the service. The current source and CLI contract explicitly perform no HTTP and no slow.pics reachability check. Correct the reference so users do not treat doctor success as publishing-connectivity evidence.
+[The public doctor reference](../reference/commands.md#doctor) still says an optional slow.pics check contacts the service. The current source and CLI contract explicitly perform no HTTP and no slow.pics reachability check. Correct the reference so users do not treat doctor success as publishing-connectivity evidence.
 
-[The no-cache reference](/Users/tristan/Software/frame-compare/docs/reference/commands.md:225) says analysis cache is neither read nor written; [Windows acceptance text](/Users/tristan/Software/frame-compare/docs/media-runtime-windows-validation.md:322) similarly expects no reusable cache persistence. Actual help and canonical contract define scoped refresh: preparation removes the matching entry, computation proceeds, and the replacement persists. Align both descriptions with that intended behavior. Existing media cache E2E covers regeneration; documentation corrections alone do not require another media run.
+[The no-cache reference](../reference/commands.md#run-no-cache) says analysis cache is neither read nor written; [Windows acceptance text](../media-runtime-windows-validation.md#application-caches) similarly expects no reusable cache persistence. Actual help and canonical contract define scoped refresh: preparation removes the matching entry, computation proceeds, and the replacement persists. Align both descriptions with that intended behavior. Existing media cache E2E covers regeneration; documentation corrections alone do not require another media run.
 
 Also correct the dormant direct-call geometry claim as part of CQ12, and update ownership/payload/disclosure documentation with CQ8–CQ11. Keep specific narrative corrections with the change they explain. Do not turn missed prose into a new mandatory documentation framework or agent workflow.
 
@@ -711,7 +711,7 @@ For each package, define the completed behavior, owner/interface decision, calle
 
 ## Verification strategy for implementation planning
 
-The [engineering runbook](/Users/tristan/Software/frame-compare/docs/ENGINEERING_RUNBOOK.md:154) remains the command and gate authority. The existing full-verification route applies to behavior/ownership changes in the affected hotspots. Use focused tests while iterating and reuse valid integrated evidence; do not rerun unchanged gates merely because the next package begins.
+The [engineering runbook](../ENGINEERING_RUNBOOK.md#verification-policy) remains the command and gate authority. The existing full-verification route applies to behavior/ownership changes in the affected hotspots. Use focused tests while iterating and reuse valid integrated evidence; do not rerun unchanged gates merely because the next package begins.
 
 The current full native route is:
 
@@ -733,7 +733,7 @@ uv run --no-sync pytest -q tests/browser/test_report_browser_smoke.py
 
 Inspect skips and actual test observations. `REPORT_BROWSER` can select an installed Chrome/Chromium executable. Node state proof, generated markup, and browser interaction proof establish different claims. Viewer work alone does not require native-media acceptance.
 
-For changes that alter native runtime behavior or media-tier observations such as selected frames, screenshots, alignment/cache behavior, or report payloads, use the applicable complete [Docker/runtime procedure](/Users/tristan/Software/frame-compare/docs/ENGINEERING_RUNBOOK.md:252). The canonical command is:
+For changes that alter native runtime behavior or media-tier observations such as selected frames, screenshots, alignment/cache behavior, or report payloads, use the applicable complete [Docker/runtime procedure](../ENGINEERING_RUNBOOK.md#docker-runtime-verification). The canonical command is:
 
 ```sh
 bash tools/verify_docker_integration.sh
