@@ -2559,7 +2559,7 @@ ledger-only commit is `425b52ad1fa0c2962e774b14c6ede6fe63680a27` (all P0–P11 i
 | P6 / CQ2,CQ5,CQ21c | `2313b659/f871e88c/977cc3f7` → `1f7ae791/fae10b01/af500389` | Complete, deep review no findings; native and real phase/cache Docker gate passed at 04d5c90b. |
 | P7 / CQ4,CQ6,CQ9 | original `4ea3ec04/0a2222ce/5a6f03ba`; rebased `a2257207/fb840295/e971b136` → integrated `8c70dfb5/badc1b48/f9eec86d` | Complete implementation/integration/current deep review, no findings; native3607 and real Docker298 passes at f9eec86d, no P7 target gate remains open. |
 | P8 / CQ11,CQ12,CQ22 geometry | original `165eb46a/4ce11247`; rebased `e09d684c/306631b9` → `bc182b07/698095cd` | Complete and integrated; early deep review and current P5/P6/P10 integration recheck no findings. Standalone/current native and Docker passed at 04d5c90b; Windows hosted acceptance open. |
-| P9 / CQ3 | worker `7840c859` → integrated `425b52ad` | Full implementation present; independent deep/Wave C review active; focused1023+121passes, native/Docker/Windows gates open. |
+| P9 / CQ3 | worker `7840c859` → integrated `425b52ad` | Full implementation and independent deep/Wave C review complete, no findings; focused1023+121worker and475reviewer passes, native/Docker/Windows gates open. |
 | P10 / CQ13 | `f0c67e62` → `94efe8cd` | Complete, independent review no findings; joined warning/result/summary/record proof + native gate at 94 passed. |
 | P11 / CQ21b | original `d3250f4e/c542928b`; rebased `e4f502a2/881b0fde` → integrated `722da1ec/04d5c90b` | Code, final notes and current Wave A boundary independently reviewed, no findings; original cold Docker 295-pass proof and current combined-head 298-pass gate complete. |
 
@@ -3092,3 +3092,25 @@ retry. This covers all implementation plus P2Pythonvectors/P9real SIGINT/reaping
 independent P2/P9 reviews still active, so result remains source-bound if fixes arise.
 Distribution proof intentionally waits for final independent source clearance.
 Windows acceptance and final cumulative review remain open.
+
+
+P2worker explicitly confirmed cancellation: no source/test/docs edits or commits,
+only authorized clean detach78e71c3e→4060eb0f. Independent rawblob hashes/literal
+length1/codepoint92 match reviewer's retraction. No unnecessary change landed or
+needs undo; no nested tests added solely for false premise. Full P2/Wave B review
+continues at exact9ae; PS7Linux15parse/44pure-vector actual evidence supplied for
+reuse with source-equivalence check, Windows limits preserved.
+
+P9/Wave C COMPLETE deep review at exact9ae3ca9d..425b52ad: all25files/allCQ3steps/
+deletions/callers/test dispositions, no actionable correctness/maintenance finding.
+Worker/integrated range-diff identical; structure/cardinality/source-fact guards,
+global paths-before-native, indivisible whole-job batching, job-index real failure,
+50msstop/drain/reaping/progress and plain service boundary retained. Every old
+ungrouped proof mapped; no real obligation silently deleted, actualDefaultFFmpeg
+batch mismatch seam observed. CurrentP7rows/reference mapping,P8facts/geometry/
+warnings,P10result/record and P5/P6contracts inspected; P11media assertions migrated
+without deletion. Reviewer **475fresh focused passes/no skips** (65render/scheduler,
+225orchestration/report/CLI,185cache/authority),including actualPOSIXSIGINT<=150ms
+and child reaping/staging/no-partial results. No fullnative/Docker/Windows claim;
+those gates remain separate. Current425native running, finalP2review pending,
+then fresh cumulative independent review and final stable distribution/media proof.
