@@ -1,4 +1,4 @@
-"""Tests for the v1.2 report generation service."""
+"""Tests for the v1.3 report generation service."""
 
 from __future__ import annotations
 

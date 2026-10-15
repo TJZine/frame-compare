@@ -1075,7 +1075,7 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
 - Displayed file size is the complete container storage cost in IEC units. It is not a
   bitrate, quality, efficiency, or winner metric. The existing value appears in visible
   Single, Slider, Diff, Blink, and Grid source labels when positive and available;
-  hiding source labels hides the size, and the report payload remains version `1.2`.
+  hiding source labels hides the size, and the report payload is version `1.3`.
 
 ### slow.pics Upload Behavior
 
