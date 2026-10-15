@@ -3055,3 +3055,40 @@ oracle/guard bypass. Failures route to P2owner/reviewer. This is additional boun
 syntax/language proof, NOT Windows/PS5.1/transaction/filesystem acceptance. No browser/
 full-native/media gate until lease release; final current gates follow serially.
 If unavailable,record exact condition rather than custom toolchain or retry loop.
+
+
+### Rejected P2 claim and actual PowerShell language proof
+
+P2 reviewer preliminary P2-F1/P1-severity normalization claim was RETRACTED before
+any fix: apparent double backslashes were tool/JSON escaping. Direct character count
+at both cited updater literals is length1/codepoint92; correct production code.
+Parent immediately cancelled forwarded remediation; Git metadata confirmed BOTH
+parent and worker clean at4060eb0f, no unnecessary edit/commit or rollback. Finding
+REJECTED, not open. Original complete P2/Wave B review continues. Future string-
+escape findings require direct raw-character evidence; no test work inferred solely
+from false premise.
+
+Additional tooling verifiera638 PASSED at exact425b52ad, no tracked changes. Official
+Microsoft guidance identified supported .NET SDK images with PowerShell; official
+MCRsdk8.0linuxarm64 resolved repo digest
+sha256:f7e28a0a3f6f9235929ec19274fd0ddf8534e9159f99fac602ac73304f1ce99f,
+configsha256:6eda2d69bb463eb1c0747f627aecc0fc0c6f202d253fe404175023eec15428de.
+Actual PowerShell7.4.21Core/Unix/Arm64,Debian12. Only exact committed rootinstall+
+14WindowsPSscripts and versionvectors staged/hashed and mountedREADONLY,container
+networkNONE,no repo/.git/credentials mounts,no install/update/build entrypoint run.
+Parser.ParseFile **15scripts/0errors**; EXACT committed pure-version vector driver
+extracted viaPythonAST,owner only dot-sourced: **27validity+7order+10range=44passes**.
+All staged/source/container hashes match,stdoutJSON/stderr empty/exit0. Artifacts
+`a638/generated/powershell-425b52ad/` contain command/result/image/driver/source hashes.
+Owned --rm container absent,no customnetwork/globalprune; tooling-Docker RELEASED.
+This is PS7Linux syntax/pure-logic proof,NOTPS5.1/Windows API/filesystem/transaction/
+installer/signed-hosted acceptance. Official provenance links retained in child report:
+Microsoft learn powershell-in-docker and dotnet-docker sdk8.0ARM64 source.
+
+Verifierb49f now assigned exact425b52ad clean detach fromf9, exclusive browser/native
+lease, one canonical fullsuite with actualChrome/ownedprofiles/JUnit and current
+static/import/security/docs. No Docker-heavy concurrency, no source fixes or blind
+retry. This covers all implementation plus P2Pythonvectors/P9real SIGINT/reaping;
+independent P2/P9 reviews still active, so result remains source-bound if fixes arise.
+Distribution proof intentionally waits for final independent source clearance.
+Windows acceptance and final cumulative review remain open.
