@@ -2924,3 +2924,17 @@ Chrome/unique owned profiles/JUnit,skips explicit,no blind rerun or product fixe
 Docker lease released/idle until native finishes; P7real media/cache gate REQUIRED
 then. P2implementation remains isolated5016. P9not dispatched until reviewed P7.
 Only pending child work remains; no idle polling.
+
+
+P7 ORIGINAL candidate deep review completed at exactb2..5a6f03ba with no actionable
+findings. Reviewer independently loaded EVERY frame_compare product module from
+untouched b2 Git objects via an in-memory import finder, confirmed provenance and
+replayed all5literal raw/keyed tokens,keys and exact actual old-writer v8bytes under
+pinned runtime/relative files/fixedmtime; all match committed fixture. Current baseline
+reader proof passed. Full CQ6/CQ9/CQ4/migrations/deletions/recovery/coordinates and
+retained-proof map reviewed; keyed_metric_request shared-owner naming accepted.
+454disjoint focused reviewer passes/no skips (233+221), diff clean, no native media.
+This clears ONLY original source. Current integrated range001755f5..f9eec86d was
+reissued explicitly for focused P8/P11/rebase equivalence/composition recheck; no P9
+dispatch until it clears. Native verifier atf9 still pending; source-bound Docker
+required afterward. No worker remediation requested by original review.
