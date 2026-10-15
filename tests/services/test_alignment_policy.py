@@ -15,7 +15,7 @@ from frame_compare.utils.alignment_policy import (
     confirmed_offset,
     edge_consensus_offset,
 )
-from tests.services.test_alignment_evidence import stream
+from tests.services.alignment_evidence_test_support import stream
 
 
 def _observation(index: int, lag: int) -> ChunkObservation:

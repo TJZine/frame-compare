@@ -47,7 +47,6 @@ from frame_compare.services.types import (
     AlignmentSource,
 )
 from frame_compare.utils.alignment_evidence import (
-    AudioAuthorityRecount,
     AudioChunkRun,
     AudioSameFrameContext,
     VideoCheckObservation,
@@ -61,12 +60,30 @@ from frame_compare.utils.logging import configure_logging
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
-from tests.services.alignment_request_test_support import alignment_request
-from tests.services.test_alignment_evidence import (
+from tests.alignment_review_scenarios import (
+    audio_failed_video_confirmed_attempt as _audio_failed_video_confirmed_attempt,
+)
+from tests.alignment_review_scenarios import (
+    boundary_video_inconclusive_attempt as _boundary_video_inconclusive_attempt,
+)
+from tests.alignment_review_scenarios import (
+    multi_context_attempt as _multi_context_attempt,
+)
+from tests.alignment_review_scenarios import (
+    production_nested_targets_attempt as _production_nested_targets_attempt,
+)
+from tests.alignment_review_scenarios import (
+    review_attempt as _review_attempt,
+)
+from tests.alignment_review_scenarios import (
+    singleton_chunk_target_attempt as _singleton_chunk_target_attempt,
+)
+from tests.services.alignment_evidence_test_support import (
     attempt_with_chunks,
     retimed_comparison_stream,
     stream,
 )
+from tests.services.alignment_request_test_support import alignment_request
 
 
 def _provisional_result(reference: Path, comparison: Path) -> AlignmentResult:
@@ -162,111 +179,6 @@ def _present(
         json_output=json_output,
         diagnostics_written=False,
     )
-
-
-def _review_attempt(reason: str):
-    base = attempt_with_chunks(4)
-    alternate_lag = 81_000
-    target_resolution = {
-        "competing_offset_confirmed_by_video": "alternative_confirmed",
-        "competing_offset": "unresolved",
-        "unresolved_audio_disagreement": "unresolved",
-    }.get(reason)
-    chunks = replace(
-        base.chunks,
-        lags=(1177, 1177, alternate_lag, alternate_lag),
-        agrees=(True, True, False, False),
-    )
-    runs = (
-        AudioChunkRun(first_index=0, last_index=1, lag=1177, chunk_count=2),
-        AudioChunkRun(first_index=2, last_index=3, lag=alternate_lag, chunk_count=2),
-    )
-    target = (
-        (
-            VideoTargetEvidence(
-                kind="run",
-                first_chunk_index=2,
-                last_chunk_index=3,
-                credible=True,
-                start_sample=(2) * 240_000,
-                end_sample=((3) + 1) * 240_000,
-                target_offset=243,
-                alternative_offsets=(242, 243, 244),
-                resolution=target_resolution,  # type: ignore[arg-type]
-                positions=(
-                    VideoTargetPosition(
-                        position_index=1,
-                        reference_frame=13_123,
-                        confirmed_score=1.0,
-                        alternative_score=0.1,
-                        winner=(
-                            "alternative"
-                            if reason == "competing_offset_confirmed_by_video"
-                            else "neither"
-                        ),
-                        alternative_offset=(
-                            243 if reason == "competing_offset_confirmed_by_video" else None
-                        ),
-                    ),
-                ),
-            ),
-        )
-        if target_resolution is not None
-        else ()
-    )
-    video = (
-        VideoCheckObservation(
-            observation="not_observed",
-            scored_offsets=(),
-            confirmed_offset=None,
-            index_build_seconds=None,
-            positions=(),
-        )
-        if reason == "video_check_unavailable"
-        else VideoCheckObservation(
-            observation="observed",
-            scored_offsets=(144, 145, 146, 147, 148),
-            confirmed_offset=(None if reason == "video_check_inconclusive" else 146),
-            index_build_seconds=0.1,
-            positions=(
-                VideoPositionDifference(
-                    position_index=0,
-                    reference_frame=6_474,
-                    score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
-                ),
-            ),
-            targets=target,
-            check_points=(
-                VideoCheckPoint(3661.0, 13_123, 12_880),
-                VideoCheckPoint(270.0, 6_474, 6_328),
-            ),
-        )
-    )
-    return replace(
-        base,
-        chunks=chunks,
-        runs=runs,
-        video_check=video,
-        decision=replace(
-            base.decision,
-            state="provisional",
-            primary_reason=reason,
-            failed_gates=(reason,),
-        ),
-    )
-
-
-def _boundary_video_inconclusive_attempt(*, position_count: int = 6):
-    attempt = _review_attempt("video_check_inconclusive")
-    positions = tuple(
-        VideoPositionDifference(
-            position_index=index,
-            reference_frame=6_474 + index,
-            score_by_offset=(2.0, 1.8, 1.4, 1.2, 0.1),
-        )
-        for index in range(position_count)
-    )
-    return replace(attempt, video_check=replace(attempt.video_check, positions=positions))
 
 
 def _early_competing_run_attempt():
@@ -445,49 +357,6 @@ def _unexamined_before_unresolved_attempt():
     )
 
 
-def _singleton_chunk_target_attempt():
-    attempt = _review_attempt("unresolved_audio_disagreement")
-    targets = (
-        VideoTargetEvidence(
-            kind="chunk",
-            first_chunk_index=0,
-            last_chunk_index=0,
-            credible=True,
-            start_sample=(0) * 240_000,
-            end_sample=((0) + 1) * 240_000,
-            target_offset=243,
-            alternative_offsets=(242, 243, 244),
-            resolution="unexamined",
-            positions=(),
-        ),
-        VideoTargetEvidence(
-            kind="chunk",
-            first_chunk_index=2,
-            last_chunk_index=2,
-            credible=True,
-            start_sample=(2) * 240_000,
-            end_sample=((2) + 1) * 240_000,
-            target_offset=246,
-            alternative_offsets=(245, 246, 247),
-            resolution="unresolved",
-            positions=(VideoTargetPosition(2, 9_000, 1.0, 1.0, "neither"),),
-        ),
-    )
-    return replace(
-        attempt,
-        chunks=replace(
-            attempt.chunks,
-            lags=(1177, 81_000, 82_000, 1177),
-            agrees=(True, False, False, True),
-        ),
-        runs=tuple(
-            AudioChunkRun(first_index=index, last_index=index, lag=lag, chunk_count=1)
-            for index, lag in enumerate((1177, 81_000, 82_000, 1177))
-        ),
-        video_check=replace(attempt.video_check, targets=targets),
-    )
-
-
 def _nested_alternative_confirmed_chunk_attempt():
     attempt = _review_attempt("competing_offset_confirmed_by_video")
     targets = (
@@ -532,63 +401,6 @@ def _nested_alternative_confirmed_chunk_attempt():
             agreeing_chunks=0,
         ),
         video_check=replace(attempt.video_check, targets=targets),
-    )
-
-
-def _production_nested_targets_attempt():
-    attempt = _review_attempt("competing_offset")
-    targets = (
-        VideoTargetEvidence(
-            kind="run",
-            first_chunk_index=0,
-            last_chunk_index=1,
-            credible=True,
-            start_sample=(0) * 240_000,
-            end_sample=((1) + 1) * 240_000,
-            target_offset=250,
-            alternative_offsets=(249, 250, 251),
-            resolution="unresolved",
-            positions=(VideoTargetPosition(1, 9_000, 1.0, 1.0, "neither"),),
-        ),
-        VideoTargetEvidence(
-            kind="chunk",
-            first_chunk_index=2,
-            last_chunk_index=2,
-            credible=False,
-            start_sample=(2) * 240_000,
-            end_sample=((2) + 1) * 240_000,
-            target_offset=246,
-            alternative_offsets=(245, 246, 247),
-            resolution="unresolved",
-            positions=(VideoTargetPosition(2, 9_001, 1.0, 1.0, "neither"),),
-        ),
-        VideoTargetEvidence(
-            kind="chunk",
-            first_chunk_index=3,
-            last_chunk_index=3,
-            credible=True,
-            start_sample=(3) * 240_000,
-            end_sample=((3) + 1) * 240_000,
-            target_offset=250,
-            alternative_offsets=(249, 250, 251),
-            resolution="alternative_confirmed",
-            positions=(VideoTargetPosition(3, 9_002, 1.0, 0.1, "alternative", 250),),
-        ),
-    )
-    return replace(
-        attempt,
-        chunks=replace(
-            attempt.chunks,
-            lags=(81_000, 81_000, 82_000, 83_333),
-            credible=(True, True, False, True),
-            agrees=(False, False, False, False),
-        ),
-        runs=(AudioChunkRun(first_index=0, last_index=3, lag=81_000, chunk_count=3),),
-        video_check=replace(attempt.video_check, targets=targets),
-        decision=replace(
-            attempt.decision,
-            failed_gates=("competing_offset", "unresolved_audio_disagreement"),
-        ),
     )
 
 
@@ -1082,42 +894,6 @@ def _resolved_before_alternative_confirmed_attempt():
             AudioChunkRun(first_index=1, last_index=2, lag=81_000, chunk_count=2),
         ),
         video_check=replace(attempt.video_check, targets=targets),
-    )
-
-
-def _multi_context_attempt():
-    attempt = _review_attempt("competing_offset_confirmed_by_video")
-    return replace(
-        attempt,
-        audio=replace(attempt.audio, agreeing_chunks=2),
-        authority_recount=AudioAuthorityRecount(
-            raw_status="agreed",
-            raw_agreeing_chunks=2,
-            authority_status="agreed",
-            authority_agreeing_chunks=4,
-            passed=True,
-        ),
-        video_check=replace(
-            attempt.video_check,
-            same_frame_context=(
-                AudioSameFrameContext(0, 1177, 146.23, 146),
-                AudioSameFrameContext(1, 1177, 146.23, 146),
-            ),
-        ),
-    )
-
-
-def _audio_failed_video_confirmed_attempt():
-    attempt = _review_attempt("video_check_inconclusive")
-    return replace(
-        attempt,
-        audio=replace(attempt.audio, status="no_single_offset", agreeing_chunks=2),
-        video_check=replace(attempt.video_check, confirmed_offset=146, targets=()),
-        decision=replace(
-            attempt.decision,
-            primary_reason="no_single_offset",
-            failed_gates=("no_single_offset",),
-        ),
     )
 
 
@@ -2790,3 +2566,33 @@ def test_verbose_context_rows_use_one_key_and_continuations(
     assert "         2 sections differ by less than a frame (sub-frame); not a disagreement." in err
     assert err.count("Context:") == 1
     assert ": 2 sections differ by less than a frame" not in err
+
+
+@pytest.mark.parametrize("credible", [True, False])
+@pytest.mark.parametrize(
+    "resolution", ["unresolved", "resolved", "unexamined", "alternative_confirmed"]
+)
+def test_literal_target_scenario_matches_producer(credible: bool, resolution: str) -> None:
+    from tests.alignment_review_scenarios import target_context_attempt
+
+    assert target_context_attempt(
+        credible=credible, resolution=resolution
+    ) == _producer_target_context_attempt(credible=credible, resolution=resolution)
+
+
+@pytest.mark.parametrize("shape", ["run", "run_and_chunk", "two_runs"])
+def test_literal_run_scenario_matches_producer(shape: str) -> None:
+    from tests.alignment_review_scenarios import resolved_run_context_attempt
+
+    resolutions = ("resolved",) if shape == "run" else ("resolved", "resolved")
+    assert resolved_run_context_attempt(
+        shape=shape, resolutions=resolutions
+    ) == _producer_run_context_attempt(shape=shape, resolutions=resolutions)
+
+
+@pytest.mark.parametrize("counts", [(4, 4, 3, 3), (4, 3, 3, 3), (5, 4, 3, 3), (4, 0, 0, 0)])
+def test_literal_count_scenario_matches_producer(counts: tuple[int, int, int, int]) -> None:
+    from tests.alignment_review_scenarios import established_counts_attempt
+
+    kwargs = dict(zip(("planned", "active", "credible", "agreeing"), counts, strict=True))
+    assert established_counts_attempt(**kwargs) == _producer_count_attempt(**kwargs)
