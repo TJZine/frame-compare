@@ -338,41 +338,18 @@ function Invoke-WithRetry([scriptblock]$Action, [string]$Label) {
 function Acquire-UpdateLock([string]$BundlePath) {
   $lockPath = Join-PathParts -Root $BundlePath -Parts @("app", ".update_lock")
   Ensure-Directory -Path (Split-Path -Parent $lockPath)
-  $staleAfter = [TimeSpan]::FromHours(1)
-  for ($attempt = 1; $attempt -le 2; $attempt++) {
-    try {
-      $stream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-      $bytes = [System.Text.Encoding]::ASCII.GetBytes(([DateTime]::UtcNow.ToString("o")))
-      $stream.Write($bytes, 0, $bytes.Length)
-      $stream.Flush()
-      return [ordered]@{
-        lock_path = $lockPath
-        stream = $stream
-      }
-    } catch {
-      if ($attempt -eq 1 -and (Test-Path -LiteralPath $lockPath)) {
-        $existing = $null
-        try {
-          $existing = Get-Item -LiteralPath $lockPath -ErrorAction Stop
-        } catch {
-          $existing = $null
-        }
-        if ($null -ne $existing) {
-          $age = ([DateTime]::UtcNow - $existing.LastWriteTimeUtc)
-          if ($age -gt $staleAfter) {
-            $ageMinutes = [int][Math]::Round($age.TotalMinutes)
-            Write-Host "WARNING: Stale update lock detected ($ageMinutes min); removing: $lockPath"
-            try {
-              Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
-            } catch {
-              # Ignore and fall through to the generic lock error.
-            }
-            continue
-          }
-        }
-      }
-      throw "Another update appears to be running (lock exists): $lockPath"
+  # Ownership belongs to the exclusive handle, not the file's age or existence.
+  # A terminated updater releases its handle so the next command can repair its
+  # journal immediately. Keep the file: unlinking it after close can race a new
+  # owner and let different handles lock different files at the same path.
+  try {
+    $stream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    return [ordered]@{
+      lock_path = $lockPath
+      stream = $stream
     }
+  } catch {
+    throw "Another update appears to be running or its lock is inaccessible: $lockPath. $($_.Exception.Message)"
   }
 }
 
@@ -381,12 +358,8 @@ function Release-UpdateLock([object]$LockInfo) {
     return
   }
   $stream = $LockInfo["stream"]
-  $lockPath = [string]$LockInfo["lock_path"]
   if ($null -ne $stream) {
     $stream.Dispose()
-  }
-  if (Test-Path -LiteralPath $lockPath) {
-    Remove-Item -LiteralPath $lockPath -Force
   }
 }
 

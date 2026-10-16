@@ -129,7 +129,9 @@ UPDATING (Code-Only Update Package):
     - Both apply and rollback use one stage/verify/rename/smoke/commit transaction.
       app\.frame_compare_replacement.json records staging/promoting/committed with
       atomic replacement. The next apply or rollback repairs interrupted work under
-      the update lock before reading the installed version. Unjournaled .old/.new
+      the update lock before reading the installed version. The lock file stays
+      in place; only its exclusive process handle owns the lock, so retry works
+      immediately after a terminated updater releases that handle. Unjournaled .old/.new
       trees are refused with paths. Recovery failures retain trees and the journal
       with manual-repair guidance. Failed promoted trees remain as
       app\src\frame_compare.failed-*; a successful commit keeps only the newest.

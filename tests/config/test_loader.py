@@ -396,6 +396,40 @@ def test_deep_environment_json_is_typed_config_error(monkeypatch: pytest.MonkeyP
         load_config()
 
 
+def test_raw_config_narrowing_limits_are_typed_at_default_recursion(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[unknown" + ".nested" * 500 + "]\nvalue=1\n", encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys, tomllib
+from pathlib import Path
+from frame_compare.config.errors import ConfigParseError
+from frame_compare.config.loader import load_raw_config
+assert sys.getrecursionlimit() == 1000
+path = Path(sys.argv[1])
+tomllib.loads(path.read_text(encoding="utf-8"))
+try:
+    load_raw_config(path)
+except ConfigParseError as error:
+    assert error.code == "FC-1002"
+    assert error.__suppress_context__ and error.__cause__ is None
+else:
+    raise AssertionError("raw config nesting must fail through its typed error boundary")
+assert sys.getrecursionlimit() == 1000
+""",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
 @pytest.mark.parametrize(
     "section, field",
     [

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from frame_compare.errors import PathEscapesRootError
 from frame_compare.utils.file_lock import FileLockTimeoutError, exclusive_file_lock
 from tests.integration import alignment_u4_media_recipes as recipe_source
 from tests.integration.alignment_u4_media_recipes import PAIRS, RECIPES, MediaRecipe
@@ -148,6 +149,38 @@ def test_pruning_is_owned_and_does_not_unlink_held_lock(tmp_path: Path) -> None:
         assert store.path("reference").read_bytes() == b"complete-media"
         assert store.stats["reused"] == ["reference"]
     assert sentinel.read_bytes() == b"foreign"
+
+
+@pytest.mark.parametrize("redirect", ["generator", "current-key"])
+def test_redirected_cache_directory_is_refused_before_pruning(
+    tmp_path: Path, redirect: str
+) -> None:
+    cache = tmp_path / "cache"
+    generator = cache / GENERATOR
+    redirected = generator if redirect == "generator" else generator / media_key(_version())
+    redirected.parent.mkdir(parents=True)
+    external = tmp_path / "external"
+    hidden = external / ".retain-this"
+    hidden.mkdir(parents=True)
+    sentinel = hidden / "sentinel.txt"
+    sentinel.write_bytes(b"unrelated data")
+    redirected.symlink_to(external, target_is_directory=True)
+
+    with (
+        pytest.raises(PathEscapesRootError, match="escapes root"),
+        open_u4_media(
+            tmp_path / "session",
+            cache_root=cache,
+            full_matrix=False,
+            ffmpeg_version=_version,
+            recipes={},
+        ),
+    ):
+        pass
+
+    assert sentinel.read_bytes() == b"unrelated data"
+    assert set(external.iterdir()) == {hidden}
+    assert redirected.is_symlink()
 
 
 def test_writer_failure_never_publishes_partial_and_retry_succeeds(tmp_path: Path) -> None:

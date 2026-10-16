@@ -838,6 +838,7 @@ def test_signed_update_version_admission(
     # host Python import in this generated bundle fixture.
     if installed == "invalid":
         (bundle / "python/python.exe").unlink()
+    (bundle / "app/.update_lock").touch()
     before = _snapshot_bytes(bundle)
     archive = _build_update_zip(
         tmp_path=tmp_path,
@@ -956,6 +957,17 @@ def test_update_commands_repair_interrupted_journals(
         encoding="utf-8",
     )
     journal.with_suffix(".json.tmp").write_bytes(b"partial atomic journal write")
+    # A real terminated owner leaves a fresh lock file beside the journal. The
+    # next command must recover immediately, without an age threshold or removal.
+    abandoned = _run_updater_functions(
+        update_exe,
+        updater,
+        bundle,
+        "$held = Acquire-UpdateLock $env:BUNDLE; [Environment]::Exit(17)",
+    )
+    assert abandoned.returncode == 17, abandoned.stdout + abandoned.stderr
+    lock_path = bundle / "app/.update_lock"
+    assert lock_path.is_file()
     if operation == "apply":
         archive = _build_update_zip(tmp_path=tmp_path)
         env = _sign_update_zip(
@@ -985,6 +997,7 @@ def test_update_commands_repair_interrupted_journals(
         assert _snapshot_bytes(target) == before
     assert not journal.exists() and not journal.with_suffix(".json.tmp").exists()
     assert not new.exists() and not old.exists()
+    assert lock_path.is_file()
     if state == "promoting-both":
         failed = list(target.parent.glob("frame_compare.failed-*"))
         assert (
@@ -1020,6 +1033,7 @@ def test_update_commands_refuse_unknown_replacement_state(
         )
         if state == "missing-both":
             shutil.rmtree(version.parent)
+    (bundle / "app/.update_lock").touch()
     before = _snapshot_bytes(bundle)
     if operation == "apply":
         archive = _build_update_zip(tmp_path=tmp_path)
@@ -1218,6 +1232,7 @@ def test_backup_creation_refuses_collision_and_removes_partial_copy(
     if failure == "collision":
         backup.mkdir(parents=True)
         (backup / "sentinel").write_bytes(b"occupied backup must survive")
+    (bundle / "app/.update_lock").touch()
     before = _snapshot_bytes(bundle)
     injection = ""
     if failure == "copy":
@@ -1282,7 +1297,7 @@ def test_backup_retention_counts_only_complete_compatible_backups(
     assert sorted(path.name for path in (bundle / "app/.update_backups").iterdir()) == [
         path.name for path in complete[2:]
     ]
-    assert not (bundle / "app/.update_lock").exists()
+    assert (bundle / "app/.update_lock").is_file()
 
 
 def test_backup_purge_respects_update_lock_owner(
@@ -1293,6 +1308,7 @@ def test_backup_purge_respects_update_lock_owner(
     )
     _write_mock_bundle(bundle_dir=bundle)
     _complete_backup(bundle, "20260101000000")
+    (bundle / "app/.update_lock").touch()
     before = _snapshot_bytes(bundle)
     result = _run_updater_functions(
         update_exe,

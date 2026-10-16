@@ -181,6 +181,7 @@ def load_raw_config(config_path: Path) -> RawConfigDocument:
         text = config_path.read_text(encoding="utf-8-sig")
         try:
             untrusted: object = tomllib.loads(text)
+            payload = _narrow_toml_table(untrusted, path="root")
         except tomllib.TOMLDecodeError:
             raise
         except SERIALIZED_DECODE_FAILURES:
@@ -196,7 +197,6 @@ def load_raw_config(config_path: Path) -> RawConfigDocument:
     except OSError:
         raise ConfigParseError(config_path, "could not read configuration file") from None
 
-    payload = _narrow_toml_table(untrusted, path="root")
     return RawConfigDocument(
         payload=payload,
         config=validate_raw_config_payload(payload, redact_inputs=True),

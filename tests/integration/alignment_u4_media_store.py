@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from frame_compare.utils.file_lock import exclusive_file_lock
+from frame_compare.utils.paths import require_managed_immediate_child
 from frame_compare.utils.subproc import run_subprocess
 from tests.integration import alignment_u4_media_recipes as recipe_source
 from tests.integration.alignment_u4_media_recipes import PAIRS, RECIPES, MediaRecipe
@@ -152,9 +153,12 @@ def open_u4_media(
             yield store
         return
 
-    generator_root = cache_root.resolve() / GENERATOR
+    resolved_cache_root = cache_root.resolve()
+    generator_root = require_managed_immediate_child(
+        resolved_cache_root, resolved_cache_root / GENERATOR
+    )
     with exclusive_file_lock(generator_root / ".verifier.lock", timeout_seconds=0):
-        cached = generator_root / key
+        cached = require_managed_immediate_child(generator_root, generator_root / key)
         cached.mkdir(exist_ok=True)
         _prune(generator_root, cached)
         with session(cached) as store:
