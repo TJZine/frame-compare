@@ -36,6 +36,7 @@ from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
 CACHE_VERSION = "2"
 CACHE_FILE_NAME = "alignment_reuse.toml"
+_ACTIVE_RECT_IDENTITY_VERSION = "1"
 
 log = structlog.get_logger()
 
@@ -68,7 +69,18 @@ def _clip_identity_dict(clip: AlignmentClipRequest) -> dict[str, _TomlValue]:
         "trim_start_frames": clip.trim_start_frames,
         "effective_fps_num": clip.effective_fps_num,
         "effective_fps_den": clip.effective_fps_den,
+        "active_rect_identity_version": _ACTIVE_RECT_IDENTITY_VERSION,
+        "active_rect": "absent" if clip.active_rect_x is None else "resolved",
     }
+    if clip.active_rect_x is not None:
+        data.update(
+            {
+                "active_rect_x": clip.active_rect_x,
+                "active_rect_y": clip.active_rect_y,
+                "active_rect_width": clip.active_rect_width,
+                "active_rect_height": clip.active_rect_height,
+            }
+        )
     if clip.trim_end_frame_inclusive is not None:
         data["trim_end_frame_inclusive"] = clip.trim_end_frame_inclusive
     if clip.selected_audio_stream is not None:
