@@ -10,7 +10,8 @@ async function reviewStateContracts() {
     vm.runInThisContext(`${fs.readFileSync(asset, 'utf8')}\nglobalThis.__ReviewState = ReviewState;`, { filename: asset });
     const R = globalThis.__ReviewState;
     const reportId = `report_${'a'.repeat(32)}`;
-    const context = { reportId, payloadVersion: '1.3', frameCount: 1001, clipCount: 3 };
+    const locks = { request: async (_name, _options, operation) => operation() };
+    const context = { locks, reportId, payloadVersion: '1.3', frameCount: 1001, clipCount: 3 };
 
     class Storage {
         constructor(initial = null) { this.value = initial; this.failRead = false; this.failWrite = false; this.writes = 0; }
@@ -33,7 +34,7 @@ async function reviewStateContracts() {
         report: { id: reportId, payload_version: '1.2' },
     }))), /report|version/i);
     assert.equal(state.storageKey, `frame-compare:report-review:v1:${reportId}`);
-    state.mutate(2, { bookmark: true, tag: 'artifact', note: 'line\r\n😀', preferred_clip_id: 'clip:1' });
+    await state.mutate(2, { bookmark: true, tag: 'artifact', note: 'line\r\n😀', preferred_clip_id: 'clip:1' });
     assert.equal(state.get(2).note, 'line\n😀');
     assert.equal(storage.writes, 1);
     assert.equal(storage.value.includes('exported_at'), false);
@@ -48,7 +49,7 @@ async function reviewStateContracts() {
         assert.equal(exact.includes(forbidden), false);
     }
 
-    state.mutate(2, { bookmark: false, tag: null, note: '', preferred_clip_id: null });
+    await state.mutate(2, { bookmark: false, tag: null, note: '', preferred_clip_id: null });
     assert.equal(state.all().length, 0);
     assert.throws(() => state.mutate(1, { note: '😀'.repeat(1001) }), /too long/);
     assert.throws(() => state.mutate(1, { note: '\ud800' }), /surrogate/);
@@ -86,19 +87,19 @@ async function reviewStateContracts() {
     const other = exported([]).replace(reportId, `report_${'b'.repeat(32)}`);
     assert.throws(() => state.parseImport(bytes(other)), new RegExp(R.constants.REPORT_MISMATCH.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
-    state.mutate(1, { bookmark: true });
-    state.mutate(2, { bookmark: true });
+    await state.mutate(1, { bookmark: true });
+    await state.mutate(2, { bookmark: true });
     const incoming = state.parseImport(bytes(exported([record(2, 'changed'), record(3)])));
     let preview = state.preview(incoming);
     assert.deepEqual(preview.counts, { add: 1, change: 0, remove: 0, unchanged: 2 });
-    assert.equal(state.apply(preview), true);
+    assert.equal(await state.apply(preview), true);
     assert.equal(state.get(2).note, '');
     preview = state.preview(incoming, 'merge', 'use-imported');
-    assert.equal(state.apply(preview), true);
+    assert.equal(await state.apply(preview), true);
     assert.equal(state.get(2).note, 'changed');
     preview = state.preview(incoming, 'replace', 'keep-local');
     assert.equal(preview.counts.remove, 1);
-    assert.equal(state.apply(preview), true);
+    assert.equal(await state.apply(preview), true);
     assert.deepEqual(state.all().map((item) => item.frame_ordinal), [2, 3]);
 
     // Count the full-record delta independently of the model's conflict-policy implementation.
@@ -117,9 +118,9 @@ async function reviewStateContracts() {
     for (const mode of ['merge', 'replace']) {
         for (const conflict of ['keep-local', 'use-imported']) {
             const model = R.create({ ...context, storage: new Storage() });
-            model.mutate(0, { note: 'local only' });
-            model.mutate(1, { note: 'local conflict' });
-            model.mutate(2, { bookmark: true });
+            await model.mutate(0, { note: 'local only' });
+            await model.mutate(1, { note: 'local conflict' });
+            await model.mutate(2, { bookmark: true });
             const before = model.all();
             const selected = model.preview([record(1, 'incoming'), record(2), record(3)], mode, conflict);
             const keepsConflict = mode === 'merge' && conflict === 'keep-local';
@@ -128,16 +129,16 @@ async function reviewStateContracts() {
                 remove: mode === 'replace' ? 1 : 0,
                 unchanged: 1 + (keepsConflict ? 1 : 0) + (mode === 'merge' ? 1 : 0),
             });
-            assert.equal(model.apply(selected), true);
+            assert.equal(await model.apply(selected), true);
             assert.deepEqual(selected.counts, appliedDelta(before, model.all()));
             assert.equal(model.get(1).note, keepsConflict ? 'local conflict' : 'incoming');
             const noChange = model.preview(model.all(), mode, conflict);
             assert.deepEqual(noChange.counts, { add: 0, change: 0, remove: 0, unchanged: model.all().length });
-            assert.equal(model.apply(noChange), true);
+            assert.equal(await model.apply(noChange), true);
         }
     }
     const stale = state.preview([record(8)], 'replace');
-    state.mutate(2, { note: 'edited after preview' });
+    await state.mutate(2, { note: 'edited after preview' });
     const staleMemory = state.all();
     const staleBytes = storage.value;
     assert.throws(() => state.apply(stale), /stale or invalid/);
@@ -148,7 +149,7 @@ async function reviewStateContracts() {
     const beforeBytes = storage.value;
     storage.failWrite = true;
     const failedPreview = state.preview([record(4)], 'replace');
-    assert.equal(state.apply(failedPreview), false);
+    assert.equal(await state.apply(failedPreview), false);
     assert.deepEqual(state.all(), beforeMemory);
     assert.equal(storage.value, beforeBytes);
     assert.throws(
@@ -164,17 +165,17 @@ async function reviewStateContracts() {
 
     const quotaStorage = new Storage();
     const quota = R.create({ ...context, storage: quotaStorage });
-    quota.mutate(5, { bookmark: true });
+    await quota.mutate(5, { bookmark: true });
     const quotaBytes = quotaStorage.value;
     quotaStorage.failWrite = true;
-    quota.mutate(5, { note: 'kept in memory' });
+    await quota.mutate(5, { note: 'kept in memory' });
     assert.equal(quota.get(5).note, 'kept in memory');
     assert.equal(quotaStorage.value, quotaBytes);
     assert.equal(quota.status().unsaved, true);
     assert.equal(quota.status().warning, R.constants.PERSISTENCE_WARNING);
 
     const memory = R.create({ ...context, storage: null });
-    assert.equal(memory.apply(memory.preview([record(8)], 'replace')), true);
+    assert.equal(await memory.apply(memory.preview([record(8)], 'replace')), true);
     assert.equal(memory.get(8).bookmark, true);
     assert.equal(memory.status().warning, R.constants.PERSISTENCE_WARNING);
 
@@ -206,6 +207,78 @@ async function reviewStateContracts() {
     assert.equal(mergeCeiling.all().length, 501);
 
 
+
+    // Shared lock queue models two independent tabs, including a paused writer.
+    let lockTail = Promise.resolve();
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const queuedLocks = {
+        request(_name, options, operation) {
+            assert.equal(options.mode, 'exclusive');
+            const result = lockTail.then(operation);
+            lockTail = result.catch(() => {});
+            return result;
+        },
+    };
+    const shared = new Storage();
+    const tab = () => R.create({ ...context, storage: shared, locks: queuedLocks });
+    const a = tab();
+    const b = tab();
+    await Promise.all([a.mutate(0, { note: 'A' }), b.mutate(1, { note: 'B draft' })]);
+    assert.equal(JSON.parse(shared.value).reviews[0].note, 'A');
+    assert.equal(JSON.parse(shared.value).reviews.length, 1);
+    assert.equal(b.get(1).note, 'B draft');
+    assert.equal(b.status().unsaved, true);
+    assert.equal(b.status().warning, R.constants.CONFLICT_WARNING);
+    assert.equal(JSON.parse(b.exportText()).reviews[0].note, 'B draft');
+    await b.mutate(0, { note: 'same-frame draft' });
+    assert.equal(JSON.parse(shared.value).reviews[0].note, 'A');
+
+    // Deletes cannot be resurrected by either a stale edit or either import mode.
+    const deletion = tab();
+    const staleTab = tab();
+    const previews = ['merge', 'replace'].map(mode => staleTab.preview([record(2)], mode));
+    await deletion.mutate(0, { note: '' });
+    for (const selected of previews) {
+        await assert.rejects(staleTab.apply(selected), /another tab/);
+        assert.deepEqual(JSON.parse(shared.value).reviews, []);
+        assert.equal(staleTab.get(0).note, 'A');
+    }
+    assert.throws(() => staleTab.preview([record(2)]), /another tab/);
+    await staleTab.mutate(1, { note: 'retained local' });
+    assert.deepEqual(JSON.parse(shared.value).reviews, []);
+
+    // Multiple edits while the lock is pending must keep the latest draft/status.
+    const pending = tab();
+    lockTail = gate;
+    const firstSave = pending.mutate(3, { note: 'first' });
+    const secondSave = pending.mutate(3, { note: 'second' });
+    assert.equal(pending.get(3).note, 'second');
+    assert.equal(pending.status().unsaved, true);
+    release();
+    await Promise.all([firstSave, secondSave]);
+    assert.equal(pending.status().unsaved, false);
+    assert.equal(JSON.parse(shared.value).reviews[0].note, 'second');
+
+    // An edit during a pending import invalidates Apply without discarding it.
+    let unlock;
+    lockTail = new Promise(resolve => { unlock = resolve; });
+    const pendingImport = pending.apply(pending.preview([record(4)], 'replace'));
+    const duringImport = pending.mutate(3, { note: 'edited while Apply waits' });
+    unlock();
+    await assert.rejects(pendingImport, /stale or invalid/);
+    await duringImport;
+    assert.equal(pending.get(3).note, 'edited while Apply waits');
+    assert.equal(pending.get(4).bookmark, false);
+
+    const noLocks = R.create({ ...context, storage: shared, locks: null });
+    const durable = shared.value;
+    await noLocks.mutate(5, { note: 'memory draft' });
+    assert.equal(noLocks.status().memoryOnly, true);
+    assert.equal(noLocks.status().warning, R.constants.PERSISTENCE_WARNING);
+    assert.equal(await noLocks.apply(noLocks.preview([record(6)], 'replace')), true);
+    assert.equal(shared.value, durable);
+    assert.equal(JSON.parse(noLocks.exportText()).reviews[0].frame_ordinal, 6);
 
     assert.equal(state.all().length, 2);
 

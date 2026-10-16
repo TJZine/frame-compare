@@ -211,6 +211,7 @@ def _generated_report(
     *,
     tonemapped: bool = False,
     encoded_image_paths: bool = False,
+    frames: tuple[int, ...] = (10,),
 ) -> Path:
     clips: list[ClipInfo] = []
     geometry_by_name = {
@@ -267,9 +268,10 @@ def _generated_report(
                 images=[
                     ReportImageInfo(
                         screenshot,
-                        10 if name == "reference" else 12,
-                        RenderedFrameFacts(10 if name == "reference" else 12, "B"),
+                        frame if name == "reference" else frame + 2,
+                        RenderedFrameFacts(frame if name == "reference" else frame + 2, "B"),
                     )
+                    for frame in frames
                 ],
                 display=ReportClipDisplayInfo(
                     primary=(_REFERENCE_PRIMARY if name == "reference" else _COMPARISON_PRIMARY),
@@ -284,7 +286,7 @@ def _generated_report(
     return generate_report(
         ReportData(
             clips=[replace(clip) for clip in clips],
-            frames=[10],
+            frames=list(frames),
             rendering=ReportRenderingInfo(
                 overlay_mode=OverlayMode.DIAGNOSTIC,
                 include_frame_number=True,
@@ -807,13 +809,14 @@ document.addEventListener('DOMContentLoaded', () => {
             bookmark.dispatchEvent(new Event('change', { bubbles: true }));
             note.value = 'Browser integration proof';
             note.dispatchEvent(new Event('input', { bubbles: true }));
+            // dump-dom's virtual-time clock cannot establish asynchronous lock
+            // completion. The CDP editor test below proves the durable save.
             reviewTabUsable = Boolean(
                 ReportViewer.reviewController
                 && bookmark.checked
                 && note.value === 'Browser integration proof'
-                && document.querySelector('[data-review-status]')?.textContent.includes(
-                    'saved in this browser'
-                )
+                && ReportViewer.reviewController.model.get(0).note === note.value
+                && document.querySelector('[data-review-status]')?.textContent === 'Unsaved changes.'
             );
         } catch (error) {
             document.documentElement.dataset.reviewTabError = String(error);
@@ -1529,6 +1532,13 @@ async function evaluate(expression) {
             assert.equal(await evaluate('document.activeElement === note'), true);
         }
         assert.equal(await evaluate('trustedInputs'), 12);
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            if (!await evaluate('ReportViewer.reviewController.model.status().unsaved')) break;
+            await pause();
+        }
+        assert.equal(await evaluate('ReportViewer.reviewController.model.status().unsaved'), false);
+        assert.equal(await evaluate('JSON.parse(localStorage.getItem(ReportViewer.reviewController.model.storageKey)).reviews[0].note'), 'leftéright');
+        assert.match(await evaluate("document.querySelector('[data-review-status]').textContent"), /saved in this browser/);
         console.log('Native BMP, supplementary, mixed, bounds, selection, focus and export passed');
     } finally {
         socket?.close();
@@ -1600,3 +1610,198 @@ const profile = process.argv[2];
     assert len(processes) == 1
     assert processes[0].poll() is not None
     assert processes[0].wait(timeout=0) == processes[0].returncode
+
+
+@pytest.mark.integration
+def test_review_tabs_preserve_saved_notes_and_local_drafts(tmp_path: Path) -> None:
+    """Same-file tabs serialize writes and retain conflicts through the real editor."""
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path, frames=(10, 11))
+    script = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const [report, profile] = process.argv.slice(1);
+const pause = () => new Promise(resolve => setTimeout(resolve, 30));
+const sessions = [];
+async function connect(target, waitForViewer = true) {
+    const socket = new WebSocket(target.webSocketDebuggerUrl);
+    let nextId = 0;
+    const pending = new Map();
+    await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(Error('socket timeout')), 5000);
+        socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+        socket.addEventListener('error', error => { clearTimeout(timer); reject(error); }, { once: true });
+    });
+    socket.addEventListener('message', event => {
+        const message = JSON.parse(event.data);
+        const request = pending.get(message.id);
+        if (!request) return;
+        pending.delete(message.id);
+        clearTimeout(request.timer);
+        if (message.error) request.reject(Error(JSON.stringify(message.error)));
+        else request.resolve(message.result);
+    });
+    const command = (method, params = {}) => new Promise((resolve, reject) => {
+        const id = ++nextId;
+        const timer = setTimeout(() => { pending.delete(id); reject(Error(method + ' timeout: ' + (params.expression || ''))); }, 5000);
+        pending.set(id, { resolve, reject, timer });
+        socket.send(JSON.stringify({ id, method, params }));
+    });
+    const evaluate = async expression => {
+        const result = await command('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+        assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
+        return result.result.value;
+    };
+    const session = { command, evaluate, close: () => socket.close() };
+    sessions.push(session);
+    if (waitForViewer) await until(session, "typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)");
+    return session;
+}
+async function until(session, expression) {
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+        if (await session.evaluate(expression)) return;
+        await pause();
+    }
+    throw Error('Timed out: ' + expression + ' state: ' + await session.evaluate('JSON.stringify({status: globalThis.model?.status(), records: globalThis.model?.all(), stored: globalThis.model && localStorage.getItem(model.storageKey)})'));
+}
+const initialize = `
+    ReportViewer.inspector.setOpen(true, { save: false });
+    ReportViewer.inspector.setTab('review', { save: false });
+    globalThis.model = ReportViewer.reviewController.model;
+    globalThis.note = document.querySelector('[data-review-note]');
+    globalThis.trustedInputs = 0;
+    note.addEventListener('input', event => { if (event.isTrusted) trustedInputs += 1; });
+`;
+const stored = 'JSON.parse(localStorage.getItem(model.storageKey))?.reviews || []';
+async function edit(session, frame, text) {
+    await session.evaluate(`ReportViewer.setFrame(${frame}); note.focus(); note.select();`);
+    await session.command('Input.insertText', { text });
+    assert.equal(await session.evaluate('document.activeElement === note'), true);
+    assert.equal(await session.evaluate('note.value'), text);
+}
+(async () => {
+    try {
+        let port;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            try {
+                port = (await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
+                break;
+            } catch { await pause(); }
+        }
+        assert.ok(port, 'Chrome did not expose a debugging port');
+        const request = async (uri, method = 'GET') => (await fetch(`http://127.0.0.1:${port}${uri}`, {
+            method, signal: AbortSignal.timeout(5000),
+        })).json();
+        const open = async (withoutLocks = false) => {
+            const session = await connect(await request('/json/new?' + encodeURIComponent(withoutLocks ? 'about:blank' : report), 'PUT'), !withoutLocks);
+            if (withoutLocks) {
+                await session.command('Page.enable');
+                await session.command('Page.addScriptToEvaluateOnNewDocument', {
+                    source: "Object.defineProperty(navigator, 'locks', { value: undefined })",
+                });
+                await session.command('Page.navigate', { url: report });
+                await until(session, "typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)");
+            }
+            await session.evaluate(initialize);
+            return session;
+        };
+        const a = await open();
+        const b = await open();
+        assert.equal(await a.evaluate("typeof navigator.locks.request"), 'function');
+        await edit(a, 0, 'Saved A 😀');
+        await until(a, '!model.status().unsaved');
+        await edit(b, 1, 'Draft B é');
+        await until(b, 'model.status().warning.includes("another tab")');
+        assert.deepEqual((await b.evaluate(stored)).map(row => row.note), ['Saved A 😀']);
+        assert.equal(await b.evaluate('model.get(1).note'), 'Draft B é');
+        assert.match(await b.evaluate("document.querySelector('[data-review-status]').textContent"), /another tab/);
+        await edit(b, 0, 'Same-frame draft');
+        assert.deepEqual((await b.evaluate(stored)).map(row => row.note), ['Saved A 😀']);
+        assert.equal(await b.evaluate('JSON.parse(model.exportText()).reviews[0].note'), 'Same-frame draft');
+        const fresh = await open();
+        assert.equal(await fresh.evaluate('model.get(0).note'), 'Saved A 😀');
+        assert.equal(await fresh.evaluate('model.get(1).note'), '');
+
+        // External deletion invalidates both Merge and Replace previews, including Apply.
+        for (const mode of ['merge', 'replace']) {
+            const importer = await open();
+            const deleter = await open();
+            await importer.evaluate(`(() => {
+                const incoming = JSON.parse(model.exportText());
+                incoming.reviews = [{ frame_ordinal: 1, bookmark: true, tag: null, note: 'imported', preferred_clip_id: null }];
+                const transfer = new DataTransfer();
+                transfer.items.add(new File([JSON.stringify(incoming)], 'review.json', { type: 'application/json' }));
+                const input = document.querySelector('[data-review-import]');
+                input.files = transfer.files;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            await until(importer, "!document.querySelector('[data-review-preview]').hidden");
+            await importer.evaluate(`document.querySelector('input[name="review-import-mode"][value="${mode}"]').click()`);
+            await edit(deleter, 0, '');
+            await until(deleter, '!model.status().unsaved');
+            await until(importer, 'model.status().warning.includes("another tab")');
+            await importer.evaluate("document.querySelector('[data-review-import-apply]').click()");
+            assert.deepEqual(await importer.evaluate(stored), []);
+            assert.equal(await importer.evaluate('model.get(0).note'), 'Saved A 😀');
+            await edit(importer, 1, 'Draft after deletion');
+            assert.deepEqual(await importer.evaluate(stored), []);
+            // Restore through a fresh snapshot for the next independent import mode.
+            const restore = await open();
+            await edit(restore, 0, 'Saved A 😀');
+            await until(restore, '!model.status().unsaved');
+        }
+
+        // Hold the actual browser lock, then enqueue writes from both tabs.
+        const owner = await open();
+        await owner.evaluate('localStorage.removeItem(model.storageKey)');
+        const left = await open();
+        const right = await open();
+        const hold = async () => {
+            await owner.evaluate(`globalThis.lockHeld = false;
+                globalThis.holding = navigator.locks.request(model.storageKey, () => new Promise(resolve => {
+                    globalThis.releaseLock = resolve; globalThis.lockHeld = true;
+                })); void 0;`);
+            await until(owner, 'lockHeld');
+        };
+        await hold();
+        await edit(left, 0, 'first queued');
+        await edit(left, 0, 'latest queued 😀');
+        await edit(right, 1, 'simultaneous draft');
+        assert.equal(await left.evaluate('model.status().unsaved'), true);
+        assert.equal(await right.evaluate('model.status().unsaved'), true);
+        assert.deepEqual(await left.evaluate(stored), []);
+        await owner.evaluate('releaseLock(); void 0;');
+        for (const session of [left, right]) {
+            await until(session, '!model.status().unsaved || model.status().warning.includes("another tab")');
+        }
+        const saved = await left.evaluate(stored);
+        assert.equal(saved.length, 1);
+        assert.ok(['latest queued 😀', 'simultaneous draft'].includes(saved[0].note));
+        assert.equal(await left.evaluate('model.status().unsaved'), saved[0].note !== 'latest queued 😀');
+        assert.equal(await right.evaluate('model.status().unsaved'), saved[0].note !== 'simultaneous draft');
+        assert.equal(await right.evaluate('model.get(1).note'), 'simultaneous draft');
+        assert.equal(await left.evaluate('note.selectionStart === note.value.length && document.activeElement === note'), true);
+
+        console.log('Cross-tab conflicts, deletes, stale imports and queued writes passed');
+        const memory = await open(true);
+        assert.equal(await memory.evaluate('typeof navigator.locks'), 'undefined');
+        const durable = await memory.evaluate('localStorage.getItem(model.storageKey)');
+        await edit(memory, 1, 'exportable without locks');
+        assert.equal(await memory.evaluate('model.status().memoryOnly'), true);
+        assert.match(await memory.evaluate("document.querySelector('[data-review-status]').textContent"), /only for this session/);
+        assert.equal(await memory.evaluate('localStorage.getItem(model.storageKey)'), durable);
+        assert.equal(await memory.evaluate('JSON.parse(model.exportText()).reviews.find(row => row.frame_ordinal === 1).note'), 'exportable without locks');
+        assert.equal(await left.evaluate('trustedInputs'), 2);
+        assert.equal(await right.evaluate('trustedInputs'), 1);
+        console.log('Real two-tab conflicts, deletions, stale Merge/Replace Apply, queued writes, drafts and missing-lock export passed');
+    } finally {
+        for (const session of sessions) session.close();
+    }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = _run_browser_input(browser, report_path, tmp_path / "chrome-tabs-profile", script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Real two-tab conflicts" in result.stdout

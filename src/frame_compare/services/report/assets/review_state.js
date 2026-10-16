@@ -11,6 +11,7 @@ const ReviewState = (() => {
     const TAGS = new Set([null, 'artifact', 'detail', 'motion', 'color', 'other']);
     const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
     const PERSISTENCE_WARNING = 'Changes are kept only for this session. Export review JSON to keep them.';
+    const CONFLICT_WARNING = 'Saved review data changed in another tab. Local drafts were kept; export review JSON before reloading to review the saved changes.';
     const REPORT_MISMATCH = 'This review belongs to a different report. No changes were made.';
     const encoder = new TextEncoder();
 
@@ -187,7 +188,11 @@ const ReviewState = (() => {
         let records = new Map();
         let revision = 0;
         const candidates = new WeakMap();
-        let memoryOnly = !storage;
+        const locks = options.locks === undefined ? globalThis.navigator?.locks : options.locks;
+        let expectedBytes = null;
+        let conflicted = false;
+        let pendingWrite = Promise.resolve();
+        let memoryOnly = !storage || typeof locks?.request !== 'function';
         let unsaved = false;
         let warning = memoryOnly ? PERSISTENCE_WARNING : '';
 
@@ -198,6 +203,7 @@ const ReviewState = (() => {
         if (storage) {
             try {
                 const bytes = storage.getItem(storageKey);
+                expectedBytes = bytes;
                 if (bytes !== null) {
                     if (encoder.encode(bytes).byteLength > MAX_BYTES) throw new ReviewStateError(`Stored review JSON exceeds ${MAX_BYTES_LABEL} bytes.`);
                     const parsed = JSON.parse(bytes);
@@ -213,22 +219,50 @@ const ReviewState = (() => {
             }
         }
 
-        function persistMutation() {
-            if (!storage) {
-                unsaved = true;
+        // Do not adopt external snapshots: doing so could resurrect a deletion or
+        // silently change the local draft / selected Replace import.
+        function checkExternalStorage() {
+            if (!storage || memoryOnly) return false;
+            try {
+                if (storage.getItem(storageKey) !== expectedBytes) conflicted = true;
+            } catch {
+                memoryOnly = true;
                 warning = PERSISTENCE_WARNING;
                 return false;
             }
-            try {
-                storage.setItem(storageKey, serialize(storedDocument(context, sortedRecords())));
-                unsaved = false;
+            if (conflicted) {
+                unsaved = true;
+                warning = CONFLICT_WARNING;
+            }
+            return conflicted;
+        }
+
+        function exclusive(operation) {
+            // The local queue preserves edit order; the Web Lock also serializes
+            // other tabs. The comparison and write must both run inside that lock.
+            const result = pendingWrite.then(() => locks.request(storageKey, { mode: 'exclusive' }, operation));
+            pendingWrite = result.catch(() => {});
+            return result;
+        }
+
+        function persistMutation(snapshot, editRevision) {
+            if (memoryOnly) {
+                unsaved = true;
+                warning = PERSISTENCE_WARNING;
+                return Promise.resolve(false);
+            }
+            return exclusive(() => {
+                if (checkExternalStorage() || memoryOnly) return false;
+                storage.setItem(storageKey, snapshot);
+                expectedBytes = snapshot;
+                unsaved = revision !== editRevision;
                 warning = '';
                 return true;
-            } catch {
+            }).catch(() => {
                 unsaved = true;
                 warning = PERSISTENCE_WARNING;
                 return false;
-            }
+            });
         }
 
         function mutate(frameOrdinal, patch) {
@@ -247,8 +281,8 @@ const ReviewState = (() => {
                 records.set(frameOrdinal, validated);
             }
             revision += 1;
-            persistMutation();
-            return records.get(frameOrdinal) || defaultRecord(frameOrdinal);
+            unsaved = true;
+            return persistMutation(serialize(storedDocument(context, sortedRecords())), revision);
         }
 
         function exportText(now = new Date()) {
@@ -278,6 +312,7 @@ const ReviewState = (() => {
             if (!['merge', 'replace'].includes(mode) || !['keep-local', 'use-imported'].includes(conflict)) {
                 throw new ReviewStateError('Import preview options are invalid.');
             }
+            if (checkExternalStorage()) throw new ReviewStateError(CONFLICT_WARNING);
             const imported = mapFrom(validateRecords(importedRecords, context));
             const candidate = mode === 'replace' ? imported : new Map(records);
             if (mode === 'merge') {
@@ -303,7 +338,7 @@ const ReviewState = (() => {
             return previewValue;
         }
 
-        function apply(previewValue) {
+        function apply(previewValue, { signal } = {}) {
             // Validate supplied input even when it did not originate at this model.
             validateRecords(previewValue?.importedRecords, context);
             const selected = candidates.get(previewValue);
@@ -318,22 +353,32 @@ const ReviewState = (() => {
                 revision += 1;
                 unsaved = true;
                 warning = PERSISTENCE_WARNING;
-                return true;
+                return Promise.resolve(true);
             }
-            try { storage.setItem(storageKey, serialized); }
-            catch {
+            return exclusive(() => {
+                if (signal?.aborted) return false;
+                if (checkExternalStorage()) throw new ReviewStateError(CONFLICT_WARNING);
+                if (selected.revision !== revision) {
+                    throw new ReviewStateError('Import preview is stale or invalid. Review choices again.');
+                }
+                if (memoryOnly) return false;
+                storage.setItem(storageKey, serialized);
+                expectedBytes = serialized;
+                records = candidate;
+                revision += 1;
+                unsaved = false;
+                warning = '';
+                return true;
+            }).catch(error => {
+                if (error instanceof ReviewStateError) throw error;
                 warning = 'Import could not be saved; no changes were made.';
                 return false;
-            }
-            records = candidate;
-            revision += 1;
-            unsaved = false;
-            warning = '';
-            return true;
+            });
         }
 
         return {
             storageKey,
+            checkExternalStorage,
             get: (ordinal) => canonicalRecord(records.get(ordinal) || defaultRecord(ordinal)),
             all: () => sortedRecords().map(canonicalRecord),
             mutate,
@@ -356,6 +401,7 @@ const ReviewState = (() => {
         let importRecords = null;
         let importPreview = null;
         let importToken = 0;
+        let applyingImport = null;
         let renderedFrameOrdinal = null;
         let initialWarningPending = Boolean(model.status().warning);
 
@@ -403,10 +449,12 @@ const ReviewState = (() => {
             viewer.dom.reviewPreferred.replaceChildren(...options);
         }
 
-        function mutate(patch) {
+        async function mutate(patch) {
             try {
-                model.mutate(viewer.state.currentFrameIdx, patch);
+                const saving = model.mutate(viewer.state.currentFrameIdx, patch);
                 updateImportPreview();
+                updateStatus();
+                await saving;
                 updateStatus(Boolean(model.status().warning));
             } catch (error) {
                 render({ force: true });
@@ -447,11 +495,19 @@ const ReviewState = (() => {
 
         function updateImportPreview(announce = false) {
             if (!importRecords) return;
-            importPreview = model.preview(
-                importRecords,
-                importChoice('review-import-mode', 'merge'),
-                importChoice('review-import-conflict', 'keep-local'),
-            );
+            applyingImport?.abort();
+            try {
+                importPreview = model.preview(
+                    importRecords,
+                    importChoice('review-import-mode', 'merge'),
+                    importChoice('review-import-conflict', 'keep-local'),
+                );
+            } catch (error) {
+                importPreview = null;
+                viewer.setText(viewer.dom.reviewPreviewCounts, 'Preview is stale. Reload saved changes before importing.');
+                showMessage(error.message, true);
+                return;
+            }
             const { add, change, remove, unchanged } = importPreview.counts;
             viewer.setText(
                 viewer.dom.reviewPreviewCounts,
@@ -465,6 +521,7 @@ const ReviewState = (() => {
         }
 
         function cancelImport() {
+            applyingImport?.abort();
             importToken += 1;
             importRecords = null;
             importPreview = null;
@@ -494,6 +551,7 @@ const ReviewState = (() => {
                 resetImportChoices();
                 viewer.dom.reviewPreview.hidden = false;
                 updateImportPreview();
+                if (!importPreview) return;
                 const { add, change, remove, unchanged } = importPreview.counts;
                 showMessage(
                     `Import ready: add ${add}, change ${change}, remove ${remove}, unchanged ${unchanged}. Review choices before applying.`,
@@ -505,14 +563,20 @@ const ReviewState = (() => {
             }
         }
 
-        function applyImport() {
+        async function applyImport() {
             if (!importPreview) return;
+            applyingImport?.abort();
+            const operation = new AbortController();
+            applyingImport = operation;
             try {
-                if (!model.apply(importPreview)) {
+                const applied = await model.apply(importPreview, { signal: operation.signal });
+                if (operation.signal.aborted) return;
+                if (!applied) {
                     showMessage('Import could not be saved; no changes were made.', true);
                     return;
                 }
             } catch (error) {
+                if (operation.signal.aborted) return;
                 showMessage(`${error.message} No changes were made.`, true);
                 return;
             }
@@ -523,6 +587,12 @@ const ReviewState = (() => {
         }
 
         function bind() {
+            window.addEventListener?.('storage', event => {
+                if (event.key !== null && event.key !== model.storageKey) return;
+                if (!model.checkExternalStorage()) return;
+                updateImportPreview();
+                updateStatus(true);
+            });
             viewer.dom.reviewBookmark.addEventListener(
                 'change',
                 event => mutate({ bookmark: event.target.checked }),
@@ -537,11 +607,12 @@ const ReviewState = (() => {
                 if (scalars.length > MAX_NOTE_SCALARS) {
                     event.target.value = scalars.slice(0, MAX_NOTE_SCALARS).join('');
                 }
-                mutate({ note: event.target.value });
+                const saving = mutate({ note: event.target.value });
                 viewer.setText(
                     viewer.dom.reviewNoteCount,
                     `${[...event.target.value].length} / ${MAX_NOTE_SCALARS}`,
                 );
+                return saving;
             });
             viewer.dom.reviewPreferred.addEventListener(
                 'change',
@@ -576,6 +647,7 @@ const ReviewState = (() => {
             MAX_RECORDS,
             MAX_NOTE_SCALARS,
             PERSISTENCE_WARNING,
+            CONFLICT_WARNING,
             REPORT_MISMATCH,
         },
     };
