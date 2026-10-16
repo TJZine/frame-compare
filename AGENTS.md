@@ -31,6 +31,9 @@ Working rules:
   not a runtime/platform pass.
 
 Specialist procedures remain in [`docs/ENGINEERING_RUNBOOK.md`](docs/ENGINEERING_RUNBOOK.md).
+For application user-journey verification, use the repository-local
+[`verify-frame-compare`](.agents/skills/verify-frame-compare/SKILL.md) skill and its
+feature map. Target affected journeys; full-map maintenance is a separate request.
 Current ownership and CLI contracts remain in [`docs/current-architecture.md`](docs/current-architecture.md)
 and [`docs/current-cli-contract.md`](docs/current-cli-contract.md). Keep those sources
 current when the corresponding contract changes.

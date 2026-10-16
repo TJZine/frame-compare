@@ -158,6 +158,13 @@ the relevant routes below. Keep proof tied to the actual source, inputs, depende
 set, and environment. Reuse inspected results while those conditions remain valid;
 do not repeat a clean check solely because another workflow stage began.
 
+The repository-local `verify-frame-compare` skill under
+`.agents/skills/verify-frame-compare/` owns the application user-journey map and
+driving entrypoint. Use affected journeys alongside the relevant procedures below;
+it adds no universal gate. Its shared creation/maintenance procedures run on
+request. The [initial pilot](plans/2026-10-15-verification-map-pilot.md) is historical
+evidence; native and physical Windows acceptance remain separate proof obligations.
+
 Full native runs use the measured local count of four workers with `--dist loadgroup`.
 Focused selections, including single-test runs, may stay serial; `addopts` does not
 enable parallelism. Native CI uses `-n auto --dist loadgroup` because runner core
