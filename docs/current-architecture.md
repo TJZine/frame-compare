@@ -347,7 +347,8 @@ never searches parent directories.
   shared previous alignment offset reuse cache owned by
   `frame_compare.services.alignment_reuse_cache`. It stores eligible computed or
   interactively confirmed offsets keyed by a typed source-set identity, source
-  fingerprints, source trims, effective FPS values, selected reference
+  fingerprints, source trims, effective FPS values, resolved active-rectangle
+  geometry (or explicit absence), selected reference
   relationship, selected audio streams, alignment settings that affect
   computed offsets, an internal estimator-policy revision, and the scoped
   media-runtime alignment fingerprint. For the
@@ -363,6 +364,13 @@ never searches parent directories.
   origins, requires a bounded scalar stability summary for computed entries and
   embedded computed results, and persists no per-chunk evidence or audio. A v1
   cache is ignored and recomputed; there is no v1 migration or compatibility reader.
+  The canonical clip identity also carries an active-rectangle identity revision.
+  Entries written before that dependency was recorded cannot authorize reuse,
+  including for a request with no rectangle: their original video region is
+  unknown. Their source sets remain in the v2 container as historical information
+  when current entries are saved, but require fresh computation or confirmation
+  before reuse. Detector provenance is not part of the key when the resolved
+  geometry is unchanged.
   Unreadable, corrupt, unsupported-version, malformed source-table, or
   invalid-entry shared reuse data degrades to the normal alignment path with a
   warning log event. Ordinary no-match, incomplete, or stale source-set misses
@@ -408,7 +416,12 @@ never searches parent directories.
   `frame_compare.services.run_result_record` and written atomically only after a
   reserved run completes or fails. It stores sanitized run-folder-relative output
   facts, UTC lifecycle timing, bounded warning summaries, cache/phase facts,
-  slow.pics outcome, and a sanitized typed failure when applicable. The service
+  slow.pics outcome, and a sanitized typed failure when applicable. A failed run
+  can still record an uploaded slow.pics outcome and URL when the publisher
+  confirmed remote success before cancellation. Orchestration captures that fact
+  synchronously before optional post-upload work or another cancellation
+  checkpoint; it does not turn interruption into success or start new work.
+  The service
   also owns strict TOML validation, immediate-child history discovery that admits
   only folders containing a supported result record, malformed-record isolation,
   deterministic ordering, exact run-name validation, record-file/run-directory
@@ -1159,7 +1172,13 @@ sequence rendering.
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
 V1 JSON export, strict import validation, a selected merge/replace candidate shared by
 preview and atomic apply, stale-preview rejection, and
-the Review tab's dedicated edit/import/export interaction lifecycle. That controller is
+the Review tab's dedicated edit/import/export interaction lifecycle. Saves and
+import Apply share a per-report Web Lock and a same-tab queue. The owner checks
+the expected storage snapshot inside the exclusive operation before replacing
+it; a stale writer keeps its local draft for export rather than overwriting
+another tab's saved records. External changes invalidate import previews too.
+Pending Apply can be cancelled before its write by changing choices, editing,
+choosing another file, or cancelling the import. That controller is
 the single editor-limit owner: notes are bounded to 1000 Unicode scalars in editing,
 stored records, and V1 import/export. The textarea has no native maxlength because
 browsers count UTF-16 code units rather than Unicode scalars. The controller is
@@ -1167,9 +1186,11 @@ created on first visible Review use, keeps form rendering stable across unrelate
 refreshes, and routes transition announcements through the existing shared polite live
 region. A persistent status line states how many review records are saved in this
 browser (singular/plural and the zero count are each phrased truthfully) beside a static
-reminder that notes live in browser storage, not the report file; a storage-unavailable
-or failed-write state instead says changes are kept only for the session, and never
-claims persistence it did not achieve. Its storage is
+reminder that notes live in browser storage, not the report file. Pending writes
+remain unsaved until the exclusive write finishes. A conflict warns the user to
+export local drafts before reloading saved changes; it does not merge or reload
+automatically. Unavailable storage or Web Locks uses the memory-only/export
+fallback, and failed writes never claim persistence they did not achieve. Its storage is
 separate from viewport preferences and never writes into the report or run directory.
 `assets/viewer.js` caches the Review DOM and composes those focused owners with the
 existing canonical report, mode, viewport, alignment, and Inspector state

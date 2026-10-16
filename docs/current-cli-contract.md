@@ -744,7 +744,11 @@ unchanged.
 
 After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. In-flight FFmpeg batch extraction is stopped and reaped with bounded cleanup; frame extraction keeps its existing timeout. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
 
-The interrupted run follows the failure-record path and exits 130. The shared
+The interrupted run follows the failure-record path and exits 130. Its failure
+record retains a confirmed slow.pics upload outcome and URL if remote
+publishing completed before the interrupt, even when optional post-upload work
+did not finish. That does not make the run successful or permit new work after
+cancellation. The shared
 TMDB response cache is an exception to the publication rule: an already-in-flight
 validated upstream response may finish its locked, atomic worker publication.
 It carries no run, selection, alignment, or analysis-cache authority, and the
@@ -1905,9 +1909,13 @@ claim drift compensation or per-segment edit matching.
 The shared source-set identity includes the scoped alignment runtime fingerprint.
 That scope covers the selected standalone FFmpeg/ffprobe lineage and, because final
 authority depends on decoded frame numbering, the selected VapourSynth and
-L-SMASH-Works identity. A change misses the cache and recomputes. Resolved active
-rectangles affect video scoring but intentionally do not enter this source-relationship
-cache identity; clearing the cache forces re-verification after a crop change.
+L-SMASH-Works identity. A change misses the cache and recomputes. Each source's
+resolved active rectangle, or its explicit absence, also enters the identity
+because that region supplies video-confirmation evidence. Changing either region
+misses the cache without requiring manual clearing. Entries written before the
+active-rectangle identity revision remain on disk as historical information but
+cannot authorize reuse: their original scoring region is unknown. Unchanged
+resolved geometry remains reusable regardless of detector provenance.
 
 ## Persistence Rules
 

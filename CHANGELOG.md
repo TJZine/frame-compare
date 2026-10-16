@@ -28,6 +28,12 @@ notes used by the guarded publication workflow.
 
 ### Fixed
 
+- Recompute alignment when either source's picture region changes instead of
+  reusing an offset confirmed against a different crop.
+- Prevent one report tab from silently overwriting another tab's saved notes;
+  retain conflicting local drafts for export and invalidate stale import previews.
+- Retain a confirmed slow.pics upload URL in failed-run history when cancellation
+  interrupts optional post-upload work, while preserving interruption and cleanup.
 - Preserve explicitly authored tone-map settings through config save/reload and
   partial preset application without reacquiring unrelated ambient settings.
 - Report unreadable or nonregular config/preset files and malformed environment
@@ -45,6 +51,11 @@ notes used by the guarded publication workflow.
 
 ### Upgrade notes
 
+- Previous shared alignment entries lack crop identity. They remain on disk as
+  historical information but require fresh computation or confirmation before reuse.
+- The report-notes correction applies to newly generated reports. Existing HTML
+  reports keep their embedded viewer; browsers without Web Locks keep new edits
+  in memory and require review JSON export to retain them.
 - Run-local `manual_overrides.toml` uses version "2" without a separate `confirmed`
   field. Older versions are ignored as recoverable cache state and replaced on the
   next manual save without migration. The native VSView result sidecar remains v1.

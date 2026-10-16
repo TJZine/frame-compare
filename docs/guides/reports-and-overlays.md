@@ -157,14 +157,21 @@ or transfer notes outside the browser that made them.
 
 A persistent line states how many review records are saved in this browser, and a fixed
 note beside it reminds you that notes are not stored in the report file. When browser
-storage is unavailable or a save fails, the viewer says changes are kept only for that
+storage or Web Locks is unavailable, or a save fails, the viewer says changes are kept only for that
 session. Export review JSON while that message is showing to keep the notes.
+
+If another tab changes saved review data, the current tab keeps its local drafts
+and warns instead of overwriting the other tab's changes. Export those drafts
+before reloading. After reviewing the saved changes, you can import the exported
+JSON with the appropriate merge or replacement choices. Saving is asynchronous;
+the status remains unsaved until the write finishes.
 
 Import previews additions, changes, and removals before you apply a merge or
 replacement.
 An import that fails validation or a browser-storage write leaves existing records
 unchanged. If browser storage is unavailable, a validated import applies only to the
-current session.
+current session. Previously generated reports retain their embedded viewer code;
+installing a newer Frame Compare does not update those HTML files.
 
 ## Screenshot overlays
 
