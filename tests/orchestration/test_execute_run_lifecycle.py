@@ -1197,3 +1197,257 @@ def test_reservation_is_captured_before_interrupted_run_info_writer(
     records = list((tmp_path / "generated").rglob(RUN_RESULT_FILENAME))
     assert len(records) == 1
     assert read_run_result(records[0]).status == "failed"
+
+
+@pytest.mark.parametrize("confirm_after_report", [False, True])
+@pytest.mark.parametrize(
+    "outcome", ["success", "webhook_cancel", "publisher_handoff", "phase_handoff", "upload_failure"]
+)
+async def test_confirmed_upload_facts_survive_cancellation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    confirm_after_report: bool,
+    outcome: str,
+) -> None:
+    from threading import Event
+
+    from frame_compare.orchestration import execution, phase_post_render
+    from frame_compare.orchestration.execution_types import (
+        ExecutionState,
+        PhaseOutput,
+        PostReportCleanupPhaseOutput,
+        ReportPhaseOutput,
+    )
+    from frame_compare.services import slowpics_webhook
+    from frame_compare.services.errors import SlowpicsError
+    from frame_compare.services.slowpics_post_upload import SlowpicsPostUploadRequest
+    from frame_compare.services.slowpics_webhook import SlowpicsWebhookResult
+
+    workspace = _workspace(tmp_path, run_subdir="run", screenshots_subdir="run/screenshots")
+    assert workspace.run_dir is not None
+    workspace.run_dir.mkdir()
+    config = ConfigSchema()
+    config.audio_alignment.enable = False
+    config.report.enable = confirm_after_report
+    config.report.embed_images = True
+    config.slowpics.auto_upload = True
+    config.slowpics.confirm_upload_after_report = confirm_after_report
+    config.slowpics.create_url_shortcut = outcome == "publisher_handoff"
+    config.slowpics.delete_after_upload = True
+    config.slowpics.webhook_url = "https://hooks.example.test/offline"
+    config.slowpics.title = "Offline cancellation test"
+    artifacts = RunArtifacts()
+    source = tmp_path / "reference.mkv"
+    prep = PrepState(
+        workspace=workspace,
+        config=config,
+        input_videos=[source],
+        clips=[clip_state(source, label="Reference")],
+        artifacts=artifacts,
+        metadata_prefetch=MetadataPrefetch(None, False),
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=0.0,
+        selection_domain=PreparedSelectionDomain(
+            token="test", selection_window=SelectionWindow(0, 100), analysis_clip=None
+        ),
+    )
+    known_url = "https://slow.pics/c/confirmed-offline"
+    uploaded_paths: tuple[Path, ...] = ()
+    connector_started = Event()
+    connector_finished = Event()
+    release_connector = Event()
+    applied_publish: list[bool] = []
+    post_upload_started: list[bool] = []
+    cleanup_started: list[bool] = []
+
+    async def fake_prep(_request: RunRequest, deps: RunDependencies) -> PrepState:
+        assert deps.capture_reserved_run is not None
+        deps.capture_reserved_run(
+            ReservedRunCapture(
+                workspace=workspace,
+                clip_count=1,
+                preflight_duration=0.0,
+                preflight_warnings=[],
+                run_warnings=artifacts.warnings,
+            )
+        )
+        return prep
+
+    def fake_render(_ctx: RunContext, *, frames: list[int], runner: object) -> RenderPhaseOutput:
+        del runner
+        screenshots = workspace.screenshots_dir
+        assert screenshots is not None
+        screenshots.mkdir()
+        paths = [screenshots / f"{frame}.png" for frame in frames]
+        for path in paths:
+            path.write_bytes(b"PNG")
+        # A leftover screenshot must never be mistaken for part of this upload.
+        (screenshots / "stale.png").write_bytes(b"PNG")
+        return RenderPhaseOutput(
+            _render_artifacts(screenshots_by_label={"Reference": paths}, screenshot_dir=screenshots)
+        )
+
+    def fake_report(*_args: object, **_kwargs: object) -> ReportPhaseOutput:
+        assert workspace.run_dir is not None
+        path = workspace.run_dir / "report.html"
+        path.write_text("offline report", encoding="utf-8")
+        return ReportPhaseOutput(path, report_succeeded=True)
+
+    async def fake_publish(**kwargs: object) -> PublishResult:
+        nonlocal uploaded_paths
+        if outcome == "upload_failure":
+            raise SlowpicsError("Image upload failed with status 400")
+        uploaded_paths = tuple(cast(SlowpicsUploadPlan, kwargs["upload_plan"]).file_paths)
+        if outcome == "publisher_handoff":
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+        return PublishResult(
+            url=known_url,
+            screenshot_count=len(uploaded_paths),
+            upload_duration_seconds=0.0,
+            uploaded_file_paths=uploaded_paths,
+        )
+
+    def connector(
+        _request: slowpics_webhook.WebhookDeliveryRequest,
+    ) -> slowpics_webhook.WebhookResponse:
+        connector_started.set()
+        try:
+            if outcome == "webhook_cancel":
+                assert release_connector.wait(5), "test did not release webhook worker"
+            return slowpics_webhook.WebhookResponse(status_code=204)
+        finally:
+            connector_finished.set()
+
+    async def injected_webhook(*, webhook_url: str, slowpics_url: str) -> SlowpicsWebhookResult:
+        return await slowpics_webhook.deliver_slowpics_webhook(
+            webhook_url=webhook_url,
+            slowpics_url=slowpics_url,
+            resolver=lambda _host, _port: ("8.8.8.8",),
+            connector=connector,
+        )
+
+    real_post_upload = phase_post_render.run_slowpics_post_upload_actions
+
+    async def post_upload(request: SlowpicsPostUploadRequest) -> tuple[PostUploadActionResult, ...]:
+        post_upload_started.append(True)
+        if outcome == "phase_handoff":
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            return ()
+        return await real_post_upload(request)
+
+    real_apply = execution.apply_phase_output
+
+    def apply(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
+        if isinstance(output, PublishPhaseOutput):
+            applied_publish.append(True)
+        real_apply(ctx=ctx, state=state, output=output)
+
+    real_cleanup = execution.run_post_report_cleanup_phase
+
+    def cleanup(
+        ctx: RunContext, *, uploaded_file_paths: tuple[Path, ...], report_succeeded: bool
+    ) -> PostReportCleanupPhaseOutput:
+        cleanup_started.append(True)
+        return real_cleanup(
+            ctx, uploaded_file_paths=uploaded_file_paths, report_succeeded=report_succeeded
+        )
+
+    def reject_network(*_args: object, **_kwargs: object) -> Never:
+        raise AssertionError("Unexpected network access in offline lifecycle test")
+
+    monkeypatch.setattr(coordinator, "execute_prep", fake_prep)
+    for name in (
+        "emit_consolidated_fps_report",
+        "emit_final_selection_report",
+        "emit_frame_alignment_report",
+    ):
+        monkeypatch.setattr(coordinator, name, lambda *a, **kw: None)
+    monkeypatch.setattr(execution, "run_render_phase", fake_render)
+    monkeypatch.setattr(execution, "run_report_phase", fake_report)
+    monkeypatch.setattr(execution, "apply_phase_output", apply)
+    monkeypatch.setattr(execution, "run_post_report_cleanup_phase", cleanup)
+    monkeypatch.setattr(phase_post_render, "publish_to_slowpics", fake_publish)
+    monkeypatch.setattr(phase_post_render, "run_slowpics_post_upload_actions", post_upload)
+    monkeypatch.setattr(
+        "frame_compare.services.slowpics_post_upload.deliver_slowpics_webhook", injected_webhook
+    )
+    monkeypatch.setattr("socket.getaddrinfo", reject_network)
+    monkeypatch.setattr("socket.create_connection", reject_network)
+    monkeypatch.setattr("socket.socket.connect", reject_network)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reject_network)) as client:
+        worker = asyncio.create_task(
+            execute_run(
+                make_run_request(
+                    root=tmp_path, config=config, skip_analysis=True, skip_metadata=True
+                ),
+                deps=RunDependencies(
+                    ffmpeg_runner=FakeFFmpegRunner(),
+                    http_client=client,
+                    monotonic_timer=_zero_monotonic_timer,
+                    progress=NullProgressReporter(),
+                    confirm_slowpics_upload=lambda request: "confirmed",
+                ),
+            )
+        )
+        try:
+            if outcome == "webhook_cancel":
+                async with asyncio.timeout(3):
+                    while not connector_started.is_set():
+                        if worker.done():
+                            await worker
+                        await asyncio.sleep(0.005)
+                worker.cancel()
+                await asyncio.sleep(0)
+                worker.cancel()
+                await asyncio.sleep(0)
+                assert not worker.done(), "cancellation abandoned the blocked webhook worker"
+                release_connector.set()
+            if outcome in {"webhook_cancel", "publisher_handoff", "phase_handoff"}:
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(worker, 3)
+            else:
+                result = await asyncio.wait_for(worker, 3)
+                assert result.success
+                assert result.slowpics_url == (None if outcome == "upload_failure" else known_url)
+        finally:
+            release_connector.set()
+            if not worker.done():
+                worker.cancel()
+                await asyncio.gather(worker, return_exceptions=True)
+
+    record = read_run_result(workspace.run_dir / "run_result.toml")
+    cancelled = outcome in {"webhook_cancel", "publisher_handoff", "phase_handoff"}
+    confirmed = outcome != "upload_failure"
+    assert record.status == (
+        "failed" if cancelled else "completed_with_warnings" if not confirmed else "completed"
+    )
+    assert record.slowpics_outcome == ("uploaded" if confirmed else "not_uploaded")
+    assert record.slowpics_url == (known_url if confirmed else None)
+    assert artifacts.slowpics_url == record.slowpics_url
+    assert artifacts.uploaded_slowpics_file_paths == uploaded_paths
+    assert bool(applied_publish) == (outcome == "success")
+    assert bool(cleanup_started) == (not cancelled)
+    assert bool(post_upload_started) == (outcome not in {"publisher_handoff", "upload_failure"})
+    assert connector_started.is_set() == (outcome in {"success", "webhook_cancel"})
+    assert connector_finished.is_set() == connector_started.is_set()
+    if cancelled:
+        assert all(path.exists() for path in uploaded_paths)
+        assert artifacts.post_upload_actions == ()
+        assert not list(workspace.run_dir.glob("*.url"))
+    else:
+        assert all(not path.exists() for path in uploaded_paths)
+    assert workspace.screenshots_dir is not None
+    assert (workspace.screenshots_dir / "stale.png").exists()
+    if outcome == "upload_failure":
+        assert artifacts.render is not None
+        assert all(
+            shot.result.path.exists()
+            for clip in artifacts.render.clips
+            for shot in clip.screenshots
+        )

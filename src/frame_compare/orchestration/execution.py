@@ -249,6 +249,10 @@ def build_phases_after_align(
     config: ConfigSchema,
     confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None,
 ) -> list[Phase]:
+    def _retain_confirmed_upload(url: str, uploaded_file_paths: tuple[Path, ...]) -> None:
+        state.artifacts.slowpics_url = url
+        state.artifacts.uploaded_slowpics_file_paths = uploaded_file_paths
+
     async def _run_publish_with_current_artifacts(ctx: RunContext) -> PublishPhaseOutput:
         if (
             _requires_report_confirmed_slowpics(ctx.config)
@@ -261,6 +265,7 @@ def build_phases_after_align(
             metadata=state.artifacts.resolved_metadata,
             render=state.artifacts.render,
             selected_frames=list(ctx.selection.frames),
+            on_upload_confirmed=_retain_confirmed_upload,
         )
 
     def _run_report_with_current_artifacts(ctx: RunContext) -> ReportPhaseOutput:

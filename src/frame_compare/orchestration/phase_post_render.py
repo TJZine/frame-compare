@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -64,6 +65,7 @@ from frame_compare.services.slowpics_upload_plan import (
 )
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
+from frame_compare.utils.cancellation import cancellation_checkpoint
 from frame_compare.utils.run_warnings import RunWarning
 
 log = structlog.get_logger()
@@ -146,6 +148,7 @@ async def run_publish_phase(
     metadata: TmdbMetadata | None,
     render: RenderArtifacts | None = None,
     selected_frames: list[int] | None = None,
+    on_upload_confirmed: Callable[[str, tuple[Path, ...]], None] | None = None,
 ) -> PublishPhaseOutput:
     if client is None:
         return PublishPhaseOutput(slowpics_url=None)
@@ -181,6 +184,11 @@ async def run_publish_phase(
         progress=ctx.reporter,
         upload_plan=upload_plan,
     )
+    # Remote success is already a fact even if cancellation prevents this phase's
+    # output from being applied. Retain it synchronously before any more awaits.
+    if on_upload_confirmed is not None:
+        on_upload_confirmed(result.url, result.uploaded_file_paths)
+    await cancellation_checkpoint()
     post_upload_actions = await run_slowpics_post_upload_actions(
         SlowpicsPostUploadRequest(
             workspace=ctx.workspace,
