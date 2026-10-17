@@ -6,21 +6,27 @@ search:
 # Outstanding verification ledger — 2026-10-17
 
 Status: Feasible independent verification complete; acceptance remains OPEN for
-the explicit prerequisites below. The repeated Ctrl+C failure is preserved as a
-historical observation and resolved by the follow-up at the end of this ledger.
+the explicit prerequisites in the final disposition table. Visible native review
+and the bounded repeated native-console-event observation have now passed.
+The repeated rendering Ctrl+C failure is preserved as a historical observation,
+resolved by the separately authorized fix and affected verification below.
+This ledger is chronological: interim pending/failed observations retain their
+original scope; the final table reconciles the latest evidence at HEAD 6739bfb2.
 This is the canonical ledger. Supporting
 receipts, raw logs, downloads, probes and sidecars are retained under
-`generated/verification/2026-10-17/`, outside scratch. No product fix, reset,
-merge, credential migration, protected dispatch, publication or live product-service
-request is authorized or performed by this verification.
+`generated/verification/2026-10-17/`, outside scratch. Initial verification made
+no product changes; the later authorized Ctrl+C fix and commit/push are recorded
+separately. The current continuation changes only this ledger. No reset, merge,
+credential migration, protected dispatch, publication or live product-service
+request was performed.
 
 ## Source and evidence baseline
 
 Initial checkout was clean, branch `v0.7.0`, HEAD
 `104491b5b023b5a666d37bb7ea9d6742b030c749`. `git ls-remote` and GitHub PR metadata
 independently agree. PR [138](https://github.com/TJZine/frame-compare/pull/138)
-is open against `pre-release` at `35792220ae59d514ed626707340e2a86a7a14d05`;
-current PR merge is `b7d64df92eea6500e92f05b2dd233a24297b79e7`. Hosted checkout
+was open against `pre-release` at `35792220ae59d514ed626707340e2a86a7a14d05`;
+the then-current PR merge was `b7d64df92eea6500e92f05b2dd233a24297b79e7`. Hosted checkout
 logs record that merge SHA. Its tree and local HEAD tree are identical:
 `28c1a0ec1fc4f38da27c69e2ef3375261c344c34`. Thus these hosted results apply to
 the candidate's exact source content, without pretending their checkout SHA was HEAD.
@@ -302,7 +308,9 @@ Maintainer actions, separately authorized:
    approved secure runbook. If needed, separately approve one-time migration and
    remove its temporary token/ref permission afterward.
 2. Integrate the reviewed candidate into protected pre-release, then resolve and
-   review its **then-current exact SHA**. Candidate104491b5 is not currently there;
+   review its **then-current exact SHA**. The latest candidate is now
+   `6739bfb276390ddefee00e28e61c2d7c2af69377`, still absent from protected
+   pre-release `35792220ae59d514ed626707340e2a86a7a14d05`;
    a squash integration changes its SHA.
 3. Separately authorize verification-only dispatch and release-candidate approval:
    `gh workflow run windows-portable.yml --repo TJZine/frame-compare --ref pre-release -f operation=verify -f channel=rc -f expected_sha=<then-current-protected-head>`.
@@ -361,7 +369,7 @@ All historical O-items are reconciled in `reconciliation/findings.md`:
 | O-06 late image loss | Satisfied by newer main-stage error/retry implementation and current browser Blink retry/focus proof for its assertions; no exhaustive physical every-mode claim. |
 | O-07 infinite operation timeouts | Satisfied by newer `allow_inf_nan=False` schema and current schema tests; old premise superseded. |
 | O-08 response-body budgets | Outside accepted release obligation; no agreed normal budget or demonstrated failure. |
-| O-09 actual Ctrl+C | First native/VS/FFmpeg and repeated FFmpeg exit/cleanup scope observed; repeated VS **failed** 130 expectation; repeated review unobserved. Exact boundaries above. |
+| O-09 actual Ctrl+C | Historical repeated-VS failure is retained and resolved by the separately authorized fix/affected reruns below. First native/VS/FFmpeg, repeated FFmpeg and latest two-real-OS-event native-review exit/cleanup scope passed. Two separate Python callbacks during native review remain unestablished; final table preserves that boundary. |
 | O-10 physical/browser settings | Partial prior/current automated proof; remaining physical, picker, cross-machine and settings cases blocked as above. |
 | O-11 Linux optional profiles | Outside default release obligation; their separate host-dependent acceptance remains blocked. |
 | O-12 Docker/resource | Satisfied by exact-tree hosted Docker and distinct resource job evidence. |
@@ -507,3 +515,476 @@ remain historical evidence. Raw local diagnostics, disposable-media files,
 package ZIPs, private PATH rollback snapshot and caches are intentionally outside
 the commit; their identities and claim boundaries are recorded here. No signed
 dispatch, migration, publication, merge or protected-branch operation is authorized.
+
+## Visible native alignment continuation at 6739bfb2
+
+The subsequent verification-only instruction resumes outstanding acceptance,
+starting with visible native alignment. No signing/release action or product
+change is authorized by this continuation. Initial checkout and remote branch
+both remain `6739bfb276390ddefee00e28e61c2d7c2af69377`, with clean tracked state;
+PR merge remains `6d9200e03b1b8808744e985681ff6be66df9080d`. The four newer
+post-push hosted passes and their explicit skips remain reusable as recorded on
+PR #138 and in `generated/verification/2026-10-17/post-push-ci/`.
+
+New supporting receipts are under
+`generated/verification/2026-10-17/native-visible/`. Disposable roots and exact
+commands are recorded in `run.json` and the per-command/process JSON files.
+Managed Python 3.13.16, VS R81/API 4.3, PySide6 6.11.2, VSView 0.13.0 and runtime
+fingerprint `b47d64de188aab069cf3c3b9d51add6d0b3416c5ee175b4c0646b72436219320`
+reuse the previously hash-verified extracted bundle, without installing it.
+Doctor and actual `core.lsmas.LWLibavSource` frame-24 decode both exited 0.
+
+The first disposable fixture command failed because the managed LGPL FFmpeg has
+no `libx264` encoder; its command, stderr and exit are retained under
+`prepare-attempt1/`. Lossless FFV1 generation then exited 0. The lineup contains
+the existing owned 288-frame, 640×360/24fps source, an identical comparison, and
+a 276-frame comparison starting 0.5 seconds later. Matching source positions
+therefore include reference/comparison1 frame 24 and comparison2 frame 12.
+No private media or live service request is involved.
+
+An evidence-driver import assumption was corrected: embedded `python313._pth`
+ignores `PYTHONPATH`, so the first capture case actually uses the extracted
+bundle source, rather than the initially intended checkout overlay. The capability
+receipt exposes its exact import path. `source-equivalence.json` proves 184 Python
+files identical to the current checkout; only `cli/entry.py` differs. Thus native
+alignment owners are identical, but this first launch must not be called a test
+of the corrected standalone Ctrl+C entry boundary. Later driver invocations
+explicitly insert current checkout source for the parent CLI.
+
+The actual PTY has stdin/stdout/stderr all true. Production generated the
+three-output session and retained original `video_check_inconclusive` evidence
+for both comparisons, with no usable audio candidate and no automatic authority.
+The CLI is waiting for its owned viewer. Windows computer-use inventory did not
+expose a targetable VSView window; the user explicitly confirmed **VSView is
+visible and responsive**. This is an automation-observation gap, not a diagnosed
+native launch failure. The prior native crash observations remain historical
+failures; they are not erased by this newer launch.
+
+`capture-before-interaction/` retains initial session/config/diagnostic files and
+hashes before review choices. Matching capture, whole-set Save, actual close/resume,
+known offsets, Keep current and optional/forced unsaved close are still **pending
+visible observation**. No new visible acceptance pass is claimed yet. The active
+owned viewer is intentionally retained for the next user-assisted screenshot and
+review action; final sidecar, authority, trim/cache and cleanup results remain to
+be appended here after those actions.
+
+The user's subsequent two screenshots are retained as `user-initial-panel.png`
+and `user-initial-window.png`, with SHA-256 receipts. They show the actual visible
+three-output session, rendered Comparison 2 at frame 0, both no-usable-candidate
+warnings explicitly NOT APPLIED, 1/3 positions captured, and the whole-set Confirm
+button disabled. This establishes visible initial panel/rendering behavior; it
+does not yet establish a saved decision or resumed parent execution. A fresh
+automation inventory still does not expose a targetable VSView window.
+
+The next user screenshot, `user-capture-ready.png`, shows unlinked playheads and
+**3/3 positions captured — ready to confirm**: reference frame 24, Comparison 1
+frame 24 with raw offset +0, and Comparison 2 frame 12 with raw offset +12 and
+the reference-trim preview. Confirm is enabled. A separate real L-SMASH decode
+of those exact three source frames exited 0 and produced identical SHA-256
+hashes for all three YUV planes (`matching-source-frames.*`). This establishes
+the matching-position capture and complete-set readiness path, including zero
+and nonzero previews, before any confirmation. `capture-ready-observation.json`
+records screenshot hash, process state and the still-absent result/override/run
+completion artifacts. Save, close/resume and resulting authority remain pending.
+
+The initial evidence supervisor's 20-minute wait limit expired during the
+user-assisted positioning. `capture-process.json` honestly records this timeout
+and no child exit code; it did not terminate the application. The same CLI PID
+8652 (creation time and command rechecked) and viewer PID 7696 remained alive and
+responsive, with no saved result or completed run record. Before confirmation,
+a separate passive Win32 process-handle observer was attached to PID 8652 to
+retain its eventual actual exit status. It only queries the held process handle;
+it sends no input/signals and changes no application policy. Its receipt is
+`capture-passive-exit-observer.json`. This collection timeout is not classified
+as an application failure. Subsequent user-assisted case supervisors allow a
+longer bounded wait.
+
+**Visible whole-set Save passed its pre-close boundary.** The next user screenshot
+(`user-capture-saved-open.png`) shows **Alignment choices saved**, **Close VSView
+to resume Frame Compare**, manually confirmed +0/+12, the retained captured
+24/24/12 positions and disabled saved actions. Exactly one schema-1 sibling result
+was written for session `4ed2ac74bfb342c7a1b7a2583be2ee97`, with ordered confirmed
+decisions `reference:comparison1` (24,24) and `reference:comparison2` (24,12).
+Its SHA-256 is `6c33566a35c95ea8dcb1bdff5998bc9169614e213786c77d98faa880b21089bc`.
+The current production result reader validated session identity, complete order
+and raw-frame bounds, exit 0 (`capture-saved-open-validation.json`). Both initial
+diagnostic files remain byte-identical; no manual overrides, completed run record
+or rendered PNG exists yet, while both original processes remain alive. This
+demonstrates Save persists a session-bound choice but does not resume parent
+execution before the viewer closes. Actual close/resume, final applied authority,
+trim/cache effects and cleanup are the next pending observations.
+
+**Actual user close/resume passed the observed execution boundary.** After the
+user closed the whole viewer and reported `closed`, the passive held-handle
+observer recorded CLI PID 8652 exit **0** at `2026-10-17T09:17:06.031001Z`.
+The transcript reports acceptance of both confirmed pairs, offset +0 with
+reference/comparison1 trims 12..287/12..287, and offset +12 with
+reference/comparison2 trims 12..287/0..275. It then completes one aligned frame
+(71), writes three PNGs and `report.html`, and reports no metadata/publication.
+The original supervisor's exit 1 belongs to its documented wait-limit exception,
+not to the application: the passive process receipt separately proves actual CLI
+exit 0. Original CLI/viewer process IDs are no longer present. Complete non-media
+run artifacts and hashes are retained in `capture-after-close-artifacts/` and
+`capture-after-close-inventory.json`; owned fixtures are retained once under
+`fixtures/`. Detailed final authority/original-evidence/cache inspection is being
+reconciled against these retained outputs.
+
+The separate `known-offsets` case now runs with a fresh disposable generated
+directory, actual TTY and explicit current-checkout parent source bootstrap.
+Its doctor and source-provenance preflight both exited 0; the latter resolves
+`C:\Software\video\frame-compare\src\frame_compare\cli\entry.py` with SHA-256
+`210e50e13bf5c1120c7e497612e1d3bdaa4cf020171802382ff92ba90acaa93d`.
+Its production-generated three-output session is waiting for user review;
+`known-offsets-before-interaction-*` preserves the initially absent sidecar,
+manual override, completed run and PNGs. This next case exercises signed numeric
+entry deliberately; arbitrary acceptance input values are not an accuracy claim
+about the fixture's real +0/+12 correspondence.
+
+**Capture final authority/evidence/trim/cache audit passed.** The read-only
+`capture-authority-audit/receipt.md` and `result.json` retain 18 artifact predicates,
+copied outputs and hashes. Both original decisions were **unavailable**, not
+provisional; their complete attempts and canonical digests are unchanged after
+confirmation. Final authority is `interactive_confirmed_this_run`, applied at
+0/+12, with an explicit zero manual override in version "2". The complete shared
+reuse set has two `interactive_confirmed` entries and no `computed_result`.
+The completed one-frame/three-source run has zero warnings. Report aligned frame
+71 maps to raw source frames 83/83/71, consistent with global trim starts 12/12/0,
+common length 276 and inclusive ends 287/287/275. All three 640×360 PNGs have
+identical pixels. Inputs and preservation sentinel are unchanged; no matching
+owned CLI/viewer/native process remains. This closes the first visible
+capture/save/close/resume case in its documented source/runtime scope. It does
+not add native provisional-original coverage; existing automated authority
+evidence retains that separate scope.
+
+**Known-offset Save passed its pre-close boundary.** The user's next screenshot
+(`user-known-offsets-saved-open.png`) shows input basis **Known offsets**, entered
++4/-3, corresponding manually confirmed offsets, saved status, disabled controls
+and the close-to-resume message. The current production reader validated session
+`1130ce05432241adbde18afa85f760ea` and complete ordered canonical frame pairs
+(4,0)/(0,3), exit 0. Sidecar SHA-256:
+`4d60dba43e1b0180553a44befd415b47fe2bf8522b92c224f71b0dfc6556a62d`.
+`known-offsets-saved-open-validation.json` and the saved-open artifact snapshot
+also show unchanged initial diagnostics, no manual overrides, no completed run
+and zero PNGs while the viewer is still open. Known-offset close/resume and
+final normalized trims/persistence remain pending.
+
+The user then closed the known-offset viewer. Its current-checkout CLI completed
+with exit **0**, independently recorded by the 2-hour supervisor and normal PTY
+exit (`known-offsets-process.json`, `known-offsets-complete-transcript.txt`). The
+transcript confirms manually applied +4/-3 and normalized ranges reference
+4..272, Comparison 1 0..268, Comparison 2 7..275, aligned frame 79, three PNGs
+and a completed report. Its after-close artifacts are archived and a read-only
+authority/cache/original-attempt audit is being reconciled against those outputs.
+
+The separate fresh `keep-current` case is now waiting in its production-generated
+three-source session. Doctor/source-provenance preflights exited 0, all TTY flags
+are true, and `keep-current-before-interaction-*` records no result, override,
+completed record or image. Both source attempts are unresolved/unavailable and
+NOT APPLIED; this case targets preserving that absence of authority when the
+user chooses Keep current. Existing automated valid-zero/provisional authority
+observations retain their own scope, rather than being relabeled as physical
+coverage by this fresh-root case.
+
+**Known-offset final audit passed.**
+`known-offsets-authority-audit/receipt.md` and `result.json` retain 16 read-only
+artifact predicates. The complete +4/-3 manual-v2 and shared interactive cache
+authority matches the UI result, with no `computed_result`. Both unavailable
+original attempts and canonical digests remain unchanged. Report aligned frame
+79 maps to source frames 83/79/86, consistent with starts 4/0/7 and common length
+269; inclusive ends are 272/268/275. Three PNGs are readable 640×360 outputs;
+pixel equality is intentionally not expected for these deliberately incorrect
+alignment input values. The completed run has zero warnings and no upload.
+Inputs, config and sentinel are unchanged; no matching owned native child remains.
+
+**First Keep current attempt: visible Save passed; close/resume unverified after
+collector timeout.** The user's screenshot (`user-keep-current-saved-open.png`)
+shows saved choices and both comparisons explicitly unresolved, with no accepted
+alignment. The actual schema-1 sidecar for session
+`4b7ee8467e5a487495017d58cfd7e62b` contains only the complete ordered pair of
+`keep_current` actions, no frame/offset fields. The current production reader
+accepted it; SHA-256
+`229889c1ed1938137070dd6c49bda3a74bbdc8735e4bd6436ff70988729d2882`.
+Both diagnostic files remain byte-identical to the initial snapshots, and no
+manual override, completed run record or PNG exists. The supervisor reached its
+7200-second wait limit at `2026-10-17T11:31:54.702856Z`; the sidecar was written
+later at `2026-10-17T18:13:55.3214451Z`. When inspecting the user's response, the
+collector's outer status was 1 from that timeout, and no original CLI/viewer
+process remained. There is no captured actual CLI exit status or resumed run.
+This is a failed/expired collection boundary, not a demonstrated product defect
+or accepted close/resume. Raw transcript, file times, screenshot, validation and
+artifacts are retained. The previous `after-close` snapshot name is merely its
+collection stage; its absent completion artifacts do not establish a clean close.
+
+Only this invalidated lifecycle case is retried as `keep-current-retry`, in a
+new disposable root with the same owned media/config and no initial authority.
+The source/remote head remains 6739bfb2; only this ledger is modified. Doctor and
+current-source preflights exited 0, actual TTY flags are true, and the generated
+session is waiting for user input. The evidence supervisor now allows a bounded
+24-hour wait; a separate read-only held-handle observer records both actual CLI
+and viewer exits, without injecting signals or changing application policy.
+No previously satisfied capture, known-offset, full-suite or hosted gate is rerun.
+
+**Retry observed normal viewer close with no result; action clarification pending.**
+After the user reported `closed`, the held-handle observer recorded viewer PID
+23872 exit **0** and current-checkout CLI PID 17536 exit **5** at approximately
+`2026-10-17T18:20:18Z`. The typed CLI diagnostic was **FC-4005**, “Interactive
+alignment did not return a valid VSView review result: alignment review result is
+missing.” Its recorded run is failed; no review sidecar, manual override or PNG
+exists. Complete raw transcript, actual process statuses and archived run files
+are retained under `keep-current-retry-*`. A new confirmation question asks
+whether this retry actually showed saved status before closing. Until answered,
+this is **not** a Keep current pass or a diagnosed Save defect. It establishes
+the missing-result fail-closed behavior after a normal viewer exit; whether it
+also satisfies the intended human close-without-save case depends on the actual
+UI action. No expectation is weakened and no product code is changed.
+
+The independent read-only `keep-current-retry-authority-audit/receipt.md` and
+`result.json` confirm 12 artifact predicates: both initial diagnostics remain
+byte-identical, including unavailable attempts and recomputed original digests;
+their outcome is pending and authority remains absent. No result, manual/shared
+alignment cache, PNG or report was created. The failed record selected zero frames
+and has zero render/report/publish durations, with no upload. Media, config and
+sentinel hashes are unchanged, and all matching owned native processes are gone.
+This completes feasible artifact/cleanup inspection while the UI-action
+clarification remains pending; it does not settle that action by inference.
+
+**User clarification resolves the apparent Save contradiction.** The user first
+recalled seeing saved status, then clarified that they assumed the reopened
+window was the same earlier saved window, and requested repeating the last case.
+The earlier saved-status observation therefore does not establish Save in retry
+session `8567fc57d36c4632b4fcf86442013ca8`. The observed normal viewer exit,
+missing sidecar and forced exit 5 remain valid fail-closed evidence; there is no
+confirmed Save defect. The confusing session handoff is recorded rather than
+silently converting an instruction into an observed click. The prior
+`keep-current-retry-authority-audit/` action-pending wording is historical,
+superseded by this clarification.
+
+The user explicitly authorized repeating Keep current. A fresh
+`keep-current-check` root now uses distinct `KEEP_CHECK_reference.mkv`,
+`KEEP_CHECK_comparison1.mkv` and `KEEP_CHECK_comparison2.mkv` names so its visible
+lineup identifies the new case. Media bytes/config behavior are otherwise the
+same owned fixtures. Doctor and exact checkout-source preflights passed; the
+actual TTY-generated three-output session is waiting with no initial result,
+manual override, completed record or PNG. Its 24-hour collector and separate held
+CLI/viewer handles are active. The next step deliberately holds the viewer open
+after Save for immediate file validation before a separate close instruction.
+
+**Distinct KEEP_CHECK Save passed while viewer remains open.** The user's next
+screenshot (`user-keep-current-check-saved-open.png`) visibly identifies all
+three KEEP CHECK sources, saved choices, disabled controls, and both comparisons
+explicitly unresolved with no accepted alignment. The actual sibling sidecar for
+session `b1ba57ca08944c6ba172f5cbda6fa5e1` exists and the current production reader
+accepted its complete ordered `keep_current` actions for
+`KEEP_CHECK_reference:KEEP_CHECK_comparison1` and
+`KEEP_CHECK_reference:KEEP_CHECK_comparison2`; neither contains frame/offset
+authority. SHA-256:
+`ec457b6451fe9603781844a163775bd2a33e5103d1a239a9cb1ce76834951158`.
+`keep-current-check-saved-open-validation.json` records exit-0 validation,
+unchanged initial diagnostics, no manual overrides, no completed run and zero
+PNGs. The held-handle observer has not observed an exit for either original
+CLI/viewer process. Thus the new visible Save and actual file are established
+together; actual close/resume and final no-authority/cache behavior remain the
+next pending observations. No product fix or speculative consolidation was made.
+
+**KEEP_CHECK close/resume and final audit passed.** User close was followed by
+viewer PID 13764 exit **0** and CLI PID 5808 exit **0**, recorded by both the
+normal supervisor and held process handles. The run accepted zero confirmed
+pairs and kept both comparisons unresolved; it completed with the two expected
+honest alignment warnings and no upload. The read-only
+`keep-current-check-authority-audit/receipt.md` and `result.json` confirm 14
+artifact predicates: the exact complete keep-current sidecar is retained;
+original unavailable attempts and canonical digests are unchanged; final outcome
+is `keep_current`, authority `none`, `applied=false`, and all offset/frame fields
+remain null. No manual override or shared alignment cache was created. Report
+frame 83 maps to raw 83/83/83 with inferred starts 0/0/0 in best-effort rendering;
+all three PNGs are readable 640×360, without an aligned-pixel-equality claim.
+Inputs, config and sentinel are unchanged; no matching owned native child remains.
+This proves Keep current with absent initial authority; retention of pre-existing
+accepted offsets/provisional behavior keeps its identified automated/prior scope.
+
+The forced missing-result obligation is already observed in
+`keep-current-retry`: normal viewer exit 0, typed FC-4005/CLI exit 5, zero selected
+or rendered frames and no unintended authority/persistence. The user's clarified
+old-window assumption means it is not a confirmed Save failure. That exact
+fail-closed guard need not be rerun solely to give its directory a different name.
+
+The distinct `optional-unsaved-check` case now waits in a new production session
+whose source names begin `OPTIONAL_CLOSE`. It omits
+`--force-interactive-alignment`; the run plan explicitly says audio then VSView
+review. Doctor/current-source preflights passed and actual TTY flags are true.
+The pre-action snapshot contains no sidecar/manual override/completed run/PNG.
+Its CLI/viewer process handles are held separately. The intended next action is
+to close the whole viewer without choosing Confirm or Keep current, then verify
+optional retention/continuation rather than the forced refusal above.
+
+**OPTIONAL_CLOSE unsaved close/resume passed.** The user reported closing that
+distinct viewer without Confirm or Keep. Held handles recorded viewer PID 22932
+exit **0** at `2026-10-17T18:32:05.877785Z` and current-checkout CLI PID 29472
+exit **0** at `18:32:06.279426Z`. The completed run honestly retains two
+unresolved-alignment warnings, one selected frame, three readable 640×360 PNGs
+and no upload. No result sidecar, manual override or shared alignment cache was
+created. Final authority remains `none`, `applied=false`, offset/source frames
+null; both unavailable original attempts and canonical digests are unchanged.
+Report `report_f86b247b2dbed51288634d4fb7685b7c` maps reference frame 83 to raw
+83/83/83 with starts 0/0/0, best-effort rather than an aligned-image claim.
+The exact diagnostic outcome is **`rejected_result`**, the current optional
+missing-sidecar validation path; `no_result` belongs to launch-disabled/nonTTY
+paths. No expectation was changed to accommodate this token. The independent
+read-only `optional-unsaved-check-authority-audit/receipt.md` and `result.json`
+passed 13 artifact predicates, exit 0, including input/config/sentinel preservation
+and no remaining owned native process. Before/after files, actual exit observations
+and complete transcript remain under `native-visible/optional-unsaved-check-*`.
+
+### Final repeated native-review console-event observation
+
+The remaining native repeated-interruption obligation used actual Windows
+`GenerateConsoleCtrlEvent(CTRL_C_EVENT,0)` in a dedicated owned console with
+actual stdin/stdout/stderr TTYs and a production-generated three-source review.
+The evidence observer records lifecycle boundaries without replacing product
+signal handling or delaying product cleanup. The console guard refuses unknown
+participants; no unrelated terminal or existing viewer was targeted.
+
+**Attempt 1 failed its harness guard before sending any event.** The evidence
+interpreter's venv redirector introduced additional proxy PIDs; sender events
+and supervisor signals are both empty. The guard refusal is retained in
+`cancel-check/attempt1/`. Later bounded owned cleanup ended CLI/viewer with 1;
+those exits are not product Ctrl+C results. Only the evidence launcher was
+corrected to use its resolved base interpreter. No guard expectation was weakened.
+
+**Attempt 2 passed the bounded two-real-OS-event exit/cleanup scope.** Fresh session
+`063765aba849444cb82b0d5590ed62c6` used current checkout `entry.console_main`
+at source 6739bfb2, the unchanged managed runtime and byte-identical native
+alignment child. Doctor exited 0. Before input, the real VS View child PID 7184
+had a responding window and was owned by CLI PID 2556. Console membership was
+exactly the owned supervisor 39424, CLI 2556, viewer 7184 and sender 24000.
+
+| Boundary | Actual observation |
+| --- | --- |
+| First OS event | Successful at `2026-10-17T18:35:53.876260Z`; CLI and viewer both STILL_ACTIVE (259). |
+| Second OS event | Successful at `18:35:53.897802Z`, **21.5469 ms** later; CLI still 259, viewer already exit 1. |
+| CLI unwind | `18:35:53.997310Z`, after both events, `SystemExit(130)` with the standalone teardown handler now SIG_IGN. |
+| Final processes | CLI **130**, viewer **1**, sender **0**, supervisor **0**; no deadline cleanup in this attempt. |
+
+The supervisor recorded **one Python SIGINT callback**. Closely spaced console
+events can coalesce: this proves two successful real OS events while the CLI was
+alive before unwind, not two separately executed Python callbacks, physical human
+keystrokes, every repeat timing, or a still-live viewer at the second event.
+Existing first-native and rendering interruption evidence retains its separate
+scope; no satisfied case was repeated merely to enlarge a test count.
+
+The actual failed run record has selected frame count 0, render/report/publish
+timings 0 and no upload. Its recorded code is **FC-0001 INTERNAL_ERROR**, preserved
+exactly; overall process exit **130** is a separate observation. No dedicated
+cancellation-diagnostic claim is made. No sidecar, manual/shared alignment cache,
+PNG or report exists. Both diagnostic outcomes remain pending with no authority;
+original unavailable attempts have valid recomputed canonical digests and match
+the earlier production script's retained audio projection after its documented
+per-chunk-row omission. **No full pre-signal diagnostic-byte snapshot exists**;
+canonical consistency is not promoted to temporal equality of omitted rows.
+Input/config/sentinel hashes are unchanged. Fresh scoped process readback found
+no owned participants from either attempt and no commands referring to the case.
+
+Exact invocations, doctor, actual event membership/timestamps/statuses and lifecycle
+JSONL are under `cancel-check/attempt2/`; the independent read-only
+`cancel-check/acceptance-audit/receipt.md` and `result.json` passed 15 artifact
+predicates, exit 0. The post-event case snapshot is explicitly named
+`review-repeated-check-probe-observation-*`, not a pre-signal snapshot.
+
+### Final baseline, disposition and cleanup
+
+Final local and remote readbacks still agree on branch/PR head
+**`6739bfb276390ddefee00e28e61c2d7c2af69377`**, actual PR merge
+**`6d9200e03b1b8808744e985681ff6be66df9080d`**, and protected base
+**`35792220ae59d514ed626707340e2a86a7a14d05`**. Head and tested merge share tree
+**`c42dd46936a14c2029839893ec29f133934b0a9f`**. The previously inspected automatic
+attempt-1 runs remain valid; native verification changed no product source:
+
+| Automated gate | Reused current-head evidence and claim boundary |
+| --- | --- |
+| CI | [39017432736](https://github.com/TJZine/frame-compare/actions/runs/39017432736): ten successful jobs; derived 3,535 passing progress symbols, 276 skip-summary items including nine collection skips. Real browser 23 passed/zero skips, fresh distribution install, static/import checks and dependency audits passed. Derived counts are not emitted pytest totals. |
+| Docker | [39017432739](https://github.com/TJZine/frame-compare/actions/runs/39017432739): 300 passed/zero skips plus separate three streaming-resource cases passed/zero skips. |
+| Windows unsigned | [39017432807](https://github.com/TJZine/frame-compare/actions/runs/39017432807): derived 3,898 passing symbols, 87 skip-summary items including one collection skip. New five standalone-exit cases and latest updater lock/recovery under PS5.1/7 ran without relevant skips. Full/extracted portable and unsigned update packaging passed. Hosted GUI is offscreen; GPU proof skipped for unavailable Vulkan. |
+| Documentation | [39017432765](https://github.com/TJZine/frame-compare/actions/runs/39017432765): strict build/search passed; deployment skipped. |
+| Protected jobs | Four whole Windows signing-validation/verification/migration/release jobs and seven related unsigned-build steps were skipped, not passed. No protected dispatch or publication occurred. |
+
+Current-run artifact identities below are GitHub API/upload digests; these new
+archives were not downloaded and locally rehashed. Prior downloaded archives and
+their local hashes remain separate evidence. Complete logs, skip lists, jobs and
+readbacks are under `post-push-ci/`, including `inspection-receipt.md` and
+`windows/findings.md`.
+
+| Artifact | ID | Bytes | GitHub ZIP SHA-256 |
+| --- | --- | --- | --- |
+| Docker evidence | 12095945385 | 465164 | `6da4799495b484c37677c0017b3c2ed99501858d25d5060f42fd379fa85a5056` |
+| Windows portable | 12095666834 | 422846700 | `ae7d44555054da0b9c7db3c653d718dbb979e010018a43a945ffc41720bebe60` |
+| Windows unsigned update | 12094948978 | 698437 | `0c339c3f021175cbe749981ddbc1907cf34b4b145690b4906d04faad3b335223` |
+
+The following is the final disposition of every requested obligation. A pass is
+limited to its named source/environment/path; automated, human-visible native,
+physical-host and protected-signing claims remain distinct.
+
+| Obligation | Final disposition and remaining distinguishing evidence/prerequisite |
+| --- | --- |
+| Actual checkout, remote, hosted run/artifact/skip baseline | **Passed / satisfied by identified prior evidence.** Current refs/tree and newer four automatic runs above; older 104491b5 runs retain their historical scope. No reset or redundant full suite. |
+| Offline actual UI export/import, Merge/Replace/conflicts, identity/images/exact review state and reload in isolated storage on Windows | **Satisfied by identified prior evidence**, `browser/transfer/` and `browser/physical-controls/`; the retained UI download and input/action/result receipts delimit this single-host proof. |
+| Actual cross-machine report/assets/review transfer | **Blocked** by access to the matching first-machine report/assets/UI-exported review, or an identified receiving machine/person for the ready outbound package. This Windows host is the second physical computer; no matching first-machine artifact was found. Two profiles do not supply transfer. Ready package SHA-256 `586ab45c45931a62c4bbfb6fafadb47f410e1cb006da519a16b2210b377d6875`, report `report_381ff1102c183e0764f342a2b68bf9d7`, retained review JSON SHA-256 `850858fbc1c85a4d055a9515ea5fbdae99a7bd7596f67e72ba639aae164031cd`; receiving fresh-storage UI import, image/state/reload comparison still required. |
+| Browser focus/storage/gesture/reduced-motion reconciliation | **Satisfied by identified prior evidence** for hosted browser focus/retry and the recorded denied/quota/UTF-8 storage/browser-control assertions. **Blocked** for remaining physical mouse/touch pinch/Lens, OS reduced-motion/browser zoom and native picker observations by compatible device/settings interaction. Trusted headless input is not physical-device proof. |
+| Supported native decoder/doctor/actual L-SMASH | **Passed**, managed Windows runtime fingerprint above, real frame decode and production three-source sessions; no native/offscreen substitution. |
+| Visible matching-position whole-set capture, Save, close/resume | **Passed**, human screenshots + actual file/readback + real CLI completion, session 4ed2ac74…; 24/24/12 capture, accepted 0/+12, trims 12/12/0 and equal rendered pixels. Initial packaged entry limitation is recorded; alignment code is byte-identical to current source. |
+| Known offsets, zero/nonzero authority, original attempts, trims/cache | **Passed** visible/current-parent +4/-3 session 1130ce05… and explicit-zero capture above. Version-2 manual authority and complete interactive-only shared reuse set verified; original unavailable attempts retained, no computed authority. Existing automated provisional-original/authority combinations retain their separate scope. |
+| Keep current, saved result then close/resume | **Passed**, distinct KEEP_CHECK session b1ba57ca…, viewer/CLI 0, honest unresolved warnings, no authority/manual/shared cache. First expired collector remains a failed collection boundary; ambiguous old/new-window recollection was clarified, not diagnosed as a Save bug. |
+| Optional close without Save | **Passed**, OPTIONAL_CLOSE session ae47b65f…, viewer/CLI 0, rejected_result, best-effort rendering with absent authority/cache and retained original evidence. |
+| Forced close without a valid saved result | **Passed fail-closed behavior**, retry session 8567fc57…, normal viewer 0 then FC-4005/CLI 5, zero admission/render/report/persistence. No confirmed Save occurred in that session. |
+| First Ctrl+C in native review and VS/FFmpeg rendering; repeated FFmpeg | **Satisfied by identified prior physical-host evidence**, exact exit-130/phase/admission/cleanup receipts above. |
+| Repeated Ctrl+C in VapourSynth rendering | **Passed after the authorized product fix**, af590b58…/current 6739bfb2, affected native active-render and teardown reruns + five hosted standalone-exit cases. Original 0xC000013A failure is retained. Partial-image retention remains permitted. |
+| Repeated native-review console input | **Passed bounded real-OS-event exit/admission/no-authority/cleanup scope**, two events 21.5469 ms apart before unwind, CLI 130; viewer exited after first. Two distinct Python callbacks and human keystrokes are **unestablished**, not claimed. Attempt-1 guard refusal remains a harness failure. |
+| Earlier physical Windows PS5.1/7, installation preservation, render/updater and RTX5080 | **Satisfied by identified prior evidence** at 262f624655ebc35b046c6993ba1c85282b994064, within the environment/routes recorded above. Current runtime/native owners unchanged except separately verified CLI exit boundary. No blanket invalidation or full physical-suite rerun. |
+| Latest updater lock/recovery and AppData helper delivery | **Satisfied by identified prior evidence**, current hosted twenty PS5.1/7 cases plus actual isolated fresh-full-bundle helper install/hash, both-shell lock refusal/recovery and exact PATH restoration. Code-only updates cannot replace that helper. |
+| Actual HDR10/Dolby Vision, range/bit-depth, real-media timing/frame properties | **Blocked** by representative owned/explicitly authorized corpus and corresponding native observations; generated PQ/BT2020/GPU evidence retains its narrower recorded scope. No private media was swept. |
+| Index/cache migration, genuine previous-bundle update/full reinstall and objective/perceptual media comparisons | **Blocked** by genuine predecessor installation/update inputs and representative authorized corpus/defined comparison target. Fixture-signed updates and unsigned artifacts do not supply real full-bundle migration proof; fresh full install is required for AppData helper repair. |
+| Protected signing checklist/preparation | **Passed preparation**, sanitized metadata and concrete dispatch/receipt sequence in `signing/findings.md` plus current-candidate correction above. No secret values exposed. |
+| Key scope/migration, negative access, protected signed RC verification | **Blocked** by maintainer-readable scope metadata, separately authorized credential operations, reviewed candidate integration into protected pre-release, its then-current exact SHA and RC/environment approval. Current dev SHA is not a protected dispatch target. No merge, migration or signed dispatch authorized/performed; fixture/unsigned proof does not close this gate. |
+| Linux NVIDIA and X11 wrapper/visible GUI | **Outside current default release obligation**, separate optional profiles requiring compatible Linux GPU/X11 hosts for their own still-unobserved claims. |
+| Maintenance App actual token creation and postpublication pre-release recreation | **Blocked** by separately approved first operational run and publication/freeze prerequisites; prior App-name/bypass metadata scope remains satisfied. No branch recreation/publication solely to test it. |
+| Live slow.pics/webhook/TMDB | **Blocked** by explicit live-request authorization, dedicated credentials/receiver/owned media and bounded request/cleanup plan. Prior mocks/local persistence and newer source reconcile older premises but do not supply live receipts. |
+| CQ7 image-request lifecycle | **Outside accepted refactor/release-blocker scope**; bounded public-Next/RAF stale-lifecycle investigation passed. Actual browser background-suspension discriminator remains unobserved; retain owners, no speculative consolidation. |
+| CQ14 resampling | **Outside accepted refactor/release-blocker scope**; intentionally different current resampling policies retained. Real Pillow/fpng discriminator additionally **blocked** by supported fpng runtime and an agreed comparison/disclosure contract. |
+| Historical unmanaged-native crashes and failed evidence attempts | **Failed historical observations retained**, including unmanaged COM/crash, missing libx264 encoder, collector timeouts and initial proxy-console guard refusal. New managed visible passes resolve the managed-profile acceptance gap, not the cause of an unmanaged crash or a different proof level. |
+| Release/publication and legal/corresponding-source approval | **Outside this task**, expressly excluded; no signing/release action. |
+
+**Cleanup passed, exit 0**, `native-visible/finalize_cleanup.py prepare` then
+`remove`. Absolute root/parent containment, exact 6739bfb2 ownership markers,
+complete file inventories, zero reparse points and no matching owned native/helper
+process were verified before recursive removal. All 173 files (197,982,091 bytes
+across the main and failed-preparation roots) have retained copies or exact
+byte-identical fixture references; every retained SHA-256 was rechecked before
+deletion. `cleanup-prepared.json`, `cleanup-archive/`, `cleanup.json` and
+`processes-before-final-cleanup.json` preserve the targets, provenance, archive
+mapping and result. Both disposable roots were removed; unused initial
+`optional-unsaved`/`forced-unsaved` plans are **not run**, with acceptance supplied
+only by their separately named actual cases above. Reused extracted bundle and
+downloaded ZIP remain uninstalled and retained; user installation/media/profiles
+were untouched. Environment overrides were child-only, with no parent PATH/Qt
+change to restore. Screenshots, actual downloaded JSON, native sidecars, reports,
+diagnostics, process receipts and owned fixtures remain outside scratch.
+
+At completion of this verification continuation, the only tracked edit was this
+ledger, then uncommitted. No product change, commit/push, signing/release operation
+or live product request occurred during that continuation.
+Final whitespace/conflict/readback checks and refreshed evidence-integrity receipt
+record the final local document state; no satisfied application suite is rerun
+for a prose-only ledger update. Previous integrity manifests remain retained.
+
+The subsequent user instruction authorizes committing/pushing this updated ledger
+to `v0.7.0` and preparing a MacBook handoff. This is a documentation-only commit
+on top of tested head 6739bfb2; the exact new commit/remote readback belongs to the
+handoff receipt. Product/runtime content and all tested source identities above
+retain their scope. Supporting ignored Windows evidence does not travel with a
+Git pull: transfer the accompanying evidence package separately for artifact-level
+review. Its exact archive/included-file hashes and omissions belong to its manifest.
+The small original `browser/transfer/transfer-package.zip` remains the unmodified
+UI-exported report/assets/review input for actual fresh-storage MacBook import,
+state/image/identity/reload acceptance. Receiving that package on the MacBook can
+close the cross-machine prerequisite; reading this ledger alone cannot. No merge,
+credential migration, protected signing dispatch, publication or release action
+is authorized by this commit/push/handoff instruction.
