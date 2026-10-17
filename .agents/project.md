@@ -13,7 +13,8 @@ baseline records this profile's provenance; it does not choose future task branc
 
 Frame Compare is a Python 3.13+ CLI-first packaged application for deterministic
 video-frame comparison, alignment, tonemapping, reports, and optional publishing.
-The installed command is `frame-compare`, owned by `frame_compare.cli.entry:app`.
+The installed command is `frame-compare`, owned by `frame_compare.cli.entry:console_main`;
+the reusable Typer application remains `frame_compare.cli.entry:app`.
 
 The supported public surfaces are documented CLI/config behavior, streams, exit
 codes, persisted/output contracts, distribution contents, and installer/update

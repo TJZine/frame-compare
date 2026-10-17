@@ -562,5 +562,22 @@ def preset_save(
     )
 
 
+def console_main() -> None:
+    """Run the standalone CLI, retaining its interrupted exit during native teardown."""
+    try:
+        app()
+    except SystemExit as error:
+        if sys.platform == "win32" and error.code == 130:
+            import signal
+
+            # Python resets callable handlers before native module destruction.
+            # Ignore survives that reset, keeping a late console event from
+            # replacing the selected 130 with Windows STATUS_CONTROL_C_EXIT.
+            # Apply only after CLI cleanup, and preserve caller-owned handlers.
+            if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
+        raise
+
+
 if __name__ == "__main__":
-    app()
+    console_main()

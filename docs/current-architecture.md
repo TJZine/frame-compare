@@ -21,7 +21,7 @@ Frame Compare is a CLI-first packaged Python app with importable internal module
 
 ## Composition Roots
 
-- CLI entrypoint: `frame_compare.cli.entry:app`
+- Standalone CLI entrypoint: `frame_compare.cli.entry:console_main`; reusable Typer application: `frame_compare.cli.entry:app`.
 - Runtime entry surface: `frame_compare.runner.run(...)`
 - Async orchestration root: `frame_compare.orchestration.execute_run(...)`
 - Diagnostic entry surface: `frame_compare.orchestration.doctor.run_doctor(...)`
