@@ -10,9 +10,11 @@ import subprocess
 from dataclasses import replace
 from html.parser import HTMLParser
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, cast
 
 import pytest
+from tests.tonemap_test_support import libplacebo_tonemap
 
 from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.config.schema_enums import ViewerMode
@@ -34,7 +36,7 @@ from frame_compare.utils.media_facts import (
 )
 from frame_compare.vs.types import TonemapSettings
 
-# Chrome launches share a profile; keep this module on one xdist worker.
+# Keep the browser acceptance module on one xdist worker for bounded host load.
 pytestmark = pytest.mark.xdist_group("browser")
 
 _ONE_PIXEL_PNG = base64.b64decode(
@@ -109,6 +111,12 @@ def _run_browser_dump(
         "--dump-dom",
         report_path.as_uri(),
     ]
+    with TemporaryDirectory(prefix="chrome-dump-", dir=report_path.parent) as profile:
+        command.insert(1, f"--user-data-dir={profile}")
+        return _run_browser_dump_command(command)
+
+
+def _run_browser_dump_command(command: list[str]) -> subprocess.CompletedProcess[str]:
     for attempt in range(2):
         try:
             return subprocess.run(
@@ -203,6 +211,7 @@ def _generated_report(
     *,
     tonemapped: bool = False,
     encoded_image_paths: bool = False,
+    frames: tuple[int, ...] = (10,),
 ) -> Path:
     clips: list[ClipInfo] = []
     geometry_by_name = {
@@ -254,14 +263,15 @@ def _generated_report(
                 presentation_state=(
                     PresentationState.HDR_TONEMAPPED if tonemapped else PresentationState.SDR
                 ),
-                tonemap_settings=TonemapSettings() if tonemapped else None,
+                tonemap=libplacebo_tonemap(TonemapSettings()) if tonemapped else None,
                 active_picture=geometry.active_picture,
                 images=[
                     ReportImageInfo(
                         screenshot,
-                        10 if name == "reference" else 12,
-                        RenderedFrameFacts(10 if name == "reference" else 12, "B"),
+                        frame if name == "reference" else frame + 2,
+                        RenderedFrameFacts(frame if name == "reference" else frame + 2, "B"),
                     )
+                    for frame in frames
                 ],
                 display=ReportClipDisplayInfo(
                     primary=(_REFERENCE_PRIMARY if name == "reference" else _COMPARISON_PRIMARY),
@@ -276,11 +286,10 @@ def _generated_report(
     return generate_report(
         ReportData(
             clips=[replace(clip) for clip in clips],
-            frames=[10],
+            frames=list(frames),
             rendering=ReportRenderingInfo(
                 overlay_mode=OverlayMode.DIAGNOSTIC,
                 include_frame_number=True,
-                tonemap_settings=TonemapSettings() if tonemapped else None,
                 geometry_by_label={
                     clip.label or clip.name: geometry_by_name[clip.name] for clip in clips
                 },
@@ -800,13 +809,14 @@ document.addEventListener('DOMContentLoaded', () => {
             bookmark.dispatchEvent(new Event('change', { bubbles: true }));
             note.value = 'Browser integration proof';
             note.dispatchEvent(new Event('input', { bubbles: true }));
+            // dump-dom's virtual-time clock cannot establish asynchronous lock
+            // completion. The CDP editor test below proves the durable save.
             reviewTabUsable = Boolean(
                 ReportViewer.reviewController
                 && bookmark.checked
                 && note.value === 'Browser integration proof'
-                && document.querySelector('[data-review-status]')?.textContent.includes(
-                    'saved in this browser'
-                )
+                && ReportViewer.reviewController.model.get(0).note === note.value
+                && document.querySelector('[data-review-status]')?.textContent === 'Unsaved changes.'
             );
         } catch (error) {
             document.documentElement.dataset.reviewTabError = String(error);
@@ -859,7 +869,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const summary = disclosure?.querySelector('summary');
     const settings = disclosure?.querySelector('dl');
     const advancedLabels = [
-        'Dynamic peak detection', 'Contrast recovery', 'Gamma lift', 'Source peak',
+        'Dynamic peak detection', 'Contrast recovery', 'Gamma lift',
         'Destination minimum', 'Knee offset', 'Smoothing period', 'Percentile',
         'Scene thresholds', 'Gamut mapping',
         'Metadata mode', 'Dolby Vision metadata use',
@@ -877,7 +887,7 @@ document.addEventListener('DOMContentLoaded', () => {
     );
     document.documentElement.dataset.tonemapSummary = String(
         document.querySelector('[data-rendering-tonemap-summary]')?.textContent
-        === 'Reference · BT.2390 · 100 nits'
+        === 'BT.2390 · 100 nits'
     );
     document.documentElement.dataset.tonemapDisclosureInitial = String(
         Boolean(
@@ -950,6 +960,107 @@ def test_applied_tonemap_disclosure_is_focusable_toggleable_and_scrollable(
             parser.document_attributes[attribute],
             parser.document_attributes,
         )
+
+
+def _append_pair_offset_mode_transition_probe(report_path: Path) -> None:
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const viewer = ReportViewer;
+    const storageKey = viewer.viewerStorageKey();
+    const results = [];
+    const clickMode = mode => document.querySelector(`[data-mode="${mode}"]`).click();
+    const selectRight = index => {
+        const select = document.getElementById('right-select');
+        select.value = String(index);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const typeOffset = (x, y) => {
+        for (const [axis, value] of [['x', x], ['y', y]]) {
+            const input = document.getElementById(`align-${axis}`);
+            input.value = String(value);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('blur'));
+        }
+    };
+    for (const mode of ['diff', 'blink']) {
+        for (const savedOffset of [false, true]) {
+            for (const sameSourceOffset of [false, true]) {
+                localStorage.removeItem(storageKey);
+                viewer.restorePersistedState();
+                clickMode('slider');
+                selectRight(1);
+                if (savedOffset) typeOffset(7, 3);
+                selectRight(0);
+                if (sameSourceOffset) typeOffset(2, 2);
+                clickMode(mode);
+                const canvas = getComputedStyle(viewer.dom.canvas);
+                const saved = JSON.parse(localStorage.getItem(storageKey));
+                const current = viewer.viewport.currentAlignment();
+                const result = {
+                    mode, savedOffset, sameSourceOffset,
+                    pair: viewer.viewport.currentPairAlignmentKey(),
+                    current,
+                    stored: saved.pairAlignments['0:1'] || null,
+                    storedSameSource: saved.pairAlignments['0:0'] || null,
+                    x: canvas.getPropertyValue('--align-x').trim(),
+                    y: canvas.getPropertyValue('--align-y').trim(),
+                    transform: getComputedStyle(document.querySelector('.rv-right')).transform,
+                    status: document.getElementById('alignment-status').textContent.trim(),
+                };
+                viewer.restorePersistedState();
+                result.restored = viewer.viewport.currentAlignment();
+                results.push(result);
+            }
+        }
+    }
+    document.documentElement.dataset.pairOffsetTransitions = JSON.stringify(results);
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_pair_offsets_survive_same_source_slider_mode_repair(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+    report_path = _generated_report(tmp_path)
+    _append_pair_offset_mode_transition_probe(report_path)
+    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+    assert parser.document_attributes is not None
+    encoded = parser.document_attributes.get("data-pair-offset-transitions")
+    assert encoded is not None, parser.document_attributes
+    cases = json.loads(encoded)
+    assert len(cases) == 8
+    for case in cases:
+        expected = {
+            "alignmentPreset": "custom" if case["savedOffset"] else "none",
+            "alignX": 7 if case["savedOffset"] else 0,
+            "alignY": 3 if case["savedOffset"] else 0,
+        }
+        assert case["pair"] == "0:1", case
+        assert case["current"] == expected, case
+        assert case["restored"] == expected, case
+        assert case["stored"] == (expected if case["savedOffset"] else None), case
+        assert case["storedSameSource"] == (
+            {"alignmentPreset": "custom", "alignX": 2, "alignY": 2}
+            if case["sameSourceOffset"]
+            else None
+        ), case
+        assert case["x"] == f"{expected['alignX']}px", case
+        assert case["y"] == f"{expected['alignY']}px", case
+        assert case["status"] == (
+            "Offset: custom +7x +3y" if case["savedOffset"] else "Offset: none"
+        ), case
+        if case["mode"] == "diff":
+            assert case["transform"] == (
+                "matrix(1, 0, 0, 1, 7, 3)" if case["savedOffset"] else "matrix(1, 0, 0, 1, 0, 0)"
+            ), case
 
 
 def _append_width_fit_restore_probe(report_path: Path) -> None:
@@ -1421,6 +1532,13 @@ async function evaluate(expression) {
             assert.equal(await evaluate('document.activeElement === note'), true);
         }
         assert.equal(await evaluate('trustedInputs'), 12);
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            if (!await evaluate('ReportViewer.reviewController.model.status().unsaved')) break;
+            await pause();
+        }
+        assert.equal(await evaluate('ReportViewer.reviewController.model.status().unsaved'), false);
+        assert.equal(await evaluate('JSON.parse(localStorage.getItem(ReportViewer.reviewController.model.storageKey)).reviews[0].note'), 'leftéright');
+        assert.match(await evaluate("document.querySelector('[data-review-status]').textContent"), /saved in this browser/);
         console.log('Native BMP, supplementary, mixed, bounds, selection, focus and export passed');
     } finally {
         socket?.close();
@@ -1492,3 +1610,198 @@ const profile = process.argv[2];
     assert len(processes) == 1
     assert processes[0].poll() is not None
     assert processes[0].wait(timeout=0) == processes[0].returncode
+
+
+@pytest.mark.integration
+def test_review_tabs_preserve_saved_notes_and_local_drafts(tmp_path: Path) -> None:
+    """Same-file tabs serialize writes and retain conflicts through the real editor."""
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path, frames=(10, 11))
+    script = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const [report, profile] = process.argv.slice(1);
+const pause = () => new Promise(resolve => setTimeout(resolve, 30));
+const sessions = [];
+async function connect(target, waitForViewer = true) {
+    const socket = new WebSocket(target.webSocketDebuggerUrl);
+    let nextId = 0;
+    const pending = new Map();
+    await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(Error('socket timeout')), 5000);
+        socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+        socket.addEventListener('error', error => { clearTimeout(timer); reject(error); }, { once: true });
+    });
+    socket.addEventListener('message', event => {
+        const message = JSON.parse(event.data);
+        const request = pending.get(message.id);
+        if (!request) return;
+        pending.delete(message.id);
+        clearTimeout(request.timer);
+        if (message.error) request.reject(Error(JSON.stringify(message.error)));
+        else request.resolve(message.result);
+    });
+    const command = (method, params = {}) => new Promise((resolve, reject) => {
+        const id = ++nextId;
+        const timer = setTimeout(() => { pending.delete(id); reject(Error(method + ' timeout: ' + (params.expression || ''))); }, 5000);
+        pending.set(id, { resolve, reject, timer });
+        socket.send(JSON.stringify({ id, method, params }));
+    });
+    const evaluate = async expression => {
+        const result = await command('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+        assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
+        return result.result.value;
+    };
+    const session = { command, evaluate, close: () => socket.close() };
+    sessions.push(session);
+    if (waitForViewer) await until(session, "typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)");
+    return session;
+}
+async function until(session, expression) {
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+        if (await session.evaluate(expression)) return;
+        await pause();
+    }
+    throw Error('Timed out: ' + expression + ' state: ' + await session.evaluate('JSON.stringify({status: globalThis.model?.status(), records: globalThis.model?.all(), stored: globalThis.model && localStorage.getItem(model.storageKey)})'));
+}
+const initialize = `
+    ReportViewer.inspector.setOpen(true, { save: false });
+    ReportViewer.inspector.setTab('review', { save: false });
+    globalThis.model = ReportViewer.reviewController.model;
+    globalThis.note = document.querySelector('[data-review-note]');
+    globalThis.trustedInputs = 0;
+    note.addEventListener('input', event => { if (event.isTrusted) trustedInputs += 1; });
+`;
+const stored = 'JSON.parse(localStorage.getItem(model.storageKey))?.reviews || []';
+async function edit(session, frame, text) {
+    await session.evaluate(`ReportViewer.setFrame(${frame}); note.focus(); note.select();`);
+    await session.command('Input.insertText', { text });
+    assert.equal(await session.evaluate('document.activeElement === note'), true);
+    assert.equal(await session.evaluate('note.value'), text);
+}
+(async () => {
+    try {
+        let port;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            try {
+                port = (await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
+                break;
+            } catch { await pause(); }
+        }
+        assert.ok(port, 'Chrome did not expose a debugging port');
+        const request = async (uri, method = 'GET') => (await fetch(`http://127.0.0.1:${port}${uri}`, {
+            method, signal: AbortSignal.timeout(5000),
+        })).json();
+        const open = async (withoutLocks = false) => {
+            const session = await connect(await request('/json/new?' + encodeURIComponent(withoutLocks ? 'about:blank' : report), 'PUT'), !withoutLocks);
+            if (withoutLocks) {
+                await session.command('Page.enable');
+                await session.command('Page.addScriptToEvaluateOnNewDocument', {
+                    source: "Object.defineProperty(navigator, 'locks', { value: undefined })",
+                });
+                await session.command('Page.navigate', { url: report });
+                await until(session, "typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)");
+            }
+            await session.evaluate(initialize);
+            return session;
+        };
+        const a = await open();
+        const b = await open();
+        assert.equal(await a.evaluate("typeof navigator.locks.request"), 'function');
+        await edit(a, 0, 'Saved A 😀');
+        await until(a, '!model.status().unsaved');
+        await edit(b, 1, 'Draft B é');
+        await until(b, 'model.status().warning.includes("another tab")');
+        assert.deepEqual((await b.evaluate(stored)).map(row => row.note), ['Saved A 😀']);
+        assert.equal(await b.evaluate('model.get(1).note'), 'Draft B é');
+        assert.match(await b.evaluate("document.querySelector('[data-review-status]').textContent"), /another tab/);
+        await edit(b, 0, 'Same-frame draft');
+        assert.deepEqual((await b.evaluate(stored)).map(row => row.note), ['Saved A 😀']);
+        assert.equal(await b.evaluate('JSON.parse(model.exportText()).reviews[0].note'), 'Same-frame draft');
+        const fresh = await open();
+        assert.equal(await fresh.evaluate('model.get(0).note'), 'Saved A 😀');
+        assert.equal(await fresh.evaluate('model.get(1).note'), '');
+
+        // External deletion invalidates both Merge and Replace previews, including Apply.
+        for (const mode of ['merge', 'replace']) {
+            const importer = await open();
+            const deleter = await open();
+            await importer.evaluate(`(() => {
+                const incoming = JSON.parse(model.exportText());
+                incoming.reviews = [{ frame_ordinal: 1, bookmark: true, tag: null, note: 'imported', preferred_clip_id: null }];
+                const transfer = new DataTransfer();
+                transfer.items.add(new File([JSON.stringify(incoming)], 'review.json', { type: 'application/json' }));
+                const input = document.querySelector('[data-review-import]');
+                input.files = transfer.files;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            await until(importer, "!document.querySelector('[data-review-preview]').hidden");
+            await importer.evaluate(`document.querySelector('input[name="review-import-mode"][value="${mode}"]').click()`);
+            await edit(deleter, 0, '');
+            await until(deleter, '!model.status().unsaved');
+            await until(importer, 'model.status().warning.includes("another tab")');
+            await importer.evaluate("document.querySelector('[data-review-import-apply]').click()");
+            assert.deepEqual(await importer.evaluate(stored), []);
+            assert.equal(await importer.evaluate('model.get(0).note'), 'Saved A 😀');
+            await edit(importer, 1, 'Draft after deletion');
+            assert.deepEqual(await importer.evaluate(stored), []);
+            // Restore through a fresh snapshot for the next independent import mode.
+            const restore = await open();
+            await edit(restore, 0, 'Saved A 😀');
+            await until(restore, '!model.status().unsaved');
+        }
+
+        // Hold the actual browser lock, then enqueue writes from both tabs.
+        const owner = await open();
+        await owner.evaluate('localStorage.removeItem(model.storageKey)');
+        const left = await open();
+        const right = await open();
+        const hold = async () => {
+            await owner.evaluate(`globalThis.lockHeld = false;
+                globalThis.holding = navigator.locks.request(model.storageKey, () => new Promise(resolve => {
+                    globalThis.releaseLock = resolve; globalThis.lockHeld = true;
+                })); void 0;`);
+            await until(owner, 'lockHeld');
+        };
+        await hold();
+        await edit(left, 0, 'first queued');
+        await edit(left, 0, 'latest queued 😀');
+        await edit(right, 1, 'simultaneous draft');
+        assert.equal(await left.evaluate('model.status().unsaved'), true);
+        assert.equal(await right.evaluate('model.status().unsaved'), true);
+        assert.deepEqual(await left.evaluate(stored), []);
+        await owner.evaluate('releaseLock(); void 0;');
+        for (const session of [left, right]) {
+            await until(session, '!model.status().unsaved || model.status().warning.includes("another tab")');
+        }
+        const saved = await left.evaluate(stored);
+        assert.equal(saved.length, 1);
+        assert.ok(['latest queued 😀', 'simultaneous draft'].includes(saved[0].note));
+        assert.equal(await left.evaluate('model.status().unsaved'), saved[0].note !== 'latest queued 😀');
+        assert.equal(await right.evaluate('model.status().unsaved'), saved[0].note !== 'simultaneous draft');
+        assert.equal(await right.evaluate('model.get(1).note'), 'simultaneous draft');
+        assert.equal(await left.evaluate('note.selectionStart === note.value.length && document.activeElement === note'), true);
+
+        console.log('Cross-tab conflicts, deletes, stale imports and queued writes passed');
+        const memory = await open(true);
+        assert.equal(await memory.evaluate('typeof navigator.locks'), 'undefined');
+        const durable = await memory.evaluate('localStorage.getItem(model.storageKey)');
+        await edit(memory, 1, 'exportable without locks');
+        assert.equal(await memory.evaluate('model.status().memoryOnly'), true);
+        assert.match(await memory.evaluate("document.querySelector('[data-review-status]').textContent"), /only for this session/);
+        assert.equal(await memory.evaluate('localStorage.getItem(model.storageKey)'), durable);
+        assert.equal(await memory.evaluate('JSON.parse(model.exportText()).reviews.find(row => row.frame_ordinal === 1).note'), 'exportable without locks');
+        assert.equal(await left.evaluate('trustedInputs'), 2);
+        assert.equal(await right.evaluate('trustedInputs'), 1);
+        console.log('Real two-tab conflicts, deletions, stale Merge/Replace Apply, queued writes, drafts and missing-lock export passed');
+    } finally {
+        for (const session of sessions) session.close();
+    }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = _run_browser_input(browser, report_path, tmp_path / "chrome-tabs-profile", script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Real two-tab conflicts" in result.stdout

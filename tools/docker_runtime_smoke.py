@@ -40,7 +40,7 @@ from frame_compare.vs.runtime_contract import (
 )
 from frame_compare.vs.source import load_source, source_index_path
 from frame_compare.vs.tonemap import apply_tonemap
-from frame_compare.vs.types import TonemapSettings
+from frame_compare.vs.types import LibplaceboTonemap, TonemapSettings
 
 
 def assert_true(condition: object, message: str) -> None:
@@ -454,6 +454,18 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
             TonemapSettings(tone_curve=ToneCurve.SPLINE, target_nits=203),
             hdr_lsw.hdr_metadata,
         )
+        assert_true(
+            tonemapped_hdr.applied is not None
+            and isinstance(tonemapped_hdr.applied.transform, LibplaceboTonemap),
+            "production tonemap did not use libplacebo",
+        )
+        assert_true(
+            spline_hdr.applied is not None
+            and isinstance(spline_hdr.applied.transform, LibplaceboTonemap),
+            "spline tonemap did not use libplacebo",
+        )
+        tonemapped_hdr = tonemapped_hdr.clip
+        spline_hdr = spline_hdr.clip
         tonemapped_hdr_frame = tonemapped_hdr.get_frame(0)
         assert_true(
             tonemapped_hdr_frame.props.get("_Tonemapped") == 1,

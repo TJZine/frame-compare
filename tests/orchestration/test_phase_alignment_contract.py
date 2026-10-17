@@ -9,8 +9,6 @@ from typing import cast
 
 import pytest
 
-from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.loader import load_config
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import phase_alignment
 from frame_compare.orchestration.context import ClipState, RunContext
@@ -27,57 +25,10 @@ from tests.alignment_review_test_support import (
     provisional_audio_attempt,
     unavailable_audio_attempt,
 )
-from tests.orchestration.phase_task_helpers import _clip, _run_align_phase, _workspace
-
-# U3 keeps only the C1 config surface; the shared helper config still lists the
-# removed C2 estimator keys, so this file builds its context from valid TOML.
-_VALID_MINIMAL_CONFIG = """\
-[paths]
-input_dir = "comparison_videos"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-random_frame_count = 3
-random_seed = 7
-
-[audio_alignment]
-enable = true
-max_offset_seconds = 4.5
-use_vsview = true
-force_interactive = false
-cache_results = false
-channel_strategy = "best_channel"
-reference_stream = 1
-comparison_streams = { encode = 2 }
-
-[screenshots]
-use_ffmpeg = true
-
-[report]
-enable = false
-"""
-
-
-def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> RunContext:
-    config_dir = tmp_path / "config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_path = config_dir / "config.toml"
-    config_path.write_text(_VALID_MINIMAL_CONFIG, encoding="utf-8")
-    config = load_config(config_path)
-    reference_path = tmp_path / "comparison_videos" / "reference.mkv"
-    reference_path.parent.mkdir(parents=True, exist_ok=True)
-    reference_path.write_bytes(b"reference")
-    reference = _clip(reference_path, label="Reference")
-    return RunContext(
-        config=config,
-        workspace=_workspace(tmp_path),
-        reference=reference,
-        comparisons=[] if comparisons is None else comparisons,
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
-        analysis_clip=reference,
-    )
+from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
+from tests.render_test_support import paths_by_label
+from tests.run_request_support import make_run_request
+from tests.services.alignment_resolution_test_support import save_resolutions
 
 
 def test_alignment_request_uses_untrimmed_probe_frame_count(
@@ -341,10 +292,9 @@ def test_primed_cache_source_drift_after_request_freezing_cannot_apply_trims(
         CACHE_FILE_NAME,
         comparison_cache_key,
         load_reusable_offset_entries,
-        save_reusable_offsets,
     )
     from frame_compare.services.errors import AudioAlignmentError
-    from frame_compare.services.types import AlignmentProvenance
+    from frame_compare.services.types import ComparisonResolution
     from tests.alignment_review_test_support import frame_lag, trusted_audio_attempt
 
     comparison_path = tmp_path / "comparison_videos" / "encode.mkv"
@@ -382,14 +332,13 @@ def test_primed_cache_source_drift_after_request_freezing_cannot_apply_trims(
         audio_attempt=trusted_audio_attempt(frame_offset=3),
         stability=trusted_audio_attempt(frame_offset=3).stability,
     )
-    save_reusable_offsets(
+    save_resolutions(
         frozen,
         [
-            AlignmentProvenance(
+            ComparisonResolution(
                 result=accepted,
                 comparison_cache_key=comparison_cache_key(frozen.comparisons[0]),
-                provenance="computed_this_run",
-                evidence_availability="current_attempt",
+                origin="computed_this_run",
             )
         ],
     )
@@ -433,7 +382,6 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
     )
     from frame_compare.orchestration.execution_types import ExecutionState, MetadataPrefetch
     from frame_compare.orchestration.phases import PhaseStatus, execute_phases
-    from frame_compare.orchestration.types import RunRequest
     from frame_compare.services import alignment_audio
     from frame_compare.services.errors import AlignmentSourceIdentityError
     from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
@@ -468,8 +416,6 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
     ctx.comparisons = [prepared(ctx.comparisons[0])]
 
     def unavailable_probe(_path: Path, **_kwargs: object) -> alignment_audio.ProbedStreams:
-        # Drift while the real service is planning an unavailable audio attempt.
-        # No applied result or cache authority will trigger an acceptance check.
         if changed_role is not None:
             changed = ctx.reference if changed_role == "reference" else ctx.comparisons[0]
             changed.path.write_bytes(b"changed prepared source during unavailable audio probe")
@@ -500,9 +446,13 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
         )
 
     monkeypatch.setattr(alignment_audio, "probe_streams", unavailable_probe)
-    state = ExecutionState(selected_frames=[0, 1, 2])
-    request = RunRequest(
-        root=tmp_path, skip_metadata=True, config_overrides=CLIConfigOverrides(no_upload=True)
+    ctx.selection = replace(ctx.selection, frames=(0, 1, 2))
+    state = ExecutionState()
+    request = make_run_request(
+        root=tmp_path,
+        config=ctx.config,
+        skip_metadata=True,
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     align = build_phases_before_align(
         request=request,
@@ -529,7 +479,7 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
         ), state.warnings
         assert downstream[0].status == PhaseStatus.COMPLETED
         assert state.artifacts.render is not None
-        assert state.artifacts.render.screenshots_by_label
+        assert paths_by_label(state.artifacts.render.clips)
         assert ctx.comparisons[0].alignment is None
         detail = {
             "stream": "audio stream override",

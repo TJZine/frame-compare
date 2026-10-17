@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 import typer
@@ -11,6 +12,8 @@ from rich.table import Table
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.errors import FrameCompareError, JSONValue
+from frame_compare.orchestration.doctor_types import DoctorConfigSelection
+from frame_compare.orchestration.run_inputs import select_run_config_path
 from frame_compare.utils.terminal_theme import (
     ACCENT,
     FAIL,
@@ -49,6 +52,7 @@ class RunDoctorFn(Protocol):
         self,
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport: ...
 
 
@@ -58,10 +62,14 @@ def handle_doctor(
     run_doctor: RunDoctorFn,
     handle_error: HandleErrorFn,
     no_color: bool,
+    root: Path | None = None,
+    config_path: Path | None = None,
 ) -> None:
     """Run dependency diagnostics."""
     try:
-        report = run_doctor(checks=None, reporter=None)
+        resolved_root, selected = select_run_config_path(config_path, root)
+        selection = DoctorConfigSelection(resolved_root, selected, config_path is not None)
+        report = run_doctor(checks=None, reporter=None, selection=selection)
     except FrameCompareError as error:
         if json_output:
             typer.echo(json.dumps(format_error_json(error), sort_keys=True, separators=(",", ":")))

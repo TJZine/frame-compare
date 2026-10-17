@@ -530,7 +530,11 @@ def parse_run_result(payload: object) -> RunResultRecord:
 def read_run_result(path: Path) -> RunResultRecord:
     """Read and validate one result record."""
     with path.open("rb") as handle:
-        return parse_run_result(tomllib.load(handle))
+        try:
+            payload = tomllib.load(handle)
+        except RecursionError:
+            raise ValueError("run result exceeds TOML parser limits") from None
+    return parse_run_result(payload)
 
 
 def _report_path(record: RunResultRecord, run_dir: Path) -> Path | None:

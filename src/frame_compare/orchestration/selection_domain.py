@@ -11,6 +11,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from frame_compare.analysis.window import (
     ClipWindowInput,
@@ -23,6 +24,7 @@ from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.active_rect import (
     active_rect_identity,
     active_rect_policy_identity,
+    metric_cache_request_for_clip,
     resolve_active_rects_for_clips,
 )
 from frame_compare.orchestration.context import (
@@ -33,6 +35,52 @@ from frame_compare.orchestration.context import (
 from frame_compare.orchestration.errors import SourceSelectionError
 from frame_compare.services.release_identity import ReleaseIdentity
 from frame_compare.utils.run_warnings import RunWarning
+
+if TYPE_CHECKING:
+    from frame_compare.analysis.types import MetricCacheRequest
+    from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedSelectionDomain:
+    """Prepared window and analysis identity; config and live clips stay on context."""
+
+    selection_window: SelectionWindow
+    analysis_clip: ClipState | None
+    token: str
+    full_window_retry_override: FullWindowRetryOverride | None = None
+
+
+def build_prepared_selection_domain(
+    *,
+    clips: list[ClipState],
+    config: ConfigSchema,
+    analysis_clip: ClipState | None,
+    selection_window: SelectionWindow,
+    override: FullWindowRetryOverride | None,
+) -> PreparedSelectionDomain:
+    token = (
+        build_analysis_selection_domain_token(
+            clips=clips,
+            config=config,
+            analysis_clip=analysis_clip,
+            selection_window=selection_window,
+        )
+        if analysis_clip is not None
+        else ""
+    )
+    return PreparedSelectionDomain(selection_window, analysis_clip, token, override)
+
+
+def metric_request_for_domain(
+    domain: PreparedSelectionDomain, config: ConfigSchema
+) -> MetricCacheRequest:
+    """Resolve metric range only at an existing cache/Analyze use boundary."""
+    return metric_cache_request_for_clip(
+        domain.analysis_clip,
+        selection_window=domain.selection_window,
+        fallback_detection_mode=config.screenshots.active_rect_detection.value,
+    )
 
 
 @dataclass(frozen=True)

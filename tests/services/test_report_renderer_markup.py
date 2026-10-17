@@ -406,17 +406,29 @@ def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settin
         **report_payload,
         "rendering": {
             **report_payload["rendering"],
-            "tonemap": {"applied": True, "settings": settings},
+            "tonemap": {
+                "ran": True,
+                "requested": settings,
+                "shared": {
+                    "implementation": "libplacebo",
+                    "algorithm": "bt2390",
+                    "effective_controls": {
+                        key: value
+                        for key, value in settings.items()
+                        if key not in ("enabled", "preset", "tone_curve", "source_peak")
+                    },
+                },
+            },
         },
     }
     html = build_html(payload)
-    assert "Reference · BT.2390 · 100 nits" in html
+    assert "BT.2390 · 100 nits" in html
     details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
     assert "open" not in details.attrs
     pairs = parse_definition_pairs(details)
     assert pairs["Dynamic peak detection"] == "On"
     assert pairs["Gamma lift"] == "Off"
-    assert pairs["Source peak"] == "Automatic"
+    assert "Source peak" not in pairs
     assert pairs["Smoothing period"] == "45 frames"
     assert pairs["Scene thresholds"] == "0.8 low · 2.4 high"
     assert pairs["Gamut mapping"] == "Perceptual"
@@ -453,8 +465,13 @@ def test_build_html_tonemap_labels(
 ) -> None:
     payload = deepcopy(report_payload)
     payload["rendering"]["tonemap"] = {
-        "applied": True,
-        "settings": cast(ReportTonemapSettingsPayload, {field: value}),
+        "ran": True,
+        "requested": None,
+        "shared": {
+            "implementation": "libplacebo",
+            "algorithm": "bt2390",
+            "effective_controls": {field: value},
+        },
     }
     html = build_html(payload)
     details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")

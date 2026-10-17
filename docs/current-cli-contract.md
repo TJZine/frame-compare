@@ -104,6 +104,7 @@ described under Output Modes.
 These commands share the same root/config path resolution rules:
 
 - `run`
+- `doctor`
 - `wizard`
 - `preset apply`
 - `preset save`
@@ -122,7 +123,7 @@ once and may name a normal external directory; empty or whitespace-only values,
 including values that become empty after environment expansion, are invalid. Its
 managed descendants remain contained beneath that resolved generated-data root.
 Containment follows symlinks and expands environment variables in config path values,
-so invalid config paths fail through the standard typed path error. `run`, `wizard`, `preset apply`,
+so invalid config paths fail through the standard typed path error. `run`, `doctor`, `wizard`, `preset apply`,
 `preset save`, and both `history` subcommands validate their selected config
 destination before config reads or writes; `run` also validates generated-data
 root structure before diagnostics, config writes, or runtime entry. `preset list`
@@ -149,7 +150,7 @@ History does not require the configured input directory or current video files t
 exist, keeping recorded outcomes readable after media moves.
 
 For the installed Windows portable shim, the shim runs the bundle launcher from the
-bundle root and injects a default `--config` for `run`, `wizard`, supported
+bundle root and injects a default `--config` for `run`, `doctor`, `wizard`, supported
 `preset` subcommands, and `history list`/`history open` when the user did not pass
 `--config`. For subgroup commands the injection occurs after the subcommand and
 before any positional history run name or preset name. The injected default
@@ -743,7 +744,16 @@ unchanged.
 
 After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. In-flight FFmpeg batch extraction is stopped and reaped with bounded cleanup; frame extraction keeps its existing timeout. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
 
-The interrupted run follows the failure-record path and exits 130. The shared
+The interrupted run follows the failure-record path and exits 130. On Windows,
+once the standalone CLI has completed its Python cleanup and selected exit 130,
+it ignores further Ctrl+C during interpreter/native-module teardown to preserve
+that exit status. This does not change repeated-interrupt behavior while the run
+or its cleanup is active, or the signal policy of the reusable Typer application.
+Its failure
+record retains a confirmed slow.pics upload outcome and URL if remote
+publishing completed before the interrupt, even when optional post-upload work
+did not finish. That does not make the run successful or permit new work after
+cancellation. The shared
 TMDB response cache is an exception to the publication rule: an already-in-flight
 validated upstream response may finish its locked, atomic worker publication.
 It carries no run, selection, alignment, or analysis-cache authority, and the
@@ -979,8 +989,9 @@ recovery requirement.
   - `--json` was not used
   - `--quiet` was not used
   - stdout is attached to a TTY
-  - the CLI can reload the effective config and `report.auto_open` is true, or the
-    post-run config reload fails and the CLI falls back to opening the report anyway
+  - `refresh_report_auto_open_preference` rereads the selected config through the
+    injected loader and `report.auto_open` is true, or that refresh fails and the CLI
+    falls back to opening the report anyway
 
 There is currently no dedicated `run` flag for `report.auto_open`; it is a config-only
 surface.
@@ -1001,7 +1012,7 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
 
 ### Report And Overlay Metadata Contract
 
-- Newly generated standalone reports use payload version `1.2`. Each clip carries a
+- Newly generated standalone reports use payload version `1.3`. Each clip carries a
   presentation-only `display` object with full primary identity, release descriptor,
   ordinary-control label, constrained micro label, and exact filename. These strings
   are assembled once from prepared release identity and explicit-label state. They do
@@ -1010,9 +1021,9 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   number is the common comparison-domain frame; every image separately records its
   mapped untrimmed source frame, exact-frame picture type, and selected-frame Dolby
   Vision RPU presence when available.
-- Existing payload v1.1 HTML reports remain self-contained and viewable as generated;
+- Existing payload v1.1/v1.2 HTML reports remain self-contained and viewable as generated;
   Frame Compare does not rewrite or migrate them. Because the payload version
-  participates in report ID generation, a newly generated v1.2 report may use a new
+  participates in report ID generation, a newly generated v1.3 report may use a new
   browser-local viewer/review storage key. Review JSON is valid only for the exact report
   ID and payload version; there is no cross-version review-state migration or import.
 - The existing Frame inspector follows the images visible in Single, Slider, Diff,
@@ -1023,7 +1034,14 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   and informative release identity, retain the complete wrapping filename, and wrap
   compact source signal, presentation, file-size, and non-full active-picture facts
   without horizontal panel scrolling. Report Information owns the Rendering
-  disclosure, including resolved tonemap settings when tonemapping ran.
+  disclosure, including the shared applied transform when tonemapping ran; the Clips
+  inspector shows each clip's implementation, algorithm, resolved source peak and
+  origin, and fallback cause; per-clip effective controls remain in the payload. Payload `clips[].presentation` contains
+  `state` and `tonemap` (applied facts or null), replacing the old flat requested curve
+  and target fields. `rendering.tonemap` contains `ran`, `requested` settings (or null
+  for mixed requests), and a `shared` implementation/algorithm/effective-controls
+  projection only when all tonemapped clips agree. Per-clip peaks and fallback causes
+  do not prevent a shared run summary.
 - The primary report toolbar keeps frame navigation, view modes, and mode-specific
   context/alignment in three stable CSS-owned zones on wide screens. It becomes a
   two-row layout at medium widths and a stacked layout at narrow widths without
@@ -1042,11 +1060,21 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   Unparseable date text is shown unchanged.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
-  `src` values, timestamps, transient browser state, and clip display strings.
+  `src` values, timestamps, transient browser state, clip display strings, requested
+  tonemap settings, and fallback causes. Applied implementation, algorithm, effective
+  controls and resolved per-clip peaks participate in identity. Identical output via
+  different fallback causes shares identity; regenerated 1.3 reports start fresh
+  browser-local state and reject 1.2 review imports.
 - `screenshots.overlay_mode` has four exact presentation levels: `none` bakes no text;
   `minimal` carries source identity plus compact frame/type/size context; `standard`
   adds selection and source/output context; `diagnostic` adds only observed signal,
   applied tonemap, HDR static, exceptional geometry, and proven exact-frame facts.
+- When vs-placebo is unavailable, unusable, or fails at runtime, Frame Compare keeps
+  its existing fallback policy and discloses `frame_compare_peak_scaled_rational_v1`
+  per clip, rather than the requested curve. Diagnostic overlays say
+  `Tonemap: fallback (peak-scaled) → <target> nits`; one render warning names all
+  affected clips and their cause classes. Signature/configuration errors remain fatal.
+  The pre-run CLI preview describes requested settings, not applied output facts.
 - Picture type is collected from the exact selected original source frame. Its absence
   is nonfatal and is omitted from baked text rather than inferred from keyframe status.
 - Selected-frame Dolby Vision RPU presence is collected from that same original
@@ -1056,7 +1084,7 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
 - Displayed file size is the complete container storage cost in IEC units. It is not a
   bitrate, quality, efficiency, or winner metric. The existing value appears in visible
   Single, Slider, Diff, Blink, and Grid source labels when positive and available;
-  hiding source labels hides the size, and the report payload remains version `1.2`.
+  hiding source labels hides the size, and the report payload is version `1.3`.
 
 ### slow.pics Upload Behavior
 
@@ -1246,6 +1274,9 @@ its core. When unset, neither process changes the VapourSynth default.
 
 ## Config-Only TMDB Surface
 
+`[tmdb].timeout_seconds` defaults to `10.0` and must be finite and at least
+`1.0` second.
+
 `[tmdb].unattended` remains an accepted, persisted boolean with default `false`.
 It currently has no behavioral effect: both values use the resolver's selected
 match when available and otherwise continue without a match. Neither value opens
@@ -1379,10 +1410,10 @@ association omits multipart `tmdbId`.
 per-comparison fields. Public maps to `public=true`/`PUBLIC`; explicit unlisted
 maps to `public=false`/`LINK_ONLY`. `remove_after_days` is a strict `0..999999`
 remote retention value: zero sends empty `removeAfter`, positive values send
-decimal days. `image_upload_timeout_seconds` is at least 10 seconds and is the
+decimal days. `image_upload_timeout_seconds` must be finite and at least 10 seconds; it is the
 image write-timeout floor; the floor also cannot be lower than
 `file_size / 256 KiB/s + 15 seconds`. Navigation and metadata continue using
-`timeout_seconds`.
+`timeout_seconds`, which must be finite and at least 10 seconds.
 
 `confirm_upload_after_report` is a config-only, interactive-only opt-in. It only
 has effect when effective `auto_upload = true`; it adds no `run` flag, no wizard
@@ -1433,7 +1464,7 @@ toggles or tags.
 
 ## VSView Native Alignment Diagnostics
 
-VSView 0.12.1 parent telemetry and generated Frame Compare session diagnostics use
+VSView 0.13.0 parent telemetry and generated Frame Compare session diagnostics use
 stderr as the single human diagnostic stream. The native VSView panel is the sole
 human alignment-review interface: the terminal never reads review input, parses a
 confirmation response, or writes a result. The VSView child process is launched with
@@ -1632,7 +1663,7 @@ dedicated `run` flags for them:
   compression input for Pillow and VapourSynth fpng. Pillow receives the value
   directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;
   unsupported values fail config validation rather than being silently clamped.
-- `ffmpeg_timeout_seconds` defaults to `30.0` and must be at least `5.0`. It
+- `ffmpeg_timeout_seconds` defaults to `30.0` and must be finite and at least `5.0`. It
   controls only FFmpeg frame extraction. The separate ffprobe HDR metadata
   probe keeps its fixed `15.0` second timeout.
 
@@ -1652,6 +1683,16 @@ The implemented `[logging]` surface contains only:
 
 - `level = "INFO"`, accepting `DEBUG`, `INFO`, `WARNING`, or `ERROR`
 - `format = "console"`, accepting `console` or `json`
+
+For `run`, `orchestration.run_inputs.acquire_run_config` loads TOML and environment
+once and applies CLI overrides before admission. Logging, preview, callback policy,
+preparation, execution, and post-actions use that same acquired configuration;
+preparation rechecks filesystem containment and discovers current sources without
+reloading settings. The preview input row uses the resolved input directory.
+Environment variables in `--config` are expanded for acquisition, `--diagnose-paths`,
+and the secret-safe `--write-config` destination. The preflight timing excludes
+configuration acquisition. Only the named report auto-open preference refresh
+rereads settings later, before an interactive report-open attempt.
 
 For `run`, logging is configured only after the effective config loads and
 validates. `--quiet` forces level `WARNING`; otherwise `--verbose` forces
@@ -1873,9 +1914,13 @@ claim drift compensation or per-segment edit matching.
 The shared source-set identity includes the scoped alignment runtime fingerprint.
 That scope covers the selected standalone FFmpeg/ffprobe lineage and, because final
 authority depends on decoded frame numbering, the selected VapourSynth and
-L-SMASH-Works identity. A change misses the cache and recomputes. Resolved active
-rectangles affect video scoring but intentionally do not enter this source-relationship
-cache identity; clearing the cache forces re-verification after a crop change.
+L-SMASH-Works identity. A change misses the cache and recomputes. Each source's
+resolved active rectangle, or its explicit absence, also enters the identity
+because that region supplies video-confirmation evidence. Changing either region
+misses the cache without requiring manual clearing. Entries written before the
+active-rectangle identity revision remain on disk as historical information but
+cannot authorize reuse: their original scoring region is unknown. Unchanged
+resolved geometry remains reusable regardless of detector provenance.
 
 ## Persistence Rules
 
@@ -2030,12 +2075,11 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   temporary cleanup remains best effort.
 - After a successful write, or a true no-op, `wizard` prints a compact `Next steps`
   block to stderr: diagnose with `frame-compare doctor`, preview with `run --dry-run`,
-  then `run`. Both suggested `run` commands always carry the exact resolved `--root`
+  then `run`. All three suggestions always carry the exact resolved `--root`
   and the exact selected `--config` path, which is the same file already named in the
   no-op/write confirmation, including the Windows portable fallback file when that
   exception applies, so a suggestion cannot silently target a different workspace or
-  config. `doctor` is suggested with no options, matching its actual supported
-  surface. These are suggestions only; the wizard never executes them. POSIX values
+  config. These are suggestions only; the wizard never executes them. POSIX values
   are quoted with `shlex.quote`; Windows values use PowerShell literal single-quoted
   strings with every single-quote delimiter, including typographic ones, doubled; the
   block names which shell its quoting targets. No
@@ -2052,6 +2096,14 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 ## `doctor` Command Contract
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
+- `--root/-r` defaults to `.`; `--config/-c` selects a file relative to that root,
+  defaulting to `config/config.toml`. Selection uses the same owner as `run`, including
+  the exact Windows portable state-file exception and shim injection. Doctor never
+  searches parent directories. Environment variables retain their normal precedence.
+- Invalid or escaping selected paths are typed top-level failures. An explicit
+  missing, nonregular, unreadable, malformed, or invalid config is a failed TMDB check
+  with config details. An absent default config uses defaults plus environment.
+  This does not change the doctor JSON schema.
 - `doctor` makes no HTTP requests and does not test slow.pics reachability. The
   `tmdb_api_key` check validates local configuration and credential format only;
   it does not contact TMDB. slow.pics connectivity is exercised by the

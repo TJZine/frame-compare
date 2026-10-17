@@ -267,3 +267,22 @@ async def test_locked_atomic_write_failure_is_warning_only(
     assert "Private title" not in repr(warning)
     assert "a" * 32 not in repr(warning)
     assert not cache_path.exists()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+    ],
+)
+async def test_parser_limits_miss_and_store_repairs(tmp_path: Path, content: str) -> None:
+    path = tmp_path / "tmdb.toml"
+    path.write_text(content, encoding="utf-8")
+    endpoint = "https://api.example.test/search/movie"
+    params = _search_params("Known")
+    cache = TmdbCache(path)
+    assert cache.get_search(endpoint, params) is None
+    await cache.store_search(endpoint, params, [_movie(1, "Known")])
+    assert TmdbCache(path).get_search(endpoint, params) == [_movie(1, "Known")]

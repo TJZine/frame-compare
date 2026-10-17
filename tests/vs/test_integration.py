@@ -71,6 +71,8 @@ def test_vs_integration_smoke():
         core = ensure_vs_environment()
         clip = core.std.BlankClip(width=16, height=16, format=vs.RGBS, length=1)
         out = apply_tonemap(clip, TonemapSettings(enabled=True), hdr_metadata=None)
+        assert out.applied is not None
+        out = out.clip
         frame = out.get_frame(0)
 
         assert out.width == 16
@@ -112,6 +114,7 @@ def test_libplacebo_tonemap_succeeds_in_docker():
         from frame_compare.vs import HDRMetadata, TonemapSettings, apply_tonemap
         from frame_compare.vs.env import detect_plugins
         from frame_compare.vs.tonemap_libplacebo import apply_libplacebo
+        from frame_compare.vs.types import TonemapResult, LibplaceboTonemap
 
         core = vs.core
         require_libplacebo = os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1"
@@ -148,13 +151,16 @@ def test_libplacebo_tonemap_succeeds_in_docker():
 
         if require_libplacebo:
             libplacebo_out = apply_libplacebo(clip, settings, core, hdr_metadata)
-            assert libplacebo_out is not None, (
+            assert isinstance(libplacebo_out, TonemapResult), (
                 "apply_libplacebo returned None while FRAME_COMPARE_REQUIRE_LIBPLACEBO=1; "
                 "Vulkan/libplacebo backend is not usable in this environment."
             )
-            _ = libplacebo_out.get_frame(0)
+            assert isinstance(libplacebo_out.applied.transform, LibplaceboTonemap)
+            _ = libplacebo_out.clip.get_frame(0)
 
         out = apply_tonemap(clip, settings, hdr_metadata)
+        assert out.applied is not None
+        out = out.clip
         frame = out.get_frame(0)
 
         assert out.format.id == vs.RGBS

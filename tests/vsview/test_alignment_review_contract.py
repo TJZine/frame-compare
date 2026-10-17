@@ -10,7 +10,7 @@ import pytest
 
 from frame_compare.services.alignment import _build_audio_review_map
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
-from frame_compare.services.types import AlignmentProvenance, AlignmentResult
+from frame_compare.services.types import AlignmentResult, ComparisonResolution
 from frame_compare.utils.alignment_evidence import (
     MAX_ALIGNMENT_EVIDENCE_BYTES,
     AlignmentStabilitySummary,
@@ -132,7 +132,7 @@ def _attempt_shell(
     return AudioAlignmentAttempt(
         reference_identity_digest=_REFERENCE_DIGEST,
         comparison_identity_digest=_COMPARISON_DIGEST,
-        comparison_ordinal=ordinal,  # type: ignore[arg-type]
+        comparison_ordinal=ordinal,
         status=status,  # type: ignore[arg-type]
         estimator_policy=ALIGNMENT_ESTIMATOR_POLICY,
         diagnostic_policy=_DIAGNOSTIC_POLICY,
@@ -261,7 +261,7 @@ def rejected_audio_attempt(
 
 def _collection_facts(role: str) -> AudioCollectionFacts:
     return AudioCollectionFacts(
-        role="reference" if role == "reference" else "comparison",  # type: ignore[arg-type]
+        role="reference" if role == "reference" else "comparison",
         emitted_samples=8000,
         eof_sample=8000,
         elapsed_seconds=0.25,
@@ -611,17 +611,15 @@ def test_build_audio_review_map_bounds_native_projection_for_many_chunks() -> No
         applied=False,
         audio_attempt=attempt,
     )
-    provenance = AlignmentProvenance(
+    provenance = ComparisonResolution(
         result=result,
         comparison_cache_key="ref:a",
-        provenance="computed_this_run",
-        evidence_availability="current_attempt",
+        origin="computed_this_run",
     )
     payloads = _build_audio_review_map(
         reference=reference,
         comparisons=[comparison],
-        results_map={"ref:a": result},
-        provenances={"ref:a": provenance},
+        resolutions={"ref:a": provenance},
     )
 
     review = payloads["ref:a"]
@@ -881,3 +879,20 @@ def test_session_rejects_preexisting_result(tmp_path: Path) -> None:
             sessions_dir=session.sessions_dir,
             require_result_absent=True,
         )
+
+
+@pytest.mark.parametrize(
+    "content", [pytest.param("[" * 10000, id="deep"), pytest.param("1" * 5000, id="integer-limit")]
+)
+def test_result_decode_limits_are_unreadable(tmp_path: Path, content: str) -> None:
+    session = _session(tmp_path)
+    session.result_path.write_text(content, encoding="utf-8")
+    with pytest.raises(AlignmentReviewContractError, match="result is unreadable"):
+        read_alignment_review_result(session, _expected())
+
+
+def test_result_duplicate_key_keeps_hook_diagnostic(tmp_path: Path) -> None:
+    session = _session(tmp_path)
+    session.result_path.write_text('{"schema_version":1,"schema_version":1}', encoding="utf-8")
+    with pytest.raises(AlignmentReviewContractError, match="duplicate"):
+        read_alignment_review_result(session, _expected())

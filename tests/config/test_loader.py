@@ -1,5 +1,9 @@
 """Tests for configuration loading logic."""
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -366,3 +370,221 @@ def test_default_config_location_directory_is_rejected(
     (tmp_path / "config" / "config.toml").mkdir(parents=True)
     with pytest.raises(ConfigParseError, match="regular file"):
         load_config()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+    ],
+)
+@pytest.mark.parametrize("raw", [False, True])
+def test_parser_limits_are_typed_config_errors(tmp_path: Path, content: str, raw: bool) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(ConfigParseError, match="parser limits"):
+        if raw:
+            load_raw_config(path)
+        else:
+            load_config(path)
+
+
+def test_deep_environment_json_is_typed_config_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_TMDB", "[" * 10000)
+    with pytest.raises(ConfigValidationError):
+        load_config()
+
+
+def test_raw_config_narrowing_limits_are_typed_at_default_recursion(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[unknown" + ".nested" * 500 + "]\nvalue=1\n", encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys, tomllib
+from pathlib import Path
+from frame_compare.config.errors import ConfigParseError
+from frame_compare.config.loader import load_raw_config
+assert sys.getrecursionlimit() == 1000
+path = Path(sys.argv[1])
+tomllib.loads(path.read_text(encoding="utf-8"))
+try:
+    load_raw_config(path)
+except ConfigParseError as error:
+    assert error.code == "FC-1002"
+    assert error.__suppress_context__ and error.__cause__ is None
+else:
+    raise AssertionError("raw config nesting must fail through its typed error boundary")
+assert sys.getrecursionlimit() == 1000
+""",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize(
+    "section, field",
+    [
+        ("screenshots", "ffmpeg_timeout_seconds"),
+        ("slowpics", "timeout_seconds"),
+        ("slowpics", "image_upload_timeout_seconds"),
+        ("tmdb", "timeout_seconds"),
+    ],
+)
+@pytest.mark.parametrize("source", ["toml", "env"])
+def test_nonfinite_timeouts_are_typed_config_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, section: str, field: str, source: str
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(f"[{section}]\n{field} = inf\n" if source == "toml" else "", encoding="utf-8")
+    if source == "env":
+        monkeypatch.setenv(f"FRAME_COMPARE_{section.upper()}__{field.upper()}", "inf")
+    with pytest.raises(ConfigValidationError):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    "content", ["[tmdb]\nenabled = false\n", "[malformed"], ids=["valid-cwd", "malformed-cwd"]
+)
+def test_environment_config_never_stats_or_reads_cwd_toml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    content: str,
+) -> None:
+    from frame_compare.config.loader import load_environment_config
+
+    config_file = tmp_path / "config/config.toml"
+    config_file.parent.mkdir()
+    config_file.write_text(content)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__ENABLED", "true")
+    monkeypatch.setenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", "2048")
+    original_stat, original_read = Path.stat, Path.read_bytes
+
+    def stat(path: Path, *args, **kwargs):
+        assert path.absolute() != config_file, "environment-only loading must not stat cwd TOML"
+        return original_stat(path, *args, **kwargs)
+
+    def read(path: Path):
+        assert path.absolute() != config_file, "environment-only loading must not read cwd TOML"
+        return original_read(path)
+
+    monkeypatch.setattr(Path, "stat", stat)
+    monkeypatch.setattr(Path, "read_bytes", read)
+    config = load_environment_config()
+    assert config.tmdb.enabled is True
+    assert config.runtime.memory_limit_mb == 2048
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("FRAME_COMPARE_ANALYSIS", "["),
+        ("FRAME_COMPARE_ANALYSIS", "[" * 10000),
+        ("FRAME_COMPARE_TMDB__TIMEOUT_SECONDS", "inf"),
+        ("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB", "1.5"),
+    ],
+    ids=["malformed-json", "deep-json", "infinite-timeout", "strict-memory"],
+)
+def test_environment_only_config_keeps_typed_validation_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: str,
+) -> None:
+    from frame_compare.config.loader import load_environment_config
+
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ConfigValidationError) as raised:
+        load_environment_config()
+    assert raised.value.code == "FC-1003"
+
+
+@pytest.mark.parametrize(
+    "variable, content",
+    [
+        ("FRAME_COMPARE_ANALYSIS", "[" * 2000 + '{"api_key":"sentinel-deep-secret"}' + "]" * 2000),
+        ("FRAME_COMPARE_TMDB", "[" * 1000 + '{"api_key":"sentinel-deep-secret"}' + "]" * 1000),
+        (
+            "FRAME_COMPARE_TMDB",
+            '{"api_key":' + '{"nested":' * 1000 + '"sentinel-deep-secret"' + "}" * 1000 + "}",
+        ),
+    ],
+)
+@pytest.mark.parametrize("route", ["file", "environment"])
+def test_valid_deep_environment_shape_has_bounded_typed_error_at_default_recursion(
+    tmp_path: Path, variable: str, content: str, route: str
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    env = {key: value for key, value in os.environ.items() if not key.startswith("FRAME_COMPARE_")}
+    env[variable] = content
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import json, sys
+from pathlib import Path
+from frame_compare.config.loader import load_config, load_environment_config
+from frame_compare.config.errors import ConfigValidationError
+assert sys.getrecursionlimit() == 1000
+try:
+    if sys.argv[2] == "file":
+        load_config(Path(sys.argv[1]))
+    else:
+        load_environment_config()
+except ConfigValidationError as error:
+    print(json.dumps(error.context.to_dict()))
+else:
+    raise AssertionError("invalid section must fail validation")
+assert sys.getrecursionlimit() == 1000
+""",
+            str(path),
+            route,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert "sentinel-deep-secret" not in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["code"] == "FC-1003"
+    validation_errors = payload["details"]["validation_errors"]
+    assert validation_errors[0]["type"] == (
+        "string_type" if content.startswith('{"api_key":') else "model_type"
+    )
+    assert "input" in validation_errors[0]
+    assert len(result.stdout) < 4000
+
+
+@pytest.mark.parametrize("route", ["file", "environment"])
+@pytest.mark.parametrize("content", ["[0]", '[{"api_key":"sentinel-shallow-secret"}]'])
+def test_shallow_environment_shape_and_valid_control_keep_config_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, route: str, content: str
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    from frame_compare.config.loader import load_environment_config
+
+    def load():
+        return load_config(path) if route == "file" else load_environment_config()
+
+    monkeypatch.setenv("FRAME_COMPARE_TMDB", '{"enabled":false}')
+    assert load().tmdb.enabled is False
+    monkeypatch.setenv("FRAME_COMPARE_TMDB", content)
+    with pytest.raises(ConfigValidationError) as caught:
+        load()
+    payload = caught.value.context.to_dict()
+    assert payload["code"] == "FC-1003"
+    assert "sentinel-shallow-secret" not in json.dumps(payload)

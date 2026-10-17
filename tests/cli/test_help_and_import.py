@@ -29,7 +29,7 @@ import frame_compare.utils.terminal
 from frame_compare.cli.entry import app
 app()
 """
-    result = subprocess.run(  # noqa: S603 - explicit interpreter and CLI arguments
+    result = subprocess.run(
         [sys.executable, "-c", code, argument],
         capture_output=True,
         text=True,
@@ -299,12 +299,6 @@ _PERSISTENT_HELP_PANELS = frozenset(
 
 
 def test_run_help_panel_persistence_matches_cli_override_map() -> None:
-    """Options grouped under the three "persists" panels are exactly the CLI_OVERRIDE_MAP flags.
-
-    The run command's docstring states the persistence rule once, by panel name,
-    instead of repeating it on every option. This locks that claim to the actual
-    override map so the two cannot silently drift apart.
-    """
     command = get_command(app)
     assert isinstance(command, TyperGroup)
     run_command = command.commands["run"]
@@ -341,7 +335,6 @@ def test_run_help_does_not_repeat_persistence_clause_per_option() -> None:
     assert result.exit_code == 0
     assert "persists with --write-config" not in output
     assert "requires analysis and persists" not in output
-    # The unified explanation still appears exactly once, near the top.
     assert output.count("apply to this run only") == 1
 
 
@@ -407,7 +400,6 @@ def test_run_help_shows_three_examples() -> None:
     assert (
         "Save an override without running: frame-compare run --overlay diagnostic --write-config"
     ) in output
-    # The frames example must not claim to disable other selection categories.
     assert "only these frames" not in output
     assert "disables" not in output
 
@@ -447,3 +439,26 @@ def test_stabilize_typer_help_width_ignores_non_positive_explicit_width(
     stabilize_typer_help_width(terminal_width)
 
     assert typer_rich_utils.MAX_WIDTH == 120
+
+
+@pytest.mark.parametrize(
+    "module", ["frame_compare.orchestration.run_inputs", "frame_compare.cli.entry"]
+)
+def test_acquisition_and_cli_import_without_runtime_dependencies(module: str) -> None:
+    code = """
+import importlib
+import sys
+importlib.import_module(sys.argv[1])
+assert 'httpx' not in sys.modules
+assert 'frame_compare.orchestration.types' not in sys.modules
+assert 'frame_compare.vs.loader' not in sys.modules
+assert 'vapoursynth' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, module],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

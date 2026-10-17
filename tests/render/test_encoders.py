@@ -44,7 +44,6 @@ from frame_compare.vs.errors import SourceLoadError
 @pytest.fixture
 def mock_run_subprocess(monkeypatch):
     mock = MagicMock()
-    # Default behavior: success with empty stdout/stderr
     mock.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
     monkeypatch.setattr("frame_compare.render.encoders.run_subprocess", mock)
     return mock
@@ -75,8 +74,6 @@ def mock_apply_overlay_file(monkeypatch):
 
 
 class FakeClip:
-    """Mock for vs.VideoNode"""
-
     pass
 
 
@@ -94,7 +91,7 @@ def _overlay(mode: OverlayMode = OverlayMode.MINIMAL, *, frame: int = 0) -> Over
         source_resolution=resolution,
         signal=SourceSignalFacts(is_hdr=False),
         presentation_state=PresentationState.SDR,
-        tonemap_settings=None,
+        tonemap=None,
         geometry=RenderedGeometryFacts(
             source_size=resolution,
             active_picture=ActivePictureFacts(0, 0, *resolution, "full_frame", True),
@@ -121,7 +118,7 @@ class _FakeFpngNamespace:
         self.job = job
         self.calls: list[tuple[object, str, int, bool]] = []
 
-    def Write(  # noqa: N802
+    def Write(
         self,
         clip: object,
         filename: str,
@@ -137,7 +134,7 @@ class _FakeVsStd:
     def __init__(self, clip: "_FakeFpngClip") -> None:
         self._clip = clip
 
-    def CropRel(  # noqa: N802
+    def CropRel(
         self,
         *,
         left: int,
@@ -149,7 +146,7 @@ class _FakeVsStd:
             ("crop", {"left": left, "right": right, "top": top, "bottom": bottom})
         )
 
-    def AddBorders(  # noqa: N802
+    def AddBorders(
         self,
         *,
         left: int,
@@ -161,7 +158,7 @@ class _FakeVsStd:
             ("pad", {"left": left, "right": right, "top": top, "bottom": bottom})
         )
 
-    def SetFrameProps(self, **_props: object) -> "_FakeFpngClip":  # noqa: N802
+    def SetFrameProps(self, **_props: object) -> "_FakeFpngClip":
         return self._clip
 
 
@@ -169,7 +166,7 @@ class _FakeVsResize:
     def __init__(self, clip: "_FakeFpngClip") -> None:
         self._clip = clip
 
-    def Spline36(self, *, width: int, height: int) -> "_FakeFpngClip":  # noqa: N802
+    def Spline36(self, *, width: int, height: int) -> "_FakeFpngClip":
         return self._clip.with_op(("resize", {"width": width, "height": height}))
 
 
@@ -233,7 +230,6 @@ def test_render_frame_ffmpeg_dispatch(mock_ffmpeg_runner):
 
 
 def test_render_frame_mismatch_error():
-    # Path but renderer="vapoursynth"
     request = RenderRequest(
         clip=Path("test.mp4"),
         diagnostic_source=Path("test.mp4"),
@@ -247,7 +243,6 @@ def test_render_frame_mismatch_error():
 
 
 def test_render_frame_overlay_integration(mock_render_vs):
-    # VS Path: pass overlay to _render_vs
     clip = FakeClip()
     overlay = _overlay(frame=100)
     request = RenderRequest(
@@ -261,14 +256,11 @@ def test_render_frame_overlay_integration(mock_render_vs):
     render_frame_detailed(request, renderer="auto")
 
     mock_render_vs.assert_called_once()
-    # Check args
     call_args = mock_render_vs.call_args
-    # signature: (clip, frame, output, settings, overlay=...)
     assert call_args[1]["overlay"] == overlay
 
 
 def test_render_frame_overlay_integration_ffmpeg(mock_ffmpeg_runner, mock_apply_overlay_file):
-    # FFmpeg Path
     request = RenderRequest(
         clip=Path("test.mp4"),
         diagnostic_source=Path("test.mp4"),
@@ -538,13 +530,18 @@ def _geometry_plan(
 ) -> RenderGeometryPlan:
     crop_rect = crop_rect or GeometryRect(1, 0, 2, 4)
     pad = pad or GeometryMargins(left=1, right=1)
-    source = SourceGeometry(width=source_size[0], height=source_size[1])
+    source = SourceGeometry(
+        width=source_size[0],
+        height=source_size[1],
+        active_rect=crop_rect,
+        provenance="dimension_derived",
+    )
     source_rect = GeometryRect(0, 0, source.width, source.height)
     return RenderGeometryPlan(
         source=source,
         source_rect=source_rect,
         active_rect=crop_rect,
-        active_rect_source="dimension-derived",
+        provenance="dimension_derived",
         crop_rect=crop_rect,
         crop=GeometryMargins(left=crop_rect.x, right=source.width - crop_rect.right),
         cropped_size=(crop_rect.width, crop_rect.height),
@@ -553,7 +550,6 @@ def _geometry_plan(
         final_canvas_size=final_canvas_size,
         content_origin=(pad.left, pad.top),
         overlay_origin=(pad.left + 10, pad.top + 10),
-        source_overlay_origin=(crop_rect.x + 10, crop_rect.y + 10),
     )
 
 
@@ -735,11 +731,11 @@ class _FakeResize:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
-    def Bicubic(self, **kwargs: object) -> str:  # noqa: N802
+    def Bicubic(self, **kwargs: object) -> str:
         self.calls.append(("Bicubic", dict(kwargs)))
         return "bicubic"
 
-    def Point(self, **kwargs: object) -> str:  # noqa: N802
+    def Point(self, **kwargs: object) -> str:
         self.calls.append(("Point", dict(kwargs)))
         return "point"
 
@@ -879,8 +875,6 @@ def test_clip_to_rgb24_for_pillow_skips_expand_when_not_limited_internal_tonemap
 def test_picture_type_from_frame_props_normalizes_supported_values(
     prop_value: object, expected: str | None
 ) -> None:
-    # Intentional internal-seam coverage: render_frame tests below prove integration,
-    # while this table protects the stable `_PictType` normalization contract.
     assert normalize_picture_type(prop_value) == expected
 
 

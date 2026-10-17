@@ -302,7 +302,6 @@ def test_planning_budget_rejects_before_decode(
 def _failure_facts() -> tuple[CollectionFacts, CollectionFacts]:
     def facts(role: str) -> CollectionFacts:
         return CollectionFacts(
-            planned_end_sample=100,
             emitted_sample_count=10,
             emitted_byte_count=40,
             retained_sample_count=10,

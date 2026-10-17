@@ -2,7 +2,6 @@ const ALL_CATEGORY_FILTER_KEY = '__fc_all__';
 const DEFAULT_FRAME_CATEGORY = 'selected';
 const EMPTY_IMAGE_SRC = 'data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=';
 
-// Help and Report Information share a lifecycle; Inspector owns its own state.
 class HelpInfoDialog {
     constructor(viewer, element, trigger, closeButton) {
         this.viewer = viewer;
@@ -81,16 +80,13 @@ const ReportViewer = {
         currentFrameIdx: 0,
         leftClipIdx: 0,
         rightClipIdx: 1,
-        activeClipIdx: 0, // For overlay/blink
+        activeClipIdx: 0,
         mode: 'slider',
         zoom: 1.0,
         fitMode: 'actual',
         panX: 0,
         panY: 0,
         revealPercent: 50,
-        alignmentPreset: 'none',
-        alignX: 0,
-        alignY: 0,
         pairAlignments: {},
         blinkInterval: null,
         blinkPauseRequested: false,
@@ -154,7 +150,7 @@ const ReportViewer = {
             }
 
             this.bindInteractionEvents();
-            this.setMode(this.state.mode); // Apply default mode UI state
+            this.setMode(this.state.mode);
             this.preloadImages();
         } catch (e) {
             console.error("Failed to initialize viewer:", e);
@@ -447,7 +443,6 @@ const ReportViewer = {
                 action.key === previous.actions[index].key
                 && action.ariaLabel === previous.actions[index].ariaLabel
             ))) {
-            // Keep focused controls, but bind them to the current request generation.
             previous.actions = retryActions;
             return;
         }
@@ -780,13 +775,11 @@ const ReportViewer = {
         });
         this.dom.btnAlignmentReset.addEventListener('click', () => this.viewport.setAlignmentPreset('none'));
 
-        // Toggle popover visibility
         this.dom.btnAlignToggle.addEventListener('click', (e) => {
             e.stopPropagation();
             this.setAlignmentPopoverOpen(!this.isAlignmentPopoverOpen());
         });
 
-        // Close on outside click
         document.addEventListener('click', (e) => {
             if (
                 this.isAlignmentPopoverOpen()
@@ -797,7 +790,6 @@ const ReportViewer = {
             }
         });
 
-        // Close on Escape key
         this.dom.alignPopover.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 e.preventDefault();
@@ -957,14 +949,29 @@ const ReportViewer = {
         return idx;
     },
 
-    ensureDistinctPairSelection(mode = this.state.mode) {
-        if (!this.modeUsesDistinctPair(mode) || this.clipCount() <= 1) return;
-        if (this.state.leftClipIdx !== this.state.rightClipIdx) return;
-
-        this.state.rightClipIdx = this.nextDistinctClipIndex(
-            this.state.rightClipIdx,
-            this.state.leftClipIdx,
-        );
+    selectPair(selection = {}, { render = true } = {}) {
+        const { left, right, mode = this.state.mode, activate } = selection;
+        const previousKey = this.viewport.currentPairAlignmentKey();
+        this.state.mode = mode;
+        this.state.leftClipIdx = this.clipIndexOrDefault(left, this.state.leftClipIdx);
+        this.state.rightClipIdx = this.clipIndexOrDefault(right, this.state.rightClipIdx);
+        if (this.modeUsesDistinctPair(mode) && this.clipCount() > 1
+            && this.state.leftClipIdx === this.state.rightClipIdx) {
+            this.state.rightClipIdx = this.nextDistinctClipIndex(
+                this.state.rightClipIdx, this.state.leftClipIdx,
+            );
+        }
+        if (activate === 'left') this.state.activeClipIdx = this.state.leftClipIdx;
+        if (activate === 'right') this.state.activeClipIdx = this.state.rightClipIdx;
+        if (mode === 'blink' && this.state.activeClipIdx !== this.state.leftClipIdx
+            && this.state.activeClipIdx !== this.state.rightClipIdx) {
+            this.state.activeClipIdx = this.state.leftClipIdx;
+        }
+        if (Object.hasOwn(selection, 'left') || Object.hasOwn(selection, 'right')
+            || previousKey !== this.viewport.currentPairAlignmentKey()) {
+            this.viewport.clearRawAlignmentInputs();
+        }
+        if (render) this.render();
     },
 
     defaultPairIndexes() {
@@ -977,55 +984,20 @@ const ReportViewer = {
 
     applyDefaultSelection() {
         const [left, right] = this.defaultPairIndexes();
-
-        this.state.leftClipIdx = left;
-        this.state.rightClipIdx = right;
-        this.state.activeClipIdx = left;
-        this.ensureDistinctPairSelection();
+        this.selectPair({ left, right, activate: 'left' }, { render: false });
     },
 
     setLeftClip(idx) {
-        const nextIndex = this.clipIndexOrDefault(idx, this.state.leftClipIdx);
-        this.viewport.storeCurrentPairAlignment();
-        this.state.leftClipIdx = nextIndex;
-        this.ensureDistinctPairSelection();
-        this.viewport.loadCurrentPairAlignment();
-        if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
-        this.render();
+        this.selectPair({ left: idx });
     },
 
     setRightClip(idx) {
-        const nextIndex = this.clipIndexOrDefault(idx, this.state.rightClipIdx);
-        this.viewport.storeCurrentPairAlignment();
-        this.state.rightClipIdx = nextIndex;
-        this.ensureDistinctPairSelection();
-        this.viewport.loadCurrentPairAlignment();
-        if (this.state.mode === 'blink') {
-            this.state.activeClipIdx = this.state.rightClipIdx;
-        }
-        if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
-        this.render();
+        this.selectPair({ right: idx, activate: this.state.mode === 'blink' ? 'right' : undefined });
     },
 
     swapPairClips() {
         if (this.state.mode === 'overlay' || this.state.mode === 'grid' || this.clipCount() <= 1) return;
-
-        this.viewport.storeCurrentPairAlignment();
-        const previousLeft = this.state.leftClipIdx;
-        this.state.leftClipIdx = this.state.rightClipIdx;
-        this.state.rightClipIdx = previousLeft;
-        this.viewport.loadCurrentPairAlignment();
-        if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
-        this.render();
-    },
-
-    keepBlinkActiveInPair() {
-        if (
-            this.state.activeClipIdx !== this.state.leftClipIdx &&
-            this.state.activeClipIdx !== this.state.rightClipIdx
-        ) {
-            this.state.activeClipIdx = this.state.leftClipIdx;
-        }
+        this.selectPair({ left: this.state.rightClipIdx, right: this.state.leftClipIdx });
     },
 
     viewerStorageKey() {
@@ -1046,14 +1018,10 @@ const ReportViewer = {
 
         if (!saved || typeof saved !== 'object') return;
 
-        if (['slider', 'overlay', 'diff', 'blink', 'grid'].includes(saved.mode)) {
-            this.state.mode = saved.mode;
-        }
+        const mode = this.validMode(saved.mode) ? saved.mode : this.state.mode;
         if (['actual', 'width', 'height', 'custom'].includes(saved.fitMode)) {
             this.state.fitMode = saved.fitMode;
         }
-        this.state.leftClipIdx = this.clipIndexOrDefault(saved.leftClipIdx, this.state.leftClipIdx);
-        this.state.rightClipIdx = this.clipIndexOrDefault(saved.rightClipIdx, this.state.rightClipIdx);
         this.state.activeClipIdx = this.clipIndexOrDefault(saved.activeClipIdx, this.state.activeClipIdx);
         this.state.zoom = this.viewport.clampZoom(saved.zoom);
         this.state.panX = this.numberOrDefault(saved.panX, 0);
@@ -1087,17 +1055,15 @@ const ReportViewer = {
         ) {
             this.state.currentFrameIdx = saved.currentFrameIdx;
         }
-        this.ensureDistinctPairSelection();
+        this.selectPair({ mode, left: saved.leftClipIdx, right: saved.rightClipIdx }, { render: false });
         this.state.pairAlignments = this.viewport.normalizedPairAlignments(saved.pairAlignments);
-        this.viewport.loadCurrentPairAlignment();
+        this.viewport.clearRawAlignmentInputs();
         this.normalizeCurrentFrameForFilter();
-        if (this.state.mode === 'blink') this.keepBlinkActiveInPair();
     },
 
     persistViewerState() {
         const storage = this.localStorage();
         if (!this.state.storageKey || !storage) return false;
-        this.viewport.storeCurrentPairAlignment();
 
         const payload = {
             currentFrameIdx: this.state.currentFrameIdx,
@@ -1286,14 +1252,14 @@ const ReportViewer = {
     },
     resetCurrentPairAlignment() {
         delete this.state.pairAlignments[this.viewport.currentPairAlignmentKey()];
-        this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
+        this.viewport.clearRawAlignmentInputs();
         this.viewport.applyAlignment();
         this.persistViewerState();
     },
 
     resetAllPairAlignments() {
         this.state.pairAlignments = {};
-        this.viewport.applyAlignmentState(this.viewport.neutralAlignmentState());
+        this.viewport.clearRawAlignmentInputs();
         this.viewport.applyAlignment();
         this.persistViewerState();
     },
@@ -1655,16 +1621,12 @@ const ReportViewer = {
             this.state.panX = base.width > 0 ? this.state.panX / base.width : 0;
             this.state.panY = base.height > 0 ? this.state.panY / base.height : 0;
         }
-        this.state.mode = mode;
-        this.ensureDistinctPairSelection(mode);
-        if (mode === 'blink') this.keepBlinkActiveInPair();
+        this.selectPair({ mode }, { render: false });
 
-        // Stop blink if leaving blink mode
         if (this.state.blinkInterval && mode !== 'blink') {
             clearInterval(this.state.blinkInterval);
             this.state.blinkInterval = null;
         }
-        // Start blink if entering
         if (mode === 'blink' && !this.state.blinkInterval) {
             if (this.reducedMotionActive()) {
                 this.state.blinkPauseRequested = true;
@@ -1787,10 +1749,8 @@ const ReportViewer = {
         if (count <= 0) return;
         if (this.state.mode === 'grid') return;
         if (this.state.mode === 'slider') {
-            // Cycle left clip
             this.setLeftClip((this.state.leftClipIdx + direction + count) % count);
         } else if (this.state.mode === 'diff' || this.state.mode === 'blink') {
-            // Cycle the comparison side of the explicit pair.
             this.setRightClip(
                 this.nextDistinctClipIndex(this.state.rightClipIdx, this.state.leftClipIdx, direction)
             );
@@ -2038,11 +1998,8 @@ const ReportViewer = {
             leftAlt = `${ViewerFormat.clipAccessibleName(leftClip)} - Frame ${frameData.number}`;
             rightAlt = `${ViewerFormat.clipAccessibleName(rightClip)} - Frame ${frameData.number}`;
 
-            // For Diff mode, right layer is the "compare" one which gets difference blend
-            // Left layer is base.
 
         } else {
-            // Overlay uses the left layer as the single visible layer.
             const activeImage = frameData.images?.[this.state.activeClipIdx];
             const rightImage = frameData.images?.[this.state.rightClipIdx];
             const activeClip = this.state.data.clips[this.state.activeClipIdx];
@@ -2054,7 +2011,6 @@ const ReportViewer = {
                 return;
             }
             leftSrc = activeImage.src;
-            // Right layer remains hidden; keep its source tied to the comparison pair.
             rightSrc = rightImage.src;
 
             leftClip = activeClip;
@@ -2121,7 +2077,6 @@ const ReportViewer = {
         }
         this.normalizeCurrentFrameForFilter();
 
-        // Update controls
         this.dom.frameSelect.value = this.state.currentFrameIdx;
         this.updateFrameNavigationControls();
         this.updateFrameOptionVisibility();
@@ -2138,14 +2093,12 @@ const ReportViewer = {
         this.updatePaletteOrientation();
         this.updateBlinkControls();
         this.updateInspectorData();
-        // Update images and labels
         this.updateImages();
         this.viewport.updateSlider();
         this.viewport.applyFitMode();
         this.viewport.applyAlignment();
         this.viewport.applyPan();
 
-        // Update filmstrip active state
         Array.from(this.dom.filmstrip.children).forEach((el, idx) => {
             const frameIdx = parseInt(el.dataset.idx);
             const categoryKey = el.dataset.categoryKey

@@ -26,7 +26,8 @@ from frame_compare.config.schema import (
     TonemapPreset,
 )
 from frame_compare.errors import PathEscapesRootError
-from frame_compare.orchestration import RunRequest, RunResult
+from frame_compare.orchestration import RunResult
+from frame_compare.orchestration.run_inputs import acquire_run_config, resolve_run_workspace
 
 from .run_command_test_support import (
     DepsOptions,
@@ -42,64 +43,31 @@ from .run_command_test_support import (
 )
 
 
-def test_build_run_request_from_cli_maps_all_runtime_options() -> None:
-    request = build_run_request_from_cli(
-        RunCliOptions(
-            root=Path("/workspace"),
-            config_path=Path("/workspace/config/custom.toml"),
-            no_cache=True,
-            from_cache_only=True,
-            skip_analysis=True,
-            skip_metadata=True,
-            json_output=True,
-            no_color=True,
-            quiet=True,
-            verbose=True,
-            config_overrides=CLIConfigOverrides(
-                input_dir=Path("inputs"),
-                no_upload=True,
-                tm_preset=TonemapPreset.FILMIC,
-                tm_target_nits=203,
-                tm_curve=ToneCurve.SPLINE,
-                user_frames=[12, 24],
-                random_frame_count=17,
-                dark_frame_count=3,
-                bright_frame_count=4,
-                motion_frame_count=5,
-                seed=42,
-                overlay_mode=OverlayMode.DIAGNOSTIC,
-                force_interactive_alignment=True,
-            ),
-        )
-    )
-
-    assert request == RunRequest(
-        root=Path("/workspace"),
-        config_path=Path("/workspace/config/custom.toml"),
+def test_build_run_request_from_cli_maps_all_runtime_options(tmp_path: Path) -> None:
+    options = RunCliOptions(
+        root=tmp_path,
+        config_path=tmp_path / "config/config.toml",
+        config_overrides=CLIConfigOverrides(no_upload=True),
         no_cache=True,
         from_cache_only=True,
         skip_analysis=True,
         skip_metadata=True,
+        json_output=True,
         no_color=True,
         quiet=True,
         verbose=True,
-        json_output=True,
-        config_overrides=CLIConfigOverrides(
-            input_dir=Path("inputs"),
-            no_upload=True,
-            force_interactive_alignment=True,
-            tm_preset=TonemapPreset.FILMIC,
-            tm_target_nits=203,
-            tm_curve=ToneCurve.SPLINE,
-            user_frames=[12, 24],
-            random_frame_count=17,
-            dark_frame_count=3,
-            bright_frame_count=4,
-            motion_frame_count=5,
-            seed=42,
-            overlay_mode=OverlayMode.DIAGNOSTIC,
-        ),
     )
+    inputs = acquire_run_config(
+        root=tmp_path,
+        overrides=options.config_overrides,
+        load_config_fn=lambda config_path=None, overrides=None: get_default_config(),
+    )
+    request = build_run_request_from_cli(options, inputs)
+    assert request.inputs is inputs
+    assert request.no_cache and request.from_cache_only and request.skip_analysis
+    assert request.skip_metadata and request.json_output and request.no_color
+    assert request.quiet and request.verbose
+    assert request.inputs.config.slowpics.auto_upload is False
 
 
 @pytest.mark.parametrize(
@@ -243,7 +211,10 @@ def test_handle_json_output_omits_memory_only_review_wait(
     }
 
 
-def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> None:
+def test_handle_run_write_config_applies_cli_overrides_and_skips_runner(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    expected_config = workspace / "config" / "config.toml"
     runner = RecordingRunner()
     written_paths: list[Path] = []
     written_configs: list[ConfigSchema] = []
@@ -252,7 +223,7 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> Non
         config_path: Path | None = None,
         overrides: dict[str, object] | None = None,
     ) -> ConfigSchema:
-        assert config_path == Path("/workspace/config/config.toml")
+        assert config_path == expected_config
         assert overrides is None
         return get_default_config()
 
@@ -263,6 +234,8 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> Non
     handle_run(
         replace(
             _base_args(),
+            resolved_root=workspace,
+            config_path=expected_config,
             write_config=True,
             frames="3,5,8",
             random_frame_count="17",
@@ -280,7 +253,7 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner() -> Non
     )
 
     assert runner.requests == []
-    assert written_paths == [Path("/workspace/config/config.toml")]
+    assert written_paths == [expected_config]
     assert written_configs[0].analysis.user_frames == [3, 5, 8]
     assert written_configs[0].analysis.random_frame_count == 17
     assert written_configs[0].color.preset == TonemapPreset.FILMIC
@@ -386,12 +359,20 @@ def test_handle_run_allows_external_generated_root(mode: str) -> None:
     assert (len(written) == 1) is (mode == "write")
 
 
-def test_handle_run_allows_external_input_override() -> None:
+def test_handle_run_allows_external_input_override(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     runner = RecordingRunner()
-    external_input = Path("/external/media")
+    external_input = tmp_path / "external" / "media"
+    external_input.mkdir(parents=True)
 
     handle_run(
-        replace(_base_args(), input_dir=external_input),
+        replace(
+            _base_args(),
+            resolved_root=workspace,
+            config_path=workspace / "config" / "config.toml",
+            input_dir=external_input,
+        ),
         _deps(
             DepsOptions(
                 runner=runner,
@@ -401,7 +382,7 @@ def test_handle_run_allows_external_input_override() -> None:
     )
 
     assert len(runner.requests) == 1
-    assert runner.requests[0].config_overrides.input_dir == external_input
+    assert resolve_run_workspace(runner.requests[0].inputs).input_dir == external_input
 
 
 def test_handle_run_allows_exact_windows_portable_state_config(
@@ -432,7 +413,7 @@ def test_handle_run_allows_exact_windows_portable_state_config(
     )
 
     assert len(runner.requests) == 1
-    assert runner.requests[0].config_path == portable_config
+    assert runner.requests[0].inputs.config_path == portable_config
 
 
 def test_handle_run_write_config_error_uses_injected_error_handler() -> None:
@@ -556,3 +537,113 @@ def test_handle_run_write_config_rejects_previous_offsets_before_writing() -> No
         ("audio_alignment", "force_interactive"),
         ("audio_alignment", "previous_offsets"),
     }
+
+
+@pytest.mark.parametrize("json_output", [False, True], ids=["human", "json"])
+def test_run_keeps_admission_config_and_refreshes_only_report_preference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    json_output: bool,
+) -> None:
+    import frame_compare.cli.run_command as command
+    from frame_compare.config.loader import load_config
+
+    config_file = tmp_path / "config/config.toml"
+    config_file.parent.mkdir()
+    config_file.write_text(
+        "[audio_alignment]\nuse_vsview = false\n"
+        "[analysis]\nignore_lead_seconds = 5\n[slowpics]\nauto_upload = false\n"
+        "[report]\nauto_open = true\n"
+    )
+    calls: list[Path | None] = []
+    acquisitions = 0
+    original_acquire = command.acquire_run_config
+
+    def acquire(**kwargs):
+        nonlocal acquisitions
+        acquisitions += 1
+        return original_acquire(**kwargs)
+
+    monkeypatch.setattr(command, "acquire_run_config", acquire)
+
+    def load(config_path=None, overrides=None):
+        calls.append(config_path)
+        return load_config(config_path, overrides)
+
+    class ChangingRunner(RecordingRunner):
+        def run(self, request, dependencies=None):
+            config_file.write_text(
+                "[audio_alignment]\nuse_vsview = true\n"
+                "[analysis]\nignore_lead_seconds = 0\n[slowpics]\nauto_upload = true\n"
+                "confirm_upload_after_report = true\n[report]\nauto_open = false\n"
+            )
+            assert request.inputs.config.audio_alignment.use_vsview is False
+            assert request.inputs.config.analysis.ignore_lead_seconds == 5
+            assert request.inputs.config.slowpics.auto_upload is False
+            if json_output:
+                assert dependencies is None
+            else:
+                assert dependencies is not None
+                assert dependencies.confirm_full_window_retry is not None
+                assert dependencies.confirm_slowpics_upload is None
+            return RunResult(success=True, report_path=tmp_path / "report.html")
+
+    opened: list[Path] = []
+    deps = _deps(
+        DepsOptions(
+            runner=ChangingRunner(), load_config=load, stdin_is_tty=True, stdout_is_tty=True
+        ),
+        opened,
+    )
+    handle_run(
+        replace(
+            _base_args(),
+            resolved_root=tmp_path,
+            config_path=config_file,
+            quiet=False,
+            json_output=json_output,
+        ),
+        deps,
+    )
+    assert acquisitions == 1
+    assert calls == [config_file] * (1 if json_output else 2)
+    assert opened == []
+    if json_output:
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["success"] is True
+
+
+@pytest.mark.parametrize("write", [False, True], ids=["diagnose", "write"])
+def test_environment_selected_config_path_is_used_for_read_and_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    write: bool,
+) -> None:
+    selected = tmp_path / "config/selected.toml"
+    selected.parent.mkdir()
+    selected.write_text("[paths]\ninput_dir = 'inputs'\n")
+    monkeypatch.setenv("P5_SELECTED_CONFIG", str(selected))
+    from frame_compare.config.loader import load_config
+
+    writes: list[Path] = []
+    deps = _deps(
+        DepsOptions(
+            load_config=load_config, write_config_to=lambda path, config: writes.append(path)
+        )
+    )
+    handle_run(
+        replace(
+            _base_args(),
+            resolved_root=tmp_path,
+            config_path=Path("$P5_SELECTED_CONFIG"),
+            diagnose_paths=not write,
+            write_config=write,
+        ),
+        deps,
+    )
+    if write:
+        assert writes == [selected]
+    else:
+        assert json.loads(capsys.readouterr().out)["config"] == str(selected)

@@ -1,6 +1,8 @@
 name: Windows portable
 
 on:
+  push:
+    branches: [main, pre-release]
   pull_request:
   workflow_dispatch:
     inputs:
@@ -51,7 +53,7 @@ jobs:
 
   verify_pull_request:
     name: Verify unsigned Windows portable artifacts
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
     permissions:
       contents: read
     uses: ./.github/workflows/windows-portable-build.yml
@@ -78,6 +80,7 @@ jobs:
           DISPATCH_REF_NAME: ${{ github.ref_name }}
           DISPATCH_REF_PROTECTED: ${{ github.ref_protected }}
           DISPATCH_REF_TYPE: ${{ github.ref_type }}
+          VERIFY_CHANNEL: ${{ inputs.channel }}
           DISPATCH_SHA: ${{ github.sha }}
           EXPECTED_SHA: ${{ inputs.expected_sha || github.sha }}
         run: |
@@ -86,16 +89,16 @@ jobs:
             echo "expected_sha must be an exact 40-character lowercase commit SHA." >&2
             exit 1
           fi
-          if [[ "$DISPATCH_REF_TYPE" != "branch" && "$DISPATCH_REF_TYPE" != "tag" ]]; then
-            echo "Signed verification must be dispatched from a branch or tag." >&2
+          expected_branch="pre-release"
+          if [[ "$VERIFY_CHANNEL" == "stable" ]]; then
+            expected_branch="main"
+          fi
+          if [[ "$DISPATCH_REF_TYPE" != "branch" || "$DISPATCH_REF_NAME" != "$expected_branch" ]]; then
+            echo "Signed verification must use the channel's stable integration branch: $expected_branch." >&2
             exit 1
           fi
           if [[ "$DISPATCH_REF_PROTECTED" != "true" ]]; then
             echo "Signed verification refs must be protected by a branch or tag rule." >&2
-            exit 1
-          fi
-          if [[ "$DISPATCH_REF_TYPE" == "tag" && ! "$DISPATCH_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
-            echo "Signed verification tags must use the release tag format." >&2
             exit 1
           fi
           if [[ "$EXPECTED_SHA" != "$DISPATCH_SHA" ]]; then
@@ -127,6 +130,7 @@ jobs:
       attestations: write
       contents: write
       id-token: write
+      pull-requests: read
     concurrency:
       group: frame-compare-release-${{ inputs.tag }}
       cancel-in-progress: false

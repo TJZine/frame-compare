@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import math
 import tomllib
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeGuard, cast, get_args
@@ -13,11 +15,12 @@ import structlog
 import tomli_w
 
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
+from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_sources import require_current_alignment_sources
 from frame_compare.services.types import (
-    AlignmentProvenance,
     AlignmentResult,
     AlignmentReuseCacheOrigin,
+    ComparisonResolution,
     ReusableAlignmentEntry,
 )
 from frame_compare.utils.alignment_evidence import (
@@ -27,11 +30,13 @@ from frame_compare.utils.alignment_evidence import (
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.file_lock import exclusive_file_lock
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
 CACHE_VERSION = "2"
 CACHE_FILE_NAME = "alignment_reuse.toml"
+_ACTIVE_RECT_IDENTITY_VERSION = "1"
 
 log = structlog.get_logger()
 
@@ -64,7 +69,18 @@ def _clip_identity_dict(clip: AlignmentClipRequest) -> dict[str, _TomlValue]:
         "trim_start_frames": clip.trim_start_frames,
         "effective_fps_num": clip.effective_fps_num,
         "effective_fps_den": clip.effective_fps_den,
+        "active_rect_identity_version": _ACTIVE_RECT_IDENTITY_VERSION,
+        "active_rect": "absent" if clip.active_rect_x is None else "resolved",
     }
+    if clip.active_rect_x is not None:
+        data.update(
+            {
+                "active_rect_x": clip.active_rect_x,
+                "active_rect_y": clip.active_rect_y,
+                "active_rect_width": clip.active_rect_width,
+                "active_rect_height": clip.active_rect_height,
+            }
+        )
     if clip.trim_end_frame_inclusive is not None:
         data["trim_end_frame_inclusive"] = clip.trim_end_frame_inclusive
     if clip.selected_audio_stream is not None:
@@ -122,7 +138,7 @@ def _load_cache_data(cache_path: Path) -> dict[str, object] | None:
     try:
         with cache_path.open("rb") as handle:
             data = cast(dict[str, object], tomllib.load(handle))
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError) as exc:
+    except (OSError, *SERIALIZED_DECODE_FAILURES) as exc:
         log.warning(
             "alignment_reuse_cache_unreadable",
             path=str(cache_path),
@@ -461,42 +477,67 @@ def load_reusable_offset_entries(
     return results
 
 
-def _origin_for_provenance(provenance: AlignmentProvenance) -> AlignmentReuseCacheOrigin | None:
-    if provenance.provenance in {"computed_this_run", "shared_computed_offsets"}:
+def _cache_origin(resolution: ComparisonResolution) -> AlignmentReuseCacheOrigin | None:
+    if resolution.origin in {"computed_this_run", "shared_computed_offsets"}:
         return "computed"
-    if provenance.provenance == "interactive_confirmed_this_run":
+    if resolution.origin == "interactive_confirmed_this_run":
         return "interactive_confirmed"
     return None
 
 
-def _is_write_eligible(provenance: AlignmentProvenance) -> bool:
-    result = provenance.result
-    origin = _origin_for_provenance(provenance)
-    if origin is None or not result.applied:
-        return False
-    if provenance.provenance == "computed_this_run":
-        attempt = result.audio_attempt
-        return (
-            attempt is not None
-            and attempt.decision.state == "trusted_automatic"
-            and result.stability is not None
-        )
-    if provenance.provenance == "shared_computed_offsets":
-        return result.stability is not None
-    return provenance.computed_result is None or provenance.computed_result.stability is not None
+@dataclass(frozen=True, slots=True)
+class ReusableSourceSetCandidate:
+    """Complete publication admitted for one exact requested source set."""
+
+    source_set_key: str
+    resolutions: tuple[ComparisonResolution, ...]
 
 
-def _entry_from_provenance(
-    provenance: AlignmentProvenance,
+def prepare_reusable_source_set(
+    request: AlignmentRequest, resolutions: Mapping[str, ComparisonResolution]
+) -> ReusableSourceSetCandidate | None:
+    if not request.comparisons:
+        return None
+    prepared: list[ComparisonResolution] = []
+    for comparison in request.comparisons:
+        item = resolutions.get(alignment_key(request.reference.path, comparison.path))
+        if item is None or item.comparison_cache_key != comparison_cache_key(comparison):
+            return None
+        result = item.result
+        if _cache_origin(item) is None or not result.applied:
+            return None
+        if item.origin == "computed_this_run":
+            attempt = result.audio_attempt
+            if (
+                attempt is None
+                or attempt.decision.state != "trusted_automatic"
+                or result.stability is None
+            ):
+                return None
+        elif item.origin == "shared_computed_offsets":
+            if result.stability is None:
+                return None
+        elif item.computed_fallback is not None and item.computed_fallback.stability is None:
+            return None
+        prepared.append(item)
+    if not any(
+        item.origin in {"computed_this_run", "interactive_confirmed_this_run"} for item in prepared
+    ):
+        return None
+    return ReusableSourceSetCandidate(source_set_cache_key(request), tuple(prepared))
+
+
+def _entry_from_resolution(
+    resolution: ComparisonResolution,
     *,
     request: AlignmentRequest,
     comparison: AlignmentClipRequest,
     accepted_at: str,
 ) -> dict[str, object]:
-    origin = _origin_for_provenance(provenance)
+    origin = _cache_origin(resolution)
     if origin is None:
-        raise ValueError("ineligible shared alignment provenance")
-    result = provenance.result
+        raise ValueError("ineligible shared alignment resolution")
+    result = resolution.result
     entry: dict[str, object] = {
         "reference_clip": request.reference.path.name,
         "comparison_clip": comparison.path.name,
@@ -514,8 +555,8 @@ def _entry_from_provenance(
             raise ValueError("computed stability is required")
         entry["correlation_score"] = result.correlation_score
         entry["stability"] = _stability_dict(result.stability)
-    elif provenance.computed_result is not None:
-        computed = provenance.computed_result
+    elif resolution.computed_fallback is not None:
+        computed = resolution.computed_fallback
         if computed.frame_offset is not None and computed.time_offset_seconds is not None:
             if computed.stability is None:
                 raise ValueError("computed_result.stability is required")
@@ -544,38 +585,23 @@ def _accepted_at_now() -> str:
 
 def save_reusable_offsets(
     request: AlignmentRequest,
-    provenances: list[AlignmentProvenance],
+    candidate: ReusableSourceSetCandidate,
     *,
     accepted_at: str | None = None,
 ) -> None:
-    """Persist a complete current-run accepted source set to the shared cache.
-
-    If any requested comparison is missing or has ineligible provenance, nothing is written.
-    """
+    """Persist a prepared source set after rechecking source freshness."""
     require_current_alignment_sources(request)
-    if not request.comparisons:
-        return
-    by_comparison_key = {item.comparison_cache_key: item for item in provenances}
-    request_comparison_keys = [
-        comparison_cache_key(comparison) for comparison in request.comparisons
-    ]
-    if any(comparison_key not in by_comparison_key for comparison_key in request_comparison_keys):
-        return
-    if any(
-        not _is_write_eligible(by_comparison_key[comparison_key])
-        for comparison_key in request_comparison_keys
-    ):
-        return
+    if candidate.source_set_key != source_set_cache_key(request):
+        raise ValueError("alignment candidate belongs to a different source set")
 
     cache_path = _cache_path(request)
     source_set_key = source_set_cache_key(request)
     accepted_at_value = accepted_at if accepted_at is not None else _accepted_at_now()
     entries: dict[str, object] = {}
-    for comparison in request.comparisons:
+    for comparison, resolution in zip(request.comparisons, candidate.resolutions, strict=True):
         comparison_key = comparison_cache_key(comparison)
-        provenance = by_comparison_key[comparison_key]
-        entries[comparison_key] = _entry_from_provenance(
-            provenance,
+        entries[comparison_key] = _entry_from_resolution(
+            resolution,
             request=request,
             comparison=comparison,
             accepted_at=accepted_at_value,

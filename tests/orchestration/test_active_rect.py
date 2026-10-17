@@ -497,3 +497,49 @@ def test_post_refinement_ratio_respects_maximum_removal_limit() -> None:
     )
 
     assert propagated[-1].active_rect == unresolved.active_rect
+
+
+@pytest.mark.parametrize(
+    ("source", "provenance"),
+    [
+        ("explicit", "explicit"),
+        ("metadata", "dolby_vision_l5"),
+        ("dimension-derived", "dimension_derived"),
+        ("aspect-ratio-derived", "aspect_ratio_derived"),
+        ("content-derived", "content_derived"),
+        ("full-frame", "full_frame"),
+    ],
+)
+def test_active_picture_provenance_projection(source, provenance) -> None:
+    from frame_compare.orchestration.active_rect import active_picture_provenance_from_rect_source
+
+    assert active_picture_provenance_from_rect_source(source) == provenance
+
+
+def test_isolated_ultrawide_outlier_does_not_change_supported_full_frame_ratio() -> None:
+    clips = [
+        _clip("wide.mkv", width=3000, height=1000),
+        _clip("a.mkv", width=3840, height=2160),
+        _clip("b.mkv", width=3840, height=2160),
+    ]
+    resolved = resolve_active_rects_for_clips(
+        clips=clips, overrides_by_path={}, detection=ScreenshotActiveRectDetection.ASPECT_RATIO
+    )
+    rects = [clip.active_rect for clip in resolved]
+    assert all(rect is not None for rect in rects)
+    assert [rect.source for rect in rects if rect is not None] == ["full-frame"] * 3
+    assert [(rect.width, rect.height) for rect in rects if rect is not None] == [
+        (3000, 1000),
+        (3840, 2160),
+        (3840, 2160),
+    ]
+
+
+def test_invalid_projection_source_fails_explicitly() -> None:
+    from typing import cast
+
+    from frame_compare.orchestration.active_rect import active_picture_provenance_from_rect_source
+    from frame_compare.orchestration.context import ClipActiveRectSource
+
+    with pytest.raises(AssertionError):
+        active_picture_provenance_from_rect_source(cast(ClipActiveRectSource, "invalid"))

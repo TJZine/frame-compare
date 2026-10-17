@@ -15,23 +15,22 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 pytest.importorskip("vsview")
 
-# Qt must see the offscreen platform before PySide6 and VSView are imported.
-from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
-from vsengine.loops import get_loop, set_loop  # noqa: E402
-from vsview.vsenv import QtEventLoop  # noqa: E402
+from PySide6.QtCore import Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from vsengine.loops import get_loop, set_loop
+from vsview.vsenv import QtEventLoop
 
-from frame_compare.services.alignment import _build_audio_review_map  # noqa: E402
-from frame_compare.services.alignment_keys import alignment_key  # noqa: E402
-from frame_compare.services.types import AlignmentProvenance, AlignmentResult  # noqa: E402
-from frame_compare.utils.alignment_evidence import (  # noqa: E402
+from frame_compare.services.alignment import _build_audio_review_map
+from frame_compare.services.alignment_keys import alignment_key
+from frame_compare.services.types import AlignmentResult, ComparisonResolution
+from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
 )
-from frame_compare.utils.alignment_review_projection import (  # noqa: E402
+from frame_compare.utils.alignment_review_projection import (
     build_audio_review_presentation,
 )
-from frame_compare.vsview.alignment_review_contract import (  # noqa: E402
+from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
     ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
     ALIGNMENT_REVIEW_METADATA_NAME_KEY,
@@ -42,11 +41,22 @@ from frame_compare.vsview.alignment_review_contract import (  # noqa: E402
     ALIGNMENT_REVIEW_METADATA_VERSION,
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
 )
-from frame_compare.vsview.alignment_review_panel import (  # noqa: E402
+from frame_compare.vsview.alignment_review_panel import (
     AlignmentReviewPanel,
     vsview_register_toolpanel,
 )
-from tests.alignment_review_test_support import (  # noqa: E402
+from tests.alignment_review_scenarios import (
+    audio_failed_video_confirmed_attempt,
+    boundary_video_inconclusive_attempt,
+    established_counts_attempt,
+    multi_context_attempt,
+    production_nested_targets_attempt,
+    resolved_run_context_attempt,
+    review_attempt,
+    singleton_chunk_target_attempt,
+    target_context_attempt,
+)
+from tests.alignment_review_test_support import (
     audio_review as _audio_review,
 )
 from tests.alignment_review_test_support import (
@@ -54,18 +64,7 @@ from tests.alignment_review_test_support import (
     trusted_audio_attempt,
     unavailable_audio_attempt,
 )
-from tests.services.test_alignment_evidence import retimed_comparison_stream, stream
-from tests.services.test_alignment_frozen_strings import (
-    _audio_failed_video_confirmed_attempt,
-    _boundary_video_inconclusive_attempt,
-    _multi_context_attempt,
-    _producer_count_attempt,
-    _producer_run_context_attempt,
-    _producer_target_context_attempt,
-    _production_nested_targets_attempt,
-    _review_attempt,
-    _singleton_chunk_target_attempt,
-)
+from tests.services.alignment_evidence_test_support import retimed_comparison_stream, stream
 
 _SESSION_ID = "12345678123456781234567812345678"
 _APP = QApplication.instance() or QApplication([])
@@ -454,7 +453,7 @@ def test_evidence_details_toggle_works_from_keyboard_and_stays_collapsed_by_defa
 @pytest.mark.parametrize("boundary", [False, True], ids=["singleton", "nearby-video"])
 def test_panel_summary_preserves_target_boundary_copy(tmp_path: Path, boundary: bool) -> None:
     attempt = (
-        _boundary_video_inconclusive_attempt() if boundary else _singleton_chunk_target_attempt()
+        boundary_video_inconclusive_attempt() if boundary else singleton_chunk_target_attempt()
     )
     panel, _api, _script = _panel(
         tmp_path, suggestion=None, audio_review=_attempt_audio_review(attempt)
@@ -477,7 +476,7 @@ def test_panel_summary_preserves_target_boundary_copy(tmp_path: Path, boundary: 
 def test_actual_native_payload_omits_rows_and_matches_full_terminal_and_panel_copy(
     tmp_path: Path,
 ) -> None:
-    attempt = _production_nested_targets_attempt()
+    attempt = production_nested_targets_attempt()
     reference = Path("reference.mkv")
     comparison = Path("comparison.mkv")
     key = alignment_key(reference, comparison)
@@ -497,13 +496,11 @@ def test_actual_native_payload_omits_rows_and_matches_full_terminal_and_panel_co
     native_review = _build_audio_review_map(
         reference=reference,
         comparisons=[comparison],
-        results_map={key: result},
-        provenances={
-            key: AlignmentProvenance(
+        resolutions={
+            key: ComparisonResolution(
                 result=result,
                 comparison_cache_key="key",
-                provenance="computed_this_run",
-                evidence_availability="current_attempt",
+                origin="computed_this_run",
             )
         },
     )[key]
@@ -584,7 +581,7 @@ def test_panel_target_context_semantic_matrix(
     expected_state: str,
     expected_noted: str | None,
 ) -> None:
-    attempt = _producer_target_context_attempt(credible=credible, resolution=resolution)
+    attempt = target_context_attempt(credible=credible, resolution=resolution)
     applied = expected_state == "trusted_automatic"
     panel, _api, _script = _panel(
         tmp_path,
@@ -643,7 +640,7 @@ def test_panel_resolved_run_context_matrix(
     expected_context: tuple[str, ...],
 ) -> None:
     resolutions = ("resolved",) if shape == "run" else ("resolved", "resolved")
-    attempt = _producer_run_context_attempt(shape=shape, resolutions=resolutions)
+    attempt = resolved_run_context_attempt(shape=shape, resolutions=resolutions)
     panel, _api, _script = _panel(
         tmp_path, suggestion=0, audio_review=_attempt_audio_review(attempt, applied=True)
     )
@@ -672,7 +669,7 @@ def test_panel_established_counts_matrix(
     agreeing: int,
     expected: str,
 ) -> None:
-    attempt = _producer_count_attempt(
+    attempt = established_counts_attempt(
         planned=planned,
         active=active,
         credible=credible,
@@ -1229,7 +1226,7 @@ def test_deactivation_clears_only_owned_marker_group(tmp_path: Path, next_worksp
 def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
     tmp_path: Path,
 ) -> None:
-    attempt = _review_attempt("competing_offset_confirmed_by_video")
+    attempt = review_attempt("competing_offset_confirmed_by_video")
     audio_review = json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
@@ -1277,11 +1274,11 @@ def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
 def test_panel_details_preserve_context_rows(tmp_path: Path, retimed: bool) -> None:
     attempt = (
         replace(
-            _producer_target_context_attempt(credible=False, resolution="unexamined"),
+            target_context_attempt(credible=False, resolution="unexamined"),
             selected_streams=(stream("reference"), retimed_comparison_stream()),
         )
         if retimed
-        else _multi_context_attempt()
+        else multi_context_attempt()
     )
     panel, _api, _script = _panel(
         tmp_path,
@@ -1341,9 +1338,9 @@ def test_p4a_panel_covers_each_non_applied_reason(
     tmp_path: Path, reason: str, expected: str
 ) -> None:
     attempt = (
-        _audio_failed_video_confirmed_attempt()
+        audio_failed_video_confirmed_attempt()
         if reason == "no_single_offset"
-        else _review_attempt(reason)
+        else review_attempt(reason)
     )
     audio_review = json.dumps(
         {
@@ -1386,7 +1383,7 @@ def test_evidence_is_built_once_per_comparison_and_replaced_with_workspace(
         comparison_count=2,
         suggestion=None,
         audio_reviews=(
-            _attempt_audio_review(_production_nested_targets_attempt()),
+            _attempt_audio_review(production_nested_targets_attempt()),
             _provisional_audio_review(ordinal=2, frame_offset=7),
         ),
     )

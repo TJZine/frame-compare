@@ -205,6 +205,8 @@ def test_verifier_selects_pytest_paths_and_default_exclusion(
     )
     assert result.returncode == 17
     command = shlex.split(invocation.splitlines()[-1])
+    environment = _docker_environment_args(invocation)
+    assert ("FRAME_COMPARE_U4_MEDIA_FULL=1" in environment) is not explicit
     if explicit:
         assert command[-1] == RESOURCE_TEST
         assert "--ignore=" + RESOURCE_TEST not in command

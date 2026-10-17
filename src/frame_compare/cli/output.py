@@ -30,13 +30,9 @@ from frame_compare.utils.terminal_theme import (
 )
 
 if TYPE_CHECKING:
-    from frame_compare.config.overrides import TonemapCliOverrides
-    from frame_compare.config.schema import ConfigSchema
-    from frame_compare.orchestration.coordinator import RunRequest, RunResult
-    from frame_compare.vs.types import TonemapSettings
+    from frame_compare.orchestration.coordinator import RunResult
+    from frame_compare.orchestration.run_inputs import AcquiredRunConfig
 
-# ── Theme constants ────────────────────────────────────────────────────────────
-# Role-based color vocabulary inspired by the legacy CLI layout engine.
 
 STYLE_UNIT = "dim"
 STYLE_PATH = "dim"
@@ -45,8 +41,6 @@ STYLE_WARN = "yellow"
 
 @dataclass(frozen=True)
 class WarningPresentation:
-    """CLI-local warning row with an optional follow-up action association."""
-
     source: WarningSource
     severity: WarningSeverity
     message: str
@@ -54,11 +48,7 @@ class WarningPresentation:
     action: str | None = None
 
 
-# ── Formatting helpers ─────────────────────────────────────────────────────────
-
-
 def _styled_value(value: str) -> str:
-    # S3 VALUE is the terminal default foreground: values carry no style.
     if VALUE:
         return f"[{VALUE}]{escape(value)}[/]"
     return escape(value)
@@ -81,7 +71,6 @@ def _absolute_display_path(path: Path, root: Path | None) -> Path:
 
 
 def format_display_path(path: Path, *, root: Path | None) -> str:
-    """Render a plain path relative to its root when it is contained."""
     absolute = _absolute_display_path(path, root)
     if root is None:
         return str(path)
@@ -99,7 +88,6 @@ def _display_path(
     root: Path | None,
     verbose: bool = False,
 ) -> str:
-    """Render a complete path relative to the workspace when it is contained."""
     display = format_display_path(path, root=root)
     rendered = _styled_path(display)
     absolute = _absolute_display_path(path, root)
@@ -118,7 +106,6 @@ def _humanize(value: str) -> str:
 
 
 def _group_table() -> Table:
-    """Create a borderless two-column table for key-value rows."""
     table = Table(show_header=False, box=None, pad_edge=False, padding=(0, 1, 0, 0))
     table.add_column("key", style=KEY, min_width=22, overflow="fold")
     table.add_column("value", overflow="fold")
@@ -126,17 +113,14 @@ def _group_table() -> Table:
 
 
 def _add_section(table: Table, name: str, value: str) -> None:
-    """Add a section row with the name in accent and the value on the same row."""
     table.add_row(f"[bold {ACCENT} not dim]{name}[/]", value)
 
 
 def _dot_join(parts: Sequence[str]) -> str:
-    """Join plain value segments with the muted `·` separator."""
     return "[dim] · [/]".join(escape(part) for part in parts)
 
 
 def _lower_first(text: str) -> str:
-    """Lower-case the first letter of a sentence-style value."""
     if not text:
         return text
     return text[0].lower() + text[1:]
@@ -150,7 +134,6 @@ def _format_tools_row(
     vsview_requested: bool,
     vsview_status: str | None,
 ) -> str:
-    """Format the Run plan tools row with availability notes."""
     if not alignment_enabled:
         ffmpeg_entry = f"{glyphs.skipped} FFmpeg audio"
     elif ffmpeg_available:
@@ -174,51 +157,33 @@ def _format_tools_row(
 
 
 def _add_kv(table: Table, key: str, value: str) -> None:
-    """Add an indented key-value row."""
     table.add_row(f"  {key}", value)
 
 
 def _add_separator(table: Table) -> None:
-    """Add a blank separator row."""
     table.add_row("", "")
-
-
-# ── Tonemap settings resolution ───────────────────────────────────────────────
-
-
-def _resolve_preview_tonemap_settings(config: ConfigSchema, request: RunRequest) -> TonemapSettings:
-    from frame_compare.render.prepare import resolve_tonemap_settings
-
-    overrides: TonemapCliOverrides = {
-        "tm_preset": request.config_overrides.tm_preset,
-        "tm_target": request.config_overrides.tm_target_nits,
-        "tm_curve": request.config_overrides.tm_curve,
-    }
-    return resolve_tonemap_settings(config, overrides)
-
-
-# ── Run plan ──────────────────────────────────────────────────────────────────
 
 
 def print_at_a_glance(
     console: Console,
     *,
-    request: RunRequest,
-    config: ConfigSchema,
-    root: Path,
-    config_path: Path,
+    inputs: AcquiredRunConfig,
+    no_cache: bool,
+    from_cache_only: bool,
+    skip_analysis: bool,
+    skip_metadata: bool,
+    no_upload_flag: bool,
     verbose: bool = False,
 ) -> None:
-    from frame_compare.orchestration.preflight import resolve_paths
+    from frame_compare.orchestration.run_inputs import resolve_run_workspace
+    from frame_compare.render.prepare import resolve_tonemap_settings
 
-    workspace = resolve_paths(config, root)
-    overrides = request.config_overrides
-
+    config = inputs.config
+    root, config_path = inputs.root, inputs.config_path
+    workspace = resolve_run_workspace(inputs)
     vsview_status: str | None = None
-    use_vsview = config.audio_alignment.use_vsview or overrides.force_interactive_alignment
-    force_interactive = (
-        config.audio_alignment.force_interactive or overrides.force_interactive_alignment
-    )
+    use_vsview = config.audio_alignment.use_vsview
+    force_interactive = config.audio_alignment.force_interactive
     if use_vsview or force_interactive:
         from frame_compare.vsview.adapter import (
             VSViewAvailabilityStatus,
@@ -243,32 +208,14 @@ def print_at_a_glance(
     else:
         ffmpeg_available = True
     workspace_root = root.resolve()
-    input_path = overrides.input_dir if overrides.input_dir is not None else workspace.input_dir
+    input_path = workspace.input_dir
     analysis = config.analysis
-    user_frames = (
-        overrides.user_frames if overrides.user_frames is not None else analysis.user_frames
-    )
-    random_frame_count = (
-        overrides.random_frame_count
-        if overrides.random_frame_count is not None
-        else analysis.random_frame_count
-    )
-    dark_frame_count = (
-        overrides.dark_frame_count
-        if overrides.dark_frame_count is not None
-        else analysis.dark_frame_count
-    )
-    bright_frame_count = (
-        overrides.bright_frame_count
-        if overrides.bright_frame_count is not None
-        else analysis.bright_frame_count
-    )
-    motion_frame_count = (
-        overrides.motion_frame_count
-        if overrides.motion_frame_count is not None
-        else analysis.motion_frame_count
-    )
-    random_seed = overrides.seed if overrides.seed is not None else analysis.random_seed
+    user_frames = analysis.user_frames
+    random_frame_count = analysis.random_frame_count
+    dark_frame_count = analysis.dark_frame_count
+    bright_frame_count = analysis.bright_frame_count
+    motion_frame_count = analysis.motion_frame_count
+    random_seed = analysis.random_seed
     requested_total = (
         len(user_frames)
         + random_frame_count
@@ -276,19 +223,19 @@ def print_at_a_glance(
         + bright_frame_count
         + motion_frame_count
     )
-    overlay_mode = overrides.overlay_mode or config.screenshots.overlay_mode
+    overlay_mode = config.screenshots.overlay_mode
     tonemap_enabled = config.color.enable_tonemap
     alignment_enabled = config.audio_alignment.enable
-    upload_enabled = config.slowpics.auto_upload and not overrides.no_upload
+    upload_enabled = config.slowpics.auto_upload
     report_confirmed_upload = upload_enabled and config.slowpics.confirm_upload_after_report
     glyphs = glyphs_for_console(console)
 
     source_policy = config.sources.analysis_source.replace("_", " ")
     cache_policy = (
         "cache only"
-        if request.from_cache_only
+        if from_cache_only
         else "refresh current entry"
-        if request.no_cache
+        if no_cache
         else "read and write"
     )
     if analysis.ignore_lead_seconds == 0.0 and analysis.ignore_trail_seconds == 0.0:
@@ -310,7 +257,7 @@ def print_at_a_glance(
             f"active area {_humanize(config.screenshots.active_rect_detection.value).lower()}",
         ]
     )
-    tonemap_settings = _resolve_preview_tonemap_settings(config, request)
+    tonemap_settings = resolve_tonemap_settings(config)
     if not tonemap_enabled:
         tonemap_text = _styled_value("disabled")
     else:
@@ -347,11 +294,9 @@ def print_at_a_glance(
         review_text = _dot_join(["HTML report", "opens when done"])
     else:
         review_text = _styled_value("HTML report")
-    metadata_text = "TMDB lookup" if not request.skip_metadata else "disabled"
+    metadata_text = "TMDB lookup" if not skip_metadata else "disabled"
     if not upload_enabled:
-        publishing_text = _styled_value(
-            "disabled by --no-upload" if overrides.no_upload else "disabled"
-        )
+        publishing_text = _styled_value("disabled by --no-upload" if no_upload_flag else "disabled")
     elif report_confirmed_upload:
         publishing_text = _dot_join(
             [
@@ -384,7 +329,6 @@ def print_at_a_glance(
 
     table = _group_table()
 
-    # ── Workspace ──
     _add_section(table, "Workspace", _styled_path(str(workspace_root)))
     _add_kv(table, "config", _display_path(config_path, root=workspace_root, verbose=verbose))
     _add_kv(table, "input", _display_path(input_path, root=workspace_root, verbose=verbose))
@@ -394,7 +338,6 @@ def print_at_a_glance(
         _display_path(workspace.generated_root, root=workspace_root, verbose=verbose),
     )
 
-    # ── Frames ──
     _add_separator(table)
     _add_section(table, "Frames", _styled_value(f"{requested_total} total"))
     categories = [
@@ -415,7 +358,7 @@ def print_at_a_glance(
         f"{_humanize(config.analysis.performance_mode.value).lower()} profile",
         f"{source_policy} source",
     ]
-    if request.skip_analysis:
+    if skip_analysis:
         analysis_parts.append("skipped for this run")
     _add_kv(table, "analysis", _dot_join(analysis_parts))
     _add_kv(table, "cache", _styled_value(cache_policy))
@@ -423,25 +366,21 @@ def print_at_a_glance(
     if random_frame_count:
         _add_kv(table, "seed", _styled_value(str(random_seed)))
 
-    # ── Rendering ──
     _add_separator(table)
     _add_section(table, "Rendering", renderer)
     _add_kv(table, "overlay", _styled_value(overlay_mode.value.lower()))
     _add_kv(table, "geometry", geometry_text)
     _add_kv(table, "tone map", tonemap_text)
 
-    # ── Alignment ──
     _add_separator(table)
     _add_section(table, "Alignment", _styled_value(alignment_text))
     _add_kv(table, "tools", tools_text)
     _add_kv(table, "offsets", _styled_value(_lower_first(reuse_policy_label)))
 
-    # ── Review ──
     _add_separator(table)
     _add_section(table, "Review", review_text)
     _add_kv(table, "metadata", _styled_value(metadata_text))
 
-    # ── Publishing ──
     _add_separator(table)
     _add_section(table, "Publishing", publishing_text)
     _add_kv(table, "after upload", after_upload_text)
@@ -461,15 +400,7 @@ def print_at_a_glance(
     )
 
 
-# ── Result summary ────────────────────────────────────────────────────────────
-
-
 def _add_time_rows(table: Table, *, result: RunResult) -> None:
-    """Add the machine/user time rows to the result summary.
-
-    The review wait is memory-only telemetry: machine times exclude it, and it
-    is never added to phase timings, the run record, or JSON output.
-    """
     timings = result.phase_timings
     review_seconds = max(0.0, result.vsview_review_seconds)
     _add_kv(table, "time", f"{format_duration(result.duration_seconds)} total")
@@ -545,7 +476,6 @@ def print_result_summary(
         border_style = BORDER_SUCCESS
     table = _group_table()
 
-    # ── slow.pics ──
     if result.slowpics_url is not None or result.slowpics_upload_confirmation_status in {
         "declined",
         "report_unavailable",
@@ -560,12 +490,10 @@ def print_result_summary(
             )
         _add_kv(table, "slow.pics", slowpics_value)
 
-    # ── Follow-up actions ──
     followup_items = _followup_action_items(all_post_upload_actions, glyphs=glyphs)
     if followup_items:
         table.add_row("", Columns(followup_items, equal=False, padding=(0, 4)))
 
-    # ── Shortcut ──
     for action in all_post_upload_actions:
         if action.kind != "shortcut":
             continue
@@ -580,7 +508,6 @@ def print_result_summary(
             _add_kv(table, "  shortcut", _shortcut_failure_value(action, glyphs=glyphs))
             break
 
-    # ── Webhook ──
     for action in all_post_upload_actions:
         if action.kind != "webhook":
             continue
@@ -590,7 +517,6 @@ def print_result_summary(
             _add_kv(table, "  webhook", f"[{WARN}]{glyphs.warning} delivery failed[/]")
         break
 
-    # ── Report and screenshots ──
     if result.report_path is not None:
         _add_kv(table, "report", _artifact_link(result.report_path, root=root, verbose=verbose))
     if result.screenshot_dir is not None:
@@ -601,7 +527,6 @@ def print_result_summary(
             screenshots_value += f"  [dim]{screenshot_total} {unit}[/]"
         _add_kv(table, "screenshots", screenshots_value)
 
-    # ── Run ──
     run_segments: list[str] = []
     if result.frame_count > 0:
         unit = "frame" if result.frame_count == 1 else "frames"
@@ -620,7 +545,6 @@ def print_result_summary(
             table.add_row("", "")
         _add_kv(table, "run", _dot_join(run_segments))
 
-    # ── Time (machine vs user) ──
     if table.rows:
         table.add_row("", "")
     _add_time_rows(table, result=result)
@@ -652,7 +576,6 @@ def print_result_summary(
 
 
 def _count_screenshot_files(screenshot_dir: Path) -> int | None:
-    """Count the image files in the screenshots directory, if it exists."""
     try:
         entries = list(screenshot_dir.iterdir())
     except OSError:
@@ -661,7 +584,6 @@ def _count_screenshot_files(screenshot_dir: Path) -> int | None:
 
 
 def _artifact_link(path: Path, *, root: Path | None, verbose: bool = False) -> str:
-    """Render an artifact path as a Rich hyperlink with a workspace-relative label."""
     display = format_display_path(path, root=root)
     absolute = _absolute_display_path(path, root)
     if not absolute.is_absolute():
@@ -673,7 +595,6 @@ def _artifact_link(path: Path, *, root: Path | None, verbose: bool = False) -> s
 
 
 def _slowpics_link(url: str) -> str:
-    """Render the slow.pics URL as an accent hyperlink safe for bracketed URLs."""
     target = url.replace("[", "%5B").replace("]", "%5D")
     return f"[link={target}][bold {ACCENT} underline]{escape(url)}[/][/link]"
 
@@ -682,7 +603,6 @@ _ROW_WARNING_ACTIONS = ("clipboard", "browser", "shortcut", "webhook")
 
 
 def _row_warning_count(actions: PostUploadActionResults) -> int:
-    """Count follow-up failures shown on their own summary row."""
     count = sum(
         1 for action in actions if not action.success and action.kind in ("clipboard", "browser")
     )
@@ -696,7 +616,6 @@ def _row_warning_count(actions: PostUploadActionResults) -> int:
 
 
 def _shortcut_failure_value(action: PostUploadActionResult, *, glyphs: GlyphSet) -> str:
-    """Render a failed shortcut action for the `  shortcut` summary row."""
     item = f"[{WARN}]{glyphs.warning}[/] not created"
     reason = None if action.warning is None else action.warning.detail
     if reason:
@@ -705,7 +624,6 @@ def _shortcut_failure_value(action: PostUploadActionResult, *, glyphs: GlyphSet)
 
 
 def _followup_action_items(actions: PostUploadActionResults, *, glyphs: GlyphSet) -> list[str]:
-    """Build the unlabelled follow-up result items for the Columns row."""
     items: list[str] = []
     for action in actions:
         if action.kind == "clipboard":

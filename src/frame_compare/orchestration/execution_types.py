@@ -12,7 +12,6 @@ from frame_compare.analysis.types import (
     SelectionDetail,
     SelectionDetailsByFrame,
 )
-from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.types import (
@@ -20,37 +19,21 @@ from frame_compare.orchestration.types import (
     PostUploadActionResults,
     SlowpicsUploadConfirmationStatus,
 )
-from frame_compare.render.types import RenderedClipFacts
+from frame_compare.render.types import RenderedClip
 from frame_compare.services.types import TmdbMetadata
-from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 if TYPE_CHECKING:
-    from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
     from frame_compare.orchestration.phases import Phase
+    from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 
 
 @dataclass
 class RenderArtifacts:
-    screenshots_by_label: dict[str, list[Path]]
-    frame_facts_by_label: dict[str, list[RenderedFrameFacts]]
-    clip_facts_by_label: dict[str, RenderedClipFacts]
+    clips: tuple[RenderedClip, ...]
     screenshot_dir: Path | None
     warnings: list[RunWarning] = field(default_factory=list[RunWarning])
-
-    def __post_init__(self) -> None:
-        labels = set(self.screenshots_by_label)
-        if labels != set(self.frame_facts_by_label) or labels != set(self.clip_facts_by_label):
-            raise ValueError("render artifact mappings must have identical label sets")
-        for label in labels:
-            paths = self.screenshots_by_label[label]
-            facts = self.frame_facts_by_label[label]
-            if len(paths) != len(facts):
-                raise ValueError(
-                    f"render artifact path/fact count mismatch for {label!r}: "
-                    f"{len(paths)} != {len(facts)}"
-                )
 
 
 @dataclass(frozen=True)
@@ -109,6 +92,7 @@ class PublishPhaseOutput:
     slowpics_url: str | None
     uploaded_file_paths: tuple[Path, ...] = ()
     post_upload_actions: PostUploadActionResults = ()
+    warnings: tuple[RunWarning, ...] = ()
     success_summary: str | None = None
 
 
@@ -164,7 +148,6 @@ class ExecutionState:
     """Mutable execution state shared explicitly by phase construction."""
 
     artifacts: RunArtifacts = field(default_factory=RunArtifacts)
-    selected_frames: list[int] = field(default_factory=list[int])
     frame_plan_warnings: list[RunWarning] = field(default_factory=list[RunWarning])
     phase_timings: dict[str, float] = field(default_factory=dict[str, float])
     # Measured VSView review wait for the human summary (memory only: never a
@@ -193,10 +176,7 @@ class PrepState:
     preflight_warnings: list[RunWarning]
     preflight_duration: float
     load_sources_start: float
-    analysis_selection_domain: str
-    selection_window: SelectionWindow
-    analysis_clip: ClipState | None = None
-    full_window_retry_override: FullWindowRetryOverride | None = None
+    selection_domain: PreparedSelectionDomain
     load_source_diagnostics: list[str] = field(default_factory=list[str])
 
 

@@ -22,6 +22,7 @@ from frame_compare.orchestration.execution_types import (
     ExecutionState,
 )
 from frame_compare.orchestration.phases import Phase, execute_phases
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.utils.progress import (
     NullProgressReporter,
     RichProgressReporter,
@@ -57,9 +58,12 @@ def _make_context(tmp_path: Path) -> RunContext:
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
         reporter=NullProgressReporter(),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )
 
 
@@ -239,6 +243,6 @@ def test_warn_only_executor_interrupt_is_failed_and_never_applied(tmp_path: Path
             execute_phases([phase, Phase("later", downstream)], context, NullProgressReporter())
         )
     assert phase.status == PhaseStatus.FAILED
-    assert state.selected_frames == []
+    assert list(context.selection.frames) == []
     assert state.warnings == []
     assert later == []

@@ -435,14 +435,6 @@ const Viewport = {
         }
     },
 
-    applyAlignmentPresetOffsets(preset) {
-        const offset = this.presetAlignmentOffsets(preset);
-        if (!offset) return;
-        this.clearRawAlignmentInputs();
-        this.viewer.state.alignX = offset[0];
-        this.viewer.state.alignY = offset[1];
-    },
-
     validAlignmentPreset(preset) {
         return ['none', 'left-1', 'right-1', 'up-1', 'down-1', 'custom'].includes(preset);
     },
@@ -484,12 +476,9 @@ const Viewport = {
         return presets[preset] || null;
     },
 
-    currentAlignmentState() {
-        return {
-            alignmentPreset: this.viewer.state.alignmentPreset,
-            alignX: this.viewer.state.alignX,
-            alignY: this.viewer.state.alignY
-        };
+    currentAlignment() {
+        const saved = this.viewer.state.pairAlignments[this.currentPairAlignmentKey()];
+        return this.normalizedAlignmentState(saved) || this.neutralAlignmentState();
     },
 
     normalizedAlignmentState(value) {
@@ -523,43 +512,27 @@ const Viewport = {
         return pairAlignments;
     },
 
-    applyAlignmentState(alignment) {
-        const normalized = this.normalizedAlignmentState(alignment) || this.neutralAlignmentState();
-        this.clearRawAlignmentInputs();
-        this.viewer.state.alignmentPreset = normalized.alignmentPreset;
-        this.viewer.state.alignX = normalized.alignX;
-        this.viewer.state.alignY = normalized.alignY;
-    },
-
-    storeCurrentPairAlignment() {
+    writeCurrentAlignment(alignment, { clearDrafts = true } = {}) {
+        if (clearDrafts) this.clearRawAlignmentInputs();
         if (this.viewer.clipCount() <= 0) return;
         const key = this.currentPairAlignmentKey();
         if (!this.isValidPairAlignmentKey(key)) return;
-        this.viewer.state.pairAlignments[key] = this.currentAlignmentState();
-    },
-
-    loadCurrentPairAlignment() {
-        const saved = this.viewer.state.pairAlignments[this.currentPairAlignmentKey()];
-        this.applyAlignmentState(saved || this.neutralAlignmentState());
+        this.viewer.state.pairAlignments[key] = this.normalizedAlignmentState(alignment)
+            || this.neutralAlignmentState();
     },
 
     setAlignmentPreset(preset) {
-        if (!this.validAlignmentPreset(preset)) {
-            return;
-        }
-        this.viewer.state.alignmentPreset = preset;
-        if (preset !== 'custom') {
-            this.applyAlignmentPresetOffsets(preset);
-        }
+        if (!this.validAlignmentPreset(preset)) return;
+        this.writeCurrentAlignment(
+            { ...this.currentAlignment(), alignmentPreset: preset },
+            { clearDrafts: preset !== 'custom' },
+        );
         this.applyAlignment();
         this.viewer.persistViewerState();
     },
 
     setManualAlignment(x, y) {
-        this.clearRawAlignmentInputs();
-        this.viewer.state.alignmentPreset = 'custom';
-        this.viewer.state.alignX = this.viewer.numberOrDefault(x, 0);
-        this.viewer.state.alignY = this.viewer.numberOrDefault(y, 0);
+        this.writeCurrentAlignment({ alignmentPreset: 'custom', alignX: x, alignY: y });
         this.applyAlignment();
         this.viewer.persistViewerState();
     },
@@ -588,6 +561,7 @@ const Viewport = {
     },
 
     commitRawAlignmentInput(axis) {
+        const alignment = this.currentAlignment();
         const field = this.rawAlignmentField(axis);
         const rawValue = this.viewer.state[field];
         if (rawValue === null) return;
@@ -601,21 +575,22 @@ const Viewport = {
         const committedValue = Number(String(rawValue).trim());
         this.viewer.state[field] = null;
         this.setManualAlignment(
-            axis === 'x' ? committedValue : this.viewer.state.alignX,
-            axis === 'y' ? committedValue : this.viewer.state.alignY,
+            axis === 'x' ? committedValue : alignment.alignX,
+            axis === 'y' ? committedValue : alignment.alignY,
         );
         this.rawAlignmentElement(axis).value = committedValue;
     },
 
     applyAlignment() {
-        this.viewer.dom.canvas.style.setProperty('--align-x', `${this.viewer.state.alignX}px`);
-        this.viewer.dom.canvas.style.setProperty('--align-y', `${this.viewer.state.alignY}px`);
-        this.viewer.dom.alignmentPreset.value = this.viewer.state.alignmentPreset;
-        this.viewer.dom.alignX.value = this.viewer.state.rawAlignX ?? this.viewer.state.alignX;
-        this.viewer.dom.alignY.value = this.viewer.state.rawAlignY ?? this.viewer.state.alignY;
+        const alignment = this.currentAlignment();
+        this.viewer.dom.canvas.style.setProperty('--align-x', `${alignment.alignX}px`);
+        this.viewer.dom.canvas.style.setProperty('--align-y', `${alignment.alignY}px`);
+        this.viewer.dom.alignmentPreset.value = alignment.alignmentPreset;
+        this.viewer.dom.alignX.value = this.viewer.state.rawAlignX ?? alignment.alignX;
+        this.viewer.dom.alignY.value = this.viewer.state.rawAlignY ?? alignment.alignY;
 
         // Visual indicator on gear button if offset is non-zero
-        const isOffset = this.viewer.state.alignX !== 0 || this.viewer.state.alignY !== 0;
+        const isOffset = alignment.alignX !== 0 || alignment.alignY !== 0;
         this.viewer.dom.btnAlignToggle.classList.toggle('has-offset', isOffset);
         this.updateAlignmentStatus();
         this.viewer.updateInspectorData();
@@ -639,14 +614,15 @@ const Viewport = {
     },
 
     alignmentStatusValue() {
-        const xText = this.formatSignedPixels(this.viewer.state.alignX, 'x');
-        const yText = this.formatSignedPixels(this.viewer.state.alignY, 'y');
-        const hasOffset = this.viewer.state.alignX !== 0 || this.viewer.state.alignY !== 0;
+        const alignment = this.currentAlignment();
+        const xText = this.formatSignedPixels(alignment.alignX, 'x');
+        const yText = this.formatSignedPixels(alignment.alignY, 'y');
+        const hasOffset = alignment.alignX !== 0 || alignment.alignY !== 0;
 
-        if (!hasOffset && this.viewer.state.alignmentPreset === 'none') return 'none';
-        if (this.viewer.state.alignmentPreset === 'custom') return `custom ${xText} ${yText}`;
-        if (this.viewer.state.alignmentPreset !== 'none') {
-            return `preset ${this.alignmentPresetLabel(this.viewer.state.alignmentPreset)}`;
+        if (!hasOffset && alignment.alignmentPreset === 'none') return 'none';
+        if (alignment.alignmentPreset === 'custom') return `custom ${xText} ${yText}`;
+        if (alignment.alignmentPreset !== 'none') {
+            return `preset ${this.alignmentPresetLabel(alignment.alignmentPreset)}`;
         }
         return `${xText} ${yText}`;
     },

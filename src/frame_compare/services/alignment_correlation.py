@@ -1,12 +1,3 @@
-"""Whole-track chunked GCC-PHAT audio alignment estimator (pure numeric).
-
-Estimates one constant frame offset by tiling chunks over the whole track,
-correlating each against the comparison with GCC-PHAT, judging chunks by peak
-prominence (PSR), and requiring chunks to agree on the lag. Operates on
-in-memory arrays at the shared utils analysis rate; streaming decode feeds it
-later.
-"""
-
 from __future__ import annotations
 
 import math
@@ -39,8 +30,6 @@ _ACTIVITY_FLOOR = 10.0 ** (_ACTIVITY_FLOOR_DBFS / 20)
 
 @dataclass(frozen=True)
 class ChunkPlan:
-    """Chunking of the reference stream plus the symmetric lag search radius."""
-
     chunk_samples: int
     lag_samples: int
     chunks: tuple[tuple[int, int], ...]
@@ -48,8 +37,6 @@ class ChunkPlan:
 
 @dataclass(frozen=True)
 class ChunkObservation:
-    """Per-chunk result. ``agrees`` is resolved by ``finish()`` against the global lag."""
-
     index: int
     reference_start: int
     reference_count: int
@@ -62,8 +49,6 @@ class ChunkObservation:
 
 @dataclass(frozen=True)
 class ChunkRun:
-    """Credible chunks sharing one lag, in index order; non-credible gaps are skipped."""
-
     first_index: int
     last_index: int
     lag: int
@@ -72,8 +57,6 @@ class ChunkRun:
 
 @dataclass(frozen=True)
 class ChunkedAudioEstimate:
-    """Decision over all planned chunks."""
-
     outcome: AudioOutcomeStatus
     global_lag: int | None
     observations: tuple[ChunkObservation, ...]
@@ -94,7 +77,6 @@ def plan_audio_chunks(
     comparison_samples: int,
     max_offset_seconds: float,
 ) -> ChunkPlan:
-    """Tile the reference stream into chunks searched over ``±M`` lag samples."""
     if reference_samples < 1 or comparison_samples < 1:
         raise AudioAlignmentError(
             "need at least one sample per stream to plan audio chunks",
@@ -148,7 +130,6 @@ def _chunk_psr(correlation: FloatArray, peak: int) -> float:
             correlation[min(correlation.size, peak + _PSR_EXCLUSION_SAMPLES + 1) :],
         )
     )
-    # An empty side has no median; treat it as 0 so the peak test below still applies.
     median = float(np.median(side)) if side.size else 0.0
     mad = float(np.median(np.abs(side - median))) if side.size else 0.0
     if mad == 0:
@@ -157,12 +138,6 @@ def _chunk_psr(correlation: FloatArray, peak: int) -> float:
 
 
 class ChunkedCorrelation:
-    """Streaming-shaped accumulator: one ``add`` per planned chunk, then ``finish``.
-
-    Keeps only the running global correlation sum plus scalar observations, so
-    memory stays bounded independent of track length.
-    """
-
     def __init__(self, plan: ChunkPlan) -> None:
         self._plan = plan
         self._next_index = 0
@@ -175,7 +150,6 @@ class ChunkedCorrelation:
         reference: npt.ArrayLike,
         comparison_window: npt.ArrayLike,
     ) -> ChunkObservation:
-        """Correlate one chunk. Chunks must be added in plan order, each exactly once."""
         if index != self._next_index or index >= len(self._plan.chunks):
             raise ValueError(
                 f"audio chunks must be added in plan order, expected {self._next_index}, got {index}"
@@ -230,8 +204,6 @@ class ChunkedCorrelation:
             self._next_index += 1
             return observation
 
-        # N >= n + 2M, so no circular wrap affects the searched lags;
-        # index m of xc corresponds to lag = M - m.
         size = _next_pow2(reference_count + 2 * lag_samples)
         cross_power = np.conj(np.fft.rfft(reference_signal, size)) * np.fft.rfft(
             window_signal, size
@@ -257,7 +229,6 @@ class ChunkedCorrelation:
         return observation
 
     def finish(self) -> ChunkedAudioEstimate:
-        """Decide one global lag from all planned chunks."""
         if self._next_index != len(self._plan.chunks):
             raise ValueError(
                 f"need all {len(self._plan.chunks)} chunks before finish, got {self._next_index}"
@@ -284,7 +255,6 @@ class ChunkedCorrelation:
         agreeing_count = len(agreeing)
         credible_count = len(credible)
         required = max(1, min(_REQUIRED_AGREEING, len(self._plan.chunks)))
-        # agreeing / credible >= 0.8, compared as integers.
         passed = agreeing_count >= required and agreeing_count * 5 >= credible_count * 4
         if not passed:
             outcome: AudioOutcomeStatus = "no_single_offset"
@@ -319,7 +289,6 @@ class ChunkedCorrelation:
 
 
 def _credible_runs(credible: list[ChunkObservation]) -> tuple[ChunkRun, ...]:
-    """Group credible chunks into runs sharing one lag (diagnostic, index order)."""
     runs: list[ChunkRun] = []
     member_lags: list[int] = []
     member_indices: list[int] = []

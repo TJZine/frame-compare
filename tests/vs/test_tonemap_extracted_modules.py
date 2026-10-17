@@ -1,10 +1,8 @@
-"""Direct behavior tests for extracted tonemap owner modules."""
-
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
-import vapoursynth as vs  # noqa: E402, I001
+import vapoursynth as vs
 
 from frame_compare.config.schema import ToneCurve, TonemapPreset
 from frame_compare.vs.tonemap_conversion import (
@@ -19,7 +17,7 @@ from frame_compare.vs.tonemap_libplacebo import (
     build_libplacebo_tonemap_kwargs,
 )
 from frame_compare.vs.tonemap_presets import get_preset_settings
-from frame_compare.vs.types import HDRMetadata, TonemapSettings
+from frame_compare.vs.types import HDRMetadata, TonemapFallbackCause, TonemapResult, TonemapSettings
 
 if TYPE_CHECKING:
     from vapoursynth import Core, VideoNode
@@ -97,7 +95,6 @@ class _Placebo:
 
 
 def test_fallback_tonemap_detects_metadata_and_uses_reinhard_expression() -> None:
-    """Fallback should derive source peak from HDR metadata when not provided."""
     clip = _Clip(
         props={
             "_Transfer": 16,
@@ -107,15 +104,17 @@ def test_fallback_tonemap_detects_metadata_and_uses_reinhard_expression() -> Non
     )
     settings = TonemapSettings(tone_curve=ToneCurve.REINHARD, target_nits=203)
 
-    result = fallback_tonemap(cast("VideoNode", clip), settings)
+    result = fallback_tonemap(
+        cast("VideoNode", clip), settings, cause=TonemapFallbackCause.PLUGIN_UNAVAILABLE
+    )
 
-    assert result is clip
+    assert isinstance(result, TonemapResult)
+    assert result.clip is clip
     assert len(clip.std.expr_calls) == 1
     assert clip.std.expr_calls[0] == ["x 3 * dup 1 + / 2 * 0 max 1 min"] * 3
 
 
 def test_fallback_tonemap_prefers_explicit_source_peak_over_metadata() -> None:
-    """Explicit source_peak should own the fallback scale when configured."""
     clip = _Clip(
         props={
             "_Transfer": 16,
@@ -125,7 +124,9 @@ def test_fallback_tonemap_prefers_explicit_source_peak_over_metadata() -> None:
     )
     settings = TonemapSettings(source_peak=812, target_nits=203)
 
-    fallback_tonemap(cast("VideoNode", clip), settings)
+    fallback_tonemap(
+        cast("VideoNode", clip), settings, cause=TonemapFallbackCause.PLUGIN_UNAVAILABLE
+    )
 
     assert clip.std.expr_calls[0] == ["x 4 * dup 1 + / 2 * 0 max 1 min"] * 3
 
@@ -139,7 +140,12 @@ def test_fallback_tonemap_uses_probed_hdr_signal_for_untagged_yuv_conversion() -
     )
     metadata = HDRMetadata(None, 1000, 400, 9, 16, 9)
 
-    fallback_tonemap(cast("VideoNode", clip), TonemapSettings(), metadata)
+    fallback_tonemap(
+        cast("VideoNode", clip),
+        TonemapSettings(),
+        metadata,
+        cause=TonemapFallbackCause.PLUGIN_UNAVAILABLE,
+    )
 
     assert clip.resize.bicubic_calls[0] == {
         "format": vs.RGBS,
@@ -168,7 +174,6 @@ def test_resolve_hdr_inputs_preserves_explicit_sdr_signal_and_range() -> None:
 
 
 def test_build_libplacebo_kwargs_uses_hdr10_hints_and_metadata_peak() -> None:
-    """HDR10 metadata should map to the selected libplacebo kwargs."""
     metadata = HDRMetadata(
         mastering_display=None,
         max_cll=1000,
@@ -231,7 +236,8 @@ def test_libplacebo_uses_probed_hdr_signal_for_untagged_yuv_conversion() -> None
         metadata,
     )
 
-    assert result is clip
+    assert isinstance(result, TonemapResult)
+    assert result.clip is clip
     assert clip.resize.bicubic_calls[0] == {
         "format": vs.RGB48,
         "matrix_in": 9,
@@ -271,7 +277,6 @@ def test_build_libplacebo_kwargs_emits_canonical_tone_curve_name(
 
 
 def test_apply_post_processing_does_not_apply_contrast_recovery_expr() -> None:
-    """contrast_recovery is a libplacebo option, not a post-tonemap shadow crusher."""
     clip = _Clip()
 
     result = apply_post_processing(
@@ -283,8 +288,7 @@ def test_apply_post_processing_does_not_apply_contrast_recovery_expr() -> None:
     assert clip.std.expr_calls == []
 
 
-def test_apply_libplacebo_runtime_failure_returns_none_after_rgb_prop_normalization() -> None:
-    """Unexpected libplacebo runtime errors should signal fallback without masking setup."""
+def test_apply_libplacebo_runtime_failure_reports_cause_after_rgb_prop_normalization() -> None:
     clip = _Clip()
     placebo = _Placebo([RuntimeError("vulkan device unavailable")])
     core = SimpleNamespace(placebo=placebo)
@@ -304,7 +308,7 @@ def test_apply_libplacebo_runtime_failure_returns_none_after_rgb_prop_normalizat
         metadata,
     )
 
-    assert result is None
+    assert result is TonemapFallbackCause.RUNTIME_CALL_FAILED
     assert clip.std.set_frame_props_calls == [
         {"_Matrix": 0, "_ColorRange": 0, "_Transfer": 18, "_Primaries": 9}
     ]
@@ -335,7 +339,6 @@ def test_apply_libplacebo_runtime_failure_returns_none_after_rgb_prop_normalizat
 
 
 def test_convert_non_rgb_matrix_presence_uses_frame_prop_boundary() -> None:
-    """A present matrix prop should be forwarded as numeric conversion metadata."""
     clip = _Clip(format_id=999, color_family=999, props={"_Matrix": b"9"})
 
     result = convert_non_rgb_with_matrix_hint(cast("VideoNode", clip), target_format=vs.RGBS)

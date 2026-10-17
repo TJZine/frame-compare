@@ -22,7 +22,6 @@ type AlignmentWriteProvenance = Literal[
 type AlignmentEvidenceAvailability = Literal[
     "current_attempt",
     "historical_details_unavailable",
-    "not_computed",
 ]
 
 
@@ -82,15 +81,36 @@ class AlignmentResult:
             raise ValueError("trusted automatic evidence must match the applied result")
 
 
-@dataclass(frozen=True)
-class AlignmentProvenance:
-    """Current-run provenance used to decide shared alignment-cache write eligibility."""
+@dataclass(frozen=True, slots=True)
+class ComparisonResolution:
+    """Current authority and original evidence for one requested comparison."""
 
     result: AlignmentResult
     comparison_cache_key: str
-    provenance: AlignmentWriteProvenance
-    computed_result: AlignmentResult | None = None
-    evidence_availability: AlignmentEvidenceAvailability = "not_computed"
+    origin: AlignmentWriteProvenance
+    computed_fallback: AlignmentResult | None = None
+
+    def __post_init__(self) -> None:
+        if self.origin != "computed_this_run" and not self.result.applied:
+            raise ValueError("historical or confirmed resolution must be applied")
+        if self.computed_fallback is not None and (
+            self.origin != "interactive_confirmed_this_run"
+            or not self.computed_fallback.applied
+            or self.computed_fallback.algorithm != "cross_correlation"
+        ):
+            raise ValueError("computed fallback requires confirmed authority and applied audio")
+
+    @property
+    def evidence_availability(self) -> AlignmentEvidenceAvailability:
+        return (
+            "current_attempt"
+            if self.result.audio_attempt is not None
+            else "historical_details_unavailable"
+        )
+
+    @property
+    def accepted_offset(self) -> int | None:
+        return self.result.frame_offset if self.result.applied else None
 
 
 @dataclass(frozen=True)

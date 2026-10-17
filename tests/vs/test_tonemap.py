@@ -1,18 +1,15 @@
-"""Tests for tonemapping module."""
-
 from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 
-from frame_compare.config.schema import ToneCurve, TonemapPreset  # noqa: E402, I001
-from frame_compare.vs.errors import TonemapError  # noqa: E402, I001
-from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings  # noqa: E402, I001
-from frame_compare.vs.types import TonemapSettings  # noqa: E402, I001
+from frame_compare.config.schema import ToneCurve, TonemapPreset
+from frame_compare.vs.errors import TonemapError
+from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings
+from frame_compare.vs.types import TonemapSettings
 
 
 def test_get_preset_settings_unknown_raises_tonemap_error():
-    """Verify unknown preset raises correct error."""
     with pytest.raises(TonemapError) as exc:
         get_preset_settings(cast(TonemapPreset, "invalid"))
     assert exc.value.context.code == "FC-4003"
@@ -21,13 +18,13 @@ def test_get_preset_settings_unknown_raises_tonemap_error():
 
 
 def test_apply_tonemap_enabled_false_returns_clip_unchanged():
-    """Verify enabled=False is a no-op."""
     mock_clip = MagicMock()
     settings = TonemapSettings(enabled=False)
 
     result = apply_tonemap(mock_clip, settings)
 
-    assert result is mock_clip
+    assert result.clip is mock_clip
+    assert result.applied is None
 
 
 @pytest.mark.parametrize(

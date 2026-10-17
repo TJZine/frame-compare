@@ -12,10 +12,11 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 LEGACY_RELEASE_NOTES_RE = re.compile(
     r"^Frame Compare v\S+\. See CHANGELOG\.md at the tagged commit\.$"
 )
-STABLE_VERSION_RE = re.compile(r"^(?P<base>0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+STABLE_VERSION_RE = re.compile(r"^(?P<base>0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$", re.ASCII)
 RC_VERSION_RE = re.compile(
     r"^(?P<base>(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))rc"
-    r"(?P<number>[1-9]\d*)$"
+    r"(?P<number>[1-9]\d*)$",
+    re.ASCII,
 )
 
 

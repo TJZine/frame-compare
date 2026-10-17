@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from frame_compare.analysis.errors import SelectionError
+from frame_compare.analysis.errors import SelectionError, SelectionFailureKind
 from frame_compare.analysis.metrics import slice_frame_metrics
 from frame_compare.analysis.selection import select_frames, select_random_frames
 from frame_compare.analysis.types import (
@@ -180,9 +180,10 @@ async def run_align_phase(
             seed=ctx.config.analysis.random_seed,
             allow_fallback=(
                 generated_frame_count(ctx.config.analysis) > 0
-                and ctx.full_window_retry_override is None
+                and ctx.selection_domain.full_window_retry_override is None
             ),
-            require_full_generated_selection=ctx.full_window_retry_override is not None,
+            require_full_generated_selection=ctx.selection_domain.full_window_retry_override
+            is not None,
         )
     except SelectionError as error:
         raise_if_full_window_retry_failed(ctx, error)
@@ -201,7 +202,7 @@ async def run_align_phase(
         )
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
-    if normalized_selection.used_fallback_frame_plan and ctx.analysis_metrics is not None:
+    if normalized_selection.used_fallback_frame_plan and ctx.selection.analysis_metrics is not None:
         configured_user_source_frames = set(ctx.config.analysis.user_frames)
         normalized_user_frames = [
             frame
@@ -210,7 +211,7 @@ async def run_align_phase(
         ]
         try:
             trimmed_selection = _reselect_frames_for_trimmed_overlap(
-                metrics=ctx.analysis_metrics,
+                metrics=ctx.selection.analysis_metrics,
                 reference=reference,
                 comparisons=comparisons,
                 selection_source_window=selection_source_window,
@@ -444,10 +445,15 @@ def _alignment_clip_request(
 
 
 def _selection_source_window_for_alignment(ctx: RunContext) -> tuple[int, int] | None:
-    if ctx.selection_window.frame_count <= 0:
+    if ctx.selection_domain.selection_window.frame_count <= 0:
         return None
-    source_start = ctx.reference.trim.trim_start_frames + ctx.selection_window.start_frame
-    source_end = ctx.reference.trim.trim_start_frames + ctx.selection_window.end_frame_exclusive
+    source_start = (
+        ctx.reference.trim.trim_start_frames + ctx.selection_domain.selection_window.start_frame
+    )
+    source_end = (
+        ctx.reference.trim.trim_start_frames
+        + ctx.selection_domain.selection_window.end_frame_exclusive
+    )
     return source_start, source_end
 
 
@@ -506,6 +512,7 @@ def _reselect_frames_for_trimmed_overlap(
             "insufficient generated candidates after alignment",
             requested=target_count,
             found=selectable_length,
+            kind=SelectionFailureKind.INSUFFICIENT_ALIGNED_CANDIDATES,
         )
     metric_reference_start = (
         selection_source_window[0]
@@ -614,6 +621,7 @@ def _normalize_selected_frames_for_trimmed_domain(
             "insufficient generated candidates after alignment",
             requested=generated_requested_count,
             found=generated_capacity,
+            kind=SelectionFailureKind.INSUFFICIENT_ALIGNED_CANDIDATES,
         )
     generated_target_count = generated_requested_count
     if (
@@ -624,6 +632,7 @@ def _normalize_selected_frames_for_trimmed_domain(
             "insufficient generated frames after full-window retry alignment",
             requested=generated_target_count,
             found=len(normalized_generated_frames),
+            kind=SelectionFailureKind.INSUFFICIENT_ALIGNED_CANDIDATES,
         )
     normalized_frames = sorted(
         {*normalized_user_frames, *normalized_generated_frames[:generated_target_count]}

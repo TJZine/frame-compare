@@ -113,6 +113,17 @@ For publication-bound comparisons:
 - check for raised blacks, clipped highlights, hue shifts, and range mistakes;
 - validate the result on the physical Windows/GPU environment intended for release.
 
+## Applied transforms and fallback
+
+The pre-run preview shows your requested preset and settings. Reports disclose the
+transform that actually ran for each source, including its resolved source peak and
+origin. If vs-placebo is missing, unusable, or fails at runtime, Frame Compare uses
+its existing peak-scaled fallback and emits one render warning naming the affected
+sources and causes. The fallback is labeled **fallback (peak-scaled)**, rather than
+as the requested BT.2390, Spline, or Reinhard curve. It uses source peak, target nits,
+and gamma lift; other requested plugin controls do not become effective fallback
+controls. Configuration and signature errors still fail the run.
+
 ## Overlays and measurements
 
 `diagnostic` overlays can include observed mastering metadata, MaxCLL/MaxFALL, source

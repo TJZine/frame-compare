@@ -31,6 +31,7 @@ SOURCE_SCRIPTS = (
     ".github/workflows/windows-portable-build.yml",
     ".github/workflows/windows-portable.yml",
     "tools/windows_portable/build_portable.ps1",
+    "tools/windows_portable/path_safety.ps1",
     "tools/windows_portable/runtime_smoke.py",
     "tools/windows_portable/build_update.ps1",
     "tools/windows_portable/bundle_info.schema.json",
@@ -44,6 +45,7 @@ SOURCE_SCRIPTS = (
     "tools/windows_portable/sign_update.ps1",
     "tools/windows_portable/update_manifest.schema.json",
     "tools/windows_portable/shim/frame-compare-update.ps1",
+    "tools/windows_portable/shim/frame-compare-version.ps1",
     "tools/windows_portable/validate_update_public_key.ps1",
     "tools/windows_portable/write_bundle_inventory.py",
 )
@@ -413,7 +415,7 @@ def main() -> int:
         raise NotADirectoryError(packaged_src)
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(packaged_src))
-    from frame_compare.vs.runtime_contract import (  # noqa: PLC0415
+    from frame_compare.vs.runtime_contract import (
         MEDIA_RUNTIME_SCOPES,
     )
     from frame_compare.vs.runtime_contract import (

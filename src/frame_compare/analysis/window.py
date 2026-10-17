@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from fractions import Fraction
 
-from frame_compare.analysis.errors import SelectionError
+from frame_compare.analysis.errors import SelectionError, SelectionFailureKind
 
 _ROUNDING_EPSILON = 1e-9
 
@@ -40,7 +40,9 @@ def compute_shared_selection_window(
 ) -> SelectionWindow:
     """Compute the shared selectable aligned-domain window for all clips."""
     if not clips:
-        raise SelectionError("no clips available for selection", 1, 0)
+        raise SelectionError(
+            "no clips available for selection", 1, 0, kind=SelectionFailureKind.NO_CLIPS
+        )
 
     windows = [
         _clip_selection_window(
@@ -54,7 +56,12 @@ def compute_shared_selection_window(
     shared_start = max(window.start_frame for window in windows)
     shared_end = min(window.end_frame_exclusive for window in windows)
     if shared_end <= shared_start:
-        raise SelectionError("analysis ignore windows leave no selectable frames", 1, 0)
+        raise SelectionError(
+            "analysis ignore windows leave no selectable frames",
+            1,
+            0,
+            kind=SelectionFailureKind.EMPTY_SELECTION_WINDOW,
+        )
     return SelectionWindow(start_frame=shared_start, end_frame_exclusive=shared_end)
 
 
@@ -68,7 +75,12 @@ def _clip_selection_window(
     if clip.frame_count <= 0:
         return SelectionWindow(start_frame=0, end_frame_exclusive=0)
     if clip.fps <= 0:
-        raise SelectionError("clip fps must be positive for analysis windowing", 1, 0)
+        raise SelectionError(
+            "clip fps must be positive for analysis windowing",
+            1,
+            0,
+            kind=SelectionFailureKind.INVALID_CLIP_FPS,
+        )
 
     duration_seconds = float(Fraction(clip.frame_count, 1) / clip.fps)
     if min_window_seconds >= duration_seconds:

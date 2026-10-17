@@ -17,9 +17,17 @@ from frame_compare.vs.tonemap_conversion import (
     deduce_src_csp_hint,
     normalize_rgb_props,
     resolve_hdr_tonemap_inputs,
+    resolve_source_peak,
     validate_target_nits,
 )
-from frame_compare.vs.types import HDRMetadata, TonemapSettings
+from frame_compare.vs.types import (
+    AppliedTonemap,
+    HDRMetadata,
+    LibplaceboTonemap,
+    TonemapFallbackCause,
+    TonemapResult,
+    TonemapSettings,
+)
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -64,10 +72,7 @@ def build_libplacebo_tonemap_kwargs(
     target_nits: int,
     inputs: HdrTonemapInputs,
 ) -> dict[str, object]:
-    src_max = settings.source_peak
-    if src_max is None:
-        metadata = inputs.hdr_metadata
-        src_max = metadata.max_cll if metadata and metadata.max_cll else 1000
+    src_max = resolve_source_peak(settings, inputs.hdr_metadata).nits
 
     src_csp = deduce_src_csp_hint(inputs.transfer, inputs.primaries)
     tm_kwargs: dict[str, object] = {
@@ -112,7 +117,7 @@ def apply_libplacebo(
     settings: TonemapSettings,
     core: vs.Core,
     hdr_metadata: HDRMetadata | None = None,
-) -> vs.VideoNode | None:
+) -> TonemapResult | TonemapFallbackCause:
     """Apply tonemapping using libplacebo."""
     import vapoursynth as vs
 
@@ -139,7 +144,7 @@ def apply_libplacebo(
             inputs=inputs,
         )
         raise_if_cancelling()
-        clip = core.placebo.Tonemap(clip, **tm_kwargs)  # type: ignore[misc]
+        clip = core.placebo.Tonemap(clip, **tm_kwargs)
     except TypeError as e:
         raise TonemapError(reason=f"Invalid libplacebo Tonemap arguments: {e}") from e
     except Exception as e:
@@ -149,11 +154,21 @@ def apply_libplacebo(
             "libplacebo_tonemap_runtime_failure_falling_back",
             error=f"{type(e).__name__}: {e}",
         )
-        return None
+        return TonemapFallbackCause.RUNTIME_CALL_FAILED
 
     raise_if_cancelling()
     clip = clip.resize.Point(format=vs.RGBS)
 
     clip = apply_post_processing(clip, settings)
     raise_if_cancelling()
-    return clip.std.SetFrameProps(_Tonemapped=1, _FrameCompareExpandRange=1)
+    return TonemapResult(
+        clip.std.SetFrameProps(_Tonemapped=1, _FrameCompareExpandRange=1),
+        AppliedTonemap(
+            settings,
+            LibplaceboTonemap(
+                settings.tone_curve,
+                settings,
+                resolve_source_peak(settings, inputs.hdr_metadata),
+            ),
+        ),
+    )

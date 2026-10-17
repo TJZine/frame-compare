@@ -632,3 +632,18 @@ def test_runtime_memory_limit_defaults_and_integer_boundaries() -> None:
 def test_runtime_memory_limit_rejects_invalid_values(value: object) -> None:
     with pytest.raises(ValidationError):
         RuntimeConfig.model_validate({"memory_limit_mb": value})
+
+
+@pytest.mark.parametrize(
+    "model, field",
+    [
+        (ScreenshotsConfig, "ffmpeg_timeout_seconds"),
+        (SlowpicsConfig, "timeout_seconds"),
+        (SlowpicsConfig, "image_upload_timeout_seconds"),
+        (TmdbConfig, "timeout_seconds"),
+    ],
+)
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_operation_timeouts_require_finite_values(model, field: str, value: float) -> None:
+    with pytest.raises(ValidationError):
+        model(**{field: value})

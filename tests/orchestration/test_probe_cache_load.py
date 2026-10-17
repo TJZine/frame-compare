@@ -195,3 +195,18 @@ def test_load_clip_probe_cache_returns_empty_dict_on_read_os_error(tmp_path: Pat
     assert cache == {}
     warning.assert_called_once()
     assert warning.call_args.args[0] == "probe_cache_read_error"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+    ],
+)
+def test_parser_limits_read_as_miss(tmp_path: Path, content: str) -> None:
+    path = tmp_path / "probe.toml"
+    path.write_text(content, encoding="utf-8")
+    with patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning:
+        assert load_clip_probe_cache(path) == {}
+    warning.assert_called_once()

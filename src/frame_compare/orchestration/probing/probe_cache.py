@@ -18,6 +18,7 @@ from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapsh
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.file_lock import exclusive_file_lock
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 from frame_compare.vs.types import HDRMetadata
 
@@ -230,7 +231,7 @@ def _load_clip_probe_cache(
         if abort_on_read_error:
             raise _ProbeCacheReadError from e
         return {}
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+    except SERIALIZED_DECODE_FAILURES as e:
         log.warning("probe_cache_parse_error", path=str(cache_path), error=str(e))
         if abort_on_read_error:
             raise _ProbeCacheReadError("Malformed shared probe cache") from e

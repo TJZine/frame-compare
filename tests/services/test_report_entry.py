@@ -57,7 +57,7 @@ def report_data(tmp_path: Path) -> ReportData:
                 size_bytes=1024**3,
                 signal=SourceSignalFacts(is_hdr=False),
                 presentation_state=PresentationState.SDR,
-                tonemap_settings=None,
+                tonemap=None,
                 active_picture=geometry.active_picture,
                 images=images,
                 display=ReportClipDisplayInfo(
@@ -77,7 +77,6 @@ def report_data(tmp_path: Path) -> ReportData:
         rendering=ReportRenderingInfo(
             overlay_mode=OverlayMode.STANDARD,
             include_frame_number=True,
-            tonemap_settings=None,
             geometry_by_label={clip.label or clip.name: geometry for clip in clips},
         ),
         metadata=TmdbMetadata(

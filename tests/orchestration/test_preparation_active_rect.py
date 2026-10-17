@@ -14,7 +14,8 @@ import pytest
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.context import ClipActiveRect
-from frame_compare.orchestration.types import RunDependencies, RunRequest
+from frame_compare.orchestration.run_inputs import acquire_run_config
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.vs.types import SourceInfo
 from tests.orchestration.execute_run_helpers import write_probe_cache_for_inputs
 from tests.orchestration.preparation_test_support import (
@@ -29,6 +30,7 @@ from tests.orchestration.preparation_test_support import (
 from tests.orchestration.preparation_test_support import (
     create_video_files as _create_video_files,
 )
+from tests.run_request_support import make_run_request
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -105,7 +107,7 @@ def test_execute_prep_resolves_dimension_active_rects_during_preparation(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, loader)),
         )
     )
@@ -147,7 +149,7 @@ def test_execute_prep_resolves_metadata_active_rect_from_preserved_probe_props(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, loader)),
         )
     )
@@ -178,12 +180,12 @@ def test_execute_prep_selection_domain_includes_resolved_active_rect_identity(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, loader)),
         )
     )
 
-    selection_domain = json.loads(prep.analysis_selection_domain)
+    selection_domain = json.loads(prep.selection_domain.token)
     assert selection_domain["active_rect_policy"] == {
         "detection_mode": "aspect_ratio",
         "algorithm_id": "active_rect_resolution_v2",
@@ -232,7 +234,7 @@ def test_execute_prep_auto_content_refinement_updates_selection_domain_after_win
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, loader)),
         )
     )
@@ -247,7 +249,7 @@ def test_execute_prep_auto_content_refinement_updates_selection_domain_after_win
         "content-derived",
         "auto",
     )
-    selection_domain = json.loads(prep.analysis_selection_domain)
+    selection_domain = json.loads(prep.selection_domain.token)
     assert selection_domain["active_rect_policy"] == {
         "detection_mode": "auto",
         "algorithm_id": "active_rect_resolution_v2",
@@ -301,7 +303,7 @@ def test_execute_prep_auto_propagates_supported_content_ratio_to_unresolved_clip
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, loader)),
         )
     )
@@ -311,7 +313,7 @@ def test_execute_prep_auto_propagates_supported_content_ratio_to_unresolved_clip
         ClipActiveRect(0, 10, 100, 60, "content-derived", "auto"),
         ClipActiveRect(0, 10, 100, 60, "aspect-ratio-derived", "auto"),
     ]
-    selection_domain = json.loads(prep.analysis_selection_domain)
+    selection_domain = json.loads(prep.selection_domain.token)
     assert selection_domain["clips"][2]["active_rect"] == {
         "x": 0,
         "y": 10,
@@ -343,7 +345,7 @@ def test_execute_prep_auto_sampling_failure_warns_and_leaves_full_frame(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path),
+            make_run_request(root=tmp_path),
             RunDependencies(vs_loader=cast(Any, loader)),
         )
     )
@@ -361,7 +363,7 @@ def test_execute_prep_from_cache_only_auto_sampling_failure_fails_before_cache_v
     _create_config(tmp_path, content=AUTO_METRIC_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     source_path = _create_video_files(input_dir, "source.mkv")[0]
-    config = preparation.prepare_preflight(root=tmp_path).config
+    config = acquire_run_config(root=tmp_path).config
     write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
 
     class FailingContentSampler:
@@ -376,7 +378,7 @@ def test_execute_prep_from_cache_only_auto_sampling_failure_fails_before_cache_v
     with pytest.raises(MetricsCalculationError, match="active-rect auto detection failed"):
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path, from_cache_only=True),
+                make_run_request(root=tmp_path, from_cache_only=True),
                 RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
             )
         )

@@ -11,7 +11,7 @@ from typing import Literal, Protocol
 
 import httpx
 
-from frame_compare.config.overrides import CLIConfigOverrides
+from frame_compare.orchestration.run_inputs import AcquiredRunConfig
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.utils.post_upload_actions import PostUploadActionResults
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -28,10 +28,7 @@ class RunRequest:
     See docs/current-cli-contract.md for CLI flag → config mappings and persistence rules.
     """
 
-    # Paths and persistent CLI overrides
-    root: Path
-    config_path: Path | None = None
-    config_overrides: CLIConfigOverrides = field(default_factory=CLIConfigOverrides)
+    inputs: AcquiredRunConfig
 
     # Run-mode controls
     no_cache: bool = False

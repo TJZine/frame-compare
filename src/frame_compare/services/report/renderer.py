@@ -267,19 +267,19 @@ def _render_tonemap_summary(rendering: object) -> str:
     """Render the concise archival tonemap summary from raw payload values."""
     rendering_map = _object_mapping(rendering)
     tonemap_map = _object_mapping(rendering_map.get("tonemap"))
-    if not tonemap_map.get("applied"):
+    if not tonemap_map.get("ran"):
         return "Not applied"
-    settings_map = _object_mapping(tonemap_map.get("settings"))
-    if not settings_map:
-        return "Applied"
-    preset = str(settings_map.get("preset", "")).replace("_", " ").title()
-    curve = _render_tone_curve(settings_map.get("tone_curve", ""))
-    target = settings_map.get("target_nits")
-    parts = [part for part in (preset, curve) if part]
-    summary = " · ".join(parts)
-    if target is not None and summary:
-        return f"{summary} · {target} nits"
-    return summary or "Applied"
+    shared = _object_mapping(tonemap_map.get("shared"))
+    if not shared:
+        return "Applied · varies by source"
+    algorithm = (
+        "fallback (peak-scaled)"
+        if shared.get("implementation") == "fallback"
+        else _render_tone_curve(shared.get("algorithm", ""))
+    )
+    controls = _object_mapping(shared.get("effective_controls"))
+    target = controls.get("target_nits")
+    return f"{algorithm} · {target} nits" if target is not None else algorithm
 
 
 _GAMUT_MAPPING_LABELS = {
@@ -311,17 +311,17 @@ def _render_tonemap_number(value: object) -> str:
 
 
 def _render_tonemap_details(rendering: object) -> str:
-    """Render raw effective tonemap settings into an accessible details list."""
+    """Render shared applied tonemap controls into an accessible details list."""
     rendering_map = _object_mapping(rendering)
     tonemap_map = _object_mapping(rendering_map.get("tonemap"))
-    settings_map = _object_mapping(tonemap_map.get("settings"))
+    shared = _object_mapping(tonemap_map.get("shared"))
+    settings_map = _object_mapping(shared.get("effective_controls"))
     if not settings_map:
         return ""
     labels = (
         ("dynamic_peak_detection", "Dynamic peak detection"),
         ("contrast_recovery", "Contrast recovery"),
         ("gamma_lift", "Gamma lift"),
-        ("source_peak", "Source peak"),
         ("dst_min_nits", "Destination minimum"),
         ("knee_offset", "Knee offset"),
         ("smoothing_period", "Smoothing period"),

@@ -9,7 +9,8 @@ from pathlib import Path
 
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import preparation
-from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.coordinator import RunDependencies, execute_run
+from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
@@ -36,11 +37,11 @@ def test_execute_prep_writes_run_info_with_clock_and_no_http_client_skip(
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv", "encode.mkv")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=False,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(
         vs_loader=FakeVSLoader(),
@@ -71,11 +72,11 @@ def test_execute_run_writes_run_info_with_skip_metadata_facts(
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 

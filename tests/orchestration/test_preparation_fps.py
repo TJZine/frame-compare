@@ -14,7 +14,7 @@ from frame_compare.orchestration import preparation
 from frame_compare.orchestration.errors import (
     MixedSourceFpsError,
 )
-from frame_compare.orchestration.types import RunDependencies, RunRequest
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.vs.types import SourceInfo
 from tests.orchestration.preparation_test_support import (
     METRIC_CONFIG,
@@ -27,6 +27,7 @@ from tests.orchestration.preparation_test_support import (
 from tests.orchestration.preparation_test_support import (
     create_video_files as _create_video_files,
 )
+from tests.run_request_support import make_run_request
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -125,13 +126,13 @@ def test_execute_prep_effective_fps(
     loader = FakeVSLoader(fps_by_name=fps_by_name)
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
+            make_run_request(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
         )
     )
     assert [clip.source_fps for clip in prep.clips] == source_fps
     assert [clip.effective_fps for clip in prep.clips] == effective_fps
     if reference is not None:
-        selection_domain = json.loads(prep.analysis_selection_domain)
+        selection_domain = json.loads(prep.selection_domain.token)
         assert selection_domain["reference_path"] == (input_dir / reference).as_posix()
         assert [clip["effective_fps"] for clip in selection_domain["clips"]] == domain_fps
 
@@ -157,7 +158,7 @@ def test_execute_prep_match_fps_preserves_explicit_comparison_effective_fps(
     with pytest.raises(MixedSourceFpsError) as exc_info:
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, loader)),
             )
         )
@@ -252,7 +253,7 @@ def test_execute_prep_majority_fps(
     loader = FakeVSLoader(fps_by_name=fps_by_name)
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
+            make_run_request(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
         )
     )
     if source_fps is not None:
@@ -291,7 +292,7 @@ def test_execute_prep_match_fps_majority_preserves_explicit_override_and_can_sti
     with pytest.raises(MixedSourceFpsError) as exc_info:
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, loader)),
             )
         )
@@ -314,7 +315,7 @@ def test_execute_prep_rejects_mixed_source_fps_before_downstream_work(tmp_path: 
     with pytest.raises(MixedSourceFpsError) as exc_info:
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, loader)),
             )
         )

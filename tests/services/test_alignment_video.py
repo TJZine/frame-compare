@@ -35,7 +35,7 @@ from frame_compare.utils.alignment_evidence import (
 )
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.types import SourceInfo
-from tests.services.test_alignment_evidence import attempt_with_chunks
+from tests.services.alignment_evidence_test_support import attempt_with_chunks
 
 if isinstance(cast(object, vs), MagicMock):
     pytest.skip("VapourSynth is not installed", allow_module_level=True)

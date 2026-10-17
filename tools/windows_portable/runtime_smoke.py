@@ -31,7 +31,7 @@ def prove_package_imports() -> None:
 
 def prove_vsview_distribution_contract() -> None:
     expected = {
-        "jetpytools": "3.1.2",
+        "jetpytools": "3.2.0",
         "pyside6": "6.11.2",
         "pyside6-addons": "6.11.2",
         "pyside6-essentials": "6.11.2",
@@ -39,9 +39,9 @@ def prove_vsview_distribution_contract() -> None:
         "vapoursynth-bestsource": "22",
         "vapoursynth-lsmas": "1310.0.0.0",
         "vspackrgb": "2.0.0",
-        "vsview": "0.12.1",
+        "vsview": "0.13.0",
         "cyclopts": "5.2.0",
-        "vsjetengine": "1.8.0",
+        "vsjetengine": "1.8.1",
     }
     observed = {name: importlib.metadata.version(name) for name in expected}
     assert_true(observed == expected, f"VSView distribution mismatch: {observed}")
@@ -331,7 +331,7 @@ def prove_apply_tonemap_frame() -> None:
     import vapoursynth as vs
 
     from frame_compare.vs.tonemap import _libplacebo_runtime_usable, apply_tonemap
-    from frame_compare.vs.types import TonemapSettings
+    from frame_compare.vs.types import LibplaceboTonemap, TonemapSettings
 
     core = vs.core
     tonemap_clip = core.std.BlankClip(
@@ -341,7 +341,12 @@ def prove_apply_tonemap_frame() -> None:
 
     libplacebo_runtime_usable = _libplacebo_runtime_usable()
     app_out = apply_tonemap(tonemap_clip, TonemapSettings(enabled=True))
-    app_frame = app_out.get_frame(0)
+    assert_true(app_out.applied is not None, "apply_tonemap omitted applied facts")
+    assert_true(
+        isinstance(app_out.applied.transform, LibplaceboTonemap) == libplacebo_runtime_usable,
+        "apply_tonemap implementation does not match runtime capability",
+    )
+    app_frame = app_out.clip.get_frame(0)
     assert_true(
         app_frame.width == 16 and app_frame.height == 16, "apply_tonemap frame render failed"
     )
@@ -595,8 +600,8 @@ def prove_vsview_runtime(media_path: Path) -> None:
     proof("pyside6_event_loop=ok platform=offscreen")
 
     import vspackrgb.rust  # noqa: F401, I001
-    import vsview  # noqa: F401
-    import vsview.app.main  # noqa: F401
+    import vsview
+    import vsview.app.main
     import vsview.cli  # noqa: F401
     from vsview import set_output  # noqa: F401
 

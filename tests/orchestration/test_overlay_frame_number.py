@@ -14,10 +14,12 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.render.geometry import RenderGeometryPlan
 from frame_compare.render.types import RenderedFrameResult
 from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.vs.types import HDRMetadata, SourceInfo
+from tests.render_test_support import paths_by_label
 
 from .execute_run_helpers import clip_state
 from .phase_task_helpers import _workspace
@@ -117,9 +119,12 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
         reporter=None,
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
+            analysis_clip=None,
+        ),
     )
 
     output = run_render_phase(
@@ -129,8 +134,8 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
     )
 
     assert output.render.screenshot_dir == workspace.screenshots_dir
-    assert "Reference" in output.render.screenshots_by_label
-    assert output.render.screenshots_by_label["Reference"][0].name == "10 - ref.png"
+    assert "Reference" in paths_by_label(output.render.clips)
+    assert paths_by_label(output.render.clips)["Reference"][0].name == "10 - ref.png"
 
     req = cast(Any, captured[0])
     assert req.frame_number == 20
