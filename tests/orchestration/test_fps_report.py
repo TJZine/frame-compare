@@ -38,6 +38,7 @@ def _make_clip_state(
     size_bytes: int = 123,
     release_identity: ReleaseIdentity | None = None,
     label_is_explicit: bool = False,
+    source_fps: Fraction | None = None,
 ) -> ClipState:
     fingerprint = ClipFingerprint(Path(path), size_bytes, 456)
     probe = ClipProbeSnapshot(
@@ -52,7 +53,7 @@ def _make_clip_state(
         path=Path(path),
         label=label,
         probe=probe,
-        source_fps=fps,
+        source_fps=fps if source_fps is None else source_fps,
         effective_fps=effective_fps,
         release_identity=release_identity,
         label_is_explicit=label_is_explicit,
@@ -71,6 +72,8 @@ def _fps_report_clip(
     num_frames: int = 100,
     is_hdr: bool = False,
     note: str | None = None,
+    raw_fps: Fraction | None = None,
+    fps_reason: str | None = None,
     size_bytes: int = 0,
 ) -> FpsReportClip:
     return FpsReportClip(
@@ -84,6 +87,8 @@ def _fps_report_clip(
         effective_fps=effective_fps,
         fps_divergent=fps_divergent,
         note=note,
+        raw_fps=source_fps if raw_fps is None else raw_fps,
+        fps_reason=fps_reason,
         size_bytes=size_bytes,
     )
 
@@ -228,6 +233,28 @@ def test_build_consolidated_fps_report_includes_probe_metadata_and_fps_order() -
     assert report[1].source_fps == Fraction(30000, 1001)
     assert report[1].effective_fps == Fraction(24000, 1001)
     assert report[1].fps_divergent is True
+    assert report[1].raw_fps == Fraction(30000, 1001)
+    assert report[1].fps_reason is None
+
+
+def test_build_consolidated_fps_report_retains_raw_rate_for_canonical_snap() -> None:
+    raw_fps = Fraction(27021, 1127)
+    canonical_fps = Fraction(24000, 1001)
+    reference = _make_clip_state(
+        "ref.mkv",
+        "Reference",
+        raw_fps,
+        canonical_fps,
+        source_fps=canonical_fps,
+    )
+
+    (report_clip,) = build_consolidated_fps_report(reference, [])
+
+    assert report_clip.raw_fps == raw_fps
+    assert report_clip.source_fps == canonical_fps
+    assert report_clip.effective_fps == canonical_fps
+    assert report_clip.fps_divergent is False
+    assert report_clip.fps_reason == "within 10 ppm of standard"
 
 
 def test_build_consolidated_fps_report_with_empty_comparisons_returns_reference_only() -> None:
@@ -337,9 +364,70 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
     assert clips[0]["label"] == "Reference"
     assert clips[0]["source_fps_num"] == 24
     assert clips[0]["source_fps_den"] == 1
+    assert clips[0]["raw_fps_num"] == 24
+    assert clips[0]["raw_fps_den"] == 1
     assert clips[0]["effective_fps_num"] == 24
     assert clips[0]["fps_divergent"] is False
     assert "size_bytes" not in clips[0]
+
+
+def test_emit_consolidated_fps_report_shows_canonical_snap_reason(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw_fps = Fraction(27021, 1127)
+    canonical_fps = Fraction(24000, 1001)
+    clip = _fps_report_clip(
+        path=Path("imprecise.mkv"),
+        label="Imprecise",
+        source_fps=canonical_fps,
+        effective_fps=canonical_fps,
+        fps_divergent=False,
+        raw_fps=raw_fps,
+        fps_reason="within 10 ppm of standard",
+    )
+
+    emit_consolidated_fps_report(
+        stage="after_load_sources",
+        clips=[clip],
+        json_output=False,
+        quiet=False,
+        rich_output=True,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert "23.976 fps (27021/1127) -> 23.976 fps (24000/1001)" in output
+    assert "within 10 ppm of standard" in output
+
+
+def test_emit_consolidated_fps_report_does_not_hide_canonical_snap_after_align(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    clip = _fps_report_clip(
+        path=Path("imprecise.mkv"),
+        label="Imprecise",
+        source_fps=Fraction(24000, 1001),
+        effective_fps=Fraction(24000, 1001),
+        fps_divergent=False,
+        raw_fps=Fraction(27021, 1127),
+        fps_reason="within 10 ppm of standard",
+    )
+
+    emit_consolidated_fps_report(
+        stage="after_align",
+        clips=[clip],
+        json_output=False,
+        quiet=False,
+        rich_output=True,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert "Frame rates" in output
+    assert "27021/1127" in output
+    assert "24000/1001" in output
+    assert "within 10 ppm of standard" in output
+    assert "frame rates match" not in output
 
 
 def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
@@ -501,6 +589,7 @@ def _length_clip(name: str, num_frames: int, fps: Fraction = Fraction(24, 1)) ->
         effective_fps=fps,
         fps_divergent=False,
         note=None,
+        raw_fps=fps,
     )
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import dataclass, replace
+from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,6 +40,20 @@ from frame_compare.utils.run_warnings import RunWarning
 if TYPE_CHECKING:
     from frame_compare.analysis.types import MetricCacheRequest
     from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
+
+
+_STANDARD_SOURCE_FPS = (
+    Fraction(24000, 1001),
+    Fraction(24, 1),
+    Fraction(25, 1),
+    Fraction(30000, 1001),
+    Fraction(30, 1),
+    Fraction(48, 1),
+    Fraction(50, 1),
+    Fraction(60000, 1001),
+    Fraction(60, 1),
+)
+_SOURCE_FPS_SNAP_TOLERANCE_PPM = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,16 +261,17 @@ def _build_selection_domain_clip(
             matches=[path],
         )
 
+    source_fps = _canonical_source_fps(snapshot.fps)
     effective_fps = (
         override.effective_fps
         if override is not None and override.effective_fps is not None
-        else snapshot.fps
+        else source_fps
     )
     return ClipState(
         path=path,
         label=label,
         probe=snapshot,
-        source_fps=snapshot.fps,
+        source_fps=source_fps,
         effective_fps=effective_fps,
         release_identity=release_identity,
         label_is_explicit=label_is_explicit,
@@ -263,6 +279,17 @@ def _build_selection_domain_clip(
         trim_start_frames=trim_start_frames,
         trim_end_frame_inclusive=end_inclusive,
     )
+
+
+def _canonical_source_fps(decoder_fps: Fraction) -> Fraction:
+    """Snap an imprecise decoder rate to one unambiguous standard rate."""
+    matches = [
+        standard_fps
+        for standard_fps in _STANDARD_SOURCE_FPS
+        if abs(decoder_fps - standard_fps) * 1_000_000
+        <= standard_fps * _SOURCE_FPS_SNAP_TOLERANCE_PPM
+    ]
+    return matches[0] if len(matches) == 1 else decoder_fps
 
 
 def compute_selection_window_for_clips(

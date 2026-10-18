@@ -111,6 +111,7 @@ def test_run_non_tty_routes_fps_diagnostics_through_logging(
                     effective_fps=Fraction(24, 1),
                     fps_divergent=False,
                     note=None,
+                    raw_fps=Fraction(24, 1),
                 )
             ],
             json_output=_request.json_output,

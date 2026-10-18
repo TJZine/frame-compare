@@ -76,6 +76,8 @@ class FpsReportClip:
     effective_fps: Fraction
     fps_divergent: bool
     note: str | None
+    raw_fps: Fraction
+    fps_reason: str | None = None
     size_bytes: int = 0
     release_identity: ReleaseIdentity | None = None
     label_is_explicit: bool = False
@@ -103,6 +105,8 @@ def build_consolidated_fps_report(
                 effective_fps=clip.effective_fps,
                 fps_divergent=clip.effective_fps != clip.source_fps,
                 note=None,
+                raw_fps=clip.probe.fps,
+                fps_reason=_source_fps_reason(clip.probe.fps, clip.source_fps),
                 size_bytes=clip.probe.fingerprint.size_bytes,
                 release_identity=clip.release_identity,
                 label_is_explicit=clip.label_is_explicit,
@@ -121,6 +125,12 @@ def _fps_decimal_text(value: Fraction) -> str:
 
 def _format_fps_decimal(value: Fraction) -> str:
     return f"{_fps_decimal_text(value)} fps"
+
+
+def _source_fps_reason(raw_fps: Fraction, source_fps: Fraction) -> str | None:
+    if raw_fps == source_fps:
+        return None
+    return "within 10 ppm of standard"
 
 
 def _format_runtime(num_frames: int, fps: Fraction) -> str:
@@ -151,6 +161,7 @@ def _fraction_parts(value: Fraction) -> tuple[int, int]:
 
 
 def _serialize_clip(clip: FpsReportClip) -> dict[str, Any]:
+    raw_num, raw_den = _fraction_parts(clip.raw_fps)
     source_num, source_den = _fraction_parts(clip.source_fps)
     effective_num, effective_den = _fraction_parts(clip.effective_fps)
     return {
@@ -160,12 +171,15 @@ def _serialize_clip(clip: FpsReportClip) -> dict[str, Any]:
         "height": clip.height,
         "num_frames": clip.num_frames,
         "is_hdr": clip.is_hdr,
+        "raw_fps_num": raw_num,
+        "raw_fps_den": raw_den,
         "source_fps_num": source_num,
         "source_fps_den": source_den,
         "effective_fps_num": effective_num,
         "effective_fps_den": effective_den,
         "fps_divergent": clip.fps_divergent,
         "note": clip.note,
+        "fps_reason": clip.fps_reason,
     }
 
 
@@ -178,11 +192,12 @@ def _stage_label(stage: str) -> str:
 
 
 def _format_fps_transition(clip: FpsReportClip) -> str:
-    source_fps = _format_fps_value(clip.source_fps)
-    effective_fps = _format_fps_value(clip.effective_fps)
-    if clip.fps_divergent:
-        return f"{escape(source_fps)} -> {escape(effective_fps)}"
-    return escape(effective_fps)
+    fps_values = [clip.raw_fps]
+    if clip.source_fps != fps_values[-1]:
+        fps_values.append(clip.source_fps)
+    if clip.effective_fps != fps_values[-1]:
+        fps_values.append(clip.effective_fps)
+    return " -> ".join(escape(_format_fps_value(value)) for value in fps_values)
 
 
 def _format_file_size(size_bytes: int) -> str:
@@ -254,15 +269,21 @@ def _render_clip_overview(
 
 def _source_detail_line(clip: FpsReportClip) -> str:
     """Return the `{w}×{h} · {fps} fps · {frames} ({runtime}) · {size}` line."""
+    if clip.fps_reason is None:
+        fps_segment = escape(f"{_fps_decimal_text(clip.effective_fps)} fps")
+    else:
+        fps_segment = f"{_format_fps_transition(clip)} [dim]({escape(clip.fps_reason)})[/]"
     segments = [
-        f"{clip.width}×{clip.height}",
-        f"{_fps_decimal_text(clip.effective_fps)} fps",
-        (f"{clip.num_frames:,} frames ({_format_runtime(clip.num_frames, clip.effective_fps)})"),
+        escape(f"{clip.width}×{clip.height}"),
+        fps_segment,
+        escape(
+            f"{clip.num_frames:,} frames ({_format_runtime(clip.num_frames, clip.effective_fps)})"
+        ),
     ]
     size = _format_file_size(clip.size_bytes)
     if size:
-        segments.append(size)
-    return "[dim] · [/]".join(escape(segment) for segment in segments)
+        segments.append(escape(size))
+    return "[dim] · [/]".join(segments)
 
 
 def _clip_short_names(clips: Sequence[FpsReportClip]) -> list[str]:
@@ -384,8 +405,9 @@ def _render_fps_table(
     reference_fps = clips[0].effective_fps
     for index, clip in enumerate(clips):
         status_text = _fps_status(clip, reference_fps=reference_fps)
-        if clip.note is not None:
-            status_text = f"{status_text} [dim]({escape(clip.note)})[/]"
+        notes = [note for note in (clip.note, clip.fps_reason) if note is not None]
+        if notes:
+            status_text = f"{status_text} [dim]({escape('; '.join(notes))})[/]"
 
         descriptor = (
             clip.label
@@ -410,7 +432,7 @@ def _render_fps_table(
 
 
 def _can_summarize_matching_fps(clips: Sequence[FpsReportClip]) -> bool:
-    if not clips or any(clip.fps_divergent for clip in clips):
+    if not clips or any(clip.fps_divergent or clip.raw_fps != clip.source_fps for clip in clips):
         return False
     effective_fps = clips[0].effective_fps
     return all(clip.effective_fps == effective_fps for clip in clips)

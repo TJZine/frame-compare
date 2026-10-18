@@ -190,6 +190,11 @@ Current fields:
   This is an AssumeFPS-style timing override; it does not resample, drop,
   interpolate, or duplicate frames. Alignment analyses retimed sources' audio on
   their effective timeline.
+- Decoder-reported source FPS values are canonicalized before mixed-FPS
+  validation and `match_fps`: a value within 10 ppm of exactly one standard rate
+  (`24000/1001`, `24`, `25`, `30000/1001`, `30`, `48`, `50`, `60000/1001`, or
+  `60`) uses that standard rate for time conversions. Frame indices and the raw
+  probe/cache value are unchanged. A value outside that tolerance remains raw.
 - `label_mode`: display-label policy. `stem` is the default; `filename` includes
   the extension; `parsed` composes available release group, title,
   season/episode marker, and episode title.
@@ -220,10 +225,11 @@ active rectangles are the highest-precedence active-picture evidence during
 preparation; when omitted, preparation may use trusted static metadata,
 dimension/aspect-ratio inference, or a full-frame fallback according to
 `screenshots.active_rect_detection`.
-`effective_fps` is an explicit AssumeFPS-style timing override: it changes
-timing/FPS interpretation without resampling, dropping, interpolating, or
-duplicating source frames. Mixed-FPS validation compares effective FPS values
-after explicit overrides and after `match_fps = "assume_reference"` or
+`effective_fps` is an explicit AssumeFPS-style timing override applied after
+source-rate canonicalization: it changes timing/FPS interpretation without
+resampling, dropping, interpolating, or duplicating source frames. Mixed-FPS
+validation compares effective FPS values after explicit overrides and after
+`match_fps = "assume_reference"` or
 `match_fps = "majority"` matching. Explicit per-source `effective_fps` values
 take precedence over `match_fps`.
 
@@ -456,12 +462,13 @@ unchanged.
 - After alignment, normal human output emits one collapsed line of the form
   `✓ frame rates match · 23.976 fps (24000/1001)` (the A2 terminal FPS format)
   only when every effective FPS is equal and no source FPS was adjusted. Any
-  adjustment or effective-FPS divergence instead keeps a compact evidence table
-  with the source-to-effective transition and status. Normal post-alignment FPS
-  output omits repeated paths; `--verbose` retains the detailed rows and full
-  absolute paths. JSON-mode FPS diagnostics retain their existing structured
-  stderr event and do not add fields to the successful stdout payload; the
-  event carries the original diagnostic wording (e.g. `Analysis source:
+  adjustment, canonical source-rate snap, or effective-FPS divergence instead
+  keeps a compact evidence table with the raw-to-canonical and
+  source-to-effective transitions, plus the snap reason. Normal post-alignment
+  FPS output omits repeated paths; `--verbose` retains the detailed rows and
+  full absolute paths. JSON-mode FPS diagnostics retain their existing
+  structured stderr event and do not add fields to the successful stdout
+  payload; the event carries the original diagnostic wording (e.g. `Analysis source:
   {role} | selected by fastest-source policy`); only the Rich rendering shows
   the Sources short-name line (`analysis source  {short name} (fastest to
   decode)` or `(configured)`).
