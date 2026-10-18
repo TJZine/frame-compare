@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import sys
+import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
@@ -31,6 +32,22 @@ if TYPE_CHECKING:
 
 
 _ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _cell_width(text: str) -> int:
+    """Measure terminal cells using only the VSView runtime's standard library."""
+    return sum(
+        0
+        if unicodedata.category(character) in {"Mn", "Me", "Cf"}
+        else 2
+        if unicodedata.east_asian_width(character) in {"W", "F"}
+        else 1
+        for character in text
+    )
+
+
+def _pad_cells(text: str, width: int) -> str:
+    return text + " " * max(0, width - _cell_width(text))
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,14 +239,15 @@ class SessionConsole:
                     current = [active_style] if active_style else []
                     visible_width = 0
                     continue
-                if visible_width == width:
+                character_width = _cell_width(character)
+                if character_width and visible_width + character_width > width and visible_width:
                     if active_style:
                         current.append("\x1b[0m")
                     lines.append("".join(current))
                     current = [active_style] if active_style else []
                     visible_width = 0
                 current.append(character)
-                visible_width += 1
+                visible_width += character_width
         if current or not lines:
             lines.append("".join(current))
         return lines
@@ -261,7 +279,7 @@ class SessionConsole:
         self.safe_print()
 
     def key_value(self, key: str, value: str) -> _SectionKeyValue:
-        return _SectionKeyValue(self.key(f"{key:<14}"), value)
+        return _SectionKeyValue(self.key(_pad_cells(key, 14)), value)
 
     def note(self, kind: str, text: str) -> str:
         glyph = self.glyph(kind)
@@ -307,11 +325,11 @@ class SessionConsole:
         source_names.extend(
             short_names.get(label, target["display_name"]) for label, target in targets.items()
         )
-        name_width = max(map(len, source_names))
+        name_width = max(map(_cell_width, source_names))
         rows = [
             self.key_value(
                 "outputs",
-                f"0  {source_names[0].ljust(name_width)}  {self.dim('reference')}",
+                f"0  {_pad_cells(source_names[0], name_width)}  {self.dim('reference')}",
             )
         ]
         for index, ((_label, target), name) in enumerate(
@@ -323,7 +341,7 @@ class SessionConsole:
             rows.append(
                 self.key_value(
                     "",
-                    f"{index}  {name.ljust(name_width)}  {state_text}",
+                    f"{index}  {_pad_cells(name, name_width)}  {state_text}",
                 )
             )
         return rows

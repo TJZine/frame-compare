@@ -77,7 +77,9 @@ class Section:
     def prompt(self, console: Console, question: str, ask: Callable[[str], _T]) -> _T:
         """Print an in-rail prompt, closing the section even on interruption.
 
-        ``ask`` supplies the literal default suffix and reads/echoes the answer.
+        ``ask`` prints the final literal question fragment, appends `` [y/N]: ``,
+        and reads/echoes the answer. The renderer prints earlier lines with styled
+        rails, leaving room for the suffix and a short answer on the final line.
         """
         ascii_only = glyphs_for_console(console) is GLYPHS_ASCII
         console.print()
@@ -87,9 +89,15 @@ class Section:
             )
         )
         console.print(_SectionBody(self), end="")
-        console.print(Text("| " if ascii_only else "│ ", style=self.rail_style), end="")
+        rail = "| " if ascii_only else "│ "
+        body_width = max(1, min(console.width, 120) - 2)
+        question_width = max(1, body_width - Text(" [y/N]: ").cell_len - 3)
+        lines = Text(question).wrap(console, question_width)
+        for line in lines[:-1]:
+            console.print(Text.assemble((rail, self.rail_style), line))
+        console.print(Text(rail, style=self.rail_style), end="")
         try:
-            return ask(question)
+            return ask(lines[-1].plain if lines else "")
         finally:
             console.print(Text("+-" if ascii_only else "╰─", style=self.rail_style))
             console.print()

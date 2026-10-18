@@ -255,9 +255,11 @@ def test_confirmation_callback_uses_nested_prompt_and_returns_confirmed(
     ("prompt_input", "expected_exit_code"),
     [("\n", 0), ("maybe\nn\n", 0), ("", 1)],
 )
+@pytest.mark.parametrize("width", [48, 80])
 def test_full_window_retry_prompt_keeps_visible_text_on_stderr(
     prompt_input: str,
     expected_exit_code: int,
+    width: int,
 ) -> None:
     app = typer.Typer()
 
@@ -275,18 +277,23 @@ def test_full_window_retry_prompt_keeps_visible_text_on_stderr(
             )
         )
 
-    result = CliRunner().invoke(app, input=prompt_input)
+    result = CliRunner().invoke(app, input=prompt_input, env={"COLUMNS": str(width)})
 
     expected_prompt = "Analyze the full shared clip for this run? [y/N]:"
     assert result.exit_code == expected_exit_code
     assert result.stdout == ""
     stderr = _normalize_cli_output(result.stderr)
-    assert expected_prompt in stderr
+    assert expected_prompt in " ".join(
+        line.removeprefix("│ ").strip() for line in stderr.splitlines()
+    )
+    assert all(len(line) <= width for line in stderr.splitlines())
     assert "╰─" in stderr
     if expected_exit_code == 1:
         assert stderr.endswith("Aborted.\n")
     assert "› Analyze the full clip?" in stderr
-    assert "The skip settings leave too few frames for this selection." in stderr
+    assert "The skip settings leave too few frames for this selection." in " ".join(
+        line.removeprefix("│ ").strip() for line in stderr.splitlines()
+    )
     assert "requested       8 frames" in stderr
     assert "available       4 frames" in stderr
     assert "skip            first 4m 00s · last 4m 00s" in stderr

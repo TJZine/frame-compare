@@ -9,6 +9,7 @@ from time import monotonic
 import structlog
 from rich.cells import cell_len
 from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
+from rich.constrain import Constrain
 from rich.padding import Padding
 from rich.progress import (
     BarColumn,
@@ -22,7 +23,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 from rich.progress_bar import ProgressBar
-from rich.table import Column
+from rich.table import Column, Table
 from rich.text import Text
 
 from frame_compare.utils.logging import register_log_console, release_log_console
@@ -248,6 +249,9 @@ class _RunProgress(Progress):
             expand=True,
             console=console,
         )
+
+    def get_renderable(self) -> RenderableType:
+        return Constrain(super().get_renderable(), width=120)
 
     def get_renderables(self) -> Iterable[RenderableType]:
         yield from super().get_renderables()
@@ -569,7 +573,8 @@ class RichProgressReporter:
         glyphs = glyphs_for_console(self._progress.console)
         glyph = getattr(glyphs, _DURABLE_STATUS_GLYPHS[status])
         style = _DURABLE_STATUS_STYLES[status]
-        line = Text.assemble((glyph, style), f" {label:<16}")
+        prefix = Text.assemble((glyph, style), f" {label:<16}")
+        line = Text()
         resolved_duration = duration_text
         if resolved_duration is None and (
             status == ProgressPhaseStatus.COMPLETED
@@ -592,7 +597,11 @@ class RichProgressReporter:
             if summary:
                 line.append(" · ", style="dim")
             line.append(resolved_duration, style="dim")
-        self._progress.console.print(line, width=min(self._progress.console.width, 120))
+        phase = Table.grid(padding=0)
+        phase.add_column(width=18, no_wrap=True)
+        phase.add_column(ratio=1, overflow="fold")
+        phase.add_row(prefix, line)
+        self._progress.console.print(phase, width=min(self._progress.console.width, 120))
         for row in continuation:
             self._progress.console.print(
                 Padding(row, (0, 0, 0, 18)), width=min(self._progress.console.width, 120)

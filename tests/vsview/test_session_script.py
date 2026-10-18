@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from rich.cells import cell_len
 
 from frame_compare.vsview.session_runtime import AudioReviewPayload, SessionConsole
 from frame_compare.vsview.session_script import (
@@ -318,10 +319,17 @@ def test_generated_ready_block_keeps_display_assumptions_inside_section(
     assert "VSView Display Assumptions" not in output
 
 
+@pytest.mark.parametrize(
+    "value", ["very-long-source-name-" * 4, "日本語映像" * 9, "Cafe\u0301" * 20]
+)
+@pytest.mark.parametrize("no_color", [False, True])
 def test_session_section_wraps_key_values_and_list_rows_at_terminal_width(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, value: str, no_color: bool
 ) -> None:
-    monkeypatch.setenv("NO_COLOR", "1")
+    if no_color:
+        monkeypatch.setenv("NO_COLOR", "1")
+    else:
+        monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr(
         "frame_compare.vsview.session_runtime.shutil.get_terminal_size",
         lambda **_kwargs: SimpleNamespace(columns=40, lines=24),
@@ -332,7 +340,7 @@ def test_session_section_wraps_key_values_and_list_rows_at_terminal_width(
         console.section(
             "› VSView is open · waiting for you",
             [
-                console.key_value("source", "very-long-source-name-" * 4),
+                console.key_value("source", console.dim(value)),
                 "A long instruction row that must continue after the rail without losing text.",
                 console.note("warning", "A long warning row that also needs to wrap."),
             ],
@@ -341,13 +349,21 @@ def test_session_section_wraps_key_values_and_list_rows_at_terminal_width(
     output = stderr.getvalue()
     lines = output.splitlines()
     visible_lines = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in lines]
-    assert all(len(line) <= 40 for line in visible_lines)
+    assert all(cell_len(line) <= 40 for line in visible_lines)
     assert any(line.startswith("│                 ") for line in visible_lines)
     assert any(
         line.startswith("│ ") and not line.startswith("│                 ")
         for line in visible_lines[2:-2]
     )
-    assert output.count("very-long-source-name-") == 4
+    source_start = next(
+        index for index, line in enumerate(visible_lines) if line.startswith("│ source")
+    )
+    source_lines = []
+    for line in visible_lines[source_start:]:
+        if source_lines and not line.startswith("│                 "):
+            break
+        source_lines.append(line[18:])
+    assert "".join(source_lines) == value
     assert "instruction row" in output
     assert "warning row" in output
 
@@ -441,3 +457,30 @@ def test_session_script_optional_frame_cache_limit(
         exec(compile(script, "session.py", "exec"), {"__file__": "session_x.py"})
     assert caught.value.code == 1
     assert observed == [(321 if memory_limit_mb is None else memory_limit_mb, memory_limit_mb)]
+
+
+def test_session_output_names_pad_by_terminal_cells(monkeypatch: pytest.MonkeyPatch) -> None:
+    from frame_compare.vsview.session_runtime import ComparisonSource, ReferenceSource
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    stderr = _StubStderr()
+    with redirect_stderr(stderr):
+        console = SessionConsole()
+        reference = ReferenceSource(
+            label="ref", path="ref.mkv", index_path="ref.lwi", display_name="日本語"
+        )
+        target = ComparisonSource(
+            path="a.mkv",
+            index_path="a.lwi",
+            display_name="Cafe\u0301",
+            comparison_key="ref:a",
+            suggested_offset=0,
+            audio_review=_accepted_review(),
+        )
+        console.section("Outputs", console._output_table_rows(reference, {"a": target}, {}))
+    lines = stderr.getvalue().splitlines()
+    reference_line = next(line for line in lines if "reference" in line)
+    comparison_line = next(line for line in lines if "audio +0f" in line)
+    assert cell_len(reference_line[: reference_line.index("reference")]) == 29
+    assert cell_len(comparison_line[: comparison_line.index("audio")]) == 29
+    assert "Cafe\u0301" in comparison_line

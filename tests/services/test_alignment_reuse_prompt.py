@@ -225,7 +225,7 @@ def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
     assert str(prompt_input.shared_cache_path) in "".join(output.split())
 
 
-@pytest.mark.parametrize("columns", [60, 80, 120, 240])
+@pytest.mark.parametrize("columns", [32, 48, 60, 80, 120, 240])
 def test_prompt_output_fits_terminal_width(
     columns: int,
     tmp_path: Path,
@@ -251,7 +251,9 @@ def test_prompt_output_fits_terminal_width(
     )
     stderr_output = stderr.getvalue()
     assert "Reuse previous offsets?" in stderr_output
-    assert REUSE_PREVIOUS_OFFSETS_PROMPT in stderr_output
+    assert REUSE_PREVIOUS_OFFSETS_PROMPT.strip() in " ".join(
+        line.removeprefix("│ ").strip() for line in stderr_output.splitlines()
+    )
     assert "\x1b[" not in stderr_output
     assert all(len(line) <= columns for line in stderr_output.splitlines())
 

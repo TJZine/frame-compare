@@ -297,14 +297,15 @@ def test_live_refresh_runs_without_events_and_stops_while_suspended(
         reporter._progress.stop()
 
 
+@pytest.mark.parametrize("width", [80, 100])
 @pytest.mark.parametrize("mixed", [False, True])
 def test_alignment_rows_follow_header_duration_and_precede_footage_note(
-    monkeypatch: pytest.MonkeyPatch, mixed: bool
+    monkeypatch: pytest.MonkeyPatch, mixed: bool, width: int
 ) -> None:
     from frame_compare.utils.progress_protocol import AlignmentSummary, AlignmentSummaryEntry
 
     reporter, output = _captured_rich_reporter(monkeypatch)
-    reporter._progress.console.width = 100
+    reporter._progress.console.width = width
     summary = AlignmentSummary(
         entries=(
             AlignmentSummaryEntry(
@@ -322,11 +323,33 @@ def test_alignment_rows_follow_header_duration_and_precede_footage_note(
     )
     lines = Text.from_ansi(output.getvalue()).plain.splitlines()
     header = next(index for index, line in enumerate(lines) if "sources aligned" in line)
-    assert "2m 09s + 4m 41s review" in lines[header]
+    phase_value = " ".join(line[18:].strip() for line in lines[header:] if line.strip())
+    assert "2m 09s + 4m 41s review" in phase_value
+    assert all(len(line) <= width for line in lines)
     following = "\n".join(lines[header + 1 :])
     assert "Alpha [red] with a long source name  +2f (audio +0f)" in following
     assert "Beta with a long source name" in following
     assert following.index("Alpha") < following.index("Reference has")
     assert all(line.startswith(" " * 18) for line in lines[header + 1 :] if line.strip())
     assert (" kept" in following) is mixed
-    assert ("confirmed in VSView" in following) is mixed
+    assert ("confirmed in VSView" in phase_value.partition("Alpha")[2]) is mixed
+
+
+def test_live_progress_caps_width_and_follows_resize(monkeypatch: pytest.MonkeyPatch) -> None:
+    reporter, _ = _captured_rich_reporter(monkeypatch)
+    reporter.set_phase_steps(["Analyze", "Align", "Render", "Report", "Publish"])
+    reporter.start_indeterminate("reading audio " + "source " * 30)
+    reporter.suspend()
+    try:
+        for width in (187, 80, 150):
+            reporter._progress.console.width = width
+            with reporter._progress.console.capture() as capture:
+                reporter._progress.console.print(reporter._progress.get_renderable())
+            lines = Text.from_ansi(capture.get()).plain.splitlines()
+            assert all(len(line) <= min(width, 120) for line in lines)
+            assert "reading audio" in lines[0]
+            assert "0:00" in lines[0]
+            assert "Analyze" in lines[-1]
+            assert reporter._progress.console.width == width
+    finally:
+        reporter.complete_phase()

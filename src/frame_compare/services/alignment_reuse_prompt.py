@@ -196,8 +196,8 @@ def prompt_for_previous_offset_reuse(
         section = _render_previous_offsets_section(prompt_input=prompt_input, verbose=verbose)
         response = section.prompt(
             console,
-            REUSE_PREVIOUS_OFFSETS_PROMPT,
-            lambda question: _read_reuse_response(question, no_color=no_color),
+            REUSE_PREVIOUS_OFFSETS_PROMPT.removesuffix(" [y/N]: "),
+            lambda question: _read_reuse_response(question + " [y/N]: ", no_color=no_color),
         )
         if response is None:
             _print_prompt_unavailable(no_color=no_color)
