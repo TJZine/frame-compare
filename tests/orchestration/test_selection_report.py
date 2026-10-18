@@ -89,8 +89,7 @@ def test_build_final_selection_report_marks_empty_breakdown_available() -> None:
             [0, 1, 2],
             SelectionBreakdown(user=[10, 11], random=[30]),
             [
-                "Final Selection",
-                "After Alignment",
+                "Final selection",
                 "3 aligned frames",
                 "User",
                 "2 source frames",

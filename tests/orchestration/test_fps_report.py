@@ -493,7 +493,9 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "Lengths differ" in captured.err
     assert "1200 frames" in captured.err
     assert "FPS target: 24000/1001 (majority)" in captured.err
-    assert "analysis source" in captured.err
+    assert "analysis" in captured.err
+    assert "\n│\n│ analysis        " in captured.err
+    assert "analysis source" not in captured.err
     assert "(configured)" in captured.err
     assert "selected by configured policy" not in captured.err
     assert "\x1b[" not in captured.err
@@ -658,7 +660,7 @@ def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(
 
     captured = capsys.readouterr()
     assert "Frame rates" in captured.err
-    assert "After Alignment" in captured.err
+    assert "After Alignment" not in captured.err
     assert "29.97 fps (30000/1001) -> 23.976 fps (24000/1001)" in captured.err
     assert "adjusted" in captured.err
     assert "assumed" in captured.err
@@ -701,7 +703,7 @@ def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "frame rates match · 24 fps (24/1)" in captured.err
+    assert captured.err == ""
     assert str(reference_path) not in captured.err
 
 
