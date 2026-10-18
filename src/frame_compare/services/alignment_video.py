@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -110,6 +110,7 @@ def check_video_alignment(
     fps_reference: Fraction,
     loader: VSLoader | None,
     cancellation: Event | None = None,
+    on_stage: Callable[[str], None] | None = None,
 ) -> VideoCheckObservation:
     """Run V1-V5 and return bounded W0 evidence without throwing runtime failures."""
     global_lag = attempt.audio.global_lag
@@ -123,6 +124,8 @@ def check_video_alignment(
     if not _identities_match(reference) or not _identities_match(comparison):
         return _failed()
 
+    if on_stage is not None:
+        on_stage("indexing video")
     try:
         load_started = time.monotonic()
         reference_source = _load_source(loader, reference.path)
@@ -140,6 +143,8 @@ def check_video_alignment(
     except RuntimeError:
         return _failed()
 
+    if on_stage is not None:
+        on_stage("checking video")
     try:
         reference_node = _prepare_luma(reference_source.clip, reference.active_rect)
         comparison_node = _prepare_luma(comparison_source.clip, comparison.active_rect)

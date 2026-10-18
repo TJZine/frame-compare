@@ -77,12 +77,12 @@ def start_phase_progress(
         # used here for every phase.
         rich_label = rich_phase_label(name)
         if name == "align":
-            reporter.start_phase(rich_label, total=1)
+            reporter.start_indeterminate(rich_label)
             return
         reporter.start_phase(rich_label, total=total)
         return
     if name == "align":
-        reporter.start_phase(display_label, total=1)
+        reporter.start_indeterminate(display_label)
         return
     reporter.start_phase(display_label, total=total)
 

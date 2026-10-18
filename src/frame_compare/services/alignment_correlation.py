@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -138,8 +139,9 @@ def _chunk_psr(correlation: FloatArray, peak: int) -> float:
 
 
 class ChunkedCorrelation:
-    def __init__(self, plan: ChunkPlan) -> None:
+    def __init__(self, plan: ChunkPlan, *, on_chunk: Callable[[], None] | None = None) -> None:
         self._plan = plan
+        self._on_chunk = on_chunk
         self._next_index = 0
         self._global = np.zeros(2 * plan.lag_samples + 1, dtype=np.float64)
         self._observations: list[ChunkObservation] = []
@@ -202,6 +204,8 @@ class ChunkedCorrelation:
         if reference_rms <= _ACTIVITY_FLOOR or window_rms <= _ACTIVITY_FLOOR:
             self._observations.append(observation)
             self._next_index += 1
+            if self._on_chunk is not None:
+                self._on_chunk()
             return observation
 
         size = _next_pow2(reference_count + 2 * lag_samples)
@@ -226,6 +230,8 @@ class ChunkedCorrelation:
         )
         self._observations.append(observation)
         self._next_index += 1
+        if self._on_chunk is not None:
+            self._on_chunk()
         return observation
 
     def finish(self) -> ChunkedAudioEstimate:

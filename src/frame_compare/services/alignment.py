@@ -11,7 +11,9 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from fractions import Fraction
+from functools import partial
 from pathlib import Path
+from time import monotonic
 from typing import TYPE_CHECKING, cast
 
 import structlog
@@ -92,6 +94,7 @@ from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
 )
+from frame_compare.utils.progress import LogProgressReporter
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import AlignmentCacheSettings, AlignmentClipRequest, AlignmentRequest
@@ -680,6 +683,8 @@ def _collect_and_decide_audio_pair(
     comparison_ordinal: int,
     cancellation: threading.Event | None,
     vs_loader: VSLoader | None,
+    on_stage: Callable[[str, int | None], None] | None = None,
+    on_chunk: Callable[[], None] | None = None,
 ) -> AlignmentResult:
     """Collect paired audio and map the outcome; raises on cancel/failed cleanup."""
     reference_selection = planned.reference_selection
@@ -692,6 +697,10 @@ def _collect_and_decide_audio_pair(
     comparison_audio_start, comparison_video_start = _selection_start_facts(
         comparison_selection, timeline_scale=comparison_request.timeline_scale
     )
+
+    def report_video_stage(stage: str) -> None:
+        if on_stage is not None:
+            on_stage(stage, None)
 
     def finish(
         decided: DecidedAudioStage,
@@ -720,6 +729,7 @@ def _collect_and_decide_audio_pair(
                 fps_reference=fps_reference,
                 loader=vs_loader,
                 cancellation=cancellation,
+                on_stage=report_video_stage,
             )
             decided = alignment_decision.decide_after_video(
                 stage=decided,
@@ -767,7 +777,9 @@ def _collect_and_decide_audio_pair(
         _check_pair_identities(reference, comparison, planned.frozen_identities)
     except AudioAlignmentError:
         return aborted_for_identity_change("not_observed", ())
-    accumulator = ChunkedCorrelation(plan)
+    if on_stage is not None:
+        on_stage("reading audio", len(plan.chunks))
+    accumulator = ChunkedCorrelation(plan, on_chunk=on_chunk)
     collection = collect_paired_audio_chunks(
         alignment_audio.collection_argv(
             reference,
@@ -850,8 +862,12 @@ def _estimate_audio_pair(
     comparison_ordinal: int = 1,
     cancellation: threading.Event | None = None,
     vs_loader: VSLoader | None = None,
+    on_stage: Callable[[str, int | None], None] | None = None,
+    on_chunk: Callable[[], None] | None = None,
 ) -> AlignmentResult:
     """Estimate one pair: pre-decode planning, then collection plus decision."""
+    if on_stage is not None:
+        on_stage("preparing audio", None)
     planned = _plan_audio_pair(
         reference,
         comparison,
@@ -876,6 +892,8 @@ def _estimate_audio_pair(
         comparison_ordinal=comparison_ordinal,
         cancellation=cancellation,
         vs_loader=vs_loader,
+        on_stage=on_stage,
+        on_chunk=on_chunk,
     )
 
 
@@ -884,7 +902,8 @@ def _compute_requested_alignments(
     request: AlignmentRequest,
     requested_comparisons: list[AlignmentClipRequest],
     fps_reference: Fraction | None,
-    on_comparison_started: Callable[[AlignmentClipRequest], None] | None,
+    on_stage: Callable[[AlignmentClipRequest, str, int | None], None],
+    on_chunk: Callable[[], None],
     cancellation: threading.Event,
     vs_loader: VSLoader | None,
 ) -> tuple[Fraction, dict[str, ComparisonResolution]]:
@@ -906,8 +925,6 @@ def _compute_requested_alignments(
 
     for fallback_ordinal, comp in enumerate(requested_comparisons, start=1):
         raise_if_alignment_cancelled(cancellation)
-        if on_comparison_started is not None:
-            on_comparison_started(comp)
         res = _estimate_audio_pair(
             reference.path,
             comp.path,
@@ -919,6 +936,8 @@ def _compute_requested_alignments(
             comparison_ordinal=comparison_ordinals.get(comp.path, fallback_ordinal),
             cancellation=cancellation,
             vs_loader=vs_loader,
+            on_stage=partial(on_stage, comp),
+            on_chunk=on_chunk,
         )
         raise_if_alignment_cancelled(cancellation)
         resolutions[alignment_key(reference.path, comp.path)] = resolution_from_computation(
@@ -939,25 +958,67 @@ async def _await_audio_computation(
     await cancellation_checkpoint()
     cancellation = threading.Event()
     loop = asyncio.get_running_loop()
-    analysis_descriptions = _request_progress_descriptions(request)
+    # LF2 is human presentation; structured phase events retain their contract.
+    if isinstance(progress, LogProgressReporter):
+        progress = None
+    descriptions = _request_progress_descriptions(request)
+    positions = {comp.path: i for i, comp in enumerate(requested_comparisons, 1)}
+    stage_active = False
+    pending_chunks = 0
+    last_tick = monotonic()
 
-    def report_comparison_started(comparison: AlignmentClipRequest) -> None:
+    def apply_stage(description: str, total: int | None) -> None:
+        nonlocal stage_active
+        if progress is None:
+            return
+        if stage_active:
+            progress.complete_phase(retain=False)
+        if total is None:
+            progress.start_indeterminate(description)
+        else:
+            progress.start_phase(description, total, presentation="measurable")
+        stage_active = True
+
+    def flush_chunks() -> None:
+        nonlocal pending_chunks, last_tick
+        if pending_chunks and progress is not None:
+            loop.call_soon_threadsafe(progress.advance, pending_chunks)
+            pending_chunks = 0
+            last_tick = monotonic()
+
+    def report_stage(comparison: AlignmentClipRequest, stage: str, total: int | None) -> None:
+        flush_chunks()
         if progress is not None:
-            loop.call_soon_threadsafe(
-                progress.set_description,
-                analysis_descriptions[comparison.path],
+            description = (
+                f"{descriptions[comparison.path]} "
+                f"({positions[comparison.path]} of {len(requested_comparisons)}) · {stage}"
             )
+            loop.call_soon_threadsafe(apply_stage, description, total)
+
+    def report_chunk() -> None:
+        nonlocal pending_chunks
+        pending_chunks += 1
+        # Coalesce fast chunks to the live renderer's four-Hz refresh cadence.
+        if monotonic() - last_tick >= 0.25:
+            flush_chunks()
+
+    def compute() -> tuple[Fraction, dict[str, ComparisonResolution]]:
+        try:
+            return _compute_requested_alignments(
+                request=request,
+                requested_comparisons=requested_comparisons,
+                fps_reference=fps_reference,
+                on_stage=report_stage,
+                on_chunk=report_chunk,
+                cancellation=cancellation,
+                vs_loader=vs_loader,
+            )
+        finally:
+            # Flush the last fast batch from the worker, including on failure.
+            flush_chunks()
 
     worker = asyncio.create_task(
-        asyncio.to_thread(
-            _compute_requested_alignments,
-            request=request,
-            requested_comparisons=requested_comparisons,
-            fps_reference=fps_reference,
-            on_comparison_started=report_comparison_started,
-            cancellation=cancellation,
-            vs_loader=vs_loader,
-        ),
+        asyncio.to_thread(compute),
         name="alignment-audio-computation",
     )
     try:
@@ -973,6 +1034,9 @@ async def _await_audio_computation(
         if isinstance(error, AudioAlignmentCleanupError):
             raise error from cancelled
         raise
+    finally:
+        if stage_active and progress is not None:
+            progress.complete_phase(retain=False)
 
 
 def _record_alignment_progress(
@@ -1027,12 +1091,21 @@ def _record_resolved_alignment_request_progress(
                 )
             )
             is not None
-            and resolution.origin == "shared_computed_offsets"
+            and (
+                resolution.origin == "shared_computed_offsets"
+                or (
+                    resolution.origin == "shared_previous_offsets"
+                    and not isinstance(progress, LogProgressReporter)
+                )
+            )
         ]
     for comparison in request.comparisons:
         key = alignment_key(request.reference.path, comparison.path)
         resolution = resolutions.get(key)
-        if resolution is not None and resolution.origin == "shared_computed_offsets":
+        if resolution is not None and resolution.origin in {
+            "shared_computed_offsets",
+            "shared_previous_offsets",
+        }:
             progress_descriptions[comparison.path] = progress_descriptions[comparison.path].replace(
                 "Align · ", "Align · using cached audio evidence · ", 1
             )
@@ -1169,13 +1242,14 @@ async def align_clips_from_request(
                 vs_loader=vs_loader,
             )
             resolutions.update(computed)
-            descriptions = _request_progress_descriptions(request)
-            for comparison in requested_comparisons:
-                _record_alignment_progress(
-                    progress=progress,
-                    result=resolutions[alignment_key(reference, comparison.path)].result,
-                    description=descriptions[comparison.path],
-                )
+            if isinstance(progress, LogProgressReporter):
+                descriptions = _request_progress_descriptions(request)
+                for comparison in requested_comparisons:
+                    _record_alignment_progress(
+                        progress=progress,
+                        result=resolutions[alignment_key(reference, comparison.path)].result,
+                        description=descriptions[comparison.path],
+                    )
         else:
             _record_resolved_alignment_request_progress(
                 progress=progress,
