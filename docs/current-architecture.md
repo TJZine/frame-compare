@@ -747,7 +747,27 @@ Native alignment review is deliberately split across the existing owners. The
 `frame_compare.vsview.session_script` owner reserves the script path and generates
 deterministic session data plus a small installed-package bootstrap.
 `frame_compare.vsview.session_runtime` owns preview source loading, defaults,
-console guidance, and output registration after all sources are prepared. It uses
+console guidance, frame-bound native alignment guidance, and output registration after
+all sources are prepared. The `frame_compare.vsview.alignment_overlay` owner builds
+immutable session-open facts and uses one public `ModifyFrame` path, receiving the
+frame number and raw frame together, to bake the original-frame and named suggested-
+match labels into native frames without polling or moving GUI playheads. Raw
+reference-minus-comparison mapping keeps zero distinct from unavailable evidence,
+rejects out-of-bounds targets without clamping, and leaves base trims outside the
+raw mapping. Launch classification stays fixed at session open; the panel remains
+the authority for saved choices, current status, whole-set actions, and result
+persistence, and the preview remains untrimmed. An owned late composition failure
+may use an independent static fresh-copy fallback with the absolute raw offset and
+named higher/lower/equal relationship, or unavailable guidance, plus the same
+session-open classification; it does not show current/target frame numbers.
+A calculated target outside the other source's bounds is a separate `No overlap at
+this frame in {name}` result, not static fallback. Source/decoder errors and native
+post-return validation errors propagate; if neither label mode works, the preview
+remains raw with a warning and the panel stays available; raw degradation is not
+static acceptance. Existing source preparation/defaults/FPS, metadata-v5/result-v1,
+alignment authority, cache, trim, and persistence contracts remain unchanged.
+
+The runtime otherwise uses
 the explicit generated script path for session identity, creates one `Reference`
 output and the complete ordered `Comparison N` output set, registering each source once and
 serializing role/key/ordinal/name, the authoritative integer/null offset, and bounded

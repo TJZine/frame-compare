@@ -44,6 +44,19 @@ The panel distinguishes the frame you are viewing from the captured position and
 previews the signed offset and which source is trimmed. It shows the audio candidate
 under **Audio evidence** without applying it.
 
+### Read the preview labels
+
+Video labels use the alignment evidence from session open. **Original frame** identifies
+the source frame shown. **Suggested match in ...** is calculated from that frame; it
+does not show or move the other playhead. The session-open classification remains
+launch guidance after you save, keep, or confirm a choice. Saved choices and current
+status are shown in the Alignment Review panel. If a frame-specific target is
+outside the source bounds, the preview says **No overlap at this frame in {name}**.
+That is different from static fallback: static labels omit current and target frame
+numbers and show the absolute offset with a named higher, lower, equal, or unavailable
+relationship. If neither label mode works, the preview has no labels and shows a
+warning; the panel stays available. The preview remains untrimmed.
+
 <figure class="fc-figure fc-figure--narrow">
   <img src="../images/vsview-alignment-panel.webp" alt="VSView alignment panel listing the Reference and Comparison 1 positions as captured and ready to confirm." width="748" height="1142" loading="lazy">
   <figcaption>When every source shows a captured position, the panel is ready to confirm the whole lineup.</figcaption>
