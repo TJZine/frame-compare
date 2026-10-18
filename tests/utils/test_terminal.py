@@ -60,7 +60,9 @@ from frame_compare.cli.run_command import (
 )
 from frame_compare.config.schema import ConfigSchema, Visibility
 from frame_compare.orchestration.run_inputs import AcquiredRunConfig
-from frame_compare.services.alignment_reuse_prompt import _read_reuse_response
+from frame_compare.services.alignment_reuse_prompt import (
+    REUSE_PREVIOUS_OFFSETS_PROMPT, _read_reuse_response,
+)
 from frame_compare.orchestration.types import (
     FullWindowRetryConfirmationRequest, SlowpicsUploadConfirmationRequest,
 )
@@ -79,7 +81,7 @@ async def main():
     saved = signal.getsignal(signal.SIGINT)
     try:
         if sys.argv[1] == "reuse":
-            _read_reuse_response(no_color=True)
+            _read_reuse_response(REUSE_PREVIOUS_OFFSETS_PROMPT, no_color=True)
         elif sys.argv[1] == "retry":
             callback = build_confirm_full_window_retry_callback(deps=deps(DepsOptions(
                 confirm_full_window_retry=confirm_full_window_retry_on_stderr,

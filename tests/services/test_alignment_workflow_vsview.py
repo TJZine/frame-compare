@@ -176,7 +176,7 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
 
     def launch(*args: object, **_kwargs: object):
         prelaunch = capsys.readouterr().err
-        assert "Provisional audio candidate: +0f - NOT APPLIED" in prelaunch
+        assert "comparison: +0f · not applied · confirm in VSView" in prelaunch
         initial_payload = json.loads(
             (tmp_path / "alignment_diagnostics" / "comparison-1.json").read_text(encoding="utf-8")
         )
