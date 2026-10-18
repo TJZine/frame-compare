@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING
 from rich.console import Console
 from rich.markup import escape
 
+from frame_compare.utils.artifact_paths import (
+    absolute_display_path,
+    artifact_link,
+    format_display_path,
+)
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
+from frame_compare.utils.progress import AlignmentSummaryValue
 from frame_compare.utils.run_warnings import RunWarning, WarningSeverity, WarningSource
 from frame_compare.utils.terminal_sections import Section, section_title
 from frame_compare.utils.terminal_theme import (
@@ -59,26 +65,6 @@ def _styled_path(value: str) -> str:
     return f"[{STYLE_PATH}]{escape(value)}[/]"
 
 
-def _absolute_display_path(path: Path, root: Path | None) -> Path:
-    if path.is_absolute():
-        return path.resolve()
-    if root is None:
-        return path
-    return (root.resolve() / path).resolve()
-
-
-def format_display_path(path: Path, *, root: Path | None) -> str:
-    absolute = _absolute_display_path(path, root)
-    if root is None:
-        return str(path)
-
-    try:
-        relative = absolute.relative_to(root.resolve())
-    except ValueError:
-        return str(absolute)
-    return str(relative) if relative != Path(".") else "."
-
-
 def _display_path(
     path: Path,
     *,
@@ -87,7 +73,7 @@ def _display_path(
 ) -> str:
     display = format_display_path(path, root=root)
     rendered = _styled_path(display)
-    absolute = _absolute_display_path(path, root)
+    absolute = absolute_display_path(path, root)
     if verbose and root is not None and display != str(absolute):
         rendered += f" {_styled_unit(f'(absolute: {absolute})')}"
     return rendered
@@ -507,6 +493,15 @@ def print_result_summary(
             screenshots_value += f"  [dim]{screenshot_total} {unit}[/]"
         _add_kv(table, "screenshots", screenshots_value)
 
+    if result.alignment_summary is not None:
+        table.add_row("alignment", AlignmentSummaryValue(result.alignment_summary))
+    if result.alignment_diagnostics_dir is not None:
+        _add_kv(
+            table,
+            "diagnostics",
+            artifact_link(result.alignment_diagnostics_dir, root=root, verbose=verbose),
+        )
+
     if result.slowpics_upload_confirmation_status == "report_unavailable":
         _add_kv(table, "slow.pics", "upload skipped because the report could not be confirmed")
 
@@ -553,17 +548,6 @@ def _count_screenshot_files(screenshot_dir: Path) -> int | None:
     except OSError:
         return None
     return sum(1 for entry in entries if entry.is_file() and entry.suffix.lower() == ".png")
-
-
-def artifact_link(path: Path, *, root: Path | None, verbose: bool = False) -> str:
-    display = format_display_path(path, root=root)
-    absolute = _absolute_display_path(path, root)
-    if not absolute.is_absolute():
-        absolute = path.resolve()
-    rendered = f"[link={absolute.as_uri()}]{escape(display)}[/link]"
-    if verbose and root is not None and display != str(absolute):
-        rendered += f" {_styled_unit(f'(absolute: {absolute})')}"
-    return rendered
 
 
 def _slowpics_link(url: str) -> str:

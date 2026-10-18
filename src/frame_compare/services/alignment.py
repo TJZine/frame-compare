@@ -35,7 +35,6 @@ from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.alignment_presentation import (
     present_alignment_evidence,
-    print_pre_review_summary,
 )
 from frame_compare.services.alignment_previous_offsets import (
     apply_shared_reuse,
@@ -940,7 +939,7 @@ async def _await_audio_computation(
     await cancellation_checkpoint()
     cancellation = threading.Event()
     loop = asyncio.get_running_loop()
-    analysis_descriptions = _request_analysis_progress_descriptions(request)
+    analysis_descriptions = _request_progress_descriptions(request)
 
     def report_comparison_started(comparison: AlignmentClipRequest) -> None:
         if progress is not None:
@@ -986,7 +985,7 @@ def _record_alignment_progress(
         return
 
     if description is None:
-        description = f"ALIGN | {result.comparison_clip}"
+        description = f"Align · {result.comparison_clip}"
     progress.set_description(description)
     progress.advance(1)
 
@@ -1035,7 +1034,7 @@ def _record_resolved_alignment_request_progress(
         resolution = resolutions.get(key)
         if resolution is not None and resolution.origin == "shared_computed_offsets":
             progress_descriptions[comparison.path] = progress_descriptions[comparison.path].replace(
-                "ALIGN | ", "ALIGN | Using cached audio evidence | ", 1
+                "Align · ", "Align · using cached audio evidence · ", 1
             )
     _record_resolved_alignment_progress(
         progress=progress,
@@ -1049,16 +1048,9 @@ def _record_resolved_alignment_request_progress(
 def _request_progress_descriptions(request: AlignmentRequest) -> dict[Path, str]:
     return {
         comparison.path: (
-            f"ALIGN | Comparison {index} | {comparison.presentation_name or comparison.path.name}"
+            f"Align · {comparison.short_name or comparison.label or comparison.path.name}"
         )
-        for index, comparison in enumerate(request.comparisons, start=1)
-    }
-
-
-def _request_analysis_progress_descriptions(request: AlignmentRequest) -> dict[Path, str]:
-    return {
-        path: description.replace("ALIGN | ", "ALIGN | Analyzing audio | ", 1)
-        for path, description in _request_progress_descriptions(request).items()
+        for comparison in request.comparisons
     }
 
 
@@ -1129,7 +1121,7 @@ async def align_clips_from_request(
         validate_previous_offsets_policy(request, config)
 
         if progress:
-            progress.set_description("ALIGN | Checking saved offsets")
+            progress.set_description("Align · checking saved offsets")
 
         resolutions: dict[str, ComparisonResolution] = {}
         fps_reference = _apply_manual_overrides(
@@ -1153,6 +1145,7 @@ async def align_clips_from_request(
             cache_results=config.cache_results,
             progress=progress,
             no_color=config.no_color,
+            verbose=verbose,
         )
 
         resolutions.update(reused)
@@ -1205,13 +1198,6 @@ async def align_clips_from_request(
             review_outcome=initial_outcome,
             emit_success_log=json_output,
         )
-        if initial_outcome == "pending" and not quiet and not json_output:
-            print_pre_review_summary(
-                request=request,
-                resolutions=resolutions,
-                progress=progress,
-                no_color=config.no_color,
-            )
         present_alignment_evidence(
             request=request,
             resolutions=resolutions,
@@ -1221,10 +1207,17 @@ async def align_clips_from_request(
             quiet=quiet,
             json_output=json_output,
             diagnostics_written=bool(diagnostic_keys),
+            review_pending=initial_outcome == "pending",
         )
         if completed_confirmed_reuse and not requested_comparisons:
             require_current_alignment_sources(request)
-            return AlignmentOperationOutcome(ordered_results(request, resolutions))
+            return AlignmentOperationOutcome(
+                ordered_results(request, resolutions),
+                resolutions=tuple(
+                    resolutions[alignment_key(reference, comp.path)] for comp in request.comparisons
+                ),
+                diagnostics_dir=request.alignment_diagnostics_dir if diagnostic_keys else None,
+            )
 
         offsets_by_key = _build_offsets_map(
             reference=reference,
@@ -1283,7 +1276,14 @@ async def align_clips_from_request(
             if candidate is not None:
                 save_reusable_offsets(request, candidate)
 
-        return AlignmentOperationOutcome(ordered_results(request, resolutions), review.summary)
+        return AlignmentOperationOutcome(
+            ordered_results(request, resolutions),
+            review.summary,
+            resolutions=tuple(
+                resolutions[alignment_key(reference, comp.path)] for comp in request.comparisons
+            ),
+            diagnostics_dir=request.alignment_diagnostics_dir if diagnostic_keys else None,
+        )
     except _RunInterrupt:
         await cancellation_checkpoint()
         raise asyncio.CancelledError() from None

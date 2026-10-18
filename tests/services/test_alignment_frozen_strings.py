@@ -36,14 +36,10 @@ from frame_compare.services.alignment_decision import (
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_presentation import (
     present_alignment_evidence,
-    print_pre_review_summary,
 )
-from frame_compare.services.alignment_vsview import format_vsview_review_message
 from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentResult,
-    AlignmentReviewSummary,
-    AlignmentSource,
     ComparisonResolution,
 )
 from frame_compare.utils.alignment_evidence import (
@@ -84,7 +80,6 @@ from tests.services.alignment_evidence_test_support import (
     stream,
 )
 from tests.services.alignment_request_test_support import alignment_request
-from tests.services.alignment_resolution_test_support import resolutions_for_results
 
 
 def _provisional_result(reference: Path, comparison: Path) -> AlignmentResult:
@@ -935,96 +930,6 @@ def _applied_result(reference: Path, comparison: Path, attempt) -> AlignmentResu
 
 
 @pytest.mark.parametrize(
-    ("source", "offset", "reviewed"),
-    [
-        ("manual", 0, False),
-        ("manual", 12, False),
-        ("computed", 0, False),
-        ("cached", 12, False),
-        ("manual", 12, True),
-    ],
-    ids=["manual-zero", "manual-nonzero", "computed", "cached", "reviewed"],
-)
-def test_align_pre_review_summary_uses_frozen_fragments(
-    tmp_path: Path,
-    capsys,
-    source: AlignmentSource,
-    offset: int,
-    reviewed: bool,
-) -> None:
-    from frame_compare.orchestration.phase_alignment import _align_success_summary
-    from frame_compare.utils.progress import RichProgressReporter
-
-    reference, alpha, beta = (tmp_path / name for name in ("ref.mkv", "alpha.mkv", "beta.mkv"))
-    for path in (reference, alpha, beta):
-        path.touch()
-    request = alignment_request(
-        reference=reference,
-        comparisons=[alpha, beta],
-        generated_dir=tmp_path,
-    )
-    request = replace(
-        request,
-        comparisons=[
-            replace(comparison, short_name=short_name)
-            for comparison, short_name in zip(request.comparisons, ("Alpha", "Beta"), strict=True)
-        ],
-    )
-    results_map = {
-        f"{reference.stem}:{comparison.stem}": AlignmentResult(
-            reference.name,
-            comparison.name,
-            offset if applied else None,
-            offset / 24 if applied else None,
-            0.0,
-            None,
-            source,
-            applied=applied,
-        )
-        for comparison, applied in ((alpha, True), (beta, False))
-    }
-
-    print_pre_review_summary(
-        request=request,
-        resolutions=resolutions_for_results(results_map),
-        progress=RichProgressReporter(no_color=True),
-        no_color=True,
-    )
-
-    err = capsys.readouterr().err
-    assert "Align" in err
-    assert "Alpha alignment applied · Beta needs visual confirmation" in err
-
-    summary = _align_success_summary(
-        request=request,
-        results=list(results_map.values()),
-        review=AlignmentReviewSummary(
-            review_ran=reviewed,
-            pairs_confirmed=1 if reviewed else 0,
-            comparisons_kept=1 if reviewed else 0,
-        ),
-    )
-    assert summary == (
-        "1 pair confirmed in VSView · 1 kept"
-        if reviewed
-        else "Alpha alignment applied · Beta needs visual confirmation"
-    )
-
-
-@pytest.mark.parametrize(
-    ("pairs_confirmed", "kept_count", "expected"),
-    [
-        (1, 1, "Accepted 1 confirmed pair; 1 comparison kept its current offset."),
-        (2, 1, "Accepted 2 confirmed pairs; 1 comparison kept its current offset."),
-        (2, 3, "Accepted 2 confirmed pairs; 3 comparisons kept their current offset."),
-        (2, 0, "Accepted 2 confirmed pairs."),
-    ],
-)
-def test_vsview_review_message(pairs_confirmed: int, kept_count: int, expected: str) -> None:
-    assert format_vsview_review_message(pairs_confirmed, kept_count) == expected
-
-
-@pytest.mark.parametrize(
     ("has_candidate", "expected"),
     [
         (
@@ -1111,7 +1016,7 @@ def test_normal_provisional_copy_is_frozen(
     _present(request, _provisional_result(reference, comparison), config)
 
     err = capsys.readouterr().err
-    assert "Comparison 1 - Provisional audio candidate: +146f - NOT APPLIED" in err
+    assert "comparison: +146f · not applied" in err
     assert (
         "Visual confirmation required to use this hint. Align manually or keep the current alignment."
         not in err
@@ -1163,7 +1068,7 @@ def test_normal_unavailable_copy_is_frozen(
     _present(request, _unavailable_result(reference, comparison, reason=reason), config)
 
     err = capsys.readouterr().err
-    assert f"Comparison 1 - No usable audio candidate ({phrase}) - NOT APPLIED" in err
+    assert f"comparison: no audio match ({phrase})" in err
     assert "Align manually or keep the current alignment." in err
 
 
@@ -1245,7 +1150,7 @@ def test_verbose_unavailable_shows_runs(tmp_path: Path, capsys: pytest.CaptureFi
     err = capsys.readouterr().err
     assert "Run 0-0: lag=+100 x1 chunks" in err
     assert "Run 1-1: lag=-200 x1 chunks" in err
-    assert "No usable audio candidate (no single offset across the track) - NOT APPLIED" in err
+    assert "no audio match (no single offset across the track)" in err
 
 
 def test_verbose_stability_scope_names_unassessed_chunks(
@@ -1297,7 +1202,7 @@ def test_quiet_keeps_only_actionable_notices(
     _present(request, _provisional_result(reference, comparison), config, quiet=True)
 
     err = capsys.readouterr().err
-    assert "Provisional audio candidate" in err
+    assert "· not applied" in err
 
     applied = AlignmentResult(
         reference_clip=reference.name,
@@ -1379,7 +1284,7 @@ def test_p4a_reason_copy_is_plain_and_shows_check_points(
     _present(request, result, config)
 
     err = capsys.readouterr().err
-    assert "Comparison 1 - Provisional audio candidate: +146f - NOT APPLIED" in err
+    assert "comparison: +146f · not applied" in err
     assert expected in err
     if reason != "video_check_unavailable":
         assert "Check 1:01:01  reference 13,123 <-> comparison 12,880 (+243f)" in err
@@ -1914,8 +1819,8 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
     assert capsys.readouterr().err == full_terminal
     assert "Picture differs" not in full_terminal
     assert "the picture differs" not in full_terminal
-    assert (" - APPLIED" in full_terminal) is applied
-    assert (" - NOT APPLIED" in full_terminal) is (not applied)
+    assert (" · applied" in full_terminal) is applied
+    assert (" · not applied" in full_terminal) is (not applied)
 
     _present(request, result, config, verbose=True)
     verbose_terminal = capsys.readouterr().err
@@ -2054,9 +1959,9 @@ def test_resolved_credible_run_context_matches_full_and_compact_terminal(
     _present(request, compact_result, config)
     assert capsys.readouterr().err == full_terminal
     assert full_terminal == (
-        "Comparison 1 - Audio alignment accepted: +0f - APPLIED\n"
-        "No additional confirmation needed.\n"
-        f"{expected_noted}\n"
+        "comparison: +0f · applied\n"
+        "  8 of 10 sections agree · video check +0f · stable\n"
+        f"  {expected_noted}\n"
     )
 
     _present(request, result, config, verbose=True)
@@ -2327,6 +2232,8 @@ def test_confirmed_reason_skips_earlier_resolved_region(
 def test_json_review_diagnostics_stay_on_stderr_and_run_stdout_is_pinned(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    from frame_compare.utils.progress_protocol import AlignmentSummary, AlignmentSummaryEntry
+
     configure_logging("INFO", "json")
     config = AlignmentConfig(cache_results=False, no_color=True)
     reference, comparison, request = _request_for(tmp_path, config)
@@ -2360,7 +2267,12 @@ def test_json_review_diagnostics_stay_on_stderr_and_run_stdout_is_pinned(
         assert reason not in diagnostic.out
 
         handle_json_output(
-            RunResult(success=True, warnings=[RunWarning("alignment", "warning", reason)])
+            RunResult(
+                success=True,
+                alignment_summary=AlignmentSummary((AlignmentSummaryEntry("Encode", 0, "audio"),)),
+                alignment_diagnostics_dir=tmp_path / "diagnostics",
+                warnings=[RunWarning("alignment", "warning", reason)],
+            )
         )
         serialized = capsys.readouterr()
         serialized_outputs.append(serialized.out.encode("utf-8"))
@@ -2596,3 +2508,139 @@ def test_literal_count_scenario_matches_producer(counts: tuple[int, int, int, in
 
     kwargs = dict(zip(("planned", "active", "credible", "agreeing"), counts, strict=True))
     assert established_counts_attempt(**kwargs) == _producer_count_attempt(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("observed", "confirmed", "classification", "video_segment"),
+    [
+        (True, 146, "stable", " · video check +146f"),
+        (True, None, "possible_drift", " · video check inconclusive"),
+        (False, None, "insufficient_evidence", ""),
+        (False, None, "variable", ""),
+    ],
+)
+def test_normal_audio_evidence_reports_observation_and_stability(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    observed: bool,
+    confirmed: int | None,
+    classification: str,
+    video_segment: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import cast
+
+    from frame_compare.utils.alignment_evidence import (
+        AlignmentStabilityClassification,
+        AudioAuthorityRecount,
+    )
+
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = attempt_with_chunks(2)
+    attempt = replace(
+        attempt,
+        video_check=VideoCheckObservation(
+            observation="observed" if observed else "not_observed",
+            scored_offsets=(144, 145, 146, 147, 148) if observed else (),
+            confirmed_offset=confirmed,
+            index_build_seconds=0.0 if observed else None,
+            positions=(),
+        ),
+        stability=replace(
+            attempt.stability, classification=cast(AlignmentStabilityClassification, classification)
+        ),
+    )
+    if confirmed is not None:
+        attempt = replace(
+            attempt,
+            chunks=replace(attempt.chunks, agrees=(True, False)),
+            audio=replace(attempt.audio, agreeing_chunks=1),
+            authority_recount=AudioAuthorityRecount("agreed", 1, "agreed", 2, True),
+        )
+    result = replace(_provisional_result(reference, comparison), audio_attempt=attempt)
+    _present(request, result, config)
+    output = capsys.readouterr().err
+    assert f"  2 of 2 sections agree{video_segment} · {classification.replace('_', ' ')}" in output
+    if not observed:
+        assert "video check" not in output
+
+    from io import StringIO
+
+    from rich.console import Console
+    from rich.text import Text
+
+    from frame_compare.utils.progress import RichProgressReporter
+
+    rendered = StringIO()
+    console = Console(
+        file=rendered, width=120, force_terminal=True, color_system="standard", no_color=False
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_presentation.human_console", lambda **_kwargs: console
+    )
+    present_alignment_evidence(
+        request=request,
+        resolutions={
+            alignment_key(reference, comparison): ComparisonResolution(
+                result, "key", "computed_this_run"
+            )
+        },
+        config=replace(config, no_color=False),
+        progress=RichProgressReporter(no_color=True),
+        verbose=False,
+        quiet=False,
+        json_output=False,
+        diagnostics_written=False,
+        review_pending=True,
+    )
+    rich_text = rendered.getvalue()
+    plain = Text.from_ansi(rich_text).plain
+    assert "comparison  +146f · not applied · confirm in VSView" in plain
+    assert f"2 of 2 sections agree{video_segment} · {classification.replace('_', ' ')}" in plain
+    assert "Align manually or keep the current alignment." not in plain
+    evidence_style = Text.from_ansi(rich_text).get_style_at_offset(
+        console, plain.index(classification.replace("_", " "))
+    )
+    assert (evidence_style.color is not None and evidence_style.color.number == 3) is (
+        classification in {"possible_drift", "possible_discontinuity", "variable"}
+    )
+
+
+def test_final_summary_shows_changed_audio_offset_and_unapplied_state(tmp_path: Path) -> None:
+    from frame_compare.orchestration.phase_alignment import _align_success_summary
+    from frame_compare.services.alignment_resolution import confirm_manual
+    from frame_compare.utils.progress import alignment_summary_lines
+
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    request = replace(
+        request, comparisons=[replace(request.comparisons[0], short_name="Encode [red]")]
+    )
+    initial = ComparisonResolution(
+        _applied_result(reference, comparison, _producer_run_context_attempt()),
+        "key",
+        "computed_this_run",
+    )
+    confirmed = confirm_manual(
+        initial,
+        frame_offset=2,
+        fps_reference=Fraction(24),
+        reference_clip=reference,
+        comparison_clip=comparison,
+    )
+    summary = _align_success_summary(request=request, resolutions=(confirmed,), review_ran=True)
+    assert (
+        alignment_summary_lines(summary, width=120)[0].plain
+        == "Encode [red] +2f (audio +0f) · confirmed in VSView"
+    )
+    rejected = ComparisonResolution(
+        _provisional_result(reference, comparison), "key", "computed_this_run"
+    )
+    summary = _align_success_summary(request=request, resolutions=(rejected,), review_ran=False)
+    line = alignment_summary_lines(summary, width=120)[0]
+    assert line.plain == "Encode [red] not applied"
+    assert any(
+        span.style == "yellow" and line.plain[span.start : span.end] == "not applied"
+        for span in line.spans
+    )

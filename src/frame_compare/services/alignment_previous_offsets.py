@@ -75,7 +75,7 @@ def _shared_reuse_prompt_input(
                 time_offset_seconds=result.time_offset_seconds,
                 accepted_at=entry.accepted_at,
                 source="computed" if entry.origin == "computed" else "confirmed",
-                presentation_name=comparison.presentation_name,
+                short_name=comparison.short_name,
             )
         )
     return previous_offset_prompt_input_from_rows(
@@ -108,6 +108,7 @@ def apply_shared_reuse(
     cache_results: bool,
     progress: ProgressReporter | None,
     no_color: bool,
+    verbose: bool = False,
 ) -> tuple[dict[str, ComparisonResolution], bool]:
     """Apply shared cache hits and return whether confirmed reuse completed alignment."""
     resolutions: dict[str, ComparisonResolution] = {}
@@ -162,6 +163,7 @@ def apply_shared_reuse(
             ),
             progress=progress,
             no_color=no_color,
+            verbose=verbose,
         )
         if not accepted:
             for comparison in confirmed_comparisons:
@@ -196,10 +198,12 @@ def prompt_for_previous_alignment_offset_reuse(
     prompt_input: PreviousOffsetPromptInput,
     progress: ProgressReporter | None,
     no_color: bool,
+    verbose: bool = False,
 ) -> bool:
     """Prompt for shared previous-offset reuse without owning reuse precedence."""
     return prompt_for_previous_offset_reuse(
         prompt_input=prompt_input,
         progress=progress,
         no_color=no_color,
+        verbose=verbose,
     )

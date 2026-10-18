@@ -71,6 +71,8 @@ def _assemble_run_result(
         screenshot_dir=None if artifacts.render is None else artifacts.render.screenshot_dir,
         slowpics_url=artifacts.slowpics_url,
         report_path=artifacts.report_path,
+        alignment_summary=artifacts.alignment_summary,
+        alignment_diagnostics_dir=artifacts.alignment_diagnostics_dir,
         post_upload_actions=artifacts.post_upload_actions,
         slowpics_upload_confirmation_status=artifacts.slowpics_upload_confirmation_status,
         frame_count=len(selected_frames),

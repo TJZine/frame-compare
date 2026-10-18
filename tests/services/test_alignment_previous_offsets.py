@@ -299,8 +299,8 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
         "evidence_availability": "historical_details_unavailable",
     }
     terminal = capsys.readouterr().err
-    assert "Accepted audio alignment reused: +7f - APPLIED" in terminal
-    assert "Historical chunk and selected-stream details are unavailable" in terminal
+    assert "+7f · reused from last run" in terminal
+    assert "no audio analysis ran this time" in terminal
 
 
 def test_stale_policy_entry_is_not_replayed_or_applied(
@@ -489,8 +489,8 @@ def test_align_clips_from_request_reuses_confirmed_offsets_skips_vsview(
     assert results[0].source == "cached"
     assert results[0].frame_offset == 9
     terminal = capsys.readouterr().err
-    assert "Manually confirmed alignment reused: +9f - APPLIED" in terminal
-    assert "Manually confirmed alignment: +9f - APPLIED" not in terminal
+    assert "+9f · previously confirmed" in terminal
+    assert "+9f · manual offset" not in terminal
 
 
 def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed_entry(

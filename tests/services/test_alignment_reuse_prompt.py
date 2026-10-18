@@ -95,7 +95,7 @@ def _prompt_input(request: AlignmentRequest) -> reuse_prompt.PreviousOffsetPromp
 
 
 def _fallback_only_output(stderr_output: str) -> bool:
-    return stderr_output.strip() == PROMPT_UNAVAILABLE_MESSAGE
+    return stderr_output.strip() == "! " + PROMPT_UNAVAILABLE_MESSAGE
 
 
 def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
@@ -118,31 +118,44 @@ def test_prompt_prints_rich_safe_table_to_stderr_and_accepts_yes(
     stderr_output = stderr.getvalue()
     assert accepted is True
     assert captured.out == ""
-    assert "Alignment reuse" in stderr_output
+    assert "Reuse previous offsets?" in stderr_output
     assert "[y/N]" in stderr_output
-    panel_line = next(line for line in stderr_output.splitlines() if "Alignment reuse" in line)
-    assert panel_line.startswith("  ")
-    assert not panel_line.startswith("   ")
+    panel_line = next(
+        line for line in stderr_output.splitlines() if "Reuse previous offsets?" in line
+    )
+    assert panel_line.startswith("╭─ › ")
     prompt_line = next(
         line for line in stderr_output.splitlines() if "Reuse these offsets?" in line
     )
-    assert prompt_line == f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}"
-    assert stderr_output.index("Alignment reuse") < stderr_output.index("    Reuse these offsets?")
+    assert prompt_line == f"│ {REUSE_PREVIOUS_OFFSETS_PROMPT}"
+    assert stderr_output.index("Reuse previous offsets?") < stderr_output.index(
+        "│ Reuse these offsets?"
+    )
     assert "Comparison [cyan]" in stderr_output
     assert "<one>" in stderr_output
-    assert "A [red].mkv" in stderr_output
-    assert stderr_output.count("A [red].mkv") == 1
-    assert "+12 frames" in stderr_output
-    assert "-4 frames" in stderr_output
-    assert "0.5" in stderr_output
-    assert "-0.166" in stderr_output
+    assert "A [red].mkv" not in stderr_output
+    assert stderr_output.count("A [red].mkv") == 0
+    assert "+12f" in stderr_output
+    assert "-4f" in stderr_output
+    assert "0.5 s" not in stderr_output
+    assert "-0.166 s" not in stderr_output
     assert "2026-06-06 12:34:56 UTC" in stderr_output
-    assert "Computed" in stderr_output
-    assert "Preview-confirmed" in stderr_output
+    assert "audio" in stderr_output
+    assert "confirmed in VSView" in stderr_output
     assert "cached" not in stderr_output
-    assert stderr_output.index("+12 frames") < stderr_output.index("Computed")
-    assert stderr_output.index("Computed") < stderr_output.index("Accepted")
-    assert stderr_output.index("Accepted") < stderr_output.index("Cache")
+    assert stderr_output.index("+12f") < stderr_output.index("audio")
+    assert stderr_output.index("audio") < stderr_output.index("2026-06-06")
+    assert stderr_output.index("2026-06-06") < stderr_output.index("cache")
+    verbose_output = _TTYStringIO("", is_tty=True)
+    monkeypatch.setattr(reuse_prompt.sys, "stderr", verbose_output)
+    monkeypatch.setattr(reuse_prompt.sys, "stdin", _TTYStringIO("n\n", is_tty=True))
+    assert not prompt_for_previous_offset_reuse(
+        prompt_input=_prompt_input(request), progress=None, no_color=True, verbose=True
+    )
+    verbose_text = verbose_output.getvalue()
+    assert "A [red].mkv" in verbose_text
+    assert "0.5 s" in verbose_text
+    assert "-0.166 s" in verbose_text
 
 
 def test_prompt_shows_full_filename_once_when_label_equals_stem(
@@ -154,7 +167,6 @@ def test_prompt_shows_full_filename_once_when_label_equals_stem(
     first_row = prompt_input.rows[0]
     prompt_input = replace(
         prompt_input,
-        reference_label=Path(prompt_input.reference_filename).stem,
         shared_cache_path=Path("generated/cache/alignment/alignment_reuse.toml"),
         rows=(replace(first_row, label=first_row.stem),),
     )
@@ -165,7 +177,7 @@ def test_prompt_shows_full_filename_once_when_label_equals_stem(
     prompt_for_previous_offset_reuse(prompt_input=prompt_input, progress=None, no_color=True)
 
     output = stderr.getvalue()
-    assert output.count(prompt_input.reference_filename) == 1
+    assert output.count(request.reference.path.name) == 0
     assert output.count(first_row.filename) == 1
     assert str(prompt_input.shared_cache_path) in "".join(output.split())
 
@@ -190,7 +202,7 @@ def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
         rows=(
             replace(
                 prompt_input.rows[0],
-                presentation_name="2160p | ATV WEB-DL | DV HDR10+ | REPACK | Kitsune",
+                short_name="Kitsune",
             ),
         ),
     )
@@ -202,13 +214,14 @@ def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
         prompt_input=prompt_input, progress=None, no_color=True
     )
     output = stderr.getvalue()
-    assert "Alignment reuse" in output
-    assert "Avatar Aang The Last Airbender (2026)" in output
-    assert "PMTP WEB-DL" in output
-    assert "ATV WEB-DL" in output
+    assert "Reuse previous offsets?" in output
+    assert "Avatar Aang The Last Airbender (2026)" not in output
+    assert "PMTP WEB-DL" not in output
+    assert "Kitsune" in output
+    assert "ATV WEB-DL" not in output
     assert str(request.reference.path) not in output
     assert str(request.comparisons[0].path) not in output
-    assert "Cache" in output
+    assert "cache" in output
     assert str(prompt_input.shared_cache_path) in "".join(output.split())
 
 
@@ -237,7 +250,7 @@ def test_prompt_output_fits_terminal_width(
         is False
     )
     stderr_output = stderr.getvalue()
-    assert "Alignment reuse" in stderr_output
+    assert "Reuse previous offsets?" in stderr_output
     assert REUSE_PREVIOUS_OFFSETS_PROMPT in stderr_output
     assert "\x1b[" not in stderr_output
     assert all(len(line) <= columns for line in stderr_output.splitlines())
@@ -283,7 +296,7 @@ def test_prompt_non_tty_stdin_prints_only_fallback_line(
     assert accepted is False
     assert captured.out == ""
     assert _fallback_only_output(stderr_output)
-    assert "Alignment reuse" not in stderr_output
+    assert "Reuse previous offsets?" not in stderr_output
     assert "[y/N]" not in stderr_output
     assert "Comparison [cyan] <one>" not in stderr_output
 
@@ -312,10 +325,11 @@ def test_prompt_visible_prompt_path_fallbacks_on_eof_or_read_failure(
     assert accepted is False
     assert captured.out == ""
     stderr_output = stderr.getvalue()
-    assert "Alignment reuse" in stderr_output
+    assert "Reuse previous offsets?" in stderr_output
     assert "[y/N]" in stderr_output
-    expected_prompt = f"    {REUSE_PREVIOUS_OFFSETS_PROMPT}"
-    assert f"{expected_prompt}\n{PROMPT_UNAVAILABLE_MESSAGE}" in stderr_output
+    expected_prompt = f"│ {REUSE_PREVIOUS_OFFSETS_PROMPT}"
+    assert expected_prompt in stderr_output
+    assert stderr_output.index("╰─") < stderr_output.index("! " + PROMPT_UNAVAILABLE_MESSAGE)
     assert f"    {PROMPT_UNAVAILABLE_MESSAGE}" not in stderr_output
 
 
@@ -430,5 +444,5 @@ def test_prompt_falls_back_to_filename_when_labels_are_blank(
     assert accepted is False
     stderr_output = stderr.getvalue()
     assert captured.out == ""
-    assert request.reference.path.name in stderr_output
+    assert request.reference.path.name not in stderr_output
     assert request.comparisons[0].path.name in stderr_output

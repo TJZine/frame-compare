@@ -254,3 +254,38 @@ def test_live_refresh_runs_without_events_and_stops_while_suspended(
         assert reporter._progress.live._refresh_thread is None
     finally:
         reporter._progress.stop()
+
+
+@pytest.mark.parametrize("mixed", [False, True])
+def test_alignment_rows_follow_header_duration_and_precede_footage_note(
+    monkeypatch: pytest.MonkeyPatch, mixed: bool
+) -> None:
+    from frame_compare.utils.progress_protocol import AlignmentSummary, AlignmentSummaryEntry
+
+    reporter, output = _captured_rich_reporter(monkeypatch)
+    reporter._progress.console.width = 100
+    summary = AlignmentSummary(
+        entries=(
+            AlignmentSummaryEntry(
+                "Alpha [red] with a long source name", 2, "confirmed in VSView", 0
+            ),
+            AlignmentSummaryEntry(
+                "Beta with a long source name", 0, "kept" if mixed else "confirmed in VSView"
+            ),
+        ),
+        extra_footage="Reference has 2.0 s more at the end; frames come from the range all sources share.",
+    )
+    reporter.start_phase("Align", 1)
+    reporter.complete_phase(
+        retain=True, duration_text="2m 09s + 4m 41s review", alignment_summary=summary
+    )
+    lines = Text.from_ansi(output.getvalue()).plain.splitlines()
+    header = next(index for index, line in enumerate(lines) if "sources aligned" in line)
+    assert "2m 09s + 4m 41s review" in lines[header]
+    following = "\n".join(lines[header + 1 :])
+    assert "Alpha [red] with a long source name  +2f (audio +0f)" in following
+    assert "Beta with a long source name" in following
+    assert following.index("Alpha") < following.index("Reference has")
+    assert all(line.startswith(" " * 18) for line in lines[header + 1 :] if line.strip())
+    assert (" kept" in following) is mixed
+    assert ("confirmed in VSView" in following) is mixed

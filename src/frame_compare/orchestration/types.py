@@ -14,7 +14,7 @@ import httpx
 from frame_compare.orchestration.run_inputs import AcquiredRunConfig
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.utils.post_upload_actions import PostUploadActionResults
-from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.progress_protocol import AlignmentSummary, ProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import VSLoader
@@ -111,6 +111,8 @@ class RunResult:
     screenshot_dir: Path | None = None
     slowpics_url: str | None = None
     report_path: Path | None = None
+    alignment_summary: AlignmentSummary | None = None
+    alignment_diagnostics_dir: Path | None = None
     post_upload_actions: PostUploadActionResults = ()
     slowpics_upload_confirmation_status: SlowpicsUploadConfirmationStatus = "not_applicable"
 

@@ -123,9 +123,10 @@ def _create_timed_phase(
                 phase.success_summary = summary
             if timing_key == "align" and isinstance(output, AlignPhaseOutput):
                 align_output = output
-                if output.review_unresolved:
-                    if phase is None:
-                        raise RuntimeError("timed phase was not initialized")
+                if phase is None:
+                    raise RuntimeError("timed phase was not initialized")
+                phase.alignment_summary = output.alignment_summary
+                if output.review_unresolved or output.has_unapplied_offsets:
                     phase.success_status = ProgressPhaseStatus.WARNED
             if retain_if is not None:
                 if phase is None:

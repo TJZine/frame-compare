@@ -172,7 +172,6 @@ class AlignmentClipRequest:
     active_rect_height: int | None = None
     preserved_frame_props: PreservedFrameProps = field(default_factory=dict[str, str | int | float])
     presentation_name: str | None = None
-    compact_name: str | None = None
     short_name: str | None = None
 
     def __post_init__(self) -> None:

@@ -7,7 +7,9 @@ from threading import RLock
 from time import monotonic
 
 import structlog
-from rich.console import Console, RenderableType
+from rich.cells import cell_len
+from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
+from rich.padding import Padding
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -23,7 +25,11 @@ from rich.progress_bar import ProgressBar
 from rich.table import Column
 from rich.text import Text
 
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+from frame_compare.utils.progress_protocol import (
+    AlignmentSummary,
+    AlignmentSummaryEntry,
+    ProgressPhaseStatus,
+)
 from frame_compare.utils.terminal_theme import (
     ACCENT,
     FAIL,
@@ -88,6 +94,52 @@ __all__ = [
     "RichProgressReporter",
     "align_phase_duration_text",
 ]
+
+
+def _alignment_offset_text(entry: AlignmentSummaryEntry) -> Text:
+    if entry.offset is not None:
+        return Text(entry.value)
+    text = Text("not applied", style=WARN)
+    if entry.origin == "kept":
+        text.append(" (kept)", style="default")
+    return text
+
+
+def alignment_summary_lines(summary: AlignmentSummary, *, width: int) -> tuple[Text, ...]:
+    """Render AL1–AL5 at the width available for the value column."""
+    common = summary.common_origin
+    inline = Text()
+    for index, entry in enumerate(summary.entries):
+        if index:
+            inline.append(" · ")
+        inline.append(entry.name + " ")
+        inline.append_text(_alignment_offset_text(entry))
+        if common is None and entry.offset is not None:
+            inline.append(" " + entry.origin)
+    if common:
+        inline.append(" · " + common)
+    if inline.cell_len <= width:
+        return (inline,)
+    header = Text(f"{len(summary.entries)} sources aligned" + (f" · {common}" if common else ""))
+    name_width = max((cell_len(entry.name) for entry in summary.entries), default=0)
+    rows: list[Text] = [header]
+    for entry in summary.entries:
+        row = Text(entry.name + " " * (name_width - cell_len(entry.name) + 2))
+        row.append_text(_alignment_offset_text(entry))
+        if common is None and entry.offset is not None:
+            row.append(" " + entry.origin)
+        rows.append(row)
+    return tuple(rows)
+
+
+@dataclass(frozen=True)
+class AlignmentSummaryValue:
+    """Completion-section alignment value, sized by its actual column."""
+
+    summary: AlignmentSummary
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        yield from alignment_summary_lines(self.summary, width=options.max_width)
 
 
 @dataclass(frozen=True)
@@ -248,8 +300,9 @@ class NullProgressReporter:
         retain: bool | None = None,
         summary: str | None = None,
         duration_text: str | None = None,
+        alignment_summary: AlignmentSummary | None = None,
     ) -> None:
-        del self, status, retain, summary, duration_text
+        del self, status, retain, summary, duration_text, alignment_summary
 
     def suspend(self) -> None:
         del self
@@ -293,8 +346,9 @@ class PlainProgressReporter:
         retain: bool | None = None,
         summary: str | None = None,
         duration_text: str | None = None,
+        alignment_summary: AlignmentSummary | None = None,
     ) -> None:
-        del retain, summary, duration_text
+        del retain, summary, duration_text, alignment_summary
         with self._lock:
             if self._task is None:
                 return
@@ -422,6 +476,7 @@ class RichProgressReporter:
         retain: bool | None = None,
         summary: str | None = None,
         duration_text: str | None = None,
+        alignment_summary: AlignmentSummary | None = None,
     ) -> None:
         """Complete the current phase and stop progress if all tasks done."""
         with self._lock:
@@ -469,6 +524,7 @@ class RichProgressReporter:
                         summary=summary,
                         duration=duration,
                         duration_text=duration_text,
+                        alignment_summary=alignment_summary,
                     )
 
                 self._progress.remove_task(task_id)
@@ -492,22 +548,45 @@ class RichProgressReporter:
         summary: str | None,
         duration: float,
         duration_text: str | None,
+        alignment_summary: AlignmentSummary | None = None,
     ) -> None:
         """Print a retained phase line with its duration inline."""
         glyphs = glyphs_for_console(self._progress.console)
         glyph = getattr(glyphs, _DURABLE_STATUS_GLYPHS[status])
         style = _DURABLE_STATUS_STYLES[status]
         line = Text.assemble((glyph, style), f" {label:<16}")
-        if summary:
-            line.append(summary)
         resolved_duration = duration_text
-        if resolved_duration is None and status == ProgressPhaseStatus.COMPLETED:
+        if resolved_duration is None and (
+            status == ProgressPhaseStatus.COMPLETED
+            or (status == ProgressPhaseStatus.WARNED and alignment_summary is not None)
+        ):
             resolved_duration = _format_elapsed(duration)
+        continuation: tuple[Text, ...] = ()
+        if alignment_summary is not None:
+            duration_width = cell_len(resolved_duration) + 3 if resolved_duration else 0
+            header, *rows = alignment_summary_lines(
+                alignment_summary,
+                width=max(1, min(self._progress.console.width, 120) - 18 - duration_width),
+            )
+            line.append_text(header)
+            continuation = tuple(rows)
+            summary = header.plain
+        elif summary:
+            line.append(summary)
         if resolved_duration:
             if summary:
                 line.append(" · ", style="dim")
             line.append(resolved_duration, style="dim")
-        self._progress.console.print(line)
+        self._progress.console.print(line, width=min(self._progress.console.width, 120))
+        for row in continuation:
+            self._progress.console.print(
+                Padding(row, (0, 0, 0, 18)), width=min(self._progress.console.width, 120)
+            )
+        if alignment_summary is not None and alignment_summary.extra_footage:
+            self._progress.console.print(
+                Padding(Text(alignment_summary.extra_footage, style="dim"), (0, 0, 0, 18)),
+                width=min(self._progress.console.width, 120),
+            )
 
     def suspend(self) -> None:
         """Pause live progress rendering during blocking terminal interaction."""
@@ -591,9 +670,10 @@ class LogProgressReporter:
         retain: bool | None = None,
         summary: str | None = None,
         duration_text: str | None = None,
+        alignment_summary: AlignmentSummary | None = None,
     ) -> None:
         """Log phase completion."""
-        del retain, summary, duration_text
+        del retain, summary, duration_text, alignment_summary
         log.info("phase_completed", phase=self._name, status=status.value)
         if self._task_stack:
             self._name, self._total, self._current, self._last_logged_milestone = (

@@ -21,6 +21,7 @@ from frame_compare.orchestration.types import (
 )
 from frame_compare.render.types import RenderedClip
 from frame_compare.services.types import TmdbMetadata
+from frame_compare.utils.progress_protocol import AlignmentSummary
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
@@ -69,11 +70,15 @@ class AlignPhaseOutput:
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
     warnings: list[RunWarning] = field(default_factory=list[RunWarning])
     success_summary: str | None = None
+    alignment_summary: AlignmentSummary | None = None
+    alignment_diagnostics_dir: Path | None = None
     # Measured VSView review wait for the human summary (memory only).
     review_seconds: float = 0.0
     # True when review was pending but VSView never ran: the durable Align
     # line keeps the pre-review summary and warns instead of succeeding.
     review_unresolved: bool = False
+    # Human phase status only; this does not add a warning or alignment authority.
+    has_unapplied_offsets: bool = False
 
 
 @dataclass(frozen=True)
@@ -138,6 +143,8 @@ class RunArtifacts:
     post_upload_actions: PostUploadActionResults = ()
     slowpics_upload_confirmation_status: SlowpicsUploadConfirmationStatus = "not_applicable"
     report_path: Path | None = None
+    alignment_summary: AlignmentSummary | None = None
+    alignment_diagnostics_dir: Path | None = None
     report_succeeded: bool = False
     resolved_metadata: TmdbMetadata | None = None
     warnings: list[RunWarning] = field(default_factory=list[RunWarning])

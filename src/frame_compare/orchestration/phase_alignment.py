@@ -43,16 +43,16 @@ from frame_compare.services.release_identity import (
     common_content_identity,
     format_compact_identity,
     format_content_identity,
-    format_micro_descriptor,
     format_release_descriptor,
     short_source_names,
 )
 from frame_compare.services.types import (
     AlignmentConfig,
-    AlignmentResult,
-    AlignmentReviewSummary,
+    ComparisonResolution,
 )
+from frame_compare.utils.progress_protocol import AlignmentSummary, AlignmentSummaryEntry
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.terminal_theme import format_duration
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
     AlignmentClipIdentity,
@@ -275,42 +275,85 @@ async def run_align_phase(
         selection_breakdown=selection_breakdown,
         selection_details_by_source_frame=selection_details_by_source_frame,
         warnings=warnings,
-        success_summary=_align_success_summary(
+        alignment_summary=_align_success_summary(
             request=alignment_request,
-            results=results,
-            review=review_summary,
+            resolutions=outcome.resolutions,
+            review_ran=review_summary.review_ran,
+            extra_footage=_extra_footage_note(
+                request=alignment_request,
+                originals=[ctx.reference, *ctx.comparisons],
+                aligned=[reference, *comparisons],
+            ),
         ),
+        alignment_diagnostics_dir=outcome.diagnostics_dir,
         review_seconds=review_summary.review_seconds,
         review_unresolved=review_summary.review_unresolved,
+        has_unapplied_offsets=any(not result.applied for result in results),
     )
 
 
 def _align_success_summary(
     *,
     request: AlignmentRequest,
-    results: Sequence[AlignmentResult],
-    review: AlignmentReviewSummary,
-) -> str:
-    """Build the durable Align phase summary from short names and review counts."""
-    if review.review_ran:
-        pairs = review.pairs_confirmed
-        summary = (
-            f"{pairs} pair confirmed in VSView"
-            if pairs == 1
-            else f"{pairs} pairs confirmed in VSView"
+    resolutions: Sequence[ComparisonResolution],
+    review_ran: bool,
+    extra_footage: str | None = None,
+) -> AlignmentSummary:
+    """Build final human facts from the authority owner's ordered resolutions."""
+    entries: list[AlignmentSummaryEntry] = []
+    origins = {
+        "computed_this_run": "audio",
+        "shared_computed_offsets": "reused from last run",
+        "shared_previous_offsets": "previously confirmed",
+        "preexisting_manual_override": "manual offset",
+        "interactive_confirmed_this_run": "confirmed in VSView" if review_ran else "manual offset",
+    }
+    for comparison, resolution in zip(request.comparisons, resolutions, strict=False):
+        origin = origins[resolution.origin]
+        if review_ran and resolution.origin != "interactive_confirmed_this_run":
+            origin = "kept"
+        attempt = resolution.result.audio_attempt
+        candidate = attempt.decision.candidate if attempt is not None else None
+        entries.append(
+            AlignmentSummaryEntry(
+                name=_request_short_name(comparison),
+                offset=resolution.accepted_offset,
+                origin=origin,
+                audio_candidate=candidate.frame_offset if candidate is not None else None,
+            )
         )
-        if review.comparisons_kept > 0:
-            summary += f" · {review.comparisons_kept} kept"
-        return summary
-    parts = [
-        (
-            f"{_request_short_name(comparison)} alignment applied"
-            if result.applied
-            else f"{_request_short_name(comparison)} needs visual confirmation"
-        )
-        for comparison, result in zip(request.comparisons, results, strict=True)
-    ]
-    return " · ".join(parts)
+    return AlignmentSummary(tuple(entries), extra_footage=extra_footage)
+
+
+def _extra_footage_note(
+    *,
+    request: AlignmentRequest,
+    originals: Sequence[ClipState],
+    aligned: Sequence[ClipState],
+) -> str | None:
+    if len({clip.probe.num_frames for clip in originals}) <= 1:
+        return None
+    parts: list[str] = []
+
+    def duration(frames: int, fps: Fraction) -> str:
+        seconds = frames / float(fps)
+        return f"{seconds:.1f} s" if seconds < 1 else format_duration(seconds)
+
+    for source, original, final in zip(
+        [request.reference, *request.comparisons], originals, aligned, strict=True
+    ):
+        start = final.trim.trim_start_frames - original.trim.trim_start_frames
+        original_end = original.trim.trim_start_frames + original.effective_num_frames()
+        final_end = final.trim.trim_start_frames + final.effective_num_frames()
+        end = original_end - final_end
+        extents: list[str] = []
+        if start > 0:
+            extents.append(f"{duration(start, original.effective_fps)} more at the start")
+        if end > 0:
+            extents.append(f"{duration(end, original.effective_fps)} more at the end")
+        if extents:
+            parts.append(f"{_request_short_name(source)} has {' and '.join(extents)}")
+    return ", ".join(parts) + "; frames come from the range all sources share." if parts else None
 
 
 def _request_short_name(comparison: AlignmentClipRequest) -> str:
@@ -338,7 +381,6 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         clip.path.name if not name or counts[name] > 1 else name
         for clip, name in zip(clips, presentation_names, strict=True)
     ]
-    compact_names = [_alignment_compact_name(clip) for clip in clips]
     short_names = short_source_names(
         [
             ShortNameSource(
@@ -356,7 +398,6 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
             ctx.reference,
             selected_audio_stream=ctx.config.audio_alignment.reference_stream,
             presentation_name=presentation_names[0],
-            compact_name=compact_names[0],
             short_name=short_names[0],
         ),
         selected_reference_relationship=_selected_reference_relationship(ctx),
@@ -367,7 +408,6 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
                     comparison.path.stem
                 ),
                 presentation_name=presentation_names[index],
-                compact_name=compact_names[index],
                 short_name=short_names[index],
             )
             for index, comparison in enumerate(ctx.comparisons, start=1)
@@ -393,14 +433,6 @@ def _alignment_presentation_name(clip: ClipState, has_common_content: bool) -> s
     return formatter(clip.release_identity, separator=" · ") or clip.path.name
 
 
-def _alignment_compact_name(clip: ClipState) -> str:
-    if clip.label_is_explicit and clip.label.strip():
-        return clip.label.strip()
-    if clip.release_identity is None:
-        return clip.path.name
-    return format_micro_descriptor(clip.release_identity, separator=" · ") or clip.path.name
-
-
 def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedReferenceRelationship:
     configured_reference = ctx.config.sources.reference
     if configured_reference is None or configured_reference == "auto":
@@ -413,7 +445,6 @@ def _alignment_clip_request(
     *,
     selected_audio_stream: int | None,
     presentation_name: str | None = None,
-    compact_name: str | None = None,
     short_name: str | None = None,
 ) -> AlignmentClipRequest:
     fingerprint = clip.probe.fingerprint
@@ -439,7 +470,6 @@ def _alignment_clip_request(
         active_rect_height=None if clip.active_rect is None else clip.active_rect.height,
         preserved_frame_props=dict(clip.probe.preserved_frame_props),
         presentation_name=presentation_name,
-        compact_name=compact_name,
         short_name=short_name,
     )
 

@@ -498,3 +498,282 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
         assert state.artifacts.render is None
         assert ctx.reference.trim.trim_start_frames == 0
         assert ctx.comparisons[0].trim.trim_start_frames == 0
+
+
+@pytest.mark.parametrize(
+    ("origins", "review_ran", "expected"),
+    [
+        (("computed_this_run", "computed_this_run"), False, "Alpha +0f · Beta +0f · audio"),
+        (
+            ("shared_computed_offsets", "shared_computed_offsets"),
+            False,
+            "Alpha +0f · Beta +0f · reused from last run",
+        ),
+        (
+            ("shared_previous_offsets", "shared_previous_offsets"),
+            False,
+            "Alpha +0f · Beta +0f · previously confirmed",
+        ),
+        (
+            ("preexisting_manual_override", "preexisting_manual_override"),
+            False,
+            "Alpha +0f · Beta +0f · manual offset",
+        ),
+        (
+            ("interactive_confirmed_this_run", "interactive_confirmed_this_run"),
+            True,
+            "Alpha +0f · Beta +0f · confirmed in VSView",
+        ),
+        (
+            ("interactive_confirmed_this_run", "computed_this_run"),
+            True,
+            "Alpha +0f confirmed in VSView · Beta +0f kept",
+        ),
+        (
+            ("preexisting_manual_override", "computed_this_run"),
+            False,
+            "Alpha +0f manual offset · Beta +0f audio",
+        ),
+    ],
+)
+def test_final_alignment_summary_preserves_origins(
+    tmp_path: Path, origins: tuple[str, str], review_ran: bool, expected: str
+) -> None:
+    from frame_compare.services.types import AlignmentWriteProvenance, ComparisonResolution
+    from frame_compare.utils.progress import alignment_summary_lines
+    from tests.services.alignment_request_test_support import alignment_request
+
+    for name in ("ref.mkv", "a.mkv", "b.mkv"):
+        (tmp_path / name).touch()
+    request = alignment_request(
+        reference=tmp_path / "ref.mkv",
+        comparisons=[tmp_path / "a.mkv", tmp_path / "b.mkv"],
+        generated_dir=tmp_path,
+    )
+    request = replace(
+        request,
+        comparisons=[
+            replace(comp, short_name=name)
+            for comp, name in zip(request.comparisons, ("Alpha", "Beta"), strict=True)
+        ],
+    )
+    resolutions = tuple(
+        ComparisonResolution(
+            result=AlignmentResult(
+                "ref.mkv",
+                comp.path.name,
+                0,
+                0.0,
+                1.0,
+                None,
+                "manual" if origin != "computed_this_run" else "computed",
+            ),
+            comparison_cache_key=comp.path.stem,
+            origin=cast(AlignmentWriteProvenance, origin),
+        )
+        for comp, origin in zip(request.comparisons, origins, strict=True)
+    )
+    summary = phase_alignment._align_success_summary(
+        request=request, resolutions=resolutions, review_ran=review_ran
+    )
+    assert alignment_summary_lines(summary, width=200)[0].plain == expected
+
+
+@pytest.mark.parametrize(
+    ("counts", "offset", "expected"),
+    [
+        ((240, 216), 0, "Reference has 1.0 s more at the end"),
+        ((240, 216), 24, "Reference has 1.0 s more at the start"),
+        ((240, 192), 24, "Reference has 1.0 s more at the start and 1.0 s more at the end"),
+        ((240, 216, 264), 0, "Reference has 1.0 s more at the end, Beta has 2.0 s more at the end"),
+        ((240, 240), 24, None),
+    ],
+)
+def test_extra_footage_describes_final_shared_range(
+    tmp_path: Path,
+    counts: tuple[int, ...],
+    offset: int,
+    expected: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from frame_compare.services.types import ComparisonResolution
+
+    comparisons = [
+        _clip(tmp_path / f"comp{index}.mkv", label=name, num_frames=count)
+        for index, (count, name) in enumerate(zip(counts[1:], ("Alpha", "Beta"), strict=False))
+    ]
+    ctx = _context(tmp_path, comparisons=comparisons)
+    ctx.reference = _clip(ctx.reference.path, label="Reference", num_frames=counts[0])
+    ctx.reference = replace(ctx.reference, label_is_explicit=True)
+    ctx.comparisons = [replace(comp, label_is_explicit=True) for comp in ctx.comparisons]
+
+    def align(
+        request: AlignmentRequest, *_args: object, **_kwargs: object
+    ) -> AlignmentOperationOutcome:
+        results = tuple(
+            AlignmentResult(
+                request.reference.path.name,
+                comp.path.name,
+                offset,
+                offset / 24,
+                1.0,
+                None,
+                "computed",
+            )
+            for comp in request.comparisons
+        )
+        return AlignmentOperationOutcome(
+            results,
+            resolutions=tuple(
+                ComparisonResolution(result, str(index), "computed_this_run")
+                for index, result in enumerate(results)
+            ),
+            diagnostics_dir=tmp_path / "actual diagnostics",
+        )
+
+    monkeypatch.setattr(phase_alignment, "align_clips_from_request", align)
+    output = _run_align_phase(ctx, selected_frames=[30])
+    assert output.alignment_summary is not None
+    note = output.alignment_summary.extra_footage
+    assert note == (
+        expected + "; frames come from the range all sources share." if expected else None
+    )
+    from frame_compare.orchestration.coordinator import _assemble_run_result
+    from frame_compare.orchestration.execution_types import ExecutionState
+    from frame_compare.orchestration.phase_output_application import apply_phase_output
+
+    state = ExecutionState()
+    apply_phase_output(ctx=ctx, state=state, output=output)
+    result = _assemble_run_result(
+        artifacts=state.artifacts,
+        selected_frames=output.selected_frames,
+        context=ctx,
+        preflight_warnings=[],
+        phase_timings={},
+        duration_seconds=1.0,
+    )
+    assert result.alignment_summary == output.alignment_summary
+    assert result.alignment_diagnostics_dir == output.alignment_diagnostics_dir
+
+
+@pytest.mark.parametrize("review_kind", ["none", "kept", "unresolved"])
+def test_unapplied_and_unresolved_review_warn_only_the_align_phase(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    review_kind: str,
+) -> None:
+    from io import StringIO
+
+    from rich.console import Console
+    from rich.text import Text
+
+    from frame_compare.cli.output import print_result_summary
+    from frame_compare.orchestration.coordinator import _assemble_run_result
+    from frame_compare.orchestration.execution import _create_timed_phase
+    from frame_compare.orchestration.execution_types import ExecutionState
+    from frame_compare.orchestration.phases import PhaseStatus, execute_phases
+    from frame_compare.services.alignment import format_rejected_alignment_warning
+    from frame_compare.services.types import AlignmentReviewSummary, ComparisonResolution
+    from frame_compare.utils.progress import RichProgressReporter, alignment_summary_lines
+    from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+
+    comparison = _clip(tmp_path / "encode.mkv", label="Encode [red]", label_is_explicit=True)
+    ctx = _context(tmp_path, comparisons=[comparison])
+    unapplied = review_kind != "unresolved"
+    original_result = AlignmentResult(
+        ctx.reference.path.name,
+        comparison.path.name,
+        None if unapplied else 0,
+        None if unapplied else 0.0,
+        0.0,
+        None,
+        "computed",
+        applied=not unapplied,
+        diagnostic="no_single_offset" if unapplied else None,
+    )
+    resolution = ComparisonResolution(original_result, "key", "computed_this_run")
+    outcome = AlignmentOperationOutcome(
+        (original_result,),
+        AlignmentReviewSummary(
+            review_ran=review_kind == "kept",
+            comparisons_kept=int(review_kind == "kept"),
+            review_unresolved=review_kind == "unresolved",
+        ),
+        resolutions=(resolution,),
+    )
+    monkeypatch.setattr(
+        phase_alignment, "align_clips_from_request", lambda *_args, **_kwargs: outcome
+    )
+    output = _run_align_phase(ctx, selected_frames=[0])
+    assert output.has_unapplied_offsets is unapplied
+    assert output.review_unresolved is (review_kind == "unresolved")
+    expected_warnings = (
+        [format_rejected_alignment_warning(original_result, comparison_label=comparison.label)]
+        if unapplied
+        else []
+    )
+    assert output.warnings == expected_warnings
+    if unapplied:
+        assert output.comparisons[0].alignment is None
+    else:
+        assert output.comparisons[0].alignment is not None
+    assert output.reference.trim.trim_start_frames == ctx.reference.trim.trim_start_frames
+    assert output.reference.effective_num_frames() == ctx.reference.effective_num_frames()
+    assert output.comparisons[0].trim.trim_start_frames == comparison.trim.trim_start_frames
+    assert output.comparisons[0].effective_num_frames() == comparison.effective_num_frames()
+    assert output.alignment_summary is not None
+    expected_value = (
+        "not applied (kept)"
+        if review_kind == "kept"
+        else "not applied"
+        if unapplied
+        else "+0f · audio"
+    )
+    inline = alignment_summary_lines(output.alignment_summary, width=200)
+    assert inline[0].plain == "Encode [red] " + expected_value
+    rows = alignment_summary_lines(output.alignment_summary, width=10)
+    assert rows[1].plain == "Encode [red]  " + ("+0f" if not unapplied else expected_value)
+
+    stream = StringIO()
+    console = Console(file=stream, no_color=True, width=120)
+    monkeypatch.setattr("frame_compare.utils.progress.human_console", lambda **_kwargs: console)
+    reporter = RichProgressReporter(no_color=True)
+    state = ExecutionState()
+    phase = _create_timed_phase(
+        "align",
+        "align",
+        None,
+        lambda _ctx: output,
+        state,
+        lambda: 0.0,
+        state.phase_timings,
+        state.warnings,
+    )
+    asyncio.run(execute_phases([phase], ctx, reporter))
+    assert phase.status == PhaseStatus.COMPLETED
+    assert phase.success_status == ProgressPhaseStatus.WARNED
+    phase_line = next(
+        line for line in Text.from_ansi(stream.getvalue()).plain.splitlines() if "! Align" in line
+    )
+    assert " · " in phase_line
+    assert state.warnings == expected_warnings
+    result = _assemble_run_result(
+        artifacts=state.artifacts,
+        selected_frames=[0],
+        context=ctx,
+        preflight_warnings=[],
+        phase_timings={},
+        duration_seconds=0,
+    )
+    completion = StringIO()
+    print_result_summary(
+        Console(file=completion, no_color=True, width=120), result=result, quiet=False
+    )
+    baseline = StringIO()
+    print_result_summary(
+        Console(file=baseline, no_color=True, width=120),
+        result=replace(result, alignment_summary=None),
+        quiet=False,
+    )
+    assert completion.getvalue().splitlines()[1] == baseline.getvalue().splitlines()[1]
+    assert "Encode [red] " + expected_value in completion.getvalue()

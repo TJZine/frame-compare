@@ -15,7 +15,6 @@ from rich.console import Console
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.cli.output import (
-    artifact_link,
     print_at_a_glance,
     print_result_summary,
 )
@@ -35,6 +34,7 @@ from frame_compare.orchestration.run_inputs import (
     refresh_report_auto_open_preference,
     select_run_config_path,
 )
+from frame_compare.utils.artifact_paths import artifact_link
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.terminal import interruptible_prompt

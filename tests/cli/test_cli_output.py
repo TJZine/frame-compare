@@ -716,19 +716,36 @@ def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
 def test_result_summary_resolves_relative_artifact_link_against_root(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
+    from frame_compare.utils.progress_protocol import AlignmentSummary, AlignmentSummaryEntry
+
     root = tmp_path / "workspace"
     monkeypatch.chdir(tmp_path)
     console = _console()
 
     print_result_summary(
         console,
-        result=RunResult(success=True, report_path=Path("generated") / "report.html"),
+        result=RunResult(
+            success=True,
+            report_path=Path("generated") / "report.html",
+            alignment_summary=AlignmentSummary(
+                (AlignmentSummaryEntry("Encode [red]", 2, "confirmed in VSView", 0),)
+            ),
+            alignment_diagnostics_dir=Path("generated") / "alignment [cyan]",
+        ),
         quiet=False,
         root=root,
     )
 
     expected = (root / "generated" / "report.html").as_uri()
-    assert f'href="{expected}"' in console.export_html()
+    assert f'href="{expected}"' in console.export_html(clear=False)
+
+    assert f'href="{(root / "generated" / "alignment [cyan]").as_uri()}"' in console.export_html(
+        clear=False
+    )
+    output = _render(console)
+    assert "Encode [red] +2f (audio +0f) · confirmed in VSView" in output
+    assert "alignment [cyan]" in output
+    assert output.index("report") < output.index("alignment") < output.index("diagnostics")
 
 
 def test_verbose_run_plan_path_presentation_adds_absolute_detail(
