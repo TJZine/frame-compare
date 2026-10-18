@@ -42,7 +42,7 @@ from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.media_facts import ActivePictureFacts
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import LogProgressReporter, NullProgressReporter
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+from frame_compare.utils.progress_protocol import AlignmentSummary, ProgressPhaseStatus
 from frame_compare.vs.types import TonemapSettings
 from tests.orchestration.phase_task_helpers import (
     _clip,
@@ -77,9 +77,10 @@ class _RecordingProgressReporter(NullProgressReporter):
         retain: bool | None = None,
         summary: str | None = None,
         duration_text: str | None = None,
+        alignment_summary: AlignmentSummary | None = None,
         presentation: str | None = None,
     ) -> None:
-        del summary, duration_text, presentation
+        del summary, duration_text, alignment_summary, presentation
         self.completions.append((status, retain))
 
     def suspend(self) -> None:

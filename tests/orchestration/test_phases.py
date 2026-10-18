@@ -27,7 +27,7 @@ from frame_compare.utils.progress import (
     NullProgressReporter,
     RichProgressReporter,
 )
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+from frame_compare.utils.progress_protocol import AlignmentSummary, ProgressPhaseStatus
 
 from .execute_run_helpers import clip_state
 from .phase_task_helpers import _workspace
@@ -159,9 +159,10 @@ def test_execute_phases_marks_cancellation_failed_before_propagating(
             retain: bool | None = None,
             summary: str | None = None,
             duration_text: str | None = None,
+            alignment_summary: AlignmentSummary | None = None,
             presentation: str | None = None,
         ) -> None:
-            del retain, summary, duration_text, presentation
+            del retain, summary, duration_text, alignment_summary, presentation
             self.complete_phase_calls.append(status)
 
     reporter = SpyReporter()
