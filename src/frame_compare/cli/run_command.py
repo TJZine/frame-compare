@@ -11,14 +11,11 @@ from typing import TYPE_CHECKING, Protocol
 
 import structlog
 import typer
-from rich.console import Console, Group
-from rich.markup import escape
-from rich.padding import Padding
-from rich.panel import Panel
-from rich.table import Table
+from rich.console import Console
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.cli.output import (
+    artifact_link,
     print_at_a_glance,
     print_result_summary,
 )
@@ -41,6 +38,7 @@ from frame_compare.orchestration.run_inputs import (
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.terminal import interruptible_prompt
+from frame_compare.utils.terminal_sections import Section, section_title
 from frame_compare.utils.terminal_theme import ACCENT, glyphs_for_console
 
 from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn, format_enum_expected
@@ -433,30 +431,20 @@ def build_confirm_slowpics_upload_callback(
             deps=deps,
             inputs=inputs,
         )
-        details = Table.grid(padding=(0, 2))
-        details.add_column(style="dim", no_wrap=True)
-        details.add_column(overflow="fold")
-        details.add_row("Visibility", escape(visibility_text.title()))
-        if not opened:
-            details.add_row("Report", escape(str(request.report_path)))
         waiting_glyph = glyphs_for_console(console).waiting
-        console.print()
-        console.print(
-            Padding(
-                Panel.fit(
-                    Group("[dim]Review the local report before publishing.[/]", details),
-                    title=f"[bold {ACCENT}]{waiting_glyph} Publish to slow.pics?[/]",
-                    border_style=ACCENT,
-                ),
-                (0, 0, 0, 2),
-            )
-        )
+        section = Section(section_title(f"{waiting_glyph} Publish to slow.pics?"), ACCENT)
+        if opened:
+            section.add_line("The report is open in your browser. Review it first.")
+        else:
+            section.add_line("Review the report before publishing:")
+            section.add_line(f"[dim]{artifact_link(request.report_path, root=inputs.root)}[/]")
+        section.add_line()
         with interruptible_prompt():
-            confirmed = deps.confirm_upload(
-                f"    Upload to {visibility_text} slow.pics?",
-                default=False,
+            confirmed = section.prompt(
+                console,
+                f"Upload to {visibility_text} slow.pics?",
+                lambda question: deps.confirm_upload(question, default=False),
             )
-        console.print()
         if confirmed:
             return "confirmed"
         return "declined"

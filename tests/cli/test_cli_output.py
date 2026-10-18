@@ -372,7 +372,7 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
 
     output = _render(console)
     assert "root" in output
-    assert str(workspace) in output
+    assert str(workspace) in "".join(output.replace("│", "").split())
     assert str(relative_config) in output
     assert "[bold]input[end]" in output
     assert "[cyan]generated[end]" in output
@@ -666,7 +666,7 @@ def test_result_summary_uses_result_hierarchy_and_relative_paths() -> None:
     assert "Comparison complete" in output
     assert "12 frames" in output
     assert "2 sources" in output
-    assert "cache hit" in output
+    assert "analysis cached" in output
     assert output.index("report.html") < output.index("screenshots")
     assert "files" not in output
     assert "slow.pics" in output
@@ -862,8 +862,8 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
 @pytest.mark.parametrize(
     ("status", "expected"),
     [
-        ("declined", ("not uploaded (declined)",)),
-        ("report_unavailable", ("upload skipped", "report confirmation was unavailable")),
+        ("declined", ()),
+        ("report_unavailable", ("upload skipped", "the report could not be confirmed")),
     ],
 )
 def test_result_summary_prints_slowpics_as_skipped(
@@ -882,7 +882,8 @@ def test_result_summary_prints_slowpics_as_skipped(
     output = _render(console)
     for fragment in expected:
         assert fragment in output
-    assert "slow.pics" in output
+    assert ("slow.pics" in output) == (status != "declined")
+    assert "not uploaded (declined)" not in output
     assert "[SKIP]" not in output
 
 
@@ -1211,7 +1212,8 @@ def test_result_summary_reports_skipped_analysis_cache_status() -> None:
     output = _render(console)
     assert "1 frame" in output
     assert "2 sources" in output
-    assert "cache skipped" in output
+    assert "analysis skipped" not in output
+    assert "cache skipped" not in output
     assert "miss" not in output
 
 
