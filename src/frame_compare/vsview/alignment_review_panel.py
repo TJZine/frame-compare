@@ -30,6 +30,7 @@ from frame_compare.utils.alignment_review_projection import (
     audio_evidence_rows,
     build_audio_review_presentation,
 )
+from frame_compare.vsview.alignment_overlay import PANEL_LABEL_EXPLANATION
 from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewComparisonMetadata,
     AlignmentReviewContractError,
@@ -167,6 +168,11 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         body_layout.setSpacing(8)
         self.body_scroll.setWidget(self.body_widget)
         layout.addWidget(self.body_scroll, 1)
+
+        self.launch_label_explanation = QLabel(PANEL_LABEL_EXPLANATION, self.body_widget)
+        self.launch_label_explanation.setWordWrap(True)
+        self.launch_label_explanation.setAccessibleName("Video launch labels and current status")
+        body_layout.addWidget(self.launch_label_explanation)
 
         self.lineup_group = QGroupBox("Source lineup", self.body_widget)
         self.lineup_layout = QVBoxLayout(self.lineup_group)

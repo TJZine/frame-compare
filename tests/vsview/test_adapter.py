@@ -10,6 +10,7 @@ import subprocess
 import sys
 import types
 from contextlib import suppress
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -35,6 +36,11 @@ from frame_compare.vsview.session_runtime import install_workspace_log_filter
 from frame_compare.vsview.session_script import (
     _build_script_content,
     write_vsview_session_script,
+)
+from tests.alignment_review_test_support import (
+    provisional_audio_attempt,
+    trusted_audio_attempt,
+    unavailable_audio_attempt,
 )
 
 
@@ -591,6 +597,7 @@ def _execute_generated_script(
     class FakeClip:
         def __init__(self, stem: str) -> None:
             self.stem = stem
+            self.num_frames = 20_000
             self.fps = SimpleNamespace(numerator=24, denominator=1)
 
     clips = {stem: FakeClip(stem) for stem in ("ref", *comparison_stems)}
@@ -611,13 +618,6 @@ def _execute_generated_script(
                 raise RuntimeError("cache-free fallback failed")
             return clips[stem]
 
-    class FakeText:
-        def Text(self, clip: FakeClip, text: str, *, alignment: int) -> FakeClip:
-            assert alignment == 7
-            if overlay_sink is not None:
-                overlay_sink.append(text)
-            return clip
-
     class FakeStd:
         def AssumeFPS(self, clip: FakeClip, *, fpsnum: int, fpsden: int) -> FakeClip:
             assert (fpsnum, fpsden) == (24, 1)
@@ -627,7 +627,7 @@ def _execute_generated_script(
             applied_props[clip.stem] = props
             return clip
 
-    core = SimpleNamespace(lsmas=FakeLsmas(), text=FakeText(), std=FakeStd())
+    core = SimpleNamespace(lsmas=FakeLsmas(), std=FakeStd())
     fake_vapoursynth = types.ModuleType("vapoursynth")
     fake_vapoursynth.core = core  # pyright: ignore[reportAttributeAccessIssue]
     fake_vsview = types.ModuleType("vsview")
@@ -639,6 +639,17 @@ def _execute_generated_script(
     fake_vsview.set_output = set_output  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vapoursynth)
     monkeypatch.setitem(sys.modules, "vsview", fake_vsview)
+
+    def capture_overlay(_core, clip, model, *, warn):
+        del warn
+        if overlay_sink is not None:
+            n = 10994 if model.role == "REF" else 10490
+            overlay_sink.append("\n".join((*model.live_lines(n), *model.static_lines())))
+        return clip
+
+    monkeypatch.setattr(
+        "frame_compare.vsview.session_runtime.apply_alignment_overlay", capture_overlay
+    )
 
     script = _build_script_content(
         reference=reference,
@@ -761,56 +772,25 @@ def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_disti
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     overlays: list[str] = []
-    candidate = {
-        "frame_offset": 0,
-        "time_offset_seconds": 0.0,
-        "subframe_estimate": 0.0,
-        "basis": "audio_only",
-    }
-    reviews = {
-        "ref:accepted": json.dumps(
+    reviews = {}
+    for ordinal, (label, attempt) in enumerate(
+        [
+            ("accepted", trusted_audio_attempt(ordinal=1, frame_offset=0)),
+            ("provisional", provisional_audio_attempt(ordinal=2, frame_offset=0)),
+            ("unavailable", unavailable_audio_attempt(ordinal=3)),
+        ],
+        1,
+    ):
+        reviews[f"ref:{label}"] = json.dumps(
             {
-                "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
-                "evidence_availability": "current_attempt",
-                "audio_attempt": {
-                    "decision": {
-                        "state": "trusted_automatic",
-                        "candidate": candidate,
-                        "primary_reason": "accepted",
-                        "failed_gates": [],
-                    }
+                "current_authority": {
+                    "origin": "computed_this_run" if ordinal == 1 else "none",
+                    "frame_offset": 0 if ordinal == 1 else None,
                 },
-            }
-        ),
-        "ref:provisional": json.dumps(
-            {
-                "current_authority": {"origin": "none", "frame_offset": None},
                 "evidence_availability": "current_attempt",
-                "audio_attempt": {
-                    "decision": {
-                        "state": "provisional",
-                        "candidate": candidate,
-                        "primary_reason": "audio_only",
-                        "failed_gates": [],
-                    }
-                },
+                "audio_attempt": asdict(attempt),
             }
-        ),
-        "ref:unavailable": json.dumps(
-            {
-                "current_authority": {"origin": "none", "frame_offset": None},
-                "evidence_availability": "current_attempt",
-                "audio_attempt": {
-                    "decision": {
-                        "state": "unavailable",
-                        "candidate": None,
-                        "primary_reason": "insufficient_signal",
-                        "failed_gates": ["insufficient_signal"],
-                    }
-                },
-            }
-        ),
-    }
+        )
 
     _execute_generated_script(
         tmp_path=tmp_path,
@@ -826,9 +806,9 @@ def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_disti
     )
 
     joined = "\n".join(overlays)
-    assert "Audio alignment accepted: +0f" in joined
-    assert "Provisional +0f - NOT APPLIED" in joined
-    assert "No usable audio candidate" in joined
+    assert "Accepted audio alignment at session open" in joined
+    assert "Provisional audio suggestion at session open" in joined
+    assert "No alignment suggestion at session open" in joined
     assert "no trusted audio hint" not in joined
 
 
@@ -865,8 +845,8 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
     )
     assert len(overlays) == 2
     for overlay in overlays:
-        assert "Open Tool Panel -> Frame Compare Alignment Review." in overlay
-        assert "Unlink playheads, then position every source on the same visible moment." in overlay
+        assert "Saved choices/status: Alignment Review panel" in overlay
+        assert "at session open" in overlay
     output = capsys.readouterr().err
     assert "│ 2  Unlink playheads, then position every source on the same visible moment." in output
     assert (

@@ -823,6 +823,9 @@ def test_mixed_states_save_authority_labels_and_preserve_evidence(
     )
 
     original_summaries = [label.text() for label in panel.audio_summary_labels]
+    launch_note = panel.launch_label_explanation.text()
+    assert "evidence from session open" in launch_note
+    assert "do not show or move the other playhead" in launch_note
     original_details = [
         cast(QLabel, details.findChild(QLabel)).text() for details in panel.audio_detail_groups
     ]
@@ -882,10 +885,12 @@ def test_mixed_states_save_authority_labels_and_preserve_evidence(
         cast(QLabel, details.findChild(QLabel)).text() for details in panel.audio_detail_groups
     ] == original_details
     assert all(not details.isChecked() for details in panel.audio_detail_groups)
+    assert panel.launch_label_explanation.text() == launch_note
     assert panel.guidance_label.text() == "Close VSView to resume Frame Compare."
     assert panel.keep_help_label.isHidden()
 
     if confirm:
+        assert panel.launch_label_explanation.text() == launch_note
         api.current_frame = 150
         _call_hook(panel.on_current_frame_changed, 150)
         assert all("Viewing:" not in label.text() for label in panel.source_status_labels)
@@ -1206,6 +1211,9 @@ def test_save_failure_stays_editable_unsaved_and_redacted(
     assert "OSError" in panel.error_label.text()
     assert str(tmp_path) not in panel.error_label.text()
     assert "saved" not in panel.progress_label.text().lower()
+    assert (
+        "Saved choices and current status are shown here" in panel.launch_label_explanation.text()
+    )
 
 
 @pytest.mark.parametrize("next_workspace", ["ordinary", "malformed"])

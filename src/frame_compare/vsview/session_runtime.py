@@ -13,8 +13,8 @@ from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TextIO, TypedDict, cast
 
-from frame_compare.utils.alignment_evidence import AudioAlignmentDecision, evidence_from_payload
 from frame_compare.vs.source import INDEX_CONSTRUCTION_FAILURE_MARKER
+from frame_compare.vsview.alignment_overlay import apply_alignment_overlay, build_launch_overlays
 from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
     ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
@@ -25,6 +25,9 @@ from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
     ALIGNMENT_REVIEW_METADATA_VERSION,
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
+    AlignmentReviewContractError,
+    AlignmentReviewOutputCandidate,
+    parse_alignment_review_workspace_metadata,
 )
 
 if TYPE_CHECKING:
@@ -613,17 +616,6 @@ def run_session(data: SessionData, script_path: Path) -> None:
         preview_assumptions.append(ref_assumption)
     ref_clip = apply_preview_defaults(core, ref_clip, reference["label"], frame_props_by_label)
 
-    try:
-        ref_clip = core.text.Text(
-            ref_clip,
-            f"REF: {reference['display_name']}\n"
-            "Open Tool Panel -> Frame Compare Alignment Review.\n"
-            "Unlink playheads, then position every source on the same visible moment.",
-            alignment=7,
-        )
-    except Exception:
-        console.safe_print(console.status_line("[WARN]", "Could not apply reference text overlay"))
-
     prepared_comparisons: list[tuple[int, str, ComparisonSource, vs.VideoNode]] = []
 
     for comparison_number, (label, target) in enumerate(targets.items(), start=1):
@@ -656,80 +648,55 @@ def run_session(data: SessionData, script_path: Path) -> None:
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
         comp_clip = apply_preview_defaults(core, comp_clip, label, frame_props_by_label)
 
-        suggested_offset = target["suggested_offset"]
-        audio_review = cast(AudioReviewPayload, json.loads(target["audio_review"]))
-        audio_attempt = audio_review["audio_attempt"]
-        raw_decision = audio_attempt.get("decision") if isinstance(audio_attempt, dict) else None
-        try:
-            audio_decision = (
-                None
-                if raw_decision is None
-                else evidence_from_payload(AudioAlignmentDecision, raw_decision)
-            )
-        except ValueError:
-            audio_decision = None
-        candidate_offset = (
-            None
-            if audio_decision is None or audio_decision.candidate is None
-            else audio_decision.candidate.frame_offset
-        )
-        audio_attempt_unusable = audio_attempt is not None and (
-            audio_decision is None or candidate_offset is None
-        )
-        authority = audio_review["current_authority"]
-        if (
-            audio_decision is not None
-            and audio_decision.state == "provisional"
-            and candidate_offset is not None
-        ):
-            audio_hint = f"Provisional {candidate_offset:+d}f - NOT APPLIED"
-            hint_pair = "Verify manually; this candidate is not a confirmed alignment"
-            trim_hint = f"Reason: {audio_decision.primary_reason}"
-        elif audio_decision is not None and audio_decision.state == "trusted_automatic":
-            accepted_offset = cast(int, suggested_offset)
-            audio_hint = f"Audio alignment accepted: {accepted_offset:+d}f"
-            hint_pair = (
-                "No relative audio correction required"
-                if accepted_offset == 0
-                else f"Accepted origin pair: REF {max(accepted_offset, 0)} <-> "
-                f"CMP {max(-accepted_offset, 0)}"
-            )
-            trim_hint = "Accepted by the recorded automatic policy"
-        elif authority["origin"] in {
-            "interactive_confirmed_this_run",
-            "shared_previous_offsets",
-            "preexisting_manual_override",
-        }:
-            audio_hint = f"Current alignment: {suggested_offset:+d}f — manually confirmed"
-            hint_pair = "Historical audio details unavailable"
-            trim_hint = "Manual authority is separate from audio evidence"
-        elif audio_attempt_unusable or suggested_offset is None:
-            audio_hint = "No usable audio candidate"
-            hint_pair = "No automatic correction applied"
-            trim_hint = "Enter known offsets or align the sources manually"
-        else:
-            audio_hint = f"Reused accepted audio alignment: {suggested_offset:+d}f"
-            hint_pair = "Historical chunk and selected-stream details unavailable"
-            trim_hint = "No audio analysis ran this time"
-
-        try:
-            overlay_text = (
-                f"CMP: {display_name}\n"
-                f"Audio hint: {audio_hint}\n"
-                f"{hint_pair}\n"
-                f"{trim_hint}\n"
-                "Open Tool Panel -> Frame Compare Alignment Review.\n"
-                "Unlink playheads, then position every source on the same visible moment."
-            )
-            comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
-        except Exception:
-            console.safe_print(
-                console.status_line("[WARN]", "Could not apply comparison text overlay")
-            )
-
         prepared_comparisons.append((comparison_number, label, target, comp_clip))
 
     session_id = script_path.stem.rpartition("_")[2]
+    # Parse the same metadata-v5 workspace the panel will consume, with actual
+    # untrimmed frame counts, before deriving immutable display-only launch facts.
+    candidates = (
+        AlignmentReviewOutputCandidate(
+            0, ref_clip.num_frames, _reference_metadata(session_id, reference)
+        ),
+        *(
+            AlignmentReviewOutputCandidate(
+                number, clip.num_frames, _comparison_metadata(session_id, target, number)
+            )
+            for number, _label, target, clip in prepared_comparisons
+        ),
+    )
+    try:
+        workspace = parse_alignment_review_workspace_metadata(candidates)
+        names = {0: data["short_names"].get(reference["label"], reference["display_name"])}
+        names.update(
+            {
+                number: data["short_names"].get(label, target["display_name"])
+                for number, label, target, _clip in prepared_comparisons
+            }
+        )
+        models = build_launch_overlays(workspace, names)
+    except (AlignmentReviewContractError, ValueError):
+        models = {}
+        console.safe_print(
+            console.status_line(
+                "[WARN]",
+                "Alignment video labels unavailable: invalid session evidence; using raw preview.",
+            )
+        )
+
+    def overlay_warning(message: str) -> None:
+        console.safe_print(console.status_line("[WARN]", message))
+
+    if models:
+        ref_clip = apply_alignment_overlay(core, ref_clip, models[0], warn=overlay_warning)
+        prepared_comparisons = [
+            (
+                number,
+                label,
+                target,
+                apply_alignment_overlay(core, clip, models[number], warn=overlay_warning),
+            )
+            for number, label, target, clip in prepared_comparisons
+        ]
     try:
         set_output(ref_clip, 0, "Reference", **_reference_metadata(session_id, reference))
         for comparison_number, _label, target, comparison_clip in prepared_comparisons:

@@ -199,6 +199,7 @@ def _execute_ready_block(
     class FakeClip:
         def __init__(self, stem: str) -> None:
             self.stem = stem
+            self.num_frames = 20_000
             self.fps = SimpleNamespace(numerator=24, denominator=1)
 
     clips = {path.stem: FakeClip(path.stem) for path in (reference, *comparisons)}
@@ -207,11 +208,6 @@ def _execute_ready_block(
         def LWLibavSource(self, path: str, **_kwargs: object) -> FakeClip:
             return clips[Path(path).stem]
 
-    class FakeText:
-        def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
-            assert alignment == 7
-            return clip
-
     class FakeStd:
         def AssumeFPS(self, clip: FakeClip, **_kwargs: object) -> FakeClip:
             return clip
@@ -219,7 +215,7 @@ def _execute_ready_block(
         def SetFrameProps(self, clip: FakeClip, **_kwargs: object) -> FakeClip:
             return clip
 
-    core = SimpleNamespace(lsmas=FakeLsmas(), text=FakeText(), std=FakeStd())
+    core = SimpleNamespace(lsmas=FakeLsmas(), std=FakeStd())
     fake_vapoursynth = types.ModuleType("vapoursynth")
     fake_vapoursynth.core = core  # pyright: ignore[reportAttributeAccessIssue]
     fake_vsview = types.ModuleType("vsview")
