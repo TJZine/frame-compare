@@ -59,7 +59,7 @@ def probe_libplacebo_runtime() -> bool:
             dst_max=203,
             tone_mapping_function=2,
             dst_csp=0,
-            dst_prim=1,
+            dst_prim=3,
             src_csp=1,
         )
         _ = out.get_frame(0)

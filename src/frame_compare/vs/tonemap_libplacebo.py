@@ -80,9 +80,9 @@ def build_libplacebo_tonemap_kwargs(
         "dst_max": target_nits,
         "tone_mapping_function_s": TONE_CURVE_STRING_MAP[settings.tone_curve],
         "tone_mapping_param": settings.knee_offset,
-        # SDR output targeting BT.709 (legacy default).
+        # SDR output targeting BT.709.
         "dst_csp": 0,
-        "dst_prim": 1,
+        "dst_prim": 3,
         "dst_min": settings.dst_min_nits,
         "dynamic_peak_detection": int(settings.dynamic_peak_detection),
         "smoothing_period": settings.smoothing_period,

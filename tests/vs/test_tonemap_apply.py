@@ -177,7 +177,7 @@ def test_apply_tonemap_passes_src_csp_hint_for_hdr10(mock_runtime_usable, mock_d
         _, kwargs = mock_core.placebo.Tonemap.call_args
         assert kwargs["src_csp"] == 1
         assert kwargs["dst_csp"] == 0
-        assert kwargs["dst_prim"] == 1
+        assert kwargs["dst_prim"] == 3
 
 
 @pytest.mark.parametrize("case", ["metadata_missing", "runtime_failure", "runtime_unusable"])
