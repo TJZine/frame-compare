@@ -4,10 +4,12 @@ from io import StringIO
 from threading import Event, current_thread
 
 import pytest
+import structlog
 from rich.console import Console
 from rich.text import Text
 
 import frame_compare.utils.progress as progress_module
+from frame_compare.utils.logging import configure_logging
 from frame_compare.utils.progress import (
     PlainProgressReporter,
     RichProgressReporter,
@@ -80,6 +82,45 @@ def test_rich_progress_reporter_suspend_and_resume_preserves_active_task() -> No
     assert reporter._progress.live.is_started is True
 
     reporter.complete_phase()
+
+
+def test_warning_uses_active_reporter_console_and_releases_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stderr = StringIO()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    configure_logging(rich_output=True, no_color=True)
+    structlog.get_logger().warning("before_progress")
+    assert "! before progress" in stderr.getvalue()
+    stderr.truncate(0)
+    stderr.seek(0)
+    reporter, output = _captured_rich_reporter(monkeypatch)
+    reporter.start_phase("outer", 10)
+    try:
+        reporter.start_phase("inner", 2)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(
+                structlog.get_logger().warning, "tmdb_lookup_failed", status=503
+            ).result()
+        assert "! tmdb lookup failed · status=503" in Text.from_ansi(output.getvalue()).plain
+        assert stderr.getvalue() == ""
+        reporter.complete_phase()
+        structlog.get_logger().warning("parent_active")
+        assert "! parent active" in Text.from_ansi(output.getvalue()).plain
+        assert stderr.getvalue() == ""
+        reporter.suspend()
+        structlog.get_logger().warning("while_suspended")
+        assert "! while suspended" in stderr.getvalue()
+        reporter.resume()
+        stderr.truncate(0)
+        stderr.seek(0)
+        structlog.get_logger().warning("after_resume")
+        assert "! after resume" in Text.from_ansi(output.getvalue()).plain
+        assert stderr.getvalue() == ""
+    finally:
+        reporter.complete_phase()
+    structlog.get_logger().warning("after_completion")
+    assert "! after completion" in stderr.getvalue()
 
 
 def test_rich_progress_reporter_hides_parent_while_nested_phase_is_active(

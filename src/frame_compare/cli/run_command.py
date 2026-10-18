@@ -37,7 +37,7 @@ from frame_compare.orchestration.run_inputs import (
 from frame_compare.utils.artifact_paths import artifact_link
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
 from frame_compare.utils.run_warnings import RunWarning
-from frame_compare.utils.terminal import interruptible_prompt
+from frame_compare.utils.terminal import interruptible_prompt, stream_is_tty
 from frame_compare.utils.terminal_sections import Section, section_title
 from frame_compare.utils.terminal_theme import ACCENT, format_duration, glyphs_for_console
 
@@ -75,7 +75,9 @@ class ConsoleFactory(Protocol):
 
 
 class ConfigureLoggingFn(Protocol):
-    def __call__(self, *, level: str, log_format: str) -> None: ...
+    def __call__(
+        self, *, level: str, log_format: str, rich_output: bool, no_color: bool
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -274,7 +276,16 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             "WARNING" if args.quiet else ("DEBUG" if args.verbose else config.logging.level.value)
         )
         log_format = "json" if args.json_output else config.logging.format.value
-        deps.configure_logging(level=log_level, log_format=log_format)
+        deps.configure_logging(
+            level=log_level,
+            log_format=log_format,
+            rich_output=(
+                not args.quiet
+                and not args.json_output
+                and (stream_is_tty(sys.stdout) or stream_is_tty(sys.stderr))
+            ),
+            no_color=effective_no_color,
+        )
 
         if args.diagnose_paths:
             handle_diagnose_paths(inputs.root, inputs.config_path, inputs.config)

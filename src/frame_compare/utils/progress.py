@@ -25,6 +25,7 @@ from rich.progress_bar import ProgressBar
 from rich.table import Column
 from rich.text import Text
 
+from frame_compare.utils.logging import register_log_console, release_log_console
 from frame_compare.utils.progress_protocol import (
     AlignmentSummary,
     AlignmentSummaryEntry,
@@ -410,6 +411,20 @@ class RichProgressReporter:
         self._suspend_depth = 0
         self._lock = RLock()
 
+    def _start_live(self) -> None:
+        register_log_console(self._progress.console)
+        try:
+            self._progress.start()
+        except BaseException:
+            release_log_console(self._progress.console)
+            raise
+
+    def _stop_live(self) -> None:
+        try:
+            self._progress.stop()
+        finally:
+            release_log_console(self._progress.console)
+
     def set_phase_steps(self, labels: list[str]) -> None:
         """Initialize the run footer with its enabled phases in execution order."""
         with self._lock:
@@ -440,7 +455,7 @@ class RichProgressReporter:
             if self._task_id is None and name in self._progress.steps:
                 self._progress.steps[name] = "running"
             if self._suspend_depth == 0 and not self._progress.live.is_started:
-                self._progress.start()
+                self._start_live()
             if self._task_id is not None:
                 self._progress.update(self._task_id, visible=False, refresh=True)
                 self._task_stack.append(self._task_id)
@@ -538,7 +553,7 @@ class RichProgressReporter:
                 return
 
             if self._progress.live.is_started:
-                self._progress.stop()
+                self._stop_live()
 
     def _print_durable_line(
         self,
@@ -593,7 +608,7 @@ class RichProgressReporter:
         with self._lock:
             self._suspend_depth += 1
             if self._suspend_depth == 1 and self._progress.live.is_started:
-                self._progress.stop()
+                self._stop_live()
 
     def resume(self) -> None:
         """Resume live progress rendering after blocking terminal interaction."""
@@ -606,7 +621,7 @@ class RichProgressReporter:
                 and self._task_id is not None
                 and not self._progress.live.is_started
             ):
-                self._progress.start()
+                self._start_live()
 
 
 class LogProgressReporter:

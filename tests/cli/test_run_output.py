@@ -226,8 +226,11 @@ def test_run_env_no_color_propagates_to_request(monkeypatch: MonkeyPatch, tmp_pa
         ("ERROR", "json", ["--verbose"], "DEBUG", "json"),
         ("ERROR", "json", ["--quiet", "--verbose"], "WARNING", "json"),
         ("ERROR", "console", ["--json"], "ERROR", "json"),
+        ("INFO", "console", [], "INFO", "console"),
+        ("INFO", "console", ["--no-color"], "INFO", "console"),
     ],
 )
+@pytest.mark.parametrize("tty", ["none", "stdout", "stderr"])
 def test_run_logging_config_and_cli_precedence(
     monkeypatch: MonkeyPatch,
     configured_level: str,
@@ -236,14 +239,24 @@ def test_run_logging_config_and_cli_precedence(
     expected_level: str,
     expected_format: str,
     tmp_path: Path,
+    tty: str,
 ) -> None:
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
-    def _configure_logging(*, level: str, log_format: str) -> None:
+    def _configure_logging(
+        *, level: str, log_format: str, rich_output: bool, no_color: bool
+    ) -> None:
         captured["level"] = level
         captured["format"] = log_format
+        captured["rich_output"] = rich_output
+        captured["no_color"] = no_color
 
+    monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr("frame_compare.cli.entry.configure_logging", _configure_logging)
+    monkeypatch.setattr(
+        "frame_compare.cli.run_command.stream_is_tty",
+        lambda stream: tty != "none" and stream is getattr(sys, tty),
+    )
     monkeypatch.setattr(
         "frame_compare.cli.entry.runner.run",
         lambda _request, dependencies=None: RunResult(success=True),
@@ -269,8 +282,13 @@ def test_run_logging_config_and_cli_precedence(
             ],
             color=False,
             terminal_width=200,
-            env={"NO_COLOR": "1", "TERM": "dumb"},
+            env={"TERM": "dumb"},
         )
 
     assert result.exit_code == 0
-    assert captured == {"level": expected_level, "format": expected_format}
+    assert captured == {
+        "level": expected_level,
+        "format": expected_format,
+        "rich_output": tty != "none" and "--quiet" not in args and "--json" not in args,
+        "no_color": "--no-color" in args,
+    }
