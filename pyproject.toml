@@ -30,7 +30,7 @@ dependencies = [
     "pydantic-settings>=2.16.0",
     "structlog>=26.1.0",
     "tomli-w>=1.2.0",
-    "pillow==12.3.0",
+    "pillow==13.0.0",
     "guessit>=4.4.0",
     "anitopy>=2.1.1",
     "pyperclip>=1.11.0",
