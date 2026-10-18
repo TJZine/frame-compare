@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import shutil
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TextIO, TypedDict, cast
@@ -25,6 +28,15 @@ from frame_compare.vsview.alignment_review_contract import (
 
 if TYPE_CHECKING:
     import vapoursynth as vs
+
+
+_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+@dataclass(frozen=True, slots=True)
+class _SectionKeyValue:
+    key: str
+    value: str
 
 
 class ReferenceSource(TypedDict):
@@ -139,17 +151,214 @@ class SessionConsole:
             return text
         return f"\x1b[{code}m{text}\x1b[0m"
 
+    def dim(self, text: str) -> str:
+        return self.style(text, "2")
+
     def header(self, text: str) -> str:
         return self.style(text, self.accent_code())
 
     def key(self, text: str) -> str:
         return self.style(text, "2")
 
-    def value(self, text: str) -> str:
-        return text
-
     def hint(self, text: str) -> str:
         return self.style(text, "2")
+
+    def ascii_fallback(self, text: str) -> str:
+        if not self.use_ascii():
+            return text
+        return text.translate(
+            str.maketrans(
+                {
+                    "╭": "+",
+                    "─": "-",
+                    "│": "|",
+                    "╰": "+",
+                    "·": "|",
+                    "›": ">",
+                    "…": "...",
+                    "×": "x",
+                    "●": "*",
+                    "○": "o",
+                }
+            )
+        )
+
+    def _section_border(self, side: str) -> str:
+        if self.use_ascii():
+            return "+-" if side in {"top", "bottom"} else "|"
+        return {"top": "╭─", "body": "│", "bottom": "╰─"}[side]
+
+    def _section_title(self, text: str) -> str:
+        heading, separator, detail = text.partition(" · ")
+        title = self.style(self.ascii_fallback(heading), f"{self.accent_code()};1")
+        if separator:
+            title += self.dim(self.ascii_fallback(separator + detail))
+        return title
+
+    def _section_body(self, text: str) -> str:
+        text = self.ascii_fallback(text)
+        rail = self.style(self._section_border("body"), self.accent_code())
+        return rail if not text else f"{rail} {text}"
+
+    def terminal_width(self) -> int:
+        return max(1, min(shutil.get_terminal_size(fallback=(120, 24)).columns, 120))
+
+    def _wrap_ansi(self, text: str, width: int) -> list[str]:
+        """Fold an ANSI-styled string without counting SGR sequences as width."""
+        lines: list[str] = []
+        current: list[str] = []
+        visible_width = 0
+        active_style = ""
+        for token_match in re.finditer(r"\x1b\[[0-9;]*m|.", text, re.DOTALL):
+            token = token_match.group()
+            ansi_match = _ANSI_SGR_RE.fullmatch(token)
+            if ansi_match is not None:
+                current.append(token)
+                active_style = "" if token == "\x1b[0m" else token
+                continue
+            for character in token:
+                if character == "\n":
+                    lines.append("".join(current))
+                    current = [active_style] if active_style else []
+                    visible_width = 0
+                    continue
+                if visible_width == width:
+                    if active_style:
+                        current.append("\x1b[0m")
+                    lines.append("".join(current))
+                    current = [active_style] if active_style else []
+                    visible_width = 0
+                current.append(character)
+                visible_width += 1
+        if current or not lines:
+            lines.append("".join(current))
+        return lines
+
+    def _section_lines(self, line: str | _SectionKeyValue, body_width: int) -> list[str]:
+        if isinstance(line, _SectionKeyValue):
+            key = self.ascii_fallback(line.key)
+            value = self.ascii_fallback(line.value)
+            value_width = max(1, body_width - 16)
+            value_lines = self._wrap_ansi(value, value_width)
+            return [
+                f"{key}  {value_lines[0]}",
+                *(f"{' ' * 16}{value_line}" for value_line in value_lines[1:]),
+            ]
+        return self._wrap_ansi(self.ascii_fallback(line), body_width)
+
+    def section(self, title: str, body: Sequence[str | _SectionKeyValue]) -> None:
+        """Print one G1 section with the VSView console's ANSI styling."""
+        rail_code = self.accent_code()
+        body_width = max(1, self.terminal_width() - 2)
+        self.safe_print()
+        self.safe_print(
+            self.style(self._section_border("top") + " ", rail_code) + self._section_title(title)
+        )
+        for line in body:
+            for wrapped_line in self._section_lines(line, body_width):
+                self.safe_print(self._section_body(wrapped_line))
+        self.safe_print(self.style(self._section_border("bottom"), rail_code))
+        self.safe_print()
+
+    def key_value(self, key: str, value: str) -> _SectionKeyValue:
+        return _SectionKeyValue(self.key(f"{key:<14}"), value)
+
+    def note(self, kind: str, text: str) -> str:
+        glyph = self.glyph(kind)
+        code = "33" if kind == "warning" else "2"
+        return f"{self.style(glyph, code)} {text}"
+
+    def _audio_output_state(self, audio_review: AudioReviewPayload) -> tuple[str, bool]:
+        authority = audio_review["current_authority"]
+        origin = authority["origin"]
+        offset = authority["frame_offset"]
+        attempt = audio_review["audio_attempt"]
+        decision_raw = attempt.get("decision") if isinstance(attempt, dict) else None
+        decision = cast(dict[str, object], decision_raw) if isinstance(decision_raw, dict) else None
+        state = decision.get("state") if decision is not None else None
+        candidate_raw = decision.get("candidate") if decision is not None else None
+        candidate = (
+            cast(dict[str, object], candidate_raw) if isinstance(candidate_raw, dict) else None
+        )
+        candidate_offset = candidate.get("frame_offset") if candidate is not None else None
+
+        if origin == "computed_this_run" and state == "trusted_automatic" and offset is not None:
+            return f"audio {offset:+d}f", False
+        if origin == "shared_computed_offsets" and offset is not None:
+            return f"audio {offset:+d}f · reused", False
+        if (
+            origin in {"interactive_confirmed_this_run", "shared_previous_offsets"}
+            and offset is not None
+        ):
+            return f"previously confirmed {offset:+d}f", False
+        if origin == "preexisting_manual_override" and offset is not None:
+            return f"manual offset {offset:+d}f", False
+        if state == "provisional" and isinstance(candidate_offset, int):
+            return f"audio {candidate_offset:+d}f · not applied", True
+        return "no audio match", True
+
+    def _output_table_rows(
+        self,
+        reference: ReferenceSource,
+        targets: Mapping[str, ComparisonSource],
+        short_names: Mapping[str, str],
+    ) -> list[_SectionKeyValue]:
+        source_names = [short_names.get(reference["label"], reference["display_name"])]
+        source_names.extend(
+            short_names.get(label, target["display_name"]) for label, target in targets.items()
+        )
+        name_width = max(map(len, source_names))
+        rows = [
+            self.key_value(
+                "outputs",
+                f"0  {source_names[0].ljust(name_width)}  {self.dim('reference')}",
+            )
+        ]
+        for index, ((_label, target), name) in enumerate(
+            zip(targets.items(), source_names[1:], strict=True), start=1
+        ):
+            audio_review = cast(AudioReviewPayload, json.loads(target["audio_review"]))
+            state, warning = self._audio_output_state(audio_review)
+            state_text = self.style(state, "33") if warning else self.dim(state)
+            rows.append(
+                self.key_value(
+                    "",
+                    f"{index}  {name.ljust(name_width)}  {state_text}",
+                )
+            )
+        return rows
+
+    def vsview_section_body(
+        self,
+        reference: ReferenceSource,
+        targets: Mapping[str, ComparisonSource],
+        short_names: Mapping[str, str],
+        preview_assumptions: list[dict[str, str]],
+    ) -> list[str | _SectionKeyValue]:
+        body: list[str | _SectionKeyValue] = [
+            "1  Open Tool Panel " + self.arrow() + " Frame Compare Alignment Review.",
+            "2  Unlink playheads, then position every source on the same visible moment.",
+            "3  Save the alignment in the panel, then close VSView to continue Frame Compare.",
+            "",
+            *self._output_table_rows(reference, targets, short_names),
+        ]
+        if preview_assumptions:
+            body.extend(("", self.note("warning", "VSView display assumptions")))
+            for assumption_number, assumption in enumerate(preview_assumptions):
+                if assumption_number:
+                    body.append("")
+                body.append(self.key_value("source", assumption["source"]))
+                if "preview" in assumption:
+                    body.append(self.key_value("preview", self.hint(assumption["preview"])))
+                if "range" in assumption:
+                    body.append(self.key_value("range", self.hint(assumption["range"])))
+                body.append(
+                    self.key_value(
+                        "impact",
+                        self.hint("Preview only; source, render, and report unchanged"),
+                    )
+                )
+        return body
 
     def status(self, marker: str) -> str:
         kinds = {"[WARN]": ("warning", "33"), "[FAIL]": ("failed", "31")}
@@ -398,7 +607,6 @@ def run_session(data: SessionData, script_path: Path) -> None:
         console.safe_print(console.status_line("[WARN]", "Could not apply reference text overlay"))
 
     prepared_comparisons: list[tuple[int, str, ComparisonSource, vs.VideoNode]] = []
-    ready_hints: list[tuple[str, str]] = []
 
     for comparison_number, (label, target) in enumerate(targets.items(), start=1):
         comp_path = Path(target["path"])
@@ -486,8 +694,6 @@ def run_session(data: SessionData, script_path: Path) -> None:
             hint_pair = "Historical chunk and selected-stream details unavailable"
             trim_hint = "No audio analysis ran this time"
 
-        ready_hints.append((label, audio_hint))
-
         try:
             overlay_text = (
                 f"CMP: {display_name}\n"
@@ -521,53 +727,7 @@ def run_session(data: SessionData, script_path: Path) -> None:
         )
         sys.exit(1)
 
-    if preview_assumptions:
-        console.safe_print("\n" + console.status_line("[WARN]", "VSView Display Assumptions"))
-        for assumption_number, assumption in enumerate(preview_assumptions):
-            if assumption_number:
-                console.safe_print()
-            console.safe_print(
-                f"    {console.key('source')}      {console.value(assumption['source'])}"
-            )
-            if "preview" in assumption:
-                console.safe_print(
-                    f"    {console.key('preview')}     {console.hint(assumption['preview'])}"
-                )
-            if "range" in assumption:
-                console.safe_print(
-                    f"    {console.key('range')}       {console.hint(assumption['range'])}"
-                )
-            console.safe_print(
-                f"    {console.key('impact')}      "
-                f"{console.hint('Preview only; source, render, and report unchanged')}"
-            )
-
-    ready_prefix = "\n" if preview_assumptions else ""
-    console.safe_print(
-        ready_prefix
-        + console.header(f"{console.glyph('waiting')} VSView is open \u00b7 waiting for you")
+    console.section(
+        f"{console.glyph('waiting')} VSView is open · waiting for you",
+        console.vsview_section_body(reference, targets, short_names, preview_assumptions),
     )
-    console.safe_print(
-        "  1  Open Tool Panel " + console.arrow() + " Frame Compare Alignment Review."
-    )
-    console.safe_print(
-        "  2  Unlink playheads, then position every source on the same visible moment."
-    )
-    console.safe_print(
-        "  3  Save the alignment in the panel, then close VSView to continue Frame Compare."
-    )
-    console.safe_print("")
-    console.safe_print("  outputs  0  " + reference["display_name"])
-    for comparison_number, _label, target, _comparison_clip in prepared_comparisons:
-        console.safe_print("           " + str(comparison_number) + "  " + target["display_name"])
-    ready_hint_rows: list[tuple[str, str]] = []
-    for label, audio_hint in ready_hints:
-        ready_hint_rows.append((short_names.get(label, targets[label]["display_name"]), audio_hint))
-    if ready_hint_rows:
-        hint_width = max(len(name) for name, _hint_text in ready_hint_rows)
-        first_hint_name, first_hint_text = ready_hint_rows[0]
-        console.safe_print(
-            "  hints    " + first_hint_name.ljust(hint_width) + "  " + first_hint_text
-        )
-        for hint_name, hint_text in ready_hint_rows[1:]:
-            console.safe_print("           " + hint_name.ljust(hint_width) + "  " + hint_text)

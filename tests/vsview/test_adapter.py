@@ -868,12 +868,13 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
         assert "Open Tool Panel -> Frame Compare Alignment Review." in overlay
         assert "Unlink playheads, then position every source on the same visible moment." in overlay
     output = capsys.readouterr().err
-    assert "  2  Unlink playheads, then position every source on the same visible moment." in output
+    assert "│ 2  Unlink playheads, then position every source on the same visible moment." in output
     assert (
-        "  3  Save the alignment in the panel, then close VSView to continue Frame Compare."
+        "│ 3  Save the alignment in the panel, then close VSView to continue Frame Compare."
         in output
     )
     assert "VSView is open" in output
+    assert "hints" not in output
 
 
 def test_write_vsview_session_script_uses_unique_uuid_paths(
