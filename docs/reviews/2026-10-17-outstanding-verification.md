@@ -5,18 +5,23 @@ search:
 
 # Outstanding verification ledger — 2026-10-17
 
-Status: Feasible independent verification complete; acceptance remains OPEN for
-the explicit prerequisites in the final disposition table. Visible native review
-and the bounded repeated native-console-event observation have now passed.
+Status: MacBook continuation completed on 2026-10-18. Actual Windows-to-MacBook
+report transfer, native macOS picker, Merge/Replace/conflict choices and exact
+review/image/identity/reload acceptance passed. Acceptance remains OPEN for the
+explicit prerequisites in the final disposition table. Visible Windows native
+review and the bounded repeated native-console-event observation retain their passes.
 The repeated rendering Ctrl+C failure is preserved as a historical observation,
 resolved by the separately authorized fix and affected verification below.
 This ledger is chronological: interim pending/failed observations retain their
-original scope; the final table reconciles the latest evidence at HEAD 6739bfb2.
+original scope. The final MacBook disposition table supersedes the Windows handoff
+table; its checkout is 698d1e76, with unchanged product content since 6739bfb2.
 This is the canonical ledger. Supporting
 receipts, raw logs, downloads, probes and sidecars are retained under
-`generated/verification/2026-10-17/`, outside scratch. Initial verification made
+`generated/verification/2026-10-17/` on Windows and the durable MacBook evidence
+directory recorded below, outside scratch. Initial verification made
 no product changes; the later authorized Ctrl+C fix and commit/push are recorded
-separately. The current continuation changes only this ledger. No reset, merge,
+separately. The MacBook continuation changes only this ledger after a safe local
+fast-forward. No destructive reset, PR merge,
 credential migration, protected dispatch, publication or live product-service
 request was performed.
 
@@ -919,7 +924,8 @@ readbacks are under `post-push-ci/`, including `inspection-receipt.md` and
 | Windows portable | 12095666834 | 422846700 | `ae7d44555054da0b9c7db3c653d718dbb979e010018a43a945ffc41720bebe60` |
 | Windows unsigned update | 12094948978 | 698437 | `0c339c3f021175cbe749981ddbc1907cf34b4b145690b4906d04faad3b335223` |
 
-The following is the final disposition of every requested obligation. A pass is
+The following is the Windows handoff disposition at 6739bfb2, retained as historical
+evidence and superseded by the final MacBook disposition below. A pass is
 limited to its named source/environment/path; automated, human-visible native,
 physical-host and protected-signing claims remain distinct.
 
@@ -988,3 +994,189 @@ state/image/identity/reload acceptance. Receiving that package on the MacBook ca
 close the cross-machine prerequisite; reading this ledger alone cannot. No merge,
 credential migration, protected signing dispatch, publication or release action
 is authorized by this commit/push/handoff instruction.
+
+## MacBook continuation — 2026-10-18
+
+### Checkout and transferred evidence
+
+The Mac checkout was clean on `v0.7.0` at
+`104491b5b023b5a666d37bb7ea9d6742b030c749`. Remote readback identified the supplied
+`698d1e7647c3f580b07939ff07bf8b3dbfc334f0`; fetch and `merge --ff-only` advanced
+the clean checkout without resetting or discarding work. PR138 remains open and
+unmerged against protected base `35792220ae59d514ed626707340e2a86a7a14d05`.
+Only this ledger differs between tested product baseline 6739bfb2 and 698d1e76;
+source, tests, workflows, tools and dependency files are unchanged across that range.
+The supplied handoff and its scripts were read as evidence; no transferred Windows
+helper was executed on the Mac.
+
+Durable receiving directory:
+`/Users/tristan/Downloads/frame-compare-macbook-verification-2026-10-18-qrg1myxu/`.
+`windows-evidence/` holds the unpacked Windows receipts; `mac-evidence/` holds new
+observations, screenshots, actual downloaded exports and decoded CI logs.
+
+The received `frame-compare-windows-evidence-698d1e76.zip` is **29,872,391 bytes**,
+SHA-256 `35f9e80ddf5453cf21c2a20f81ae5aaae85a313cf7760ca95c0006d3a84cd6ef`,
+matching `package-receipt.json`. All **1,226 included entries** match the sizes
+and SHA-256 values in `HANDOFF-MANIFEST.json`; **zero mismatches**. The manifest's
+own received SHA-256 is
+`f8dabaec2451a5ceeae21f43a49000189101f0e7944fb0c0934d616c4f793cc0`.
+The 52 explicitly omitted files were not received or locally rehashed. Their
+recorded original identities remain historical evidence, not inspected Mac bytes.
+Receipts: `transferred-integrity.json`, `mac-receipt.json`, original package manifest
+and receipt. Extraction refused escaping paths and symlink entries.
+
+The final Windows disposition was reconciled with transferred source-equivalence,
+native authority/cancellation audits, browser transfer acceptance and cleanup
+receipts. In particular, the first visible capture's packaged CLI entry limitation
+is preserved; alignment owners were byte-identical, while later current-parent
+console observations establish their separately recorded entry-boundary claims.
+The capture, known-offset, Keep-current, optional-close and repeated-event audits
+remain artifact evidence of the original Windows sessions, not new native Mac runs.
+Earlier 262f PS5.1/7, installation/updater/render and RTX5080 proof keeps its exact
+source/runtime scope. `mac-evidence/reconciliation.json` records the inspected
+receipt identities. No satisfied suite or native session was repeated.
+
+### Latest automatic CI inspected
+
+All four automatic attempt-1 workflows triggered by 698d1e76 completed successfully.
+Decoded checkout logs establish actual tested PR merge
+**`d778a55db214f4a62102d0a4aff93d167463efb5`**. GitHub Git-object readbacks show
+that merge and head698d1e76 share exact tree
+**`890a2216cb2f536c646393f1b806b2dd499d9e2b`**. These are observed completed
+automatic runs; no dispatch or rerun was requested.
+
+| Gate | Inspected result and boundary |
+| --- | --- |
+| [CI39059652931](https://github.com/TJZine/frame-compare/actions/runs/39059652931) | Ten successful jobs, including browser, fresh distribution install, static/import checks and both dependency audits. Browser log has23 passing progress symbols and zero skips; quiet output does not emit a numeric total. General pytest has77 skip-summary lines summing276 items; these include collection/platform/capability/opt-in gaps and are not passes. |
+| [Docker39059652932](https://github.com/TJZine/frame-compare/actions/runs/39059652932) | Canonical cold gate explicitly reports300 passed; separate resource step3 passed; no skip-summary entries. Container/software-Vulkan and accelerated sample-volume scope remains distinct from Linux NVIDIA hardware/endurance. |
+| [Windows39059653003](https://github.com/TJZine/frame-compare/actions/runs/39059653003) | Full suite, full/extracted portable smoke and unsigned update layout/upload succeeded.61 skip-summary lines sum87 items, with no updater/interpreter skips. Extracted provenance explicitly identifies tested merge d778a55. Direct GPU proof reports `vulkan_runtime_unavailable`; hosted panel proof is offscreen. Four whole protected jobs and seven signing/release-related unsigned-build steps remain skipped. |
+| [Documentation39059652950](https://github.com/TJZine/frame-compare/actions/runs/39059652950) | Build and search-scope steps succeeded; Pages configuration/upload and deployment skipped. |
+
+`automatic-ci-readback.json`, `ci-source-and-artifact-readback.json`,
+`latest-ci-skip-accounting.json` and `ci-{pytest,browser,docker,windows}.log`
+retain source/job/step/skip observations under `mac-evidence/`. Original 6739bfb2
+and104491b5 results retain their own identities rather than being relabeled.
+
+| Latest artifact | ID | Bytes | GitHub API ZIP SHA-256 |
+| --- | --- | --- | --- |
+| Docker evidence | 12111460285 | 465242 | `8469ae50853d4834845547aa0a2759e468d1db09045547fcb7ca8f002a549b92` |
+| Windows portable | 12111720132 | 422847488 | `f962eef03573fffccfd0e9e99ea3295a8088058a12969611a72ee0d63790bc92` |
+| Windows unsigned update | 12111530917 | 698436 | `eeb3aca9f02f381e1a35ffa5659ba41981d0236f4e1de2578ce1eed863b6dcb8` |
+
+These latest archive digests are API metadata, not locally downloaded/rehashed ZIPs.
+They are separate from the Windows evidence package actually transferred and hashed.
+
+### Actual Windows-to-MacBook report transfer
+
+**Passed.** Receiver: physical MacBook Pro (MacBookPro18,1), Apple M1 Pro,
+macOS 27.0.1 build 26A434, Google Chrome 155.0.8059.82. Sender: the original
+Windows 10/Brave Chromium 155.0.8059.85 UI-export session identified in
+`browser/transfer/acceptance.md`.
+Serial numbers, hardware UUIDs and account data are not needed in retained receipts.
+
+The unmodified original `browser/transfer/transfer-package.zip` is351,229 bytes,
+SHA-256 `586ab45c45931a62c4bbfb6fafadb47f410e1cb006da519a16b2210b377d6875`.
+Receiving extraction preserves the intentional space, `#`, literal`%20` and Unicode
+paths. All four entry hashes match the sender: report
+`8bd38594f21165b8c197ff7dba1b11fd79747da2242e0d5505943c658967b3a8`, original
+review JSON `850858fbc1c85a4d055a9515ea5fbdae99a7bd7596f67e72ba639aae164031cd`,
+and each image `63ef318d96b5d0d0ceba6e04a4e622b1158335cdc67c49e27839132c6f655058`.
+No report was regenerated. Report identity remains
+**`report_381ff1102c183e0764f342a2b68bf9d7`**, payload**1.3**.
+
+Actual native Chrome Guest windows opened the received offline `report.html`.
+Every accepted scenario began with a new Guest session and observed **0 review
+records saved in this browser**; the previous Guest window was closed first.
+The report's Inspector→Review controls edited local records and opened **Import
+review JSON**. The **native macOS Open dialog**, including Go to Folder and the
+selected file's preview, supplied the original transferred disk JSON. No CDP
+file-input assignment, injected File object or review/model/storage mutation via
+evaluation was used. Native Save dialogs retained actual UI re-exports.
+
+Apply UI state was captured, then each accepted case was reloaded and exported.
+All fields, not merely record counts, were compared in those actual re-exports:
+
+- Imported ordinal0: bookmark true, note exactly `Transfer é 😀 — source note`,
+  tag null and preferred_clip_id null.
+- Local conflicting ordinal0: bookmark false, note exactly `Local conflict Ω`,
+  tag null and preferred_clip_id null.
+- Local-only ordinal1: bookmark true, note exactly `Local-only frame 15 🚀`,
+  tag null and preferred_clip_id null.
+
+| Accepted receiving scenario | Observed preview: Add / Change / Remove / Unchanged | Exact state in the receiving UI export after reload |
+| --- | --- | --- |
+| Fresh Merge/Keep local | 1 / 0 / 0 / 0 | Only imported ordinal0, exact sender record. |
+| Merge/Keep local with conflict | 0 / 0 / 0 / 2 | Exact local ordinal0 and local-only ordinal1 retained. |
+| Merge/Use imported with conflict | 0 / 1 / 0 / 1 | Exact imported ordinal0 and local-only ordinal1 retained. |
+| Replace with conflict | 0 / 1 / 1 / 0 | Only exact imported ordinal0 retained; local-only ordinal1 removed. |
+
+Actual Mac UI-exported JSON after reload matches format/schema/report identity
+and every expected review field for all four scenarios. Newly generated
+`exported_at` timestamps differ legitimately; whole-file equality with the old
+Windows download is not required. `transfer-acceptance-result.json` records exact
+records, export hashes and preview predicates; `*-initial`, `*-local-frame*`,
+`*-preview`, `*-applied` and `*-reloaded` AX/screenshot receipts record the path.
+
+Read-only expressions entered through the actual Chrome DevTools console observed
+both main images `complete=true`, intrinsic dimensions1×1, at correctly encoded
+transferred URLs after the fresh import/reload and later Replace/reload, including
+frame15. No state was set through those expressions. Image observations during an
+initial conflict-driver attempt remain valid independently of its note-input gap;
+the successful fresh-import image observation also has exact accepted review state.
+These synthetic1×1 assets prove loading/path handling, not real-media visual quality.
+
+**Driver failures retained, expectations unchanged:** direct CUA Chrome-tab creation
+was unavailable, so native Chrome Guest was used. Stale native accessibility IDs,
+an invalid text-entry invocation and a premature file-picker path entry were
+corrected using fresh AX observations; an incidental Find overlay was dismissed.
+More significantly, native `typeText` omitted the rocket from the initial local-only
+note. Exact downloaded-JSON comparison caught it; those three conflict attempts
+are retained under `initial-native-text-entry-omitted-rocket/` and do not satisfy
+the required exact-string cases. Clipboard paste plus explicit pre-import exact
+note checks corrected the driver. Only those three conflict scenarios were repeated
+in new Guest sessions; the valid fresh import was reused. No product failure or
+product change was established.
+
+Owned Guest windows were closed after exports; `guest-cleanup.json` records the
+final non-Guest/non-report front window. The report was never opened in the regular
+profile, and no user profile storage was cleared. Native paste restored the user's
+clipboard through the computer-use API. Regular Chrome windows were retained;
+there was no application-name process kill. Inputs, screenshots, successful and
+failed exports, decoded CI logs and Windows receipts remain outside scratch.
+
+The retained read-only artifact audit `mac-evidence/check_transfer_receipts.py`
+ran with `python3`, exited 0, and verified all four actual re-exports, previews,
+fresh-storage/exact-input predicates and retained image observations. This audits
+browser-produced artifacts; it is not an additional product-test suite. Only this
+ledger changed in the repository. `git diff --check` and
+`uv run --no-sync zensical build --clean --strict` passed; no product suite was
+repeated for the documentation update.
+
+### Final disposition after the MacBook continuation
+
+This table is the current acceptance summary. Earlier pending/failed rows above
+remain historical observations. No satisfied application suite was repeated.
+
+| Obligation | Current disposition and exact remaining boundary/prerequisite |
+| --- | --- |
+| Checkout/remote preservation and transferred evidence integrity | **Passed.** Clean checkout safely fast-forwarded to698d1e76; all1,226 included hashes match.52 omissions retain their original scope. Only the ledger is edited locally. |
+| Latest automatic CI/browser/distribution/Docker/resource/unsigned Windows/docs | **Passed / satisfied by identified evidence.** Four completed automatic runs above at exact tested merge d778a55, tree identical to698d1e76. Relevant skips retained; no signed/GPU/visible-host inference. |
+| Windows original UI export and single-host browser acceptance | **Satisfied by identified prior evidence**, transferred `browser/transfer/` and `browser/physical-controls/` receipts at their original Windows source/runtime. |
+| Actual Windows-to-MacBook transfer, receiving UI import, Merge/Replace/conflict choices, exact records/identity/images and reload | **Passed**, original unmodified package on independently identified physical MacBook, four accepted fresh-Guest scenarios and exact actual UI re-export comparisons above. |
+| Native OS file picker | **Passed on macOS Chrome**, actual Open/Go to Folder/selected-file preview and Save dialogs. Native Windows picker and other browsers are not inferred. |
+| Remaining physical gestures, OS motion/browser zoom and browser-policy observations | **Satisfied by prior evidence only for its recorded automated/trusted-input/storage cases; blocked for remaining physical-device/OS-setting observations** by the specific device/settings interaction. This continuation did not change system settings or claim physical touch/pinch/assistive-technology proof. |
+| Native decoder/doctor, visible capture, known offsets, zero/nonzero/original authority, Save/close/resume, Keep current and optional/forced unsaved close | **Satisfied by identified Windows evidence**, original managed runtime and session-specific authority/artifact receipts. First packaged-entry limitation and later current-parent boundaries remain explicit; no new native Mac claim. |
+| First native/VS/FFmpeg Ctrl+C, repeated FFmpeg and corrected repeated VS rendering | **Satisfied by identified physical Windows evidence** at its recorded source and af590b58 correction/affected reruns. Original failure retained. |
+| Repeated native-review console events | **Satisfied by identified bounded Windows evidence**: two OS events21.5469ms apart before unwind, CLI130 and cleanup/no authority. Two separate Python callbacks, physical keystrokes/every timing and a full pre-signal diagnostic-byte snapshot remain unestablished. |
+| Earlier physical PS5.1/7 installation/updater/render/RTX5080 acceptance | **Satisfied by identified prior evidence at262f**, within its unchanged runtime/routes; no blanket repeat or new Mac/GPU claim. |
+| Latest lock/recovery and full-bundle AppData-helper delivery | **Satisfied by identified prior physical/helper receipts and latest hosted Windows coverage** without updater/interpreter skips. Code-only updates still cannot deliver the helper. |
+| Representative HDR10/Dolby Vision, range/bit-depth and real-media timing/frame properties | **Blocked** by representative owned/explicitly authorized corpus and corresponding native observations. Generated PQ/BT2020/GPU proof remains narrower. |
+| Index/cache migration, genuine predecessor update/full reinstall and objective/perceptual comparisons | **Blocked** by genuine predecessor installation/update inputs and authorized corpus/defined comparison target. Fresh full installation is required for the helper repair; fixture signatures/unsigned artifacts do not establish predecessor migration. |
+| Signing preparation | **Satisfied by identified prior preparation evidence**, sanitized metadata/checklist only. |
+| Key scope/migration, negative access and protected signed RC verification | **Blocked** by maintainer-readable scope metadata, separately authorized credential operations, reviewed integration into protected pre-release, its then-current exact SHA and RC/environment approval. Dev head698d1e76 remains outside protected pre-release; no protected action authorized/performed. |
+| Maintenance App token creation and postpublication pre-release recreation | **Blocked** by separately approved operational run and publication/freeze prerequisites. Configuration metadata is narrower; no recreation/publication solely for testing. |
+| Live slow.pics/webhook/TMDB | **Blocked** by explicit live-request authorization, dedicated credentials/receiver/owned media and bounded request/cleanup plan. No live product-service request occurred. |
+| Linux NVIDIA and X11 wrapper/visible GUI | **Outside current default release obligation**, separate optional profiles requiring compatible Linux hosts for their own unobserved claims. |
+| CQ7 and CQ14 | **Outside accepted refactor/release-blocker scope.** Prior bounded CQ7 lifecycle proof retained; actual browser-managed background-suspension discriminator unobserved. CQ14 real fpng comparison additionally needs a supported runtime and agreed comparison/disclosure contract. No speculative consolidation. |
+| Historical failed native/harness/input attempts | **Failed historical observations retained**, not converted to passes. Later successful managed Windows or exact Mac receiving cases establish only their stated scopes. |
+| Release/publication/legal approval | **Outside this task.** No signing, credential migration, protected dispatch, PR merge, publication or release action. |
