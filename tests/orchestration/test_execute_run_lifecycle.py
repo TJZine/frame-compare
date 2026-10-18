@@ -332,13 +332,33 @@ def test_execute_run_propagates_collection_warning_once_through_result_summary_a
     assert payload["slowpics_url"] == "https://slow.pics/c/explicit"
 
 
-def test_execute_run_closes_execution_section_without_masking_phase_failure(
+@pytest.mark.parametrize(
+    ("enabled", "confirm_after_report", "expected"),
+    [
+        (True, True, ["Analyze", "Align", "Render", "Report", "Publish"]),
+        (True, False, ["Analyze", "Align", "Render", "Publish", "Report"]),
+        (False, False, ["Render"]),
+    ],
+)
+def test_execute_run_initializes_enabled_step_map_before_phase_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    enabled: bool,
+    confirm_after_report: bool,
+    expected: list[str],
 ) -> None:
+    config = ConfigSchema()
+    config.analysis.dark_frame_count = 1 if enabled else 0
+    config.analysis.bright_frame_count = 0
+    config.analysis.motion_frame_count = 0
+    config.analysis.random_frame_count = 0
+    config.audio_alignment.enable = enabled
+    config.report.enable = enabled
+    config.slowpics.auto_upload = enabled
+    config.slowpics.confirm_upload_after_report = confirm_after_report
     prep = PrepState(
         workspace=_workspace(tmp_path, run_subdir=None),
-        config=ConfigSchema(),
+        config=config,
         input_videos=[tmp_path / "reference.mkv"],
         clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
         artifacts=RunArtifacts(),
@@ -352,7 +372,12 @@ def test_execute_run_closes_execution_section_without_masking_phase_failure(
             analysis_clip=None,
         ),
     )
-    events: list[str] = []
+    steps: list[str] = []
+
+    class RecordingReporter(NullProgressReporter):
+        def set_phase_steps(self, labels: list[str]) -> None:
+            steps.extend(labels)
+
     phase_error = RuntimeError("phase failed")
 
     async def _execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
@@ -364,27 +389,18 @@ def test_execute_run_closes_execution_section_without_masking_phase_failure(
     monkeypatch.setattr(coordinator, "execute_prep", _execute_prep)
     monkeypatch.setattr(coordinator, "execute_phases", _execute_phases)
     monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda **_kwargs: None)
-    monkeypatch.setattr(
-        coordinator,
-        "emit_execution_section_start",
-        lambda *_args, **_kwargs: events.append("start"),
-    )
-
-    def _failing_close(*_args: object, **_kwargs: object) -> None:
-        events.append("end")
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(coordinator, "emit_execution_section_end", _failing_close)
-
     with pytest.raises(RuntimeError) as exc_info:
         asyncio.run(
             execute_run(
                 make_run_request(config=ConfigSchema(), root=tmp_path),
-                deps=RunDependencies(monotonic_timer=_zero_monotonic_timer),
+                deps=RunDependencies(
+                    monotonic_timer=_zero_monotonic_timer, progress=RecordingReporter()
+                ),
             )
         )
 
     assert exc_info.value is phase_error
+    assert steps == expected
 
 
 def test_execute_run_cleanup_delete_error_returns_warning_not_failure(

@@ -7,8 +7,6 @@ progress reporter selection.
 
 import sys
 
-from rich.rule import Rule
-
 from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
@@ -17,7 +15,6 @@ from frame_compare.utils.progress import (
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import stream_is_tty
-from frame_compare.utils.terminal_theme import ACCENT, human_console
 
 _PHASE_DISPLAY_LABELS = {
     "frame_plan": "PLAN",
@@ -57,29 +54,6 @@ def rich_phase_label(name: str) -> str:
 def uses_rich_progress(reporter: ProgressReporter) -> bool:
     """Return whether runtime presentation uses the interactive Rich owner."""
     return isinstance(reporter, RichProgressReporter)
-
-
-def emit_execution_section_start(
-    reporter: ProgressReporter,
-    *,
-    no_color: bool,
-) -> None:
-    """Open the interactive runtime section."""
-    if not uses_rich_progress(reporter):
-        return
-    console = human_console(stderr=True, no_color=no_color)
-    console.print(Rule(f"[bold {ACCENT}]Execution[/]", style="dim", align="left"))
-
-
-def emit_execution_section_end(
-    reporter: ProgressReporter,
-    *,
-    no_color: bool,
-) -> None:
-    """Close the interactive runtime section."""
-    if not uses_rich_progress(reporter):
-        return
-    human_console(stderr=True, no_color=no_color).print(Rule(style="dim"))
 
 
 def start_phase_progress(

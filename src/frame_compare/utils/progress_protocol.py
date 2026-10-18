@@ -23,6 +23,10 @@ class ProgressPhaseStatus(StrEnum):
 class ProgressReporter(Protocol):
     """Protocol for reporting progress of long-running operations."""
 
+    def set_phase_steps(self, labels: list[str]) -> None:
+        """Set the enabled run phases in execution order for the Rich footer."""
+        ...
+
     def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
         """Start a new phase of the operation.
 

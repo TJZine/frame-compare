@@ -1,12 +1,13 @@
 """Progress reporting utilities for Frame Compare."""
 
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from threading import RLock
 from time import monotonic
 
 import structlog
-from rich.console import RenderableType
+from rich.console import Console, RenderableType
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -49,7 +50,7 @@ _DURABLE_STATUS_GLYPHS = {
 }
 _DURABLE_STATUS_STYLES = {
     ProgressPhaseStatus.COMPLETED: OK,
-    ProgressPhaseStatus.SKIPPED: "",
+    ProgressPhaseStatus.SKIPPED: "dim",
     ProgressPhaseStatus.WARNED: WARN,
     ProgressPhaseStatus.FAILED: FAIL,
 }
@@ -173,8 +174,60 @@ class _EstimatedTimeRemainingColumn(ProgressColumn):
         return Text.assemble("ETA ", value)
 
 
+class _ElapsedTimeColumn(ProgressColumn):
+    def render(self, task: Task) -> RenderableType:
+        minutes, seconds = divmod(int(task.elapsed or 0), 60)
+        return Text(f"{minutes}:{seconds:02d}")
+
+
+class _RunProgress(Progress):
+    """Keep the run's step map below the current task, including nested work."""
+
+    def __init__(self, *columns: ProgressColumn, console: Console) -> None:
+        self.steps: dict[str, str] = {}
+        super().__init__(
+            *columns,
+            transient=True,
+            auto_refresh=True,
+            refresh_per_second=4,
+            redirect_stdout=False,
+            redirect_stderr=False,
+            expand=True,
+            console=console,
+        )
+
+    def get_renderables(self) -> Iterable[RenderableType]:
+        yield from super().get_renderables()
+        if self.steps:
+            glyphs = glyphs_for_console(self.console)
+            unicode = glyphs.ok == "✓"
+            markers = {
+                "pending": ("○" if unicode else "o", "dim"),
+                "running": ("●" if unicode else "*", ACCENT),
+                **{
+                    status.value: (
+                        getattr(glyphs, _DURABLE_STATUS_GLYPHS[status]),
+                        _DURABLE_STATUS_STYLES[status],
+                    )
+                    for status in ProgressPhaseStatus
+                },
+            }
+            line = Text("  ")
+            for index, (label, status) in enumerate(tuple(self.steps.items())):
+                if index:
+                    line.append("  ")
+                glyph, style = markers[status]
+                line.append(glyph, style=style)
+                line.append(f" {label}")
+            yield line
+
+
 class NullProgressReporter:
     """No-op progress reporter."""
+
+    def set_phase_steps(self, labels: list[str]) -> None:
+        """Non-interactive reporters do not render the step map."""
+        del labels
 
     def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
         del name, total, presentation
@@ -212,6 +265,10 @@ class PlainProgressReporter:
         self._task: _PlainTask | None = None
         self._task_stack: list[_PlainTask] = []
         self._lock = RLock()
+
+    def set_phase_steps(self, labels: list[str]) -> None:
+        """Non-interactive reporters do not render the step map."""
+        del labels
 
     def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
         del total, presentation
@@ -269,7 +326,7 @@ class RichProgressReporter:
     def __init__(self, *, no_color: bool = False) -> None:
         console = human_console(stderr=True, no_color=no_color)
         glyphs = glyphs_for_console(console)
-        self._progress = Progress(
+        self._progress = _RunProgress(
             _TaskPresentationColumn(
                 _ActiveDescriptionColumn(glyphs.running),
                 "measurable",
@@ -289,11 +346,7 @@ class RichProgressReporter:
             _TaskPresentationColumn(_EstimatedTimeRemainingColumn(), "measurable"),
             _TaskPresentationColumn(_UploadTimeRemainingColumn(), UPLOAD_PRESENTATION),
             _TaskPresentationColumn(SpinnerColumn(spinner_name="line"), "indeterminate"),
-            transient=True,
-            auto_refresh=False,
-            redirect_stdout=False,
-            redirect_stderr=False,
-            expand=True,
+            _TaskPresentationColumn(_ElapsedTimeColumn(), "indeterminate"),
             console=console,
         )
         self._task_id: TaskID | None = None
@@ -302,6 +355,11 @@ class RichProgressReporter:
         self._task_started_at: dict[TaskID, float] = {}
         self._suspend_depth = 0
         self._lock = RLock()
+
+    def set_phase_steps(self, labels: list[str]) -> None:
+        """Initialize the run footer with its enabled phases in execution order."""
+        with self._lock:
+            self._progress.steps = dict.fromkeys(labels, "pending")
 
     def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
         """Start a new phase with a rich progress bar."""
@@ -314,7 +372,7 @@ class RichProgressReporter:
         self._start_task(label, total=total, presentation=resolved)
 
     def start_indeterminate(self, name: str) -> None:
-        """Start a new phase with spinner-only activity."""
+        """Start a new phase with a spinner and elapsed time."""
         self._start_task(name, total=None, presentation="indeterminate")
 
     def _start_task(
@@ -325,7 +383,9 @@ class RichProgressReporter:
         presentation: str,
     ) -> None:
         with self._lock:
-            if not self._progress.live.is_started:
+            if self._task_id is None and name in self._progress.steps:
+                self._progress.steps[name] = "running"
+            if self._suspend_depth == 0 and not self._progress.live.is_started:
                 self._progress.start()
             if self._task_id is not None:
                 self._progress.update(self._task_id, visible=False, refresh=True)
@@ -390,6 +450,10 @@ class RichProgressReporter:
                     self._progress.update(task_id, completed=total, refresh=True)
 
                 nested = bool(self._task_stack)
+                if not nested and task is not None:
+                    label = task.fields.get("phase_label", task.description)
+                    if label in self._progress.steps:
+                        self._progress.steps[label] = status.value
                 should_retain = status != ProgressPhaseStatus.COMPLETED
                 if status == ProgressPhaseStatus.COMPLETED and retain is not False:
                     should_retain = retain is True or (
@@ -429,22 +493,20 @@ class RichProgressReporter:
         duration: float,
         duration_text: str | None,
     ) -> None:
-        """Print one retained `{glyph} {Label:<9} {summary}` line."""
+        """Print a retained phase line with its duration inline."""
         glyphs = glyphs_for_console(self._progress.console)
         glyph = getattr(glyphs, _DURABLE_STATUS_GLYPHS[status])
         style = _DURABLE_STATUS_STYLES[status]
-        resolved_summary = summary
-        text = f"{label:<9}"
-        if resolved_summary:
-            text = f"{text} {resolved_summary}"
-        line = Text.assemble((glyph, style), f" {text}")
+        line = Text.assemble((glyph, style), f" {label:<16}")
+        if summary:
+            line.append(summary)
         resolved_duration = duration_text
         if resolved_duration is None and status == ProgressPhaseStatus.COMPLETED:
             resolved_duration = _format_elapsed(duration)
         if resolved_duration:
-            width = self._progress.console.width or 80
-            padding = max(1, width - len(line.plain) - len(resolved_duration))
-            line = Text.assemble(line, " " * padding, (resolved_duration, "dim"))
+            if summary:
+                line.append(" · ", style="dim")
+            line.append(resolved_duration, style="dim")
         self._progress.console.print(line)
 
     def suspend(self) -> None:
@@ -478,6 +540,10 @@ class LogProgressReporter:
         self._task_stack: list[tuple[str, int, int, int]] = []
         self._milestones: tuple[int, ...] = (10, 25, 50, 75, 100)
         self._last_logged_milestone: int = 0
+
+    def set_phase_steps(self, labels: list[str]) -> None:
+        """Non-interactive reporters do not render the step map."""
+        del labels
 
     def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
         """Start logging a new phase."""

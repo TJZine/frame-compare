@@ -1,9 +1,11 @@
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
+from threading import Event, current_thread
 
 import pytest
 from rich.console import Console
+from rich.text import Text
 
 import frame_compare.utils.progress as progress_module
 from frame_compare.utils.progress import (
@@ -107,14 +109,22 @@ def test_rich_progress_reporter_hides_parent_while_nested_phase_is_active(
     reporter.complete_phase()
 
 
-def test_rich_progress_reporter_indeterminate_phase_is_spinner_only() -> None:
+def test_rich_progress_reporter_indeterminate_phase_shows_elapsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     reporter = RichProgressReporter()
 
+    now = [0.0]
+    monkeypatch.setattr(reporter._progress, "get_time", lambda: now[0])
     reporter.start_indeterminate("Loading cached data")
+    now[0] = 42.0
 
     task = reporter._progress.tasks[0]
     assert task.total is None
     assert task.fields["presentation"] == "indeterminate"
+    with reporter._progress.console.capture() as capture:
+        reporter._progress.console.print(reporter._progress.get_renderable())
+    assert "0:42" in capture.get()
 
     reporter.complete_phase()
 
@@ -156,3 +166,91 @@ def test_rich_progress_reporter_serializes_concurrent_updates() -> None:
         list(executor.map(_update, range(40)))
 
     reporter.complete_phase()
+
+
+@pytest.mark.parametrize(
+    ("summary", "duration_text", "expected"),
+    [
+        ("50 frames selected", None, "✓ Analyze         50 frames selected · 12s"),
+        (None, None, "✓ Analyze         12s"),
+        ("offsets", "2s + 42s review", "✓ Analyze         offsets · 2s + 42s review"),
+    ],
+)
+def test_durable_phase_duration_is_inline(
+    monkeypatch: pytest.MonkeyPatch,
+    summary: str | None,
+    duration_text: str | None,
+    expected: str,
+) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch)
+    reporter._print_durable_line(
+        ProgressPhaseStatus.COMPLETED,
+        "Analyze",
+        summary=summary,
+        duration=12,
+        duration_text=duration_text,
+    )
+    assert Text.from_ansi(output.getvalue()).plain.strip() == expected
+
+
+def test_step_map_tracks_run_phases_and_nested_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    reporter, _ = _captured_rich_reporter(monkeypatch)
+    reporter.set_phase_steps(["Analyze", "Align", "Render", "Report", "Publish"])
+
+    def footer() -> str:
+        reporter.suspend()
+        try:
+            with reporter._progress.console.capture() as capture:
+                reporter._progress.console.print(reporter._progress.get_renderable())
+            return Text.from_ansi(capture.get()).plain.splitlines()[-1]
+        finally:
+            reporter.resume()
+
+    try:
+        reporter.start_phase("Analyze", 1)
+        reporter.complete_phase()
+        reporter.start_phase("Align", 1)
+        reporter.start_indeterminate("Align · source · preparing audio")
+        assert footer() == "  ✓ Analyze  ● Align  ○ Render  ○ Report  ○ Publish"
+        reporter.complete_phase()
+        reporter.complete_phase(ProgressPhaseStatus.WARNED)
+        reporter.start_phase("Render", 1)
+        reporter.complete_phase(ProgressPhaseStatus.FAILED)
+        reporter.start_phase("Report", 1)
+        reporter.complete_phase()
+        reporter.start_phase("Publish", 1)
+        reporter.complete_phase(ProgressPhaseStatus.SKIPPED, summary="declined")
+        assert footer() == "  ✓ Analyze  ! Align  ✗ Render  ✓ Report  – Publish"
+    finally:
+        reporter._progress.stop()
+
+
+def test_live_refresh_runs_without_events_and_stops_while_suspended(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter, output = _captured_rich_reporter(monkeypatch)
+    refreshed = Event()
+    refresh = reporter._progress.live.refresh
+
+    def observe_refresh() -> None:
+        refresh()
+        if current_thread().name != "MainThread":
+            refreshed.set()
+
+    monkeypatch.setattr(reporter._progress.live, "refresh", observe_refresh)
+    reporter.start_indeterminate("Align · source · preparing audio")
+    try:
+        assert refreshed.wait(2), "no automatic redraw while the task was active"
+        reporter.suspend()
+        refreshed.clear()
+        reporter.start_indeterminate("nested while suspended")
+        assert not reporter._progress.live.is_started
+        assert not refreshed.wait(0.6), "redraw continued during suspension"
+        reporter.complete_phase()
+        reporter.resume()
+        assert refreshed.wait(2), "redraw did not resume"
+        reporter.complete_phase(retain=True, summary="finished")
+        assert "finished · " in Text.from_ansi(output.getvalue()).plain
+        assert reporter._progress.live._refresh_thread is None
+    finally:
+        reporter._progress.stop()
