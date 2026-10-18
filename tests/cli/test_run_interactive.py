@@ -195,8 +195,8 @@ def test_handle_run_injects_confirmation_dependency_only_for_prompt_required_pat
 @pytest.mark.parametrize(
     ("visibility", "expected_prompt"),
     [
-        (Visibility.PUBLIC, "    Upload to public slow.pics?"),
-        (Visibility.UNLISTED, "    Upload to unlisted slow.pics?"),
+        (Visibility.PUBLIC, "Upload to public slow.pics?"),
+        (Visibility.UNLISTED, "Upload to unlisted slow.pics?"),
     ],
 )
 def test_confirmation_callback_uses_nested_prompt_and_returns_confirmed(
@@ -210,7 +210,7 @@ def test_confirmation_callback_uses_nested_prompt_and_returns_confirmed(
         assert opened == [Path("report.html")]
         assert text == expected_prompt
         assert default is False
-        output.write(f"{text} yes\n")
+        output.write(f"{text} [y/N]: yes\n")
         return True
 
     callback = build_confirm_slowpics_upload_callback(
@@ -237,10 +237,11 @@ def test_confirmation_callback_uses_nested_prompt_and_returns_confirmed(
     )
     rendered = output.getvalue()
     assert rendered.index("Publish to slow.pics?") < rendered.index(expected_prompt)
-    assert rendered.endswith(f"{expected_prompt} yes\n\n")
+    assert rendered.endswith(f"│ {expected_prompt} [y/N]: yes\n╰─\n\n")
     panel_line = next(line for line in rendered.splitlines() if "Publish to slow.pics?" in line)
-    assert panel_line.startswith("  ")
-    assert not panel_line.startswith("   ")
+    assert panel_line == "╭─ › Publish to slow.pics?"
+    assert "The report is open in your browser. Review it first." in rendered
+    assert "Visibility" not in rendered
     output.write("  [OK] PUBLISH  Completed in 20s\n")
     transcript = output.getvalue()
     assert (
@@ -251,13 +252,12 @@ def test_confirmation_callback_uses_nested_prompt_and_returns_confirmed(
 
 
 @pytest.mark.parametrize(
-    ("prompt_input", "expected_exit_code", "stderr_suffix"),
-    [("\n", 0, " "), ("maybe\nn\n", 0, " "), ("", 1, " Aborted.\n")],
+    ("prompt_input", "expected_exit_code"),
+    [("\n", 0), ("maybe\nn\n", 0), ("", 1)],
 )
 def test_full_window_retry_prompt_keeps_visible_text_on_stderr(
     prompt_input: str,
     expected_exit_code: int,
-    stderr_suffix: str,
 ) -> None:
     app = typer.Typer()
 
@@ -277,13 +277,19 @@ def test_full_window_retry_prompt_keeps_visible_text_on_stderr(
 
     result = CliRunner().invoke(app, input=prompt_input)
 
-    expected_prompt = (
-        "Configured lead/trail exclusions leave too little media to satisfy the\n"
-        "requested frame selection. Analyze the full shared clip for this run? [y/N]"
-    )
+    expected_prompt = "Analyze the full shared clip for this run? [y/N]:"
     assert result.exit_code == expected_exit_code
     assert result.stdout == ""
-    assert _normalize_cli_output(result.stderr) == expected_prompt + stderr_suffix
+    stderr = _normalize_cli_output(result.stderr)
+    assert expected_prompt in stderr
+    assert "╰─" in stderr
+    if expected_exit_code == 1:
+        assert stderr.endswith("Aborted.\n")
+    assert "› Analyze the full clip?" in stderr
+    assert "The skip settings leave too few frames for this selection." in stderr
+    assert "requested       8 frames" in stderr
+    assert "available       4 frames" in stderr
+    assert "skip            first 4m 00s · last 4m 00s" in stderr
 
 
 @pytest.mark.parametrize(
@@ -377,9 +383,9 @@ def test_confirmation_callback_prints_report_path(auto_open: bool) -> None:
     rendered = output.getvalue()
     assert "Publish to slow.pics?" in rendered
     assert rendered.count("report.html") == 1
-    if not auto_open:
-        assert "Visibility  Public" in rendered
-        assert "Report: report.html" not in rendered
+    assert "Review the report before publishing:" in rendered
+    assert "Visibility" not in rendered
+    assert "Report: report.html" not in rendered
 
 
 @pytest.mark.parametrize("width", [60, 80])
@@ -420,7 +426,8 @@ def test_confirmation_panel_fits_narrow_no_color_console(width: int) -> None:
     )
     rendered = output.getvalue()
     assert "Publish to slow.pics?" in rendered
-    assert "Visibility  Unlisted" in rendered
+    assert "Review the report before publishing:" in rendered
+    assert "Visibility" not in rendered
     assert "\x1b[" not in rendered
     assert max(len(line) for line in rendered.splitlines()) <= width
 

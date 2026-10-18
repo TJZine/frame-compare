@@ -39,7 +39,7 @@ from frame_compare.utils.post_upload_actions import PostUploadActionResult, Post
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.terminal import interruptible_prompt
 from frame_compare.utils.terminal_sections import Section, section_title
-from frame_compare.utils.terminal_theme import ACCENT, glyphs_for_console
+from frame_compare.utils.terminal_theme import ACCENT, format_duration, glyphs_for_console
 
 from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn, format_enum_expected
 from .run_contracts import (
@@ -117,8 +117,8 @@ class ConfirmFullWindowRetryPromptFn(Protocol):
 
 
 def confirm_full_window_retry_on_stderr(text: str) -> bool:
-    """Read one default-No response without allowing Click to reprompt."""
-    typer.echo(text, nl=False, err=True)
+    """Echo one default-No question and read its response without reprompting."""
+    typer.echo(f"{text} [y/N]: ", nl=False, err=True)
     try:
         response = sys.stdin.readline()
     except KeyboardInterrupt:
@@ -362,7 +362,10 @@ def build_runner_dependencies(
         else None
     )
     confirm_full_window_retry = (
-        build_confirm_full_window_retry_callback(deps=deps)
+        build_confirm_full_window_retry_callback(
+            deps=deps,
+            console=deps.console_factory(stderr=True, no_color=console.no_color),
+        )
         if full_window_retry_prompt_is_legal(args=args, deps=deps, config=config)
         else None
     )
@@ -397,15 +400,34 @@ def full_window_retry_prompt_is_legal(
 def build_confirm_full_window_retry_callback(
     *,
     deps: RunCommandDeps,
+    console: Console | None = None,
 ) -> FullWindowRetryConfirmationFn:
+    prompt_console = console or Console(stderr=True, no_color=True)
+
     def _confirm_full_window_retry(
         request: FullWindowRetryConfirmationRequest,
     ) -> FullWindowRetryConfirmationDecision:
-        del request
+        waiting_glyph = glyphs_for_console(prompt_console).waiting
+        section = Section(section_title(f"{waiting_glyph} Analyze the full clip?"), ACCENT)
+        section.add_line("The skip settings leave too few frames for this selection.")
+        section.add_line()
+        section.add_row("requested", f"{request.requested_frame_count} frames")
+        section.add_row("available", f"{request.eligible_frame_count} frames")
+        section.add_row(
+            "skip",
+            " · ".join(
+                (
+                    f"first {format_duration(request.ignore_lead_seconds)}",
+                    f"last {format_duration(request.ignore_trail_seconds)}",
+                )
+            ),
+        )
+        section.add_line()
         with interruptible_prompt():
-            confirmed = deps.confirm_full_window_retry(
-                "Configured lead/trail exclusions leave too little media to satisfy the\n"
-                "requested frame selection. Analyze the full shared clip for this run? [y/N] "
+            confirmed = section.prompt(
+                prompt_console,
+                "Analyze the full shared clip for this run?",
+                deps.confirm_full_window_retry,
             )
         return "confirmed" if confirmed else "declined"
 
