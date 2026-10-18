@@ -9,6 +9,11 @@ notes used by the guarded publication workflow.
 
 ### Fixed
 
+- Correct HDR screenshot colors by targeting BT.709 destination primaries; colors
+  may change slightly compared with previous versions.
+- Align audio in older Matroska files that lack per-stream duration metadata.
+- Recognize near-standard frame rates so those sources no longer require
+  `sources.match_fps` to compare with their standard-rate counterparts.
 - Support stable and release-candidate versions in Windows code updates, with exact
   target verification and journaled source replacement for both apply and rollback.
   Complete backup inventories prevent restoring truncated backups. Existing RC
