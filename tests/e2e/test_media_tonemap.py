@@ -5,7 +5,6 @@ from __future__ import annotations
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 
@@ -54,11 +53,20 @@ def _pq_decode(code: int) -> float:
     return 10_000 * normalized ** (1 / _PQ_M1)
 
 
-def _bt709_oetf(linear: float) -> float:
+def _bt1886_oetf(linear: float, *, minimum_nits: float = 0.18, maximum_nits: float = 100) -> float:
+    """Encode linear BT.709-primary light with libplacebo's BT.1886 SDR curve.
+
+    The native plugin's ``dst_csp=0`` selects ``pl_color_space_bt709``: BT.709
+    primaries with a BT.1886 transfer, not the sRGB transfer curve.  The
+    minimum/maximum luminance values mirror the production kwargs builder's
+    default target settings.
+    """
     linear = max(0.0, min(1.0, linear))
-    if linear <= 0.0031308:
-        return 12.92 * linear
-    return 1.055 * linear ** (1 / 2.4) - 0.055
+    black = (minimum_nits / maximum_nits) ** (1 / 2.4)
+    white = 1.0
+    scale = (white - black) ** 2.4
+    offset = black / (white - black)
+    return max(0.0, min(1.0, (linear / scale) ** (1 / 2.4) - offset))
 
 
 def _expected_bt709_patch() -> tuple[float, float, float]:
@@ -71,9 +79,9 @@ def _expected_bt709_patch() -> tuple[float, float, float]:
     xyz = _matrix_vector_product(_BT2020_TO_XYZ, source_linear)
     bt709_linear = _matrix_vector_product(_XYZ_TO_BT709, xyz)
     return (
-        _bt709_oetf(bt709_linear[0]),
-        _bt709_oetf(bt709_linear[1]),
-        _bt709_oetf(bt709_linear[2]),
+        _bt1886_oetf(bt709_linear[0]),
+        _bt1886_oetf(bt709_linear[1]),
+        _bt1886_oetf(bt709_linear[2]),
     )
 
 
@@ -82,10 +90,9 @@ def _render_native_color_patch(*, destination_primaries: int | None) -> tuple[fl
 
     from frame_compare.vs.tonemap_libplacebo import (
         HdrTonemapInputs,
-        apply_libplacebo,
         build_libplacebo_tonemap_kwargs,
     )
-    from frame_compare.vs.types import HDRMetadata, TonemapResult, TonemapSettings
+    from frame_compare.vs.types import HDRMetadata, TonemapSettings
 
     core = vs.core
     assert hasattr(core, "placebo") and hasattr(core.placebo, "Tonemap"), (
@@ -112,29 +119,24 @@ def _render_native_color_patch(*, destination_primaries: int | None) -> tuple[fl
     ).std.SetFrameProps(_Matrix=0, _Range=1, _Transfer=16, _Primaries=9)
     metadata = HDRMetadata(None, None, None, 9, 16, 0)
 
-    if destination_primaries is None:
-        rendered = apply_libplacebo(clip, settings, core, metadata)
-        assert isinstance(rendered, TonemapResult), "libplacebo tonemap did not render the patch"
-        output = rendered.clip
-    else:
-        inputs = HdrTonemapInputs(
-            hdr_metadata=metadata,
-            transfer=16,
-            primaries=9,
-            props={"_Matrix": 0, "_Range": 1, "_Transfer": 16, "_Primaries": 9},
-            detected_is_hdr=True,
-        )
-        kwargs = build_libplacebo_tonemap_kwargs(
-            settings=settings,
-            target_nits=100,
-            inputs=inputs,
-        )
+    inputs = HdrTonemapInputs(
+        hdr_metadata=metadata,
+        transfer=16,
+        primaries=9,
+        props={"_Matrix": 0, "_Range": 1, "_Transfer": 16, "_Primaries": 9},
+        detected_is_hdr=True,
+    )
+    kwargs = build_libplacebo_tonemap_kwargs(
+        settings=settings,
+        target_nits=100,
+        inputs=inputs,
+    )
+    if destination_primaries is not None:
         kwargs["dst_prim"] = destination_primaries
-        output = core.placebo.Tonemap(clip, **kwargs).resize.Point(format=vs.RGBS)
+    output = core.placebo.Tonemap(clip, **kwargs).resize.Point(format=vs.RGBS)
 
     frame = output.get_frame(0)
-    planes = cast(Any, frame)
-    return (float(planes[0][0, 0]), float(planes[1][0, 0]), float(planes[2][0, 0]))
+    return (float(frame[0][0, 0]), float(frame[1][0, 0]), float(frame[2][0, 0]))
 
 
 @pytest.mark.e2e
