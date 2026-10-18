@@ -622,7 +622,17 @@ stale-policy shared entries miss and recompute.
 Computed alignment work runs whole-track chunked correlation over each selected audio
 stream. `alignment_audio` owns stream probing and deterministic selection, audio and
 video start-time probing with container-start compensation, and the canonical
-whole-track 8 kHz mono FFmpeg recipe. Without overrides, a non-commentary reference
+whole-track 8 kHz mono FFmpeg recipe. Selected audio duration comes from stream
+`duration_ts`, stream duration, or a `DURATION` tag. When those are absent, one
+15-second-bounded ffprobe call reads selected-stream packets starting at
+`max(0, source_frame_count / source_fps - 60)` seconds. A `packet_tail` duration
+is the latest packet end minus the stream start, accepted only if every packet
+value parses, a packet reaches the seek point, and the duration is positive.
+Container duration is never substituted. Missing tail evidence remains
+`selected_audio_timeline_unavailable`; exact retime rates above the supported
+bound produce the distinct `retime_rate_unsupported` rejection. These durations
+only bound planning and collection; audio/video authority remains unchanged.
+Without overrides, a non-commentary reference
 default with a known language switches to the best-ranked non-commentary reference
 stream in a known language shared by both sides when its language is missing from the
 comparison. Each source's audio is analysed on its

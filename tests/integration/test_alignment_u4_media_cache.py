@@ -82,10 +82,10 @@ def test_demand_dependencies_pairs_and_full_matrix(tmp_path: Path) -> None:
         assert store.pair("multipath")[0].name == "u4-multipath-reference.mkv"
         assert store.pair("surround-local")[0].name == "u4-surround-reference.mkv"
         store.materialize_all()
-        assert len(created) == len(RECIPES) == 37
+        assert len(created) == len(RECIPES) == 40
         assert set(store.stats["created"]) == set(RECIPES)
         assert set(PAIRS) == set(RECIPES) - {name for name in RECIPES if name.endswith("reference")}
-        assert len(list(store.storage.glob("*.mkv"))) == 37
+        assert len(list(store.storage.glob("*.mkv"))) == 40
 
     with open_u4_media(
         tmp_path / "warm",
@@ -96,7 +96,7 @@ def test_demand_dependencies_pairs_and_full_matrix(tmp_path: Path) -> None:
     ) as store:
         assert store.stats["created"] == []
         assert set(store.stats["reused"]) == set(RECIPES)
-        assert len(created) == 37
+        assert len(created) == 40
 
 
 def test_without_cache_is_lazy_and_publishes_regular_files(tmp_path: Path) -> None:

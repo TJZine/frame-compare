@@ -21,7 +21,9 @@ type AudioSelectionMethod = Literal["explicit_override", "automatic_metadata"]
 type AudioMetadataMatch = Literal["match", "mismatch", "unknown", "not_applicable"]
 type AudioPeakRatio = float | Literal["unbounded"]
 type AudioStartBasis = Literal["metadata", "default_zero"]
-type AudioDurationBasis = Literal["duration_ts", "stream_duration", "stream_tag", "unavailable"]
+type AudioDurationBasis = Literal[
+    "duration_ts", "stream_duration", "stream_tag", "packet_tail", "unavailable"
+]
 type AudioOutcomeStatus = Literal["agreed", "no_single_offset", "search_edge", "no_usable_audio"]
 type AudioCollectionObservation = Literal["observed", "not_observed"]
 type AudioCandidateBasis = Literal["audio_only"]
@@ -74,6 +76,7 @@ AUDIO_UNAVAILABLE_REASON_PHRASES: dict[str, str] = {
     "search_edge": "best offset at the search edge",
     "no_usable_audio": "no usable audio signal",
     "selected_audio_timeline_unavailable": "selected audio timeline unavailable",
+    "retime_rate_unsupported": "retimed audio rate unsupported",
     "analysis_budget_exceeded": "analysis budget exceeded",
     "source_identity_changed": "source changed during analysis",
 }

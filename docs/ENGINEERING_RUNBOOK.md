@@ -328,7 +328,7 @@ exact `tests/integration/alignment_u4_media_recipes.py` source and complete
 `ffmpeg -version` output, obtained with an explicit timeout. Assertion-only and
 store-only edits retain cached media. Recipes generate on demand with their declared
 prerequisites; each file publishes atomically by temporary file + replace. The full
-verifier passes `FRAME_COMPARE_U4_MEDIA_FULL=1` to prepare all 37 files; focused
+verifier passes `FRAME_COMPARE_U4_MEDIA_FULL=1` to prepare all 40 files; focused
 `--pytest-path` runs remain demand-driven. Only that generator's obsolete keys and
 temporary files are pruned while a session-held `.verifier.lock` protects generation
 and use. The lock file is never pruned. Tests consume temporary symlinks so source

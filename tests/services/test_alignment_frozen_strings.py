@@ -1146,6 +1146,7 @@ def test_inconclusive_copy_does_not_report_boundary_hint_with_four_positions() -
         ("search_edge", "best offset at the search edge"),
         ("no_usable_audio", "no usable audio signal"),
         ("selected_audio_timeline_unavailable", "selected audio timeline unavailable"),
+        ("retime_rate_unsupported", "retimed audio rate unsupported"),
         ("analysis_budget_exceeded", "analysis budget exceeded"),
         ("source_identity_changed", "source changed during analysis"),
         ("timeout", "audio collection failed"),

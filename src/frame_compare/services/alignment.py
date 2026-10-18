@@ -570,6 +570,30 @@ def _plan_audio_pair(
         reference_override=reference_request.selected_audio_stream,
         comparison_override=comparison_request.selected_audio_stream,
     )
+    reference_selection = replace(
+        reference_selection,
+        stream=alignment_audio.measure_selected_audio_duration(
+            reference,
+            reference_selection.stream,
+            video_seconds=Fraction(
+                reference_request.source_frame_count * reference_request.source_fps_den,
+                reference_request.source_fps_num,
+            ),
+            cancellation=cancellation,
+        ),
+    )
+    comparison_selection = replace(
+        comparison_selection,
+        stream=alignment_audio.measure_selected_audio_duration(
+            comparison,
+            comparison_selection.stream,
+            video_seconds=Fraction(
+                comparison_request.source_frame_count * comparison_request.source_fps_den,
+                comparison_request.source_fps_num,
+            ),
+            cancellation=cancellation,
+        ),
+    )
     reference_duration = reference_selection.stream.timeline.duration
     comparison_duration = comparison_selection.stream.timeline.duration
     if reference_duration is None or comparison_duration is None:

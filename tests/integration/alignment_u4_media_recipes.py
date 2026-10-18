@@ -360,6 +360,43 @@ def _write_music_stem(path: Path) -> None:
     )
 
 
+def _write_packet_tail(path: Path, *, trim_seconds: int = 0, early_end: bool = False) -> None:
+    """Live Matroska deliberately omits stream and container duration metadata."""
+    _run_ffmpeg(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            _source("video", 90),
+            "-f",
+            "lavfi",
+            "-i",
+            f"anoisesrc=color=white:sample_rate={_SAMPLE_RATE}:duration=90:seed=1101",
+            "-filter_complex",
+            f"[0:v]trim=start={trim_seconds},setpts=PTS-STARTPTS[v];"
+            f"[1:a]atrim=start={trim_seconds}:end={10 if early_end else 90},"
+            "asetpts=PTS-STARTPTS[a]",
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "pcm_s16le",
+            "-live",
+            "1",
+            str(path),
+        ]
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class MediaRecipe:
     writer: Callable[[Path], None]
@@ -383,6 +420,9 @@ def _recipes() -> dict[str, MediaRecipe]:
     def add(name: str, writer: Callable[[Path], None], *, requires: tuple[str, ...] = ()) -> None:
         recipes[name] = MediaRecipe(writer, requires)
 
+    add("packet-tail-reference", _write_packet_tail)
+    add("packet-tail", lambda path: _write_packet_tail(path, trim_seconds=2))
+    add("packet-tail-early-end", lambda path: _write_packet_tail(path, early_end=True))
     add("insert-60", lambda path: _write_insert(path, 60))
     add("insert-540", lambda path: _write_insert(path, 540))
     add("insert-570", lambda path: _write_insert(path, 570))
@@ -489,6 +529,8 @@ def _recipes() -> dict[str, MediaRecipe]:
 RECIPES: Mapping[str, MediaRecipe] = _recipes()
 PAIRS: Mapping[str, tuple[str, str]] = {
     **{name: ("reference", name) for name in RECIPES if not name.endswith("reference")},
+    "packet-tail": ("packet-tail-reference", "packet-tail"),
+    "packet-tail-early-end": ("packet-tail-reference", "packet-tail-early-end"),
     "multipath": ("multipath-reference", "multipath"),
     "repeated-music-cue": ("repeated-music-cue-reference", "repeated-music-cue"),
     "surround": ("surround-reference", "surround"),
