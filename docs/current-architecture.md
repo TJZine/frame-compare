@@ -266,6 +266,15 @@ the explicit owner of the import-time contract. Owner-specific exceptions belong
 imports belong in focused protocol modules such as
 `frame_compare.utils.progress_protocol`.
 
+`frame_compare.utils.terminal_sections` owns the shared open-rail renderer used by
+Rich human panels, rules, and prompts. `frame_compare.utils.artifact_paths` owns
+human artifact-path display and terminal hyperlinks. The VSView `SessionConsole`
+implements the same section rules in its separate process because Rich is not
+available there. `progress_protocol.AlignmentSummary` and
+`AlignmentSummaryEntry` are memory-only final alignment facts carried through
+phase output, artifacts, `RunResult`, and completion presentation; they do not
+change JSON or persistence projections.
+
 Render orchestration derives optional, unique progress labels from already-parsed
 release identities and passes them through the batch request seam. Render workers only
 present that string; `OverlayConfig.label`, overlay pixels, output paths, and
@@ -709,7 +718,8 @@ plain explicit records, and the shared per-comparison byte bound. Pure shared al
 math and vote policy live in `utils.alignment_policy`; the shared P4/P4a
 decision/region/check-point projection lives in `utils.alignment_review_projection`
 and is consumed by both terminal and panel renderers. `alignment_presentation`
-owns the terminal/Rich and structured-warning rendering of that projection;
+owns the terminal/Rich and structured-warning rendering of that projection, using
+the shared `utils.terminal_sections` and `utils.artifact_paths` primitives;
 `alignment_review_panel` renders the same projection in VSView. Native metadata v5
 uses a bounded projection that omits all per-chunk row columns while retaining runs,
 `chunks.total_samples`, authoritative target facts, aggregate
@@ -1291,6 +1301,9 @@ Runtime ownership matrix:
 | Shared compensation, sample/frame conversion, vote, and confirmation policy | `frame_compare.utils.alignment_policy` |
 | Shared P4/P4a terminal/panel presentation projection | `frame_compare.utils.alignment_review_projection` |
 | Terminal/Rich rendering and JSON review warning for the shared alignment presentation | `frame_compare.services.alignment_presentation` |
+| Shared open-rail human section rendering and ASCII fallback | `frame_compare.utils.terminal_sections` |
+| Human artifact-path display and terminal hyperlinks | `frame_compare.utils.artifact_paths` |
+| Memory-only final alignment summary carried to phase and completion output | `frame_compare.utils.progress_protocol` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
 | Native VSView alignment-review panel, public callback observation, source-lineup decisions, and marker lifecycle | `frame_compare.vsview.alignment_review_panel` |
