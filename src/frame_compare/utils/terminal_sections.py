@@ -12,7 +12,6 @@ from typing import TypeVar
 
 from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
 from rich.segment import Segment
-from rich.table import Table
 from rich.text import Text
 
 from frame_compare.utils.terminal_theme import ACCENT, GLYPHS_ASCII, glyphs_for_console
@@ -32,11 +31,7 @@ class Section:
         if not key and value == "":
             self.rows.append(Text())
             return
-        row = Table.grid(padding=(0, 2), expand=False)
-        row.add_column(width=14, style="dim", no_wrap=False, overflow="fold")
-        row.add_column(ratio=1, overflow="fold")
-        row.add_row(key, value)
-        self.rows.append(row)
+        self.rows.append(_KeyValueRow(key, value))
 
     def add_line(self, value: RenderableType = "") -> None:
         self.rows.append(value)
@@ -52,6 +47,7 @@ class Section:
         body_options = options.update(width=max(1, min(options.max_width, 120) - 2))
         for row in self.rows:
             for line in console.render_lines(row, body_options, pad=False):
+                line = _without_padding(line)
                 yield Segment(rail, console.get_style(self.rail_style))
                 if Segment.get_line_length(line):
                     yield Segment(" ")
@@ -115,3 +111,40 @@ class _SectionBody:
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         yield from self.section.render_body(console, options)
+
+
+def _without_padding(line: list[Segment]) -> list[Segment]:
+    """Remove layout padding while retaining the final content's style."""
+    line = list(line)
+    while line and not line[-1].control:
+        segment = line.pop()
+        text = segment.text.rstrip(" ")
+        if text:
+            line.append(Segment(text, segment.style))
+            break
+    return line
+
+
+@dataclass
+class _KeyValueRow:
+    key: str
+    value: RenderableType
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        # Size the value from the actual body width. Table's measurement pass can
+        # re-add cell padding to a custom renderable's full-width measurement.
+        key_width = min(14, max(1, options.max_width - 3))
+        value_column = key_width + 2
+        keys = console.render_lines(
+            Text.from_markup(self.key, style="dim"), options.update(width=key_width), pad=False
+        )
+        values = console.render_lines(
+            self.value, options.update(width=max(1, options.max_width - value_column)), pad=False
+        )
+        for index in range(max(len(keys), len(values))):
+            key = keys[index] if index < len(keys) else []
+            yield from key
+            yield Segment(" " * (value_column - Segment.get_line_length(key)))
+            if index < len(values):
+                yield from values[index]
+            yield Segment.line()

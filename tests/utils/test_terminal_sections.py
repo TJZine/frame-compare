@@ -3,7 +3,9 @@
 import io
 
 import pytest
-from rich.console import Console
+from rich.color import Color
+from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
+from rich.segment import Segment
 from rich.text import Text
 
 from frame_compare.utils.terminal_sections import Section, section_title
@@ -80,6 +82,20 @@ def test_prompt_wraps_literal_question_before_raw_callback(
     console = Console(
         file=stream, width=width, force_terminal=True, color_system="truecolor", no_color=no_color
     )
+    rails: list[Segment] = []
+    render = console.render
+
+    def observe_rails(
+        renderable: RenderableType, options: ConsoleOptions | None = None
+    ) -> RenderResult:
+        for segment in render(renderable, options):
+            if segment.text in {"╭─ ", "│", "│ ", "╰─"}:
+                rails.append(segment)
+            yield segment
+
+    # Observe semantic colors before Rich's SGR encoding: its shared Style cache
+    # may contain an ANSI palette encoding from an earlier standard-color console.
+    monkeypatch.setattr(console, "render", observe_rails)
     section = Section("Prompt", rail_style=ACCENT)
     question = "Analyze the full [shared] clip for this run?"
 
@@ -88,12 +104,13 @@ def test_prompt_wraps_literal_question_before_raw_callback(
         return True
 
     assert section.prompt(console, question, ask)
+    assert rails
+    assert all(segment.style and segment.style.color == Color.parse(ACCENT) for segment in rails)
     rendered = Text.from_ansi(stream.getvalue())
     offset = 0
     for line in rendered.plain.splitlines(keepends=True):
-        if line.startswith("│ "):
-            style = rendered.get_style_at_offset(console, offset)
-            assert style.color == (None if no_color else console.get_style(ACCENT).color)
+        if no_color and line.startswith("│ "):
+            assert rendered.get_style_at_offset(console, offset).color is None
         offset += len(line)
     lines = rendered.plain.splitlines()[2:-2]
     assert all(line.startswith("│ ") for line in lines)

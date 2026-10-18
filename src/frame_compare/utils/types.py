@@ -247,6 +247,7 @@ class AlignmentRequest:
     generated_dir: Path
     shared_alignment_cache_dir: Path
     settings: AlignmentCacheSettings
+    workspace_root: Path | None = None
     presentation_content: str | None = None
     alignment_diagnostics_dir: Path | None = None
     alignment_diagnostics_root: Path | None = None

@@ -181,7 +181,7 @@ def _render_alignment_evidence_panel(
     diagnostics_dir: Path | None,
     no_color: bool,
     needs_review_count: int,
-    root: Path,
+    root: Path | None,
     verbose: bool,
 ) -> None:
     section = Section(
@@ -286,7 +286,7 @@ def present_alignment_evidence(
                 diagnostics_dir=diagnostics_dir if not quiet else None,
                 no_color=config.no_color,
                 needs_review_count=needs_review_count,
-                root=request.generated_dir,
+                root=request.workspace_root,
                 verbose=verbose,
             )
         else:

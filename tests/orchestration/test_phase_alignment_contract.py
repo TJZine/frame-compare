@@ -65,6 +65,7 @@ def test_alignment_request_uses_untrimmed_probe_frame_count(
     _run_align_phase(ctx, selected_frames=[0])
 
     assert captured[0].reference.source_frame_count == 321
+    assert captured[0].workspace_root == ctx.workspace.root
 
 
 @pytest.mark.parametrize("value", [0])

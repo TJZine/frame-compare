@@ -2644,3 +2644,43 @@ def test_final_summary_shows_changed_audio_offset_and_unapplied_state(tmp_path: 
         span.style == "yellow" and line.plain[span.start : span.end] == "not applied"
         for span in line.spans
     )
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_audio_diagnostics_use_workspace_relative_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verbose: bool
+) -> None:
+    from io import StringIO
+
+    from rich.console import Console
+    from rich.text import Text
+
+    from frame_compare.utils.progress import RichProgressReporter
+
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    diagnostics = tmp_path / "generated" / "run" / "alignment_diagnostics"
+    request = replace(request, workspace_root=tmp_path, alignment_diagnostics_dir=diagnostics)
+    output = StringIO()
+    console = Console(file=output, width=120, record=True, no_color=True)
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_presentation.human_console", lambda **_kwargs: console
+    )
+    present_alignment_evidence(
+        request=request,
+        resolutions={
+            alignment_key(reference, comparison): ComparisonResolution(
+                _provisional_result(reference, comparison), "key", "computed_this_run"
+            )
+        },
+        config=config,
+        progress=RichProgressReporter(no_color=True),
+        verbose=verbose,
+        quiet=False,
+        json_output=False,
+        diagnostics_written=True,
+    )
+    plain = Text.from_ansi(output.getvalue()).plain
+    assert "diagnostics     generated/run/alignment_diagnostics" in plain
+    assert str(tmp_path) not in plain if not verbose else "(absolute:" in plain
+    assert f'href="{diagnostics.as_uri()}"' in console.export_html(clear=False)

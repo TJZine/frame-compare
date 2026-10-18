@@ -1,3 +1,4 @@
+import logging
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
@@ -6,6 +7,7 @@ from threading import Event, current_thread
 import pytest
 import structlog
 from rich.console import Console
+from rich.live import Live
 from rich.text import Text
 
 import frame_compare.utils.progress as progress_module
@@ -210,28 +212,45 @@ def test_rich_progress_reporter_serializes_concurrent_updates() -> None:
 
 
 @pytest.mark.parametrize(
-    ("summary", "duration_text", "expected"),
+    ("status", "summary", "duration_text", "expected"),
     [
-        ("50 frames selected", None, "✓ Analyze         50 frames selected · 12s"),
-        (None, None, "✓ Analyze         12s"),
-        ("offsets", "2s + 42s review", "✓ Analyze         offsets · 2s + 42s review"),
+        (
+            ProgressPhaseStatus.COMPLETED,
+            "50 frames selected",
+            None,
+            "✓ Analyze         50 frames selected · 12s",
+        ),
+        (ProgressPhaseStatus.COMPLETED, None, None, "✓ Analyze         12s"),
+        (
+            ProgressPhaseStatus.COMPLETED,
+            "offsets",
+            "2s + 42s review",
+            "✓ Analyze         offsets · 2s + 42s review",
+        ),
+        (ProgressPhaseStatus.FAILED, None, None, "✗ Analyze"),
+        (ProgressPhaseStatus.WARNED, None, None, "! Analyze"),
+        (ProgressPhaseStatus.SKIPPED, None, None, "– Analyze"),
     ],
 )
 def test_durable_phase_duration_is_inline(
     monkeypatch: pytest.MonkeyPatch,
+    status: ProgressPhaseStatus,
     summary: str | None,
     duration_text: str | None,
     expected: str,
 ) -> None:
     reporter, output = _captured_rich_reporter(monkeypatch)
+    reporter._progress.console.width = 120
     reporter._print_durable_line(
-        ProgressPhaseStatus.COMPLETED,
+        status,
         "Analyze",
         summary=summary,
         duration=12,
         duration_text=duration_text,
     )
-    assert Text.from_ansi(output.getvalue()).plain.strip() == expected
+    rendered = Text.from_ansi(output.getvalue()).plain
+    assert rendered == expected + "\n"
+    assert all(line == line.rstrip() for line in rendered.splitlines())
 
 
 def test_step_map_tracks_run_phases_and_nested_work(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,14 +290,14 @@ def test_live_refresh_runs_without_events_and_stops_while_suspended(
 ) -> None:
     reporter, output = _captured_rich_reporter(monkeypatch)
     refreshed = Event()
-    refresh = reporter._progress.live.refresh
+    refresh = Live.refresh
 
-    def observe_refresh() -> None:
-        refresh()
+    def observe_refresh(live: Live) -> None:
+        refresh(live)
         if current_thread().name != "MainThread":
             refreshed.set()
 
-    monkeypatch.setattr(reporter._progress.live, "refresh", observe_refresh)
+    monkeypatch.setattr(Live, "refresh", observe_refresh)
     reporter.start_indeterminate("Align · source · preparing audio")
     try:
         assert refreshed.wait(2), "no automatic redraw while the task was active"
@@ -353,3 +372,93 @@ def test_live_progress_caps_width_and_follows_resize(monkeypatch: pytest.MonkeyP
             assert reporter._progress.console.width == width
     finally:
         reporter.complete_phase()
+
+
+@pytest.mark.parametrize("level", [logging.WARNING, logging.ERROR])
+@pytest.mark.parametrize("log_format", ["console", "json"])
+def test_stdlib_warning_uses_active_rich_console(
+    monkeypatch: pytest.MonkeyPatch, level: int, log_format: str
+) -> None:
+    stderr = StringIO()
+    monkeypatch.setattr(sys, "stderr", stderr)
+    reporter, output = _captured_rich_reporter(monkeypatch)
+    monkeypatch.setattr(logging.getLogger(), "handlers", [])
+    configure_logging(rich_output=True, no_color=True)
+    reporter.start_indeterminate("Align")
+    try:
+        path = "/workspace/comparison_videos/source_name.mkv"
+        message = f"Loading {path} without an L-SMASH index cache"
+        logging.getLogger("frame_compare.vs.source").log(
+            level, "Loading %s without an L-SMASH index cache", path
+        )
+        plain = Text.from_ansi(output.getvalue()).plain
+        assert ("! " if level == logging.WARNING else "✗ ") + message in plain
+        assert stderr.getvalue() == ""
+    finally:
+        reporter.complete_phase()
+        configure_logging(log_format=log_format)
+    logging.getLogger("frame_compare.vs.source").warning("plain_warning")
+    assert stderr.getvalue() == "plain_warning\n"
+
+
+def test_resumed_footer_preserves_section_spacing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from frame_compare.utils.terminal_sections import Section
+
+    reporter, output = _captured_rich_reporter(monkeypatch)
+    reporter.set_phase_steps(["Analyze", "Align", "Render"])
+    reporter.start_indeterminate("Align")
+    try:
+        reporter.suspend()
+        Section("Audio alignment").print(reporter._progress.console)
+        assert Text.from_ansi(output.getvalue()).plain.endswith("╰─\n\n")
+        start = output.tell()
+        reporter.resume()
+        # The first resumed draw must start at the current cursor. A stale
+        # two-line footer issues cursor-up here, erasing the section's blank line.
+        first_draw = output.getvalue()[start:].split("Align", 1)[0]
+        assert "\x1b[1A" not in first_draw
+        reporter.complete_phase(retain=True, summary="finished")
+        reporter.start_indeterminate("Render")
+        reporter.complete_phase(retain=True, summary="finished")
+    finally:
+        reporter._progress.stop()
+
+
+@pytest.mark.parametrize("rows", [False, True])
+def test_alignment_phase_and_completion_have_no_padding_or_overwide_lines(
+    monkeypatch: pytest.MonkeyPatch,
+    rows: bool,
+) -> None:
+    from frame_compare.cli.output import print_result_summary
+    from frame_compare.orchestration import RunResult
+    from frame_compare.utils.progress_protocol import AlignmentSummary, AlignmentSummaryEntry
+
+    reporter, output = _captured_rich_reporter(monkeypatch)
+    console = reporter._progress.console
+    console.width = 120
+    entries = [AlignmentSummaryEntry("日本語 Encode [red]", 2, "confirmed in VSView", 0)]
+    if rows:
+        entries.extend(
+            AlignmentSummaryEntry(
+                f"Another source with a long name {index}", 0, "confirmed in VSView"
+            )
+            for index in range(3)
+        )
+    summary = AlignmentSummary(
+        entries=tuple(entries),
+        extra_footage=(
+            "Reference has 6.1 s more at the start and 5.4 s more at the end; "
+            "frames come from the range all sources share."
+        ),
+    )
+    reporter.suspend()
+    reporter.start_phase("Align", 1)
+    reporter.complete_phase(retain=True, alignment_summary=summary)
+    print_result_summary(
+        console, result=RunResult(success=True, alignment_summary=summary), quiet=False
+    )
+    lines = Text.from_ansi(output.getvalue()).plain.splitlines()
+    assert any("alignment" in line for line in lines)
+    assert any("frames come" in line for line in lines)
+    assert all(line == line.rstrip() for line in lines)
+    assert all(Text(line).cell_len <= 120 for line in lines)

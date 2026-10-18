@@ -414,6 +414,7 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         ],
         previous_offsets=ctx.config.audio_alignment.previous_offsets,
         generated_dir=ctx.workspace.generated_dir,
+        workspace_root=ctx.workspace.root,
         shared_alignment_cache_dir=ctx.workspace.shared_alignment_cache_dir,
         settings=settings,
         presentation_content=(

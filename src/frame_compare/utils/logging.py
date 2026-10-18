@@ -1,5 +1,6 @@
 import logging
 import sys
+from contextlib import suppress
 from threading import Lock
 from typing import Protocol, TextIO, cast
 
@@ -37,11 +38,15 @@ class _RichLogRenderer:
         logger: structlog.typing.WrappedLogger,
         name: str,
         event_dict: structlog.typing.EventDict,
+        *,
+        event_is_identifier: bool = True,
     ) -> str:
         with _console_lock:
             console = _active_console or self._console
         level = event_dict.pop("level", name)
-        event = str(event_dict.pop("event", "")).replace("_", " ")
+        event = str(event_dict.pop("event", ""))
+        if event_is_identifier:
+            event = event.replace("_", " ")
         event_dict.pop("timestamp", None)
         diagnostics = {
             key: event_dict.pop(key)
@@ -67,6 +72,31 @@ class _RichLogRenderer:
             line.append_text(Text.from_ansi(traceback))
         console.print(line, width=min(console.width, 120))
         raise structlog.DropEvent
+
+
+class _RichLoggingHandler(logging.Handler):
+    """Adapt propagated stdlib warnings to the same human renderer."""
+
+    def __init__(self, renderer: _RichLogRenderer, level: int) -> None:
+        super().__init__(max(logging.WARNING, level))
+        self._renderer = renderer
+
+    def emit(self, record: logging.LogRecord) -> None:
+        event: structlog.typing.EventDict = {
+            "event": record.getMessage(),
+            "level": record.levelname.lower(),
+        }
+        if record.exc_info:
+            event["exc_info"] = record.exc_info
+        if record.stack_info:
+            event["stack"] = record.stack_info
+        with suppress(structlog.DropEvent):
+            # getMessage() is formatted text, including literal paths, rather
+            # than a structlog event identifier to normalize for human output.
+            self._renderer(record.name, record.levelname.lower(), event, event_is_identifier=False)
+
+
+_stdlib_handler: _RichLoggingHandler | None = None
 
 
 class _WritableStream(Protocol):
@@ -136,6 +166,12 @@ def configure_logging(
         - Unknown format strings silently fall back to console renderer.
         - Safe to call multiple times; later calls reconfigure structlog globally.
     """
+    global _stdlib_handler
+    if _stdlib_handler is not None:
+        logging.getLogger().removeHandler(_stdlib_handler)
+        _stdlib_handler.close()
+        _stdlib_handler = None
+
     # Map level string to logging constant; fallback to INFO for unknown
     level_num = getattr(logging, level.upper(), logging.INFO)
 
@@ -153,7 +189,10 @@ def configure_logging(
         )
         processors.append(structlog.processors.JSONRenderer())
     elif rich_output:
-        processors.append(_RichLogRenderer(no_color=no_color))
+        renderer = _RichLogRenderer(no_color=no_color)
+        processors.append(renderer)
+        _stdlib_handler = _RichLoggingHandler(renderer, level_num)
+        logging.getLogger().addHandler(_stdlib_handler)
     else:
         processors.append(structlog.dev.ConsoleRenderer())
 

@@ -10,7 +10,7 @@ import structlog
 from rich.cells import cell_len
 from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
 from rich.constrain import Constrain
-from rich.padding import Padding
+from rich.live import Live
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -249,6 +249,21 @@ class _RunProgress(Progress):
             expand=True,
             console=console,
         )
+
+    def start(self) -> None:
+        if not self.live.is_started:
+            # Rich Live retains its last cursor geometry after stop(). A resumed
+            # session starts at the current cursor, after any suspended sections.
+            self.live = Live(
+                console=self.console,
+                transient=True,
+                auto_refresh=True,
+                refresh_per_second=4,
+                redirect_stdout=False,
+                redirect_stderr=False,
+                get_renderable=self.get_renderable,
+            )
+        super().start()
 
     def get_renderable(self) -> RenderableType:
         return Constrain(super().get_renderable(), width=120)
@@ -597,20 +612,25 @@ class RichProgressReporter:
             if summary:
                 line.append(" · ", style="dim")
             line.append(resolved_duration, style="dim")
-        phase = Table.grid(padding=0)
-        phase.add_column(width=18, no_wrap=True)
-        phase.add_column(ratio=1, overflow="fold")
-        phase.add_row(prefix, line)
-        self._progress.console.print(phase, width=min(self._progress.console.width, 120))
+        if line:
+            phase = Table.grid(padding=0)
+            phase.add_column(width=18, no_wrap=True)
+            phase.add_column(ratio=1, overflow="fold")
+            phase.add_row(prefix, line)
+            self._progress.console.print(phase, width=min(self._progress.console.width, 120))
+        else:
+            prefix.rstrip()
+            self._progress.console.print(prefix, width=min(self._progress.console.width, 120))
         for row in continuation:
-            self._progress.console.print(
-                Padding(row, (0, 0, 0, 18)), width=min(self._progress.console.width, 120)
-            )
+            self._print_continuation(row)
         if alignment_summary is not None and alignment_summary.extra_footage:
-            self._progress.console.print(
-                Padding(Text(alignment_summary.extra_footage, style="dim"), (0, 0, 0, 18)),
-                width=min(self._progress.console.width, 120),
-            )
+            self._print_continuation(Text(alignment_summary.extra_footage, style="dim"))
+
+    def _print_continuation(self, value: Text) -> None:
+        console = self._progress.console
+        for line in value.wrap(console, max(1, min(console.width, 120) - 18)):
+            line.rstrip()
+            console.print(Text.assemble(" " * 18, line))
 
     def suspend(self) -> None:
         """Pause live progress rendering during blocking terminal interaction."""
