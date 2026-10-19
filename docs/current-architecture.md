@@ -749,12 +749,18 @@ retains actual color props/defaults/FPS and registers outputs with reserved `hdr
 separately from strict metadata-v5 kwargs. Ordinary SDR packing is used even with the
 HDR viewer environment flag; final rendering/tone-map settings are unaffected.
 `vsview.alignment_overlay` uses one public ModifyFrame per source, with n/f together,
-to paint source identity and Original frame only. Finite glyph resources, source
+to paint source identity, Original frame and all other sources' live opening-hint
+projections in stable output order. Immutable validated source facts and authority-first
+opening offsets stay frozen after panel Save/Keep. Precomputed numeric/status slots
+reserve complete wrapped row extents; per-frame work stamps finite masks without
+font/raster calls or retained per-n caches. Whole-set fit failure explicitly falls back
+to unavailable live hints; the panel describes its separate pinned-anchor context.
+Finite glyph resources, source
 immutability, independent fresh-copy static fallback and raw-degradation warning remain.
 Static labels contain no current frame; source/decoder and native post-return errors
 still propagate. No GUI playhead/image-capture or mutable selected-state bridge exists.
 `vsview.alignment_selection` owns pure session-local numeric cohort transitions and
-fixed-anchor opening-offset predictions. Authority-first raw offsets use
+shared opening-offset projection math and fixed-anchor panel predictions. Authority-first raw offsets use
 `c + d_anchor - d_target`, distinguish zero/missing and provisional edges, check only
 target bounds and do not change trims or evidence authority. Any source can anchor;
 Reference remains the persistence baseline rather than a required visual first step.

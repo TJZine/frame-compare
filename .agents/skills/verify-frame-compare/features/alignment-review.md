@@ -38,6 +38,15 @@ number action text, provisional/missing hints, reset/cancel/reanchor, failed see
 and separate known-offset draft preservation. **Keep current alignment** saves a keep
 decision, not confirmation of the unsaved selected lineup.
 
+Video hints follow requested native frames and immutable session-opening offsets for
+all other named sources in stable order. Panel hints follow the named pinned anchor;
+verify these can differ when browsing. Unknown/outside hints are explicit, never
+clamped or silently omitted. Check comma/digit/status transitions and whole-set fit
+fallback. After Save/Keep, panel prediction labels/markers hide while video opening
+hints remain. Known-offset/Keep retained pins stay unsaved; failed writes stay editable.
+A standalone demo must say no parent comparison resumes in both console and panel.
+Normal CLI close/resume semantics remain unchanged.
+
 After success, edits freeze and **Close VSView to resume Frame Compare.** is shown. Close
 the owned viewer and observe the validated sidecar/resumed authority. Closing without
 saving writes no result. Review uses SDR presentation even for PQ/HLG input; final tone

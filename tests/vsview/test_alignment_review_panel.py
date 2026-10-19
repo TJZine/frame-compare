@@ -981,7 +981,7 @@ def test_mixed_states_save_authority_labels_and_preserve_evidence(
     original_summaries = [label.text() for label in panel.audio_summary_labels]
     launch_note = panel.launch_label_explanation.text()
     assert "Original frame number" in launch_note
-    assert "Predictions, selections and saved choices" in launch_note
+    assert "Panel hints refer to the pinned anchor" in launch_note
     original_details = [
         cast(QLabel, details.findChild(QLabel)).text() for details in panel.audio_detail_groups
     ]
@@ -1001,10 +1001,10 @@ def test_mixed_states_save_authority_labels_and_preserve_evidence(
             for ordinal, frame in enumerate((8, 12, 9, 11), start=1)
         ]
         assert [label.text() for label in panel.source_outcome_labels[1:]] == [
-            "Alignment confirmed: +2f — manually confirmed",
-            "Alignment confirmed: -2f — manually confirmed",
-            "Alignment confirmed: +1f — manually confirmed",
-            "Alignment confirmed: -1f — manually confirmed",
+            "Saved offset (Reference − Comparison): +2 frames — manually confirmed",
+            "Saved offset (Reference − Comparison): -2 frames — manually confirmed",
+            "Saved offset (Reference − Comparison): +1 frames — manually confirmed",
+            "Saved offset (Reference − Comparison): -1 frames — manually confirmed",
         ]
         assert [label.text() for label in panel.audio_summary_labels] == original_summaries
     else:
@@ -1168,8 +1168,8 @@ def test_one_primary_action_saves_complete_viewer_positions(tmp_path: Path) -> N
     assert panel.progress_label.text() == "Alignment choices saved"
     assert panel.guidance_label.text() == "Close VSView to resume Frame Compare."
     assert [label.text() for label in panel.source_outcome_labels[1:]] == [
-        "Alignment confirmed: +12f — manually confirmed",
-        "Alignment confirmed: -7f — manually confirmed",
+        "Saved offset (Reference − Comparison): +12 frames — manually confirmed",
+        "Saved offset (Reference − Comparison): -7 frames — manually confirmed",
     ]
     assert panel.keep_help_label.isHidden()
     assert not panel.use_positions_button.isEnabled()
@@ -1355,7 +1355,7 @@ def test_save_failure_stays_editable_unsaved_and_redacted(
     assert "OSError" in panel.error_label.text()
     assert str(tmp_path) not in panel.error_label.text()
     assert "saved" not in panel.progress_label.text().lower()
-    assert "selections and saved choices are shown here" in panel.launch_label_explanation.text()
+    assert "Panel hints refer to the pinned anchor" in panel.launch_label_explanation.text()
 
 
 @pytest.mark.parametrize("next_workspace", ["ordinary", "malformed"])
@@ -1555,3 +1555,59 @@ def test_evidence_is_built_once_per_comparison_and_replaced_with_workspace(
     assert "not selected" in panel.source_status_labels[0].text()
     _visit(panel, api, 0, 12)
     assert builds == 4
+
+
+@pytest.mark.parametrize("finish", ["positions", "offsets", "keep", "failure"])
+def test_pinned_context_terminal_visibility_markers_and_reload(tmp_path, monkeypatch, finish):
+    panel, api, _script = _panel(
+        tmp_path, comparison_count=2, frame_count=20000, suggestions=(504, -12)
+    )
+    from frame_compare.vsview.alignment_overlay import build_launch_overlays
+
+    assert panel._workspace is not None
+    models = build_launch_overlays(panel._workspace, {})
+    opening_lines = models[1].live_lines(100)
+    _pin(panel, 1, 96, anchor=True)
+    _pin(panel, 2, 612)
+    _visit(panel, api, 1, 999)
+    assert "pinned anchor" in panel.anchor_label.text()
+    assert "Comparison 1" in panel.anchor_label.text() and "frame 96" in panel.anchor_label.text()
+    assert panel.source_outcome_labels[0].text().startswith("Predicted frame 600")
+    if finish == "keep":
+        panel.keep_button.click()
+    elif finish == "offsets":
+        panel.manual_toggle.click()
+        panel.basis_selector.setCurrentIndex(1)
+        panel.offset_inputs[0].setText("+505")
+        panel.offset_inputs[1].setText("-12")
+        panel.use_positions_button.click()
+    else:
+        _pin(panel, 0, 601)
+        if finish == "failure":
+
+            def fail(*args):
+                raise OSError("owned failure")
+
+            monkeypatch.setattr(
+                "frame_compare.vsview.alignment_review_panel.write_alignment_review_result", fail
+            )
+        panel.use_positions_button.click()
+    if finish == "failure":
+        assert not panel._saved
+        assert not panel.source_outcome_labels[0].isHidden()
+        assert panel.use_positions_button.isEnabled()
+    else:
+        assert panel._saved and panel.source_outcome_labels[0].isHidden()
+        assert all(not label.isHidden() for label in panel.source_outcome_labels[1:])
+        if finish != "positions":
+            assert "unsaved" in panel.source_status_labels[1].text()
+        # Navigation after successful terminal action must not restore a prediction notch.
+        before = len(api.timeline.added)
+        _visit(panel, api, 0, 700)
+        assert len(api.timeline.added) == before
+    assert models[1].live_lines(100) == opening_lines
+    assert models[1].hint.offset == 504  # even when a newly saved offset is505
+    # A fresh generated workspace restores labels rather than inheriting hidden state.
+    (tmp_path / "fresh").mkdir()
+    fresh, _fresh_api, _ = _panel(tmp_path / "fresh", comparison_count=2)
+    assert all(not label.isHidden() for label in fresh.source_outcome_labels)

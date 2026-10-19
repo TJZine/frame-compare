@@ -54,12 +54,19 @@ A missing/out-of-range hint still permits manual matching. It is not proof of no
 
 ### Read the preview labels
 
-Video labels show source identity and native **Original frame** only. Predictions and
-selected/saved state belong to the panel. The preview is untrimmed and uses the ordinary
-SDR viewer even for HDR sources, leaving final report tone mapping unchanged. Correct
-PQ/HLG/source color properties remain intact; this is an alignment view, not calibrated HDR.
-Static fallback identifies the source without inventing a current frame. If neither
-label mode works, a warning accompanies raw preview; numeric entry remains available.
+Video labels show the source and its native **Original frame**, followed by
+**Predicted for this frame (opening hints)** for every other source in output order.
+Names and stable roles identify each target. These estimates follow the viewed frame
+using immutable session-opening offsets, even after Save or Keep. Provisional edges
+are marked; unavailable or outside-range hints never mean matching content is absent.
+If the whole list cannot fit, static labels explicitly say live hints are unavailable.
+The panel instead shows hints **for the pinned anchor** (named source and frame);
+browsing away can legitimately make its estimates differ from the video.
+
+The preview is untrimmed and uses ordinary SDR packing even for HDR sources,
+leaving final report tone mapping unchanged. Correct PQ/HLG/source color properties
+remain intact. If neither live nor static labels fit, a warning accompanies raw
+preview; explicit numeric entry remains available.
 
 ## Enter known values
 
@@ -80,7 +87,12 @@ provisional candidate or the unsaved selected lineup. The terminal message is
 
 Successful confirmation shows **Alignment choices saved**, followed by
 **Close VSView to resume Frame Compare.** Successful Save/Keep freezes edits; a failed
-write keeps unsaved pins editable. Frame Compare writes one typed, atomic sibling sidecar named
+write keeps unsaved pins editable. Successful confirmation shows **Saved offset (Reference − Comparison)**
+with the actual signed frame value. Redundant panel prediction labels and markers hide
+after Save/Keep; video opening hints continue. Retained pins in Known offsets/Keep
+remain unsaved. A standalone generated demo has no parent comparison to resume;
+its helper says to close the demo, while normal CLI review resumes Frame Compare.
+Frame Compare writes one typed, atomic sibling sidecar named
 `vsview_*.alignment-result.json` for the complete source set and checks session freshness.
 Closing VSView without saving writes no result. Missing, malformed,
 stale, mixed-session, duplicate, incomplete, and out-of-bounds results fail closed. An ordinary VSView session

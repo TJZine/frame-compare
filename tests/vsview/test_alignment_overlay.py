@@ -45,7 +45,6 @@ def test_native_label_copy_is_source_and_number_only():
     assert m.live_lines(10490) == (
         "CMP 1 - FoRM1080p",
         "Original frame 10,490",
-        "Select frame numbers in Alignment Review",
     )
     static = "\n".join(m.static_lines())
     assert "FoRM1080p" in static and "Static labels" in static
@@ -96,6 +95,10 @@ def test_workspace_authority_precedence_identity_names_and_mixed_reference():
     )
     assert "CMP 1" in models[101].name and "REF" in models[0].name
     assert models[101].ordinal == 1 and models[102].own_count == 19998
+    assert [p.role for p in models[101].peers] == ["REF", "CMP 2", "CMP 3"]
+    assert models[101].hint.offset == 0 and not models[101].hint.provisional
+    assert models[102].hint.offset == -504 and models[102].hint.provisional
+    assert len({p.name for p in models[0].peers}) == 3
     assert names[101].startswith("\n")
     tricky = overlay.build_launch_overlays(
         workspace, {0: "Reference", 101: "Same", 102: "Same", 103: "Same (CMP 1)"}
@@ -655,3 +658,229 @@ def test_narrow_native_digits_follow_wrapped_prefix_without_overwriting_it():
         )
         assert_pixels(raw, before)
     assert warnings == []
+
+
+def test_live_peer_rows_native_pixels_transitions_and_no_per_frame_raster(monkeypatch):
+    from math import ceil
+
+    from PIL import Image, ImageDraw
+
+    from frame_compare.vsview.alignment_selection import OpeningHint
+
+    vs = native()
+    peers = (
+        overlay.OpeningSource("REF", "Ref", 10000, OpeningHint(0)),
+        overlay.OpeningSource("CMP 2", "B", 2000, OpeningHint(-12)),
+        overlay.OpeningSource("CMP 3", "Unknown", 5000, OpeningHint(None)),
+    )
+    m = overlay.LaunchOverlay("CMP", "A", 2500, 1, OpeningHint(504, True), peers)
+    source = vs.core.std.BlankClip(width=640, height=720, format=vs.GRAY8, length=2500, color=[90])
+    font = overlay._font(720)
+    warnings = []
+    node = overlay.apply_alignment_overlay(vs.core, source, m, warn=warnings.append)
+    step = ceil(font.getbbox("Ag09")[3] - font.getbbox("Ag09")[1]) + 7
+    top = font.getbbox("Ag09")[1]
+
+    def expected_slot(
+        value,
+        provisional=False,
+        *,
+        number=False,
+        height=step,
+        xstart=4,
+        following=None,
+        prefix=None,
+    ):
+        fg = np.zeros((height, 620), dtype=np.uint8)
+        stroke = fg.copy()
+        pieces = []
+        if prefix:
+            pieces.append((prefix, 2, 0))
+            xstart = ceil(font.getlength(prefix)) + 8
+        if number:
+            x = xstart
+            for char in str(value):
+                pieces.append((char, x, 0))
+                x += ceil(font.getlength(char))
+            if provisional:
+                pieces.append(("(provisional)", x + 4, 0))
+        else:
+            pieces.append((str(value), xstart, 0))
+        for text, x, row in pieces:
+            # Prepared digit/status stamps clip at their physical row origin.
+            a, b = Image.new("L", (620, step)), Image.new("L", (620, step))
+            ImageDraw.Draw(a).text((x, 2 - top), text, font=font, fill=255)
+            ImageDraw.Draw(b).text(
+                (x, 2 - top), text, font=font, fill=255, stroke_width=2, stroke_fill=255
+            )
+            np.maximum(fg[row : row + step], np.asarray(a), out=fg[row : row + step])
+            np.maximum(stroke[row : row + step], np.asarray(b), out=stroke[row : row + step])
+        if following:
+            # The fixed next row can have an antialiased top overhang.
+            a, b = Image.new("L", (620, height)), Image.new("L", (620, height))
+            xy = (2, 2 + step - top)
+            ImageDraw.Draw(a).text(xy, following, font=font, fill=255)
+            ImageDraw.Draw(b).text(
+                xy, following, font=font, fill=255, stroke_width=2, stroke_fill=255
+            )
+            np.maximum(fg, np.asarray(a), out=fg)
+            np.maximum(stroke, np.asarray(b), out=stroke)
+        f, c = fg.astype(np.float32) / 255, stroke.astype(np.float32) / 255
+        return np.rint((90 * (1 - c) + 16 * c) * (1 - f) + 235 * f).astype(np.uint8)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("font/raster setup was repeated per frame")
+
+    monkeypatch.setattr(overlay, "_font", forbidden)
+    monkeypatch.setattr(overlay, "_raster", forbidden)
+    # Independent rows: own heading0, Original1, header2, inline peers3/4/5.
+    for n, ref, b in (
+        (483, 987, "999"),
+        (484, 988, "1,000"),
+        (1483, 1987, "1,999"),
+        (1484, 1988, None),
+        (0, 504, "516"),
+        (1484, 1988, None),
+        (483, 987, "999"),
+    ):
+        frame = node.get_frame(n)
+        array = np.asarray(frame[0])
+        for row, expected in (
+            (3, expected_slot(f"{ref:,}", True, number=True, prefix="REF - Ref:")),
+            (
+                4,
+                expected_slot(b, True, number=True, prefix="CMP 2 - B:")
+                if b is not None
+                else expected_slot("outside source range", prefix="CMP 2 - B:"),
+            ),
+            (5, expected_slot("unavailable", prefix="CMP 3 - Unknown:")),
+        ):
+            y = 10 + row * step
+            assert np.array_equal(array[y : y + step, 10:630], expected), (n, row)
+        own_x = ceil(font.getlength("Original frame")) + 8
+        own = expected_slot(
+            f"{n:,}",
+            number=True,
+            height=step,
+            xstart=own_x,
+            following="Predicted for this frame (opening hints)",
+        )
+        assert np.array_equal(array[10 + step : 10 + 2 * step, 10 + own_x : 630], own[:, own_x:])
+        raw = source.get_frame(n)
+        assert np.all(np.asarray(raw[0]) == 90)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        cases = ((485, 989, "1,001"), (1485, 1989, None), (1, 505, "517"), (1486, 1990, None))
+        frames = list(pool.map(node.get_frame, [case[0] for case in cases]))
+    for (_n, ref, b), frame in zip(cases, frames, strict=True):
+        array = np.asarray(frame[0])
+        assert np.array_equal(
+            array[10 + 3 * step : 10 + 4 * step, 10:630],
+            expected_slot(f"{ref:,}", True, number=True, prefix="REF - Ref:"),
+        )
+        expected = (
+            expected_slot(b, True, number=True, prefix="CMP 2 - B:")
+            if b
+            else expected_slot("outside source range", prefix="CMP 2 - B:")
+        )
+        assert np.array_equal(array[10 + 4 * step : 10 + 5 * step, 10:630], expected)
+    assert not warnings
+    assert m.live_lines(96)[3:] == (
+        "REF - Ref: 600 (provisional)",
+        "CMP 2 - B: 612 (provisional)",
+        "CMP 3 - Unknown: unavailable",
+    )
+
+
+def test_complete_peer_set_falls_back_instead_of_truncating():
+    from frame_compare.vsview.alignment_selection import OpeningHint
+
+    vs = native()
+    source = vs.core.std.BlankClip(width=320, height=240, format=vs.GRAY8, length=2, color=[90])
+    peers = tuple(
+        overlay.OpeningSource(f"CMP {i}", "long peer name", 2, OpeningHint(0)) for i in range(1, 20)
+    )
+    m = overlay.LaunchOverlay("REF", "Ref", 2, peers=peers)
+    warnings = []
+    node = overlay.apply_alignment_overlay(vs.core, source, m, warn=warnings.append)
+    assert len(m.live_lines(0)) == 22  # no peer is silently omitted from the model
+    assert len(warnings) == 1 and "live hints unavailable" in warnings[0]
+    expected = overlay._paint(
+        source.get_frame(0), overlay._raster(m.static_lines(), overlay._font(240), 300, 220)
+    )
+    assert_pixels(node.get_frame(0), frame_arrays(expected))
+
+
+def test_wrapped_peer_status_rows_reserve_the_largest_alternative():
+    from math import ceil
+
+    from PIL import Image, ImageDraw
+
+    from frame_compare.vsview.alignment_selection import OpeningHint
+
+    vs = native()
+    font = overlay._font(720)
+    step = ceil(font.getbbox("Ag09")[3] - font.getbbox("Ag09")[1]) + 7
+    top = font.getbbox("Ag09")[1]
+    source = vs.core.std.BlankClip(width=101, height=720, format=vs.GRAY8, length=12, color=[90])
+    m = overlay.LaunchOverlay(
+        "CMP",
+        "A",
+        12,
+        1,
+        OpeningHint(-1, True),
+        (overlay.OpeningSource("REF", "R", 10, OpeningHint(0)),),
+    )
+    warnings = []
+    node = overlay.apply_alignment_overlay(vs.core, source, m, warn=warnings.append)
+    # Independently measured physical rows at77px: own heading2 + prefix2 + number1;
+    # header6 (Predict / ed for / this / frame / (openin / g hints)); peer heading1.
+    # Thus peer values begin at row12. Both outside3words and number+provisional2lines
+    # reserve exactly3physical rows, even when only the number is shorter.
+    for n, words in (
+        (0, ("outside", "source", "range")),
+        (1, ("0", "(provisi", "onal)")),
+        (11, ("outside", "source", "range")),
+        (10, ("9", "(provisi", "onal)")),
+    ):
+        fg, coverage = (
+            np.zeros((3 * step, 81), dtype=np.uint8),
+            np.zeros((3 * step, 81), dtype=np.uint8),
+        )
+        for row, text in enumerate(words):
+            assert font.getlength(text) <= 77
+            # Provisional text is one two-line block clipped at its start; its
+            # second line can overhang into the first, as ordinary text rendering does.
+            clip_top = step if words[0].isdecimal() and row > 0 else 0
+            a, b = (
+                Image.new("L", (81, 3 * step - clip_top)),
+                Image.new("L", (81, 3 * step - clip_top)),
+            )
+            xy = (4 if row == 0 and text.isdecimal() else 2, 2 + row * step - clip_top - top)
+            ImageDraw.Draw(a).text(xy, text, font=font, fill=255)
+            ImageDraw.Draw(b).text(xy, text, font=font, fill=255, stroke_width=2, stroke_fill=255)
+            np.maximum(fg[clip_top:], np.asarray(a), out=fg[clip_top:])
+            np.maximum(coverage[clip_top:], np.asarray(b), out=coverage[clip_top:])
+        f, c = fg.astype(np.float32) / 255, coverage.astype(np.float32) / 255
+        expected = np.rint((90 * (1 - c) + 16 * c) * (1 - f) + 235 * f).astype(np.uint8)
+        frame = node.get_frame(n)
+        actual = np.asarray(frame[0])[10 + 12 * step : 10 + 15 * step, 10:91]
+        assert np.array_equal(actual, expected), n
+    assert warnings == []
+
+
+def test_actual_provisional_example_and_frozen_opening_snapshot():
+    from dataclasses import FrozenInstanceError
+
+    from frame_compare.vsview.alignment_selection import OpeningHint
+
+    m = overlay.LaunchOverlay(
+        "CMP",
+        "FoRM",
+        20000,
+        1,
+        OpeningHint(504, True),
+        (overlay.OpeningSource("REF", "MainFrame", 30000, OpeningHint(0)),),
+    )
+    assert m.live_lines(17671)[-1] == "REF - MainFrame: 18,175 (provisional)"
+    with pytest.raises(FrozenInstanceError):
+        cast(Any, m).hint = OpeningHint(0)

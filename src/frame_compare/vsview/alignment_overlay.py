@@ -19,7 +19,11 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
-from frame_compare.vsview.alignment_review_contract import AlignmentReviewWorkspaceMetadata
+from frame_compare.vsview.alignment_review_contract import (
+    AlignmentReviewReferenceMetadata,
+    AlignmentReviewWorkspaceMetadata,
+)
+from frame_compare.vsview.alignment_selection import OpeningHint, opening_hint, project_frame
 
 if TYPE_CHECKING:
     import numpy as np
@@ -40,9 +44,9 @@ class _CopyableFrame(Protocol):
 
 PANEL_LABEL_EXPLANATION = (
     "Match each row to the video’s Original frame number. "
-    "Predictions, selections and saved choices are shown here."
+    "Panel hints refer to the pinned anchor; video hints follow the viewed frame."
 )
-_STATUS = "Select frame numbers in Alignment Review"
+_PREDICTION_HEADER = "Predicted for this frame (opening hints)"
 
 
 def _integer(value: object) -> bool:
@@ -73,11 +77,25 @@ def _bounded_name(text: str, suffix: str = "") -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class OpeningSource:
+    role: str
+    name: str
+    count: int
+    hint: OpeningHint
+
+    @property
+    def heading(self) -> str:
+        return f"{self.role} - {self.name}"
+
+
+@dataclass(frozen=True, slots=True)
 class LaunchOverlay:
     role: Role
     name: str
     own_count: int
     ordinal: int = 0
+    hint: OpeningHint = OpeningHint(0)
+    peers: tuple[OpeningSource, ...] = ()
 
     def __post_init__(self) -> None:
         if self.role not in ("REF", "CMP") or not _integer(self.own_count) or self.own_count <= 0:
@@ -96,10 +114,23 @@ class LaunchOverlay:
 
     def live_lines(self, n: int) -> tuple[str, ...]:
         self.validate_frame(n)
-        return self.heading, f"Original frame {n:,}", _STATUS
+        lines = [self.heading, f"Original frame {n:,}"]
+        if self.peers:
+            lines.append(_PREDICTION_HEADER)
+            for peer in self.peers:
+                projected = project_frame(n, self.hint, peer.hint, peer.count)
+                value = f"{projected.frame:,}" if projected.frame is not None else projected.status
+                if projected.provisional:
+                    value += " (provisional)"
+                lines.append(f"{peer.heading}: {value}")
+        return tuple(lines)
 
     def static_lines(self) -> tuple[str, ...]:
-        return self.heading, "Static labels - enter frame numbers in the panel"
+        return (
+            self.heading,
+            "Static labels - live hints unavailable",
+            "Panel shows pinned-anchor hints",
+        )
 
 
 def build_launch_overlays(
@@ -127,15 +158,29 @@ def build_launch_overlays(
     while len(set(names.values())) < len(names):
         repeated = {name for name in names.values() if list(names.values()).count(name) > 1}
         names = {key: roles[key] if name in repeated else name for key, name in names.items()}
-    ref = workspace.reference
+    facts = {
+        source.output_id: OpeningSource(
+            roles[source.output_id],
+            names[source.output_id],
+            source.source_frame_count,
+            OpeningHint(0)
+            if isinstance(source, AlignmentReviewReferenceMetadata)
+            else opening_hint(source),
+        )
+        for source in sources
+    }
     return {
-        ref.output_id: LaunchOverlay("REF", names[ref.output_id], ref.source_frame_count),
-        **{
-            c.output_id: LaunchOverlay(
-                "CMP", names[c.output_id], c.source_frame_count, c.comparison_ordinal
-            )
-            for c in workspace.comparisons
-        },
+        source.output_id: LaunchOverlay(
+            "REF" if isinstance(source, AlignmentReviewReferenceMetadata) else "CMP",
+            names[source.output_id],
+            source.source_frame_count,
+            0
+            if isinstance(source, AlignmentReviewReferenceMetadata)
+            else source.comparison_ordinal,
+            facts[source.output_id].hint,
+            tuple(fact for output, fact in facts.items() if output != source.output_id),
+        )
+        for source in sources
     }
 
 
@@ -210,6 +255,17 @@ def _raster(lines: tuple[str, ...], font: Font, width: int, height: int) -> _Ras
 
 
 @dataclass(frozen=True, slots=True)
+class _PeerRow:
+    source: OpeningSource
+    y: int
+    x: int
+    inline: bool
+    unavailable: _Raster
+    outside: _Raster
+    provisional: _Raster | None
+
+
+@dataclass(frozen=True, slots=True)
 class _LiveLayout:
     base: _Raster
     number_y: int
@@ -217,24 +273,43 @@ class _LiveLayout:
     glyphs: Mapping[str, _Raster]
     advances: Mapping[str, int]
     model: LaunchOverlay
+    peers: tuple[_PeerRow, ...] = ()
 
     def render(self, n: int) -> _Raster:
-        import numpy as np
 
         self.model.validate_frame(n)
         fg, coverage = self.base.foreground.copy(), self.base.coverage.copy()
-        x = self.number_x
-        for char in f"{n:,}":
-            glyph = self.glyphs[char]
-            h, w = glyph.foreground.shape
-            for target, stamp in ((fg, glyph.foreground), (coverage, glyph.coverage)):
-                np.maximum(
-                    target[self.number_y : self.number_y + h, x : x + w],
-                    stamp,
-                    out=target[self.number_y : self.number_y + h, x : x + w],
-                )
-            x += self.advances[char]
+        self._digits(fg, coverage, n, self.number_x, self.number_y)
+        for row in self.peers:
+            projected = project_frame(n, self.model.hint, row.source.hint, row.source.count)
+            if projected.frame is None:
+                mask = row.unavailable if projected.status == "unavailable" else row.outside
+                self._stamp(fg, coverage, mask, row.x if row.inline else 0, row.y)
+            else:
+                end = self._digits(fg, coverage, projected.frame, row.x, row.y)
+                if projected.provisional and row.provisional is not None:
+                    self._stamp(
+                        fg,
+                        coverage,
+                        row.provisional,
+                        end + 4 if row.inline else 0,
+                        row.y if row.inline else row.y + self.glyphs["0"].foreground.shape[0],
+                    )
         return _Raster(fg, coverage)
+
+    @staticmethod
+    def _stamp(fg: Mask, coverage: Mask, mask: _Raster, x: int, y: int) -> None:
+        import numpy as np
+
+        h, w = mask.foreground.shape
+        for target, stamp in ((fg, mask.foreground), (coverage, mask.coverage)):
+            np.maximum(target[y : y + h, x : x + w], stamp, out=target[y : y + h, x : x + w])
+
+    def _digits(self, fg: Mask, coverage: Mask, number: int, x: int, y: int) -> int:
+        for char in f"{number:,}":
+            self._stamp(fg, coverage, self.glyphs[char], x, y)
+            x += self.advances[char]
+        return x
 
 
 def _live_layout(model: LaunchOverlay, font: Font, width: int, height: int) -> _LiveLayout:
@@ -254,9 +329,69 @@ def _live_layout(model: LaunchOverlay, font: Font, width: int, height: int) -> _
         prefix, x = "", 2
     number_line = len(lines)
     lines.append(prefix)
-    lines.extend(_wrap(_STATUS, font, width - 4))
+    bbox = font.getbbox("Ag09")
+    step = ceil(bbox[3] - bbox[1]) + 7
+    rows: list[_PeerRow] = []
+    if model.peers:
+        lines.extend(_wrap(_PREDICTION_HEADER, font, width - 4))
+        for peer in model.peers:
+            if len(f"{peer.count - 1:,}") * cell + 6 > width:
+                raise ValueError("complete predicted number cannot fit")
+            unavailable = _raster(("unavailable",), font, width, height)
+            outside = _raster(("outside source range",), font, width, height)
+            provisional = (
+                _raster(("(provisional)",), font, width, height)
+                if model.hint.provisional or peer.hint.provisional
+                else None
+            )
+            prefix = f"{peer.heading}:"
+            number_x = ceil(font.getlength(prefix)) + 6
+            numeric_extent = len(f"{peer.count - 1:,}") * cell + 4
+            suffix_extent = 4 + provisional.foreground.shape[1] if provisional else 0
+            # Every complete alternative must fit on one physical row; otherwise
+            # retain the wrapped block for this entire peer, never a truncated value.
+            inline = (
+                number_x
+                + max(
+                    numeric_extent + suffix_extent,
+                    ceil(font.getlength("unavailable")) + 4,
+                    ceil(font.getlength("outside source range")) + 4,
+                )
+                <= width
+            )
+            if inline:
+                y = len(lines) * step
+                lines.append(prefix)
+            else:
+                lines.extend(_wrap(peer.heading, font, width - 4))
+                number_x = 2
+                y = len(lines) * step
+                extent = max(
+                    unavailable.foreground.shape[0],
+                    outside.foreground.shape[0],
+                    step + (provisional.foreground.shape[0] if provisional else 0),
+                )
+                lines.extend([""] * ceil(extent / step))
+            rows.append(_PeerRow(peer, y, number_x, inline, unavailable, outside, provisional))
     base = _raster(tuple(line or " " for line in lines), font, width, height)
-    required_width = max(base.foreground.shape[1], x + reserve)
+    required_width = max(
+        base.foreground.shape[1],
+        x + reserve,
+        *(
+            max(
+                row.x
+                + len(f"{row.source.count - 1:,}") * cell
+                + 4
+                + (
+                    4 + row.provisional.foreground.shape[1] if row.inline and row.provisional else 0
+                ),
+                (row.x if row.inline else 0) + row.unavailable.foreground.shape[1],
+                (row.x if row.inline else 0) + row.outside.foreground.shape[1],
+                row.provisional.foreground.shape[1] if row.provisional else 0,
+            )
+            for row in rows
+        ),
+    )
     if required_width > base.foreground.shape[1]:
         padding = ((0, 0), (0, required_width - base.foreground.shape[1]))
         fg, coverage = np.pad(base.foreground, padding), np.pad(base.coverage, padding)
@@ -267,7 +402,9 @@ def _live_layout(model: LaunchOverlay, font: Font, width: int, height: int) -> _
     y = number_line * (ceil(bbox[3] - bbox[1]) + 7)
     if y + glyphs["0"].foreground.shape[0] > base.foreground.shape[0]:
         raise ValueError("digit row cannot fit")
-    return _LiveLayout(base, y, x, MappingProxyType(glyphs), MappingProxyType(advances), model)
+    return _LiveLayout(
+        base, y, x, MappingProxyType(glyphs), MappingProxyType(advances), model, tuple(rows)
+    )
 
 
 def _paint(frame: vs.VideoFrame, raster: _Raster) -> vs.VideoFrame:
@@ -364,7 +501,7 @@ class _Renderer:
         message = (
             "Alignment video labels unavailable; using raw preview and Alignment Review panel."
             if kind == "raw"
-            else "Live alignment video labels unavailable; using static session-open labels."
+            else "Live alignment video labels unavailable; using static labels; live hints unavailable. Panel shows pinned-anchor hints."
         )
         # Diagnostics are never a reason to fail an already acquired video frame.
         with suppress(Exception):

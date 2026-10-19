@@ -846,7 +846,7 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
     )
     assert len(overlays) == 2
     for overlay in overlays:
-        assert "Select frame numbers in Alignment Review" in overlay
+        assert "Predicted for this frame (opening hints)" in overlay
         assert "at session open" not in overlay
     output = capsys.readouterr().err
     assert (

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Literal
 
 from frame_compare.vsview.alignment_review_contract import AlignmentReviewComparisonMetadata
 
@@ -23,6 +24,23 @@ def opening_hint(comparison: AlignmentReviewComparisonMetadata) -> OpeningHint:
         if candidate is not None:
             return OpeningHint(candidate.frame_offset, provisional=True)
     return OpeningHint(None)
+
+
+@dataclass(frozen=True, slots=True)
+class Projection:
+    frame: int | None
+    status: Literal["available", "unavailable", "outside source range"]
+    provisional: bool = False
+
+
+def project_frame(frame: int, own: OpeningHint, target: OpeningHint, count: int) -> Projection:
+    """Project an original coordinate using session-opening edges, checking only the target."""
+    if own.offset is None or target.offset is None:
+        return Projection(None, "unavailable")
+    predicted = frame + own.offset - target.offset
+    if not 0 <= predicted < count:
+        return Projection(None, "outside source range")
+    return Projection(predicted, "available", own.provisional or target.provisional)
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,15 +110,12 @@ class SelectedCohort:
         assert frame is not None
         if index == self.anchor:
             return Prediction(frame, f"Anchor frame {frame}")
-        own, target = hints[self.anchor], hints[index]
-        if own.offset is None or target.offset is None:
+        projected = project_frame(frame, hints[self.anchor], hints[index], self.counts[index])
+        if projected.status == "unavailable":
             return Prediction(None, "Unavailable opening offset — match manually")
-        predicted = frame + own.offset - target.offset
-        if not 0 <= predicted < self.counts[index]:
+        if projected.status == "outside source range":
             return Prediction(None, "Prediction outside source range — match manually")
         provenance = (
-            "Provisional opening hint"
-            if own.provisional or target.provisional
-            else "Opening alignment hint"
+            "Provisional opening hint" if projected.provisional else "Opening alignment hint"
         )
-        return Prediction(predicted, f"Predicted frame {predicted} — {provenance}")
+        return Prediction(projected.frame, f"Predicted frame {projected.frame} — {provenance}")

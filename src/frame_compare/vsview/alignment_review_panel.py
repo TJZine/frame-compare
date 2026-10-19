@@ -711,6 +711,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.api.timeline.clear_notches(_TIMELINE_GROUP)
         if (
             self._workspace is None
+            or self._saved
             or self._source_drafts[source_index].output_id != self._active_output_id
         ):
             return
@@ -764,7 +765,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.anchor_label.setText(
             "No anchor selected"
             if anchor is None
-            else f"Anchor: {self._source_drafts[anchor].role_label} frame {self._cohort.selected[anchor]} — {'saved' if self._saved and self._saved_basis == 'positions' and not self._kept_current else 'unsaved'}"
+            else f"Panel hints for pinned anchor: {self._source_drafts[anchor].role_label} — {self._source_drafts[anchor].presentation_name}, frame {self._cohort.selected[anchor]} — {'saved' if self._saved and self._saved_basis == 'positions' and not self._kept_current else 'unsaved'}"
         )
         self.reset_button.setEnabled(anchor is not None and not self._saved and positions)
         first_error = None
@@ -791,6 +792,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             elif self._kept_current and index:
                 outcome = _keep_saved_text(self._workspace.comparisons[index - 1])
             self.source_outcome_labels[index].setText(outcome)
+            self.source_outcome_labels[index].setVisible(not self._saved or index > 0)
             proposal = draft.error or (
                 f"{draft.origin} proposal: frame {draft.frame} — not selected"
                 if draft.frame is not None and draft.frame != selected
@@ -935,6 +937,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             return
         self._saved_basis = self._basis if not self._kept_current else None
         self._saved = True
+        self.api.timeline.clear_notches(_TIMELINE_GROUP)
         self.error_label.clear()
         for label in self.audio_summary_labels:
             label.hide()
@@ -1137,7 +1140,7 @@ def _keep_saved_text(comparison: AlignmentReviewComparisonMetadata) -> str:
 
 def _manual_saved_text(comparison: AlignmentReviewComparisonMetadata, offset: int) -> str:
     del comparison
-    return f"Alignment confirmed: {offset:+d}f — manually confirmed"
+    return f"Saved offset (Reference − Comparison): {offset:+d} frames — manually confirmed"
 
 
 def _canonical_pair(offset: int) -> tuple[int, int]:
