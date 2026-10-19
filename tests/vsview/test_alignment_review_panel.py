@@ -276,56 +276,223 @@ def _visit(panel: AlignmentReviewPanel, api: Any, output_index: int, frame: int)
     _call_hook(panel.on_current_voutput_changed, api.current_voutput, output_index)
 
 
+def _pin(panel: AlignmentReviewPanel, index: int, frame: int, *, anchor: bool = False) -> None:
+    panel.frame_inputs[index].setText(str(frame))
+    (panel.anchor_buttons if anchor else panel.select_buttons)[index].click()
+
+
 def _read_result(script: Path) -> dict[str, object]:
     path = script.with_name(f"{script.stem}.alignment-result.json")
     return cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
 
 
-def test_activation_starts_with_every_source_not_visited(tmp_path: Path) -> None:
-    panel, api, _script = _panel(tmp_path, comparison_count=2)
-
-    assert panel.progress_label.text() == "0/3 positions captured"
-    assert [label.text() for label in panel.source_status_labels] == [
-        "Captured position: not captured",
-        "Captured position: not captured",
-        "Captured position: not captured",
-    ]
-    assert not panel.use_positions_button.isEnabled()
-
-    _call_hook(panel.on_current_voutput_changed, api.current_voutput, 0)
-
-    assert panel.progress_label.text() == "1/3 positions captured"
-    assert panel.source_status_labels[0].text() == (
-        "Viewing: frame 12\nCaptured position: frame 12"
+def test_any_source_numeric_anchor_ab_before_reference_and_complete_save(tmp_path: Path) -> None:
+    panel, api, script = _panel(
+        tmp_path, comparison_count=2, frame_count=20000, suggestions=(504, -12)
     )
-    assert [label.text() for label in panel.source_status_labels[1:]] == [
-        "Captured position: not captured",
-        "Captured position: not captured",
-    ]
+    _pin(panel, 1, 96, anchor=True)
+    assert panel._cohort.anchor == 1
+    assert panel.source_outcome_labels[0].text().startswith("Predicted frame 600")
+    assert panel.source_outcome_labels[2].text().startswith("Predicted frame 612")
+    assert "Comparison 1: 96" in panel.anchor_buttons[1].text()
+    _pin(panel, 2, 612)
+    assert panel._cohort.selected == (None, 96, 612)
+    assert not panel.use_positions_button.isEnabled()
+    api.current_frame = -999
+    _call_hook(panel.on_current_frame_changed, 19000)
+    _visit(panel, api, 0, 17000)
+    assert [f.text() for f in panel.frame_inputs] == ["", "96", "612"]
+    _pin(panel, 0, 600)
+    panel.use_positions_button.click()
+    assert [
+        d["reference_source_frame"] - d["comparison_source_frame"]
+        for d in cast(list[dict[str, Any]], _read_result(script)["decisions"])
+    ] == [504, -12]
+    assert all(
+        not b.isEnabled()
+        for b in (
+            *panel.anchor_buttons,
+            *panel.select_buttons,
+            *panel.clear_buttons,
+            *panel.jump_buttons,
+        )
+    )
 
 
-def test_viewer_callbacks_update_only_current_source_and_revisits_replace_it(
+def test_prediction_navigation_checks_actual_output_and_seek_admission(tmp_path: Path) -> None:
+    panel, api, _ = _panel(tmp_path, comparison_count=2, frame_count=20000, suggestions=(504, -12))
+    calls = []
+    api.playback = SimpleNamespace(seek=lambda n: calls.append(n) or False)
+    _pin(panel, 1, 96, anchor=True)
+    _visit(panel, api, 2, 300)
+    api.current_voutput = api.voutputs[1]  # Stale UI enablement is not authority.
+    panel.jump_buttons[2].click()
+    assert not calls and panel.frame_inputs[2].text() == ""
+    assert "Switch to this source" in panel.error_label.text()
+    _visit(panel, api, 2, 300)
+    panel.jump_buttons[2].click()
+    assert calls == [612] and panel.frame_inputs[2].text() == "612"
+    assert "Predicted proposal" in panel.proposal_labels[2].text()
+    assert "not admitted" in panel.error_label.text()
+    assert panel._cohort.selected == (None, 96, None)
+    api.playback.seek = lambda n: calls.append(n) or True
+    panel.jump_buttons[2].click()
+    assert "Seek requested" in panel.error_label.text()
+    panel.frame_inputs[2].setText("613")
+    assert "Entered proposal" in panel.proposal_labels[2].text()
+    assert panel._cohort.selected[2] is None
+    panel.select_buttons[2].click()
+    assert panel._cohort.selected[2] == 613
+    assert panel.source_outcome_labels[2].text().startswith("Predicted frame 612")
+
+
+def test_reanchor_reset_cancel_clear_and_proposals_preserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    panel, _, _ = _panel(tmp_path, comparison_count=2)
+    _pin(panel, 1, 30, anchor=True)
+    _pin(panel, 0, 40)
+    _pin(panel, 2, 25)
+    panel.anchor_buttons[2].click()  # Existing selected moment, no modal/reset.
+    assert panel._cohort.anchor == 2 and panel._cohort.selected == (40, 30, 25)
+    panel.frame_inputs[2].setText("26")
+    monkeypatch.setattr(panel, "_confirm_reset", lambda _: False)
+    panel.anchor_buttons[2].click()
+    assert panel._cohort.selected == (40, 30, 25)
+    monkeypatch.setattr(panel, "_confirm_reset", lambda _: True)
+    panel.anchor_buttons[2].click()
+    assert panel._cohort.selected == (None, None, 26)
+    assert [f.text() for f in panel.frame_inputs] == ["40", "30", "26"]
+    panel.select_buttons[0].click()
+    panel.select_buttons[1].click()
+    panel.clear_buttons[1].click()
+    assert panel._cohort.selected == (40, None, 26)
+    panel.reset_button.click()
+    assert panel._cohort.anchor is None and panel._cohort.selected == (None, None, None)
+
+
+def test_reset_confirmation_revalidates_reload_and_old_row_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    panel, _, _ = _panel(tmp_path)
+    _pin(panel, 0, 10, anchor=True)
+    old_binding = panel._binding(1)
+    panel.frame_inputs[0].setText("11")
+
+    def reload_during_confirmation(_message: str) -> bool:
+        _call_hook(panel.on_workspace_loaded)
+        return True
+
+    monkeypatch.setattr(panel, "_confirm_reset", reload_during_confirmation)
+    panel.anchor_buttons[0].click()
+    assert panel._cohort.selected == (None, None)
+    panel.frame_inputs[1].setText("12")
+    panel._row_action(1, "anchor", old_binding)
+    assert panel._cohort.selected == (None, None)
+
+
+def test_invalid_new_proposal_keeps_complete_pins_and_failed_write_editable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    panel, api, script = _panel(tmp_path)
+    _pin(panel, 0, 0, anchor=True)
+    _pin(panel, 1, 0)
+    panel.frame_inputs[1].setText("200")
+    assert not panel.select_buttons[1].isEnabled()
+    assert panel._cohort.selected == (0, 0) and panel.use_positions_button.isEnabled()
+
+    def fail(*args: object) -> None:
+        raise OSError("private path")
+
+    monkeypatch.setattr(
+        "frame_compare.vsview.alignment_review_panel.write_alignment_review_result", fail
+    )
+    panel.use_positions_button.click()
+    assert panel._cohort.selected == (0, 0) and not panel._saved
+    assert panel.anchor_buttons[0].isEnabled() and panel.keep_button.isEnabled()
+    assert "private path" not in panel.error_label.text()
+    api.file_path = script.with_name("another-session.py")
+    panel._save_positions()
+    assert not script.with_name(f"{script.stem}.alignment-result.json").exists()
+
+
+def test_known_offset_hide_restores_source_basis_without_losing_drafts(tmp_path: Path) -> None:
+    panel, _, _ = _panel(tmp_path)
+    _pin(panel, 1, 20, anchor=True)
+    panel.manual_toggle.click()
+    panel.basis_selector.setCurrentIndex(1)
+    panel.offset_inputs[0].setText("+12")
+    assert panel.use_positions_button.isEnabled()
+    panel.manual_toggle.click()
+    assert panel._basis == "positions" and panel.offset_inputs[0].text() == "+12"
+    assert panel._cohort.selected == (None, 20) and not panel.use_positions_button.isEnabled()
+
+
+def test_known_offset_save_does_not_mark_unsubmitted_visual_pins_saved(tmp_path: Path) -> None:
+    panel, _, script = _panel(tmp_path)
+    _pin(panel, 1, 20, anchor=True)
+    panel.manual_toggle.click()
+    panel.basis_selector.setCurrentIndex(1)
+    panel.offset_inputs[0].setText("+5")
+    panel.use_positions_button.click()
+    assert panel._saved and panel._cohort.selected == (None, 20)
+    assert "unsaved" in panel.anchor_label.text()
+    assert panel.source_status_labels[1].text().endswith("unsaved")
+    assert (
+        cast(list[dict[str, Any]], _read_result(script)["decisions"])[0]["reference_source_frame"]
+        == 5
+    )
+
+
+def test_unknown_anchor_hints_allow_manual_matching_and_explicit_reference_reanchor(
     tmp_path: Path,
 ) -> None:
+    panel, _, _ = _panel(tmp_path, comparison_count=2, suggestions=(None, -12))
+    _pin(panel, 1, 10, anchor=True)
+    assert "Unavailable" in panel.source_outcome_labels[2].text()
+    _pin(panel, 0, 20)
+    assert "Unavailable" in panel.source_outcome_labels[2].text()
+    panel.anchor_buttons[0].click()
+    assert panel._cohort.selected == (20, 10, None)
+    assert panel.source_outcome_labels[2].text().startswith("Predicted frame 32")
+
+
+def test_duplicate_long_source_names_keep_role_identity_on_numeric_actions(tmp_path: Path) -> None:
+    panel, api, _ = _panel(tmp_path, comparison_count=2)
+    name = "A very long identical comparison name " * 3
+    for output in api.voutputs[1:]:
+        output.kwargs[ALIGNMENT_REVIEW_METADATA_NAME_KEY] = name
+    _call_hook(panel.on_workspace_loaded)
+    _pin(panel, 2, 0, anchor=True)
+    assert panel.anchor_buttons[2].text() == "Anchor Comparison 2: 0"
+    assert name in panel.anchor_buttons[2].accessibleName()
+    assert "Comparison 2" in panel.anchor_buttons[2].toolTip()
+    assert panel._cohort.selected == (None, None, 0)
+
+
+def test_activation_starts_with_no_implicit_proposals_or_pins(tmp_path: Path) -> None:
     panel, api, _script = _panel(tmp_path, comparison_count=2)
-    _visit(panel, api, 0, 40)
-    _visit(panel, api, 1, 31)
+    assert panel.progress_label.text() == "0/3 frames selected"
+    assert [f.text() for f in panel.frame_inputs] == ["", "", ""]
+    assert panel._cohort.selected == (None, None, None)
+    _call_hook(panel.on_current_voutput_changed, api.current_voutput, 0)
+    assert panel._cohort.selected == (None, None, None)
+    assert [f.text() for f in panel.frame_inputs] == ["", "", ""]
+    assert not panel.use_positions_button.isEnabled()
 
-    assert panel.source_status_labels[0].text() == "Captured position: frame 40"
-    assert panel.source_status_labels[1].text() == (
-        "Viewing: frame 31\nCaptured position: frame 31"
-    )
-    assert panel.source_status_labels[2].text() == "Captured position: not captured"
-    assert panel.source_outcome_labels[1].text().startswith("+9f")
 
-    api.current_frame = 29
-    _call_hook(panel.on_current_frame_changed, 29)
-
-    assert panel.source_status_labels[0].text() == "Captured position: frame 40"
-    assert panel.source_status_labels[1].text() == (
-        "Viewing: frame 29\nCaptured position: frame 29"
-    )
-    assert panel.source_outcome_labels[1].text().startswith("+11f")
+def test_callbacks_browsing_and_edits_leave_explicit_pins_unchanged(tmp_path: Path) -> None:
+    panel, api, _script = _panel(tmp_path, comparison_count=2)
+    _pin(panel, 1, 31, anchor=True)
+    _pin(panel, 2, 29)
+    panel.frame_inputs[2].setText("28")
+    for index, n in ((0, 199), (1, 0), (2, 198)):
+        _visit(panel, api, index, n)
+        _call_hook(panel.on_current_frame_changed, n)
+    assert panel._cohort.selected == (None, 31, 29)
+    assert [f.text() for f in panel.frame_inputs] == ["", "31", "28"]
+    assert panel._active_output_id == 2
+    assert "Comparison 2: 28" in panel.select_buttons[2].text()
 
 
 def test_panel_is_inert_for_ordinary_workspace(tmp_path: Path) -> None:
@@ -420,8 +587,7 @@ def test_plugin_hook_and_native_accessibility_contract(tmp_path: Path) -> None:
     assert AlignmentReviewPanel.display_name == "Frame Compare Alignment Review"
     assert panel.guidance_label.wordWrap()
     assert panel.guidance_label.text() == (
-        "To confirm a new alignment, unlink the playheads and position each source on the "
-        "same visible moment. Or keep the current alignment."
+        "Choose an anchor, then select matching frame numbers in the other sources."
     )
     assert panel.error_label.accessibleName() == "Alignment review error"
     assert panel.manual_toggle.accessibleName() == "Enter alignment manually"
@@ -429,7 +595,7 @@ def test_plugin_hook_and_native_accessibility_contract(tmp_path: Path) -> None:
     assert panel.audio_detail_groups[0].title() == "Audio evidence details — Comparison 1"
     assert not panel.audio_detail_groups[0].isChecked()
     assert not panel.manual_group.isVisible()
-    assert panel.use_positions_button.text() == "Confirm these aligned positions"
+    assert panel.use_positions_button.text() == "Save selected alignment"
 
 
 def test_evidence_details_toggle_works_from_keyboard_and_stays_collapsed_by_default(
@@ -718,10 +884,8 @@ def test_unavailable_suggestions_leave_honest_whole_set_keep_available(
 ) -> None:
     panel, _api, script = _panel(tmp_path, suggestion=None, comparison_count=2)
 
-    assert [label.text() for label in panel.source_outcome_labels[1:]] == [
-        "No usable audio candidate (no usable audio signal) — NOT APPLIED",
-        "No usable audio candidate (no usable audio signal) — NOT APPLIED",
-    ]
+    assert all("No usable audio candidate" in label.text() for label in panel.audio_summary_labels)
+    assert all(label.text() == "Choose an anchor" for label in panel.source_outcome_labels)
     assert "remain unresolved" in panel.keep_help_label.text()
     assert panel.keep_button.isEnabled()
 
@@ -732,8 +896,7 @@ def test_unavailable_suggestions_leave_honest_whole_set_keep_available(
         {"comparison_key": "ref:comparison-1", "action": "keep_current"},
         {"comparison_key": "ref:comparison-2", "action": "keep_current"},
     ]
-    assert "Alignment choices saved" in panel.progress_label.text()
-    assert panel.progress_label.text() == "Alignment choices saved"
+    assert panel.progress_label.text() == "Keep decision saved — selected lineup was not confirmed"
     assert panel.guidance_label.text() == "Close VSView to resume Frame Compare."
     assert panel.keep_help_label.isHidden()
     assert not panel.use_positions_button.isEnabled()
@@ -741,39 +904,30 @@ def test_unavailable_suggestions_leave_honest_whole_set_keep_available(
     assert all("retained" in label.text() for label in panel.source_outcome_labels[1:])
 
 
-def test_markers_use_only_owned_group_and_role_relevant_bounded_suggestions(
-    tmp_path: Path,
-) -> None:
+def test_markers_follow_explicit_anchor_and_active_source_only(tmp_path: Path) -> None:
     panel, api, _script = _panel(tmp_path, comparison_count=2)
-    _visit(panel, api, 0, 20)
-
-    assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", False)
-    assert [marker[1] for marker in api.timeline.added] == [12, 12]
-    assert all(marker[2] == "#3daee9" for marker in api.timeline.added)
-
-    api.timeline.added.clear()
+    _visit(panel, api, 0, 100)
+    assert not api.timeline.added
+    _pin(panel, 0, 20, anchor=True)
+    assert api.timeline.added[-1][1] == 20
     _visit(panel, api, 1, 5)
-
-    assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", False)
-    assert api.timeline.added[0][0:3] == (
-        "frame_compare_alignment_review",
-        0,
-        "#d79b35",
-    )
-    assert {identifier for identifier, _update in api.timeline.cleared} == {
+    assert api.timeline.added[-1][1] == 8
+    assert api.timeline.added[-1][3].startswith("Predicted frame 8")
+    assert {identifier for identifier, _ in api.timeline.cleared} == {
         "frame_compare_alignment_review"
     }
 
 
 def test_out_of_range_reference_suggestions_publish_no_marker(tmp_path: Path) -> None:
     panel, api, _script = _panel(tmp_path, suggestion=250)
+    _pin(panel, 1, 0, anchor=True)
 
     _visit(panel, api, 0, 12)
 
     assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", True)
     assert api.timeline.added == []
     details_label = cast(QLabel, panel.audio_detail_groups[0].findChild(QLabel))
-    assert "marker omitted" in details_label.text().lower()
+    assert "outside raw source bounds" in details_label.text().lower()
 
 
 def test_provisional_zero_is_visible_but_never_seeds_manual_authority(tmp_path: Path) -> None:
@@ -786,14 +940,16 @@ def test_provisional_zero_is_visible_but_never_seeds_manual_authority(tmp_path: 
     assert "Provisional audio candidate: +0f — NOT APPLIED" in panel.audio_summary_labels[0].text()
     assert [field.text() for field in panel.frame_inputs] == ["", ""]
     assert [field.text() for field in panel.offset_inputs] == [""]
-    assert panel.progress_label.text() == "0/2 positions captured"
+    assert panel.progress_label.text() == "0/2 frames selected"
     assert not panel.use_positions_button.isEnabled()
 
     _visit(panel, api, 0, 12)
 
-    assert panel.progress_label.text() == "1/2 positions captured"
+    assert panel.progress_label.text() == "0/2 frames selected"
     assert not panel.use_positions_button.isEnabled()
-    assert api.timeline.added[0][3].startswith("[PROVISIONAL — NOT APPLIED] +0f")
+    _pin(panel, 0, 12, anchor=True)
+    _visit(panel, api, 1, 12)
+    assert "Provisional opening hint" in api.timeline.added[-1][3]
 
     panel.keep_button.click()
 
@@ -824,14 +980,14 @@ def test_mixed_states_save_authority_labels_and_preserve_evidence(
 
     original_summaries = [label.text() for label in panel.audio_summary_labels]
     launch_note = panel.launch_label_explanation.text()
-    assert "evidence from session open" in launch_note
-    assert "do not show or move the other playhead" in launch_note
+    assert "Original frame number" in launch_note
+    assert "Predictions, selections and saved choices" in launch_note
     original_details = [
         cast(QLabel, details.findChild(QLabel)).text() for details in panel.audio_detail_groups
     ]
     if confirm:
         for output_index, frame in enumerate((10, 8, 12, 9, 11)):
-            _visit(panel, api, output_index, frame)
+            _pin(panel, output_index, frame, anchor=output_index == 0)
 
         panel.use_positions_button.click()
 
@@ -860,12 +1016,7 @@ def test_mixed_states_save_authority_labels_and_preserve_evidence(
         ]
         assert [field.text() for field in panel.offset_inputs] == ["", "", "", ""]
         _visit(panel, api, 0, 0)
-        marker_text = [cast(str, marker[3]) for marker in api.timeline.added]
-        assert marker_text == [
-            "[ACCEPTED AUDIO] +0f — reference frame 0",
-            "[PROVISIONAL — NOT APPLIED] +0f — reference frame 0",
-            "[MANUAL ALIGNMENT] +0f — reference frame 0",
-        ]
+        assert api.timeline.added == []  # Entry/browsing is not an anchor.
 
         panel.keep_button.click()
 
@@ -894,7 +1045,7 @@ def test_mixed_states_save_authority_labels_and_preserve_evidence(
         api.current_frame = 150
         _call_hook(panel.on_current_frame_changed, 150)
         assert all("Viewing:" not in label.text() for label in panel.source_status_labels)
-        assert panel.source_status_labels[-1].text() == "Captured position: frame 11"
+        assert panel.source_status_labels[-1].text() == "Selected: frame 11 — saved"
     else:
         script.with_name(f"{script.stem}.alignment-result.json").unlink()
         _call_hook(panel.on_workspace_loaded)
@@ -914,7 +1065,9 @@ def test_manual_authority_stays_distinct_from_retained_provisional_attempt(
     assert "Manually confirmed alignment: +0f — APPLIED" in summary
     assert "Provisional audio candidate: +0f — NOT APPLIED" in summary
     _visit(panel, api, 0, 0)
-    assert api.timeline.added[0][3] == "[MANUAL ALIGNMENT] +0f — reference frame 0"
+    _pin(panel, 0, 0, anchor=True)
+    _visit(panel, api, 1, 0)
+    assert api.timeline.added[-1][3] == "Predicted frame 0 — Opening alignment hint"
 
 
 @pytest.mark.parametrize(
@@ -969,8 +1122,10 @@ def test_authority_origin_consistently_drives_alignment_presentation(
 
     _visit(panel, api, 0, 0)
 
-    assert api.timeline.added[0][2] == ("#8e6ccf" if manual else "#3daee9")
-    assert api.timeline.added[0][3] == f"{marker_prefix} +0f — reference frame 0"
+    _pin(panel, 0, 0, anchor=True)
+    _visit(panel, api, 1, 0)
+    assert api.timeline.added[-1][3] == "Predicted frame 0 — Opening alignment hint"
+    assert marker_prefix  # Origin-specific evidence remains in summary, not a second marker system.
 
     panel.keep_button.click()
 
@@ -982,15 +1137,15 @@ def test_authority_origin_consistently_drives_alignment_presentation(
 
 
 def test_one_primary_action_saves_complete_viewer_positions(tmp_path: Path) -> None:
-    panel, api, script = _panel(tmp_path, comparison_count=2)
-    _visit(panel, api, 0, 120)
-    _visit(panel, api, 1, 108)
-    _visit(panel, api, 2, 127)
+    panel, _api, script = _panel(tmp_path, comparison_count=2)
+    _pin(panel, 0, 120, anchor=True)
+    _pin(panel, 1, 108)
+    _pin(panel, 2, 127)
 
-    assert panel.progress_label.text() == "3/3 positions captured — ready to confirm"
+    assert panel.progress_label.text() == "3/3 frames selected — ready to save"
     assert panel.use_positions_button.isEnabled()
-    assert panel.source_outcome_labels[1].text() == "+12f — Trim 12 frame(s) from reference"
-    assert panel.source_outcome_labels[2].text() == ("-7f — Trim 7 frame(s) from this comparison")
+    assert panel.source_outcome_labels[1].text().startswith("Predicted frame 108")
+    assert panel._cohort.selected == (120, 108, 127)
 
     panel.use_positions_button.click()
 
@@ -1022,36 +1177,25 @@ def test_one_primary_action_saves_complete_viewer_positions(tmp_path: Path) -> N
     assert not panel.manual_toggle.isEnabled()
 
 
-def test_manual_source_frames_feed_same_draft_and_viewer_can_replace_origin(
+def test_numeric_proposals_require_explicit_actions_and_ignore_viewer_counter(
     tmp_path: Path,
 ) -> None:
     panel, api, script = _panel(tmp_path)
-    panel.manual_toggle.click()
-
-    assert not panel.manual_group.isHidden()
-    assert panel.progress_label.text() == "0/2 source frames entered"
     panel.frame_inputs[0].setText("120")
     panel.frame_inputs[1].setText("bad")
-    assert panel.frame_inputs[1].text() == "bad"
     assert "whole number" in panel.error_label.text()
-    assert "Needs attention" in panel.source_status_labels[1].text()
     assert not panel.use_positions_button.isEnabled()
-
     panel.frame_inputs[1].setText("108")
-    assert panel.progress_label.text() == "2/2 source frames entered — ready to confirm"
-    assert panel.source_status_labels[0].text() == "Entered source frame: 120"
-    assert panel.source_status_labels[1].text() == "Entered source frame: 108"
-    assert panel.use_positions_button.isEnabled()
-
+    assert not panel.use_positions_button.isEnabled()
+    panel.anchor_buttons[0].click()
+    panel.select_buttons[1].click()
     _visit(panel, api, 1, 107)
-    assert panel.source_status_labels[1].text() == ("Viewing: frame 107\nEntered source frame: 107")
+    assert panel.frame_inputs[1].text() == "108"
+    assert panel._cohort.selected == (120, 108)
     panel.use_positions_button.click()
-
     assert (
-        cast(list[dict[str, object]], _read_result(script)["decisions"])[0][
-            "comparison_source_frame"
-        ]
-        == 107
+        cast(list[dict[str, Any]], _read_result(script)["decisions"])[0]["comparison_source_frame"]
+        == 108
     )
 
 
@@ -1060,21 +1204,21 @@ def test_known_offsets_are_whole_set_and_serialize_canonical_pairs(tmp_path: Pat
     panel.manual_toggle.click()
     panel.basis_selector.setCurrentIndex(1)
 
-    assert panel.basis_status_label.text() == "Input basis: Known offsets"
+    assert panel.basis_status_label.text().startswith("Input basis: Known offsets")
     assert panel.guidance_label.text() == (
         "Enter the signed reference-minus-comparison offsets, then confirm. Or keep the "
         "current alignment."
     )
     assert panel.use_positions_button.text() == "Confirm these known offsets"
     assert not panel.offset_inputs_group.isHidden()
-    assert panel.frame_inputs_group.isHidden()
+    assert all(f.isReadOnly() for f in panel.frame_inputs)
     panel.offset_inputs[0].setText("+12")
     assert not panel.use_positions_button.isEnabled()
     panel.offset_inputs[1].setText("-7")
 
-    assert panel.progress_label.text() == "2/2 offsets entered — ready to confirm"
-    assert panel.source_status_labels[1].text() == "Entered offset: +12f"
-    assert panel.source_outcome_labels[2].text() == ("-7f — Trim 7 frame(s) from this comparison")
+    assert panel.progress_label.text() == "2/2 offsets entered — ready to save"
+    assert panel.source_outcome_labels[1].text() == "Entered offset: +12f"
+    assert panel.source_outcome_labels[2].text() == "Entered offset: -7f"
     assert panel.use_positions_button.isEnabled()
     panel.use_positions_button.click()
 
@@ -1113,7 +1257,7 @@ def test_known_offset_validation_preserves_text_and_blocks_save(
 
     assert panel.offset_inputs[0].text() == text
     assert error in panel.error_label.text()
-    assert "Needs attention" in panel.source_status_labels[1].text()
+    assert panel.error_label.text()
     assert not panel.use_positions_button.isEnabled()
 
 
@@ -1125,21 +1269,21 @@ def test_active_basis_scopes_validation_errors_and_restores_inactive_draft(
     panel.frame_inputs[0].setText("200")
 
     assert "Reference frame must be between 0 and 199" in panel.error_label.text()
-    assert "Needs attention" in panel.source_status_labels[0].text()
+    assert "must be between" in panel.proposal_labels[0].text()
 
     panel.basis_selector.setCurrentIndex(1)
     panel.offset_inputs[0].setText("+5")
 
-    assert panel.progress_label.text() == "1/1 offsets entered — ready to confirm"
-    assert panel.source_status_labels[0].text() == "Captured position: not captured"
-    assert panel.source_status_labels[1].text() == "Entered offset: +5f"
+    assert panel.progress_label.text() == "1/1 offsets entered — ready to save"
+    assert panel.source_status_labels[0].text() == "Selected: not selected"
+    assert panel.source_outcome_labels[1].text() == "Entered offset: +5f"
     assert panel.error_label.text() == ""
     assert panel.use_positions_button.isEnabled()
 
     panel.basis_selector.setCurrentIndex(0)
     assert panel.frame_inputs[0].text() == "200"
     assert "Reference frame must be between 0 and 199" in panel.error_label.text()
-    assert "Needs attention" in panel.source_status_labels[0].text()
+    assert "must be between" in panel.proposal_labels[0].text()
     assert not panel.use_positions_button.isEnabled()
 
 
@@ -1148,6 +1292,8 @@ def test_switching_basis_never_combines_readiness(tmp_path: Path) -> None:
     panel.manual_toggle.click()
     panel.frame_inputs[0].setText("50")
     panel.frame_inputs[1].setText("45")
+    panel.anchor_buttons[0].click()
+    panel.select_buttons[1].click()
     assert panel.use_positions_button.isEnabled()
 
     panel.basis_selector.setCurrentIndex(1)
@@ -1156,12 +1302,11 @@ def test_switching_basis_never_combines_readiness(tmp_path: Path) -> None:
     assert not panel.use_positions_button.isEnabled()
 
     panel.basis_selector.setCurrentIndex(0)
-    assert panel.progress_label.text() == "2/2 source frames entered — ready to confirm"
+    assert panel.progress_label.text() == "2/2 frames selected — ready to save"
     assert panel.guidance_label.text() == (
-        "To confirm a new alignment, unlink the playheads and position each source on the "
-        "same visible moment. Or keep the current alignment."
+        "Choose an anchor, then select matching frame numbers in the other sources."
     )
-    assert panel.use_positions_button.text() == "Confirm these aligned positions"
+    assert panel.use_positions_button.text() == "Save selected alignment"
     assert panel.use_positions_button.isEnabled()
 
 
@@ -1180,14 +1325,13 @@ def test_workspace_reload_restores_collapsed_source_frame_manual_defaults(
     assert panel.manual_toggle.text() == "Enter alignment manually..."
     assert panel.manual_group.isHidden()
     assert panel.basis_selector.currentText() == "Source frames"
-    assert not panel.frame_inputs_group.isHidden()
+    assert not panel.lineup_group.isHidden()
     assert panel.offset_inputs_group.isHidden()
-    assert panel.basis_status_label.text() == "Input basis: Source frames"
+    assert panel.basis_status_label.text() == "Input basis: Selected source frames"
     assert panel.guidance_label.text() == (
-        "To confirm a new alignment, unlink the playheads and position each source on the "
-        "same visible moment. Or keep the current alignment."
+        "Choose an anchor, then select matching frame numbers in the other sources."
     )
-    assert panel.use_positions_button.text() == "Confirm these aligned positions"
+    assert panel.use_positions_button.text() == "Save selected alignment"
 
 
 def test_save_failure_stays_editable_unsaved_and_redacted(
@@ -1211,9 +1355,7 @@ def test_save_failure_stays_editable_unsaved_and_redacted(
     assert "OSError" in panel.error_label.text()
     assert str(tmp_path) not in panel.error_label.text()
     assert "saved" not in panel.progress_label.text().lower()
-    assert (
-        "Saved choices and current status are shown here" in panel.launch_label_explanation.text()
-    )
+    assert "selections and saved choices are shown here" in panel.launch_label_explanation.text()
 
 
 @pytest.mark.parametrize("next_workspace", ["ordinary", "malformed"])
@@ -1256,7 +1398,7 @@ def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
     assert "Check 1:01:01 — reference 13,123 ↔ comparison 12,880 (+243f)" in summary
     assert [field.text() for field in panel.frame_inputs] == ["", ""]
     assert [field.text() for field in panel.offset_inputs] == [""]
-    assert panel.progress_label.text() == "0/2 positions captured"
+    assert panel.progress_label.text() == "0/2 frames selected"
     assert not panel.use_positions_button.isEnabled()
 
     details = panel.audio_detail_groups[0]
@@ -1402,7 +1544,7 @@ def test_evidence_is_built_once_per_comparison_and_replaced_with_workspace(
         _visit(panel, api, 1, frame + 1)
     assert builds == 2
     assert [label.text() for label in panel.audio_summary_labels] == summaries
-    assert "frame 4" in panel.source_status_labels[0].text()
+    assert panel._cohort.selected[0] is None and panel.frame_inputs[0].text() == ""
 
     api.voutputs[1].kwargs[ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY] = _provisional_audio_review(
         frame_offset=9
@@ -1410,6 +1552,6 @@ def test_evidence_is_built_once_per_comparison_and_replaced_with_workspace(
     _call_hook(panel.on_workspace_loaded)
     assert builds == 4
     assert "+9f" in panel.audio_summary_labels[0].text()
-    assert "not captured" in panel.source_status_labels[0].text()
+    assert "not selected" in panel.source_status_labels[0].text()
     _visit(panel, api, 0, 12)
     assert builds == 4

@@ -268,7 +268,10 @@ def test_generated_ready_block_output_cases(
     if case == "utf8":
         assert "VSView is open \u00b7 waiting for you" in output
         assert "Open Tool Panel \u2192 Frame Compare Alignment Review." in output
-        assert "Unlink playheads, then position every source on the same visible moment." in output
+        assert (
+            "Choose any source/Original frame as anchor; select matching numbers in the panel."
+            in output
+        )
         assert (
             "Save the alignment in the panel, then close VSView to continue Frame Compare."
             in output

@@ -28,83 +28,28 @@ from tests.alignment_review_test_support import audio_review, provisional_audio_
 
 
 def model(*, offset: int | None = 504, role: overlay.Role = "CMP", count: int = 8):
+    del offset  # Older native failure fixtures vary offsets; labels now contain only identity/n.
     return overlay.LaunchOverlay(
-        role,
-        "FoRM1080p" if role == "CMP" else "MainFrame4K",
-        count,
-        (
-            overlay.LaunchPair(
-                "stable-key",
-                1,
-                "MainFrame4K" if role == "CMP" else "FoRM1080p",
-                20_000,
-                offset,
-                "Provisional audio suggestion at session open",
-            ),
-        ),
-        1 if role == "CMP" else 0,
+        role, "FoRM1080p" if role == "CMP" else "MainFrame4K", count, 1 if role == "CMP" else 0
     )
 
 
-@pytest.mark.parametrize(
-    ("role", "n", "d", "expected"),
-    [
-        ("CMP", 10490, 504, 10994),
-        ("REF", 10994, 504, 10490),
-        ("CMP", 10994, -504, 10490),
-        ("REF", 10490, -504, 10994),
-        ("CMP", 0, 0, 0),
-        ("CMP", 0, None, None),
-        ("REF", 503, 504, None),
-        ("CMP", 19999, 1, None),
-        ("CMP", 0, -1, None),
-        ("CMP", 0, 10**40, None),
-    ],
-)
-def test_original_frame_mapping_independent_oracle(role, n, d, expected):
-    assert overlay.suggested_frame(n, 20_000, 20_000, d, role=role) == expected
-
-
-@pytest.mark.parametrize(
-    "n,count,offset",
-    [(True, 8, 0), (-1, 8, 0), (8, 8, 0), (0, True, 0), (0, 8, False), (0, 8, 1.2)],
-)
-def test_invalid_numeric_inputs_are_rejected(n, count, offset):
+@pytest.mark.parametrize("n", [True, -1, 8, 1.2])
+def test_invalid_original_frames_are_rejected(n):
     with pytest.raises(ValueError):
-        overlay.suggested_frame(n, count, 20, offset, role="CMP")
+        model().live_lines(n)
 
 
-def test_sign_reversal_negative_control_and_restoration(monkeypatch):
-    original = overlay.suggested_frame
-
-    def known_pair():
-        assert model(count=20_000).target(10490, model().pairs[0]) == 10994
-
-    known_pair()
-    with monkeypatch.context() as mutation:
-        mutation.setattr(
-            overlay,
-            "suggested_frame",
-            lambda n, own, other, offset, *, role: original(n, own, other, -offset, role=role),
-        )
-        with pytest.raises(AssertionError):
-            known_pair()
-    known_pair()
-
-
-def test_launch_copy_has_named_direction_and_no_static_current_frame():
-    cmp = model(count=20_000)
-    ref = model(count=20_000, role="REF")
-    assert "Suggested match in MainFrame4K: 10,994" in cmp.live_lines(10490)
-    assert "Suggested match in FoRM1080p: 10,490" in ref.live_lines(10994)
-    static = "\n".join(cmp.static_lines())
-    assert "504 original frames" in static
-    assert "Matching FoRM1080p frame numbers are 504 lower than MainFrame4K" in static
-    assert "Original frame " not in static and "Suggested match" not in static
-    assert "504 higher than FoRM1080p" in "\n".join(ref.static_lines())
-    assert "504 higher than MainFrame4K" in "\n".join(model(offset=-504).static_lines())
-    assert "Same original frame numbers" in "\n".join(model(offset=0).static_lines())
-    assert "Offset unavailable at session open" in "\n".join(model(offset=None).static_lines())
+def test_native_label_copy_is_source_and_number_only():
+    m = model(count=20000)
+    assert m.live_lines(10490) == (
+        "CMP 1 - FoRM1080p",
+        "Original frame 10,490",
+        "Select frame numbers in Alignment Review",
+    )
+    static = "\n".join(m.static_lines())
+    assert "FoRM1080p" in static and "Static labels" in static
+    assert "Original frame " not in static and "Suggested" not in static and "504" not in static
 
 
 def test_workspace_authority_precedence_identity_names_and_mixed_reference():
@@ -144,85 +89,18 @@ def test_workspace_authority_precedence_identity_names_and_mixed_reference():
     )
     names = {0: "\n日本語\x00" * 20, 101: "\n日本語\x00" * 20, 102: "same", 103: "same"}
     models = overlay.build_launch_overlays(workspace, names)
-    first, second = models[101], models[102]
-    assert first.pairs[0].offset == 0  # current manual authority beats retained +504
-    assert first.pairs[0].comparison_key == "key-1" and second.pairs[0].offset == -504
-    assert "Manually confirmed" in first.pairs[0].classification
-    assert "Provisional" in second.pairs[0].classification
-    assert "Reused audio alignment" in models[103].pairs[0].classification
     assert len({m.name for m in models.values()}) == 4
     assert all(
         overlay._cells(m.name) <= 24 and "\n" not in m.name and "\0" not in m.name
         for m in models.values()
     )
-    assert "CMP 1" in first.name and "REF" in models[0].name
-    ref_lines = "\n".join(models[0].live_lines(10490))
-    assert "+1 more comparisons - see Alignment Review" in ref_lines
-    assert "Manually confirmed" in ref_lines and "Provisional" in ref_lines
-    assert "Reused audio" not in ref_lines  # third comparison goes to panel
-    assert names[101].startswith("\n")  # builder does not mutate source presentation facts
+    assert "CMP 1" in models[101].name and "REF" in models[0].name
+    assert models[101].ordinal == 1 and models[102].own_count == 19998
+    assert names[101].startswith("\n")
     tricky = overlay.build_launch_overlays(
         workspace, {0: "Reference", 101: "Same", 102: "Same", 103: "Same (CMP 1)"}
     )
     assert len({m.name for m in tricky.values()}) == 4
-
-
-@pytest.mark.parametrize("second_offset", [None, 0])
-@pytest.mark.parametrize("static", [False, True])
-def test_unavailable_reference_rows_keep_comparison_identity(monkeypatch, second_offset, static):
-    unavailable = "No alignment suggestion at session open"
-    first = overlay.LaunchPair("ref:a", 1, "Comparison A", 8, None, unavailable)
-    second = overlay.LaunchPair(
-        "ref:b",
-        2,
-        "Comparison B",
-        8,
-        second_offset,
-        unavailable if second_offset is None else "Accepted audio alignment at session open",
-    )
-    launch = overlay.LaunchOverlay("REF", "Reference", 8, (first, second))
-    expected = "Offset unavailable at session open for Comparison A - match manually"
-    other = "Offset unavailable at session open for Comparison B - match manually"
-    for lines in (launch.live_lines(0), launch.static_lines()):
-        assert expected in lines
-        assert not any(line.startswith("Suggested match in Comparison A:") for line in lines)
-        if second_offset is None:
-            assert other in lines
-
-    vs = native()
-    source = vs.core.std.BlankClip(
-        width=1280, height=720, format=vs.RGB24, length=8, color=[33, 45, 57]
-    )
-    prepare_raster, prepare_layout = overlay._raster, overlay._live_layout
-    prepared: dict[bool, list[str]] = {False: [], True: []}
-    preparing_live = False
-
-    def capture_raster(lines, *args):
-        prepared[preparing_live].extend(lines)
-        return prepare_raster(lines, *args)
-
-    def capture_layout(*args):
-        nonlocal preparing_live
-        if static:
-            raise ValueError("regression check forces static setup")
-        preparing_live = True
-        try:
-            return prepare_layout(*args)
-        finally:
-            preparing_live = False
-
-    monkeypatch.setattr(overlay, "_raster", capture_raster)
-    monkeypatch.setattr(overlay, "_live_layout", capture_layout)
-    node = overlay.apply_alignment_overlay(vs.core, source, launch)
-    assert node is not source
-    frame = node.get_frame(0)
-    assert not np.array_equal(np.asarray(frame[0]), np.asarray(source.get_frame(0)[0]))
-    rendered_lines = prepared[not static]
-    assert expected in rendered_lines
-    if second_offset is None:
-        assert other in rendered_lines
-    else:
-        assert "Comparison B" in " ".join(rendered_lines)
 
 
 def native():
@@ -294,9 +172,9 @@ def test_concrete_identity_pixels_and_cached_requests(monkeypatch):
         assert not np.array_equal(a, before[0])
         # Read actual painted number cells against independently specified values.
         # Do not call target()/live_lines() to derive the expected target digits.
-        expected_target = {0: "504", 1: "505", 2: "506", 5: "509", 7: "511"}[n]
         layout = layouts[0]
-        for row, text in zip(layout.rows, [str(n), expected_target], strict=True):
+        text = str(n)
+        for y0, x0 in [(layout.number_y, layout.number_x)]:
             height = layout.glyphs["0"].foreground.shape[0]
             width = (
                 sum(layout.advances[c] for c in text[:-1])
@@ -322,7 +200,7 @@ def test_concrete_identity_pixels_and_cached_requests(monkeypatch):
             expected = np.rint((33 * (1 - stroke) + 16 * stroke) * (1 - fg) + 235 * fg).astype(
                 np.uint8
             )
-            x, y = 10 + row.x, 10 + row.y
+            x, y = 10 + x0, 10 + y0
             assert np.array_equal(a[y : y + height, x : x + width], expected)
         assert_pixels(raw, before)
     delayed = coded_source(vs, delay=True)
@@ -498,7 +376,7 @@ def test_layout_fit_uses_static_or_explicit_raw_degradation():
     narrow = vs.core.std.BlankClip(width=180, height=360, format=vs.GRAY8, length=8, color=[90])
     static = overlay.apply_alignment_overlay(vs.core, narrow, model(), warn=warnings.append)
     assert static is not narrow
-    assert len(warnings) == 1 and "static session-open" in warnings[0]
+    assert warnings == []  # Minimal labels now fit live; fallback faults are covered separately.
     assert not np.array_equal(
         np.asarray(static.get_frame(5)[0]), np.asarray(narrow.get_frame(5)[0])
     )
@@ -545,6 +423,7 @@ def test_cross_source_selector_overlap_has_independent_outputs(monkeypatch):
 
 def test_runtime_wires_native_previews_using_strict_launch_workspace(tmp_path, monkeypatch):
     vs = native()
+    monkeypatch.setenv("VSVIEW_HDR", "1")
     from frame_compare.vsview import session_runtime as runtime
 
     sources = {name: coded_source(vs) for name in ("ref", "a", "b")}
@@ -560,7 +439,8 @@ def test_runtime_wires_native_previews_using_strict_launch_workspace(tmp_path, m
     )
     registered = []
 
-    def register(clip, index, name, **metadata):
+    def register(clip, index, name, *, hdr, **metadata):
+        assert hdr is False
         assert loaded == ["ref", "a", "b"]
         registered.append((clip, index, name, metadata))
 
@@ -703,44 +583,75 @@ def test_antialias_pixels_match_full_frame_chroma_footprint_oracle(format_name):
     assert dict(out.props) == dict(frame.props)
 
 
-def test_tight_layout_reserves_full_numbers_and_complete_no_overlap_row():
+def test_tight_layout_reserves_complete_original_frame_number():
     count = 2**63 - 1
-    pair = overlay.LaunchPair(
-        "key", 1, "R", count, 0, "Provisional audio suggestion at session open"
-    )
-    m = overlay.LaunchOverlay("CMP", "C", count, (pair,), 1)
-    font = overlay._font(2160)
-    layout = overlay._live_layout(m, font, 3820, 2140)
+    m = overlay.LaunchOverlay("CMP", "C", count, 1)
+    layout = overlay._live_layout(m, overlay._font(2160), 3820, 2140)
     value = count - 1
     raster = layout.render(value)
     text = f"{value:,}"
-    for row in layout.rows:
-        x = row.x + sum(layout.advances[c] for c in text[:-1])
-        glyph = layout.glyphs[text[-1]].foreground
-        assert x + glyph.shape[1] <= raster.foreground.shape[1]
-        actual = raster.foreground[row.y : row.y + glyph.shape[0], x : x + glyph.shape[1]]
-        assert np.all(actual >= glyph)
-    missing = overlay.LaunchOverlay(
-        "CMP",
-        "C",
-        8,
-        (
-            overlay.LaunchPair(
-                "key",
-                1,
-                "A named comparison",
-                8,
-                504,
-                "Provisional audio suggestion at session open",
-            ),
-        ),
-        1,
+    x = layout.number_x + sum(layout.advances[c] for c in text[:-1])
+    glyph = layout.glyphs[text[-1]].foreground
+    actual = raster.foreground[
+        layout.number_y : layout.number_y + glyph.shape[0], x : x + glyph.shape[1]
+    ]
+    assert np.all(actual >= glyph)
+
+
+def test_narrow_native_digits_follow_wrapped_prefix_without_overwriting_it():
+    from math import ceil
+
+    from PIL import Image, ImageDraw
+
+    vs = native()
+    font = overlay._font(720)
+    # Measured width fits each word and the largest number, but not the full prefix.
+    width = ceil(max(font.getlength(word) for word in ("Original", "frame", "REF - A"))) + 8
+    assert font.getlength("Original frame") > width - 4
+    assert 3 * max(ceil(font.getlength(c)) for c in "0123456789,") + 4 < width
+    source = vs.core.std.BlankClip(
+        width=width + 20, height=720, format=vs.GRAY8, length=128, color=[90]
     )
-    layout = overlay._live_layout(missing, font, 3820, 2140)
-    rendered = layout.render(0)
-    row = layout.rows[1]
-    stamp = row.no_overlap
-    assert stamp is not None
-    expected = np.zeros_like(rendered.foreground[row.y : row.y + stamp.foreground.shape[0]])
-    expected[:, : stamp.foreground.shape[1]] = stamp.foreground
-    assert np.array_equal(rendered.foreground[row.y : row.y + expected.shape[0]], expected)
+    warnings = []
+    node = overlay.apply_alignment_overlay(
+        vs.core, source, overlay.LaunchOverlay("REF", "A", 128), warn=warnings.append
+    )
+    bbox = font.getbbox("Ag09")
+    step = ceil(bbox[3] - bbox[1]) + 7
+    # Independent physical rows: heading, two prefix words, then the numeric row.
+    # These masks deliberately do not use _live_layout's number_y or rendered masks.
+    for number in (0, 127):
+        foreground = Image.new("L", (width, 4 * step))
+        coverage = Image.new("L", foreground.size)
+        fg_draw, stroke_draw = ImageDraw.Draw(foreground), ImageDraw.Draw(coverage)
+        for row, text in enumerate(("REF - A", "Original", "frame", "")):
+            xy = (2, 2 + row * step - bbox[1])
+            fg_draw.text(xy, text, font=font, fill=255)
+            stroke_draw.text(xy, text, font=font, fill=255, stroke_width=2, stroke_fill=255)
+        # Independent per-digit masks combine by maximum, preserving antialiased
+        # edges where neighboring strokes overlap instead of painting over them.
+        fg_array, stroke_array = np.asarray(foreground).copy(), np.asarray(coverage).copy()
+        x = 4  # numeric slot origin plus the glyph mask's two-pixel inset
+        for char in str(number):
+            glyph_fg = Image.new("L", foreground.size)
+            glyph_stroke = Image.new("L", foreground.size)
+            xy = (x, 2 + 3 * step - bbox[1])
+            ImageDraw.Draw(glyph_fg).text(xy, char, font=font, fill=255)
+            ImageDraw.Draw(glyph_stroke).text(
+                xy, char, font=font, fill=255, stroke_width=2, stroke_fill=255
+            )
+            np.maximum(fg_array, np.asarray(glyph_fg), out=fg_array)
+            np.maximum(stroke_array, np.asarray(glyph_stroke), out=stroke_array)
+            x += ceil(font.getlength(char))
+        fg = fg_array.astype(np.float32) / 255
+        stroke = stroke_array.astype(np.float32) / 255
+        expected = np.rint((90 * (1 - stroke) + 16 * stroke) * (1 - fg) + 235 * fg).astype(np.uint8)
+        raw = source.get_frame(number)
+        before = frame_arrays(raw)
+        painted = node.get_frame(number)
+        actual = np.asarray(painted[0])[10 : 10 + 4 * step, 10 : 10 + width]
+        assert np.array_equal(actual, expected), (
+            "prefix rows or separate numeric row were overwritten"
+        )
+        assert_pixels(raw, before)
+    assert warnings == []

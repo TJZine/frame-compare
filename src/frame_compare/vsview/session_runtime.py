@@ -98,7 +98,9 @@ class _VideoNodeWithFps(Protocol):
 
 
 class OutputRegistrar(Protocol):
-    def __call__(self, clip: vs.VideoNode, index: int, name: str, **metadata: object) -> None: ...
+    def __call__(
+        self, clip: vs.VideoNode, index: int, name: str, *, hdr: bool, **metadata: object
+    ) -> None: ...
 
 
 class PreviewSourceLoader(Protocol):
@@ -358,7 +360,7 @@ class SessionConsole:
     ) -> list[str | _SectionKeyValue]:
         body: list[str | _SectionKeyValue] = [
             "1  Open Tool Panel " + self.arrow() + " Frame Compare Alignment Review.",
-            "2  Unlink playheads, then position every source on the same visible moment.",
+            "2  Choose any source/Original frame as anchor; select matching numbers in the panel.",
             "3  Save the alignment in the panel, then close VSView to continue Frame Compare.",
             "",
             *self._output_table_rows(reference, targets, short_names),
@@ -698,12 +700,15 @@ def run_session(data: SessionData, script_path: Path) -> None:
             for number, label, target, clip in prepared_comparisons
         ]
     try:
-        set_output(ref_clip, 0, "Reference", **_reference_metadata(session_id, reference))
+        set_output(
+            ref_clip, 0, "Reference", hdr=False, **_reference_metadata(session_id, reference)
+        )
         for comparison_number, _label, target, comparison_clip in prepared_comparisons:
             set_output(
                 comparison_clip,
                 comparison_number,
                 f"Comparison {comparison_number}",
+                hdr=False,
                 **_comparison_metadata(session_id, target, comparison_number),
             )
     except Exception as e:

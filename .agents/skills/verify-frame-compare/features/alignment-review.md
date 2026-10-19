@@ -28,19 +28,22 @@ stdout. The workflow checks TTY availability; an ordinary captured subprocess is
 not a substitute for a visible review session. Capture evidence alongside the
 interaction without suppressing that prerequisite.
 
-When the generated VSView session opens, choose **Tool Panel → Frame Compare
-Alignment Review**, unlink playheads, visit every source and leave each at the
-same visible moment. Observe the `positions captured — ready to confirm` state,
-then select **Confirm these aligned positions**. For known offsets, expand **Enter
-alignment manually...**, choose **Known offsets**, enter every comparison using
-`reference − comparison`, and select **Confirm these known offsets**. **Keep
-current alignment** preserves current authority without accepting a provisional
-candidate.
+When the generated session opens, choose **Tool Panel → Frame Compare Alignment Review**.
+Enter/verify **Frame** in any stable source row, then choose **Anchor [source]: [number]**.
+Switch A/B with the existing source selector; active-source **Go to [number]** requests
+a predicted seek and fills a proposal without selecting. Explicitly **Select [source]: [number]**
+for each match, including Reference, then **Save selected alignment**.
+Counters/callbacks/browsing must not seed or change proposals/pins. Verify exact source/
+number action text, provisional/missing hints, reset/cancel/reanchor, failed seek/write,
+and separate known-offset draft preservation. **Keep current alignment** saves a keep
+decision, not confirmation of the unsaved selected lineup.
 
-After saving, require **Alignment choices saved** and **Close VSView to resume
-Frame Compare.** Close the owned viewer and observe the resumed comparison and
-resulting applied authority. Closing without saving is a different path; optional
-review keeps current alignment, whereas forced missing review fails closed.
+After success, edits freeze and **Close VSView to resume Frame Compare.** is shown. Close
+the owned viewer and observe the validated sidecar/resumed authority. Closing without
+saving writes no result. Review uses SDR presentation even for PQ/HLG input; final tone
+mapping is unchanged. Native packing/readability, visible interaction and matching-source
+package proof are separate claims. Abandoned HDR presentation research/scene-graph capture
+is not a prerequisite for explicit numeric intent.
 
 ## Driving it with Qt controls and the native runbook
 

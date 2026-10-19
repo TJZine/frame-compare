@@ -11,8 +11,11 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -45,10 +48,11 @@ from frame_compare.vsview.alignment_review_contract import (
     parse_alignment_review_workspace_metadata,
     write_alignment_review_result,
 )
+from frame_compare.vsview.alignment_selection import OpeningHint, SelectedCohort, opening_hint
 
 _TIMELINE_GROUP = "frame_compare_alignment_review"
 type _InputBasis = Literal["positions", "offsets"]
-type _FrameOrigin = Literal["Viewer", "Manual"]
+type _FrameOrigin = Literal["Entered", "Predicted"]
 _MANUAL_AUTHORITY_ORIGINS = frozenset(
     {
         "interactive_confirmed_this_run",
@@ -56,10 +60,7 @@ _MANUAL_AUTHORITY_ORIGINS = frozenset(
         "preexisting_manual_override",
     }
 )
-_POSITIONS_GUIDANCE = (
-    "To confirm a new alignment, unlink the playheads and position each source on the same "
-    "visible moment. Or keep the current alignment."
-)
+_POSITIONS_GUIDANCE = "Choose an anchor, then select matching frame numbers in the other sources."
 _OFFSETS_GUIDANCE = (
     "Enter the signed reference-minus-comparison offsets, then confirm. Or keep the current "
     "alignment."
@@ -69,14 +70,6 @@ _KEEP_HELP = (
     "comparisons remain unresolved."
 )
 _SAVED_GUIDANCE = "Close VSView to resume Frame Compare."
-
-
-def _suggested_offset(
-    comparison: AlignmentReviewComparisonMetadata, review: AudioReviewPresentation | None
-) -> int | None:
-    if review is not None:
-        return review.suggested_offset
-    return comparison.audio_review.current_authority.frame_offset
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +85,7 @@ class _SourceDraft:
     presentation_name: str
     role_label: str
     source_frame_count: int
+    # Proposed entry only; explicit selected pins belong to SelectedCohort.
     frame: int | None = None
     origin: _FrameOrigin | None = None
     error: str | None = None
@@ -129,6 +123,11 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._offset_drafts = list[_OffsetDraft]()
         self._active_output_id: int | None = None
         self._basis: _InputBasis = "positions"
+        self._generation = 0
+        self._cohort = SelectedCohort.empty(())
+        self._hints: tuple[OpeningHint, ...] = ()
+        self._action_error: str | None = None
+        self._saved_basis: _InputBasis | None = None
         self._saved = False
         self._kept_current = False
         self._saved_offsets: tuple[int, ...] | None = None
@@ -139,7 +138,6 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
-
         self.progress_label = QLabel(self)
         self.progress_label.setWordWrap(True)
         self.progress_label.setAccessibleName("Alignment review status")
@@ -148,15 +146,12 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         progress_font.setBold(True)
         self.progress_label.setFont(progress_font)
         layout.addWidget(self.progress_label)
-
         self.guidance_label = QLabel(_POSITIONS_GUIDANCE, self)
         self.guidance_label.setWordWrap(True)
         layout.addWidget(self.guidance_label)
-
         self.basis_status_label = QLabel("Input basis: Source frames", self)
         self.basis_status_label.setWordWrap(True)
         layout.addWidget(self.basis_status_label)
-
         self.body_scroll = QScrollArea(self)
         self.body_scroll.setWidgetResizable(True)
         self.body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -168,31 +163,39 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         body_layout.setSpacing(8)
         self.body_scroll.setWidget(self.body_widget)
         layout.addWidget(self.body_scroll, 1)
-
         self.launch_label_explanation = QLabel(PANEL_LABEL_EXPLANATION, self.body_widget)
         self.launch_label_explanation.setWordWrap(True)
         self.launch_label_explanation.setAccessibleName("Video launch labels and current status")
         body_layout.addWidget(self.launch_label_explanation)
-
-        self.lineup_group = QGroupBox("Source lineup", self.body_widget)
+        self.lineup_group = QGroupBox("Source frames", self.body_widget)
         self.lineup_layout = QVBoxLayout(self.lineup_group)
         self.lineup_layout.setSpacing(4)
         body_layout.addWidget(self.lineup_group)
         self.source_status_labels = list[QLabel]()
         self.source_outcome_labels = list[QLabel]()
-
-        self.audio_group = QGroupBox("Audio evidence", self.body_widget)
+        self.proposal_labels = list[QLabel]()
+        self.anchor_buttons = list[QPushButton]()
+        self.select_buttons = list[QPushButton]()
+        self.clear_buttons = list[QPushButton]()
+        self.jump_buttons = list[QPushButton]()
+        self.anchor_label = QLabel("No anchor selected", self)
+        self.anchor_label.setWordWrap(True)
+        layout.insertWidget(3, self.anchor_label)
+        self.reset_button = QPushButton("Reset selected moment", self.body_widget)
+        self.reset_button.clicked.connect(self._reset_moment)
+        body_layout.addWidget(self.reset_button)
+        self.audio_group = QGroupBox(
+            "Alignment on entry — audio evidence and provenance", self.body_widget
+        )
         self.audio_layout = QVBoxLayout(self.audio_group)
         body_layout.addWidget(self.audio_group)
         self.audio_summary_labels = list[QLabel]()
         self.audio_detail_groups = list[QGroupBox]()
-
         self.manual_toggle = QPushButton("Enter alignment manually...", self.body_widget)
         self.manual_toggle.setCheckable(True)
         self.manual_toggle.setAccessibleName("Enter alignment manually")
         self.manual_toggle.toggled.connect(self._toggle_manual)
         body_layout.addWidget(self.manual_toggle)
-
         self.manual_group = QGroupBox("Manual alignment", self.body_widget)
         manual_layout = QVBoxLayout(self.manual_group)
         manual_layout.setSpacing(8)
@@ -203,12 +206,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.basis_selector.currentIndexChanged.connect(self._basis_changed)
         basis_form.addRow("Input basis:", self.basis_selector)
         manual_layout.addLayout(basis_form)
-
-        self.frame_inputs_group = QGroupBox("Untrimmed source frames", self.manual_group)
-        self.frame_inputs_form = QFormLayout(self.frame_inputs_group)
-        manual_layout.addWidget(self.frame_inputs_group)
         self.frame_inputs = list[QLineEdit]()
-
         self.offset_inputs_group = QGroupBox("Known signed offsets", self.manual_group)
         self.offset_inputs_form = QFormLayout(self.offset_inputs_group)
         manual_layout.addWidget(self.offset_inputs_group)
@@ -216,17 +214,14 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.offset_inputs_group.hide()
         self.manual_group.hide()
         body_layout.addWidget(self.manual_group)
-
         self.error_label = QLabel(self)
         self.error_label.setWordWrap(True)
         self.error_label.setAccessibleName("Alignment review error")
         body_layout.addStretch()
         layout.addWidget(self.error_label)
-
-        self.use_positions_button = QPushButton("Confirm these aligned positions", self)
+        self.use_positions_button = QPushButton("Save selected alignment", self)
         self.use_positions_button.clicked.connect(self._save_positions)
         layout.addWidget(self.use_positions_button)
-
         self.keep_help_label = QLabel(_KEEP_HELP, self)
         self.keep_help_label.setWordWrap(True)
         layout.addWidget(self.keep_help_label)
@@ -244,13 +239,26 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
     @run_in_loop(return_future=False)
     def on_current_voutput_changed(self, voutput: VideoOutputProxy, tab_index: int) -> None:
         del voutput, tab_index
-        self._record_active_frame()
+        self._navigation_changed()
 
     @override
     @run_in_loop(return_future=False)
     def on_current_frame_changed(self, n: int) -> None:
         del n
-        self._record_active_frame()
+        self._navigation_changed()
+
+    def _navigation_changed(self) -> None:
+        if self._workspace is None:
+            return
+        try:
+            self._active_output_id = self.api.current_voutput.vs_index
+        except (AttributeError, TypeError, ValueError):
+            self._active_output_id = None
+        for index, draft in enumerate(self._source_drafts):
+            if draft.output_id == self._active_output_id:
+                self._refresh_markers(index)
+                break
+        self._refresh_ui()
 
     def _activate_workspace(self) -> None:
         self._show_inactive()
@@ -292,7 +300,6 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 f"({type(exc).__name__})."
             )
             return
-
         self._workspace = workspace
         self._session = session
         presentations: list[_ComparisonPresentation] = []
@@ -327,6 +334,10 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             ),
         ]
         self._offset_drafts = [_OffsetDraft() for _comparison in workspace.comparisons]
+        self._cohort = SelectedCohort.empty(
+            tuple(d.source_frame_count for d in self._source_drafts)
+        )
+        self._hints = (OpeningHint(0), *(opening_hint(c) for c in workspace.comparisons))
         self._populate_source_controls()
         self._populate_audio_evidence()
         self.manual_toggle.setEnabled(True)
@@ -334,38 +345,80 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.basis_selector.setEnabled(True)
         self._refresh_ui()
 
+    def _binding(self, index: int) -> tuple[int, str, int]:
+        assert self._workspace is not None
+        return self._generation, self._workspace.session_id, self._source_drafts[index].output_id
+
     def _populate_source_controls(self) -> None:
         self._clear_layout(self.lineup_layout)
-        self._clear_layout(self.frame_inputs_form)
         self._clear_layout(self.offset_inputs_form)
-        self.source_status_labels.clear()
-        self.source_outcome_labels.clear()
-        self.frame_inputs.clear()
-        self.offset_inputs.clear()
-
+        for controls in (
+            self.source_status_labels,
+            self.source_outcome_labels,
+            self.frame_inputs,
+            self.proposal_labels,
+            self.anchor_buttons,
+            self.select_buttons,
+            self.clear_buttons,
+            self.jump_buttons,
+            self.offset_inputs,
+        ):
+            controls.clear()
         for index, draft in enumerate(self._source_drafts):
             if index:
                 divider = QFrame(self.lineup_group)
                 divider.setFrameShape(QFrame.Shape.HLine)
                 self.lineup_layout.addWidget(divider)
-            name = QLabel(f"{draft.role_label} — {draft.presentation_name}", self.lineup_group)
-            status = QLabel(self.lineup_group)
-            outcome = QLabel(self.lineup_group)
-            for label in (name, status, outcome):
-                label.setWordWrap(True)
-            status.setAccessibleName(f"{draft.role_label} position status")
-            outcome.setAccessibleName(f"{draft.role_label} alignment outcome")
+            identity = f"{draft.role_label} — {draft.presentation_name}"
+            name = QLabel(identity, self.lineup_group)
+            name.setTextFormat(Qt.TextFormat.PlainText)
+            name.setToolTip(identity)
+            name.setWordWrap(True)
             self.lineup_layout.addWidget(name)
-            self.lineup_layout.addWidget(outcome)
-            self.lineup_layout.addWidget(status)
-            self.source_status_labels.append(status)
-            self.source_outcome_labels.append(outcome)
-
-            field = self._manual_input(f"{draft.role_label} untrimmed source frame")
-            field.textChanged.connect(partial(self._manual_frame_changed, index))
-            self.frame_inputs_form.addRow(f"{draft.role_label}:", field)
+            for collection, description in (
+                (self.source_outcome_labels, "prediction and alignment outcome"),
+                (self.source_status_labels, "selected frame"),
+                (self.proposal_labels, "proposed frame provenance"),
+            ):
+                label = QLabel(self.lineup_group)
+                label.setWordWrap(True)
+                label.setTextFormat(Qt.TextFormat.PlainText)
+                label.setAccessibleName(f"{identity} {description}")
+                self.lineup_layout.addWidget(label)
+                collection.append(label)
+            field = self._manual_input(f"{identity} — Frame to select")
+            field.setToolTip(f"{identity}. Enter the video’s Original frame number.")
+            field.textChanged.connect(
+                partial(self._manual_frame_changed, index, self._binding(index))
+            )
+            field.setPlaceholderText("Frame")
+            field.setMinimumWidth(45)
+            field.setMaximumWidth(80)
+            entry_row = QHBoxLayout()
+            entry_row.setSpacing(4)
+            entry_row.addWidget(QLabel("Frame", self.lineup_group))
+            entry_row.addWidget(field, 1)
+            action_row = QHBoxLayout()
+            action_row.setSpacing(4)
+            self.lineup_layout.addLayout(entry_row)
+            self.lineup_layout.addLayout(action_row)
             self.frame_inputs.append(field)
-
+            for action, collection in (
+                ("anchor", self.anchor_buttons),
+                ("select", self.select_buttons),
+                ("clear", self.clear_buttons),
+                ("jump", self.jump_buttons),
+            ):
+                button = QPushButton(self.lineup_group)
+                button.setToolTip(identity)
+                button.clicked.connect(
+                    partial(self._row_action, index, action, self._binding(index))
+                )
+                if action == "select":
+                    entry_row.addWidget(button, 1)
+                else:
+                    action_row.addWidget(button, 1 if action == "anchor" else 0)
+                collection.append(button)
         if self._workspace is None:
             return
         for index, comparison in enumerate(self._workspace.comparisons):
@@ -373,7 +426,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 f"{comparison.presentation_name} known signed alignment offset"
             )
             field.setPlaceholderText("e.g. +12 or -12")
-            field.textChanged.connect(partial(self._offset_changed, index))
+            field.textChanged.connect(partial(self._offset_changed, index, self._generation))
             self.offset_inputs_form.addRow(f"Comparison {comparison.comparison_ordinal}:", field)
             self.offset_inputs.append(field)
 
@@ -429,13 +482,18 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         return field
 
     @staticmethod
-    def _clear_layout(layout: QVBoxLayout | QFormLayout) -> None:
+    def _clear_layout(layout: QLayout) -> None:
         while layout.count():
             item = layout.takeAt(0)
             if item is None:
                 continue
+            child_layout = item.layout()
+            if child_layout is not None:
+                AlignmentReviewPanel._clear_layout(child_layout)
+                child_layout.deleteLater()
             widget = item.widget()
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()
 
     def _show_inactive(self, *, clear_marker: bool = True) -> None:
@@ -444,10 +502,15 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._workspace = None
         self._session = None
         self._presentations = ()
+        self._generation += 1
+        self._cohort = SelectedCohort.empty(())
+        self._hints = ()
+        self._action_error = None
         self._source_drafts.clear()
         self._offset_drafts.clear()
         self._active_output_id = None
         self._basis = "positions"
+        self._saved_basis = None
         self._saved = False
         self._kept_current = False
         self._saved_offsets = None
@@ -465,10 +528,8 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.basis_selector.setCurrentIndex(0)
         self.basis_selector.blockSignals(False)
         self.basis_selector.setEnabled(False)
-        self.frame_inputs_group.show()
         self.offset_inputs_group.hide()
         self._clear_layout(self.lineup_layout)
-        self._clear_layout(self.frame_inputs_form)
         self._clear_layout(self.offset_inputs_form)
         self._clear_layout(self.audio_layout)
         self.source_status_labels.clear()
@@ -477,14 +538,20 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.offset_inputs.clear()
         self.audio_summary_labels.clear()
         self.audio_detail_groups.clear()
-        self.use_positions_button.setText("Confirm these aligned positions")
+        self.use_positions_button.setText("Save selected alignment")
         self.use_positions_button.setEnabled(False)
         self.keep_help_label.setText(_KEEP_HELP)
         self.keep_help_label.show()
         self.keep_button.setEnabled(False)
+        self.anchor_label.setText("No anchor selected")
+        self.reset_button.setEnabled(False)
 
     def _toggle_manual(self, visible: bool) -> None:
+        if self._saved:
+            return
         self.manual_group.setVisible(visible)
+        if not visible:
+            self.basis_selector.setCurrentIndex(0)
         self.manual_toggle.setText(
             "Hide manual alignment" if visible else "Enter alignment manually..."
         )
@@ -492,240 +559,322 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
 
     def _basis_changed(self, index: int) -> None:
         self._basis = "positions" if index == 0 else "offsets"
-        self.frame_inputs_group.setVisible(self._basis == "positions")
         self.offset_inputs_group.setVisible(self._basis == "offsets")
         self.error_label.clear()
         self._refresh_ui()
 
-    def _manual_frame_changed(self, index: int, text: str) -> None:
-        if self._workspace is None or self._saved:
+    def _manual_frame_changed(self, index: int, binding: tuple[int, str, int], text: str) -> None:
+        if (
+            self._workspace is None
+            or self._saved
+            or not 0 <= index < len(self._source_drafts)
+            or binding != self._binding(index)
+        ):
             return
         draft = self._source_drafts[index]
         draft.frame, draft.error = _parse_source_frame(
             text, draft.role_label, draft.source_frame_count
         )
-        draft.origin = "Manual" if draft.frame is not None else None
+        draft.origin = "Entered" if text else None
+        self._action_error = None
         self._refresh_ui()
 
-    def _offset_changed(self, index: int, text: str) -> None:
-        if self._workspace is None or self._saved:
+    def _offset_changed(self, index: int, generation: int, text: str) -> None:
+        if self._workspace is None or self._saved or generation != self._generation:
             return
         draft = self._offset_drafts[index]
         comparison = self._workspace.comparisons[index]
         draft.value, draft.error = _parse_offset(
-            text,
-            comparison,
-            self._workspace.reference.source_frame_count,
+            text, comparison, self._workspace.reference.source_frame_count
         )
+        self._action_error = None
         self._refresh_ui()
 
-    def _record_active_frame(self) -> None:
-        if self._workspace is None or self._saved:
-            return
-        try:
-            output_id = self.api.current_voutput.vs_index
-            frame = int(self.api.current_frame)
-        except (AttributeError, TypeError, ValueError):
-            return
-        index = next(
-            (
-                source_index
-                for source_index, draft in enumerate(self._source_drafts)
-                if draft.output_id == output_id
-            ),
-            None,
+    def _action_context(
+        self, index: int, binding: tuple[int, str, int]
+    ) -> tuple[object, ...] | None:
+        if (
+            self._workspace is None
+            or self._saved
+            or self._basis != "positions"
+            or self._session is None
+            or self.api.file_path != self._session.script_path
+            or not 0 <= index < len(self._source_drafts)
+            or binding != self._binding(index)
+        ):
+            return None
+        return (binding, self._cohort.revision, self.frame_inputs[index].text(), self.api.file_path)
+
+    def _confirm_reset(self, message: str) -> bool:
+        return (
+            QMessageBox.question(
+                self,
+                "Choose a new alignment moment?",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
         )
-        if index is None:
+
+    def _row_action(
+        self, index: int, action: str, binding: tuple[int, str, int], _checked: bool = False
+    ) -> None:
+        context = self._action_context(index, binding)
+        if context is None:
             return
         draft = self._source_drafts[index]
-        if not 0 <= frame < draft.source_frame_count:
-            draft.error = f"{draft.role_label} viewer frame is outside its source range."
-            self._refresh_ui()
-            return
-        draft.frame = frame
-        draft.origin = "Viewer"
-        draft.error = None
-        self._active_output_id = output_id
-        field = self.frame_inputs[index]
-        field.blockSignals(True)
-        field.setText(str(frame))
-        field.blockSignals(False)
-        self._refresh_markers(index)
-        self._refresh_ui()
-
-    def _refresh_markers(self, source_index: int) -> None:
-        if self._workspace is None:
-            return
-        markers = list[tuple[int, str, str]]()
-        if source_index == 0:
-            for comparison, presentation in zip(
-                self._workspace.comparisons, self._presentations, strict=True
+        self._action_error = None
+        if action == "clear":
+            if index == self._cohort.anchor and not self._confirm_reset(
+                "Clear the anchor and all selected frames? Proposed numbers and known offsets stay."
             ):
-                marker_offset = _marker_offset(comparison, presentation.review)
-                suggestion = _suggested_pair(marker_offset)[0]
-                if (
-                    suggestion is not None
-                    and suggestion < self._source_drafts[0].source_frame_count
-                ):
-                    markers.append(
-                        (
-                            suggestion,
-                            _marker_color(comparison, "reference"),
-                            _marker_text(comparison, suggestion, "reference", presentation.review),
-                        )
+                return
+            if context != self._action_context(index, binding):
+                return
+            self._cohort = self._cohort.clear(index)
+        elif action == "jump":
+            prediction = self._cohort.predict(index, self._hints)
+            try:
+                active = self.api.current_voutput.vs_index
+            except Exception:
+                active = None
+            if active != draft.output_id:
+                self._action_error = "Switch to this source using the viewer source selector first."
+            elif prediction.frame is None:
+                self._action_error = (
+                    "No in-range prediction is available; enter a matching frame manually."
+                )
+            else:
+                field = self.frame_inputs[index]
+                field.blockSignals(True)
+                field.setText(str(prediction.frame))
+                field.blockSignals(False)
+                draft.frame, draft.error, draft.origin = prediction.frame, None, "Predicted"
+                try:
+                    admitted = self.api.playback.seek(prediction.frame)
+                except Exception:
+                    self._action_error = (
+                        "Could not request the predicted seek; no frame was selected."
+                    )
+                else:
+                    self._action_error = (
+                        "Seek requested. Verify the Original frame number before selecting; no frame was selected."
+                        if admitted
+                        else "Seek was not admitted. Pause playback and try again; no frame was selected."
                     )
         else:
-            comparison = self._workspace.comparisons[source_index - 1]
-            presentation = self._presentations[source_index - 1]
-            marker_offset = _marker_offset(comparison, presentation.review)
-            suggestion = _suggested_pair(marker_offset)[1]
-            if suggestion is not None and suggestion < comparison.source_frame_count:
-                markers.append(
-                    (
-                        suggestion,
-                        _marker_color(comparison, "comparison"),
-                        _marker_text(comparison, suggestion, "comparison", presentation.review),
-                    )
-                )
-        self.api.timeline.clear_notches(_TIMELINE_GROUP, update=not markers)
-        for frame, color, label in markers:
-            self.api.timeline.add_notch(_TIMELINE_GROUP, frame, color, label)
+            number, error = _parse_source_frame(
+                self.frame_inputs[index].text(), draft.role_label, draft.source_frame_count
+            )
+            if number is None or error is not None:
+                return
+            if action == "anchor":
+                if self._cohort.needs_new_moment(index, number) and not self._confirm_reset(
+                    "Choose a new moment and clear the other selected frames? Proposed numbers and known offsets stay."
+                ):
+                    return
+                if context != self._action_context(index, binding):
+                    return
+                self._cohort = self._cohort.set_anchor(index, number)
+            elif action == "select":
+                if self._cohort.anchor is None or index == self._cohort.anchor:
+                    return
+                self._cohort = self._cohort.select(index, number)
+        self._navigation_changed()
+
+    def _reset_moment(self) -> None:
+        if (
+            self._workspace is None
+            or self._saved
+            or self._basis != "positions"
+            or self._session is None
+            or self.api.file_path != self._session.script_path
+        ):
+            return
+        context = self._generation, self._cohort.revision, self.api.file_path
+        if not self._confirm_reset(
+            "Clear the anchor and all selected frames? Proposed numbers and known offsets stay."
+        ):
+            return
+        if (
+            self._saved
+            or self._basis != "positions"
+            or context != (self._generation, self._cohort.revision, self.api.file_path)
+        ):
+            return
+        self._cohort = self._cohort.reset()
+        self._refresh_ui()
+        self.api.timeline.clear_notches(_TIMELINE_GROUP)
+
+    def _refresh_markers(self, source_index: int) -> None:
+        self.api.timeline.clear_notches(_TIMELINE_GROUP)
+        if (
+            self._workspace is None
+            or self._source_drafts[source_index].output_id != self._active_output_id
+        ):
+            return
+        prediction = self._cohort.predict(source_index, self._hints)
+        if prediction.frame is not None:
+            self.api.timeline.add_notch(
+                _TIMELINE_GROUP, prediction.frame, "#e0b020", prediction.description
+            )
 
     def _refresh_ui(self) -> None:
         if self._workspace is None:
             return
+        positions = self._basis == "positions"
         self.basis_status_label.setText(
-            "Input basis: Source frames"
-            if self._basis == "positions"
-            else "Input basis: Known offsets"
+            "Input basis: Selected source frames"
+            if positions
+            else "Input basis: Known offsets — source pins retained, not submitted"
         )
-        manual_source_basis = self._basis == "positions" and (
-            self.manual_toggle.isChecked()
-            or any(draft.origin == "Manual" for draft in self._source_drafts)
+        self.guidance_label.setText(
+            _SAVED_GUIDANCE
+            if self._saved
+            else _POSITIONS_GUIDANCE
+            if positions
+            else _OFFSETS_GUIDANCE
         )
-        if self._basis == "positions":
-            self.guidance_label.setText(_POSITIONS_GUIDANCE)
-            self.use_positions_button.setText("Confirm these aligned positions")
-            ready = sum(
-                draft.frame is not None and draft.error is None for draft in self._source_drafts
-            )
-            total = len(self._source_drafts)
-            progress_unit = "source frames entered" if manual_source_basis else "positions captured"
-            complete = ready == total
-        else:
-            self.guidance_label.setText(_OFFSETS_GUIDANCE)
-            self.use_positions_button.setText("Confirm these known offsets")
-            ready = sum(
-                draft.value is not None and draft.error is None for draft in self._offset_drafts
-            )
-            total = len(self._offset_drafts)
-            progress_unit = "offsets entered"
-            complete = ready == total
-
+        ready = (
+            sum(n is not None for n in self._cohort.selected)
+            if positions
+            else sum(d.value is not None and d.error is None for d in self._offset_drafts)
+        )
+        total = len(self._source_drafts) if positions else len(self._offset_drafts)
+        complete = ready == total and (not positions or self._cohort.anchor is not None)
+        self.use_positions_button.setText(
+            "Save selected alignment" if positions else "Confirm these known offsets"
+        )
+        self.use_positions_button.setEnabled(complete and not self._saved)
         if self._saved:
-            self.progress_label.setText("Alignment choices saved")
-            self.guidance_label.setText(_SAVED_GUIDANCE)
+            self.progress_label.setText(
+                "Keep decision saved — selected lineup was not confirmed"
+                if self._kept_current
+                else "Alignment choices saved"
+            )
             self.keep_help_label.hide()
         else:
-            suffix = " — ready to confirm" if complete else ""
-            self.progress_label.setText(f"{ready}/{total} {progress_unit}{suffix}")
+            self.progress_label.setText(
+                f"{ready}/{total} {'frames selected' if positions else 'offsets entered'}"
+                + (" — ready to save" if complete else "")
+            )
             self.keep_help_label.show()
-
-        first_error: str | None = None
-        reference_frame = self._source_drafts[0].frame
-        for index, (draft, status_label, outcome_label) in enumerate(
-            zip(
-                self._source_drafts,
-                self.source_status_labels,
-                self.source_outcome_labels,
-                strict=True,
+        anchor = self._cohort.anchor
+        self.anchor_label.setText(
+            "No anchor selected"
+            if anchor is None
+            else f"Anchor: {self._source_drafts[anchor].role_label} frame {self._cohort.selected[anchor]} — {'saved' if self._saved and self._saved_basis == 'positions' and not self._kept_current else 'unsaved'}"
+        )
+        self.reset_button.setEnabled(anchor is not None and not self._saved and positions)
+        first_error = None
+        for index, draft in enumerate(self._source_drafts):
+            prediction = self._cohort.predict(index, self._hints)
+            selected = self._cohort.selected[index]
+            self.source_status_labels[index].setText(
+                "Selected: not selected"
+                if selected is None
+                else f"{'Anchor' if index == anchor else 'Selected'}: frame {selected} — {'saved' if self._saved and self._saved_basis == 'positions' and not self._kept_current else 'unsaved'}"
             )
-        ):
-            frame_error = draft.error if self._basis == "positions" else None
-            offset_error = (
-                self._offset_drafts[index - 1].error
-                if self._basis == "offsets" and index > 0
-                else None
-            )
-            if frame_error is not None:
-                status = f"Needs attention — {frame_error}"
-                first_error = first_error or frame_error
-            elif offset_error is not None:
-                status = f"Needs attention — {offset_error}"
-                first_error = first_error or offset_error
-            elif self._basis == "offsets" and index > 0:
+            outcome = prediction.description
+            if not positions and index:
                 offset_draft = self._offset_drafts[index - 1]
-                status = (
+                outcome = offset_draft.error or (
                     f"Entered offset: {offset_draft.value:+d}f"
                     if offset_draft.value is not None
                     else "Offset not entered"
                 )
-            elif draft.frame is None:
-                status = (
-                    "Entered source frame: not entered"
-                    if manual_source_basis
-                    else "Captured position: not captured"
+            if self._saved_offsets is not None and index:
+                outcome = _manual_saved_text(
+                    self._workspace.comparisons[index - 1], self._saved_offsets[index - 1]
                 )
-            elif (
-                not self._saved
+            elif self._kept_current and index:
+                outcome = _keep_saved_text(self._workspace.comparisons[index - 1])
+            self.source_outcome_labels[index].setText(outcome)
+            proposal = draft.error or (
+                f"{draft.origin} proposal: frame {draft.frame} — not selected"
+                if draft.frame is not None and draft.frame != selected
+                else ""
+            )
+            self.proposal_labels[index].setText(proposal)
+            self.proposal_labels[index].setVisible(bool(proposal))
+            if positions:
+                first_error = first_error or draft.error
+            elif index:
+                first_error = first_error or self._offset_drafts[index - 1].error
+            number = str(draft.frame) if draft.frame is not None and draft.error is None else "…"
+            identity = f"{draft.role_label} — {draft.presentation_name}"
+            self.anchor_buttons[index].setText(f"Anchor {draft.role_label}: {number}")
+            self.select_buttons[index].setText(f"Select {draft.role_label}: {number}")
+            self.clear_buttons[index].setText("Clear")
+            self.jump_buttons[index].setText(
+                f"Go to {prediction.frame}" if prediction.frame is not None else "Go"
+            )
+            for button in (self.clear_buttons[index], self.jump_buttons[index]):
+                button.setFixedWidth(button.fontMetrics().horizontalAdvance(button.text()) + 20)
+            enabled = positions and not self._saved
+            self.anchor_buttons[index].setEnabled(
+                enabled and draft.frame is not None and draft.error is None
+            )
+            self.select_buttons[index].setEnabled(
+                enabled
+                and anchor is not None
+                and index != anchor
+                and draft.frame is not None
+                and draft.error is None
+            )
+            self.clear_buttons[index].setEnabled(enabled and selected is not None)
+            self.jump_buttons[index].setEnabled(
+                enabled
+                and prediction.frame is not None
                 and draft.output_id == self._active_output_id
-                and draft.origin == "Viewer"
+            )
+            for button in (
+                self.anchor_buttons[index],
+                self.select_buttons[index],
+                self.clear_buttons[index],
+                self.jump_buttons[index],
             ):
-                captured_label = (
-                    "Entered source frame" if manual_source_basis else "Captured position"
+                description = (
+                    "Clear selection"
+                    if button is self.clear_buttons[index]
+                    else f"Go to predicted frame {prediction.frame}"
+                    if button is self.jump_buttons[index]
+                    else button.text()
                 )
-                captured_value = str(draft.frame) if manual_source_basis else f"frame {draft.frame}"
-                status = f"Viewing: frame {draft.frame}\n{captured_label}: {captured_value}"
-            elif manual_source_basis or draft.origin == "Manual":
-                status = f"Entered source frame: {draft.frame}"
-            else:
-                status = f"Captured position: frame {draft.frame}"
-            status_label.setText(status)
-
-            if index == 0:
-                outcome = "Reference anchor — no offset"
-            else:
-                comparison = self._workspace.comparisons[index - 1]
-                if self._basis == "offsets":
-                    offset = self._offset_drafts[index - 1].value
-                elif reference_frame is not None and draft.frame is not None:
-                    offset = reference_frame - draft.frame
-                else:
-                    offset = None
-                if self._saved_offsets is not None:
-                    outcome = _manual_saved_text(comparison, self._saved_offsets[index - 1])
-                elif self._kept_current:
-                    outcome = _keep_saved_text(comparison)
-                elif offset is not None:
-                    outcome = f"{offset:+d}f — {_trim_explanation(offset)}"
-                else:
-                    outcome = self._presentations[index - 1].summary.splitlines()[0]
-            outcome_label.setText(outcome)
-
+                button.setAccessibleName(f"{description} — {identity}")
+                button.setToolTip(f"{identity}. {button.text()}.")
+            self.frame_inputs[index].setReadOnly(self._saved or not positions)
         if not self._saved:
-            self.error_label.setText(first_error or "")
-        self.use_positions_button.setEnabled(complete and not self._saved)
+            self.error_label.setText(self._action_error or first_error or "")
 
     def _save_positions(self) -> None:
-        if self._workspace is None:
+        if (
+            self._workspace is None
+            or self._saved
+            or self._session is None
+            or self.api.file_path != self._session.script_path
+        ):
             return
         decisions = list[AlignmentReviewDecision]()
         if self._basis == "positions":
-            reference_frame = self._source_drafts[0].frame
-            if reference_frame is None or any(
-                draft.frame is None or draft.error is not None for draft in self._source_drafts
+            reference_frame = self._cohort.selected[0]
+            if (
+                self._cohort.anchor is None
+                or reference_frame is None
+                or any(n is None for n in self._cohort.selected)
             ):
                 return
-            for comparison, draft in zip(
-                self._workspace.comparisons, self._source_drafts[1:], strict=True
+            for comparison, selected in zip(
+                self._workspace.comparisons, self._cohort.selected[1:], strict=True
             ):
-                if draft.frame is None:
+                if selected is None:
                     return
                 decisions.append(
                     ConfirmedAlignmentReviewDecision(
                         comparison_key=comparison.comparison_key,
                         reference_source_frame=reference_frame,
-                        comparison_source_frame=draft.frame,
+                        comparison_source_frame=selected,
                     )
                 )
         else:
@@ -778,11 +927,13 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 ),
             )
         except (AlignmentReviewContractError, OSError) as exc:
-            self.error_label.setText(
+            self._action_error = (
                 "Could not save alignment. Check available space and folder access, then try "
                 f"again. ({type(exc).__name__})"
             )
+            self.error_label.setText(self._action_error)
             return
+        self._saved_basis = self._basis if not self._kept_current else None
         self._saved = True
         self.error_label.clear()
         for label in self.audio_summary_labels:
@@ -846,63 +997,11 @@ def _parse_offset(
     return offset, None
 
 
-def _suggested_pair(offset: int | None) -> tuple[int | None, int | None]:
-    if offset is None:
-        return None, None
-    return _canonical_pair(offset)
-
-
 def _candidate_offset(comparison: AlignmentReviewComparisonMetadata) -> int | None:
     attempt = comparison.audio_review.audio_attempt
     if attempt is None or attempt.decision.candidate is None:
         return None
     return attempt.decision.candidate.frame_offset
-
-
-def _marker_offset(
-    comparison: AlignmentReviewComparisonMetadata, review: AudioReviewPresentation | None
-) -> int | None:
-    if comparison.audio_review.current_authority.frame_offset is not None:
-        return comparison.suggested_offset
-    attempt = comparison.audio_review.audio_attempt
-    if attempt is not None and attempt.decision.state in {"provisional", "unavailable"}:
-        return _suggested_offset(comparison, review)
-    return comparison.suggested_offset
-
-
-def _marker_color(comparison: AlignmentReviewComparisonMetadata, role: str) -> str:
-    origin = comparison.audio_review.current_authority.origin
-    if origin in _MANUAL_AUTHORITY_ORIGINS:
-        return "#8e6ccf"
-    attempt = comparison.audio_review.audio_attempt
-    if attempt is not None and attempt.decision.state == "provisional":
-        return "#d79b35"
-    return "#3daee9" if role == "reference" else "#d79b35"
-
-
-def _marker_text(
-    comparison: AlignmentReviewComparisonMetadata,
-    frame: int,
-    role: str,
-    review: AudioReviewPresentation | None,
-) -> str:
-    offset = _marker_offset(comparison, review)
-    if offset is None:
-        return ""
-    attempt = comparison.audio_review.audio_attempt
-    if comparison.audio_review.current_authority.origin in _MANUAL_AUTHORITY_ORIGINS:
-        prefix = "[MANUAL ALIGNMENT]"
-    elif (
-        attempt is not None
-        and comparison.audio_review.current_authority.frame_offset is None
-        and _suggested_offset(comparison, review) is not None
-    ):
-        prefix = "[PROVISIONAL — NOT APPLIED]"
-    elif comparison.audio_review.evidence_availability == "historical_details_unavailable":
-        prefix = "[REUSED ACCEPTED AUDIO]"
-    else:
-        prefix = "[ACCEPTED AUDIO]"
-    return f"{prefix} {offset:+d}f — {role} frame {frame}"
 
 
 def _unavailable_summary_line(comparison: AlignmentReviewComparisonMetadata) -> str:
@@ -952,7 +1051,6 @@ def _audio_summary(
             )
     if not lines:
         lines.append(_unavailable_summary_line(comparison))
-
     if authority.origin in _MANUAL_AUTHORITY_ORIGINS and attempt is not None:
         original = _original_audio_summary(attempt.decision)
         if original is not None:
@@ -989,31 +1087,36 @@ def _audio_details(
     attempt = comparison.audio_review.audio_attempt
     if attempt is None:
         lines = ["Historical audio details unavailable."]
-        _append_marker_bounds_detail(
+        _append_origin_bounds_detail(
             lines,
             comparison,
             reference_source_frame_count,
-            review,
         )
         return "\n".join(lines)
     assert review is not None
     lines = list(review.verbose_lines(panel=True))
     lines.extend(f"{row.key}: {row.value}" for row in audio_evidence_rows(attempt))
-    _append_marker_bounds_detail(lines, comparison, reference_source_frame_count, review)
+    _append_origin_bounds_detail(lines, comparison, reference_source_frame_count)
     return "\n".join(lines)
 
 
-def _append_marker_bounds_detail(
+def _append_origin_bounds_detail(
     lines: list[str],
     comparison: AlignmentReviewComparisonMetadata,
     reference_source_frame_count: int,
-    review: AudioReviewPresentation | None,
 ) -> None:
-    reference_frame, comparison_frame = _suggested_pair(_marker_offset(comparison, review))
-    if reference_frame is not None and reference_frame >= reference_source_frame_count:
-        lines.append("Origin hint marker omitted: reference frame is outside raw source bounds.")
-    if comparison_frame is not None and comparison_frame >= comparison.source_frame_count:
-        lines.append("Origin hint marker omitted: comparison frame is outside raw source bounds.")
+    offset = opening_hint(comparison).offset
+    if offset is None:
+        return
+    reference_frame, comparison_frame = _canonical_pair(offset)
+    if reference_frame >= reference_source_frame_count:
+        lines.append(
+            "Opening offset's canonical Reference coordinate is outside raw source bounds."
+        )
+    if comparison_frame >= comparison.source_frame_count:
+        lines.append(
+            "Opening offset's canonical comparison coordinate is outside raw source bounds."
+        )
 
 
 def _keep_saved_text(comparison: AlignmentReviewComparisonMetadata) -> str:
@@ -1039,14 +1142,6 @@ def _manual_saved_text(comparison: AlignmentReviewComparisonMetadata, offset: in
 
 def _canonical_pair(offset: int) -> tuple[int, int]:
     return (offset, 0) if offset >= 0 else (0, abs(offset))
-
-
-def _trim_explanation(offset: int) -> str:
-    if offset > 0:
-        return f"Trim {offset} frame(s) from reference"
-    if offset < 0:
-        return f"Trim {abs(offset)} frame(s) from this comparison"
-    return "No additional trim from this raw offset"
 
 
 @hookimpl(tryfirst=True)

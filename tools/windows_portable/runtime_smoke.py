@@ -389,6 +389,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
     from PySide6.QtWidgets import QApplication, QWidget
     from vsengine.loops import get_loop, set_loop
     from vsview.api import get_outputs
+    from vsview.app.outputs import VideoMetadata
     from vsview.vsenv import QtEventLoop
 
     cache_dir = media_path.parent / "runtime-smoke-cache"
@@ -447,6 +448,13 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             "generated VSView session omitted BT.709 preview defaults",
         )
         outputs = get_outputs()
+        assert_true(
+            all(
+                isinstance(output, VideoMetadata) and output.hdr is False
+                for output in outputs.values()
+            ),
+            "alignment outputs did not reserve SDR presentation",
+        )
         names = [output.name for output in outputs.values()]
         assert_true(
             names == ["Reference", "Comparison 1", "Comparison 2"],
@@ -517,18 +525,28 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             active_panel.on_workspace_loaded()
             app.processEvents()
             assert_true(
-                active_panel.progress_label.text() == "0/3 positions captured",
+                active_panel.progress_label.text() == "0/3 frames selected",
                 "alignment panel did not start with an empty three-source lineup",
             )
-            for output_index, frame in enumerate((1, 0, 2)):
+            for selected_count, (output_index, frame) in enumerate(((1, 0), (2, 2), (0, 1))):
                 panel_api.current_voutput = voutputs[output_index]
                 panel_api.current_frame = frame
                 active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
                 app.processEvents()
+                assert_true(
+                    active_panel.progress_label.text() == f"{selected_count}/3 frames selected",
+                    "navigation unexpectedly selected a frame",
+                )
+                active_panel.frame_inputs[output_index].setText(str(frame))
+                if output_index == 1:
+                    active_panel.anchor_buttons[output_index].click()
+                    app.processEvents()
+                else:
+                    active_panel.select_buttons[output_index].click()
+                    app.processEvents()
             assert_true(
-                active_panel.progress_label.text()
-                == "3/3 positions captured \u2014 ready to confirm",
-                "alignment panel did not record every source position",
+                active_panel.progress_label.text() == "3/3 frames selected \u2014 ready to save",
+                "alignment panel did not select each explicit source number",
             )
             assert_true(
                 active_panel.use_positions_button.isEnabled(),

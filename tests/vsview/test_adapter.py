@@ -632,7 +632,8 @@ def _execute_generated_script(
     fake_vapoursynth.core = core  # pyright: ignore[reportAttributeAccessIssue]
     fake_vsview = types.ModuleType("vsview")
 
-    def set_output(clip: FakeClip, index: int, name: str, **kwargs: object) -> None:
+    def set_output(clip: FakeClip, index: int, name: str, *, hdr: bool, **kwargs: object) -> None:
+        assert hdr is False
         output_calls.append((clip.stem, index, name))
         output_metadata.append(kwargs)
 
@@ -806,9 +807,9 @@ def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_disti
     )
 
     joined = "\n".join(overlays)
-    assert "Accepted audio alignment at session open" in joined
-    assert "Provisional audio suggestion at session open" in joined
-    assert "No alignment suggestion at session open" in joined
+    assert "Original frame" in joined
+    assert "Suggested match" not in joined and "session open" not in joined
+    assert all(name in joined for name in ("accepted", "provisional", "unavailable"))
     assert "no trusted audio hint" not in joined
 
 
@@ -845,10 +846,13 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
     )
     assert len(overlays) == 2
     for overlay in overlays:
-        assert "Saved choices/status: Alignment Review panel" in overlay
-        assert "at session open" in overlay
+        assert "Select frame numbers in Alignment Review" in overlay
+        assert "at session open" not in overlay
     output = capsys.readouterr().err
-    assert "│ 2  Unlink playheads, then position every source on the same visible moment." in output
+    assert (
+        "│ 2  Choose any source/Original frame as anchor; select matching numbers in the panel."
+        in output
+    )
     assert (
         "│ 3  Save the alignment in the panel, then close VSView to continue Frame Compare."
         in output

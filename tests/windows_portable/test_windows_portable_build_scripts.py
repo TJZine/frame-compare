@@ -815,23 +815,23 @@ def test_windows_portable_python_vsview_proof_covers_viewer_first_whole_set(
     }
     observed_callbacks = []
     for node in ast.walk(function):
-        statements = getattr(node, "body", None)
-        if not isinstance(statements, list):
-            continue
-        for index, statement in enumerate(statements):
-            if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+        for statements in (getattr(node, "body", None), getattr(node, "orelse", None)):
+            if not isinstance(statements, list):
                 continue
-            callback = statement.value.func
-            if isinstance(callback, ast.Attribute) and callback.attr in callback_methods:
-                observed_callbacks.append(callback.attr)
-                following = statements[index + 1]
-                assert isinstance(following, ast.Expr) and isinstance(following.value, ast.Call)
-                assert ast.unparse(following.value.func) == "app.processEvents"
+            for index, statement in enumerate(statements):
+                if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+                    continue
+                callback = statement.value.func
+                if isinstance(callback, ast.Attribute) and callback.attr in callback_methods:
+                    observed_callbacks.append(callback.attr)
+                    following = statements[index + 1]
+                    assert isinstance(following, ast.Expr) and isinstance(following.value, ast.Call)
+                    assert ast.unparse(following.value.func) == "app.processEvents"
     assert observed_callbacks.count("on_workspace_loaded") == 2
     assert observed_callbacks.count("on_current_voutput_changed") == 1
-    assert observed_callbacks.count("click") == 2
-    assert '"0/3 positions captured"' in proof
-    assert r'"3/3 positions captured \u2014 ready to confirm"' in proof
+    assert observed_callbacks.count("click") == 4
+    assert '"0/3 frames selected"' in proof
+    assert r'"3/3 frames selected \u2014 ready to save"' in proof
     assert '"alignment_positions=ok"' in proof
     assert '"alignment_keep_current=ok"' in proof
     assert '"alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 "' in proof

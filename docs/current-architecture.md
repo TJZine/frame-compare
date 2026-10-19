@@ -743,29 +743,21 @@ time for all entries. Shared cache schema v2 remains accepted-authority-only and
 not serialize the richer attempt. Warm cache entries therefore report historical
 stream/chunk details as unavailable rather than inventing them.
 
-Native alignment review is deliberately split across the existing owners. The
-`frame_compare.vsview.session_script` owner reserves the script path and generates
-deterministic session data plus a small installed-package bootstrap.
-`frame_compare.vsview.session_runtime` owns preview source loading, defaults,
-console guidance, frame-bound native alignment guidance, and output registration after
-all sources are prepared. The `frame_compare.vsview.alignment_overlay` owner builds
-immutable session-open facts and uses one public `ModifyFrame` path, receiving the
-frame number and raw frame together, to bake the original-frame and named suggested-
-match labels into native frames without polling or moving GUI playheads. Raw
-reference-minus-comparison mapping keeps zero distinct from unavailable evidence,
-rejects out-of-bounds targets without clamping, and leaves base trims outside the
-raw mapping. Launch classification stays fixed at session open; the panel remains
-the authority for saved choices, current status, whole-set actions, and result
-persistence, and the preview remains untrimmed. An owned late composition failure
-may use an independent static fresh-copy fallback with the absolute raw offset and
-named higher/lower/equal relationship, or unavailable guidance, plus the same
-session-open classification; it does not show current/target frame numbers.
-A calculated target outside the other source's bounds is a separate `No overlap at
-this frame in {name}` result, not static fallback. Source/decoder errors and native
-post-return validation errors propagate; if neither label mode works, the preview
-remains raw with a warning and the panel stays available; raw degradation is not
-static acceptance. Existing source preparation/defaults/FPS, metadata-v5/result-v1,
-alignment authority, cache, trim, and persistence contracts remain unchanged.
+Native alignment review is split across existing owners. `vsview.session_script` reserves
+and generates the session; `vsview.session_runtime` prepares every untrimmed source,
+retains actual color props/defaults/FPS and registers outputs with reserved `hdr=False`
+separately from strict metadata-v5 kwargs. Ordinary SDR packing is used even with the
+HDR viewer environment flag; final rendering/tone-map settings are unaffected.
+`vsview.alignment_overlay` uses one public ModifyFrame per source, with n/f together,
+to paint source identity and Original frame only. Finite glyph resources, source
+immutability, independent fresh-copy static fallback and raw-degradation warning remain.
+Static labels contain no current frame; source/decoder and native post-return errors
+still propagate. No GUI playhead/image-capture or mutable selected-state bridge exists.
+`vsview.alignment_selection` owns pure session-local numeric cohort transitions and
+fixed-anchor opening-offset predictions. Authority-first raw offsets use
+`c + d_anchor - d_target`, distinguish zero/missing and provisional edges, check only
+target bounds and do not change trims or evidence authority. Any source can anchor;
+Reference remains the persistence baseline rather than a required visual first step.
 
 The runtime otherwise uses
 the explicit generated script path for session identity, creates one `Reference`
@@ -778,17 +770,18 @@ typed `frame_compare.vsview.alignment_review_contract` owns the session identity
 strict metadata-v5/result-v1 topology and primitive DTO validation, trusted
 sibling-sidecar path, atomic
 result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
-is the sole human review surface inside VSView: it remains inert for ordinary or
-rejected sessions, renders accepted/provisional/unavailable evidence without importing
-service policy, observes only public current-output/current-frame callbacks after
-activation, requires each source to be visited for the default viewer-position
-workflow, and writes only a complete typed
-sidecar through one whole-set action. The panel's manual source-frame and known-offset
-inputs feed that same result model; its secondary keep-current action writes one
+is the sole human review surface inside VSView: it stays inert for rejected/ordinary
+sessions and presents entry authority/evidence separately from proposed numeric fields,
+explicit selected pins and saved outcomes. Output/frame hooks update navigation only.
+An explicit source-row action binds the validated source/session/cohort and integer;
+no current-frame counter seeds proposals or selections. Same-moment reanchor preserves
+pins; a confirmed new moment/reset clears them with context revalidation. Only the
+complete selected cohort including Reference, or separate complete known-offset basis,
+may write confirmed decisions. Keep saves a distinct whole-set
 `keep_current` decision per comparison. The panel derives immutable audio-review
 presentations, summary text, and details once per comparison at workspace activation;
 unload or replacement clears them. Preview callbacks reuse that evidence while
-updating live frame drafts and markers. `alignment_vsview` owns availability policy,
+updating active-source navigation and markers, never proposed numbers or selected pins. `alignment_vsview` owns availability policy,
 expected-comparison construction from raw source counts, result acceptance, and
 applying confirmed offsets; its service, persistence, override, cache, and CLI/config
 boundaries remain unchanged and it does not parse terminal input. The
