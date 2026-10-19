@@ -28,8 +28,9 @@ you to `doctor`, while forced review fails.
 
 1. Open **Tool Panel → Frame Compare Alignment Review**. Its stable lineup identifies
    every source; **Alignment on entry** describes existing authority and audio evidence.
-2. In any source row, enter or verify its native **Original frame** number in
-   **Frame**, then choose **Anchor [source]: [number]**.
+2. The active source’s **Frame** field follows its public viewer navigation position
+   until you edit or pin it. Verify the picture and native **Original frame** number,
+   then choose **Anchor [source]: [number]**. This prefill selects nothing.
 3. Switch directly between A and B using the viewer source selector. The panel shows
    **Predicted** positions for the pinned moment. On the active source, **Go to [number]**
    fills a predicted proposal and requests a paused seek. Verify the
@@ -45,7 +46,16 @@ you to `doctor`, while forced review fails.
 complete decision write. Editing proposals, browsing, seeking and switching sources
 never alter pins. Clear/replace affects only that source. Making an already selected
 source the anchor preserves the moment; a new anchor number/reset warns before clearing
-other selections. Cancel preserves them. Proposed numbers are retained until edited.
+other selections. Cancel preserves them. Manual edits (including empty/invalid entries),
+Anchor/Select, and **Go to [number]** protect that row’s proposal from passive following.
+**Use viewer frame** deliberately replaces the active row’s proposal and resumes following;
+it never changes a pin. Focused editing is protected. Other rows remain untouched.
+A paused step may briefly show **Waiting for viewer position** while public navigation
+state settles. Such a value cannot be pinned until validated. On timeout the prior text
+remains for inspection, with **temporarily unavailable**; enter a number or use the
+explicit viewer action to recover. This is navigation convenience, not proof of the
+presented pixels. Reset/clear and input-basis changes preserve ownership; successful
+Save/Keep freezes following, and failed writes remain editable.
 
 For stored offsets `d_i = Reference − source_i`, an anchor at frame `c` predicts
 `c + d_anchor − d_target`. Thus A96 with A offset +504 and B offset −12 predicts

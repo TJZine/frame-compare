@@ -778,16 +778,24 @@ sibling-sidecar path, atomic
 result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
 is the sole human review surface inside VSView: it stays inert for rejected/ordinary
 sessions and presents entry authority/evidence separately from proposed numeric fields,
-explicit selected pins and saved outcomes. Output/frame hooks update navigation only.
+explicit selected pins and saved outcomes. Public output/frame hooks may prefill only
+an active unprotected proposal. Each draft owns following/manual/Predicted intent;
+focused editing defers passive writes, pin actions take ownership, and active-only
+Use viewer frame deliberately resumes following without selecting.
 An explicit source-row action binds the validated source/session/cohort and integer;
-no current-frame counter seeds proposals or selections. Same-moment reanchor preserves
+pins use exact field text, never a substituted viewer number. One panel-owned
+single-shot timer settles callback expectations against fresh public current_frame
+at 25 ms, bounded by both a monotonic 500 ms deadline and 20 attempts. Pending/timeout automatic values
+are unready in UI and handlers. Tokens plus source/file/session/generation/ownership
+checks prevent stale deliveries after cancellation. No inactive position cache,
+continuous timer, renderer access or presented-frame identity claim is introduced. Same-moment reanchor preserves
 pins; a confirmed new moment/reset clears them with context revalidation. Only the
 complete selected cohort including Reference, or separate complete known-offset basis,
 may write confirmed decisions. Keep saves a distinct whole-set
 `keep_current` decision per comparison. The panel derives immutable audio-review
 presentations, summary text, and details once per comparison at workspace activation;
 unload or replacement clears them. Preview callbacks reuse that evidence while
-updating active-source navigation and markers, never proposed numbers or selected pins. `alignment_vsview` owns availability policy,
+updating active navigation/markers and eligible active proposals, never selected pins. `alignment_vsview` owns availability policy,
 expected-comparison construction from raw source counts, result acceptance, and
 applying confirmed offsets; its service, persistence, override, cache, and CLI/config
 boundaries remain unchanged and it does not parse terminal input. The

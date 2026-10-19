@@ -33,7 +33,14 @@ Enter/verify **Frame** in any stable source row, then choose **Anchor [source]: 
 Switch A/B with the existing source selector; active-source **Go to [number]** requests
 a predicted seek and fills a proposal without selecting. Explicitly **Select [source]: [number]**
 for each match, including Reference, then **Save selected alignment**.
-Counters/callbacks/browsing must not seed or change proposals/pins. Verify exact source/
+Active unprotected Frame proposals follow validated public navigation; no callback
+may select/save or change a pin. Manual empty/invalid edits, Anchor/Select and Predicted
+Go suspend that row’s follow; active-only Use viewer frame deliberately resumes it.
+Focus editing stays protected. Paused callback13/API12 must converge to13 after public
+commit without a second callback. Pending/timeout values stay unready in UI/handlers;
+check 25 ms resampling, 500 ms deadline/20-attempt caps, source/session/token cancellation,
+stale enabled actions, modal/mode/reload/destruction, and no idle retry. This observes
+navigation, not displayed pixels. Clear/reset/basis preserve ownership. Verify exact source/
 number action text, provisional/missing hints, reset/cancel/reanchor, failed seek/write,
 and separate known-offset draft preservation. **Keep current alignment** saves a keep
 decision, not confirmation of the unsaved selected lineup.

@@ -301,7 +301,7 @@ def test_any_source_numeric_anchor_ab_before_reference_and_complete_save(tmp_pat
     api.current_frame = -999
     _call_hook(panel.on_current_frame_changed, 19000)
     _visit(panel, api, 0, 17000)
-    assert [f.text() for f in panel.frame_inputs] == ["", "96", "612"]
+    assert [f.text() for f in panel.frame_inputs] == ["17000", "96", "612"]
     _pin(panel, 0, 600)
     panel.use_positions_button.click()
     assert [
@@ -327,7 +327,7 @@ def test_prediction_navigation_checks_actual_output_and_seek_admission(tmp_path:
     _visit(panel, api, 2, 300)
     api.current_voutput = api.voutputs[1]  # Stale UI enablement is not authority.
     panel.jump_buttons[2].click()
-    assert not calls and panel.frame_inputs[2].text() == ""
+    assert not calls and panel.frame_inputs[2].text() == "300"
     assert "Switch to this source" in panel.error_label.text()
     _visit(panel, api, 2, 300)
     panel.jump_buttons[2].click()
@@ -470,14 +470,14 @@ def test_duplicate_long_source_names_keep_role_identity_on_numeric_actions(tmp_p
     assert panel._cohort.selected == (None, None, 0)
 
 
-def test_activation_starts_with_no_implicit_proposals_or_pins(tmp_path: Path) -> None:
+def test_activation_prefills_only_active_proposal_and_never_pins(tmp_path: Path) -> None:
     panel, api, _script = _panel(tmp_path, comparison_count=2)
     assert panel.progress_label.text() == "0/3 frames selected"
-    assert [f.text() for f in panel.frame_inputs] == ["", "", ""]
+    assert [f.text() for f in panel.frame_inputs] == ["12", "", ""]
     assert panel._cohort.selected == (None, None, None)
     _call_hook(panel.on_current_voutput_changed, api.current_voutput, 0)
     assert panel._cohort.selected == (None, None, None)
-    assert [f.text() for f in panel.frame_inputs] == ["", "", ""]
+    assert [f.text() for f in panel.frame_inputs] == ["12", "", ""]
     assert not panel.use_positions_button.isEnabled()
 
 
@@ -490,7 +490,7 @@ def test_callbacks_browsing_and_edits_leave_explicit_pins_unchanged(tmp_path: Pa
         _visit(panel, api, index, n)
         _call_hook(panel.on_current_frame_changed, n)
     assert panel._cohort.selected == (None, 31, 29)
-    assert [f.text() for f in panel.frame_inputs] == ["", "31", "28"]
+    assert [f.text() for f in panel.frame_inputs] == ["199", "31", "28"]
     assert panel._active_output_id == 2
     assert "Comparison 2: 28" in panel.select_buttons[2].text()
 
@@ -631,7 +631,7 @@ def test_panel_summary_preserves_target_boundary_copy(tmp_path: Path, boundary: 
             in summary
         )
         assert "confirmed +148f" not in summary
-        assert [field.text() for field in panel.frame_inputs] == ["", ""]
+        assert [field.text() for field in panel.frame_inputs] == ["12", ""]
         assert not panel.use_positions_button.isEnabled()
     else:
         assert (
@@ -709,7 +709,7 @@ def test_actual_native_payload_omits_rows_and_matches_full_terminal_and_panel_co
     assert "+250f  0:00–1:00  not settled" in summary
     assert "+246f  1:00–1:30  not settled" in summary
     assert "+250f  1:30–2:00  confirmed by video" in summary
-    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.frame_inputs] == ["12", ""]
     assert [field.text() for field in panel.offset_inputs] == [""]
     assert not panel.use_positions_button.isEnabled()
 
@@ -768,7 +768,7 @@ def test_panel_target_context_semantic_matrix(
     expected_details = build_audio_review_presentation(attempt).verbose_lines(panel=True)
     assert all(line in detail_text for line in expected_details)
     assert "Picture differs" not in detail_text
-    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.frame_inputs] == ["12", ""]
     assert [field.text() for field in panel.offset_inputs] == [""]
     assert not panel.use_positions_button.isEnabled()
 
@@ -938,7 +938,7 @@ def test_provisional_zero_is_visible_but_never_seeds_manual_authority(tmp_path: 
     )
 
     assert "Provisional audio candidate: +0f — NOT APPLIED" in panel.audio_summary_labels[0].text()
-    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.frame_inputs] == ["12", ""]
     assert [field.text() for field in panel.offset_inputs] == [""]
     assert panel.progress_label.text() == "0/2 frames selected"
     assert not panel.use_positions_button.isEnabled()
@@ -1396,7 +1396,7 @@ def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
     assert "Provisional audio candidate: +146f — NOT APPLIED" in summary
     assert "The video confirms +243f in 1:00–2:00" in summary
     assert "Check 1:01:01 — reference 13,123 ↔ comparison 12,880 (+243f)" in summary
-    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.frame_inputs] == ["12", ""]
     assert [field.text() for field in panel.offset_inputs] == [""]
     assert panel.progress_label.text() == "0/2 frames selected"
     assert not panel.use_positions_button.isEnabled()
@@ -1510,7 +1510,7 @@ def test_p4a_panel_covers_each_non_applied_reason(
     summary = panel.audio_summary_labels[0].text()
     assert "NOT APPLIED" in summary
     assert expected in summary
-    assert [field.text() for field in panel.frame_inputs] == ["", ""]
+    assert [field.text() for field in panel.frame_inputs] == ["12", ""]
     assert not panel.use_positions_button.isEnabled()
 
 
@@ -1544,7 +1544,7 @@ def test_evidence_is_built_once_per_comparison_and_replaced_with_workspace(
         _visit(panel, api, 1, frame + 1)
     assert builds == 2
     assert [label.text() for label in panel.audio_summary_labels] == summaries
-    assert panel._cohort.selected[0] is None and panel.frame_inputs[0].text() == ""
+    assert panel._cohort.selected[0] is None and panel.frame_inputs[0].text() == "4"
 
     api.voutputs[1].kwargs[ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY] = _provisional_audio_review(
         frame_offset=9
@@ -1611,3 +1611,253 @@ def test_pinned_context_terminal_visibility_markers_and_reload(tmp_path, monkeyp
     (tmp_path / "fresh").mkdir()
     fresh, _fresh_api, _ = _panel(tmp_path / "fresh", comparison_count=2)
     assert all(not label.isHidden() for label in fresh.source_outcome_labels)
+
+
+def test_paused_notification_settles_after_hook_without_second_callback(tmp_path):
+    from PySide6.QtCore import QTimer
+
+    panel, api, _ = _panel(tmp_path)
+    assert panel.frame_inputs[0].text() == "12"
+    _call_hook(panel.on_current_frame_changed, 13)  # actual callback-before-commit ordering
+    assert panel.frame_inputs[0].text() == "12"
+    assert not panel.anchor_buttons[0].isEnabled()
+    panel._row_action(0, "anchor", panel._binding(0))
+    assert panel._cohort.anchor is None
+    # Deliberate Use while pending must not bypass expected13 with the old public12.
+    panel.viewer_buttons[0].click()
+    assert panel.frame_inputs[0].text() == "12" and not panel._source_drafts[0].viewer_ready
+    QTimer.singleShot(0, lambda: setattr(api, "current_frame", 13))
+    QTest.qWait(80)
+    assert panel.frame_inputs[0].text() == "13" and panel._source_drafts[0].viewer_ready
+    assert panel._pending_frame is None and not panel._follow_timer.isActive()
+    assert panel._cohort.selected == (None, None) and not panel.use_positions_button.isEnabled()
+    assert "Viewer position" in panel.proposal_labels[0].text()
+
+
+@pytest.mark.parametrize("text", ["", "oops", "9"])
+def test_manual_ownership_cancels_even_queued_settle_deliveries(tmp_path, text):
+    panel, api, _ = _panel(tmp_path)
+    _call_hook(panel.on_current_frame_changed, 13)
+    queued = panel._settle_handler
+    assert queued is not None
+    panel.frame_inputs[0].setText(text)
+    api.current_frame = 13
+    queued()
+    QTest.qWait(40)
+    assert panel.frame_inputs[0].text() == text
+    assert not panel._source_drafts[0].following and panel._pending_frame is None
+    _call_hook(panel.on_current_frame_changed, 14)
+    assert panel.frame_inputs[0].text() == text
+    panel.viewer_buttons[0].click()
+    assert panel.frame_inputs[0].text() == "13" and panel._source_drafts[0].following
+    assert panel._cohort.anchor is None
+
+
+def test_latest_pending_replaces_old_and_source_ids_are_not_tab_indices(tmp_path):
+    panel, api, _ = _panel(tmp_path)
+    api.voutputs[0].vs_index, api.voutputs[1].vs_index = 9, 71
+    _call_hook(panel.on_workspace_loaded)
+    _call_hook(panel.on_current_frame_changed, 13)
+    queued = panel._settle_handler
+    _call_hook(panel.on_current_frame_changed, 17)
+    assert queued is not None
+    api.current_frame = 13
+    queued()
+    assert panel.frame_inputs[0].text() == "12"
+    api.current_frame = 17
+    QTest.qWait(60)
+    assert panel.frame_inputs[0].text() == "17"
+    api.current_voutput, api.current_frame = api.voutputs[1], 0
+    _call_hook(panel.on_current_voutput_changed, api.current_voutput, 0)
+    assert [f.text() for f in panel.frame_inputs] == ["17", "0"]
+    assert panel._active_output_id == 71
+    queued()
+    assert panel.frame_inputs[1].text() == "0" and panel._cohort.selected == (None, None)
+
+
+@pytest.mark.parametrize("bound", ["deadline", "attempts"])
+def test_settle_timeout_stops_preserves_text_and_is_unready(tmp_path, monkeypatch, bound):
+    clock = [100.0]
+    monkeypatch.setattr("frame_compare.vsview.alignment_review_panel.monotonic", lambda: clock[0])
+    panel, api, _ = _panel(tmp_path)
+    _call_hook(panel.on_current_frame_changed, 13)
+    pending = panel._pending_frame
+    assert pending is not None and pending.attempts == 1
+    if bound == "deadline":
+        clock[0] += 0.501
+        panel._settle_frame(pending.token)
+        assert pending.attempts == 1
+    else:
+        for _ in range(25):
+            panel._settle_frame(pending.token)
+        assert pending.attempts == 20
+    assert panel._pending_frame is None and not panel._follow_timer.isActive()
+    assert panel.frame_inputs[0].text() == "12"
+    assert "unavailable" in panel.proposal_labels[0].text()
+    panel._row_action(0, "anchor", panel._binding(0))
+    assert panel._cohort.anchor is None
+    api.current_frame = 13
+    QTest.qWait(40)
+    assert panel.frame_inputs[0].text() == "12"  # no idle retry
+    panel.viewer_buttons[0].click()
+    assert panel.frame_inputs[0].text() == "13"
+
+
+@pytest.mark.parametrize("value", [True, -1, 200, None, "13"])
+def test_invalid_public_positions_preserve_text_and_never_enable_pin(tmp_path, value):
+    panel, api, _ = _panel(tmp_path)
+    api.current_frame = value
+    panel.viewer_buttons[0].click()
+    assert panel.frame_inputs[0].text() == "12" and not panel.anchor_buttons[0].isEnabled()
+    panel._row_action(0, "anchor", panel._binding(0))
+    assert panel._cohort.anchor is None
+
+
+def test_public_no_output_error_and_stale_use_button_are_safe(tmp_path):
+    from vsview.api import NoCurrentVideoOutputError
+
+    panel, api, _ = _panel(tmp_path)
+    api.current_voutput, api.current_frame = api.voutputs[1], 31
+    panel.viewer_buttons[0].click()  # still visually enabled for old source
+    assert panel.frame_inputs[0].text() == "12" and panel.frame_inputs[1].text() == ""
+
+    class MissingAPI(SimpleNamespace):
+        @property
+        def current_voutput(self):
+            raise NoCurrentVideoOutputError("owned transient")
+
+    panel.api = cast(Any, MissingAPI(file_path=api.file_path, current_frame=12))
+    panel._navigation_changed(sample=True)
+    _call_hook(panel.on_current_frame_changed, 13)
+    assert panel._active_output_id is None and panel._pending_frame is None
+    assert not panel.anchor_buttons[0].isEnabled()
+    panel._row_action(0, "anchor", panel._binding(0))
+    assert panel._cohort.anchor is None
+    assert panel._cohort.selected == (None, None)
+
+
+def test_focus_defers_passive_updates_but_explicit_use_is_deliberate(tmp_path):
+    panel, api, _ = _panel(tmp_path)
+    panel.show()
+    panel.frame_inputs[0].setFocus()
+    cast(QApplication, _APP).processEvents()
+    assert panel.frame_inputs[0].hasFocus()
+    api.current_frame = 13
+    _call_hook(panel.on_current_frame_changed, 13)
+    QTest.qWait(40)
+    assert panel.frame_inputs[0].text() == "12" and not panel._source_drafts[0].viewer_ready
+    panel.viewer_buttons[0].click()
+    assert panel.frame_inputs[0].text() == "13" and panel._pending_frame is None
+    panel.close()
+
+
+@pytest.mark.parametrize(
+    "operation", ["pin", "predicted", "mode", "reset", "reload", "file", "destroy"]
+)
+def test_pending_work_cancelled_by_owned_actions_and_context_changes(
+    tmp_path, monkeypatch, operation
+):
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    panel, api, _ = _panel(tmp_path)
+    _call_hook(panel.on_current_frame_changed, 13)
+    queued = panel._settle_handler
+    assert queued is not None
+    if operation == "pin":
+        panel.frame_inputs[0].setText("7")
+        panel.anchor_buttons[0].click()
+    elif operation == "predicted":
+        _pin(panel, 1, 0, anchor=True)
+        api.playback = SimpleNamespace(
+            seek=lambda n: (_call_hook(panel.on_current_frame_changed, n), True)[1]
+        )
+        panel.jump_buttons[0].click()
+        assert (
+            panel.frame_inputs[0].text() == "12" and panel._source_drafts[0].origin == "Predicted"
+        )
+    elif operation == "mode":
+        panel.basis_selector.setCurrentIndex(1)
+    elif operation == "reset":
+        _pin(panel, 1, 0, anchor=True)
+        monkeypatch.setattr(
+            "frame_compare.vsview.alignment_review_panel.QMessageBox.question", lambda *a: 0
+        )
+        panel._reset_moment()
+    elif operation == "reload":
+        _call_hook(panel.on_workspace_loaded)
+    elif operation == "file":
+        api.file_path = tmp_path / "other.py"
+        panel._settle_frame(panel._follow_token)
+    else:
+        stale_binding = panel._binding(0)
+        panel.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        panel._row_action(0, "anchor", stale_binding)
+        _call_hook(panel.on_current_frame_changed, 13)
+        _call_hook(panel.on_current_voutput_changed, api.current_voutput, 0)
+        _call_hook(panel.on_workspace_loaded)
+    api.current_frame = 13
+    queued()
+    if operation != "destroy":
+        QTest.qWait(40)
+        assert panel.frame_inputs[0].text() != "13"
+        assert panel._pending_frame is None
+
+
+@pytest.mark.parametrize("finish", ["save", "keep"])
+def test_terminal_actions_cancel_pending_follow_and_never_change_pins(tmp_path, finish):
+    panel, api, _ = _panel(tmp_path)
+    _pin(panel, 0, 12, anchor=True)
+    _pin(panel, 1, 0)
+    panel.viewer_buttons[0].click()  # explicit resume while retaining existing pins
+    _call_hook(panel.on_current_frame_changed, 13)
+    queued = panel._settle_handler
+    assert queued is not None and panel._cohort.selected == (12, 0)
+    (panel.keep_button if finish == "keep" else panel.use_positions_button).click()
+    assert panel._saved
+    assert all("use viewer" not in label.text() for label in panel.proposal_labels)
+    api.current_frame = 13
+    queued()
+    _call_hook(panel.on_current_frame_changed, 13)
+    QTest.qWait(40)
+    assert panel.frame_inputs[0].text() == "12" and panel._cohort.selected == (12, 0)
+    assert panel._pending_frame is None and not panel._follow_timer.isActive()
+
+
+def test_pin_stops_follow_explicit_use_resumes_and_basis_preserves_ownership(tmp_path):
+    panel, api, _ = _panel(tmp_path)
+    panel.anchor_buttons[0].click()  # exact ready viewer-filled12, no counter substitution
+    assert panel._cohort.selected == (12, None) and not panel._source_drafts[0].following
+    api.current_frame = 13
+    _call_hook(panel.on_current_frame_changed, 13)
+    assert panel.frame_inputs[0].text() == "12"
+    panel.viewer_buttons[0].click()
+    assert panel.frame_inputs[0].text() == "13" and panel._cohort.selected == (12, None)
+    panel.frame_inputs[0].setText("")
+    panel.basis_selector.setCurrentIndex(1)
+    panel.basis_selector.setCurrentIndex(0)
+    api.current_frame = 14
+    _call_hook(panel.on_current_frame_changed, 14)
+    assert panel.frame_inputs[0].text() == "" and not panel._source_drafts[0].following
+
+
+def test_modal_entry_suspends_follow_and_cancel_preserves_exact_intent(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    panel, api, _ = _panel(tmp_path)
+    _pin(panel, 1, 0, anchor=True)
+    _call_hook(panel.on_current_frame_changed, 13)
+    queued = panel._settle_handler
+    assert queued is not None
+
+    def modal(*args):
+        api.current_frame = 13
+        _call_hook(panel.on_current_frame_changed, 13)
+        queued()
+        assert panel.frame_inputs[0].text() == "12" and panel._pending_frame is None
+        return QMessageBox.StandardButton.No
+
+    monkeypatch.setattr("frame_compare.vsview.alignment_review_panel.QMessageBox.question", modal)
+    panel._reset_moment()
+    assert panel.frame_inputs[0].text() == "12" and panel._cohort.selected == (None, 0)
+    assert panel._pending_frame is None

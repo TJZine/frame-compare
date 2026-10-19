@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
+from time import monotonic
 from typing import Any, Literal, Protocol, cast, override
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -22,7 +23,15 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from vsview.api import PluginAPI, VideoOutputProxy, WidgetPluginBase, hookimpl, run_in_loop
+from shiboken6 import isValid
+from vsview.api import (
+    NoCurrentVideoOutputError,
+    PluginAPI,
+    VideoOutputProxy,
+    WidgetPluginBase,
+    hookimpl,
+    run_in_loop,
+)
 
 from frame_compare.utils.alignment_evidence import (
     AudioAlignmentDecision,
@@ -52,7 +61,7 @@ from frame_compare.vsview.alignment_selection import OpeningHint, SelectedCohort
 
 _TIMELINE_GROUP = "frame_compare_alignment_review"
 type _InputBasis = Literal["positions", "offsets"]
-type _FrameOrigin = Literal["Entered", "Predicted"]
+type _FrameOrigin = Literal["Entered", "Predicted", "Viewer"]
 _MANUAL_AUTHORITY_ORIGINS = frozenset(
     {
         "interactive_confirmed_this_run",
@@ -89,6 +98,20 @@ class _SourceDraft:
     frame: int | None = None
     origin: _FrameOrigin | None = None
     error: str | None = None
+    following: bool = True
+    viewer_ready: bool = False
+    viewer_status: str | None = None
+
+
+@dataclass(slots=True)
+class _PendingFrame:
+    token: int
+    index: int
+    binding: tuple[int, str, int]
+    expected: int
+    deadline: float
+    attempts: int = 0
+    deliberate: bool = False
 
 
 @dataclass(slots=True)
@@ -131,6 +154,15 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._saved = False
         self._kept_current = False
         self._saved_offsets: tuple[int, ...] | None = None
+        self._follow_token = 0
+        self._pending_frame: _PendingFrame | None = None
+        self._settle_handler: Callable[[], None] | None = None
+        self._follow_timer = QTimer(self)
+        self._follow_timer.setSingleShot(True)
+        self._modal_active = False
+        # Child timer dies with the widget. Invalidate Python tokens before any
+        # already queued delivery can access a destroyed QObject.
+        self.destroyed.connect(lambda: self._discard_pending_on_destroy())
         self._build_ui()
         self._show_inactive(clear_marker=False)
 
@@ -178,6 +210,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.select_buttons = list[QPushButton]()
         self.clear_buttons = list[QPushButton]()
         self.jump_buttons = list[QPushButton]()
+        self.viewer_buttons = list[QPushButton]()
         self.anchor_label = QLabel("No anchor selected", self)
         self.anchor_label.setWordWrap(True)
         layout.insertWidget(3, self.anchor_label)
@@ -239,28 +272,174 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
     @run_in_loop(return_future=False)
     def on_current_voutput_changed(self, voutput: VideoOutputProxy, tab_index: int) -> None:
         del voutput, tab_index
-        self._navigation_changed()
+        self._cancel_follow()
+        self._navigation_changed(sample=True)
 
     @override
     @run_in_loop(return_future=False)
     def on_current_frame_changed(self, n: int) -> None:
-        del n
         self._navigation_changed()
+        self._follow_notification(n)
 
-    def _navigation_changed(self) -> None:
+    def _navigation_changed(self, *, sample: bool = False) -> None:
         if self._workspace is None:
             return
-        try:
-            self._active_output_id = self.api.current_voutput.vs_index
-        except (AttributeError, TypeError, ValueError):
-            self._active_output_id = None
+        active = self._current_output_id()
+        if active != self._active_output_id:
+            self._cancel_follow()
+        self._active_output_id = active
+        if active is None:
+            for draft in self._source_drafts:
+                if draft.following:
+                    draft.viewer_ready = False
+                    draft.viewer_status = "Viewer position temporarily unavailable — enter a number or use viewer frame"
         for index, draft in enumerate(self._source_drafts):
             if draft.output_id == self._active_output_id:
                 self._refresh_markers(index)
+                if sample:
+                    self._sample_viewer(index)
                 break
         self._refresh_ui()
 
+    @override
+    def event(self, event: QEvent) -> bool:
+        if event.type() in (QEvent.Type.DeferredDelete, QEvent.Type.Close) and hasattr(
+            self, "_follow_timer"
+        ):
+            self._cancel_follow()
+        return super().event(event)
+
+    def _discard_pending_on_destroy(self) -> None:
+        self._follow_token += 1
+        self._pending_frame = None
+        self._settle_handler = None
+        self._generation += 1
+        self._workspace = self._session = None
+
+    def _cancel_follow(self) -> None:
+        self._follow_token += 1
+        if isValid(self._follow_timer):
+            self._follow_timer.stop()
+            if self._settle_handler is not None:
+                self._follow_timer.timeout.disconnect(self._settle_handler)
+        self._settle_handler = None
+        if self._pending_frame is not None:
+            draft = self._source_drafts[self._pending_frame.index]
+            draft.viewer_ready = False
+            draft.viewer_status = (
+                "Viewer position temporarily unavailable — enter a number or use viewer frame"
+            )
+        self._pending_frame = None
+
+    def _current_output_id(self) -> int | None:
+        try:
+            value = cast(object, self.api.current_voutput.vs_index)
+            return value if isinstance(value, int) and not isinstance(value, bool) else None
+        except (NoCurrentVideoOutputError, AttributeError, TypeError, ValueError):
+            return None
+
+    def _can_follow(self, index: int) -> bool:
+        return (
+            self._workspace is not None
+            and self._session is not None
+            and self.api.file_path == self._session.script_path
+            and self._basis == "positions"
+            and not self._saved
+            and not self._modal_active
+            and 0 <= index < len(self._source_drafts)
+            and self._source_drafts[index].following
+            and self._current_output_id() == self._source_drafts[index].output_id
+        )
+
+    def _sample_viewer(
+        self, index: int, *, expected: int | None = None, deliberate: bool = False
+    ) -> bool:
+        if not self._can_follow(index):
+            return False
+        draft = self._source_drafts[index]
+        try:
+            value = cast(object, self.api.current_frame)
+        except (NoCurrentVideoOutputError, AttributeError, TypeError, ValueError):
+            value = None
+        # Revalidate source/file after the public read; callback n is never copied.
+        if (
+            not self._can_follow(index)
+            or not isinstance(value, int)
+            or isinstance(value, bool)
+            or not 0 <= value < draft.source_frame_count
+            or (expected is not None and value != expected)
+            or (not deliberate and self.frame_inputs[index].hasFocus())
+        ):
+            draft.viewer_ready = False
+            draft.viewer_status = (
+                "Viewer position temporarily unavailable — enter a number or use viewer frame"
+            )
+            return False
+        field = self.frame_inputs[index]
+        field.blockSignals(True)
+        field.setText(str(value))
+        field.blockSignals(False)
+        draft.frame, draft.error, draft.origin = value, None, "Viewer"
+        draft.viewer_ready, draft.viewer_status = True, None
+        return True
+
+    def _follow_notification(self, expected: object) -> None:
+        if self._workspace is None:
+            return
+        self._cancel_follow()
+        for index, draft in enumerate(self._source_drafts):
+            if not self._can_follow(index):
+                continue
+            draft.viewer_ready = False
+            if (
+                isinstance(expected, bool)
+                or not isinstance(expected, int)
+                or not 0 <= expected < draft.source_frame_count
+            ):
+                draft.viewer_status = (
+                    "Viewer position temporarily unavailable — enter a number or use viewer frame"
+                )
+                self._refresh_ui()
+                return
+            pending = _PendingFrame(
+                self._follow_token, index, self._binding(index), expected, monotonic() + 0.5
+            )
+            self._pending_frame = pending
+            self._settle_handler = partial(self._settle_frame, pending.token)
+            self._follow_timer.timeout.connect(self._settle_handler)
+            self._settle_frame(pending.token)
+            return
+        self._refresh_ui()
+
+    def _settle_frame(self, token: int) -> None:
+        pending = self._pending_frame
+        if pending is None or pending.token != token:
+            return
+        if not self._can_follow(pending.index) or pending.binding != self._binding(pending.index):
+            self._cancel_follow()
+            self._refresh_ui()
+            return
+        if monotonic() >= pending.deadline or pending.attempts >= 20:
+            self._cancel_follow()
+        else:
+            pending.attempts += 1
+            if self._sample_viewer(
+                pending.index, expected=pending.expected, deliberate=pending.deliberate
+            ):
+                self._pending_frame = None
+                self._cancel_follow()
+            elif self._can_follow(pending.index):
+                self._source_drafts[
+                    pending.index
+                ].viewer_status = "Waiting for viewer position — not ready to select"
+                self._follow_timer.start(25)
+            else:
+                self._cancel_follow()
+        self._refresh_ui()
+
     def _activate_workspace(self) -> None:
+        if not isValid(self):
+            return
         self._show_inactive()
         if self.api.file_path is None:
             return
@@ -343,7 +522,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self.manual_toggle.setEnabled(True)
         self.keep_button.setEnabled(True)
         self.basis_selector.setEnabled(True)
-        self._refresh_ui()
+        self._navigation_changed(sample=True)
 
     def _binding(self, index: int) -> tuple[int, str, int]:
         assert self._workspace is not None
@@ -361,6 +540,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             self.select_buttons,
             self.clear_buttons,
             self.jump_buttons,
+            self.viewer_buttons,
             self.offset_inputs,
         ):
             controls.clear()
@@ -402,19 +582,25 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             action_row.setSpacing(4)
             self.lineup_layout.addLayout(entry_row)
             self.lineup_layout.addLayout(action_row)
+            viewer_row = QHBoxLayout()
+            self.lineup_layout.addLayout(viewer_row)
             self.frame_inputs.append(field)
             for action, collection in (
                 ("anchor", self.anchor_buttons),
                 ("select", self.select_buttons),
                 ("clear", self.clear_buttons),
                 ("jump", self.jump_buttons),
+                ("viewer", self.viewer_buttons),
             ):
                 button = QPushButton(self.lineup_group)
                 button.setToolTip(identity)
                 button.clicked.connect(
                     partial(self._row_action, index, action, self._binding(index))
                 )
-                if action == "select":
+                if action == "viewer":
+                    viewer_row.addWidget(button)
+                    viewer_row.addStretch()
+                elif action == "select":
                     entry_row.addWidget(button, 1)
                 else:
                     action_row.addWidget(button, 1 if action == "anchor" else 0)
@@ -497,6 +683,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 widget.deleteLater()
 
     def _show_inactive(self, *, clear_marker: bool = True) -> None:
+        self._cancel_follow()
         if clear_marker:
             self.api.timeline.clear_notches(_TIMELINE_GROUP)
         self._workspace = None
@@ -558,6 +745,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._refresh_ui()
 
     def _basis_changed(self, index: int) -> None:
+        self._cancel_follow()
         self._basis = "positions" if index == 0 else "offsets"
         self.offset_inputs_group.setVisible(self._basis == "offsets")
         self.error_label.clear()
@@ -571,7 +759,9 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             or binding != self._binding(index)
         ):
             return
+        self._cancel_follow()
         draft = self._source_drafts[index]
+        draft.following, draft.viewer_ready, draft.viewer_status = False, True, None
         draft.frame, draft.error = _parse_source_frame(
             text, draft.role_label, draft.source_frame_count
         )
@@ -606,16 +796,21 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         return (binding, self._cohort.revision, self.frame_inputs[index].text(), self.api.file_path)
 
     def _confirm_reset(self, message: str) -> bool:
-        return (
-            QMessageBox.question(
-                self,
-                "Choose a new alignment moment?",
-                message,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+        self._cancel_follow()
+        self._modal_active = True
+        try:
+            return (
+                QMessageBox.question(
+                    self,
+                    "Choose a new alignment moment?",
+                    message,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                == QMessageBox.StandardButton.Yes
             )
-            == QMessageBox.StandardButton.Yes
-        )
+        finally:
+            self._modal_active = False
 
     def _row_action(
         self, index: int, action: str, binding: tuple[int, str, int], _checked: bool = False
@@ -625,7 +820,19 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             return
         draft = self._source_drafts[index]
         self._action_error = None
-        if action == "clear":
+        if action == "viewer":
+            if self._current_output_id() != draft.output_id:
+                self._action_error = "Switch to this source before using its viewer frame."
+            else:
+                draft.following = True
+                pending = self._pending_frame
+                if pending is not None and pending.index == index and pending.binding == binding:
+                    pending.deliberate = True
+                    self._settle_frame(pending.token)
+                else:
+                    self._cancel_follow()
+                    self._sample_viewer(index, deliberate=True)
+        elif action == "clear":
             if index == self._cohort.anchor and not self._confirm_reset(
                 "Clear the anchor and all selected frames? Proposed numbers and known offsets stay."
             ):
@@ -634,6 +841,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 return
             self._cohort = self._cohort.clear(index)
         elif action == "jump":
+            self._cancel_follow()
             prediction = self._cohort.predict(index, self._hints)
             try:
                 active = self.api.current_voutput.vs_index
@@ -646,6 +854,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                     "No in-range prediction is available; enter a matching frame manually."
                 )
             else:
+                draft.following, draft.viewer_ready, draft.viewer_status = False, True, None
                 field = self.frame_inputs[index]
                 field.blockSignals(True)
                 field.setText(str(prediction.frame))
@@ -664,11 +873,15 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                         else "Seek was not admitted. Pause playback and try again; no frame was selected."
                     )
         else:
+            if draft.following and (not draft.viewer_ready or self._current_output_id() is None):
+                return
+            self._cancel_follow()
             number, error = _parse_source_frame(
                 self.frame_inputs[index].text(), draft.role_label, draft.source_frame_count
             )
             if number is None or error is not None:
                 return
+            draft.following = False
             if action == "anchor":
                 if self._cohort.needs_new_moment(index, number) and not self._confirm_reset(
                     "Choose a new moment and clear the other selected frames? Proposed numbers and known offsets stay."
@@ -692,6 +905,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             or self.api.file_path != self._session.script_path
         ):
             return
+        self._cancel_follow()
         context = self._generation, self._cohort.revision, self.api.file_path
         if not self._confirm_reset(
             "Clear the anchor and all selected frames? Proposed numbers and known offsets stay."
@@ -793,10 +1007,16 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 outcome = _keep_saved_text(self._workspace.comparisons[index - 1])
             self.source_outcome_labels[index].setText(outcome)
             self.source_outcome_labels[index].setVisible(not self._saved or index > 0)
-            proposal = draft.error or (
-                f"{draft.origin} proposal: frame {draft.frame} — not selected"
-                if draft.frame is not None and draft.frame != selected
-                else ""
+            proposal = (
+                draft.error
+                or (draft.viewer_status if draft.following else None)
+                or (
+                    f"Viewer position: frame {draft.frame} — not selected"
+                    if draft.origin == "Viewer" and draft.frame != selected
+                    else f"{draft.origin} proposal: frame {draft.frame} — not selected"
+                    if draft.frame is not None and draft.frame != selected
+                    else ""
+                )
             )
             self.proposal_labels[index].setText(proposal)
             self.proposal_labels[index].setVisible(bool(proposal))
@@ -815,11 +1035,18 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             for button in (self.clear_buttons[index], self.jump_buttons[index]):
                 button.setFixedWidth(button.fontMetrics().horizontalAdvance(button.text()) + 20)
             enabled = positions and not self._saved
+            ready = not draft.following or draft.viewer_ready
+            self.viewer_buttons[index].setText("Use viewer frame")
+            self.viewer_buttons[index].setVisible(draft.output_id == self._active_output_id)
+            self.viewer_buttons[index].setEnabled(
+                enabled and draft.output_id == self._active_output_id
+            )
             self.anchor_buttons[index].setEnabled(
-                enabled and draft.frame is not None and draft.error is None
+                enabled and ready and draft.frame is not None and draft.error is None
             )
             self.select_buttons[index].setEnabled(
                 enabled
+                and ready
                 and anchor is not None
                 and index != anchor
                 and draft.frame is not None
@@ -836,6 +1063,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 self.select_buttons[index],
                 self.clear_buttons[index],
                 self.jump_buttons[index],
+                self.viewer_buttons[index],
             ):
                 description = (
                     "Clear selection"
@@ -936,7 +1164,10 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
             self.error_label.setText(self._action_error)
             return
         self._saved_basis = self._basis if not self._kept_current else None
+        self._cancel_follow()
         self._saved = True
+        for draft in self._source_drafts:
+            draft.viewer_status = None
         self.api.timeline.clear_notches(_TIMELINE_GROUP)
         self.error_label.clear()
         for label in self.audio_summary_labels:
