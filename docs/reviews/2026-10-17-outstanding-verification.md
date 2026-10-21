@@ -5,7 +5,9 @@ search:
 
 # Outstanding verification ledger — 2026-10-17
 
-Status: MacBook continuation completed on 2026-10-18. Actual Windows-to-MacBook
+Status: HDR output correction committed on 2026-10-21; see the final HDR section
+for current source, native evidence, performance cost and remaining prerequisites.
+The earlier MacBook continuation completed on 2026-10-18. Actual Windows-to-MacBook
 report transfer, native macOS picker, Merge/Replace/conflict choices and exact
 review/image/identity/reload acceptance passed. Acceptance remains OPEN for the
 explicit prerequisites in the final disposition table. Visible Windows native
@@ -1180,3 +1182,198 @@ remain historical observations. No satisfied application suite was repeated.
 | CQ7 and CQ14 | **Outside accepted refactor/release-blocker scope.** Prior bounded CQ7 lifecycle proof retained; actual browser-managed background-suspension discriminator unobserved. CQ14 real fpng comparison additionally needs a supported runtime and agreed comparison/disclosure contract. No speculative consolidation. |
 | Historical failed native/harness/input attempts | **Failed historical observations retained**, not converted to passes. Later successful managed Windows or exact Mac receiving cases establish only their stated scopes. |
 | Release/publication/legal approval | **Outside this task.** No signing, credential migration, protected dispatch, PR merge, publication or release action. |
+
+## HDR output correction and native optimization preparation — 2026-10-21
+
+This section updates the HDR-specific obligations. Earlier acceptance keeps its
+identified source/runtime scope; it does not establish acceptance of these changed
+pixels or of a future native optimization. The user's later MacBook HDR/SDR/DV
+observations are useful attributed observations, not independently captured
+evidence for this exact replacement implementation.
+
+### Committed source and evidence identity
+
+Implementation: **`5c15cbf4daa7bb8630706259a42d2674ec5d9f5f`**, parent
+`124d75575d9ceb35987649724e029f9f4dc3cd98`, branch `v0.7.0`.
+Before acting, actual local and remote heads both identified that parent; PR138
+remained open against `pre-release` at
+`35792220ae59d514ed626707340e2a86a7a14d05`. The first sandboxed remote read failed
+to connect; the scoped authorized `git ls-remote` retry succeeded. No checkout
+reset, merge, protected branch update or installation replacement occurred.
+
+The 18 implementation/doc/test files were tested as an uncommitted snapshot atop
+that parent. Their retained raw diff SHA-256 is
+`8fc37585a8c6107f4a4a97416e0ee89de1cc83fcfe468efabbf73183470f783c`.
+All 18 working-file hashes were rechecked before committing, with an initially
+empty Git index. Git blob comparison reconciles checkout line-ending normalization;
+the original Windows raw-byte hashes are not portable Linux checkout hashes.
+Five preexisting untracked VSView plans remain outside these HDR commits.
+
+Raw evidence remains outside scratch at these local roots, relative to the Windows
+checkout `C:\Software\video\frame-compare`:
+
+- `generated/verification/2026-10-20/hdr-color-study/`: canonical diagnostic
+  `study-summary.json`, original mastering/curve studies, retained Pro packets,
+  and `output-history-controls/`.
+- `generated/verification/2026-10-20/hdr-color-study/srgb-implementation/`:
+  source receipt/snapshots/diff, command receipts and exits, JUnit, media results,
+  numerical oracle comparison, timing, skip accounting and cleanup.
+- `generated/verification/2026-10-21/hdr-native-still-prototype/`:
+  Pro response, independent source review, paired native16/sRGB8 arrays,
+  negative controls, compatibility-guard self-test, build prerequisites and handoff.
+- `generated/verification/2026-10-21/hdr-commits/`: commit/tree reconciliation
+  and the committed-source continuation receipt.
+
+The raw film, generated reports/images, full native binaries, caches, test keys and
+large diagnostic arrays are intentionally not Git contents. This ledger and the
+reusable synthetic harness are committed. Original ZIPs remain immutable historical
+evidence; a committed-source continuation identifies the new Git revisions.
+
+| Frozen handoff artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `hdr-performance-options/frame-compare-HDR-performance-Pro-packet.zip` | 1,503,348 | `84c47d6298eb963423457970135247b5e831584d816136100d3f1d00e7cf6384` |
+| `hdr-native-still-prototype/frame-compare-native-still-MacBook-handoff.zip` | 1,651,810 | `232ef769c25cc35bf315973e0577fa6abf31e5129ba3ead9511de54de995b42b` |
+
+Each ZIP's CRC and member SHA-256 manifest passed. The first contains the earlier
+dirty source and pinned upstream source; the second contains that packet plus the
+new Windows references and build handoff. No movie footage or secret values are
+needed for those packets. Their earlier statements that source was uncommitted
+describe packaging time, not the current Git state.
+
+### Behavior implemented; defaults retained
+
+Known libplacebo BT.1886 SDR destination samples now pass through explicit
+destination-black/white decoding, endpoint-relative normalization and the sRGB
+OETF in RGBS before RGB8. The existing optional gamma stage retains its position.
+Output properties specify full-range RGB/sRGB/BT.709 and discard stale HDR/RPU/
+mastering/scene/chroma properties; original source diagnostics stay available.
+Pillow declares sRGB for known matching samples. Arbitrary SDR and degraded
+fallback output do not inherit this native-output conversion.
+
+Screenshot preparation alone requests independent native frames. An eager
+one-frame prototype preserves admission/fallback; other source positions use
+transient one-frame Tonemap nodes through FrameEval, with Loop after Tonemap.
+Later native failures propagate rather than silently mixing fallback pixels.
+Sequence callers retain sequence state. Applied report identity/disclosure includes
+`output_encoding=srgb` and `frame_policy=independent_frames` where selected.
+No BT.2390 knee, gamut, dynamic-detection, smoothing, metadata, Dolby Vision,
+contrast, destination or preset default changed.
+
+### Executed verification and failure/skip accounting
+
+Environment: unmanaged native Windows10 build19045, Python3.13.7, VapourSynth R81,
+vs-placebo2.0.4, native libplacebo log v7.371.0/API371, L-SMASH1310,
+RTX5080, Pillow13.0.0 and NumPy2.5.4. Runtime binary hashes and package inventory
+are retained in `output-history-controls/environment.json`. Loaded vs-placebo DLL
+SHA-256 is `b0a0689946e03f6f7467b798fba4678018bb28ba6b1caecdded8d08945049310`.
+This is not fresh portable-bundle or Docker acceptance.
+
+| Check / command owner | Observed result | Boundary |
+| --- | --- | --- |
+| Changed implementation test files in the full native run | **Passed: 109 cases.** | Overlaps other selections; do not sum these rows as independent cases. |
+| `pytest -q tests/vs/test_integration.py -k 'srgb or still_tonemap'` | **Passed: 3, exit0.** `native-final-tests-command.json` / JUnit. | Native arithmetic/PNG goldens, original props, quantized PQ exactly-once conversion, sampled history/concurrency. |
+| `pytest -q tests/e2e/test_media_tonemap.py`, media/backend required | **Passed: 2, zero skips, exit0.** `media-tonemap-command.json` / JUnit. | Actual installed CLI/native rendering; not all media/platform journeys. |
+| `real_media_probe.py` and `run_real_media.py` | **Passed within sampled scope:** RPU/noRPU direct/helper/forward/reverse/repeated/parallel, plus noRPU lifetime; 13 children, exit0. Separate sequence benchmark child also exit0. | Owned Kill Bill original media/index/config unchanged; exact sampled finalRGB8 equality. No generic DV reshaping or exhaustive history guarantee inferred. |
+| Retained porch native16 vs independent float64 conversion oracle | **Passed:** finalRGB8 maximum difference1 code;211 components near rounding boundaries. | Arithmetic oracle tolerance is distinct from the future optimization's zero-difference gate. |
+| Ruff lint/format, Bandit medium gate, import-linter no-cache, Pyright `--warnings`, VS stub lint/format | **Passed, exit0**, exact receipts under `srgb-implementation/`. | Static evidence, not native acceptance. |
+| `pytest -q -n4 --dist loadgroup` | **Failed, exit1:** initially4091 passed/82 failed/77 skipped. Failed-fixture retry leaves4165 passed/8 unresolved/77 skipped. | Six failures reproduce on unchanged parent; two lifecycle cases require user-PATH registry access. Whole gate is not green. |
+| New paired-checkpoint harness | **Passed:** six stock Windows histories,35 captures over10 synthetic frames; native16 and corrected sRGB8 agree exactly across sampled histories. | Same evaluation linked by carried tap token/hash. Tap count is not a native invocation/eviction counter. |
+| Shared-sequence negative control | **Expected rejection, exit1:** frames2–8 differ at both checkpoints. | Demonstrates comparator sensitivity to the history effect, not a new failure of the independent implementation. |
+| Comparator enforcement | **Passed:** equal accepted; native16-only1-code difference rejected with unchangedRGB8; identical pixels with incompatible tone kwargs rejected. | Also guards fixture/settings/kwargs/platform/Python/VS and requested histories; source/GPU identity remains a separate receipt obligation. |
+
+The 74 original updater-key fixture failures came from a scratch root inside the
+repository, which the fixture generator deliberately refuses. Retrying that failed
+setup outside the repository established74 passes; it did not waive a product
+expectation. The six remaining baseline failures are one collection-warning
+orchestration fixture, two alignment path-separator expectations, two terminal CRLF
+expectations and a copied-interpreter Windows launcher fixture. The two blocked
+installation lifecycle cases are the PS5.1/PS7 variants requiring registry access.
+Exact IDs/reproductions are in `suite-accounting.json`; no unrelated repair was made.
+
+The 77 full-suite skips are retained by reason: browser unavailable20; Windows
+filesystem/POSIX-execute distinctions5; media opt-in7; streaming-resource opt-in3;
+live services2; POSIX/signal/PTY/interpreter-specific cases21; Perl1; jq18.
+These sum77 and establish no platform pass. Separately opted-in tonemap E2E above
+does not close every skipped media case.
+
+Initial harness setup failures are retained: incorrect ModifyFrame callback
+parameter name, then bytes-versus-string interpretation of the carried hash.
+Both were corrected; the six accepted native children use the final probe.
+Independent review confirmed paired checkpoint linkage and identified the missing
+input compatibility guard; the strengthened comparator was checked against retained
+arrays and deliberate violations without repeating GPU work. Small arrays/logs
+remain outside scratch; all seven accepted/negative-control native children exited.
+
+Commit preparation reused these native results after proving all18 tested files
+match the implementation commit's Git blobs. The tracked harness migration changes
+only entrypoint references/formatting; its AST matches the accepted harness with
+those substitutions. The tracked runner's comparator self-test and probe help
+exited0. Repository Ruff lint and formatting checks and `git diff --check` passed;
+an initial filename-length formatting failure was corrected and retained in the
+commit-preparation receipts. Strict Zensical was not rerun because its dependency
+is unavailable locally. No unchanged full suite or GPU benchmark was repeated.
+
+### Measured performance cost and next experiment
+
+Same-host, same-kwargs, noRPU 4K Kill Bill frames12382–12413:
+independent34.82651080004871s versus shared sequence6.868044199887663s,
+ratio5.070804698755192. **Both paths include the sRGB correction.** The helper's
+implicit frame0 request occurs before timing. Timed work includes get_frame,
+measurement/hashing and GC, so this is not full-CLI wall time or native stage
+profiling. Host private memory stabilizes around2.1GiB after warm-up; host counters
+do not establish VRAM bounds. No universal5x penalty or achievable5x speedup is claimed.
+
+Pro's recommendation and independent pinned-source review support an experiment,
+not adoption: retain a native device/renderer, reset temporal state per still,
+keep constructor metadata immutable/per-frame, and reject/poison failed native
+transactions. Flush does not clear failed shader/LUT/error caches. The review also
+found a WARN-only missing-peak-data path: an ERR-only event latch is insufficient
+for the strict first prototype. Internal capture must include the relevant numeric
+severity independently of visible logging, or expose structured detection status.
+Do not parse English logs or clear errors and continue with degraded pixels.
+
+Generic native CSP_DOVI reshaping remains excluded until previous-RPU semantics
+are defined. Pinned source also shows an unused reshape allocation in the metadata-only
+RPU route; that is a source finding, not measured installed-DLL leak proof or a claim
+that current RGB/HDR10 pixels consume process-static reshape state. Preserve actual
+L1/L6/endpoints handling when addressing it in the isolated native prototype.
+
+The user chose **MacBook Docker build, then Windows testing here**. Current Windows
+has Visual C++ Build Tools but no detected upstream MSYS2/Meson/development-library
+build stack or Docker runtime. No native candidate was implemented, built or installed.
+Linux ELF `.so` output cannot provide Windows acceptance: return a Windows x64 PE DLL
+from the same reviewed patch/dependencies through a separately demonstrated cross-build
+or Windows build route. No protected dispatch/publishing is authorized.
+
+Reusable harness entrypoints now live in `tools/hdr_still_probe.py` and
+`tools/verify_hdr_still.py`. The former is the accepted probe with its paired
+checkpoints; the runner points at that sibling name. Example in the matching locked
+environment, with fresh disposable output directories:
+
+```text
+python tools/verify_hdr_still.py --self-test --output /proof/comparator
+python tools/verify_hdr_still.py --mode stock-fresh --output /proof/stock
+python tools/verify_hdr_still.py --mode candidate-fresh --plugin /build/libvs_placebo.so --output /proof/rebuild-fresh --reference /proof/stock
+python tools/verify_hdr_still.py --mode candidate-independent --plugin /build/libvs_placebo.so --output /proof/independent --reference /proof/stock
+```
+
+Use original installed, unchanged rebuild, patched fresh and patched independent
+controls on the same environment; intentionally different binaries must retain
+their own identities. The supplied ordinary synthetic fixture does not replace
+epsilon/rounding adversaries, metadata/RPU transitions, injected faults/warnings,
+genuine eviction/recomputation, cancellation, RPU allocation/VRAM/lifecycle and
+production sparse/multiclip/CLI profiling. Native16 **and** finalRGB8 require zero
+sample differences from the current reference for the optimization gate.
+
+### Current HDR disposition
+
+| Obligation | Disposition |
+| --- | --- |
+| sRGB correction, truthful properties, PNG declaration and report identity | **Implemented; passed within identified native/media/static scope.** |
+| Independent still policy with unchanged tone settings | **Implemented; passed within sampled native/media/history scope.** Measured cost remains explicit. |
+| Current full native gate | **Failed:** six parent-reproduced failures and two registry-access gaps;77 skips. |
+| Matching-source Docker/runtime and unsigned portable artifact proof | **Blocked/pending** matching-source hosted or MacBook/Windows execution. Earlier green artifacts retain earlier source scope. |
+| fpng writer runtime, browser/profile and calibrated physical luminance | **Blocked** by the corresponding supported writer, browser/display-profile observation and measurement prerequisites. Numerical samples do not establish them. |
+| Faster native still mode | **Not implemented or accepted; blocked** by reproducible patched builds and exact/error/metadata/resource/performance proof. |
+| Older Windows/MacBook acceptance | **Satisfied only within identified prior scope.** No blanket invalidation or new pass for changed pixels. |
+| Protected signing, credential migration, release/publication | **Outside this work; no action performed.** Ordinary branch commits and automatic PR verification are separate. |
