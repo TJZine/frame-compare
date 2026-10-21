@@ -442,6 +442,8 @@ def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settin
     ("field", "label", "value", "expected"),
     [
         ("gamut_mapping", "Gamut mapping", 0, "Clip"),
+        ("output_encoding", "Image encoding", "srgb", "sRGB"),
+        ("frame_policy", "Frame processing", "independent_frames", "Independent frames"),
         ("gamut_mapping", "Gamut mapping", 1, "Perceptual"),
         ("gamut_mapping", "Gamut mapping", 2, "Soft clip"),
         ("gamut_mapping", "Gamut mapping", 3, "Relative"),

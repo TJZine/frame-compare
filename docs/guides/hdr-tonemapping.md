@@ -19,7 +19,28 @@ HDR tonemapping.
 3. Decide whether the frame requires HDR-to-SDR conversion.
 4. Convert to the working color representation without unnecessary 8-bit reduction.
 5. Apply the configured vs-placebo tonemapping preset and target luminance.
-6. Render the screenshot and selected overlay.
+6. Convert the native SDR destination's BT.1886 samples to full-range sRGB before
+   reducing to RGB8, then render the screenshot and selected overlay.
+
+Screenshot rendering gives each source frame its own native mapper state. Random
+access, helper reads of frame zero, parallel requests and cache eviction cannot
+carry peak-detector history from another frame into a screenshot. Preset controls
+remain unchanged; the report records `independent_frames` as the applied frame
+policy. This is a still-image rendering policy, not chronological playback with
+temporal smoothing.
+
+The sRGB conversion uses the native destination's configured black and white
+endpoints: the selected black maps to sRGB zero and white to one. It preserves
+BT.709 primaries and D65. It changes the representation for browser images, not
+the tone curve or the source grade, and does not set a monitor's physical
+luminance. Pillow PNGs declare sRGB; an untagged PNG from the fpng writer also
+contains sRGB samples. Original source metadata remains available in diagnostics;
+converted SDR frames no longer claim PQ/BT.2020 or carry source HDR metadata.
+
+This conversion applies only to the known vs-placebo SDR destination. Existing SDR
+sources and the separately identified degraded fallback keep their existing
+interpretation; they are not assigned the native mapper's black point or passed
+through this conversion.
 
 The FFmpeg fallback leaves ambiguous transfer or primaries metadata unknown. It does
 not treat that metadata as ordinary SDR.

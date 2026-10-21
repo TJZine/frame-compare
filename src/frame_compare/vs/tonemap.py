@@ -33,6 +33,8 @@ def apply_tonemap(
     clip: vs.VideoNode,
     settings: TonemapSettings,
     hdr_metadata: HDRMetadata | None = None,
+    *,
+    still_image: bool = False,
 ) -> TonemapResult:
     """Apply HDR to SDR tonemapping."""
     if not settings.enabled:
@@ -53,7 +55,9 @@ def apply_tonemap(
         cause = TonemapFallbackCause.RUNTIME_UNUSABLE
     else:
         raise_if_cancelling()
-        result = tonemap_libplacebo.apply_libplacebo(clip, settings, core, hdr_metadata)
+        result = tonemap_libplacebo.apply_libplacebo(
+            clip, settings, core, hdr_metadata, still_image=still_image
+        )
         if isinstance(result, TonemapResult):
             return result
         cause = result

@@ -488,12 +488,14 @@ def test_applied_tonemap_identity_and_shared_projection(
     from frame_compare.vs.types import (
         AppliedTonemap,
         FallbackTonemap,
+        LibplaceboTonemap,
         ResolvedSourcePeak,
         TonemapFallbackCause,
     )
 
     settings = TonemapSettings(target_nits=203)
     placebo = libplacebo_tonemap(settings)
+    assert isinstance(placebo.transform, LibplaceboTonemap)
     fallback = AppliedTonemap(
         settings,
         FallbackTonemap(
@@ -532,6 +534,12 @@ def test_applied_tonemap_identity_and_shared_projection(
     assert left["tonemap"] is not None
     assert right["tonemap"] is not None
     assert left["tonemap"]["implementation"] == "libplacebo"
+    assert left["tonemap"]["effective_controls"]["output_encoding"] == "srgb"
+    assert left["tonemap"]["effective_controls"]["frame_policy"] == "sequence"
+    independent = replace(
+        placebo, transform=replace(placebo.transform, frame_policy="independent_frames")
+    )
+    assert payload(independent, independent)["report_id"] != payload(placebo, placebo)["report_id"]
     assert right["tonemap"]["algorithm"] == "frame_compare_peak_scaled_rational_v1"
     assert right["tonemap"]["fallback_cause"] == "runtime_call_failed"
     assert right["tonemap"]["effective_controls"] == {"target_nits": 203, "gamma_lift": False}

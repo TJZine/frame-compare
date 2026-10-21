@@ -491,6 +491,8 @@ def _shared_tonemap_payload(tonemap: AppliedTonemap) -> ReportSharedTonemapPaylo
     controls: dict[str, object] = dict(_tonemap_settings_payload(transform.settings))
     for key in ("enabled", "preset", "tone_curve", "source_peak"):
         controls.pop(key)
+    controls["output_encoding"] = "srgb"
+    controls["frame_policy"] = transform.frame_policy
     return {
         "implementation": "libplacebo",
         "algorithm": transform.curve.value,

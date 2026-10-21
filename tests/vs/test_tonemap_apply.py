@@ -26,7 +26,9 @@ def test_apply_tonemap_uses_libplacebo_when_available(
         apply_tonemap(mock_clip, settings)
 
         mock_runtime_usable.assert_called_once_with()
-        mock_libplacebo.assert_called_once_with(mock_clip, settings, mock_core, None)
+        mock_libplacebo.assert_called_once_with(
+            mock_clip, settings, mock_core, None, still_image=False
+        )
         mock_fallback.assert_not_called()
 
 

@@ -1083,6 +1083,26 @@ call failed. Preparation, rendered clip facts, diagnostic overlays, orchestratio
 and report serialization carry the same per-clip facts. One render warning aggregates
 fallback clips. The fallback graph and frame properties are unchanged.
 
+Screenshot preparation opts into independent native frames: an eager one-frame
+libplacebo prototype preserves backend admission/fallback behavior, and FrameEval
+creates a transient one-frame mapper for each other source position. Looping takes
+place after Tonemap to preserve original frame addressing without sharing native
+peak-detector history across source frames. No Python node cache retains per-frame
+GPU contexts. Subsequent native failures propagate rather than silently mixing
+fallback pixels into a source labeled libplacebo. Other callers retain sequence
+mode; preset kwargs, including temporal smoothing settings, remain unchanged.
+
+The known libplacebo SDR destination is BT.709-primary BT.1886 encoded RGB. After
+the existing optional gamma adjustment, `tonemap_conversion` decodes that transfer
+with its explicit destination black/white, normalizes between those endpoints,
+and encodes sRGB in RGBS before RGB8 quantization. The resulting props specify
+RGB/full-range/sRGB/BT.709 and remove stale source HDR metadata. Source diagnostics
+read the original node. Pillow declares sRGB without changing supplied samples;
+fpng writes the same sRGB samples with its existing metadata behavior. This boundary
+does not convert arbitrary SDR or fallback output. Applied report controls and
+report identity include output encoding and frame policy separately from requested
+settings.
+
 Report payload v1.3 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
 provenance, shared formatters, stable roles, and set-level collision handling once per

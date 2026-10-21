@@ -79,7 +79,7 @@ def _apply_vs_tonemap_and_labeling(
         from frame_compare.vs.tonemap import apply_tonemap
 
         settings = resolve_tonemap_settings(config)
-        result = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata)
+        result = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata, still_image=True)
         return result.clip, result.applied
     return loaded_clip, None
 

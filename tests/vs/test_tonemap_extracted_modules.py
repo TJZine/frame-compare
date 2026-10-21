@@ -29,8 +29,11 @@ class _RecordingStd:
         self.expr_calls: list[list[str]] = []
         self.set_frame_props_calls: list[dict[str, object]] = []
 
-    def Expr(self, *, expr: list[str]) -> "_Clip":
+    def Expr(self, *, expr: list[str], format: int | None = None) -> "_Clip":
         self.expr_calls.append(expr)
+        return self._owner
+
+    def RemoveFrameProps(self, *, props: list[str]) -> "_Clip":
         return self._owner
 
     def SetFrameProps(self, **kwargs: object) -> "_Clip":

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 import numpy as np
 from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 
 from frame_compare.config.schema_enums import VsScreenshotWriter
 from frame_compare.errors import ErrorDetails, FrameCompareError
@@ -476,7 +477,15 @@ def _render_vs_pillow(
             raise OverlayError("rendered frame facts are required for overlay composition")
         image = apply_overlay(image, overlay, frame_facts)
 
-    image.save(output, format="PNG", compress_level=settings.compression)
+    pnginfo = None
+    if (
+        _get_int_frame_prop(vs_frame.props, _VS_TRANSFER_PROP) == 13
+        and _get_int_frame_prop(vs_frame.props, _VS_PRIMARIES_PROP) == 1
+        and props_indicate_limited_range(vs_frame.props) is False
+    ):
+        pnginfo = PngInfo()
+        pnginfo.add(b"sRGB", b"\x00")
+    image.save(output, format="PNG", compress_level=settings.compression, pnginfo=pnginfo)
 
 
 def _render_vs_fpng(

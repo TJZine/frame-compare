@@ -15,6 +15,7 @@ from frame_compare.vs.tonemap_conversion import (
     apply_post_processing,
     convert_non_rgb_with_matrix_hint,
     deduce_src_csp_hint,
+    libplacebo_output_to_srgb,
     normalize_rgb_props,
     resolve_hdr_tonemap_inputs,
     resolve_source_peak,
@@ -117,6 +118,8 @@ def apply_libplacebo(
     settings: TonemapSettings,
     core: vs.Core,
     hdr_metadata: HDRMetadata | None = None,
+    *,
+    still_image: bool = False,
 ) -> TonemapResult | TonemapFallbackCause:
     """Apply tonemapping using libplacebo."""
     import vapoursynth as vs
@@ -144,7 +147,11 @@ def apply_libplacebo(
             inputs=inputs,
         )
         raise_if_cancelling()
-        clip = core.placebo.Tonemap(clip, **tm_kwargs)
+        clip = (
+            _independent_frame_tonemap(clip, core, tm_kwargs)
+            if still_image
+            else core.placebo.Tonemap(clip, **tm_kwargs)
+        )
     except TypeError as e:
         raise TonemapError(reason=f"Invalid libplacebo Tonemap arguments: {e}") from e
     except Exception as e:
@@ -160,15 +167,41 @@ def apply_libplacebo(
     clip = clip.resize.Point(format=vs.RGBS)
 
     clip = apply_post_processing(clip, settings)
+    clip = libplacebo_output_to_srgb(clip, black_nits=settings.dst_min_nits, white_nits=target_nits)
     raise_if_cancelling()
     return TonemapResult(
-        clip.std.SetFrameProps(_Tonemapped=1, _FrameCompareExpandRange=1),
+        clip,
         AppliedTonemap(
             settings,
             LibplaceboTonemap(
                 settings.tone_curve,
                 settings,
                 resolve_source_peak(settings, inputs.hdr_metadata),
+                frame_policy="independent_frames" if still_image else "sequence",
             ),
         ),
     )
+
+
+def _independent_frame_tonemap(
+    clip: vs.VideoNode, core: vs.Core, kwargs: dict[str, object]
+) -> vs.VideoNode:
+    """Give each original frame its own native peak-detector/renderer state.
+
+    Zero smoothing alone still retains epsilon-sized history in the native
+    detector. Each mapper here sees only one source frame, even for helper reads,
+    out-of-order requests and cache eviction. Loop AFTER Tonemap so the mapper
+    always receives local frame zero. FrameEval owns transient node lifetimes;
+    there is no Python cache retaining a renderer per screenshot.
+    """
+    # Admit the backend eagerly, preserving constructor failure/fallback behavior.
+    first = core.placebo.Tonemap(clip[0], **kwargs).std.Loop(times=clip.num_frames)
+
+    def evaluate(n: int) -> vs.VideoNode:
+        if n == 0:
+            return first
+        # Later errors propagate; silently mixing fallback pixels would falsify
+        # the single AppliedTonemap attached to this prepared source.
+        return core.placebo.Tonemap(clip[n], **kwargs).std.Loop(times=clip.num_frames)
+
+    return core.std.FrameEval(first, eval=evaluate, clip_src=[clip])

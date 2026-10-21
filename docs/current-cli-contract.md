@@ -2057,9 +2057,16 @@ CLI overrides validates already-resolved values without reacquiring ambient sett
 
 The default `reference` baseline also uses `contrast_recovery = 0.3`. This value is
 forwarded to libplacebo tonemapping, not applied as a separate post-tonemap contrast
-curve. VapourSynth HDR screenshot export preserves the live tonemap-output range and
-only applies limited-to-full expansion during PNG encoding when the rendered frame
-props still indicate limited-range RGB on the active VapourSynth runtime.
+curve. Libplacebo HDR screenshots isolate native mapper state per source frame,
+without changing preset controls. Applied facts disclose `frame_policy` as
+`independent_frames` and `output_encoding` as `srgb`; both participate in report
+identity. Its BT.1886 SDR output is converted once to endpoint-relative sRGB before
+RGB8 quantization, using the configured destination black and target white. The
+converted frames carry truthful full-range RGB, sRGB transfer and BT.709 primaries
+and no stale source HDR metadata. PNG encoding preserves those samples; the existing
+limited-to-full guard remains for other clips whose props indicate limited RGB.
+SDR sources and the degraded fallback do not inherit this libplacebo-specific
+conversion or destination-black assumption.
 
 ## `wizard` Command Contract
 

@@ -81,6 +81,7 @@ class LibplaceboTonemap:
     curve: ToneCurve
     settings: TonemapSettings
     source_peak: ResolvedSourcePeak
+    frame_policy: Literal["sequence", "independent_frames"] = "sequence"
 
 
 @dataclass(frozen=True, slots=True)

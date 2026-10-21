@@ -319,6 +319,8 @@ def _render_tonemap_details(rendering: object) -> str:
     if not settings_map:
         return ""
     labels = (
+        ("output_encoding", "Image encoding"),
+        ("frame_policy", "Frame processing"),
         ("dynamic_peak_detection", "Dynamic peak detection"),
         ("contrast_recovery", "Contrast recovery"),
         ("gamma_lift", "Gamma lift"),
@@ -349,6 +351,10 @@ def _render_tonemap_details(rendering: object) -> str:
         value = settings_map.get(key)
         if value is None:
             value_text = "Automatic" if key == "source_peak" else None
+        elif key == "output_encoding" and value == "srgb":
+            value_text = "sRGB"
+        elif key == "frame_policy" and value in ("sequence", "independent_frames"):
+            value_text = "Independent frames" if value == "independent_frames" else "Sequence"
         elif key == "gamut_mapping" and isinstance(value, int) and not isinstance(value, bool):
             value_text = _GAMUT_MAPPING_LABELS.get(value, str(value))
         elif key == "metadata" and isinstance(value, int) and not isinstance(value, bool):

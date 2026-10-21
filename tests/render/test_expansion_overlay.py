@@ -147,6 +147,7 @@ def test_actual_preparation_preserves_mixed_applied_facts_and_fallback_graph(
     assert facts["Fallback"].tonemap is not None
     assert requests[1].overlay is not None
     assert isinstance(facts["CtrlHD"].tonemap.transform, LibplaceboTonemap)
+    assert facts["CtrlHD"].tonemap.transform.frame_policy == "independent_frames"
     assert isinstance(facts["Fallback"].tonemap.transform, FallbackTonemap)
     assert facts["Fallback"].tonemap.transform.cause.value == "runtime_call_failed"
     assert facts["Fallback"].tonemap.transform.source_peak.nits == 609

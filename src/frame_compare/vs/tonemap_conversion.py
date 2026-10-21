@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from math import isfinite
 from typing import TYPE_CHECKING
 
 from frame_compare.utils.cancellation import raise_if_cancelling
@@ -184,6 +185,61 @@ def apply_post_processing(clip: vs.VideoNode, settings: TonemapSettings) -> vs.V
             reason=f"Post-processing failed: {e}",
             hint="Check post-processing parameters",
         ) from e
+
+
+def libplacebo_output_to_srgb(
+    clip: vs.VideoNode, *, black_nits: float, white_nits: float
+) -> vs.VideoNode:
+    """Encode known BT.1886 native output as endpoint-relative browser sRGB.
+
+    This boundary is specific to libplacebo's SDR destination. It must not be
+    applied to arbitrary SDR sources or the degraded tonemap fallback. RGBS is
+    encoded RGB here, not linear light; source PQ props must not drive a resize
+    transfer conversion. Black and white map to sRGB zero and one respectively.
+    """
+    import vapoursynth as vs
+
+    if not (isfinite(black_nits) and isfinite(white_nits) and 0 < black_nits < white_nits):
+        raise TonemapError(
+            reason="sRGB export requires explicit 0 < destination black < destination white",
+            hint="Use positive dst_min_nits below target_nits; zero lets libplacebo infer black",
+        )
+    ratio = black_nits / white_nits
+    black = ratio ** (1 / 2.4)
+    linear = (
+        f"x 0 max 1 min {1 - black:.17g} * {black:.17g} + 2.4 pow "
+        f"{ratio:.17g} - {1 - ratio:.17g} / 0 max 1 min"
+    )
+    expression = (
+        f"{linear} 0.0031308 <= {linear} 12.92 * {linear} {1 / 2.4:.17g} pow 1.055 * 0.055 - ?"
+    )
+    raise_if_cancelling()
+    clip = clip.std.Expr(expr=[expression] * 3, format=vs.RGBS)
+    clip = clip.std.RemoveFrameProps(
+        props=[
+            "DolbyVisionRPU",
+            "PLSceneMax",
+            "PLSceneAvg",
+            "ContentLightLevelMax",
+            "ContentLightLevelAverage",
+            "MasteringDisplayMaxLuminance",
+            "MasteringDisplayMinLuminance",
+            "MasteringDisplayPrimariesX",
+            "MasteringDisplayPrimariesY",
+            "MasteringDisplayWhitePointX",
+            "MasteringDisplayWhitePointY",
+            "_ChromaLocation",
+        ]
+    )
+    # Write only modern _Range: R81 aliases legacy _ColorRange to the same key.
+    return clip.std.SetFrameProps(
+        _Matrix=0,
+        _Transfer=13,
+        _Primaries=1,
+        _Range=1,
+        _Tonemapped=1,
+        _FrameCompareExpandRange=0,
+    )
 
 
 def resolve_hdr_tonemap_inputs(
