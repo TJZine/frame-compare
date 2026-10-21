@@ -469,7 +469,7 @@ requires-dist = [
     { name = "vapoursynth", marker = "extra == 'vsview'", specifier = "==81" },
     { name = "vapoursynth-lsmas", marker = "sys_platform == 'win32' and extra == 'vsview'", specifier = "==1310.0.0.0" },
     { name = "vs-placebo", marker = "sys_platform == 'win32' and extra == 'vsview'", specifier = "==2.0.4" },
-    { name = "vsview", marker = "extra == 'vsview'", specifier = "==0.12.1" },
+    { name = "vsview", marker = "extra == 'vsview'", specifier = "==0.13.0" },
 ]
 provides-extras = ["vsview"]
 
@@ -1792,14 +1792,14 @@ wheels = [
 
 [[package]]
 name = "vsjetengine"
-version = "1.8.0"
+version = "1.8.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "vapoursynth" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d5/98/e81cc7238fa19885e32363df5a31730e0c60f7e5429792e8ce30e8694a51/vsjetengine-1.8.0.tar.gz", hash = "sha256:c588474aec08bbe2c70f8efb8fb57a15d7b521edacb361ca144b4a1df03a2624", size = 56109, upload-time = "2026-09-25T18:45:20.64Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/54/2642f09c1fe4d0a34b41f3f378b4f353785629cdedf15e729ea84f8493f0/vsjetengine-1.8.1.tar.gz", hash = "sha256:e08728b7b76d17c5a969e515f38cf6dc307e0e9101fa8b7c637f38d453529da1", size = 56837, upload-time = "2026-10-11T16:04:00.234Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/a1/44b5f91c082d119f37b9a463c23d6afe377d7cf3c57f7019eb5bb09b654d/vsjetengine-1.8.0-py3-none-any.whl", hash = "sha256:73575c9c96f9ae57985c14e59b6cbebedfd46ed1ad2f70d819d4b4a7522351ae", size = 42127, upload-time = "2026-09-25T18:45:19.156Z" },
+    { url = "https://files.pythonhosted.org/packages/12/f1/773e151ebef04f66071f1a3f0a2879da61ec20aa683e4f8a53e41f1b8dad/vsjetengine-1.8.1-py3-none-any.whl", hash = "sha256:973fca311abbdac0991ded695e00c564843c5f5371a6d06683d375551b534c74", size = 42588, upload-time = "2026-10-11T16:03:58.704Z" },
 ]
 
 [[package]]
@@ -1829,7 +1829,7 @@ wheels = [
 
 [[package]]
 name = "vsview"
-version = "0.12.1"
+version = "0.13.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cyclopts" },
@@ -1846,9 +1846,9 @@ dependencies = [
     { name = "vsjetengine" },
     { name = "vspackrgb" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e4/1c/e1eac58c9a8df00de8a91235e00921dbbd6116a0c68c50e4949c9e0d9081/vsview-0.12.1.tar.gz", hash = "sha256:0c00a25539488fd059786c762ffec022c9e3c8dbf9ec5d1a1afac912b6963afc", size = 13883419, upload-time = "2026-10-09T15:08:29.01Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7e/db/f8ad9ae29983fac6d318e254b63d44279574bdd0adea91dbdac2b222662c/vsview-0.13.0.tar.gz", hash = "sha256:8487eb9f74e96d797e705395dba46c462627ddb5f8bb2ec34d3e128f06d8e534", size = 21799251, upload-time = "2026-10-14T02:09:44.422Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a4/e1/9179b6da07cb4153ec6818ee4ba256cf5fca15ccc1f6e3bdf6e4fd27e8cf/vsview-0.12.1-py3-none-any.whl", hash = "sha256:984b3cdce0e8743ada9e5b7677b91b4540c69f6790098579b13e0260766aeb64", size = 2279401, upload-time = "2026-10-09T15:08:26.712Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/fb/2a45e7f193a12cb6f1b349f97b919930f6eaee6e030ec08d3c813b4f19c2/vsview-0.13.0-py3-none-any.whl", hash = "sha256:94e33b760db62cbe7c440dd19fc3b262694c802d29c3c08d474e72d2bd8f3687", size = 2285313, upload-time = "2026-10-14T02:09:41.928Z" },
 ]
 
 [[package]]
