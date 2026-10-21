@@ -1365,6 +1365,71 @@ genuine eviction/recomputation, cancellation, RPU allocation/VRAM/lifecycle and
 production sparse/multiclip/CLI profiling. Native16 **and** finalRGB8 require zero
 sample differences from the current reference for the optimization gate.
 
+### Isolated MacBook native prototype — 2026-10-21
+
+Continuation source was clean `79c52a6c5de5bb1597ea011780585106aa100628`,
+matching origin and PR138. The supplied committed handoff passed CRC and all167
+manifest hashes; all21 normalized source exports matched exact committed Git bytes.
+No historical `source.diff` was applied. Product source, tone controls, sRGB
+conversion, stock plugins and the application's fresh-node path remain unchanged.
+The three-file native experiment and binaries are outside the repository in
+`frame-compare-native-still-prototype-results-2026-10-21.zip`, with a complete member
+manifest, source archives, build recipes, commands, failed attempts and evidence.
+
+The opt-in API is `independent:int:opt`, default0. This first candidate admits only
+fixed RGB48 HDR10/PQ to native16 SDR; HLG, EL and generic native DOVI reshaping are
+rejected. It retains device/renderer resources, flushes temporal state per still,
+keeps constructor metadata immutable and frame metadata local, and permanently
+poisons failed transactions. Numeric WARN-or-higher capture works independently
+of visible logging. Constructor texture admission, owned cleanup and native
+locking received an independent source review; its identified eager-allocation
+gap was corrected and re-reviewed before building. No unresolved material source
+finding remained; source review alone establishes no runtime pass.
+
+Patch SHA256: `8ef323fd80a08619977c26173786f079c872e2374b55eb0f51e11f4dcdc9cc7c`.
+Both platforms use vs-placebo `3cfd23f257ecb62b0cbd81eaaca092e18ae8e579`,
+libplacebo `a7a18af88ff0a17c04840dcb3246047bb6b46df3`, exact wrapped libp2p and
+libdovi3.3.2. Actual compiler/dependency differences remain explicit in the packet.
+Source-provenance checkouts were not mistaken for a compiled native plugin.
+
+| Evidence | Observed result and boundary |
+| --- | --- |
+| Linux arm64 original stock, unchanged rebuild, patched-fresh, patched-independent | **Passed:** each of the three comparisons has35 captures across six histories, zero native16/sRGB8 differences from the original same-runtime reference. Python3.13.16, VS R81, NumPy2.5.4, vs-placebo2.0.4, llvmpipe/Mesa25.0.7 software Vulkan. |
+| Comparator and sequence controls | **Passed:** equal accepted; native-only1-code and wrong-kwargs violations rejected; shared-sequence negative differs on frames2–8 at both checkpoints. Original and patched default sequence agree over10 forward frames. |
+| Extended core, metadata, PQ-code and RPU fixtures | **Passed:** original-fresh, patched-fresh and independent agree at both checkpoints under all six histories per fixture. Includes every PQ16 input code, missing-after-present mastering/scene metadata, valid nonzero/zero/missing-L1 RPU, absent/malformed RPU and transitions. Exact libdovi inspector validates the generated RPU classes. This is not measured peak-epsilon or rounding-midpoint coverage. |
+| Native recomputation | **Passed within cache-disabled scope:** native and downstream caches disabled; repeated requests have native render-call counters1–6, including target2 at calls2/4/6. This proves actual recomputation, not ordinary-cache eviction or only tap evaluation. |
+| Constructor admission | **Passed:**11 invalid/unsupported configurations rejected and the supported RGB48 case constructed. |
+| C-boundary fault injection | **Passed:**11 cases including the healthy control. Real ELF interception proves constructor failure, texture/upload/render/download rejection, successful render with error/device status or quiet numeric WARN rejection. Removing the injected fault still leaves a different frame permanently rejected. Actual internal peak/shader/LUT/driver failures, allocation failure and concurrent callbacks remain unproved. |
+| RPU node lifetime diagnostic | **Completed, unresolved:**100 native renders across10 node/device lifetimes per mode with equal native16 hashes. Candidate host RSS rose200,781,824→271,110,144bytes; stock229,265,408→255,954,944bytes. These single samples do not attribute a leak, establish bounds or measure VRAM. Elapsed23.34s stock/3.42s candidate includes hashing and GC; no benchmark or production speedup is claimed. |
+| Windows cross-build | **Built:** actual unchanged and patched PE32+ x64 DLLs, same reviewed patch/dependencies, VapourSynth entrypoint and imports inspected. Static compiler dependencies; Windows system DLLs and existing `vulkan-1.dll` remain runtime dependencies. Native Windows loading/pixels/faults and the packaged PowerShell driver are **unrun**. |
+
+Linux candidate SHA256:
+`33dda72a7a3da6549553e15461e920b7d07957f318890d0ee5976c814c6323e3`.
+Windows unchanged DLL SHA256:
+`a0b2ba4b27da3c108c1266338ffe49571470901b9bffeb611f8a9e45a5c6aae3`.
+Windows candidate DLL SHA256:
+`1665e0dd4dd8b6491b54050e38a0d48e60316e381224ff5f0cf9afa6d78876fe`.
+The Windows driver verifies source/DLL/harness identities and creates a fresh
+original Windows reference before all three comparisons. Linux pixels are never
+used as Windows expectations. Build/header/toolchain setup failures and the initial
+cache-control harness error remain retained rather than being counted as passes.
+
+Adoption remains blocked by Windows runtime proof, measured histogram-epsilon and
+rounding adversaries, actual internal failure mechanisms, multi-source interleaving,
+cancellation, RSS growth attribution, allocation/VRAM/lifetime bounds and paired
+production profiling. The application does not select this candidate.
+
+Hosted readback for application head79c52a6c: [Docker39551756319](https://github.com/TJZine/frame-compare/actions/runs/39551756319)
+completed successfully on merge `0e581afb5eec1c8a387b1893a97917f40698bb2c`:
+306 native/media cases with zero skips, then3 separate resource cases. This is
+stock application/runtime proof, not patched-plugin acceptance.
+[Unsigned Windows39551756413](https://github.com/TJZine/frame-compare/actions/runs/39551756413)
+failed its full suite; bundle build/upload were skipped. Its eight reported failures
+include absent FFmpeg, path/CRLF expectations and two HDR native subprocess access
+violations after `VK_ERROR_INCOMPATIBLE_DRIVER`. Existing CI/audit failures retain
+their prior scope; documentation passed. No rerun, protected dispatch, installation
+replacement, signing, credential operation, merge or publication occurred.
+
 ### Current HDR disposition
 
 | Obligation | Disposition |
@@ -1372,8 +1437,8 @@ sample differences from the current reference for the optimization gate.
 | sRGB correction, truthful properties, PNG declaration and report identity | **Implemented; passed within identified native/media/static scope.** |
 | Independent still policy with unchanged tone settings | **Implemented; passed within sampled native/media/history scope.** Measured cost remains explicit. |
 | Current full native gate | **Failed:** six parent-reproduced failures and two registry-access gaps;77 skips. |
-| Matching-source Docker/runtime and unsigned portable artifact proof | **Blocked/pending** matching-source hosted or MacBook/Windows execution. Earlier green artifacts retain earlier source scope. |
+| Matching-source Docker/runtime and unsigned portable artifact proof | **Stock Docker passed**306 native/media and3 resource cases at the recorded merge SHA. **Unsigned Windows failed; artifact build skipped.** Earlier green artifacts retain earlier source scope. |
 | fpng writer runtime, browser/profile and calibrated physical luminance | **Blocked** by the corresponding supported writer, browser/display-profile observation and measurement prerequisites. Numerical samples do not establish them. |
-| Faster native still mode | **Not implemented or accepted; blocked** by reproducible patched builds and exact/error/metadata/resource/performance proof. |
+| Faster native still mode | **Isolated Linux/Windows prototype built; not adopted or accepted.** Linux exact/metadata/recomputation/C-boundary screens passed; Windows runtime, resource/fault/adversarial/performance obligations remain open. |
 | Older Windows/MacBook acceptance | **Satisfied only within identified prior scope.** No blanket invalidation or new pass for changed pixels. |
 | Protected signing, credential migration, release/publication | **Outside this work; no action performed.** Ordinary branch commits and automatic PR verification are separate. |
