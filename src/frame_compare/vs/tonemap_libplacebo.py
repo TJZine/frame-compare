@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import structlog
 
 from frame_compare.config.schema import ToneCurve
 from frame_compare.utils.cancellation import raise_if_cancelling
+from frame_compare.vs import tonemap_runtime
 from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.tonemap_conversion import (
@@ -148,7 +149,7 @@ def apply_libplacebo(
         )
         raise_if_cancelling()
         clip = (
-            _independent_frame_tonemap(clip, core, tm_kwargs)
+            _still_frame_tonemap(clip, core, tm_kwargs)
             if still_image
             else core.placebo.Tonemap(clip, **tm_kwargs)
         )
@@ -181,6 +182,46 @@ def apply_libplacebo(
             ),
         ),
     )
+
+
+def _still_frame_tonemap(
+    clip: vs.VideoNode, core: vs.Core, kwargs: dict[str, object]
+) -> vs.VideoNode:
+    """Use verified experimental reuse only for its admitted native input class."""
+    if tonemap_runtime.experimental_native_stills_enabled():
+        import vapoursynth as vs
+
+        fmt = cast("vs.VideoFormat | None", clip.format)
+        admitted = (
+            fmt is not None
+            and clip.width > 0
+            and clip.height > 0
+            and fmt.id == vs.RGB48
+            and fmt.color_family == vs.RGB
+            and fmt.sample_type == vs.INTEGER
+            and fmt.bits_per_sample == 16
+            and fmt.num_planes == 3
+            and fmt.subsampling_w == 0
+            and fmt.subsampling_h == 0
+            and kwargs.get("src_csp") == 1
+            and kwargs.get("dst_csp") == 0
+            and "dovi_el" not in kwargs
+        )
+        identity = tonemap_runtime.experimental_native_still_plugin(core) if admitted else None
+        if identity is not None:
+            log.debug(
+                "native_still_backend_selected",
+                backend="experimental_independent",
+                plugin_path=identity.path,
+                plugin_sha256=identity.sha256,
+            )
+            return core.placebo.Tonemap(clip, **kwargs, independent=1)
+        log.debug(
+            "native_still_backend_selected",
+            backend="fresh_per_frame",
+            reason="capability_unverified" if admitted else "unsupported_input",
+        )
+    return _independent_frame_tonemap(clip, core, kwargs)
 
 
 def _independent_frame_tonemap(

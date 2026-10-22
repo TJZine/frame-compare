@@ -5,8 +5,9 @@ search:
 
 # Outstanding verification ledger — 2026-10-17
 
-Status: HDR output correction committed on 2026-10-21; see the final HDR section
-for current source, native evidence, performance cost and remaining prerequisites.
+Status: HDR output correction committed on 2026-10-21; Windows UCRT verification
+reconciled on 2026-10-22. See the final HDR section for current source, native
+evidence, measured performance and the remaining adoption prerequisites.
 The earlier MacBook continuation completed on 2026-10-18. Actual Windows-to-MacBook
 report transfer, native macOS picker, Merge/Replace/conflict choices and exact
 review/image/identity/reload acceptance passed. Acceptance remains OPEN for the
@@ -1414,10 +1415,11 @@ original Windows reference before all three comparisons. Linux pixels are never
 used as Windows expectations. Build/header/toolchain setup failures and the initial
 cache-control harness error remain retained rather than being counted as passes.
 
-Adoption remains blocked by Windows runtime proof, measured histogram-epsilon and
-rounding adversaries, actual internal failure mechanisms, multi-source interleaving,
-cancellation, RSS growth attribution, allocation/VRAM/lifetime bounds and paired
-production profiling. The application does not select this candidate.
+At this initial-screen stage, Windows runtime, histogram/rounding adversaries,
+internal failures, interleaving, cancellation, RSS attribution, allocation/VRAM and
+paired profiling were still open. The following dated follow-up sections supersede
+those gaps only within their explicit environments and cases. The application does
+not select this candidate.
 
 Hosted readback for application head79c52a6c: [Docker39551756319](https://github.com/TJZine/frame-compare/actions/runs/39551756319)
 completed successfully on merge `0e581afb5eec1c8a387b1893a97917f40698bb2c`:
@@ -1430,15 +1432,557 @@ violations after `VK_ERROR_INCOMPATIBLE_DRIVER`. Existing CI/audit failures reta
 their prior scope; documentation passed. No rerun, protected dispatch, installation
 replacement, signing, credential operation, merge or publication occurred.
 
+### MacBook Docker follow-up — 2026-10-21
+
+This supplements the frozen prototype above; it does not replace its failed-attempt
+history or establish Windows acceptance. Task HEAD was docs-only
+`12cb7f54a692aea34e600fc7fd2ac875c68a883e`; application source and both tracked HDR
+harnesses remain byte-identical to `79c52a6c5de5bb1597ea011780585106aa100628`.
+The same frozen Linux candidate and Windows DLL hashes above were preserved.
+No application/native implementation, installed plugin, tone setting, sRGB path,
+packaging selection or release state changed. The only tracked follow-up is this
+ledger. Supplementary executable diagnostics and evidence are outside Git in
+`frame-compare-native-still-mac-followup-2026-10-21.zip`; its manifest identifies
+included members, and local receipts identify excluded full-size movie arrays.
+
+**RSS diagnosis:** a streaming 500-node/500-RPU-render candidate run has balanced
+observed renderer/Vulkan creates/destroys and RPU opaque/header/DM get/free calls.
+glibc allocated arena blocks at 100/200/300/400/500 lifetimes are
+11.569/11.605/11.615/11.619/11.617 MiB; mmap allocation accounting stays 1.301 MiB.
+End RSS 274.363 MiB falls to 187.996 MiB after diagnostic `malloc_trim(0)`, while
+allocated-block accounting is effectively unchanged. Heap/anonymous pages explain
+most of that release; newly resident LLVM mappings account for 53.867 MiB that
+trim retains. Stock without RPU also shows large retained RSS. A persistent-node
+500-request contrast stays around 214–220 MiB before node destruction. These
+observations support allocator high-water retention plus library residency as
+the main growth mechanism. They do not exhaustively assign residual mappings or
+prove the native stack leak-free. Balanced wrapper entries establish observed
+calls, not every transitive allocation. No production allocator trim was added.
+The pinned legacy RGB metadata-only unused reshaping allocation loss remains
+source-supported; the frozen candidate already avoids it. Heaptrack exited 139
+before its first completed render; its partial profile is a tooling failure and
+is excluded from leak conclusions. Two initial stock raw hash fields erroneously
+name the candidate; the RSS README qualifies them against the separately recorded
+actual loaded stock path/hash.
+
+| Follow-up obligation | Observation and limit |
+| --- | --- |
+| Measured epsilon | Actual 3,264-byte GPU histogram readbacks reconstruct pinned float32 mean/99.995-percentile arithmetic below/at/above epsilon. Low-PQ codes 88→112 differ by exactly float32(1/16383). Public detected metadata matches fresh in independent mode; sequence differs on 9/10 frames and changes at equality. Four native paths and observed controls retain exact outputs. The near-uniform fixture also leaves sequence native16/RGB8 unchanged; detected metadata, rather than pixel bytes, is the distinguishing negative control here. |
+| Quantization | Same-evaluation corrected-float samples bracket RGB8 midpoints. A public same-pass extra-SSBO diagnostic observes actual shader values before the unchanged UNORM16 attachment across all 65,536 neutral PQ codes. Four native paths and observer-off match native16/corrected-float/RGB8; deliberately adding 1/65535 changes 183,278 native16 and 664 RGB8 samples. This is explicit shader instrumentation, not a float-attachment counterfactual or private-state reset. |
+| Internal failure paths | Public-boundary failures reach real `update_peak_buf`, `finalize_pass` and `sh_lut` callers, including an actual numeric WARN-only zero-readback path. Disabled hooks, candidate-context calloc and four concurrent WARN callbacks reject output; after disarming, a different frame remains rejected. Representative paths only, not physical driver damage or a complete allocator/shader matrix. |
+| Ordinary-cache eviction | Automatic caching and a 1 MiB budget: first target native call 1, immediate repeat still 1, 48 intervening distinct frames, target call 50. Recomputed native16/sRGB8 match original stock exactly. |
+| Multiple sources | Two differing sources/metadata/endpoints with valid/zero/absent RPU: six interleaved and four concurrent requests, exact at both checkpoints. |
+| Real-media cache hit/recompute | At 512 MiB the immediate duplicate has native counter 2→2; reducing the owned cache budget to 1 MiB and introducing distractors produces target counters 4/6/8. Final RGB8 matches the exact pressure-run reference in both native paths. |
+| Native cancellation | Paused real render plus a second node waiting for the native mutex; cooperative diagnostic SIGINT releases only the test barrier, drains owned futures and observes balanced native destruction. Direct-PID1 TERM confound required KILL 137; `--init` forwarding exits 143/reaps. No GPU-operation preemption claim. |
+| Real media | Two 4K HDR/DV encodes of the same film (The Witch), seven sampled frames each: original stock, unchanged rebuild, candidate fresh and independent match exact native16 and sRGB8 from linked same-evaluation captures. Sparse samples do not prove whole-film equality. Full real-media arrays are omitted from transfer; this host audited their hash/comparison receipts, not the omitted pixels. |
+| Installed console/report | The installed console entrypoint uses read-only current-source `PYTHONPATH` plus process-local factory substitution, source probing, resolved HDR kwargs (source peaks 10,000/347 nits), Pillow output and report. Stock and candidate six PNG active RGB bytes, sRGB declaration and report rendering facts agree. Five later same-binary pairs each repeat those checks. This does not integrate candidate selection into the product. |
+| Installed-console failed output | After both sources admit/produce frame 0, one real peak-readback failure at target 100 exits 5 with JSON FC-4013; failed record persists and no completed report is created; metrics caching is skipped in this manual-frame setup. One already-written exact PNG remains under the existing partial-output contract. Initial ineffective preload-into-stock-probe attempt is retained and rejected. |
+| Installed-console SIGINT | Actual installed command with candidate adapter and Docker `--init`, interrupted while inside real native render: exits 130, failure record classified FC-0001/INTERNAL_ERROR, no report or later screenshot admission; the two admitted frame 100 PNGs drain and match stock, with balanced observed renderer/Vulkan destruction after releasing the test barrier. This is finite-work draining, not a universal finite native drain bound. |
+
+**Performance scope:** five alternating fresh/independent pairs, fixed same candidate
+binary/dependencies/kwargs and a 4-thread software-Vulkan profile, no diagnostic
+interposer or native16 tap in clean timings. Every completed output is validated.
+The graph matrix uses a 64 MiB VS cache pressure budget; CLI workspaces use 512 MiB.
+Graph calls use current default controls without the CLI external HDRMetadata
+object; kwargs are paired exactly, and the full CLI separately exercises its
+resolved source endpoints. Graph preparation/frame 0 is separate. Frame-fetch
+intervals include decoder, native, conversion and synchronization work; caller
+output copying and hashing are outside them. Natural internal GC and some cleanup
+may occur inside frame-fetch; final process teardown is separate.
+The 52-request matrix has 32 adjacent, 4 sparse, 8 repeated and 8 interleaved two-clip
+requests. Both real sources carry RPU; this does not reproduce the earlier Windows
+32-frame no-RPU profile. Fresh child processes share driver disk-cache/home state;
+source indexes are reused for graph tests and regenerated in fresh CLI workspaces.
+Host contention and Docker CPU/memory limits are retained; the host was not isolated.
+
+| Graph workload | Fresh median (min–max),5 samples | Independent median (min–max),5 samples |
+| --- | --- | --- |
+| adjacent | 95.75s (87.87–105.40) | 88.88s (80.17–91.23) |
+| sparse | 26.34s (24.25–29.69) | 25.07s (24.08–26.62) |
+| repeated | 49.06s (44.08–50.68) | 44.33s (42.39–48.34) |
+| two-clip | 43.83s (41.04–55.33) | 40.94s (39.77–42.26) |
+
+Installed-console full wall medians: fresh **50.29s (48.91–52.44)**, independent
+**47.43s (43.61–48.02)**; descriptive median difference
+**5.7%**. All five paired observations
+favor reuse, but the median gap is smaller than the full run-to-run variation;
+this is a modest observed result, insufficient for a broad performance/adoption
+claim. Every CLI pair completes six exact PNGs and equivalent rendering facts.
+Factory counts are 8 fresh native constructions versus 2 independent per CLI run.
+The separate full graph diagnostic observes 54 versus 2 renderer/device lifetimes,
+all balanced at teardown, and 324 versus 12 shader-pass creations.
+Separate API CPU-interval/creation-count diagnostics identify setup/render/download
+work and teardown with unchanged parameters; their nested intervals include
+instrumentation and software-driver waits and must not be summed as a GPU partition.
+
+The initial CLI teardown observer lacked destroy hooks, and a subsequent zero-PNG
+assertion ignored draining of already-admitted work. Both invalid conclusions are
+rejected; corrected hooks and passive admission traces establish the final result.
+Raw attempts and the reconciliation remain in the packet.
+
+The tested Linux correctness gaps above are closed within their declared cases.
+Windows runtime/performance, physical-GPU VRAM/device behavior, exhaustive residual
+allocation ownership and fault coverage, and actual candidate packaging/selection
+remain open. Native macOS, fpng/display/physical-luminance and unrelated suite/CI
+obligations retain their existing scope. The stock application still uses fresh
+nodes; this follow-up is not adoption, installation or release approval.
+
+### Windows frozen-DLL follow-up — 2026-10-21
+
+This reconciles the received MacBook follow-up without replacing earlier Windows
+acceptance. Checkout `v0.7.0` was inspected and safely fast-forwarded from
+`79c52a6c5de5bb1597ea011780585106aa100628` to docs-only
+`12cb7f54a692aea34e600fc7fd2ac875c68a883e`. Both revisions have application
+`src` tree `704ea71074278ddc4d139e27b7d1e2d24f3f2270`; both HDR harnesses match
+canonical frozen Git bytes. Existing unrelated VSView plans remain untouched.
+No reset to the historical source, implementation change or installation replacement
+occurred. All ledger content before the isolated MacBook prototype section was
+verified unchanged against HEAD.
+
+Received artifacts, CRC and complete member accounting:
+
+- Mac follow-up ZIP: 13,609,139 bytes, SHA256
+  `3e956fd9a5eff124283f53e190d8d8890de9261a43b7895e5b70d9f55b2385cf`;
+  all 1,307 manifest hashes passed. Windows read-only receipt review independently
+  checked the 14 real-media native16/sRGB8 hash pairs and kwargs, and recomputed all
+  eight graph timing medians/ranges. Full movie arrays are omitted from that ZIP;
+  no claim of independently recomparing those omitted pixels is made.
+- Original prototype ZIP: 67,719,883 bytes, SHA256
+  `084e439719b94181c32b35de7764041c49d4b843812e43316c668c14525a064e`;
+  all 1,233 manifest hashes passed. The original unchanged/candidate DLLs retain
+  exactly the frozen hashes recorded above. Neither was rebuilt or installed.
+
+Windows evidence is retained under
+`generated/verification/2026-10-21/windows-native-still-original/`;
+transfer/reconciliation receipts are under
+`generated/verification/2026-10-21/mac-followup-reconciliation/`.
+Environment: Windows 10 build19045, Python3.13.7, VapourSynth R81, RTX5080,
+NVIDIA617.14. The candidate's Vulkan diagnostic actually selects RTX5080,
+Vulkan1.4.351, device10de:2c02, UUID9A:01:71:49:35:D0:CC:92:F4:75:E7:07:54:DC:C8:65.
+The stock installed DLL remains SHA256
+`b0a0689946e03f6f7467b798fba4678018bb28ba6b1caecdded8d08945049310`.
+
+| Windows obligation | Actual result and boundary |
+| --- | --- |
+| Runtime preflight and side-by-side load | **Passed:** `frame-compare doctor --json`, GPU inventory and explicit `LoadPlugin` using the two frozen DLLs in fresh children. Existing stock remains installed. A separate log-level4 diagnostic records actual Vulkan device selection; comparison probes retain application log-level2. |
+| Initial frozen paired screen | **Passed:** original-stock, unchanged-rebuild-fresh, patched-fresh and independent; each35 paired captures over direct/helper/forward/reverse/repeated/parallel. Native16 and final sRGB8 are exactly equal to original Windows stock. |
+| Mastering/scene metadata, PQ inputs and RPU transitions | **Passed within synthetic scope:** three additional fixtures, same four controls and six histories, each35 captures. Includes missing-after-present metadata, all65,536 PQ16 codes and valid/zero/missing-L1/absent/malformed RPU transitions. Across initial and extended screens:560 paired captures,12 strict comparisons, zero differences. These are not measured epsilon/midpoint, native-counter recomputation or physical fault tests. Expected deprecated-property and malformed-RPU diagnostics remain in logs. |
+| Constructor admission | **Passed:**11 invalid/unsupported inputs rejected; supported RGB48 HDR10-to-SDR constructed. |
+| Real-media unchanged rebuild against original stock | **Failed at native16:** no-RPU Kill Bill frames12382 and14943 differ; respectively64 components/max12 codes and20 components/max8 codes. Frame0 and110257 match at both checkpoints in the initial four-frame sample. All four sampled final sRGB8 hashes match. Exact native16 remains required; matching final8 does not close this gate. |
+| Failure attribution controls | **Passed as distinguishing diagnosis:** two original-stock captures repeat exactly, and two unchanged-rebuild captures repeat exactly. Patched-fresh and independent are bit-identical to the unchanged rebuild at both failing frames. A further input-tap experiment confirms identical actual RGB48 input samples and all recorded properties, matching kwargs/defaults, and repeats the same output hashes. The observed divergence precedes independent reuse; its exact compiler/dependency/shader arithmetic cause remains unresolved. |
+| Paired no-RPU performance, real-media RPU, full console candidate journey | **Blocked/deferred after failed rebuild-equivalence prerequisite.** The guarded real-media driver exits1 after the first unchanged-rebuild comparison; its two render children exit0. No candidate speed claim, completed benchmark, real-RPU acceptance or Windows console/packaging acceptance is inferred. Earlier Windows stock timings and the Mac software-Vulkan paired timings retain their respective scopes. |
+| Windows measured boundary/fault/lifecycle acceptance | **Still unverified:** no Windows-equivalent measured histogram/quantization diagnostic, native internal fault/warning/poisoning test, multi-source native-counter eviction proof, candidate SIGINT/owned teardown or allocation/VRAM attribution. Linux ELF interposition and glibc accounting do not provide these Windows observations; Windows-compatible diagnostic hooks/accounting are prerequisites. |
+
+The real-media probe reads the existing owned Kill Bill HDR file and strips RPU
+only in the disposable graph. Exact file size/mtime, index SHA256, source properties,
+resolved kwargs and decoded RGB48 hashes are in the retained receipts. It copies
+the decoder index into an owned scratch directory, verifies the original index
+unchanged and removes its scratch copy after every child. No original film, index,
+user configuration or shared cache was replaced. No new media copying occurred.
+All launched native children have bounded exit receipts with no native timeout.
+The optional OS process inventory was denied by Windows; that check is unavailable,
+not proof of zero processes (`owned-processes-after.json`). Earlier inspection
+encoding/path-access errors and their recoveries are retained separately.
+
+Reproduction commands, invocation/exit receipts and adaptations are retained:
+`run_screening.py` invokes the unchanged bundled paired harness; `run_extended.py`
+uses its strict comparator with the Windows-portable extended fixture;
+`run_real_media_windows.py` records the failed gate; `run_real_media_diagnostic.py`
+and `real-media-input/commands.json` record repeatability and actual input proof.
+The supplied PowerShell driver's literal79c52a6c HEAD guard was not executed or
+silently bypassed: the owned Python driver explicitly verifies current/frozen
+source equivalence, clean affected source and frozen DLL/harness hashes instead.
+The extended fixture removes only the Linux-interposer `_FCNativeRender` assertion
+and corrects descriptive fields; it makes no Windows native-counter claim.
+
+`synthetic-summary.json`, `real-media-diagnostic/mismatch-summary.json` and
+`real-media-input/comparison.json` record reductions. Full original-stock arrays
+for the two failing frames and lossless XOR deltas retain every compared sample;
+reconstruction was verified exact before removing duplicate array containers.
+`array-storage-receipt.json` records reduction from465.53MiB to78.11MiB without
+losing native16 or sRGB8 samples. This changes storage, not the zero-tolerance gate.
+
+**Adoption is blocked first by the demonstrated Windows rebuild-equivalence
+failure**, then by remaining Windows-specific lifecycle/fault/boundary/performance
+and shipped capability-selection/packaging obligations. Resolve the native build
+variance against original Windows stock before resuming the stopped acceptance
+sequence; do not redefine the oracle or relax tolerance. No new application bug
+or reuse-specific pixel divergence is established by this failure. The current
+sRGB correction, fresh-node policy and tone-map defaults remain unchanged.
+No signing, credential migration, protected dispatch, PR merge, tag or publication
+was performed; protected signing and unrelated earlier gates remain separate.
+
+### Windows rebuild variance diagnosis — 2026-10-21
+
+Continued at the same12cb7f54 checkout and unchanged79c52a6c application source.
+Installed stock and frozen unchanged/patched DLLs retain the hashes above. No
+product code, default tone controls or native binaries were changed. This section
+supersedes the earlier four-frame real-media final8 observation only for its
+expanded cases; earlier native16 failure and other platform scopes remain valid.
+Evidence and executable diagnostics are retained at
+`generated/verification/2026-10-21/windows-rebuild-diagnosis/`.
+
+**Build-path distinction established:** installed stock is byte-identical to the
+pinned2.0.4 wheel (wheel SHA2563715ee44db698a52334a9a4be61ef29bd6d06d3d491eb905b2af7a4193d27411).
+Embedded markers and its pinned upstream Windows recipe identify MSYS2 GCC16.1 /
+UCRT64 lineage; the cross-build uses GCC14 / msvcrt. Runtime trace logs prove
+stock actually selects **shaderc** and the unchanged rebuild selects **glslang15.2.0**.
+Both report libplacebo7.371/API371. All10 publicly logged GLSL source blocks match
+byte-for-byte. Pinned libplacebo adapters request shaderc performance optimization
+versus glslang size optimization. These establish differing compilation routes;
+identical GLSL does not establish identical SPIR-V, dynamic uniforms or CPU LUT data.
+`build-provenance.json`, `compiler-logs/excerpt.json`, `shader-sources/comparison.json`
+and the retained pinned compiler sources distinguish observation from inference.
+
+| Diagnostic | Actual observation and limit |
+| --- | --- |
+| Decoder-free replay | **Passed as reproduction:** full RGB48/props fixtures12382/14943 match prior actual native-input taps; new5000 fixture reproduces the broad test's complete native16/final8 hashes. Three full frames and kwargs are exported, avoiding full-movie/decoder/index prerequisites for build diagnosis. Single-still replay reproduces the mismatch without prior request history. |
+| Broader real-media defaults | **Completed with exact-equivalence failures:**46 no-RPU plus8 retained-RPU frame/profile pairs, native-resolution3840x1600. All settings, effective transform, kwargs and original media/index identities match. Native16 differs on36/46 no-RPU frames (1332 components/max45) and4/8 retained-RPU frames (73/max12). FinalRGB8 differs on exactly1 component of1 no-RPU frame; the other53 final frame/profile outputs match. This is one film and selected positions, not whole-film or visual-quality equivalence. |
+| Final8 witness | **Reproduced:** frame5000, red/y144/x1154 is254 stock versus253 rebuild. Native16 is65150 versus65142; corrected sRGB float times255 is253.5304364562 versus253.4998860955. Opposite sides of253.5 explain the final quantization difference. Fresh patched and independent outputs match unchanged rebuild exactly at native16/corrected-float/final8. No new reuse-specific difference is observed in this case. |
+| Actual PNG writer | **Passed as impact reproduction:** current `_render_vs_pillow` writes both native-resolution5000 PNGs, without overlay or geometry transform. Both declare sRGB and exactly match captured finalRGB8. The PNG active pixels retain precisely the single254→253 component. Their file hashes and actual commands are in `writer-witness/summary.json` and `commands.json`. This is not full CLI/report/resizing or calibrated-display acceptance. |
+| Stage controls | **Diagnostic only; defaults unchanged:** gamut0 removes all differences on12382 and5000. Contrast0 removes all on12382; on5000 it removes the final8 difference but leaves2 native16 components/max4. Peak-detection0 on12382 still differs (33 components/max9). This narrows the relevant gamut/contrast processing path and does not justify changing those settings. |
+| Synthetic colour sensitivity | **Completed with differences:** two64-cubed PQ colour grids (448/1000nit endpoints) and a seeded448nit random palette,512x512. Native16 differences155/max190,125/max57,162/max194; final8 differences1/0/3 components, all max1. These are artificial numeric stress inputs, not film quality examples or a tone-map ranking. |
+| Portable Windows handoff tooling | **Passed:** explicit hash-bound side-by-side stock and unchanged replay tools reproduce all three5000 checkpoint hashes on this PC. Their strict comparator intentionally exits1 for the known mismatch (native75/max12, float75, final8 one/max1). Linux pixels are never Windows golden expectations. |
+
+**Cause remains bounded:** differing shader/SPIR-V compiler and optimizer routes in
+the gamut/contrast path are the leading explanation. CPU-generated LUT/CRT/math
+variation is not excluded. The frozen source generates identical public GLSL;
+there is no demonstrated decoder, alignment, sRGB conversion or reuse-state cause
+for these reproduced differences. A controlled unchanged Windows build enabling
+shaderc while preserving other frozen build inputs is required to isolate causality.
+This host has no discovered C/C++ cross-compiler, CMake, Meson or Docker on PATH;
+the recorded MacBook Docker builder is the prepared build route. A compiler inventory
+is a prerequisite observation, not a request to replace the Windows environment.
+
+`macbook-handoff/` contains README, a self-contained Mac task prompt, original stock
+and unchanged Windows DLLs/licenses, exact decoded inputs, default kwargs, public
+shader logs/sources, Windows goldens, paired reductions, actual PNGs, and tested
+replay/comparison tools. The complete original native-build ZIP remains the source
+archive/recipe authority; its exact hash is in the prompt. The requested Mac variant
+changes only shaderc availability initially, retaining glslang and all capabilities.
+Return new hashes and full build receipts; test back on original Windows stock.
+Do not replace the frozen artifacts, change tone defaults, drop DOVI or relax the
+zero-tolerance acceptance gate. Native internal/fault/lifetime/VRAM/selection and
+protected-signing gates retain their earlier dispositions.
+
+Full broad-test NPY references were temporary:108 owned arrays (2.78GiB) were
+validated against recorded active-array hashes before removal. Per-frame reference
+and actual hashes, difference counts/locations and command receipts remain; the
+new final8 witness is independently replayable from its exported input and full
+PNGs. Other retained native/float captures are stored losslessly with verified XOR
+reconstruction where useful (`lossless-storage.json`). Original source/index remain
+unchanged and all owned decoder-index scratch copies were removed. The first input
+collector's property-container comparison failed after its RGB hash matched; JSON
+normalization and the prior `_AbsoluteTime` exclusion fixed that diagnostic check.
+Its failed attempt and cleanup are retained, not counted as product failure.
+
+The verified handoff ZIP is
+`frame-compare-windows-rebuild-diagnosis-mac-handoff-2026-10-21.zip`,
+93,765,545bytes, SHA256
+`5305b60670a7810b04400271fb21b74581af80064cfc0a8c9763ba4d32d0b4d9`.
+CRC, all106 member-manifest hashes and complete member accounting passed.
+Its canonical-ledger snapshot includes all substantive evidence above and precedes
+this final archive-identity paragraph (`handoff-transfer.json`).
+
+These findings show sparse numeric differences reaching final image bytes; they do
+not demonstrate the broad HDR blowout or establish fidelity against an independently
+graded SDR release. Tone-map quality selection remains separate. No adoption,
+performance claim, installation replacement, signing, release or publication occurred.
+
+### Windows UCRT equivalence and native acceptance — 2026-10-22
+
+This dated reconciliation supersedes the earlier **current adoption blocker** of
+Windows rebuild equivalence for the UCRT candidate identified below. Earlier
+msvcrt failures, cross-driver golden differences and Linux-only acceptance retain
+their historical scope. No tolerance was relaxed and no historical golden was
+overwritten. The current same-driver stock comparison passes; NVIDIA version
+621.01 is **not a blocker and does not require rollback**.
+
+Source remains `v0.7.0` at `12cb7f54a692aea34e600fc7fd2ac875c68a883e`, application
+`src` tree `704ea71074278ddc4d139e27b7d1e2d24f3f2270`. Environment is Windows 10
+build19045, Python3.13.7, VapourSynth R81, RTX5080 and NVIDIA621.01. The installed
+driver, stock plugin, application source, tone settings, source film and original
+decoder index were unchanged. Candidate selection occurred only in owned child
+processes; the application still uses the fresh-per-frame implementation in
+`src/frame_compare/vs/tonemap_libplacebo.py::_independent_frame_tonemap`.
+
+Binary SHA256 identities:
+
+- Installed stock: `b0a0689946e03f6f7467b798fba4678018bb28ba6b1caecdded8d08945049310`.
+- UCRT glslang: `1b791acc9c21f2fc3fcf5183d1b583fd88fa91b796663a4e3192585e641de130`.
+- UCRT shaderc: `7e4336007fbff9a4095c621d4c9a61837be46eb7fa6b0c7c526f14b45b55cd26`.
+- **Patched UCRT shaderc under consideration:**
+  `33a6ce9743e63ced306c9038263f742e339fd3eefef9460c0897b1dbc7d7fe6c`.
+
+**Build variance and historical goldens:** repeated installed-stock captures on
+621.01 are exact within that runtime but differ from the retained617.14 goldens,
+despite matching stock DLL, decoded RGB48 inputs, properties and kwargs. All ten
+publicly logged stock SPIR-V blocks match across the two captures. A driver/runtime
+change is a leading explanation for that separate historical drift; causation was
+not isolated by rollback. On the same current driver, switching only shaderc
+availability in the msvcrt build does not remove its mismatch; both UCRT variants
+match fresh stock. This supports the CRT/build route as the distinguishing factor
+for the rebuild variance and supersedes the earlier leading shader-compiler
+attribution. It does not isolate an individual math function or prove all dynamic
+uniform/LUT contents equal from SPIR-V alone. The msvcrt frame5000 negative control
+still differs at all three checkpoints, including one RGB8 component by one code.
+
+| Windows obligation | New evidence and disposition |
+| --- | --- |
+| Broad exact equivalence | **Passed:** fresh stock, UCRT glslang, UCRT shaderc, patched fresh and patched independent; each54 pairs (46 no-RPU,8 retained-RPU selected positions from one film). Same-evaluation native16, corrected-float and RGB8 match with zero differences; input hashes/properties, source/index identity, settings and kwargs agree. |
+| Palette equivalence | **Passed:** all four candidate paths match fresh stock on cube448, cube1000 and seeded random448 palettes at all three checkpoints. These are numerical stress cases, not visual-quality or whole-film acceptance. |
+| Request history and RPU/metadata transitions | **Passed:** stock, UCRT shaderc, patched fresh and patched independent each140 linked native16/RGB8 captures over four fixtures and six histories (direct, helper-first, forward, reverse, repeated, parallel). Includes every PQ16 code and valid/zero/missing-L1/absent/malformed RPU. Additional full-resolution mixed histories give12 requests per mode for stock/patched fresh/independent, exact at all three checkpoints. |
+| Actual native recomputation and eviction | **Passed:** raw `_FCNativeRender` counters with caching disabled give fresh1 per request and independent1–6 for `[8,2,1,2,0,2]`, with equal native16. Under ordinary1MiB automatic caching, first target1, immediate hit1,48 distinct intervening frames, recomputed target50; native16/RGB8 remain exact. |
+| Source isolation and admission | **Passed within synthetic scope:** two differing pixel/metadata sources and RPU transitions, six interleaved plus four concurrent requests, exact native16/RGB8 against patched fresh. Eleven unsupported/invalid constructors rejected; supported RGB48 HDR10-to-SDR constructed. |
+| Native fault/warning/poisoning | **Passed within injected scope:**25 CDB case/policy runs plus six follow-ups cover allocation, Vulkan/renderer admission, texture, upload, render, download, packed-host allocation, shader, LUT, peak-buffer read, GPU-status and health-latch paths. Real WARN callbacks (one/four thread-pool invocations) and a real numeric ERR callback reject independent output at visible log level0. Second requests stay permanently unhealthy; replacements succeed; monitored create/render/upload/download entries are absent on poisoned retry. Fresh replacement recovers; legacy fresh LUT failure can emit different fallback pixels and is not called equivalent failure behavior. |
+| Native cleanup and resource samples | **Passed for observed cleanup/parity, resource acceptance qualified:** successful Vulkan/renderer creations balance non-null destruction in all31 fault/control runs. Three200-frame resource runs (fresh, independent recreated every5 frames, persistent independent) give600 exact native16 outputs and expected render counters. Separate allocator logs show zero used/reserved pooled slices at teardown across6/2/1 contexts; dedicated allocations are excluded. |
+| Windows interruption/drain | **Passed at native diagnostic graph scope:** real `CTRL_BREAK_EVENT` arrives with8 requests pending in each mode; all8 drain with equal native hashes and expected counters, children exit cleanly. Observed drain1.414s fresh/0.287s independent. This does not establish installed-CLI Ctrl+C handling, failed-record/report persistence or GPU preemption. |
+| Paired graph performance | **Passed as a bounded measurement:** one warmup pair plus five alternating measured pairs,52 requests per child. All624 request hashes match current fresh-stock RGB8. Full child wall medians63.303s fresh (60.283–65.738) and25.841s independent (24.365–27.099); independent wins every pair,56.95–61.34% less wall time. Sum-of-`get_frame` medians59.125s/21.758s; fresh52 versus independent2 factory constructions. Two decoder/native graphs are of the same film, RPU stripped; warm caches, fixed section order, non-isolated host and active overlays. No installed-CLI or isolated GPU-kernel speed guarantee. |
+
+**Resource finding, not a new reuse regression:** in the200-frame sample, settled
+fresh handles grow about25 per five-frame cycle; repeated independent grows5 per
+cycle; persistent independent stays392 after warmup and drops to329 on teardown.
+Host-private samples retain driver/process caches and modest variation; they do
+not prove a universal leak-free bound. A separate36-frame comparison reproduces
+the same per-context retention in **installed stock and patched fresh**. Over nine
+settled stock cycles,81 events,27 mutexes and27 sections remain: three events,
+one mutex and one section per destroyed context, still present after two seconds.
+The retained mutex's open stack passes through NVIDIA ShadowPlay
+`nvspcap64!QueryShadowPlayDdiShimInterface`; this does not independently attribute
+every event/section or establish when the behavior began. Installed overlays were
+not disabled. This existing-stock behavior needs a bounded lifetime/risk disposition,
+not an assumed candidate-specific fix or a driver rollback prerequisite.
+
+DXGI identifies the RTX5080 but reports zero local usage and constant278528-byte
+nonlocal usage after initialization, so it does **not** establish physical Vulkan
+VRAM ownership. Native pooled-slice accounting and balanced wrapper destruction
+close narrower obligations; dedicated allocations, residual host ownership and
+physical-device behavior remain qualified. CDB return/state injection modifies
+only owned child memory, not DLL files or the physical driver. Thread-pool callbacks
+under debugger stops are not a race-detector result. An overly broad mutex-stack
+probe triggered the strict slow-device WARN guard through instrumentation overhead;
+its rejected attempt is retained, and the narrower mutex-open trace passed. Setup
+pilots and this observer effect are not counted as successful acceptance cases.
+
+**What still blocks adopting patched UCRT independent mode:**
+
+| Remaining adoption obligation | Concrete closure needed |
+| --- | --- |
+| Windows numeric boundary acceptance | **Remaining seam: actual shader float before original UNORM16 conversion**, with same-pass target/download linkage, observer-off parity and a deliberate shader-effect control. The later Unit A observation below closes measured Windows peak-histogram/float32 epsilon and downstream RGB8 midpoint checks; do not rerun them merely to add the native16 observer. |
+| Product capability selection and error policy | **Experimental integration passed below:** default-off runtime selection binds actual canonical plugin/signature/path/reviewed digest and admitted inputs, preserving supported old/unknown/unsupported paths, sequence/settings/fallback and late poison propagation. Automatic production selection remains deferred until numeric/distribution/matching-source gates close; the experimental opt-in is not automatic adoption. |
+| Windows production CLI acceptance and profiling | **Actual ordinary source-CLI acceptance passed below**, including same-binary safety child, RPU/sparse/distinct-source PNG/report parity, late ERR/clean JSON, real Ctrl+C, failed persistence/partial outputs and five profiling pairs. It uses an owned canonical runtime without factory substitution. Supported full portable/wheel distribution acceptance remains separately scoped; source CLI success alone cannot close it. |
+| Bounded resource acceptance | **Native requested-memory ownership now passed within Unit A's bounded workload**, including dedicated allocations and source teardown. Actual CLI source lifetimes retain their own acceptance scope. Stock-shared ShadowPlay handles are an existing external-retention risk, not a demonstrated reuse regression or a requirement to roll back the driver. Physical residency, all driver caches and universal leak freedom are not established or imposed as new blanket adoption prerequisites. |
+| Reproducible distribution and matching-source gates | Bind the selected DLL to reviewed patch/dependency/toolchain/UCRT identities and package/select it through the supported runtime; verify capabilities/licenses/layout and the actual candidate artifact on Windows. Run the integration's required matching-source checks. The last recorded full native/unsigned Windows gate failed and artifact build was skipped; earlier stock Docker/portable successes cannot accept a newly integrated candidate. |
+
+The driver version, the resolved UCRT sampled equivalence gate, the observed
+same-driver graph speedup and already-passed representative poisoning/recomputation
+checks are **not remaining blockers**. Complete physical device-loss causation,
+universal whole-film equivalence and protected signing/release are not inferred
+from these tests; protected publication prerequisites retain their separate scope.
+This reconciliation records evidence and the remaining implementation/acceptance
+work; it does not adopt, install or publish the candidate.
+
+Canonical receipts are local under `generated/verification/2026-10-22/`:
+
+- `windows-build-diagnosis/` and `stock-golden-investigation/findings.md` retain
+  the controlled build comparison, repeated stock and historical-SPIR-V diagnosis.
+- [Broad parity report](../../generated/verification/2026-10-22/ucrt-broad-validation/summary.md)
+  and `final-summary.json` retain the54-pair/palette/history reductions and commands.
+  `frame-compare-ucrt-broad-reuse-results-2026-10-22.zip`:60,120,193bytes, SHA256
+  `c61cc4d27caef29184c9c01457f22abd780d556d8158c607d451e8b8612ce1c9`.
+  Compact transfer omits full-size stock NPY arrays, which remain locally.
+- [Native acceptance report](../../generated/verification/2026-10-22/ucrt-native-acceptance/summary.md),
+  `summary.json`, raw commands/logs and `verify_receipts.py` retain native counters,
+  fault controls, callback levels, resource/allocator/handle stacks, cancellation
+  and benchmark reductions. `frame-compare-ucrt-native-acceptance-2026-10-22.zip`:
+  1,456,726bytes, SHA256
+  `e2de0b441a56cb0796d75ae74a22ffea8ebaff974441c06c776c9e1915eb4246`,598 members.
+
+Both archive CRCs and SHA256 identities were rechecked for this ledger update;
+the native packet's retained receipt assertions passed again without GPU work.
+No native, performance or whole-suite rerun is implied by this documentation edit.
+All earlier ledger entries and unrelated VSView plans were preserved.
+
+### Windows measured boundaries and allocation follow-up — 2026-10-22
+
+Under the user-authorized separate-chat Windows completion workflow, Unit A
+(`01a162a9-0d97-7c41-bda1-edfbabd3f0f2`) completed native observations against the
+same reviewed UCRT DLL and froze its source state before integration edits.
+Application HEAD/src tree, stock/candidate hashes and NVIDIA621.01 retain the
+identities in the preceding section. Installed driver/plugin/overlays, original
+media/index and product source were unchanged by Unit A. All27 final native jobs
+exited normally, without timeout/forced termination; GPU ownership was released.
+The controller inspected the observer/reducers and reran
+`verify_results.py --manifest`: retained arrays, reductions, exact probe hashes,
+negative controls, native identities and complete member accounting passed with
+zero new GPU jobs.
+
+| Additional Windows observation | Result and acceptance boundary |
+| --- | --- |
+| Real histogram and percentile | **Passed:** CDB copies the completed3264-byte public buffer read, using the pinned producer's12-slice/64-bin wire format. A captured public peak-state handle is read through `pl_get_detected_hdr_metadata` after the same render; public structure size/offsets are independently compiled from pinned headers. Each evaluation has exactly one peak read/state capture/public return; the explicit metadata read adds no peak read. Fresh/independent metadata equals the measured float32 reduction. All-code sweep percentile0.9999392032623291 differs from raw max1.0, so percentile interpolation is actually exercised. |
+| Epsilon/state-sensitive controls | **Passed:** below-epsilon mean/peak delta0.00006103515625 retains first uniform sequence state; exact epsilon0.00006103888154029846 changes first low-PQ sequence state; above delta0.0001220703125 also changes state. Sequence public metadata differs on9/10 requests in each ten-frame fixture even though pixels match. Across low/uniform/all-code fixtures,63 observed plus84 observer-off/current-stock evaluations retain exact linked native16/corrected-float/RGB8 parity for fresh/independent; sequence is the distinguishing metadata control. No private instructions/layouts are inferred as runtime proof. |
+| Downstream RGB8 quantization | **Passed:** actual float32-scaled witnesses below22.499990463256836→22, equal118.5→118, above190.50003051757812→191. All196,608 sweep components match float32 ties-to-even, including19 exact halves. Float64 multiplication of a stored float32 can place it on another side and is recorded separately. This is downstream of the native16 attachment. |
+| Pre-UNORM16 shader midpoint | **Still open:** the verified DLL lacks a faithful same-pass preconversion side channel. Postprocessing/native16 reconstruction or a substituted float attachment cannot close it. A concrete separate Windows UCRT same-UNORM16-pass SSBO observer build and Windows-return acceptance contract is prepared for the MacBook. |
+| Actual Vulkan memory ownership, including dedicated allocations | **Passed within measured lifetime scope:** public resolved `vkAllocateMemory`/`vkFreeMemory` arguments/results and dedicated `pNext` structures are observed, with public header/ABI compilation. Two cycles of64x32,1280x720,3840x1600 sources request `[0,1,0]` across absent/valid RPU. Stock fresh and patched fresh each300 allocations/300 frees,36 dedicated; independent102/102,12 dedicated. Every source teardown and final phase has zero observed live allocations/bytes. Both cycles repeat source peaks9,150,464/48,881,664/276,873,216 bytes; maximum264.046875MiB, dedicated subset113.4375MiB.54 observed and54 observer-off native frame hashes agree with stock. Removing a real free receipt is correctly rejected by the reducer. |
+
+The new memory proof replaces the earlier **unobserved dedicated-allocation** gap
+with actual native allocation/free accounting. It does not measure physical
+residency, every driver-internal cache/allocation, residual host ownership or all
+possible lifetimes. Existing stock-shared ShadowPlay retention remains separately
+recorded; it has not been attributed to native reuse. Acceptance now targets actual
+CLI source lifetimes rather than demanding a universal physical-VRAM/leak-free
+proof. No physical driver corruption or overlay reconfiguration was performed.
+
+Evidence is under
+`generated/verification/2026-10-22/windows-ucrt-boundaries-resources/`:
+`summary.{md,json}`, `boundary-analysis.json`, `allocation-analysis.json`, raw
+readbacks/linked arrays, observed/off commands, ABI/source/provenance receipts,
+`verify_results.py` and `MANIFEST.json` (1,208 accounted members,5,475,655 bytes).
+`macbook-observer-requirements.md` specifies exact source/DLL hashes, same final
+UNORM16 raster pass and target/download linkage, separate observer DLL, no changed
+math/geometry, disabled/enabled parity and deliberate `1/65535` effect controls.
+It is a build/return contract, not Windows acceptance of an unbuilt observer.
+Corrected callback/setup and the initial float64-rounding analysis are preserved
+as tool/observer errors; none is counted as a native pass or candidate failure.
+
+Unit B's CPU proposal (`01a162a9-1b1c-7793-a6fa-a30f99559916`) was reviewed. The
+controller approved a **default-off experimental runtime opt-in**, restricted to
+the actual canonical plugin's verified signature/path/digest and admitted RGB48
+PQ/HDR10-to-SDR inputs; retained base-layer RPU is admitted. It adds no persisted
+tone setting, preserves old/unknown/unsupported paths and sequence behavior, and
+does not constitute automatic adoption. Unit B now owns implementation and the
+exclusive Windows CLI runtime after A's release. Those product/CLI changes are
+**in progress, not yet accepted**; candidate wheel/native observer builds and the
+matching-source Docker gate remain MacBook handoff work where unavailable here.
+The detailed decisions and dispatch map are in
+`docs/plans/2026-10-22-ucrt-windows-adoption.md`.
+
+### Windows experimental integration and CLI follow-up — 2026-10-22
+
+Unit B implemented the approved dormant native-still policy in
+`vs/tonemap_runtime.py`, `vs/tonemap_libplacebo.py` and `vs/tonemap.py`, with
+`tests/vs/test_native_still_policy.py` and existing architecture/runtime docs.
+The uncommitted six-file implementation manifest is SHA256
+`5999ee941ed5bd9765b0fbaa6db6c0357282e73667e90a2101f31900b35ba6b7`;
+tracked diff SHA256
+`e517cc12d385b0e66ba008702bd1d8897ccbec6ec148c49d4e36b29d8122bf41`.
+The new test is untracked and separately inventoried/exported; tracked diff alone
+does not include it. Source HEAD remains12cb7f54; the working source contains this
+reviewed patch. Independent read-only Unit D found no actionable findings and
+confirmed all six file hashes without identity drift. No Git integration occurred.
+
+`FRAME_COMPARE_EXPERIMENTAL_NATIVE_STILLS=1` is default-off, not persisted and not
+a tone/CLI config field. It requires canonical `com.vs.placebo`/`placebo`, exact
+`independent:int:opt` signature token, actual loaded path and reviewed DLL digest,
+plus fixed integer RGB48 PQ/HDR10-to-SDR/no-EL admission. Retained base-layer RPU
+is admitted. Old/unknown/unsupported classes keep the fresh route; sequence and
+tone controls, constructor fallback and late-error ownership remain unchanged.
+The normal safety subprocess must identify the same candidate; its cache is bound
+to that identity. No Python factory replacement, generic probe assumption or
+`PYTHONPATH`-only override is counted as native selection proof.
+
+| Actual Windows observation | Result and boundary |
+| --- | --- |
+| Focused/integrated checks | **Passed:**162 focused cases plus3 existing native history/sRGB cases through actual canonical candidate runtime, zero failures/errors/skips. Invalid opt-in gives actionable FC-4004/exit5 without raw supplied value. Ordinary console help/version import no VapourSynth; doctor JSON exits0. |
+| Canonical ordinary source CLI | **Passed:** owned venv/VapourSynth package copies, original console entrypoint ZIP bytes with only its inspected UVSC interpreter trailer selecting owned Python, ordinary source imports through `.pth`. Actual plugin ID/path/signature/hash, owned decoder path and the application's real safety child agree. This proves the source-console journey, not a production portable artifact. |
+| Success/routing parity | **Passed:** stock/candidate-fresh/candidate-reuse each12 real-film PNGs at6 sparse positions with retained RPU; separately encoded differing PQ sources stock/reuse each6 PNGs; old-stock-plugin opt-in6 exact PNGs on fresh route; HLG stock/opt-in each6 exact PNGs on unsupported-input fresh route. Exact active RGB bytes, PNG sRGB/dimensions, source frame/picture/RPU facts, settings/geometry and report identities agree. Film aliases establish two graphs; distinct generated PQ files separately establish source isolation. |
+| Real native ERR and failed CLI output | **Passed within callback/poison scope:** after rendering starts, CDB captures the actual callback context through public log parameters and invokes the real strict native ERR2 callback at unchanged visible level2. Native poison rejects output; normal console exits5 with exactly clean FC-4013 JSON, sanitized failed record, no report and3 admitted stock-exact partial PNGs. ERR sentinel is stderr-only. Safety child runs normally; no mute/default change or bypass. This is not physical device loss or a failed GPU download. |
+| Actual Windows Ctrl+C | **Passed:** owned hidden-console CTRL_C_EVENT with2 actual Cython native `get_frame` calls pending, exit130/empty stdout, failed record,2 exact admitted PNGs, pending calls drain to0, no report/new cache/diagnostic publication. The fixture clears only the owned process's inherited Windows Ctrl+C-ignore attribute before app startup; Python handler is unchanged. Exact main-handler timestamp is not exposed, so admission checks use the earlier signal-send time; no screenshot admission occurs after send. Not a specific GPU kernel/preemption or universal finite drain bound. |
+| Actual CLI performance | **Passed as a bounded measurement:** warmup plus5 alternating same-candidate fresh/reuse pairs,2 aliases of one film, retained RPU,6 sparse positions/12 PNGs per child. All144 outputs/report facts match stock. Wall medians22.393s fresh (22.366–22.572) and14.711s reuse (14.450–15.310); render-phase medians20.212s/12.423s. Reuse wins all5 pairs,32.17–35.39% lower wall time. Wall includes app probing/writing/report/teardown, excludes host setup/reducers; warm caches, active overlays, non-isolated host. No multi-film or isolated GPU-kernel guarantee. |
+
+Controller reran the CPU-only source/CLI receipt verifier successfully, rechecking
+the exact source manifest and actual PNG/report/fault/cancellation/profile facts.
+Original-media size/mtime and index SHA remain unchanged; no new whole-film hash
+was computed. Marker-owned hardlink/scratch aliases were contained and removed.
+Known diagnostic PIDs were no longer openable, not a global process census.
+Installed stock DLL and NVIDIA621.01 retain the recorded identities. Tool/setup
+and initial ineffective injection/signal attempts remain rejected attempts in the
+receipts, not added native passes. Evidence:
+`generated/verification/2026-10-22/windows-ucrt-integration/implementation-report.md`,
+`verification-summary.json`, commands, raw accepted CLI04 controls,
+`profile-summary.json`, `verify_integration_receipts.py`; independent review is
+`windows-ucrt-review/review.{md,json}`.
+
+**Combined matching-source Windows checks:** global Pyright (zero warnings),
+Ruff/check-format, Bandit and import contracts pass. The normal `uv` launch was
+blocked before tool execution by inaccessible uv cache metadata; direct locked
+`.venv` tools were used. Ruff required `--no-cache` for an inaccessible existing
+root cache. The full suite completed **4198 passed,9 failed,77 skipped**; all34
+new policy cases passed. Eight failures match the six recorded baseline failures
+and two registry-access gaps (xdist group suffixes normalized). The additional
+live-Matroska known-offset alignment case passed isolated retry; its full-run
+failure is retained without assigning a cause. The full run also hit a final
+protected pytest-cache write. This is **not a green full gate**, and skips are not
+acceptance. Logs/JUnit/source-stability/skip accounting are under
+`windows-ucrt-orchestration/combined-direct/`; the isolated retry used an owned
+cache and retained its JUnit. No unrelated failure was silently fixed.
+
+**Windows wheel assembly:** Unit C assembled an honestly downstream/local
+`vs_placebo-2.0.4+fc.ucrt.20261022-py3-none-win_amd64.whl` from the unchanged verified
+DLL; two independent assemblies,80-member RECORD/CRC/metadata checks, tamper
+negative control and private no-index/no-deps installation pass. Wheel7,227,421bytes,
+SHA256 `dd96afd44751d3e2e5ac22010607699b1a351520bb016a15a47a249158ef3349`.
+Companion frozen-source-inputs ZIP25,713,919bytes, SHA256
+`87775560eb1f37c9bf9fd23bf6c4f893e416be62f0e427bb25f356d5f5e79360`.
+This proves assembly, not native source rebuilding. Actual linked Cargo/runtime
+source/notice closure remains incomplete; a lockfile containing dev/optional
+dependencies does not identify the linked subset. Preserve applicable required
+sources/notices/exceptions without inventing an aggregate license or demanding
+irrelevant development dependencies. `windows-ucrt-wheel/report.md`, `verify.py`
+and source availability inventory retain exact gaps. Parent reran verification.
+**Bounded wheel-backed canonical CLI follow-up passed:** the exact local wheel was
+installed offline/no-index/no-deps into a new empty non-symlink owned target,
+then supporting VapourSynth files were materialized excluding the wheel's native
+member. Its local distribution metadata and all80 wheel/84 installed RECORD
+members verify. Actual canonical plugin/path/hash, owned decoder and ordinary
+safety child agree; no copied-over official-wheel identity or factory override.
+One real/RPU ordinary console run gives12 active-RGB/sRGB/source/settings/geometry/
+report facts exact to stock, no fallback, two experimental selections and one
+normal same-binary safety confirmation. Help/version stay native-import-free.
+Parent reran `wheel_followup.py --verify-only`; B released runtime ownership.
+Evidence is `windows-ucrt-integration/wheel-followup/`. No production lock,
+portable manifest or full-runtime fingerprint was changed to relabel stock.
+
+Remaining handoff work is the separate pre-UNORM16 native observer/build and Windows
+return acceptance, native source/build/linked-dependency package provenance and
+applicable source/notice closure, final matching-source Docker proof, and coherent
+supported artifact/runtime-identity acceptance before automatic adoption. The
+current global Windows gate remains red as recorded. No installed driver/plugin,
+registry/user configuration, overlay, protected signing, push or publication was
+changed by the experimental integration/assembly work.
+
+The final transfer is
+`generated/verification/2026-10-22/frame-compare-ucrt-macbook-handoff-2026-10-22.zip`,
+80,733,247bytes, SHA256
+`dfac69a1de4c064087859c382ca21fb05d4f997aa36c027dc1e1a90b252ccefa`.
+All2,067 members, CRC,2,066 manifest hashes/sizes and complete accounting passed.
+The checked source patch includes the untracked new test; before/after identity
+also covers all204 application source members. `TASK.md` is the self-contained
+MacBook prompt; `NATIVE_OBSERVER_TASK.md` is the remaining exact native seam.
+The packet's canonical-ledger snapshot contains all substantive results above and
+precedes this archive-identity paragraph. At that initial transfer, no source
+commit, push, installed driver/plugin replacement or publication had occurred.
+The Windows completion plan is
+historical; the listed MacBook build/return and adoption gates remain open.
+
+The subsequent committed-source refresh includes the implementation, new test,
+this ledger and the Windows plan in one commit. Its packet retains the checked
+patch and includes an incremental Git bundle. The exact commit, ZIP identity and
+verification receipt are recorded in
+`generated/verification/2026-10-22/windows-ucrt-orchestration/committed-handoff.json`.
+Use that refresh for the MacBook continuation. This source-identity step does not
+change the verified application bytes, native acceptance scope or installed
+driver/plugin, and includes no push or publication.
+
 ### Current HDR disposition
 
 | Obligation | Disposition |
 | --- | --- |
 | sRGB correction, truthful properties, PNG declaration and report identity | **Implemented; passed within identified native/media/static scope.** |
 | Independent still policy with unchanged tone settings | **Implemented; passed within sampled native/media/history scope.** Measured cost remains explicit. |
-| Current full native gate | **Failed:** six parent-reproduced failures and two registry-access gaps;77 skips. |
+| Current full native gate | **Failed:** latest matching-source Windows run4198 passed,9 failed,77 skipped. Eight match prior baseline/registry cases; additional live-Matroska case passes isolated retry, with full-run failure preserved. All34 new native-policy cases pass; global static/type/import checks pass. |
 | Matching-source Docker/runtime and unsigned portable artifact proof | **Stock Docker passed**306 native/media and3 resource cases at the recorded merge SHA. **Unsigned Windows failed; artifact build skipped.** Earlier green artifacts retain earlier source scope. |
 | fpng writer runtime, browser/profile and calibrated physical luminance | **Blocked** by the corresponding supported writer, browser/display-profile observation and measurement prerequisites. Numerical samples do not establish them. |
-| Faster native still mode | **Isolated Linux/Windows prototype built; not adopted or accepted.** Linux exact/metadata/recomputation/C-boundary screens passed; Windows runtime, resource/fault/adversarial/performance obligations remain open. |
+| Faster native still mode | **Implemented as default-off experimental UCRT reuse; not production adopted.** Reviewed capability/error-policy integration, actual ordinary Windows CLI parity/ERR/Ctrl+C,165 focused/native checks and5 CLI timing pairs pass (median22.393s fresh/14.711s reuse). Earlier same-driver54-pair/palette/history and measured native histogram/epsilon/downstream-midpoint/dedicated-allocation proof retain scope. Honest local wheel assembly and bounded wheel-backed canonical CLI acceptance pass. Remaining gates are the pre-UNORM16 observer/build with Windows return acceptance, native package/source/notice provenance, supported artifact/full-runtime identity and matching-source Docker/global gate disposition. NVIDIA621.01 and stock-shared ShadowPlay retention are not assumed reuse-specific blockers; universal physical residency/leak freedom is not newly required. |
 | Older Windows/MacBook acceptance | **Satisfied only within identified prior scope.** No blanket invalidation or new pass for changed pixels. |
 | Protected signing, credential migration, release/publication | **Outside this work; no action performed.** Ordinary branch commits and automatic PR verification are separate. |

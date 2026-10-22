@@ -180,6 +180,31 @@ VapourSynth function is `Version`; the runtime version must report `5.0.0.0`.
 Windows continues to use L-SMASH-Works only; FFMS2 is not added for artificial
 cross-platform symmetry.
 
+### Experimental native still reuse
+
+`FRAME_COMPARE_EXPERIMENTAL_NATIVE_STILLS=1` enables a default-off development
+runtime policy for one reviewed patched UCRT build. Unset the variable to retain
+the normal fresh-per-frame behavior; other nonempty values raise a typed tonemap
+error. This is not a persisted color setting or a supported-runtime upgrade.
+Selection checks the actual canonical loaded plugin's identifier, signature,
+path and code-owned reviewed SHA256. Only fixed integer RGB48 HDR10/PQ-to-SDR
+input without an enhancement layer is admitted. Retained base-layer Dolby Vision
+RPU remains supported; HLG, explicit native DOVI and other unsupported classes
+keep their existing route. Sequence behavior and tone settings stay unchanged.
+
+The ordinary runtime safety child must resolve the same experimental plugin;
+changing only the main process's Python import path is insufficient. Existing
+runtime safety overrides keep their precedence but do not establish this proof.
+Use an owned disposable runtime; do not overwrite installed native files or
+alter registry/user VapourSynth configuration for acceptance.
+
+The reviewed build record in `vs.tonemap_runtime` retains source/dependency
+revisions and native source hashes. It is experimental provenance, not an
+upstream wheel identity or accepted deployment fingerprint. Distribution still
+requires an honestly identified downstream/upstream wheel, matching sources and
+licenses, full runtime identity and artifact/physical-Windows acceptance. A native
+replacement cannot be delivered through an unchanged code-only update identity.
+
 ### vs-placebo 2.0.4
 
 The runtime requires the `placebo` namespace and `Tonemap`. Validation covers actual

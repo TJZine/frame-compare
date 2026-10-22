@@ -126,7 +126,18 @@ each source preparation. Source preparation checks between native source loading
 frame inspection, HDR probing, and index recovery/retry operations. Tonemap preparation
 checks between capability probing, frame inspection, native conversion/filter
 operations, and fallback admission. Already admitted native work still drains before
-cleanup. Each parallel render batch owns one
+cleanup. Experimental native still reuse is default-off and owned by
+`vs.tonemap_runtime` and `vs.tonemap_libplacebo`; it requires the explicit
+`FRAME_COMPARE_EXPERIMENTAL_NATIVE_STILLS=1` runtime opt-in, a reviewed actual
+canonical plugin identity/signature/binary hash, and fixed integer RGB48
+HDR10/PQ-to-SDR input without an enhancement layer. The generic safety probe must
+load that same experimental binary; its cached result does not authorize another
+plugin. Unsupported inputs and old/unknown plugins retain fresh per-frame mapping.
+The native node owns reusable resources and permanent poisoning; late errors
+propagate without per-frame fallback or retry. Constructor fallback remains
+source-level and carries truthful fallback facts. The opt-in changes no persisted
+color settings, sequence controls, mathematical frame policy or output encoding,
+and does not declare the experimental binary accepted for production. Each parallel render batch owns one
 `threading.Event`: its main-thread 50 ms future-wait poll sets it on cancellation
 or a real failure, and workers check it before each render frame. Stopped units
 retain completed frame results as cleanup outcomes; real-failure ordering remains authoritative.
@@ -1083,7 +1094,7 @@ call failed. Preparation, rendered clip facts, diagnostic overlays, orchestratio
 and report serialization carry the same per-clip facts. One render warning aggregates
 fallback clips. The fallback graph and frame properties are unchanged.
 
-Screenshot preparation opts into independent native frames: an eager one-frame
+Screenshot preparation defaults to fresh independent native frames: an eager one-frame
 libplacebo prototype preserves backend admission/fallback behavior, and FrameEval
 creates a transient one-frame mapper for each other source position. Looping takes
 place after Tonemap to preserve original frame addressing without sharing native
