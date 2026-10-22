@@ -118,9 +118,33 @@ def test_docker_gui_source_has_required_markers_and_narrow_x11_permissions(repo_
         "keep_panel.keep_button.click()",
         "app.processEvents()",
     )
-    assert '"0/3 positions captured"' in script
-    assert r'"3/3 positions captured \u2014 ready to confirm"' in script
-    assert '"Confirm these aligned positions"' in script
+    _assert_adjacent_statements(
+        script,
+        "active_panel.on_current_frame_changed(frame)",
+        "app.processEvents()",
+    )
+    for panel_name in ("active_panel", "keep_panel"):
+        for action in ("anchor", "select"):
+            _assert_adjacent_statements(
+                script,
+                f"{panel_name}.{action}_buttons[output_index].click()",
+                "app.processEvents()",
+            )
+    assert '"0/3 frames selected"' in script
+    assert 'f"{selected_count}/3 frames selected"' in script
+    assert "active_panel.use_positions_button.isEnabled() != (selected_count == 2)" in script
+    assert "active_panel.frame_inputs[output_index].setText(str(frame))" in script
+    assert r'"3/3 frames selected \u2014 ready to save"' in script
+    assert '"Save selected alignment"' in script
+    assert "ConfirmedAlignmentReviewDecision(comparison_keys[0], 1, 0)" in script
+    assert "ConfirmedAlignmentReviewDecision(comparison_keys[1], 1, 2)" in script
+    assert (
+        "_confirmed_offsets(observed_result) != {comparison_keys[0]: 1, comparison_keys[1]: -1}"
+        in script
+    )
+    assert "KeepCurrentAlignmentReviewDecision(key) for key in comparison_keys" in script
+    assert "if _confirmed_offsets(observed_result):" in script
+    assert r'"Keep decision saved \u2014 selected lineup was not confirmed"' in script
     assert '"Keep current alignment"' in script
     assert 'rm -rf -- "$proof_dir"' in script
     assert "DOCKER_GUI_PROOF temp_cleanup=ok" in script
