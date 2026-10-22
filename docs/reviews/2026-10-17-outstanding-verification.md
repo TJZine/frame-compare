@@ -1786,12 +1786,12 @@ Canonical receipts are local under `generated/verification/2026-10-22/`:
 
 - `windows-build-diagnosis/` and `stock-golden-investigation/findings.md` retain
   the controlled build comparison, repeated stock and historical-SPIR-V diagnosis.
-- [Broad parity report](../../generated/verification/2026-10-22/ucrt-broad-validation/summary.md)
+- `ucrt-broad-validation/summary.md`
   and `final-summary.json` retain the54-pair/palette/history reductions and commands.
   `frame-compare-ucrt-broad-reuse-results-2026-10-22.zip`:60,120,193bytes, SHA256
   `c61cc4d27caef29184c9c01457f22abd780d556d8158c607d451e8b8612ce1c9`.
   Compact transfer omits full-size stock NPY arrays, which remain locally.
-- [Native acceptance report](../../generated/verification/2026-10-22/ucrt-native-acceptance/summary.md),
+- `ucrt-native-acceptance/summary.md`,
   `summary.json`, raw commands/logs and `verify_receipts.py` retain native counters,
   fault controls, callback levels, resource/allocator/handle stacks, cancellation
   and benchmark reductions. `frame-compare-ucrt-native-acceptance-2026-10-22.zip`:
