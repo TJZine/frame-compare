@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 pytest.importorskip("vsview")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDeadlineTimer, Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 from vsengine.loops import get_loop, set_loop
@@ -173,6 +173,28 @@ def qt_event_loop() -> Generator[None]:
 def _call_hook(method: Callable[..., object], *args: object) -> None:
     method(*args)
     _APP.processEvents()
+
+
+def _wait_for_viewer_proposal(panel: AlignmentReviewPanel, index: int, frame: int) -> None:
+    """Wait for a valid proposal while allowing delayed Qt timer delivery."""
+    deadline = QDeadlineTimer(1000)
+
+    def ready() -> bool:
+        return (
+            panel.frame_inputs[index].text() == str(frame)
+            and panel._source_drafts[index].viewer_ready
+        )
+
+    while not ready() and not deadline.hasExpired():
+        QTest.qWait(10)
+    assert ready(), (
+        panel.frame_inputs[index].text(),
+        panel._source_drafts[index].viewer_status,
+        panel._pending_frame,
+        panel._follow_timer.isActive(),
+    )
+    assert panel._pending_frame is None
+    assert not panel._follow_timer.isActive()
 
 
 class _Timeline:
@@ -1614,8 +1636,6 @@ def test_pinned_context_terminal_visibility_markers_and_reload(tmp_path, monkeyp
 
 
 def test_paused_notification_settles_after_hook_without_second_callback(tmp_path):
-    from PySide6.QtCore import QTimer
-
     panel, api, _ = _panel(tmp_path)
     assert panel.frame_inputs[0].text() == "12"
     _call_hook(panel.on_current_frame_changed, 13)  # actual callback-before-commit ordering
@@ -1627,9 +1647,7 @@ def test_paused_notification_settles_after_hook_without_second_callback(tmp_path
     panel.viewer_buttons[0].click()
     assert panel.frame_inputs[0].text() == "12" and not panel._source_drafts[0].viewer_ready
     QTimer.singleShot(0, lambda: setattr(api, "current_frame", 13))
-    QTest.qWait(80)
-    assert panel.frame_inputs[0].text() == "13" and panel._source_drafts[0].viewer_ready
-    assert panel._pending_frame is None and not panel._follow_timer.isActive()
+    _wait_for_viewer_proposal(panel, 0, 13)
     assert panel._cohort.selected == (None, None) and not panel.use_positions_button.isEnabled()
     assert "Viewer position" in panel.proposal_labels[0].text()
 
@@ -1653,7 +1671,8 @@ def test_manual_ownership_cancels_even_queued_settle_deliveries(tmp_path, text):
     assert panel._cohort.anchor is None
 
 
-def test_latest_pending_replaces_old_and_source_ids_are_not_tab_indices(tmp_path):
+@pytest.mark.parametrize("busy_event_ms", [0, 100], ids=["normal", "busy-event"])
+def test_latest_pending_replaces_old_and_source_ids_are_not_tab_indices(tmp_path, busy_event_ms):
     panel, api, _ = _panel(tmp_path)
     api.voutputs[0].vs_index, api.voutputs[1].vs_index = 9, 71
     _call_hook(panel.on_workspace_loaded)
@@ -1661,12 +1680,20 @@ def test_latest_pending_replaces_old_and_source_ids_are_not_tab_indices(tmp_path
     queued = panel._settle_handler
     _call_hook(panel.on_current_frame_changed, 17)
     assert queued is not None
+    latest = panel._pending_frame
+    assert latest is not None and latest.expected == 17
+    latest_attempts = latest.attempts
     api.current_frame = 13
     queued()
+    assert panel._pending_frame is latest
+    assert latest.attempts == latest_attempts
     assert panel.frame_inputs[0].text() == "12"
     api.current_frame = 17
-    QTest.qWait(60)
-    assert panel.frame_inputs[0].text() == "17"
+    if busy_event_ms:
+        # A legitimate busy callback can outlast the old fixed 60 ms wait while
+        # leaving ample time within the production settlement deadline.
+        QTimer.singleShot(0, lambda: QTest.qSleep(busy_event_ms))
+    _wait_for_viewer_proposal(panel, 0, 17)
     api.current_voutput, api.current_frame = api.voutputs[1], 0
     _call_hook(panel.on_current_voutput_changed, api.current_voutput, 0)
     assert [f.text() for f in panel.frame_inputs] == ["17", "0"]
