@@ -12,6 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -108,7 +109,10 @@ def test_workspace_authority_precedence_identity_names_and_mixed_reference():
 
 def native():
     # Native cases report a capability skip explicitly on hosts without VapourSynth.
-    return pytest.importorskip("vapoursynth")
+    vs = pytest.importorskip("vapoursynth")
+    if isinstance(vs, MagicMock):
+        pytest.skip("vapoursynth is mocked")
+    return vs
 
 
 def frame_arrays(f):
