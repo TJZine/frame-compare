@@ -1974,6 +1974,41 @@ Use that refresh for the MacBook continuation. This source-identity step does no
 change the verified application bytes, native acceptance scope or installed
 driver/plugin, and includes no push or publication.
 
+### MacBook observer build, provenance and Docker follow-up — 2026-10-22
+
+Continued on the MacBook from the verified Windows handoff (archive SHA256
+`c85dcb2b23f141a9e0696261fb8024e841c4471a49ae6020485d3232c1ed110b`, 2,069 members).
+The bundle verified, and `FETCH_HEAD` was `e193e955153630295f63bed2f0f1330990c412f8`.
+After the user's pull, `v0.7.0` equals `origin/v0.7.0` at that commit (tree
+`2008374067be439befa955bfccfca58c91f740d4`, `src` tree
+`cf637961bb751dbbff4cb16ab75c95eddae51745`). The before- and after-state verifiers
+passed. No product code, tone default, installed plugin or production fingerprint
+changed. Evidence is retained at
+`generated/verification/2026-10-22/mac-ucrt-observer/` and in its return ZIP.
+
+| Check | Actual observation and limit |
+| --- | --- |
+| Same-pass UNORM16 observer DLL | **Built; Windows UNRUN.** Diagnostic `ucrt-shaderc-observer` SHA256 `d90f8b91ec55e90f0c7b8a022af373e2cd8588e91cbe7a2b1f0cf8f571eddc2f`, from the frozen UCRT/shaderc image `9f563b14…` and prefix. The three reviewed native files keep their hashes. One observer object is added to the plugin target, which is linked with `--wrap` for `pl_pass_create/run/destroy` and `pl_tex_download`. Disassembly shows every original call site (dispatch `finalize_pass`, `run_pass`, `pl_pass_run_vbo`, teardown, `VSPlaceboTMGetFrame`/`vspl_tonemap_filter` downloads) now reaches the wrappers, and the real functions are called only from them. Compile commands are otherwise identical (59/59), and imports and exports equal the candidate's. `FC_OBSERVER_MODE=off/on/effect` provides the controls. A stub-GPU selftest and pinned shaderc/glslang compilation of the instrumented stage-08 shader passed; these are not GPU acceptance. |
+| Unchanged candidate and repeat build | **Candidate preserved; repeat build identical modulo link timestamps and checksum.** A fresh preparation and full deps/Rust/libdovi/plugin rebuild gives `05539216…`, which normalizes to `33a6ce97…` (8 bytes differ: COFF timestamp, export timestamp, PE checksum). A map relink also normalizes identically. Not bit-reproducible. |
+| Linked dependency and notice provenance | **Closed with stated gaps.** The link map has 916 members from 19 archives; spirv-cross is not linked. libdovi links 12 normal crates (84 lock entries: 71 dev/optional unused, 0 build-only), retained with Cargo.lock-verified `.crate` files. Linked Rust std crates and their registry sources are identified. GCC runtime (Runtime Library Exception 3.1), mingw-w64 12.0.0-5 (ZPL-2.1 and per-file terms) and winpthreads are mapped from the actual link. A 52-component inventory and NOTICE file are provided. LGPL source obligations are vs-placebo, libplacebo and, conservatively, the VapourSynth headers. Unavailable: upstream GCC/binutils/mingw-w64 and rust-src tarballs (only `.dsc` checksums retained), a rebuild of Rust's prebuilt std objects, and a per-file license audit of vs-placebo/glslang/SPIRV-Tools. |
+| Matching-source Docker gate | **Passed.** `bash tools/verify_docker_integration.sh` built a fresh image `sha256:14b0aed991403f9c02e6679746188d6411b5fdade2c8d13ec4813cd57d89cb10` and ran 340 passed, 0 failed, 0 skipped/xfailed/xpassed, with all runtime proof markers. The baked `src` equals HEAD across 205 files. The run was at the cherry-picked tree identical to `e193e955`. The streaming-resource gate is not required (no alignment changes) and was not run. Linux results do not establish Windows GPU behaviour. |
+
+The Windows return driver `run_observer_acceptance.py` runs fresh stock,
+candidate fresh/independent and observer off/on/effect in bounded child processes
+on the 256×256 all-codes neutral PQ sweep. Its analyzer applies zero-tolerance
+comparisons, target/run/download linkage, the orientation/channel check,
+float32-vs-float64 midpoint witnesses, the ties-to-even prediction and effect
+rejection. It was exercised on the Mac only with synthetic data and a stub child.
+Independent mode remains default-off. Remaining adoption blockers:
+
+- Windows observer acceptance
+- supported artifact/runtime identity and Windows-only fingerprint migration
+- the red Windows full suite
+- the stated provenance gaps for any distributable artifact
+
+The observer DLL is diagnostic only. No push, merge, signing, publication,
+installation or default change occurred.
+
 ### Current HDR disposition
 
 | Obligation | Disposition |
@@ -1981,8 +2016,8 @@ driver/plugin, and includes no push or publication.
 | sRGB correction, truthful properties, PNG declaration and report identity | **Implemented; passed within identified native/media/static scope.** |
 | Independent still policy with unchanged tone settings | **Implemented; passed within sampled native/media/history scope.** Measured cost remains explicit. |
 | Current full native gate | **Failed:** latest matching-source Windows run4198 passed,9 failed,77 skipped. Eight match prior baseline/registry cases; additional live-Matroska case passes isolated retry, with full-run failure preserved. All34 new native-policy cases pass; global static/type/import checks pass. |
-| Matching-source Docker/runtime and unsigned portable artifact proof | **Stock Docker passed**306 native/media and3 resource cases at the recorded merge SHA. **Unsigned Windows failed; artifact build skipped.** Earlier green artifacts retain earlier source scope. |
+| Matching-source Docker/runtime and unsigned portable artifact proof | **MacBook matching-source Docker passed** at the `e193e955` tree: 340 passed, zero skips, fresh image source identical. The streaming-resource gate is not required for this change. Earlier stock Docker: 306 native/media and 3 resource cases at the recorded merge SHA. **Unsigned Windows failed; artifact build skipped.** Earlier green artifacts retain earlier source scope. |
 | fpng writer runtime, browser/profile and calibrated physical luminance | **Blocked** by the corresponding supported writer, browser/display-profile observation and measurement prerequisites. Numerical samples do not establish them. |
-| Faster native still mode | **Implemented as default-off experimental UCRT reuse; not production adopted.** Reviewed capability/error-policy integration, actual ordinary Windows CLI parity/ERR/Ctrl+C,165 focused/native checks and5 CLI timing pairs pass (median22.393s fresh/14.711s reuse). Earlier same-driver54-pair/palette/history and measured native histogram/epsilon/downstream-midpoint/dedicated-allocation proof retain scope. Honest local wheel assembly and bounded wheel-backed canonical CLI acceptance pass. Remaining gates are the pre-UNORM16 observer/build with Windows return acceptance, native package/source/notice provenance, supported artifact/full-runtime identity and matching-source Docker/global gate disposition. NVIDIA621.01 and stock-shared ShadowPlay retention are not assumed reuse-specific blockers; universal physical residency/leak freedom is not newly required. |
+| Faster native still mode | **Implemented as default-off experimental UCRT reuse; not production adopted.** Reviewed capability/error-policy integration, actual ordinary Windows CLI parity/ERR/Ctrl+C,165 focused/native checks and5 CLI timing pairs pass (median22.393s fresh/14.711s reuse). Earlier same-driver54-pair/palette/history and measured native histogram/epsilon/downstream-midpoint/dedicated-allocation proof retain scope. Honest local wheel assembly and bounded wheel-backed canonical CLI acceptance pass. The MacBook built the same-pass observer DLL (Windows acceptance UNRUN), showed a repeat native build reproduces the candidate modulo link timestamps/checksum, closed linked-dependency/notice provenance with stated gaps, and passed matching-source Docker. Remaining gates are Windows observer acceptance, supported artifact/full-runtime identity, the red global suite and those provenance gaps for any distributable artifact. NVIDIA621.01 and stock-shared ShadowPlay retention are not assumed reuse-specific blockers; universal physical residency/leak freedom is not newly required. |
 | Older Windows/MacBook acceptance | **Satisfied only within identified prior scope.** No blanket invalidation or new pass for changed pixels. |
 | Protected signing, credential migration, release/publication | **Outside this work; no action performed.** Ordinary branch commits and automatic PR verification are separate. |
