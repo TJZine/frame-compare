@@ -18,6 +18,8 @@ REQUIRED_DISTRIBUTIONS = {
     "pyside6",
     "pyside6-addons",
     "pyside6-essentials",
+    "pyside6-pdf",
+    "pyside6-webengine",
     "shiboken6",
     "vapoursynth",
     "vapoursynth-bestsource",

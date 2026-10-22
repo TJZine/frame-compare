@@ -214,12 +214,12 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
         for fingerprint in manifest["bundle"]["runtime_fingerprints"].values()
     )
 
-    expected_python_version = "3.13.16"
+    expected_python_version = "3.13.17"
     assert manifest["bundle"]["python_version"] == expected_python_version
     python = artifacts["python-embed-amd64"]
     assert python["version"] == expected_python_version
     assert python["source_ref"] == expected_python_version
-    assert python["release_date"] == "2026-09-30"
+    assert python["release_date"] == "2026-10-21"
 
     vapoursynth = artifacts["vapoursynth-portable-r81"]
     assert vapoursynth["version"] == "R81"
@@ -312,11 +312,13 @@ def test_windows_portable_manifest_pins_exact_vsview_windows_graph(repo_root: Pa
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
     expected = {
         "vsview-0.13.0-wheel": ("0.13.0", 2285313),
-        "cyclopts-5.2.0-wheel": ("5.2.0", 289196),
-        "pyside6-6.11.2-win-amd64-wheel": ("6.11.2", 578382),
-        "pyside6-addons-6.11.2-win-amd64-wheel": ("6.11.2", 168208836),
-        "pyside6-essentials-6.11.2-win-amd64-wheel": ("6.11.2", 76913043),
-        "shiboken6-6.11.2-win-amd64-wheel": ("6.11.2", 1226578),
+        "cyclopts-5.3.0-wheel": ("5.3.0", 296696),
+        "pyside6-6.12.0-win-amd64-wheel": ("6.12.0", 578958),
+        "pyside6-addons-6.12.0-win-amd64-wheel": ("6.12.0", 40522402),
+        "pyside6-essentials-6.12.0-win-amd64-wheel": ("6.12.0", 82153795),
+        "shiboken6-6.12.0-win-amd64-wheel": ("6.12.0", 1265476),
+        "pyside6-pdf-6.12.0.140-win-amd64-wheel": ("6.12.0.140", 2983516),
+        "pyside6-webengine-6.12.0.140-win-amd64-wheel": ("6.12.0.140", 131697708),
         "vapoursynth-bestsource-22-win-amd64-wheel": ("22", 15890493),
         "vspackrgb-2.0.0-win-amd64-wheel": ("2.0.0", 122797),
     }
@@ -329,13 +331,21 @@ def test_windows_portable_manifest_pins_exact_vsview_windows_graph(repo_root: Pa
         assert artifact["source_bytes"] > 0
         assert re.fullmatch(r"[a-f0-9]{64}", artifact["source_sha256"])
 
-    assert artifacts["pyside6-addons-6.11.2-win-amd64-wheel"]["license"]["files"]
+    assert artifacts["pyside6-addons-6.12.0-win-amd64-wheel"]["license"]["files"]
     sources = {source["name"]: source for source in manifest["corresponding_sources"]}
-    assert sources["Qt"]["version"] == "6.11.2"
+    assert sources["Qt"]["version"] == "6.12.0"
     assert sources["Qt for Python"]["sha256"] == (
-        "cba47efbaad1bedd529725cbc14e21f156c7a19366f07b3edfbb076ffd7afdf8"
+        "099c1a597cf33c1b000e11cf68a0b82d216fb802bf81726efc720394f10c7751"
     )
-    assert sources["FFmpeg (Qt Multimedia 6.11.2 build)"]["version"] == "7.1.5"
+    assert sources["FFmpeg (Qt Multimedia 6.12.0 build)"]["version"] == "9.0.1"
+    pdf_source = sources["Qt PDF (Qt WebEngine source tree)"]
+    assert pdf_source["version"] == "6.140.0"
+    assert pdf_source["selection_kind"] == "commit"
+    assert pdf_source["source_commit"] == "d505fc23640d2bd6345e6483eb73daf4e19f5829"
+    assert pdf_source["sha256"] == (
+        "141e9b230e5ec9ee65a7357ca4b87d702e4badc515289eeade1047a788bb96e7"
+    )
+    assert pdf_source["bytes"] == 584649116
 
 
 def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> None:
@@ -346,11 +356,13 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
     packages = {package["name"]: package for package in lock["package"]}
     artifact_ids = {
         "vsview": "vsview-0.13.0-wheel",
-        "cyclopts": "cyclopts-5.2.0-wheel",
-        "pyside6": "pyside6-6.11.2-win-amd64-wheel",
-        "pyside6-addons": "pyside6-addons-6.11.2-win-amd64-wheel",
-        "pyside6-essentials": "pyside6-essentials-6.11.2-win-amd64-wheel",
-        "shiboken6": "shiboken6-6.11.2-win-amd64-wheel",
+        "cyclopts": "cyclopts-5.3.0-wheel",
+        "pyside6": "pyside6-6.12.0-win-amd64-wheel",
+        "pyside6-addons": "pyside6-addons-6.12.0-win-amd64-wheel",
+        "pyside6-essentials": "pyside6-essentials-6.12.0-win-amd64-wheel",
+        "shiboken6": "shiboken6-6.12.0-win-amd64-wheel",
+        "pyside6-pdf": "pyside6-pdf-6.12.0.140-win-amd64-wheel",
+        "pyside6-webengine": "pyside6-webengine-6.12.0.140-win-amd64-wheel",
         "vapoursynth-bestsource": "vapoursynth-bestsource-22-win-amd64-wheel",
         "vspackrgb": "vspackrgb-2.0.0-win-amd64-wheel",
     }
@@ -760,7 +772,8 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
         assert required_proof in combined_proof
     assert "vsview_runtime_preload=ok" in combined_proof
     assert "pyside6_event_loop=ok" in combined_proof
-    assert "qt_ffmpeg_runtime=ok lineage=7.1.5" in combined_proof
+    assert "qt_ffmpeg_runtime=ok lineage=9.0.1" in combined_proof
+    assert "qt_pdf_runtime=ok deployment=retained" in combined_proof
     assert "qt_webengine_runtime=absent deployment=excluded" in proof_source
     assert "vsview_runtime=ok" in combined_proof
     assert 'Phase "vsview_runtime" -MediaPath $mediaPath -Required $true' in build_script
@@ -854,8 +867,8 @@ def test_windows_portable_build_excludes_unused_qt_webengine_runtime(repo_root: 
     )
     assert '"icudtl.dat"' in exclusion
     assert '"v8_context_snapshot.bin"' in exclusion
-    assert "$excludedFiles.Count -ne 123" in exclusion
-    assert "$excludedBytes -ne 359205252" in exclusion
+    assert "$excludedFiles.Count -ne 125" in exclusion
+    assert "$excludedBytes -ne 359295997" in exclusion
     assert "Refusing to trim Qt runtime outside bundle site-packages" in exclusion
     assert "Qt WebEngine deployment exclusion was incomplete" in exclusion
     assert "Remove-UnusedQtWebEngineRuntime -BundleRoot $OutDir" in build_script
@@ -1228,14 +1241,16 @@ def _write_extracted_verifier_fixture(
             }
             for name, version in (
                 ("jetpytools", "3.2.0"),
-                ("PySide6", "6.11.2"),
-                ("PySide6_Addons", "6.11.2"),
-                ("PySide6_Essentials", "6.11.2"),
-                ("shiboken6", "6.11.2"),
+                ("PySide6", "6.12.0"),
+                ("PySide6_Addons", "6.12.0"),
+                ("PySide6_Essentials", "6.12.0"),
+                ("PySide6_Pdf", "6.12.0.140"),
+                ("PySide6_WebEngine", "6.12.0.140"),
+                ("shiboken6", "6.12.0"),
                 ("vapoursynth-bestsource", "22"),
                 ("vspackrgb", "2.0.0"),
                 ("VSView", "0.13.0"),
-                ("cyclopts", "5.2.0"),
+                ("cyclopts", "5.3.0"),
                 ("vsjetengine", "1.8.1"),
             )
         ],
@@ -1981,17 +1996,19 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
 
     distributions = {
         "jetpytools": ("3.2.0", "MIT"),
-        "PySide6": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
-        "PySide6-Addons": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
-        "PySide6-Essentials": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
-        "shiboken6": ("6.11.2", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
+        "PySide6": ("6.12.0", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
+        "PySide6-Addons": ("6.12.0", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
+        "PySide6-Essentials": ("6.12.0", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
+        "PySide6-Pdf": ("6.12.0.140", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
+        "PySide6-WebEngine": ("6.12.0.140", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
+        "shiboken6": ("6.12.0", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "VapourSynth": ("81", "LGPL-2.1-or-later"),
         "vapoursynth-bestsource": ("22", "MIT"),
         "vapoursynth-lsmas": ("1310.0.0.0", "ISC AND LGPL-2.1-or-later"),
         "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
         "vspackrgb": ("2.0.0", "MIT"),
         "VSView": ("0.13.0", "EUPL-1.2"),
-        "cyclopts": ("5.2.0", "Apache-2.0"),
+        "cyclopts": ("5.3.0", "Apache-2.0"),
         "vsjetengine": ("1.8.1", "EUPL-1.2"),
     }
     for index, (name, (version, license_expression)) in enumerate(distributions.items()):
@@ -2146,6 +2163,8 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
         "pyside6",
         "pyside6-addons",
         "pyside6-essentials",
+        "pyside6-pdf",
+        "pyside6-webengine",
         "shiboken6",
         "vapoursynth",
         "vapoursynth-bestsource",
@@ -2167,8 +2186,8 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     assert all(artifact["binary_bytes"] > 0 for artifact in inventory["manifest_artifacts"])
     assert any(
         source["name"] == "Qt"
-        and source["version"] == "6.11.2"
-        and "/6.11/6.11.2/" in source["source_url"]
+        and source["version"] == "6.12.0"
+        and "/6.12/6.12.0/" in source["source_url"]
         for source in inventory["corresponding_sources"]
     )
     assert all(
@@ -2186,7 +2205,7 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     assert "licenses/Inter-OFL.txt" in license_paths
     source_urls = (bundle / "licenses" / "SOURCE_URLS.txt").read_text(encoding="utf-8")
     assert inventory["bundle"]["commit_sha"] in source_urls
-    assert "qt-everywhere-src-6.11.2.tar.xz" in source_urls
+    assert "qt-everywhere-src-6.12.0.tar.xz" in source_urls
     assert "Inter 4.1: https://github.com/rsms/inter/releases/tag/v4.1" in source_urls
     notices = (bundle / "licenses" / "THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8")
     assert "Inter 4.1 (OFL-1.1)" in notices
@@ -2412,12 +2431,12 @@ def test_windows_portable_manifest_records_exact_source_locations(repo_root: Pat
     qt_source = next(
         source for source in manifest["corresponding_sources"] if source["name"] == "Qt"
     )
-    assert qt_source["version"] == "6.11.2"
-    assert "/6.11/6.11.2/" in qt_source["source_url"]
+    assert qt_source["version"] == "6.12.0"
+    assert "/6.12/6.12.0/" in qt_source["source_url"]
     assert qt_source["sha256"] == (
-        "6dcfbca271d76a6502741a2c0dc6fc98ef7dd0b7b4cfd0abcebb285a86a26f33"
+        "98ff4f44bac6ec3e1e62ee2a4316ae0e3d15badb015d753cc0268a20db52f165"
     )
-    assert qt_source["bytes"] == 1019661552
+    assert qt_source["bytes"] == 443394020
 
 
 @pytest.mark.parametrize("field", ["sha256", "bytes"])
@@ -2462,8 +2481,10 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
     )
     assert '"pyside6_addons-*.dist-info"' in build_script
     assert '"pyside6_essentials-*.dist-info"' in build_script
+    assert '"pyside6_pdf-*.dist-info"' in build_script
+    assert '"pyside6_webengine-*.dist-info"' in build_script
     assert "License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only" in build_script
-    assert "$lgplNotices.Count -lt 4" in build_script
+    assert "$lgplNotices.Count -lt 6" in build_script
     assert "git -C $RepoRoot archive" in build_script
     assert "HEAD src/frame_compare" in build_script
     assert "Copy-Item -Recurse -Force -LiteralPath $pkgSrc" not in build_script

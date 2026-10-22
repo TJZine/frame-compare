@@ -772,7 +772,7 @@ function Remove-UnusedQtWebEngineRuntime([string]$BundleRoot) {
       }
   )
   $excludedBytes = [int64](($excludedFiles | Measure-Object -Property Length -Sum).Sum)
-  if ($excludedFiles.Count -ne 123 -or $excludedBytes -ne 359205252) {
+  if ($excludedFiles.Count -ne 125 -or $excludedBytes -ne 359295997) {
     throw "Unexpected Qt WebEngine deployment surface: files=$($excludedFiles.Count) bytes=$excludedBytes"
   }
   foreach ($file in $excludedFiles) {
@@ -1177,6 +1177,8 @@ function Assert-RequiredPySideLicenseMetadata([string]$BundleRoot) {
     "pyside6-*.dist-info",
     "pyside6_addons-*.dist-info",
     "pyside6_essentials-*.dist-info",
+    "pyside6_pdf-*.dist-info",
+    "pyside6_webengine-*.dist-info",
     "shiboken6-*.dist-info"
   )
 
@@ -1193,7 +1195,7 @@ function Assert-RequiredPySideLicenseMetadata([string]$BundleRoot) {
   }
 
   $lgplNotices = @(Get-ChildItem -LiteralPath $licensesDir -File -Filter "*LGPL-3.0*.txt")
-  if ($lgplNotices.Count -lt 4) {
+  if ($lgplNotices.Count -lt 6) {
     throw "Expected manifest-verified LGPL-3.0 notices for every PySide6 wheel."
   }
 }

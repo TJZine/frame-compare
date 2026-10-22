@@ -32,15 +32,17 @@ def prove_package_imports() -> None:
 def prove_vsview_distribution_contract() -> None:
     expected = {
         "jetpytools": "3.2.0",
-        "pyside6": "6.11.2",
-        "pyside6-addons": "6.11.2",
-        "pyside6-essentials": "6.11.2",
-        "shiboken6": "6.11.2",
+        "pyside6": "6.12.0",
+        "pyside6-addons": "6.12.0",
+        "pyside6-essentials": "6.12.0",
+        "pyside6-pdf": "6.12.0.140",
+        "pyside6-webengine": "6.12.0.140",
+        "shiboken6": "6.12.0",
         "vapoursynth-bestsource": "22",
         "vapoursynth-lsmas": "1310.0.0.0",
         "vspackrgb": "2.0.0",
         "vsview": "0.13.0",
-        "cyclopts": "5.2.0",
+        "cyclopts": "5.3.0",
         "vsjetengine": "1.8.1",
     }
     observed = {name: importlib.metadata.version(name) for name in expected}
@@ -624,16 +626,27 @@ def prove_vsview_runtime(media_path: Path) -> None:
     from vsview import set_output  # noqa: F401
 
     proof("vsview_deep_imports=ok modules=vsview.app.main,vsview.cli,vspackrgb.rust")
+    importlib.import_module("PySide6.QtPdf")
+    proof("qt_pdf_runtime=ok deployment=retained")
     site_packages = Path(sys.executable).resolve().parent.parent / "app" / "site-packages"
     qt_ffmpeg_dlls = [
         site_packages / "PySide6" / name
-        for name in ("avcodec-61.dll", "avformat-61.dll", "avutil-59.dll")
+        for name in (
+            "avcodec-63.dll",
+            "avformat-63.dll",
+            "avutil-61.dll",
+            "swresample-7.dll",
+            "swscale-10.dll",
+        )
     ]
     assert_true(
         all(path.is_file() for path in qt_ffmpeg_dlls),
         f"Qt FFmpeg DLL set incomplete: {qt_ffmpeg_dlls}",
     )
-    proof("qt_ffmpeg_runtime=ok lineage=7.1.5 dlls=avcodec-61,avformat-61,avutil-59")
+    proof(
+        "qt_ffmpeg_runtime=ok lineage=9.0.1 "
+        "dlls=avcodec-63,avformat-63,avutil-61,swresample-7,swscale-10"
+    )
     prove_qt_webengine_excluded()
     prove_vsview_distribution_contract()
     prove_project_entrypoint_and_panel()

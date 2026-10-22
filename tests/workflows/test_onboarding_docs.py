@@ -17,7 +17,7 @@ def test_vsview_extra_pins_supported_native_windows_media_stack(repo_root: Path)
     assert {dependency for dependency in dependencies if dependency.startswith("vsview==")} == {
         "vsview==0.13.0"
     }
-    assert "pyside6==6.11.2" in dependencies
+    assert "pyside6==6.12.0" in dependencies
     assert "vapoursynth==81" in dependencies
     assert "vapoursynth-lsmas==1310.0.0.0; sys_platform == 'win32'" in dependencies
     assert "vs-placebo==2.0.4; sys_platform == 'win32'" in dependencies

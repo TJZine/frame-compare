@@ -43,7 +43,7 @@ vsview = [
     "vs-placebo==2.0.4; sys_platform == 'win32'",
     "vsview==0.13.0",
     # Keep installed viewer environments aligned with the selected Qt runtime.
-    "pyside6==6.11.2",
+    "pyside6==6.12.0",
 ]
 
 [project.scripts]

@@ -27,7 +27,7 @@ From a clone of the repository:
 uv sync --no-dev --extra vsview --frozen
 ```
 
-The `vsview` extra pins VSView 0.13.0, PySide6 6.11.2, the native Frame Compare alignment panel, and
+The `vsview` extra pins VSView 0.13.0, PySide6 6.12.0, the native Frame Compare alignment panel, and
 the repository-managed VapourSynth Python package to R81.
 
 It uses VSView's base
