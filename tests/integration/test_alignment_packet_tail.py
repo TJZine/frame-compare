@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -28,6 +29,8 @@ if isinstance(vs_mod, MagicMock):
     pytest.skip("vapoursynth is mocked", allow_module_level=True)
 if not detect_plugins(ensure_vs_environment()).get("lsmas", False):
     pytest.skip("lsmas plugin not available", allow_module_level=True)
+if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+    pytest.skip("ffmpeg/ffprobe not available", allow_module_level=True)
 
 
 @pytest.mark.parametrize("early_end", [False, True], ids=["known-offset", "audio-before-tail"])

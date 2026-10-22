@@ -2681,6 +2681,6 @@ def test_audio_diagnostics_use_workspace_relative_link(
         diagnostics_written=True,
     )
     plain = Text.from_ansi(output.getvalue()).plain
-    assert "diagnostics     generated/run/alignment_diagnostics" in plain
+    assert f"diagnostics     {Path('generated') / 'run' / 'alignment_diagnostics'}" in plain
     assert str(tmp_path) not in plain if not verbose else "(absolute:" in plain
     assert f'href="{diagnostics.as_uri()}"' in console.export_html(clear=False)

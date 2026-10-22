@@ -49,7 +49,7 @@ def test_list_notes_and_blank_rows_keep_rail_and_literal_values() -> None:
 @pytest.mark.parametrize("width", [32, 80])
 def test_ascii_section_and_prompt_preserve_literal_suffix(width: int) -> None:
     raw = io.BytesIO()
-    stream = io.TextIOWrapper(raw, encoding="ascii")
+    stream = io.TextIOWrapper(raw, encoding="ascii", newline="\n")
     console = Console(file=stream, width=width)
     section = Section(section_title("> Publish to slow.pics?"))
     section.add_row("report", Text("[report].html"))

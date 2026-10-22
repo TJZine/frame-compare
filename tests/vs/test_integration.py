@@ -239,6 +239,12 @@ def test_native_still_tonemap_is_independent_of_request_history() -> None:
         if os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1":
             pytest.fail("libplacebo required for still-image native proof")
         pytest.skip("libplacebo unavailable for still-image native proof")
+    from frame_compare.vs.tonemap_runtime import probe_libplacebo_runtime
+
+    if not probe_libplacebo_runtime():
+        if os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1":
+            pytest.fail("libplacebo/Vulkan runtime required for still-image native proof")
+        pytest.skip("libplacebo/Vulkan runtime unavailable for still-image native proof")
     result = _run_vs_script(
         """
         import gc
@@ -299,6 +305,12 @@ def test_native_pq_patch_reaches_srgb_once() -> None:
         if os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1":
             pytest.fail("libplacebo required for native sRGB patch proof")
         pytest.skip("libplacebo unavailable for native sRGB patch proof")
+    from frame_compare.vs.tonemap_runtime import probe_libplacebo_runtime
+
+    if not probe_libplacebo_runtime():
+        if os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1":
+            pytest.fail("libplacebo/Vulkan runtime required for native sRGB patch proof")
+        pytest.skip("libplacebo/Vulkan runtime unavailable for native sRGB patch proof")
     result = _run_vs_script(
         """
         import numpy as np
