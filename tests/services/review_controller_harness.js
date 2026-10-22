@@ -52,9 +52,14 @@ async function reviewControllerContracts() {
         },
     };
     let lockGate = Promise.resolve();
+    let onLockRequest = null;
     const context = {
         AbortController,
-        navigator: { locks: { request: async (_name, _options, operation) => { await lockGate; return operation(); } } },
+        navigator: { locks: { request: async (_name, _options, operation) => {
+            onLockRequest?.();
+            await lockGate;
+            return operation();
+        } } },
         Blob: FakeBlob,
         Date,
         Map,
@@ -309,12 +314,17 @@ async function reviewControllerContracts() {
 
         // Cancel and new preview choices must cancel an Apply waiting on storage.
         for (const action of ['cancel', 'choices']) {
-            await dom.reviewImport.fire('change', { files: [file('pending.json', exported([record(5, 'pending import')]))] });
+            await dom.reviewImport.fire('change', { files: [file('pending.json', exported([record(1, 'pending import')]))] });
+            assert.equal(dom.reviewPreview.hidden, false);
+            assert.match(dom.reviewPreviewCounts.textContent, /^Add 1 ·/);
             let release;
             lockGate = new Promise(resolve => { release = resolve; });
+            const lockRequested = new Promise(resolve => { onLockRequest = resolve; });
             const before = JSON.stringify(controller.model.all());
             const saved = storage.value;
             const applying = dom.reviewImportApply.click();
+            await lockRequested;
+            onLockRequest = null;
             if (action === 'cancel') dom.reviewImportCancel.click();
             else dom.reviewPreview.fire('change');
             release();
