@@ -206,3 +206,71 @@ the Windows GPU.
 - Changing defaults or preset values; tone-curve tuning.
 - VSView UI controls for the setting.
 - A shared-sequence (detection-on) user mode.
+
+## Approved D4 implementation scope extension — 2026-10-22
+
+The first R review found that the existing VSView session did not receive color
+configuration or invoke the product tonemapper. The user explicitly approved
+expanding the plan and ownership to implement D4 for VSView. D4 remains required;
+this extension supplies its missing caller and transport ownership.
+
+### Unit D — accepted R1 correction
+
+The orchestration alignment phase resolves tone settings with the existing
+`render.prepare.resolve_tonemap_settings` owner and carries them in the existing
+`AlignmentConfig`, `VSViewSessionRequest`, and generated session payload. Services
+must not import render or duplicate preset/override resolution. Serialize the
+resolved `TonemapSettings` values and validate/reconstruct their enums at the
+generated-session boundary; the installed Pydantic dataclass adapter supports this
+round trip. Keep the payload optional for older/direct session callers. Disabled
+tonemapping retains the existing preview preparation path.
+
+For configured HDR previews, inspect the original loaded clip's color evidence,
+using the existing metadata probe when that evidence is unspecified, and invoke
+the existing `apply_tonemap` sequence route before painting overlays. Do not apply
+the old preview-default props over a successfully mapped SDR clip. SDR sources and
+legacy sessions without settings retain their existing defaults. Preserve source
+frame counts, effective FPS, output ordering, `hdr=False` registration, metadata-v5
+review authority, sidecar/session identity, and resource cleanup. No viewer controls
+or new public settings are added. D3 and F8 continue to govern the native mapper;
+sequence quality previews retain temporal sequence behavior rather than acquiring
+the screenshot frame policy.
+
+Unit D owns these additional files and their scoped tests/documentation:
+
+- `src/frame_compare/orchestration/phase_alignment.py`
+- `src/frame_compare/services/types.py`
+- `src/frame_compare/services/alignment_vsview.py`
+- `src/frame_compare/vsview/adapter.py`
+- `src/frame_compare/vsview/session_script.py`
+- `src/frame_compare/vsview/session_runtime.py`
+- `tests/orchestration/test_phase_alignment_contract.py`
+- `tests/services/test_alignment_workflow_vsview.py`
+- `tests/vsview/test_adapter.py`
+- `tests/vsview/test_session_script.py`
+- `tests/vsview/test_native_tonemap_preview.py` (new native integration proof)
+- `docs/current-cli-contract.md`
+- `docs/current-architecture.md`
+- `docs/guides/hdr-tonemapping.md`
+
+Proof must observe config-to-session settings, enum/JSON round trip, both native
+speed policies through the generated-session preparation path, and preservation of
+SDR/disabled/legacy handling and alignment metadata. Prefer real VapourSynth and
+libplacebo with a captured output registrar over mocking the mapper. Native proof
+must honor the required-runtime flag. A native graph/component result is not a
+visible GUI or physical-display pass. Use focused verification after this
+extension; the full native suite has already run once as requested.
+
+### Unit G — accepted R2 verification correction
+
+Own `tests/vs/test_integration.py` and narrowly scoped guard regression tests in
+`tests/vs/test_tonemap_runtime.py`. Make absent or mocked VapourSynth fail before
+the module-level skip when `FRAME_COMPARE_REQUIRE_LIBPLACEBO=1`; ordinary optional
+runtime absence still skips. Prove both required and optional cases without
+installing or removing a runtime. Preserve the existing native pixel/history tests.
+
+Units D and G have disjoint write ownership and may run in parallel. Both use the
+`worker` preset for accepted review fixes, remain uncommitted until orchestrator
+integration, and retain every original hard rule. R re-reviews the resulting
+corrections. The orchestrator records the results under V4 and commits the plan
+extension and corrections with precise Conventional Commit subjects.
