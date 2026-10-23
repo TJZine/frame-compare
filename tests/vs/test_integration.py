@@ -25,6 +25,26 @@ from frame_compare.vs.loader import DefaultVSLoader  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Provenance: the complete HEVC UNSPEC62 sample published as “RANDOM RPU” in
+# the MakeMKV Dolby Vision forum thread (post 96973, 2020-09-30).  The parsed
+# sample reports CRC32 0x493cbbb2 and a non-zero Level 1 max_PQ.  Keeping the
+# bytes here makes the native test independent of media files or dovi_tool.
+# https://forum.makemkv.com/forum/viewtopic.php?p=96973
+_RPU_VALID_HEVC_UNSPEC62 = bytes.fromhex(
+    """
+    7c 01 19 08 09 08 40 61 36 50 ef 00 3f f8 01 ff c0 0f ff d0
+    00 00 08 00 00 06 80 00 00 40 00 00 34 00 00 03 02 00 00 03
+    01 c9 59 80 00 0d 7a 89 59 be 7f 3a c7 09 59 91 32 80 00 00
+    40 00 00 03 02 00 00 03 00 02 00 00 03 00 07 0d 88 90 c0 61
+    82 97 8c 23 81 45 00 00 03 00 69 8f 96 bf ff c0 00 00 03 00
+    00 03 00 00 03 00 18 08 1f 73 80 54 60 30 08 00 5d 21 99 80
+    c0 28 21 80 47 fc 80 08 00 80 01 00 01 80 56 47 00 10 01 00
+    10 01 00 0f ff 04 04 01 60 5e 12 0c 4e 20 00 64 4e 20 0d 18
+    49 3c bb b2 80
+    """
+)
+_RPU_MALFORMED = _RPU_VALID_HEVC_UNSPEC62[:-5] + b"\x00\x00\x00\x00\x80"
+
 
 def _run_vs_script(script: str, *, timeout: float = 30) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -54,6 +74,22 @@ def _assert_vs_process_ok(result: subprocess.CompletedProcess[str]) -> None:
     if result.returncode in (-11, 139):
         pytest.fail(f"VapourSynth subprocess segfaulted.\n\n{details}")
     pytest.fail(f"VapourSynth subprocess failed with exit {result.returncode}.\n\n{details}")
+
+
+def _require_native_libplacebo_still_runtime() -> None:
+    """Gate tests that require a real libplacebo/Vulkan child process."""
+    require_libplacebo = os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1"
+    if not bool(detect_plugins(vs.core).get("libplacebo")):
+        if require_libplacebo:
+            pytest.fail("libplacebo required for fast still native proof")
+        pytest.skip("libplacebo unavailable for fast still native proof")
+
+    from frame_compare.vs.tonemap_runtime import probe_libplacebo_runtime
+
+    if not probe_libplacebo_runtime():
+        if require_libplacebo:
+            pytest.fail("libplacebo/Vulkan runtime required for fast still native proof")
+        pytest.skip("libplacebo/Vulkan runtime unavailable for fast still native proof")
 
 
 @pytest.mark.vs_required
@@ -360,5 +396,257 @@ def test_native_pq_patch_reaches_srgb_once() -> None:
         assert source.get_frame(0).props['_Transfer'] == 16
         print('OK')
         """
+    )
+    _assert_vs_process_ok(result)
+
+
+@pytest.mark.vs_required
+def test_native_fast_still_product_path_matches_fresh_reference_and_order_control() -> None:
+    """Fast stills reuse one stateless node; detection-on remains order-sensitive."""
+    _require_native_libplacebo_still_runtime()
+    result = _run_vs_script(
+        """
+        import hashlib
+        import numpy as np
+        import vapoursynth as vs
+
+        from frame_compare.config.schema_enums import TonemapSpeed
+        from frame_compare.vs import TonemapSettings, apply_tonemap
+        from frame_compare.vs.env import ensure_vs_environment
+        from frame_compare.vs.tonemap_conversion import resolve_hdr_tonemap_inputs
+        from frame_compare.vs.tonemap_libplacebo import apply_libplacebo
+        from frame_compare.vs.tonemap_libplacebo import build_libplacebo_tonemap_kwargs
+
+        core = ensure_vs_environment()
+        core.num_threads = 4
+        peaks = [180 + 18 * n for n in range(12)]
+        source = core.std.BlankClip(
+            width=64, height=32, format=vs.RGB48, length=len(peaks)
+        )
+
+        def fill(n, f):
+            frame = f.copy()
+            luminance = np.linspace(0.18, peaks[n], 64)[None, :]
+            for plane, factor in enumerate((1.0, 0.8, 0.6)):
+                encoded = (luminance * factor / 10000) ** (2610 / 16384)
+                encoded = ((3424 / 4096 + 2413 / 128 * encoded)
+                           / (1 + 2392 / 128 * encoded)) ** (2523 / 32)
+                np.copyto(
+                    np.asarray(frame[plane]),
+                    np.broadcast_to(
+                        np.rint(encoded * 65535).astype(np.uint16), (32, 64)
+                    ),
+                )
+            return frame
+
+        source = source.std.ModifyFrame(clips=source, selector=fill).std.SetFrameProps(
+            _Matrix=0,
+            _Transfer=16,
+            _Primaries=9,
+            _Range=1,
+            MasteringDisplayMinLuminance=0.0001,
+            MasteringDisplayMaxLuminance=1000.0,
+            ContentLightLevelMax=1000.0,
+            ContentLightLevelAverage=100.0,
+        )
+        settings = TonemapSettings(
+            tonemap_speed=TonemapSpeed.FAST,
+            dynamic_peak_detection=False,
+            use_dovi=False,
+        )
+
+        def digest(frame):
+            return hashlib.sha256(
+                np.stack([np.asarray(frame[plane]) for plane in range(3)]).tobytes()
+            ).hexdigest()
+
+        # Each call creates a fresh native node.  Keep the kwargs comparison explicit so
+        # equality is not accidentally established by different source-peak resolution.
+        shared_kwargs = build_libplacebo_tonemap_kwargs(
+            settings=settings,
+            target_nits=settings.target_nits,
+            inputs=resolve_hdr_tonemap_inputs(source, None),
+        )
+        reference = {}
+        for n in range(len(peaks)):
+            assert build_libplacebo_tonemap_kwargs(
+                settings=settings,
+                target_nits=settings.target_nits,
+                inputs=resolve_hdr_tonemap_inputs(source[n : n + 1], None),
+            ) == shared_kwargs
+            fresh = apply_libplacebo(
+                source[n : n + 1], settings, core, None, still_image=True
+            )
+            assert fresh.applied is not None
+            assert fresh.applied.transform.frame_policy == "shared_stateless"
+            reference[n] = digest(fresh.clip.get_frame(0))
+        assert len(set(reference.values())) > 1
+
+        orders = {
+            "forward": list(range(len(peaks))),
+            "reverse": list(reversed(range(len(peaks)))),
+            "sparse": [0, 3, 6, 9, 11],
+        }
+        for order in orders.values():
+            fast = apply_tonemap(source, settings, None, still_image=True)
+            assert fast.applied is not None
+            assert fast.applied.transform.frame_policy == "shared_stateless"
+            observed = {n: digest(fast.clip.get_frame(n)) for n in order}
+            assert observed == {n: reference[n] for n in order}
+
+        # Negative control: a shared node with dynamic detection is expected to carry history.
+        detected = TonemapSettings(dynamic_peak_detection=True, use_dovi=False)
+
+        def render_detected(order):
+            sequence = apply_tonemap(source, detected, None, still_image=False)
+            assert sequence.applied is not None
+            assert sequence.applied.transform.frame_policy == "sequence"
+            return {n: digest(sequence.clip.get_frame(n)) for n in order}
+
+        forward = render_detected(orders["forward"])
+        reverse = render_detected(orders["reverse"])
+        assert any(forward[n] != reverse[n] for n in range(len(peaks)))
+        print("OK")
+        """,
+        timeout=180,
+    )
+    _assert_vs_process_ok(result)
+
+
+@pytest.mark.vs_required
+def test_native_fast_still_rpu_and_hdr_metadata_variation_is_order_independent() -> None:
+    """Fast stills preserve independent per-frame RPU and HDR/scene metadata."""
+    _require_native_libplacebo_still_runtime()
+    result = _run_vs_script(
+        f"""
+        RPU_VALID = {_RPU_VALID_HEVC_UNSPEC62!r}
+        RPU_MALFORMED = {_RPU_MALFORMED!r}
+
+        import hashlib
+        import numpy as np
+        import vapoursynth as vs
+
+        from frame_compare.config.schema_enums import TonemapSpeed
+        from frame_compare.vs import TonemapSettings, apply_tonemap
+        from frame_compare.vs.env import ensure_vs_environment
+        from frame_compare.vs.tonemap_conversion import resolve_hdr_tonemap_inputs
+        from frame_compare.vs.tonemap_libplacebo import apply_libplacebo
+        from frame_compare.vs.tonemap_libplacebo import build_libplacebo_tonemap_kwargs
+
+        core = ensure_vs_environment()
+        core.num_threads = 4
+        frame_count = 6
+        base = core.std.BlankClip(
+            width=64,
+            height=32,
+            format=vs.RGB48,
+            length=frame_count,
+            color=[30000, 30000, 30000],
+        ).std.SetFrameProps(
+            _Matrix=0,
+            _Transfer=16,
+            _Primaries=9,
+            _Range=1,
+            MasteringDisplayMinLuminance=0.0001,
+            MasteringDisplayMaxLuminance=1000.0,
+            ContentLightLevelAverage=100.0,
+        )
+        rpus = [RPU_VALID, None, RPU_MALFORMED, RPU_VALID, None, RPU_VALID]
+        max_cll = [400.0, 800.0, 1600.0, 400.0, 800.0, 1600.0]
+        frames = []
+        for n, rpu in enumerate(rpus):
+            frame = base[n : n + 1].std.SetFrameProps(
+                ContentLightLevelMax=max_cll[n],
+                PLSceneMax=[max_cll[n]],
+                PLSceneAvg=[max_cll[n] / 2],
+            )
+            if rpu is not None:
+                frame = frame.std.SetFrameProps(DolbyVisionRPU=rpu)
+            frames.append(frame)
+        source = core.std.Splice(frames)
+        settings = TonemapSettings(
+            source_peak=1000,
+            tonemap_speed=TonemapSpeed.FAST,
+            dynamic_peak_detection=False,
+            use_dovi=True,
+        )
+
+        def digest(frame):
+            return hashlib.sha256(
+                np.stack([np.asarray(frame[plane]) for plane in range(3)]).tobytes()
+            ).hexdigest()
+
+        shared_kwargs = build_libplacebo_tonemap_kwargs(
+            settings=settings,
+            target_nits=settings.target_nits,
+            inputs=resolve_hdr_tonemap_inputs(source, None),
+        )
+        reference = {{}}
+        for n in range(frame_count):
+            assert build_libplacebo_tonemap_kwargs(
+                settings=settings,
+                target_nits=settings.target_nits,
+                inputs=resolve_hdr_tonemap_inputs(source[n : n + 1], None),
+            ) == shared_kwargs
+            fresh = apply_libplacebo(
+                source[n : n + 1], settings, core, None, still_image=True
+            )
+            assert fresh.applied is not None
+            assert fresh.applied.transform.frame_policy == "shared_stateless"
+            reference[n] = digest(fresh.clip.get_frame(0))
+
+        orders = {{
+            "forward": list(range(frame_count)),
+            "reverse": list(reversed(range(frame_count))),
+            "sparse": [0, 2, 5],
+        }}
+        for order in orders.values():
+            fast = apply_tonemap(source, settings, None, still_image=True)
+            assert fast.applied is not None
+            assert fast.applied.transform.frame_policy == "shared_stateless"
+            observed = {{n: digest(fast.clip.get_frame(n)) for n in order}}
+            assert observed == {{n: reference[n] for n in order}}
+
+        # Non-vacuity: the valid RPU is consumed, while the no-RPU control uses the
+        # same PQ pixels and static HDR props.
+        with_rpu = apply_tonemap(source[0:1], settings, None, still_image=True)
+        without_rpu = apply_tonemap(
+            source[0:1].std.RemoveFrameProps(props=["DolbyVisionRPU"]),
+            settings,
+            None,
+            still_image=True,
+        )
+        assert digest(with_rpu.clip.get_frame(0)) != digest(without_rpu.clip.get_frame(0))
+
+        # Independent HDR10/scene metadata control: fixed src_max, differing per-frame
+        # metadata still changes native output.
+        metadata_frames = [
+            base[0:1].std.SetFrameProps(
+                ContentLightLevelMax=400.0,
+                PLSceneMax=[400.0],
+                PLSceneAvg=[200.0],
+            ),
+            base[0:1].std.SetFrameProps(
+                ContentLightLevelMax=4000.0,
+                PLSceneMax=[4000.0],
+                PLSceneAvg=[2000.0],
+            ),
+        ]
+        metadata_source = core.std.Splice(metadata_frames)
+        metadata_settings = TonemapSettings(
+            source_peak=1000,
+            tonemap_speed=TonemapSpeed.FAST,
+            dynamic_peak_detection=False,
+            use_dovi=False,
+        )
+        metadata_result = apply_tonemap(
+            metadata_source, metadata_settings, None, still_image=True
+        )
+        assert digest(metadata_result.clip.get_frame(0)) != digest(
+            metadata_result.clip.get_frame(1)
+        )
+        print("OK")
+        """,
+        timeout=180,
     )
     _assert_vs_process_ok(result)

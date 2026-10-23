@@ -209,3 +209,88 @@ def test_media_hdr_tonemap(
         "tonemap": {"preset": "reference", "target_nits": 200},
     }
     record("M4-tonemap", root, [(arguments, result)], summary, expected, run_dir)
+
+
+@pytest.mark.e2e
+@pytest.mark.vs_required
+def test_media_hdr_tonemap_fast_mode_reports_shared_stateless(
+    media_gate: None,
+    media_files: dict[str, Path],
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+    record: Callable[..., None],
+) -> None:
+    """The opt-in fast CLI route writes PNGs and discloses its native policy."""
+    root = workspace(
+        {
+            "analysis": {"random_frame_count": 0, "user_frames": [1, 2]},
+            "audio_alignment": {"enable": False},
+            "sources": {"reference": "reference.mkv"},
+            "screenshots": {"overlay_mode": "none", "active_rect_detection": "provided"},
+            "color": {"target_nits": 200, "tonemap_speed": "fast"},
+        }
+    )
+    shutil.copy2(media_files["hdr"], root.input_dir / "reference.mkv")
+    shutil.copy2(media_files["sdr"], root.input_dir / "comparison.mkv")
+    arguments = [
+        "run",
+        "--json",
+        "--skip-metadata",
+        "--no-upload",
+        "--tm-speed",
+        "fast",
+        "--root",
+        str(root.root),
+    ]
+    result = run_cli(root.root, arguments, timeout=60)
+    summary, run_dir, report = render_summary(result)
+    requested = report["rendering"]["tonemap"]["requested"]
+    shared = report["rendering"]["tonemap"]["shared"]
+    assert requested is not None
+    assert requested["tonemap_speed"] == "fast"
+    assert requested["dynamic_peak_detection"] is False
+    assert shared is not None
+    assert shared["implementation"] == "libplacebo"
+    controls = shared["effective_controls"]
+    assert controls["tonemap_speed"] == "fast"
+    assert controls["dynamic_peak_detection"] is False
+    assert controls["frame_policy"] == "shared_stateless"
+    assert controls["output_encoding"] == "srgb"
+    applied = report["clips"][0]["presentation"]["tonemap"]
+    assert applied is not None
+    assert applied["effective_controls"]["frame_policy"] == "shared_stateless"
+
+    summary["tonemap"] = {
+        "preset": requested["preset"],
+        "target_nits": requested["target_nits"],
+        "tonemap_speed": requested["tonemap_speed"],
+        "frame_policy": controls["frame_policy"],
+    }
+    expected = {
+        "success": True,
+        "frame_count": 2,
+        "clips_processed": 2,
+        "cache_hit": False,
+        "errors": [],
+        "status": "completed",
+        "clip_count": 2,
+        "selected_frame_count": 2,
+        "metrics_cache_status": "skipped",
+        "frames": [
+            [1, "user", [["reference", 1], ["comparison", 1]]],
+            [2, "user", [["reference", 2], ["comparison", 2]]],
+        ],
+        "screenshots": [
+            ["screenshots/1 - comparison.png", "RGB", [128, 72]],
+            ["screenshots/1 - reference.png", "RGB", [64, 48]],
+            ["screenshots/2 - comparison.png", "RGB", [128, 72]],
+            ["screenshots/2 - reference.png", "RGB", [64, 48]],
+        ],
+        "tonemap": {
+            "preset": "reference",
+            "target_nits": 200,
+            "tonemap_speed": "fast",
+            "frame_policy": "shared_stateless",
+        },
+    }
+    record("M4-tonemap-fast", root, [(arguments, result)], summary, expected, run_dir)
