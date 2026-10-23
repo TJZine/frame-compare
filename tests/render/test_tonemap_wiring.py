@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import CLIConfigOverrides, apply_cli_overrides
 from frame_compare.config.schema import ColorConfig, ConfigSchema, ToneCurve, TonemapPreset
 from frame_compare.config.schema_enums import TonemapSpeed
@@ -313,7 +314,7 @@ def test_preparation_tonemap_dispatch_stops_after_interruption(
             loader_cls.return_value.load.return_value = source
             with pytest.raises(_RunInterrupt):
                 prepare_clip_for_render(
-                    Path("hdr.mkv"), "vapoursynth", ConfigSchema(), ffmpeg_runner=MagicMock()
+                    Path("hdr.mkv"), "vapoursynth", get_default_config(), ffmpeg_runner=MagicMock()
                 )
         # Exercise the real prepare -> dispatch -> conversion/libplacebo/fallback
         # chain; only native entry points and the probe's external result are faked.

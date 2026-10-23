@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import OverlayMode
 from frame_compare.render.batch.expansion import expand_batch_render_requests
@@ -42,7 +43,7 @@ def test_overlay_config_contains_structured_facts_and_original_diagnostic_source
     jobs = expand_batch_render_requests(
         [_request()],
         output_dir=Path("out"),
-        config=ConfigSchema(),
+        config=get_default_config(),
         overlay_mode=OverlayMode.DIAGNOSTIC,
         renderer="vapoursynth",
         ffmpeg_runner=MagicMock(),
@@ -76,7 +77,7 @@ def test_none_overlay_mode_does_not_create_overlay_config(mock_prepare: MagicMoc
     jobs = expand_batch_render_requests(
         [_request()],
         output_dir=Path("out"),
-        config=ConfigSchema(),
+        config=get_default_config(),
         overlay_mode=OverlayMode.NONE,
         renderer="vapoursynth",
         ffmpeg_runner=MagicMock(),

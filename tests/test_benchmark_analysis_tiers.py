@@ -23,7 +23,8 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
     SelectionBreakdown,
 )
-from frame_compare.config.schema import AnalysisConfig, ConfigSchema
+from frame_compare.config.loader import get_default_config
+from frame_compare.config.schema import AnalysisConfig
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 
 
@@ -341,7 +342,7 @@ def test_main_rejects_legacy_indexes_for_warm_requirement(
     legacy.write_bytes(b"legacy")
     config_path = tmp_path / "config.toml"
     config_path.write_text("", encoding="utf-8")
-    config = ConfigSchema()
+    config = get_default_config()
     source = script.BenchmarkAnalysisSource(
         path=video,
         ordered_paths=(video,),
@@ -404,7 +405,7 @@ def test_main_rejects_unusable_owned_index(
     def reject_index(_path: Path) -> None:
         raise script.SourceLoadError(video, "Warm source index validation failed")
 
-    monkeypatch.setattr(script, "load_config", lambda _path: ConfigSchema())
+    monkeypatch.setattr(script, "load_config", lambda _path: get_default_config())
     monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
     monkeypatch.setattr(script, "validate_source_index", reject_index)
 
@@ -492,7 +493,7 @@ def test_main_writes_expected_production_report(
         source_frame_count=20,
         sampled=sampled,
     )
-    config = ConfigSchema().model_copy(
+    config = get_default_config().model_copy(
         update={
             "analysis": AnalysisConfig(
                 random_frame_count=0,

@@ -13,6 +13,7 @@ from rich.console import Console
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.cli import run_command
 from frame_compare.config.errors import ConfigNotFoundError
+from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.orchestration import coordinator
@@ -115,7 +116,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
     )
     prep = PrepState(
         workspace=_workspace(tmp_path, run_subdir=None),
-        config=ConfigSchema(),
+        config=get_default_config(),
         input_videos=[tmp_path / "reference.mkv"],
         clips=[clip_state(tmp_path / "reference.mkv", label="Reference")],
         artifacts=RunArtifacts(
@@ -145,7 +146,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
 
     result = asyncio.run(
         execute_run(
-            make_run_request(config=ConfigSchema(), root=tmp_path, quiet=True),
+            make_run_request(config=get_default_config(), root=tmp_path, quiet=True),
             deps=RunDependencies(monotonic_timer=_zero_monotonic_timer),
         )
     )
@@ -170,7 +171,7 @@ def test_execute_run_propagates_collection_warning_once_through_result_summary_a
         screenshots_subdir="run/screenshots",
     )
 
-    config = ConfigSchema()
+    config = get_default_config()
     config.audio_alignment.enable = False
     config.report.enable = False
     config.slowpics.auto_upload = True
@@ -347,7 +348,7 @@ def test_execute_run_initializes_enabled_step_map_before_phase_failure(
     confirm_after_report: bool,
     expected: list[str],
 ) -> None:
-    config = ConfigSchema()
+    config = get_default_config()
     config.analysis.dark_frame_count = 1 if enabled else 0
     config.analysis.bright_frame_count = 0
     config.analysis.motion_frame_count = 0
@@ -392,7 +393,7 @@ def test_execute_run_initializes_enabled_step_map_before_phase_failure(
     with pytest.raises(RuntimeError) as exc_info:
         asyncio.run(
             execute_run(
-                make_run_request(config=ConfigSchema(), root=tmp_path),
+                make_run_request(config=get_default_config(), root=tmp_path),
                 deps=RunDependencies(
                     monotonic_timer=_zero_monotonic_timer, progress=RecordingReporter()
                 ),
@@ -407,7 +408,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = ConfigSchema()
+    config = get_default_config()
     config.slowpics.auto_upload = True
     config.slowpics.confirm_upload_after_report = False
     config.slowpics.delete_after_upload = True
@@ -478,7 +479,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
     monkeypatch.setattr(Path, "unlink", fake_unlink)
 
     request = make_run_request(
-        config=ConfigSchema(),
+        config=get_default_config(),
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
@@ -504,7 +505,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = ConfigSchema()
+    config = get_default_config()
     config.slowpics.auto_upload = True
     config.slowpics.confirm_upload_after_report = False
     config.report.enable = False
@@ -560,7 +561,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
     )
 
     request = make_run_request(
-        config=ConfigSchema(),
+        config=get_default_config(),
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
@@ -585,7 +586,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = ConfigSchema()
+    config = get_default_config()
     config.slowpics.auto_upload = True
     config.slowpics.confirm_upload_after_report = False
     config.slowpics.delete_after_upload = True
@@ -646,7 +647,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
     )
 
     request = make_run_request(
-        config=ConfigSchema(),
+        config=get_default_config(),
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
@@ -900,7 +901,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
     workspace = _workspace(root)
     assert workspace.run_dir is not None
     workspace.run_dir.mkdir(parents=True)
-    config = ConfigSchema()
+    config = get_default_config()
     config.audio_alignment.enable = False
     config.report.enable = True
     artifacts = RunArtifacts()
@@ -1242,7 +1243,7 @@ async def test_confirmed_upload_facts_survive_cancellation(
     workspace = _workspace(tmp_path, run_subdir="run", screenshots_subdir="run/screenshots")
     assert workspace.run_dir is not None
     workspace.run_dir.mkdir()
-    config = ConfigSchema()
+    config = get_default_config()
     config.audio_alignment.enable = False
     config.report.enable = confirm_after_report
     config.report.embed_images = True

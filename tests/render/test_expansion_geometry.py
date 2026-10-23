@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import (
     OverlayMode,
@@ -151,7 +152,7 @@ def test_prepared_dimensions_cannot_silently_replace_active_picture_bounds() -> 
         expand_batch_render_requests(
             [request],
             output_dir=Path("out"),
-            config=ConfigSchema(),
+            config=get_default_config(),
             overlay_mode=OverlayMode.NONE,
             renderer="vapoursynth",
             ffmpeg_runner=MagicMock(),

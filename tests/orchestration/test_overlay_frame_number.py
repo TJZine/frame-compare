@@ -8,7 +8,7 @@ import pytest
 
 import frame_compare.vs.loader as vs_loader_module
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     RunContext,
@@ -92,7 +92,7 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
     )
     monkeypatch.setattr(vs_loader_module, "DefaultVSLoader", FakeVSLoader)
 
-    config = ConfigSchema()
+    config = get_default_config()
 
     workspace = _workspace(
         tmp_path.resolve(),

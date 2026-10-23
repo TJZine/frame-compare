@@ -92,8 +92,13 @@ resolver), synthetic summary figures, and the effective-peak disclosures.
   `frame_compare.config.loader.get_default_config()` (no TOML, no environment),
   not a bare `ConfigSchema()`. A test that deliberately exercises TOML or
   environment discovery keeps its explicit setup. An autouse fixture in
-  `tests/conftest.py` removes inherited `FRAME_COMPARE_*` variables before each
-  test. Production configuration discovery does not change.
+  `tests/conftest.py` removes inherited application configuration variables
+  before each test, including section JSON and nested `FRAME_COMPARE_*`
+  settings. Runtime and test controls remain available, including native/media
+  requirements, runtime identity, and E2E artifact routing. Tests may set their
+  own configuration variables explicitly. The maintainer authorized this
+  distinction after the blanket prefix rule was found to remove those controls.
+  Production configuration discovery does not change.
 - **D5.** No product code changes. `TonemapSettings`, presets, the resolver and
   the native kwargs stay exactly as in `6bedfa31`.
 - **D6.** Softclip stays experimental and unexposed.
