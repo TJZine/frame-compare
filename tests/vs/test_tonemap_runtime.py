@@ -12,6 +12,7 @@ import pytest
 import structlog
 
 import frame_compare.vs.tonemap_runtime as tonemap_runtime_module
+from frame_compare.utils.subproc import prepare_python_child
 from frame_compare.vs.tonemap_runtime import (
     LibplaceboRuntimeState,
     libplacebo_runtime_override,
@@ -57,8 +58,11 @@ def test_native_integration_import_honors_required_runtime(
         raise SystemExit("Native integration module unexpectedly loaded")
         """
     )
+    argv, environment = prepare_python_child(
+        [sys.executable, "-c", script, str(integration_module), runtime], env=environment
+    )
     result = subprocess.run(
-        [sys.executable, "-I", "-c", script, str(integration_module), runtime],
+        argv,
         cwd=tmp_path,
         env=environment,
         capture_output=True,
