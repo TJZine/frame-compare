@@ -9,6 +9,7 @@ from fractions import Fraction
 from typing import TYPE_CHECKING, Literal
 
 from frame_compare.config.schema import ToneCurve, TonemapPreset
+from frame_compare.config.schema_enums import TonemapSpeed
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -47,6 +48,7 @@ class TonemapSettings:
 
     enabled: bool = True
     preset: TonemapPreset = TonemapPreset.REFERENCE
+    tonemap_speed: TonemapSpeed = TonemapSpeed.QUALITY
     tone_curve: ToneCurve = ToneCurve.BT2390
     target_nits: int = 100
     source_peak: int | None = None
@@ -81,7 +83,7 @@ class LibplaceboTonemap:
     curve: ToneCurve
     settings: TonemapSettings
     source_peak: ResolvedSourcePeak
-    frame_policy: Literal["sequence", "independent_frames"] = "sequence"
+    frame_policy: Literal["sequence", "independent_frames", "shared_stateless"] = "sequence"
 
 
 @dataclass(frozen=True, slots=True)
