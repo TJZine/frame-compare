@@ -2151,3 +2151,83 @@ skill; its worker used `gpt-6.1-sol/medium` and recorded backups/discovery separ
 the feature commits have not been pushed, so prior green PR jobs are not matching-head
 evidence. Visible VSView/physical-display acceptance is not established by graph or
 offscreen checks. No push, merge, release, signing or publication has occurred.
+
+### Approved push and first matching-head CI — 2026-10-22
+
+The user approved the ordinary `v0.7.0` push. `git push origin v0.7.0` exited 0,
+publishing `3e78bc97fb913d7513d7f003d9fd9349d6113d31`; a subsequent `git ls-remote`
+confirmed that exact branch head. PR #138's workflows tested the corresponding
+merge `6fbc0e5420ef258d22e2448f987646e75f6ffc67` into the recorded `pre-release`
+base. This supersedes the pre-push UNRUN disposition above for those hosted jobs.
+
+- [CI run 39885585100](https://github.com/TJZine/frame-compare/actions/runs/39885585100):
+  **passed**, including pytest, static/type/import checks, both dependency audits,
+  package installation, browser smoke and the aggregate CI gate. The pytest job
+  includes optional runtime/platform skips; those are not native acceptance.
+- [Documentation run 39885585166](https://github.com/TJZine/frame-compare/actions/runs/39885585166):
+  build **passed**; deployment **skipped**.
+- [Windows portable run 39885585276](https://github.com/TJZine/frame-compare/actions/runs/39885585276):
+  unsigned verification **passed**, including its full test step, portable build,
+  extracted-bundle verification and code-only update layout. Signed-request
+  validation, signing-key migration, signed verification and guarded release jobs
+  **skipped**. Signing/release-only steps within the unsigned job also skipped.
+  Its pytest log records unavailable libplacebo/Vulkan skips for native still,
+  fast-still and preview proof; the portable job does not establish those results.
+- [Docker run 39885585150](https://github.com/TJZine/frame-compare/actions/runs/39885585150/job/120192888769):
+  **failed**, exit 1: **4 failed, 345 passed**, no reported skips, in 494.35 s.
+  All failures are the four absent/mocked × optional/required controls in
+  `tests/vs/test_tonemap_runtime.py`. Their isolated `python -I` subprocess cannot
+  import the Docker image's user-installed `pytest` and fails before exercising
+  the intended guard. The runtime proof reached real vs-placebo 2.0.4 and verified
+  source provenance. E2E artifact upload passed; the subsequent alignment-resource
+  proof step **skipped** because canonical verification failed. V3 is **failed**,
+  not accepted on the strength of its 345 passing cases.
+
+PR title validation also passed. CodeRabbit reported its automatic review
+**skipped**, despite a success-valued status context. No jobs remain running in
+these four workflow runs. Local Docker remains **UNRUN** on this Windows host.
+
+#### Docker harness correction
+
+Unit G (`gpt-6.1-sol/medium`) reused `utils.subproc.prepare_python_child` in the four
+guard controls instead of launching Python with `-I`. The existing helper removes
+cwd/`PYTHONPATH` injection paths while preserving the parent's trusted user-site
+policy. All four expected exit codes, stdout markers and failure/skip reasons are
+unchanged; no production code, Docker dependency layout or native pixel assertion
+was modified.
+
+A temporary user-site-only dependency layout reproduced the original failure:
+the original four controls exited 1 with **4 failed, 12 deselected**, including
+`ModuleNotFoundError: No module named 'pytest'`. The repaired controls in the same
+layout exited 0 with **4 passed, 12 deselected**. Receipts:
+`.tmp/unit-g-user-site-ir5dw4wg/baseline.txt` and `repaired.txt`. This is a Windows
+dependency-layout reproduction, not execution inside Docker. Initial proof setup
+errors (a missing copied dependency, disabled anyio plugin and inaccessible default
+pytest temp directory) were resolved before the recorded red/green comparison.
+
+Final focused Windows command:
+`FRAME_COMPARE_REQUIRE_LIBPLACEBO=1 uv run --no-sync pytest -o addopts='' -q
+tests/vs/test_tonemap_runtime.py
+--basetemp=.tmp/fast-hdr-2026-10-22/docker-fix-runtime-temp
+--junitxml=.tmp/fast-hdr-2026-10-22/docker-fix-runtime.xml`.
+Exit 0: **16 passed, 0 skipped**, 9.07 s, including the three installed native
+probes. Whole-tree Ruff lint/format, Bandit medium and import contracts exited 0;
+559 files formatted, 0 medium/high issues and 2 import contracts kept. The full
+native suite and V2 measurement were not repeated for this test-only correction.
+Whole-tree Pyright also exited 0 with no errors or warnings.
+
+R (`gpt-6.1-sol/high`) independently cleared the harness correction with no material
+correctness/maintainability finding or plan deviation. It verified the copied
+baseline test and integration fixture against HEAD (normalizing line endings),
+inspected the actual user-site pytest tree and red/green logs, and traced the
+existing helper's safe-path/injection/user-site policies. Review diff check exited
+0. R did not rerun Docker or native workloads. Both G's and R's minimal completion
+callbacks arrived successfully; their full evidence stayed in their child chats.
+
+Correction commit: `5e492c06` (`test(tonemap): preserve user-site dependencies in
+runtime guards`). `uv run --no-sync pytest -o addopts='' -q
+tests/test_cli_contract_docs.py` exited 0: **5 passed**. The strict tracked-docs
+snapshot build with the same pinned Zensical overlay exited 0, no issues, in
+2.33 s. The protected untracked plans and their previously recorded working-tree
+link failures remain untouched. The corrected source still requires a new hosted
+Docker result; local dependency-layout proof does not replace V3.
