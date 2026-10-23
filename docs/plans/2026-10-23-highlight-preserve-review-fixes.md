@@ -3,7 +3,7 @@ search:
   exclude: true
 ---
 
-Status: Active
+Status: Historical
 Scope: Fixes from the independent review of commit 6bedfa31 (opt-in `highlight_preserve` preset)
 Owner: Codex orchestrator chat, controlled by the maintainer
 
