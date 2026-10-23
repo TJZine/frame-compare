@@ -1118,6 +1118,15 @@ When `dynamic_peak_detection` is disabled by the fast speed setting, still prepa
 instead applies one `placebo.Tonemap` node over the clip and reports
 `shared_stateless`; this policy follows detection state, not the setting name.
 
+`config.schema_enums.TonemapPreset.HIGHLIGHT_PRESERVE` is an opt-in public
+preset owned by `vs.tonemap_presets`: reference settings with BT.2390 knee 1.0.
+`render.prepare.resolve_tonemap_settings` applies authored overrides; changing
+from BT.2390 to another algorithm resets the generic native curve parameter
+to the default 0.5. An explicit BT.2390 override retains knee 1.0. Applied
+tonemap/report identity continues to contain the resolved preset and knee.
+Reference and existing presets retain their prior values; softclip remains
+experimental and is not part of this preset.
+
 Configured VSView previews receive immutable settings resolved by
 `render.prepare.resolve_tonemap_settings` in the alignment orchestration phase,
 through `AlignmentConfig`, `VSViewSessionRequest`, and the generated JSON payload.
@@ -1468,14 +1477,3 @@ Native alignment-review hotspot dispositions for the current implementation:
 
 - Whether any import-level package APIs should be promoted from convenience-only to supported/stable.
 - Whether a durable multi-session plan workflow should become active again in this repo. The runbook currently keeps `docs/plans/` inactive by default.
-
-### Highlight-preserving preset resolution
-
-`config.schema_enums.TonemapPreset.HIGHLIGHT_PRESERVE` is an opt-in public
-preset owned by `vs.tonemap_presets`: reference settings with BT.2390 knee 1.0.
-`render.prepare.resolve_tonemap_settings` applies authored overrides; changing
-curve algorithms resets the generic native curve parameter to the default 0.5
-to avoid reinterpreting a tuned knee as another curve's contrast. Applied
-tonemap/report identity continues to contain the resolved preset and knee.
-Reference and existing presets retain their prior values; softclip remains
-experimental and is not part of this preset.
