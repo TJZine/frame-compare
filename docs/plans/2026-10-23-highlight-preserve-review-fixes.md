@@ -100,8 +100,10 @@ resolver), synthetic summary figures, and the effective-peak disclosures.
 
 ## Units
 
-- **U1 — remove the bundle** (D1). `git rm -r review-evidence/`. No other file
-  may still reference `review-evidence`.
+- **U1 — remove the bundle** (D1). `git rm -r review-evidence/`. Outside
+  `docs/plans/**`, no file may still reference `review-evidence` once U4 lands.
+  This plan names the bundle to describe its removal, and historical plans stay
+  unedited per the runbook's plan lifecycle.
 - **U2 — native-boundary proof** (R3). Owns
   `tests/vs/test_tonemap_extracted_modules.py` and `tests/vs/test_integration.py`.
   - (a) Extend the existing `build_libplacebo_tonemap_kwargs` coverage. Do not add
