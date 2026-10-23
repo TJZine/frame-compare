@@ -565,6 +565,20 @@ Default
 
 Baseline tonemap settings.
 
+#### `color.tonemap_speed` { #color.tonemap_speed .fc-key }
+
+Values
+:   `"quality"`, `"fast"`
+
+Default
+:   `"quality"`
+
+Choose the source-peak policy for HDR tonemapping. `"quality"` measures the peak
+for each screenshot. `"fast"` disables dynamic peak detection and uses available
+stream or static metadata, falling back to the configured or default source peak.
+Fast mode is reproducible and shares native state across screenshots, but it can
+look different from quality mode and depends on HDR metadata.
+
 #### `color.target_nits` { #color.target_nits .fc-key }
 
 Values
@@ -609,6 +623,10 @@ Explicit configuration or environment values for `target_nits`, `tone_curve`,
 `gamma_lift`, and `contrast_recovery` override the preset baseline. `--tm-target`
 and `--tm-curve` override `target_nits` and `tone_curve` for one run and take
 precedence over configuration and environment values.
+
+`tonemap_speed` is independent of the preset and persists as an ordinary color
+field. Configuration and environment values set its baseline; `--tm-speed` takes
+precedence for one run.
 
 `gamma_lift` and `contrast_recovery` can be set only through configuration or
 environment variables;

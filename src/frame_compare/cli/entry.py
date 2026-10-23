@@ -43,7 +43,7 @@ from frame_compare.cli.wizard_command import (
 )
 from frame_compare.config.loader import TomlPayload, load_config
 from frame_compare.config.presets import apply_preset, list_presets, save_preset
-from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset
+from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset, TonemapSpeed
 from frame_compare.orchestration.doctor_types import DoctorConfigSelection
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging
@@ -264,6 +264,13 @@ def run(
         help=f"Override the tonemap curve. Choose one of: {format_enum_choices(ToneCurve)}.",
         rich_help_panel="Rendering and alignment",
     ),
+    tm_speed: str | None = _option(
+        None,
+        "--tm-speed",
+        metavar="SPEED",
+        help=f"Override the tonemap speed. Choose one of: {format_enum_choices(TonemapSpeed)}.",
+        rich_help_panel="Rendering and alignment",
+    ),
     overlay: str | None = _option(
         None,
         "--overlay",
@@ -365,6 +372,7 @@ def run(
         tm_preset=tm_preset,
         tm_target=tm_target,
         tm_curve=tm_curve,
+        tm_speed=tm_speed,
         frames=frames,
         random_frame_count=random_frame_count,
         dark_frame_count=dark_frame_count,

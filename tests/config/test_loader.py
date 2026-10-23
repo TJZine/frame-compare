@@ -19,6 +19,7 @@ from frame_compare.config.loader import (
     load_config,
     load_raw_config,
 )
+from frame_compare.config.schema_enums import TonemapSpeed
 
 
 def test_load_from_toml_file(tmp_path: Path) -> None:
@@ -213,6 +214,17 @@ def test_precedence_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     overrides: dict[str, Any] = {"analysis": {"random_frame_count": 30}}
     config = load_config(config_path=config_file, overrides=overrides)
     assert config.analysis.random_frame_count == 30
+
+
+def test_color_tonemap_speed_environment_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("FRAME_COMPARE_COLOR__TONEMAP_SPEED", "fast")
+
+    config = load_config()
+
+    assert config.color.tonemap_speed is TonemapSpeed.FAST
 
 
 def test_nested_runtime_memory_limit_environment_value_is_decoded_without_relaxing_model(

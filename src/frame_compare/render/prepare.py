@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from frame_compare.config.schema_enums import VsScreenshotWriter
+from frame_compare.config.schema_enums import TonemapSpeed, VsScreenshotWriter
 from frame_compare.render.types import PreparedRenderSource, Renderer
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.media_facts import PresentationState
@@ -41,6 +41,10 @@ def resolve_tonemap_settings(config: ConfigSchema) -> TonemapSettings:
         settings = replace(settings, gamma_lift=config.color.gamma_lift)
     if "contrast_recovery" in explicit_color_fields:
         settings = replace(settings, contrast_recovery=config.color.contrast_recovery)
+
+    settings = replace(settings, tonemap_speed=config.color.tonemap_speed)
+    if config.color.tonemap_speed is TonemapSpeed.FAST:
+        settings = replace(settings, dynamic_peak_detection=False)
 
     return settings
 

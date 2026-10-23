@@ -26,6 +26,7 @@ from frame_compare.config.schema_enums import (
     ScreenshotAlignedScalePolicy,
     ScreenshotGeometryMode,
     SourceMatchFpsMode,
+    TonemapSpeed,
     Visibility,
     VsScreenshotWriter,
 )
@@ -99,6 +100,20 @@ def test_color_target_nits_rejects_out_of_bounds(value: int, message: str) -> No
     with pytest.raises(ValidationError) as exc:
         ColorConfig(target_nits=value)
     assert message in str(exc.value)
+
+
+@pytest.mark.parametrize("value", ["quality", "fast"])
+def test_color_tonemap_speed_accepts_supported_values(value: str) -> None:
+    assert ColorConfig.model_validate({"tonemap_speed": value}).tonemap_speed is TonemapSpeed(value)
+
+
+def test_color_tonemap_speed_defaults_to_quality() -> None:
+    assert ColorConfig().tonemap_speed is TonemapSpeed.QUALITY
+
+
+def test_color_tonemap_speed_rejects_unknown_value() -> None:
+    with pytest.raises(ValidationError):
+        ColorConfig.model_validate({"tonemap_speed": "turbo"})
 
 
 @pytest.mark.parametrize(
@@ -220,6 +235,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert color.enable_tonemap is True
     assert color.contrast_recovery == 0.3
     assert color.preset == "reference"
+    assert color.tonemap_speed is TonemapSpeed.QUALITY
     assert sources.reference is None
     assert sources.analysis_source == "reference"
     assert sources.match_fps == SourceMatchFpsMode.DISABLED

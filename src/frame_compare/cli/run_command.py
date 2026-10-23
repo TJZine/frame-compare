@@ -27,6 +27,7 @@ from frame_compare.config.schema import (
     TonemapPreset,
     Visibility,
 )
+from frame_compare.config.schema_enums import TonemapSpeed
 from frame_compare.errors import FrameCompareError
 from frame_compare.orchestration.run_inputs import (
     AcquiredRunConfig,
@@ -246,6 +247,7 @@ class RunCliRawArgs:
     quiet: bool
     verbose: bool
     dry_run: bool = False
+    tm_speed: str | None = None
 
 
 def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
@@ -492,6 +494,9 @@ def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
     parsed_tm_curve = coerce_cli_choice(
         args.tm_curve, ToneCurve, ("color", "tone_curve"), flag="--tm-curve"
     )
+    parsed_tm_speed = coerce_cli_choice(
+        args.tm_speed, TonemapSpeed, ("color", "tonemap_speed"), flag="--tm-speed"
+    )
     parsed_overlay = coerce_cli_choice(
         args.overlay, OverlayMode, ("screenshots", "overlay_mode"), flag="--overlay"
     )
@@ -511,6 +516,7 @@ def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
             input_dir=args.input_dir,
             no_upload=args.no_upload,
             tm_preset=parsed_tm_preset,
+            tm_speed=parsed_tm_speed,
             tm_target_nits=args.tm_target,
             tm_curve=parsed_tm_curve,
             user_frames=parse_frame_list(args.frames),

@@ -25,6 +25,7 @@ from frame_compare.config.schema import (
     ToneCurve,
     TonemapPreset,
 )
+from frame_compare.config.schema_enums import TonemapSpeed
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration import RunResult
 from frame_compare.orchestration.run_inputs import acquire_run_config, resolve_run_workspace
@@ -76,10 +77,11 @@ def test_build_run_request_from_cli_maps_all_runtime_options(tmp_path: Path) -> 
         (OverlayMode, "--overlay", ("screenshots", "overlay_mode")),
         (TonemapPreset, "--tm-preset", ("color", "preset")),
         (ToneCurve, "--tm-curve", ("color", "tone_curve")),
+        (TonemapSpeed, "--tm-speed", ("color", "tonemap_speed")),
     ],
 )
 def test_coerce_cli_choice_invalid_value_names_flag_and_enum_choices(
-    enum_type: type[OverlayMode] | type[TonemapPreset] | type[ToneCurve],
+    enum_type: type[OverlayMode] | type[TonemapPreset] | type[ToneCurve] | type[TonemapSpeed],
     flag: str,
     loc: tuple[str, str],
 ) -> None:

@@ -28,6 +28,7 @@ from frame_compare.config.schema_enums import (
     SourceMatchFpsMode,
     ToneCurve,
     TonemapPreset,
+    TonemapSpeed,
     ViewerMode,
     Visibility,
     VsScreenshotWriter,
@@ -255,6 +256,7 @@ class ColorConfig(BaseModel):
 
     enable_tonemap: bool = True
     preset: TonemapPreset = TonemapPreset.REFERENCE
+    tonemap_speed: TonemapSpeed = TonemapSpeed.QUALITY
     target_nits: int = Field(default=100, ge=100, le=1000)
     tone_curve: ToneCurve = ToneCurve.BT2390
     gamma_lift: bool = False

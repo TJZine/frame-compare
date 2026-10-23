@@ -10,6 +10,7 @@ from frame_compare.config.overrides import CLIConfigOverrides, apply_cli_overrid
 from frame_compare.config.persistence import dump_config_for_persistence
 from frame_compare.config.presets import apply_preset, save_preset
 from frame_compare.config.schema import ColorConfig, TonemapPreset
+from frame_compare.config.schema_enums import TonemapSpeed
 from frame_compare.render.prepare import resolve_tonemap_settings
 from frame_compare.vs.tonemap_presets import get_preset_settings
 
@@ -70,6 +71,27 @@ def test_partial_color_preset_preserves_only_authored_overrides(tmp_path: Path) 
         "gamma_lift",
         "contrast_recovery",
     } == {"target_nits", "gamma_lift"}
+
+
+def test_fast_tonemap_speed_survives_persistence_and_is_not_preset_controlled(
+    tmp_path: Path,
+) -> None:
+    config = get_default_config()
+    config.color = ColorConfig(preset=TonemapPreset.FILMIC, tonemap_speed=TonemapSpeed.FAST)
+    expected = resolve_tonemap_settings(config)
+    assert expected.tonemap_speed is TonemapSpeed.FAST
+    assert expected.dynamic_peak_detection is False
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(tomli_w.dumps(dump_config_for_persistence(config)), encoding="utf-8")
+    reloaded = load_config(config_path)
+    assert reloaded.color.tonemap_speed is TonemapSpeed.FAST
+    assert resolve_tonemap_settings(reloaded) == expected
+
+    (tmp_path / "partial.toml").write_text('[color]\npreset = "reference"\n')
+    updated = apply_preset(config, "partial", presets_dir=tmp_path)
+    assert updated.color.tonemap_speed is TonemapSpeed.FAST
+    assert resolve_tonemap_settings(updated).tonemap_speed is TonemapSpeed.FAST
 
 
 @pytest.mark.parametrize("merge_kind", ["preset", "cli"])

@@ -11,6 +11,7 @@ from frame_compare.cli.run_command import RunCliOptions, build_run_request_from_
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import OverlayMode, ToneCurve, TonemapPreset
+from frame_compare.config.schema_enums import TonemapSpeed
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from frame_compare.orchestration.run_inputs import acquire_run_config, resolve_run_workspace
 
@@ -82,6 +83,8 @@ def test_run_builds_run_request_with_typed_choice_overrides(
             "filmic",
             "--tm-curve",
             "spline",
+            "--tm-speed",
+            "fast",
             "--overlay",
             "diagnostic",
         ],
@@ -93,6 +96,7 @@ def test_run_builds_run_request_with_typed_choice_overrides(
     request = captured["request"]
     assert request.inputs.config.color.preset == TonemapPreset.FILMIC
     assert request.inputs.config.color.tone_curve == ToneCurve.SPLINE
+    assert request.inputs.config.color.tonemap_speed is TonemapSpeed.FAST
     assert request.inputs.config.screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
 
 
@@ -112,6 +116,7 @@ def test_cli_and_runtime_share_the_complete_config_overrides() -> None:
             input_dir=Path("external-input"),
             no_upload=True,
             tm_preset=TonemapPreset.FILMIC,
+            tm_speed=TonemapSpeed.FAST,
             tm_target_nits=203,
             tm_curve=ToneCurve.SPLINE,
             user_frames=[3, 5],
@@ -127,6 +132,7 @@ def test_cli_and_runtime_share_the_complete_config_overrides() -> None:
     expected = CLIConfigOverrides(
         input_dir=Path("external-input"),
         tm_preset=TonemapPreset.FILMIC,
+        tm_speed=TonemapSpeed.FAST,
         tm_target_nits=203,
         tm_curve=ToneCurve.SPLINE,
         user_frames=[3, 5],

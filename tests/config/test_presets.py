@@ -148,6 +148,9 @@ def test_save_preset_roundtrip(tmp_path: Path) -> None:
     loaded_data = load_preset("roundtrip", presets_dir=tmp_path)
 
     assert loaded_data == expected_data
+    color_data = loaded_data["color"]
+    assert isinstance(color_data, dict)
+    assert color_data["tonemap_speed"] == "quality"
 
 
 def test_apply_preset_merges_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
