@@ -5,7 +5,7 @@ search:
 
 # Highlight preservation investigation and acceptance
 
-Status: Active
+Status: Historical
 
 Controller: Codex chat `01a16815-04a8-7d02-96f6-456f0dfcb02f`, host `local`.
 Baseline HEAD: `f1d3b9bf4c3406e3d0cddbfbbc536e0ac8a9279e`.
