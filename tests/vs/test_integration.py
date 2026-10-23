@@ -373,8 +373,8 @@ def test_native_highlight_preserve_knee_changes_libplacebo_output() -> None:
         width, height = 256, 16
         source = core.std.BlankClip(width=width, height=height, format=vs.RGB48, length=1)
 
-        def fill(_, frame):
-            frame = frame.copy()
+        def fill(n, f):
+            frame = f.copy()
             nits = np.linspace(100.0, 4000.0, width)
             encoded = (nits / 10000.0) ** (2610 / 16384)
             pq = ((3424 / 4096 + 2413 / 128 * encoded)
