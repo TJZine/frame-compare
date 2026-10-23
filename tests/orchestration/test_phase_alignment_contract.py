@@ -31,20 +31,27 @@ from tests.run_request_support import make_run_request
 from tests.services.alignment_resolution_test_support import save_resolutions
 
 
+@pytest.mark.parametrize("speed, enabled", [("quality", True), ("fast", True), ("fast", False)])
 def test_alignment_request_uses_untrimmed_probe_frame_count(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, speed: str, enabled: bool
 ) -> None:
+    from frame_compare.config.schema_enums import TonemapSpeed
+    from frame_compare.render.prepare import resolve_tonemap_settings
+
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.reference = _clip(ctx.reference.path, label="Reference", num_frames=321).with_trim(
         trim_start_frames=20,
         trim_end_frame_inclusive=99,
     )
+    ctx.config.color.tonemap_speed = TonemapSpeed(speed)
+    ctx.config.color.enable_tonemap = enabled
     captured: list[AlignmentRequest] = []
 
     def fake_align(
-        request: AlignmentRequest, *_args: object, **_kwargs: object
+        request: AlignmentRequest, config: AlignmentConfig, **_kwargs: object
     ) -> AlignmentOperationOutcome:
+        assert config.preview_tonemap == (resolve_tonemap_settings(ctx.config) if enabled else None)
         captured.append(request)
         return AlignmentOperationOutcome(
             (

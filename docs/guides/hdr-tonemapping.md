@@ -43,6 +43,15 @@ the report calls out use of the default 1000-nit peak and the run log warns abou
 The setting is independent of the tone curve, target, and preset, and the degraded
 fallback continues to ignore it.
 
+VSView alignment previews also use these configured tone settings for HDR sources
+when tonemapping is enabled. Fast previews use the same metadata peak policy as
+fast screenshots. Quality previews retain temporal sequence measurement; quality
+screenshots measure each still independently, so their appearance can differ.
+Mapping occurs before alignment labels and preserves sRGB output properties.
+SDR sources, disabled tonemapping and older sessions without tone settings keep
+their existing preview handling. Source frame positions and alignment decisions
+are unchanged.
+
 The sRGB conversion uses the native destination's configured black and white
 endpoints: the selected black maps to sRGB zero and white to one. It preserves
 BT.709 primaries and D65. It changes the representation for browser images, not

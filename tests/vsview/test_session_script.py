@@ -483,3 +483,42 @@ def test_session_output_names_pad_by_terminal_cells(monkeypatch: pytest.MonkeyPa
     assert cell_len(reference_line[: reference_line.index("reference")]) == 29
     assert cell_len(comparison_line[: comparison_line.index("audio")]) == 29
     assert "Cafe\u0301" in comparison_line
+
+
+@pytest.mark.parametrize("speed", ["quality", "fast"])
+def test_generated_settings_roundtrip_preserves_enums(speed: str) -> None:
+    from pydantic import TypeAdapter
+
+    from frame_compare.config.schema import ConfigSchema
+    from frame_compare.render.prepare import resolve_tonemap_settings
+    from frame_compare.vs.types import TonemapSettings
+
+    config = ConfigSchema.model_validate({"color": {"tonemap_speed": speed, "target_nits": 120}})
+    settings = resolve_tonemap_settings(config)
+    script = _build_script_content(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("comparison.mkv")],
+        suggested_offsets_by_key={"ref:comparison": 0},
+        audio_review_by_key={"ref:comparison": "{}"},
+        preview_tonemap=settings,
+    )
+    import ast
+
+    assignment = next(
+        node
+        for node in ast.parse(script).body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "SESSION_DATA"
+    )
+    # Read the literal JSON embedded in the real generated script without starting VSView.
+    payload = next(
+        node.value
+        for node in ast.walk(assignment)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
+    restored = TypeAdapter(TonemapSettings).validate_python(json.loads(payload)["preview_tonemap"])
+    assert restored == settings
+    assert restored.tonemap_speed is settings.tonemap_speed
+    assert restored.preset is settings.preset
+    assert restored.tone_curve is settings.tone_curve

@@ -2086,6 +2086,17 @@ one run; like the other mapped rendering overrides, it is persisted only with
 controls, while the degraded fallback ignores it and retains its existing effective
 controls.
 
+Configured VSView alignment previews use the same resolved tone settings when
+`color.enable_tonemap` is enabled. HDR evidence comes from the original loaded
+source, with the existing metadata probe for unspecified signals. Mapping happens
+before preview defaults and overlays; mapped output retains its sRGB properties.
+Both speeds use the sequence policy: quality previews retain temporal peak
+measurement, while quality screenshots measure each still independently. Fast
+previews and screenshots use the same metadata peak policy. SDR, disabled mapping,
+and legacy sessions without settings retain their existing preview handling.
+Review outputs keep original frame positions/counts, reference FPS, ordering,
+`hdr=False` registration and the existing metadata-v5/session result authority.
+
 ## `wizard` Command Contract
 
 - `wizard` is an interactive, goal-oriented editor for input, generated-data location,

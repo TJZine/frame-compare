@@ -32,6 +32,7 @@ from frame_compare.orchestration.phase_selection import (
     source_frames_for_reference_base_domain,
 )
 from frame_compare.orchestration.presentation import clip_role
+from frame_compare.render.prepare import resolve_tonemap_settings
 from frame_compare.services.alignment import (
     align_clips_from_request,
     format_rejected_alignment_warning,
@@ -89,6 +90,9 @@ async def run_align_phase(
         force_interactive=ctx.config.audio_alignment.force_interactive,
         cache_results=ctx.config.audio_alignment.cache_results,
         no_color=ctx.no_color,
+        preview_tonemap=(
+            resolve_tonemap_settings(ctx.config) if ctx.config.color.enable_tonemap else None
+        ),
     )
     alignment_request = _alignment_request_from_context(ctx)
     log.debug(

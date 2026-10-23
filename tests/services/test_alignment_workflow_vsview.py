@@ -291,16 +291,20 @@ def test_forced_missing_result_stops_alignment(
 def test_alignment_passes_complete_native_session_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from frame_compare.vs.types import TonemapSettings
+
+    settings = TonemapSettings(target_nits=120)
     launch = MagicMock(side_effect=lambda *_args, **_kwargs: (_session(tmp_path), 0.0))
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
     _run(
         tmp_path,
         monkeypatch,
-        config=AlignmentConfig(use_vsview=True, cache_results=False),
+        config=AlignmentConfig(use_vsview=True, cache_results=False, preview_tonemap=settings),
     )
 
     request = launch.call_args.kwargs["request"]
+    assert request.preview_tonemap is settings
     assert request.reference == tmp_path / "ref.mkv"
     assert request.comparisons == [tmp_path / "comparison.mkv"]
     assert request.suggested_offsets_by_key == {"ref:comparison": 3}

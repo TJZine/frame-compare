@@ -11,9 +11,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, TextIO, TypedDict, cast
+from typing import TYPE_CHECKING, NotRequired, Protocol, TextIO, TypedDict, cast
+
+from pydantic import TypeAdapter
 
 from frame_compare.vs.source import INDEX_CONSTRUCTION_FAILURE_MARKER
+from frame_compare.vs.types import TonemapSettings
 from frame_compare.vsview.alignment_overlay import apply_alignment_overlay, build_launch_overlays
 from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
@@ -81,6 +84,7 @@ class SessionData(TypedDict):
     frame_props_by_label: dict[str, dict[str, str | int]]
     short_names: dict[str, str]
     memory_limit_mb: int | None
+    preview_tonemap: NotRequired[dict[str, object] | None]
 
 
 class AudioReviewAuthority(TypedDict):
@@ -530,6 +534,32 @@ def apply_preview_defaults(
     return core.std.SetFrameProps(clip, **defaults)
 
 
+def prepare_preview_clip(
+    core: vs.Core,
+    clip: vs.VideoNode,
+    path: Path,
+    label: str,
+    display_name: str,
+    frame_props_by_label: Mapping[str, Mapping[str, str | int]],
+    settings: TonemapSettings | None,
+) -> tuple[vs.VideoNode, dict[str, str] | None]:
+    """Map original HDR evidence before any preview assumptions or overlays."""
+    if settings is not None and settings.enabled:
+        from frame_compare.vs.hdr_probe import probe_hdr_metadata
+        from frame_compare.vs.props import detect_hdr, hdr_signal_is_unspecified
+        from frame_compare.vs.tonemap import apply_tonemap
+
+        props = dict(clip.get_frame(0).props)
+        metadata = probe_hdr_metadata(path) if hdr_signal_is_unspecified(props) else None
+        is_hdr, metadata = detect_hdr(props, metadata)
+        if is_hdr:
+            return apply_tonemap(clip, settings, metadata, still_image=False).clip, None
+    return (
+        apply_preview_defaults(core, clip, label, frame_props_by_label),
+        collect_preview_assumption(label, display_name, frame_props_by_label),
+    )
+
+
 def _reference_metadata(session_id: str, reference: ReferenceSource) -> dict[str, str | int]:
     return {
         REVIEW_METADATA_KEYS["version"]: REVIEW_METADATA_VERSION,
@@ -561,6 +591,12 @@ def run_session(data: SessionData, script_path: Path) -> None:
     targets = data["targets"]
     frame_props_by_label = data["frame_props_by_label"]
     short_names = data["short_names"]
+    raw_tonemap = data.get("preview_tonemap")
+    preview_tonemap = (
+        TypeAdapter(TonemapSettings).validate_python(raw_tonemap)
+        if raw_tonemap is not None
+        else None
+    )
     if not targets:
         console.safe_print(
             console.status_line("[FAIL]", "Alignment review requires every comparison")
@@ -611,12 +647,17 @@ def run_session(data: SessionData, script_path: Path) -> None:
     ref_fps_num = ref_fps.numerator
     ref_fps_den = ref_fps.denominator
     preview_assumptions: list[dict[str, str]] = []
-    ref_assumption = collect_preview_assumption(
-        reference["label"], reference["display_name"], frame_props_by_label
+    ref_clip, ref_assumption = prepare_preview_clip(
+        core,
+        ref_clip,
+        ref_path,
+        reference["label"],
+        reference["display_name"],
+        frame_props_by_label,
+        preview_tonemap,
     )
     if ref_assumption is not None:
         preview_assumptions.append(ref_assumption)
-    ref_clip = apply_preview_defaults(core, ref_clip, reference["label"], frame_props_by_label)
 
     prepared_comparisons: list[tuple[int, str, ComparisonSource, vs.VideoNode]] = []
 
@@ -643,12 +684,13 @@ def run_session(data: SessionData, script_path: Path) -> None:
             )
             sys.exit(1)
 
-        comp_assumption = collect_preview_assumption(label, display_name, frame_props_by_label)
+        comp_clip, comp_assumption = prepare_preview_clip(
+            core, comp_clip, comp_path, label, display_name, frame_props_by_label, preview_tonemap
+        )
         if comp_assumption is not None:
             preview_assumptions.append(comp_assumption)
 
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
-        comp_clip = apply_preview_defaults(core, comp_clip, label, frame_props_by_label)
 
         prepared_comparisons.append((comparison_number, label, target, comp_clip))
 

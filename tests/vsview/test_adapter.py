@@ -978,3 +978,29 @@ def test_adapter_children_preserve_trusted_parent_user_site(tmp_path: Path) -> N
         timeout=10,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_adapter_forwards_preview_tonemap_to_generated_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from frame_compare.vs.types import TonemapSettings
+    from frame_compare.vsview import adapter
+
+    settings = TonemapSettings(target_nits=120)
+    captured: dict[str, object] = {}
+
+    def write(**kwargs: object) -> Path:
+        captured.update(kwargs)
+        return tmp_path / "session.py"
+
+    monkeypatch.setattr(adapter, "write_vsview_session_script", write)
+    request = adapter.VSViewSessionRequest(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("comparison.mkv")],
+        suggested_offsets_by_key={"ref:comparison": 0},
+        audio_review_by_key=_audio_review_map({"ref:comparison": 0}),
+        cache_dir=tmp_path,
+        preview_tonemap=settings,
+    )
+    adapter._write_vsview_session_script(request)
+    assert captured["preview_tonemap"] is settings

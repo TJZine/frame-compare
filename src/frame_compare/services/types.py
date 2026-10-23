@@ -7,6 +7,7 @@ from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
 )
+from frame_compare.vs.types import TonemapSettings
 
 type AlignmentSource = Literal["manual", "computed", "cached"]
 type AlignmentAlgorithm = Literal["cross_correlation"]
@@ -160,6 +161,7 @@ class AlignmentConfig:
     cache_results: bool = True
     memory_limit_mb: int | None = None
     no_color: bool = False
+    preview_tonemap: TonemapSettings | None = None
 
 
 @dataclass(frozen=True)

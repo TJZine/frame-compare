@@ -1113,6 +1113,19 @@ When `dynamic_peak_detection` is disabled by the fast speed setting, still prepa
 instead applies one `placebo.Tonemap` node over the clip and reports
 `shared_stateless`; this policy follows detection state, not the setting name.
 
+Configured VSView previews receive immutable settings resolved by
+`render.prepare.resolve_tonemap_settings` in the alignment orchestration phase,
+through `AlignmentConfig`, `VSViewSessionRequest`, and the generated JSON payload.
+Session startup validates that payload back into `TonemapSettings`, including its
+enums. Original loaded frame evidence and, when unspecified, the existing HDR
+metadata probe determine whether to map each source before preview defaults and
+overlays. Successfully mapped sRGB props are preserved. Disabled tonemapping, SDR,
+and legacy sessions without settings retain the existing preview-default path.
+Both preview speeds use `sequence`: quality retains temporal peak measurement;
+fast disables it, using the same metadata peak policy as fast screenshots. Original
+frame addresses, counts, effective reference FPS, output order, `hdr=False`
+registration, metadata-v5 review authority and sidecar identity remain unchanged.
+
 The known libplacebo SDR destination is BT.709-primary BT.1886 encoded RGB. After
 the existing optional gamma adjustment, `tonemap_conversion` decodes that transfer
 with its explicit destination black/white, normalizes between those endpoints,
