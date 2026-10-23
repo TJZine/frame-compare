@@ -2021,3 +2021,133 @@ installation or default change occurred.
 | Faster native still mode | **Implemented as default-off experimental UCRT reuse; not production adopted.** Reviewed capability/error-policy integration, actual ordinary Windows CLI parity/ERR/Ctrl+C,165 focused/native checks and5 CLI timing pairs pass (median22.393s fresh/14.711s reuse). Earlier same-driver54-pair/palette/history and measured native histogram/epsilon/downstream-midpoint/dedicated-allocation proof retain scope. Honest local wheel assembly and bounded wheel-backed canonical CLI acceptance pass. The MacBook built the same-pass observer DLL (Windows acceptance UNRUN), showed a repeat native build reproduces the candidate modulo link timestamps/checksum, closed linked-dependency/notice provenance with stated gaps, and passed matching-source Docker. Remaining gates are Windows observer acceptance, supported artifact/full-runtime identity, the red global suite and those provenance gaps for any distributable artifact. NVIDIA621.01 and stock-shared ShadowPlay retention are not assumed reuse-specific blockers; universal physical residency/leak freedom is not newly required. |
 | Older Windows/MacBook acceptance | **Satisfied only within identified prior scope.** No blanket invalidation or new pass for changed pixels. |
 | Protected signing, credential migration, release/publication | **Outside this work; no action performed.** Ordinary branch commits and automatic PR verification are separate. |
+
+## Opt-in fast HDR still mode — 2026-10-22
+
+Authority: `docs/plans/2026-10-22-fast-hdr-still-mode.md`, including the user-approved
+D4 scope extension. Starting branch `v0.7.0`, local head `8ce47d99`; its only change
+after the expected `1d11e68f` base was the approved plan. PR #138 targets `pre-release`
+at `35792220ae59d514ed626707340e2a86a7a14d05`. Feature commits through initial native
+proof: `d6d3bf22`, `7f7ef883`, `3117e850`, `3be9edc3`. Scope extension: `ce8fbae0`.
+
+Environment: native Windows `TristansPC`, Python 3.13.7, RTX 5080, NVIDIA 621.01,
+installed stock vs-placebo DLL SHA-256
+`b0a0689946e03f6f7467b798fba4678018bb28ba6b1caecdded8d08945049310`.
+No driver/plugin installation or experimental native-still opt-in was used.
+Task-local receipts are under `.tmp/fast-hdr-2026-10-22/`; no new evidence was written
+to the repository's existing `generated/` tree.
+
+### Verification observed before the D4 extension
+
+| Command or proof | Actual result and scope |
+| --- | --- |
+| Wave0 focused schema/render/apply tests | Exit 0: 167 passed, 3 existing Windows encoding skips. |
+| Wave1 combined config/CLI/render/apply/report/help/docs selection | Exit 0: 491 passed, 3 existing Windows encoding skips. |
+| `FRAME_COMPARE_REQUIRE_LIBPLACEBO=1 FRAME_COMPARE_E2E_REQUIRE_MEDIA=1 uv run --no-sync pytest -o addopts='' -q tests/vs/test_integration.py tests/e2e/test_media_tonemap.py` | Exit 0: 11 passed, 0 skipped at `3be9edc3`; includes unchanged quality/history/sRGB cases, new forward/reverse/sparse and same-kwargs reference proof, RPU/metadata controls, detection-on sensitivity and fast CLI PNG/report output. JUnit: `wave2-native.xml`. |
+| `ruff check .`, `ruff format --check .`, `pyright --warnings`, `bandit -c pyproject.toml -r src --severity-level medium`, `lint-imports --config importlinter.ini`, each via `uv run --no-sync` after each wave | All exit 0. Pyright: 0 errors/warnings. Import contracts: 2 kept. Bandit medium/high: 0; existing low findings remain outside that gate. |
+| `uv run --no-sync pytest -o addopts='' -q tests/test_cli_contract_docs.py` | Exit 0: 5 passed after combined implementation. |
+| `uv run --no-sync --with zensical==0.0.71 zensical build --clean --strict` | Working-tree build exit 1 on five protected untracked VSView-plan links. Strict builds against temporary copies of tracked docs/config/overrides passed, exit 0, after each wave. Protected plans were preserved. Initial plain invocation could not start because the docs executable was absent; pinned overlay preserved the native environment. |
+| `QT_QPA_PLATFORM=offscreen FRAME_COMPARE_REQUIRE_LIBPLACEBO=1 uv run --no-sync pytest -o addopts='' -q -n4 --dist loadgroup` | **Failed**, exit 1: 4221 passed, 1 failed, 78 skipped in 439.79 s at `3be9edc3`. Full suite ran once; this is not a green global gate. JUnit/log: `full-native.xml`, `full-native.log`. |
+
+The sole full-suite failure is
+`tests/orchestration/test_execute_run_lifecycle.py::test_execute_run_propagates_collection_warning_once_through_result_summary_and_record`.
+The authored `slowpics.confirm_upload_after_report=true` preference makes this
+fixture report unavailable upload confirmation instead of the expected collection
+warning. The isolated current-head case fails, and the same case on an exported
+pre-feature `8ce47d99` source tree fails identically when run from the same repository
+working directory/configuration (`baseline-same-cwd.xml`, both exit 1). Running the
+baseline from its isolated directory passed because no authored config was loaded;
+that initial pass does not establish a feature regression. No unrelated correction
+or user-config edit was made.
+
+The 78 skips comprise 20 unavailable-browser cases,5 Windows filesystem distinctions,
+8 media opt-in cases,3 resource opt-ins,2 live-service opt-ins,21 other platform/process
+cases,1 missing-Perl case and18 missing-jq cases. None establishes a platform pass.
+The separate 11-case media/native result above retains its narrower scope.
+
+### V2 stock Windows measurement
+
+Same 3840×1600 Kill Bill window 12382–12413 and no-RPU timing style as the earlier ledger:
+six fresh processes, one per mode/direction, 32 timed requests each. Source peak 448 nits
+from MaxCLL; reference preset, 100-nit target; all settings except speed/detection and
+the required frame policy matched. All six commands exited 0 and all 192 requests
+completed. Original media size/mtime and original decoder-index SHA-256 were unchanged;
+each process used an owned scratch copy of the index.
+
+| Mode | Forward median s/frame | Reverse median s/frame | Frames differing by order |
+| --- | ---: | ---: | ---: |
+| Quality, independent stills |0.992970|1.375289|0/32|
+| Fast, shared stateless |0.197276|0.674822|0/32|
+| Shared detection-on, diagnostic only |0.197351|0.646432|32/32|
+
+Probe commands: `uv run --no-sync python .tmp/fast-hdr-2026-10-22/benchmark.py --mode
+<quality|fast|diagnostic> --order <forward|reverse> --output <owned-run-directory>`;
+reducer `python .tmp/fast-hdr-2026-10-22/reduce_benchmark.py`, exit 0. Per-request times,
+hashes, settings and identities are retained in each `v2-*/result.json` and
+`v2-summary.json`. Helper frame 0 precedes timing. Timed work includes frame reads,
+active RGB8 hashing and GC; setup/helper warm-up is excluded. Warm OS caches, observed
+background GPU load around 13%, one process per direction, and the direction-dependent
+read cost limit the claim. This is neither an isolated GPU-kernel result nor full-CLI
+wall time, general speed guarantee, or cross-backend equality proof.
+
+### Review disposition and remaining gates
+
+R (`gpt-6.1-sol/high`) reviewed `8ce47d99..3be9edc3` read-only. It established two P2
+findings: D4's missing VSView settings/mapper route, and a module-level missing/mocked
+VapourSynth skip bypassing the required-runtime flag. Both were accepted; the user
+approved expanding D4 ownership and the plan records Units D/G. Their implementation
+and focused re-review were assigned to worker children. Unit G's R2 correction is
+committed as `4c389159`: the early guards now fail required missing/mocked runtime
+proof, with four actual-module import regressions. Its selected runtime checks
+passed 13, deselected 3 installed-probe cases to preserve D's GPU ownership, skipped 0,
+exit 0; scoped Ruff/format/Pyright and diff checks also exited 0. Those three probes are
+included in the final combined native result below. Unit D's D4 correction is committed
+as `1130d64e`: resolved settings cross the existing orchestration/service/request/JSON
+boundary and are validated at session startup; original HDR evidence selects the
+existing sequence mapper before defaults/overlays. SDR/disabled/legacy handling and
+alignment metadata/FPS/count/order remain covered. R also checked
+three runtime-import-blocked CLI paths (help, run help, version; all passed) and
+reproduced the required-runtime skip bypass. Its full local report is `review-R.txt`.
+
+Final combined proof on the exact `1130d64e` implementation:
+
+| Command or proof | Actual result |
+| --- | --- |
+| Required native/media: `uv run --no-sync pytest -o addopts='' -q tests/vs/test_integration.py tests/vs/test_tonemap_runtime.py tests/vsview/test_native_tonemap_preview.py tests/e2e/test_media_tonemap.py` | Exit 0: 33 passed, 0 skipped in 95.62 s, both required-runtime/media flags set. Includes G's deferred 3 probes, all 4 import controls, six native generated-session preview cases, prior still/sRGB/history proof and CLI PNG/report output. `final-native.xml`. |
+| Config-to-session/alignment/help/docs: `uv run --no-sync pytest -o addopts='' -q tests/orchestration/test_phase_alignment_contract.py tests/services/test_alignment_workflow_vsview.py tests/vsview/test_adapter.py tests/vsview/test_session_script.py tests/test_cli_contract_docs.py tests/cli/test_help_and_import.py` | Exit 0: 162 passed, 1 POSIX-only SIGINT skip in 8.85 s, offscreen Qt. `final-boundaries.xml`. |
+| Whole-source/test Ruff lint/format, Pyright, Bandit medium and import gates | All exit 0 after integration. 559 files formatted; 0 type errors/warnings; 2 import contracts kept; no medium/high Bandit issues. |
+| Strict tracked-docs build with the pinned overlay | Exit 0, no issues, against the final tracked content snapshot. Protected untracked plans remain excluded only from that snapshot; their working-tree link failures are still recorded above. |
+
+The six preview cases use real VapourSynth/libplacebo and execute the actual generated
+session/preparation route, with injected source loading, output registration and
+overlay boundaries. They observe the real mapper's settings/sequence policy, enum
+round trips, HDR evidence/probe routing, fast screenshot equality, distinct frame
+pixels, SDR/disabled/legacy behavior and metadata-v5 authority. They do not establish
+actual decoder-to-viewer, visible GUI or physical-display acceptance. The probe case
+injects its metadata return rather than exercising external ffprobe on actual media.
+The full suite was not repeated after D/G; its earlier failed aggregate remains
+scoped to `3be9edc3`, with the affected final paths covered by the focused results.
+V2 remains scoped to its measured source: `src/frame_compare/vs` and
+`src/frame_compare/render` are byte-for-byte unchanged between `3be9edc3` and
+`1130d64e`, so no native still-path timing was repeated.
+
+R's focused re-review of `3be9edc3..1130d64e` confirmed both findings resolved, with
+no new material correctness/maintainability finding or unapproved deviation. It
+independently passed seven checks (required/optional absent/mocked-runtime outcomes
+and three runtime-import-blocked CLI paths), exit 0, and inspected both final JUnit
+receipts. The approved D4 expansion closes that deviation; no exception was accepted
+as merely preferable. Full local report: `review-R-focused.txt`.
+
+Executors: A/B/C used `gpt-5.6-luna/xhigh`; R used `gpt-6.1-sol/high`; accepted review
+fixes use `gpt-6.1-sol/medium`. Detailed A/B/C callbacks were rejected by the app's
+approval gate despite authorization retrieval. A minimal R completion notice worked;
+the orchestrator retrieved its report locally. D/G minimal notices also succeeded.
+No messaging safeguard was bypassed. The separately requested personal skill sync
+installed the verified 36-skill `v2026.10.16.1` collection at
+`b613480fe7fe7da90c3361e865513db498d17802`, restoring the canonical `review-code`
+skill; its worker used `gpt-6.1-sol/medium` and recorded backups/discovery separately.
+
+**V3 Docker and current-feature CI: UNRUN.** This Windows host cannot run Docker;
+the feature commits have not been pushed, so prior green PR jobs are not matching-head
+evidence. Visible VSView/physical-display acceptance is not established by graph or
+offscreen checks. No push, merge, release, signing or publication has occurred.
