@@ -44,7 +44,7 @@ Runs and dry runs reject `--no-cache` combined with `--from-cache-only`
 ([`--no-cache` and `--from-cache-only`](../current-cli-contract.md#run-command-contract)).
 An invalid `--overlay`, `--tm-preset`, or `--tm-curve` value names the option and
 lists its choices before any work starts. Preset names are `reference`, `filmic`,
-`contrast`, `bt2390_spec`, `spline`, `bright_lift`, and `highlight_guard`.
+`contrast`, `bt2390_spec`, `spline`, `bright_lift`, `highlight_guard`, and `highlight_preserve`.
 
 `frame-compare run --help` groups the options under the same six headings as this
 section.

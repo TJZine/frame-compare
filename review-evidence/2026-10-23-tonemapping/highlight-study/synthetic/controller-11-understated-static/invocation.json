@@ -1,0 +1,15 @@
+{
+  "command": [
+    "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+    "-B",
+    "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\synthetic\\highlight_probe.py",
+    "_native-worker",
+    "--case",
+    "11-understated-static",
+    "--renderer-lease",
+    "--output",
+    "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\synthetic\\controller-11-understated-static\\capture"
+  ],
+  "exit": 0,
+  "timeout": false
+}

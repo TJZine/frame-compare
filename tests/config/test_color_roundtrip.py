@@ -9,10 +9,32 @@ from frame_compare.config.loader import get_default_config, load_config
 from frame_compare.config.overrides import CLIConfigOverrides, apply_cli_overrides
 from frame_compare.config.persistence import dump_config_for_persistence
 from frame_compare.config.presets import apply_preset, save_preset
-from frame_compare.config.schema import ColorConfig, TonemapPreset
+from frame_compare.config.schema import ColorConfig, ToneCurve, TonemapPreset
 from frame_compare.config.schema_enums import TonemapSpeed
 from frame_compare.render.prepare import resolve_tonemap_settings
 from frame_compare.vs.tonemap_presets import get_preset_settings
+
+
+@pytest.mark.parametrize("curve", list(ToneCurve))
+def test_highlight_preserve_opt_in_and_curve_override(curve: ToneCurve) -> None:
+    from dataclasses import asdict
+
+    config = get_default_config()
+    baseline = resolve_tonemap_settings(config)
+    assert baseline.knee_offset == 0.5
+    selected = apply_cli_overrides(
+        config, CLIConfigOverrides(tm_preset=TonemapPreset.HIGHLIGHT_PRESERVE)
+    )
+    preserved = resolve_tonemap_settings(selected)
+    assert preserved.knee_offset == 1.0
+    expected = asdict(baseline)
+    expected.update(preset=TonemapPreset.HIGHLIGHT_PRESERVE, knee_offset=1.0)
+    assert asdict(preserved) == expected
+    changed = apply_cli_overrides(selected, CLIConfigOverrides(tm_curve=curve))
+    resolved = resolve_tonemap_settings(changed)
+    assert resolved.tone_curve is curve
+    assert resolved.knee_offset == (1.0 if curve is ToneCurve.BT2390 else 0.5)
+    assert resolve_tonemap_settings(config) == baseline
 
 
 @pytest.mark.parametrize("preset", list(TonemapPreset))

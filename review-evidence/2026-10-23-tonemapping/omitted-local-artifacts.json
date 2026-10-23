@@ -1,0 +1,366 @@
+[
+  {
+    "path": "highlight-study/real-media/comparison.html",
+    "bytes": 8998
+  },
+  {
+    "path": "highlight-study/real-media/__pycache__/probe.cpython-313.pyc",
+    "bytes": 23744
+  },
+  {
+    "path": "highlight-study/real-media/stage4/closeup-knee1-contrast0/final.png",
+    "bytes": 4695421
+  },
+  {
+    "path": "highlight-study/real-media/stage4/closeup-knee1-contrast0/native16.npz",
+    "bytes": 17945323
+  },
+  {
+    "path": "highlight-study/real-media/stage4/porch-baseline-contrast0/final.png",
+    "bytes": 4161054
+  },
+  {
+    "path": "highlight-study/real-media/stage4/porch-baseline-contrast0/native16.npz",
+    "bytes": 12812454
+  },
+  {
+    "path": "highlight-study/real-media/stage4/spiderverse-knee1-contrast0/final.png",
+    "bytes": 7573446
+  },
+  {
+    "path": "highlight-study/real-media/stage4/spiderverse-knee1-contrast0/native16.npz",
+    "bytes": 33758214
+  },
+  {
+    "path": "highlight-study/real-media/stage3/immaculate-baseline/final.png",
+    "bytes": 6149720
+  },
+  {
+    "path": "highlight-study/real-media/stage3/immaculate-baseline/native16.npz",
+    "bytes": 39457606
+  },
+  {
+    "path": "highlight-study/real-media/stage3/immaculate-knee1/final.png",
+    "bytes": 6149720
+  },
+  {
+    "path": "highlight-study/real-media/stage3/immaculate-knee1/native16.npz",
+    "bytes": 39457606
+  },
+  {
+    "path": "highlight-study/real-media/stage3/porch-knee1-contrast0/final.png",
+    "bytes": 4385503
+  },
+  {
+    "path": "highlight-study/real-media/stage3/porch-knee1-contrast0/native16.npz",
+    "bytes": 12879590
+  },
+  {
+    "path": "highlight-study/real-media/stage3/porch-knee1-gamut2/final.png",
+    "bytes": 4981870
+  },
+  {
+    "path": "highlight-study/real-media/stage3/porch-knee1-gamut2/native16.npz",
+    "bytes": 23824923
+  },
+  {
+    "path": "highlight-study/real-media/stage3/porch-knee1-gamut7/final.png",
+    "bytes": 4834762
+  },
+  {
+    "path": "highlight-study/real-media/stage3/porch-knee1-gamut7/native16.npz",
+    "bytes": 23785837
+  },
+  {
+    "path": "highlight-study/real-media/stage3/spiderverse-baseline/final.png",
+    "bytes": 7668834
+  },
+  {
+    "path": "highlight-study/real-media/stage3/spiderverse-baseline/native16.npz",
+    "bytes": 33885307
+  },
+  {
+    "path": "highlight-study/real-media/stage3/spiderverse-knee1/final.png",
+    "bytes": 7692492
+  },
+  {
+    "path": "highlight-study/real-media/stage3/spiderverse-knee1/native16.npz",
+    "bytes": 34249573
+  },
+  {
+    "path": "highlight-study/real-media/stage3/spiderverse-knee1-gamut2/final.png",
+    "bytes": 7671490
+  },
+  {
+    "path": "highlight-study/real-media/stage3/spiderverse-knee1-gamut2/native16.npz",
+    "bytes": 34330229
+  },
+  {
+    "path": "highlight-study/real-media/stage3/spiderverse-knee1-gamut7/final.png",
+    "bytes": 7542838
+  },
+  {
+    "path": "highlight-study/real-media/stage3/spiderverse-knee1-gamut7/native16.npz",
+    "bytes": 34174363
+  },
+  {
+    "path": "highlight-study/real-media/stage3/substance-baseline/final.png",
+    "bytes": 6744960
+  },
+  {
+    "path": "highlight-study/real-media/stage3/substance-baseline/native16.npz",
+    "bytes": 34239863
+  },
+  {
+    "path": "highlight-study/real-media/stage3/substance-knee1/final.png",
+    "bytes": 6744960
+  },
+  {
+    "path": "highlight-study/real-media/stage3/substance-knee1/native16.npz",
+    "bytes": 34239863
+  },
+  {
+    "path": "highlight-study/real-media/stage2/porch-measured100/final.png",
+    "bytes": 4807911
+  },
+  {
+    "path": "highlight-study/real-media/stage2/porch-measured100/native16.npz",
+    "bytes": 22836606
+  },
+  {
+    "path": "highlight-study/real-media/stage2/porch-measured99995/final.png",
+    "bytes": 4767861
+  },
+  {
+    "path": "highlight-study/real-media/stage2/porch-measured99995/native16.npz",
+    "bytes": 22609736
+  },
+  {
+    "path": "highlight-study/real-media/stage2/porch-metadata2/final.png",
+    "bytes": 5016759
+  },
+  {
+    "path": "highlight-study/real-media/stage2/porch-metadata2/native16.npz",
+    "bytes": 24043516
+  },
+  {
+    "path": "highlight-study/real-media/stage2/porch-static448/final.png",
+    "bytes": 5001265
+  },
+  {
+    "path": "highlight-study/real-media/stage2/porch-static448/native16.npz",
+    "bytes": 23843491
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/closeup-baseline/final.png",
+    "bytes": 4883593
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/closeup-baseline/native16.npz",
+    "bytes": 27925138
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/closeup-knee1/final.png",
+    "bytes": 4953124
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/closeup-knee1/native16.npz",
+    "bytes": 28997804
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/closeup-spline/final.png",
+    "bytes": 4868429
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/closeup-spline/native16.npz",
+    "bytes": 29967940
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/dark-baseline/final.png",
+    "bytes": 6347720
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/dark-baseline/native16.npz",
+    "bytes": 33756941
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/dark-knee1/final.png",
+    "bytes": 6341360
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/dark-knee1/native16.npz",
+    "bytes": 33803724
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/dark-spline/final.png",
+    "bytes": 6252176
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/dark-spline/native16.npz",
+    "bytes": 33893933
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/porch-knee1/final.png",
+    "bytes": 5021061
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/porch-knee1/native16.npz",
+    "bytes": 23846473
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/porch-plain/final.png",
+    "bytes": 4808057
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/porch-spline/final.png",
+    "bytes": 5017110
+  },
+  {
+    "path": "highlight-study/real-media/stage1b/porch-spline/native16.npz",
+    "bytes": 24005788
+  },
+  {
+    "path": "highlight-study/real-media/stage1/porch-baseline/final.png",
+    "bytes": 4808057
+  },
+  {
+    "path": "highlight-study/real-media/stage1/porch-baseline/native16.npz",
+    "bytes": 22863161
+  },
+  {
+    "path": "highlight-study/controller/softclip-magenta-repeat/spiderverse-2-72-knee1/final.png",
+    "bytes": 7517967
+  },
+  {
+    "path": "highlight-study/controller/softclip-magenta-repeat/spiderverse-2-72-knee1/native16.npz",
+    "bytes": 33393018
+  },
+  {
+    "path": "highlight-study/controller/softclip-magenta-repeat/spiderverse-2-72-knee1-gamut2/final.png",
+    "bytes": 7473236
+  },
+  {
+    "path": "highlight-study/controller/softclip-magenta-repeat/spiderverse-2-72-knee1-gamut2/native16.npz",
+    "bytes": 32972000
+  },
+  {
+    "path": "highlight-study/controller/a-rerun/porch-baseline/final.png",
+    "bytes": 4808057
+  },
+  {
+    "path": "highlight-study/controller/a-rerun/porch-baseline/native16.npz",
+    "bytes": 22863161
+  },
+  {
+    "path": "highlight-study/controller/a-rerun/porch-knee1/final.png",
+    "bytes": 5021061
+  },
+  {
+    "path": "highlight-study/controller/a-rerun/porch-knee1/native16.npz",
+    "bytes": 23846473
+  },
+  {
+    "path": "highlight-study/controller/a-rerun/porch-plain/final.png",
+    "bytes": 4808057
+  },
+  {
+    "path": "highlight-softclip-expanded/comparison.html",
+    "bytes": 2843
+  },
+  {
+    "path": "highlight-softclip-expanded/__pycache__/probe.cpython-313.pyc",
+    "bytes": 26011
+  },
+  {
+    "path": "highlight-softclip-expanded/stage2/spiderverse-2-72-configured/final.png",
+    "bytes": 7517967
+  },
+  {
+    "path": "highlight-softclip-expanded/stage2/spiderverse-2-72-configured/native16.npz",
+    "bytes": 33393018
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/immaculate-2-72-knee1/final.png",
+    "bytes": 3727672
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/immaculate-2-72-knee1/native16.npz",
+    "bytes": 30939397
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/immaculate-2-72-knee1-gamut2/final.png",
+    "bytes": 3725811
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/immaculate-2-72-knee1-gamut2/native16.npz",
+    "bytes": 30809323
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/spiderverse-2-72-knee1/final.png",
+    "bytes": 7517967
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/spiderverse-2-72-knee1/native16.npz",
+    "bytes": 33393018
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/spiderverse-2-72-knee1-gamut2/final.png",
+    "bytes": 7473236
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/spiderverse-2-72-knee1-gamut2/native16.npz",
+    "bytes": 32972000
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/spiderverse-2-72-knee1-plain/final.png",
+    "bytes": 7517967
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/spiderverse-3-72-knee1/final.png",
+    "bytes": 6047468
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/spiderverse-3-72-knee1/native16.npz",
+    "bytes": 33118810
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/spiderverse-3-72-knee1-gamut2/final.png",
+    "bytes": 6097269
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/spiderverse-3-72-knee1-gamut2/native16.npz",
+    "bytes": 33194054
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/substance-2-72-knee1/final.png",
+    "bytes": 5235515
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/substance-2-72-knee1/native16.npz",
+    "bytes": 27742438
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/substance-2-72-knee1-gamut2/final.png",
+    "bytes": 5240719
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/substance-2-72-knee1-gamut2/native16.npz",
+    "bytes": 27735208
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/substance-3-72-knee1/final.png",
+    "bytes": 5403729
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/substance-3-72-knee1/native16.npz",
+    "bytes": 30493465
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/substance-3-72-knee1-gamut2/final.png",
+    "bytes": 5417830
+  },
+  {
+    "path": "highlight-softclip-expanded/stage1/substance-3-72-knee1-gamut2/native16.npz",
+    "bytes": 30505123
+  }
+]

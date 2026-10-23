@@ -39,6 +39,13 @@ def test_apply_tonemap_enabled_false_returns_clip_unchanged():
         pytest.param(
             TonemapPreset.HIGHLIGHT_GUARD, ToneCurve.SPLINE, 180, False, id="highlight_guard"
         ),
+        pytest.param(
+            TonemapPreset.HIGHLIGHT_PRESERVE,
+            ToneCurve.BT2390,
+            100,
+            False,
+            id="highlight_preserve",
+        ),
     ],
 )
 def test_tonemap_preset_settings(

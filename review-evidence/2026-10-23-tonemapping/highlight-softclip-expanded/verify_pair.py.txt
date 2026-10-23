@@ -1,0 +1,15 @@
+"""Small image receipt check for the magenta pair; negative control must fail."""
+import argparse,json
+from pathlib import Path
+import numpy as np
+from PIL import Image
+p=argparse.ArgumentParser();p.add_argument('run_root',type=Path);p.add_argument('--negative-control',action='store_true');a=p.parse_args()
+left=a.run_root/'spiderverse-2-72-knee1';right=left if a.negative_control else a.run_root/'spiderverse-2-72-knee1-gamut2'
+b=np.asarray(Image.open(left/'final.png'))[::4,::4];k=np.asarray(Image.open(right/'final.png'))[::4,::4]
+bl=np.any(b==255,axis=2).mean();kl=np.any(k==255,axis=2).mean()
+assert b.shape==k.shape
+assert bl>.05 and kl<bl*.3, 'softclip must materially reduce magenta-scene channel endpoints'
+assert abs(float(b.mean())-float(k.mean()))<5, 'candidate must not reduce endpoints merely by blacking out image'
+br=json.loads((left/'result.json').read_text());kr=json.loads((right/'result.json').read_text())
+assert br['input_rgb16_sha256']==kr['input_rgb16_sha256']
+print(json.dumps({'perceptual_any255_pct':bl*100,'softclip_any255_pct':kl*100,'passed':True}))

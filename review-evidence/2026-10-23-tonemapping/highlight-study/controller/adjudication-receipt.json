@@ -1,0 +1,11 @@
+{
+  "head": "f1d3b9bf4c3406e3d0cddbfbbc536e0ac8a9279e",
+  "tracked_diff": "",
+  "baseline_plain_equal": true,
+  "original_baseline_equal": true,
+  "original_knee1_equal": true,
+  "positive_exit": 0,
+  "negative_exit": 1,
+  "negative_reason": "Candidate replaced by baseline; endpoint-area reduction assertion failed as intended",
+  "synthetic_native_cases": 17
+}

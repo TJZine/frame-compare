@@ -558,7 +558,7 @@ Tonemap HDR sources to SDR.
 #### `color.preset` { #color.preset .fc-key }
 
 Values
-:   `"reference"`, `"filmic"`, `"contrast"`, `"bt2390_spec"`, `"spline"`, `"bright_lift"`, `"highlight_guard"`
+:   `"reference"`, `"filmic"`, `"contrast"`, `"bt2390_spec"`, `"spline"`, `"bright_lift"`, `"highlight_guard"`, `"highlight_preserve"`
 
 Default
 :   `"reference"`

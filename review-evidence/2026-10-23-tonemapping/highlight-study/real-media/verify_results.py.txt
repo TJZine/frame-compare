@@ -1,0 +1,16 @@
+"""Small independent image assertion; --negative-control must exit 1."""
+import argparse,json
+from pathlib import Path
+import numpy as np
+from PIL import Image
+p=argparse.ArgumentParser();p.add_argument('run_root',type=Path);p.add_argument('--baseline',type=Path);p.add_argument('--negative-control',action='store_true');a=p.parse_args()
+base=a.baseline or a.run_root/'porch-baseline';candidate=base if a.negative_control else a.run_root/'porch-knee1'
+b=np.asarray(Image.open(base/'final.png'))[250::4,::4]
+k=np.asarray(Image.open(candidate/'final.png'))[250::4,::4]
+bwhite=np.all(b==255,axis=2).mean();kwhite=np.all(k==255,axis=2).mean()
+assert b.shape==k.shape
+assert bwhite>.01, 'fixture must exercise bright endpoint area'
+assert kwhite<bwhite*.25, 'candidate must materially reduce endpoint area, not equal baseline'
+assert abs(float(k.mean())-float(b.mean()))<10, 'candidate must not merely black out the image'
+assert not np.array_equal(b,k)
+print(json.dumps({'baseline_white_pct':bwhite*100,'candidate_white_pct':kwhite*100,'passed':True}))

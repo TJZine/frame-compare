@@ -1,0 +1,145 @@
+[
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "porch:knee1-gamut2",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage3\\porch-knee1-gamut2"
+    ],
+    "started": "2026-10-23T09:51:37.827359+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "porch:knee1-gamut7",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage3\\porch-knee1-gamut7"
+    ],
+    "started": "2026-10-23T09:51:44.004315+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "porch:knee1-contrast0",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage3\\porch-knee1-contrast0"
+    ],
+    "started": "2026-10-23T09:51:50.052631+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "spiderverse:baseline",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage3\\spiderverse-baseline"
+    ],
+    "started": "2026-10-23T09:51:55.570479+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "spiderverse:knee1",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage3\\spiderverse-knee1"
+    ],
+    "started": "2026-10-23T09:52:01.373775+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "spiderverse:knee1-gamut2",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage3\\spiderverse-knee1-gamut2"
+    ],
+    "started": "2026-10-23T09:52:07.200428+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "spiderverse:knee1-gamut7",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage3\\spiderverse-knee1-gamut7"
+    ],
+    "started": "2026-10-23T09:52:13.195252+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "substance:baseline",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage3\\substance-baseline"
+    ],
+    "started": "2026-10-23T09:52:19.123931+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "substance:knee1",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage3\\substance-knee1"
+    ],
+    "started": "2026-10-23T09:52:26.581540+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "immaculate:baseline",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage3\\immaculate-baseline"
+    ],
+    "started": "2026-10-23T09:52:33.521840+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "immaculate:knee1",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage3\\immaculate-knee1"
+    ],
+    "started": "2026-10-23T09:52:40.460842+00:00",
+    "exit": 0,
+    "reaped": true
+  }
+]

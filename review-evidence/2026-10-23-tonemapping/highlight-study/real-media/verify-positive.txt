@@ -1,0 +1,1 @@
+{"baseline_white_pct": 7.330498027613412, "candidate_white_pct": 0.8216222879684418, "passed": true}

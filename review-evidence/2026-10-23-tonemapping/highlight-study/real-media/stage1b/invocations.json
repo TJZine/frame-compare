@@ -1,0 +1,119 @@
+[
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "porch:plain",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage1b\\porch-plain"
+    ],
+    "started": "2026-10-23T09:49:34.281103+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "porch:knee1",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage1b\\porch-knee1"
+    ],
+    "started": "2026-10-23T09:49:38.435225+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "porch:spline",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage1b\\porch-spline"
+    ],
+    "started": "2026-10-23T09:49:44.341267+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "closeup:baseline",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage1b\\closeup-baseline"
+    ],
+    "started": "2026-10-23T09:49:50.168262+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "closeup:knee1",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage1b\\closeup-knee1"
+    ],
+    "started": "2026-10-23T09:49:56.890124+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "closeup:spline",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage1b\\closeup-spline"
+    ],
+    "started": "2026-10-23T09:50:03.490104+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "dark:baseline",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage1b\\dark-baseline"
+    ],
+    "started": "2026-10-23T09:50:09.956497+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "dark:knee1",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage1b\\dark-knee1"
+    ],
+    "started": "2026-10-23T09:50:15.609823+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-study\\real-media\\probe.py",
+      "worker",
+      "dark:spline",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\real-media\\stage1b\\dark-spline"
+    ],
+    "started": "2026-10-23T09:50:21.311445+00:00",
+    "exit": 0,
+    "reaped": true
+  }
+]

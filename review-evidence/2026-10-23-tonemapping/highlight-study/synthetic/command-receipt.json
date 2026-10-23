@@ -1,0 +1,10 @@
+{
+  "guard_created_directory": false,
+  "lease_guard_output": "usage: highlight_probe.py [-h] --output OUTPUT\n                          [--case {01-reference,02-knee1,03-spline-contrast05,04-steps-knee1,05-impulse-p99995,06-impulse-p100,07-broad-p99995,08-broad-p100,09-scene-p99995,10-scene-p100,11-understated-static,12-true-static,13-patch-perceptual,14-patch-softclip,15-patch-darken,16-clipped-knee1,17-extended-preloss,18-knee1-no-recovery}]\n                          [--renderer-lease]\n                          {numeric,native,_native-worker}\nhighlight_probe.py: error: native mode needs one --case and an explicitly assigned --renderer-lease",
+  "lease_guard_exit": 2,
+  "numeric_command": ".venv/Scripts/python.exe -B generated/verification/2026-10-23/highlight-study/synthetic/highlight_probe.py numeric --output generated/verification/2026-10-23/highlight-study/synthetic/numeric-verified",
+  "numeric_output": "{\"status\": \"passed\", \"checks\": 19, \"failed\": []}",
+  "lease_guard_command": ".venv/Scripts/python.exe -B generated/verification/2026-10-23/highlight-study/synthetic/highlight_probe.py native --case 01-reference --output generated/verification/2026-10-23/highlight-study/synthetic/guard-must-not-exist",
+  "native_run": false,
+  "numeric_exit": 0
+}

@@ -1,0 +1,58 @@
+diff --git a/src/frame_compare/config/schema_enums.py b/src/frame_compare/config/schema_enums.py
+index 9a7ee3cc..adbf392e 100644
+--- a/src/frame_compare/config/schema_enums.py
++++ b/src/frame_compare/config/schema_enums.py
+@@ -75,6 +75,7 @@ class TonemapPreset(StrEnum):
+     SPLINE = "spline"
+     BRIGHT_LIFT = "bright_lift"
+     HIGHLIGHT_GUARD = "highlight_guard"
++    HIGHLIGHT_PRESERVE = "highlight_preserve"
+ 
+ 
+ class TonemapSpeed(StrEnum):
+diff --git a/src/frame_compare/render/prepare.py b/src/frame_compare/render/prepare.py
+index 5eef446b..c14ea27c 100644
+--- a/src/frame_compare/render/prepare.py
++++ b/src/frame_compare/render/prepare.py
+@@ -27,6 +27,7 @@ def should_tonemap(source_info: SourceInfo, config: ConfigSchema) -> bool:
+ 
+ def resolve_tonemap_settings(config: ConfigSchema) -> TonemapSettings:
+     from frame_compare.vs.tonemap import get_preset_settings
++    from frame_compare.vs.types import TonemapSettings
+ 
+     preset = config.color.preset
+     settings = get_preset_settings(preset)
+@@ -36,7 +37,14 @@ def resolve_tonemap_settings(config: ConfigSchema) -> TonemapSettings:
+     if "target_nits" in explicit_color_fields:
+         settings = replace(settings, target_nits=config.color.target_nits)
+     if "tone_curve" in explicit_color_fields:
+-        settings = replace(settings, tone_curve=config.color.tone_curve)
++        # The plugin's generic parameter has different meanings across curves.
++        # Do not carry a preset's tuned knee into spline contrast or Reinhard.
++        parameter = (
++            settings.knee_offset
++            if config.color.tone_curve is settings.tone_curve
++            else TonemapSettings().knee_offset
++        )
++        settings = replace(settings, tone_curve=config.color.tone_curve, knee_offset=parameter)
+     if "gamma_lift" in explicit_color_fields:
+         settings = replace(settings, gamma_lift=config.color.gamma_lift)
+     if "contrast_recovery" in explicit_color_fields:
+diff --git a/src/frame_compare/vs/tonemap_presets.py b/src/frame_compare/vs/tonemap_presets.py
+index f75f0970..778eb853 100644
+--- a/src/frame_compare/vs/tonemap_presets.py
++++ b/src/frame_compare/vs/tonemap_presets.py
+@@ -54,6 +54,13 @@ TONEMAP_PRESETS: dict[TonemapPreset, TonemapSettings] = {
+         target_nits=180,
+         gamma_lift=False,
+     ),
++    TonemapPreset.HIGHLIGHT_PRESERVE: TonemapSettings(
++        preset=TonemapPreset.HIGHLIGHT_PRESERVE,
++        tone_curve=ToneCurve.BT2390,
++        target_nits=100,
++        knee_offset=1.0,
++        gamma_lift=False,
++    ),
+ }
+ 
+ 

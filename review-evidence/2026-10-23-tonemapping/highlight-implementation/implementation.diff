@@ -1,0 +1,215 @@
+diff --git a/docs/current-architecture.md b/docs/current-architecture.md
+index 8e5ace43..1f5ae609 100644
+--- a/docs/current-architecture.md
++++ b/docs/current-architecture.md
+@@ -1468,3 +1468,14 @@ Native alignment-review hotspot dispositions for the current implementation:
+ 
+ - Whether any import-level package APIs should be promoted from convenience-only to supported/stable.
+ - Whether a durable multi-session plan workflow should become active again in this repo. The runbook currently keeps `docs/plans/` inactive by default.
++
++### Highlight-preserving preset resolution
++
++`config.schema_enums.TonemapPreset.HIGHLIGHT_PRESERVE` is an opt-in public
++preset owned by `vs.tonemap_presets`: reference settings with BT.2390 knee 1.0.
++`render.prepare.resolve_tonemap_settings` applies authored overrides; changing
++curve algorithms resets the generic native curve parameter to the default 0.5
++to avoid reinterpreting a tuned knee as another curve's contrast. Applied
++tonemap/report identity continues to contain the resolved preset and knee.
++Reference and existing presets retain their prior values; softclip remains
++experimental and is not part of this preset.
+diff --git a/docs/current-cli-contract.md b/docs/current-cli-contract.md
+index faf33e69..4804f78e 100644
+--- a/docs/current-cli-contract.md
++++ b/docs/current-cli-contract.md
+@@ -711,6 +711,16 @@ unchanged.
+ - `--write-config` writes the effective config to disk, then exits without invoking the
+   runtime pipeline.
+ 
++### Opt-in highlight preservation
++
++`--tm-preset highlight_preserve` (or `[color] preset = "highlight_preserve"`)
++selects BT.2390 at 100 nits with knee offset 1.0. Other settings match reference;
++reference remains the default with knee 0.5. Existing explicit color overrides
++retain precedence. An explicit different curve resets the native generic curve
++parameter to 0.5 so the tuned BT.2390 knee is not reused as spline/Reinhard
++contrast. The option is not a no-clipping guarantee and does not enable softclip.
++The existing `highlight_guard` spline preset is unchanged.
++
+ ### CLI Choice, Frame, And Count Validation
+ 
+ - `--overlay`, `--tm-preset`, `--tm-curve`, and `--tm-speed` are parsed as raw strings, not Typer
+diff --git a/docs/guides/hdr-tonemapping.md b/docs/guides/hdr-tonemapping.md
+index b797d230..0f93d5a8 100644
+--- a/docs/guides/hdr-tonemapping.md
++++ b/docs/guides/hdr-tonemapping.md
+@@ -103,8 +103,28 @@ still override it (source: `src/frame_compare/render/prepare.py:37-74`).
+ | `spline` | `spline` | 203 nits | Off |
+ | `contrast` | `reinhard` | 203 nits | Off |
+ | `highlight_guard` | `spline` | 180 nits | Off |
++| `highlight_preserve` | `bt2390` | 100 nits | Off |
+ | `bright_lift` | `bt2390` | 250 nits | On |
+ 
++`highlight_preserve` is an opt-in BT.2390 shoulder adjustment: knee offset 1.0
++instead of the reference preset's 0.5. All other reference settings, including
++perceptual gamut mapping and contrast recovery, stay the same. It can preserve
++more highlight distinctions, but does not guarantee unclipped output or restore
++source detail that is already lost. `highlight_guard` remains the separate spline
++preset; neither preset changes the default.
++
++For a run with an explicit BT.2390/100-nit quality policy, use:
++
++```bash
++frame-compare run --tm-preset highlight_preserve --tm-curve bt2390 --tm-target 100 --tm-speed quality
++```
++
++Or set `preset = "highlight_preserve"` in `[color]`. Explicit target, curve,
++gamma-lift and contrast-recovery overrides still take precedence. Overriding the
++curve to spline or Reinhard resets the generic native curve parameter to 0.5;
++the BT.2390 knee 1.0 must not become another algorithm's contrast parameter.
++Softclip is not bundled with this option.
++
+ ```toml
+ [color]
+ preset = "filmic"
+diff --git a/docs/reference/commands.md b/docs/reference/commands.md
+index 50fa2062..9205bbeb 100644
+--- a/docs/reference/commands.md
++++ b/docs/reference/commands.md
+@@ -44,7 +44,7 @@ Runs and dry runs reject `--no-cache` combined with `--from-cache-only`
+ ([`--no-cache` and `--from-cache-only`](../current-cli-contract.md#run-command-contract)).
+ An invalid `--overlay`, `--tm-preset`, or `--tm-curve` value names the option and
+ lists its choices before any work starts. Preset names are `reference`, `filmic`,
+-`contrast`, `bt2390_spec`, `spline`, `bright_lift`, and `highlight_guard`.
++`contrast`, `bt2390_spec`, `spline`, `bright_lift`, `highlight_guard`, and `highlight_preserve`.
+ 
+ `frame-compare run --help` groups the options under the same six headings as this
+ section.
+diff --git a/docs/reference/configuration.md b/docs/reference/configuration.md
+index fe3763bf..a567b3da 100644
+--- a/docs/reference/configuration.md
++++ b/docs/reference/configuration.md
+@@ -558,7 +558,7 @@ Tonemap HDR sources to SDR.
+ #### `color.preset` { #color.preset .fc-key }
+ 
+ Values
+-:   `"reference"`, `"filmic"`, `"contrast"`, `"bt2390_spec"`, `"spline"`, `"bright_lift"`, `"highlight_guard"`
++:   `"reference"`, `"filmic"`, `"contrast"`, `"bt2390_spec"`, `"spline"`, `"bright_lift"`, `"highlight_guard"`, `"highlight_preserve"`
+ 
+ Default
+ :   `"reference"`
+diff --git a/src/frame_compare/config/schema_enums.py b/src/frame_compare/config/schema_enums.py
+index 9a7ee3cc..adbf392e 100644
+--- a/src/frame_compare/config/schema_enums.py
++++ b/src/frame_compare/config/schema_enums.py
+@@ -75,6 +75,7 @@ class TonemapPreset(StrEnum):
+     SPLINE = "spline"
+     BRIGHT_LIFT = "bright_lift"
+     HIGHLIGHT_GUARD = "highlight_guard"
++    HIGHLIGHT_PRESERVE = "highlight_preserve"
+ 
+ 
+ class TonemapSpeed(StrEnum):
+diff --git a/src/frame_compare/render/prepare.py b/src/frame_compare/render/prepare.py
+index 5eef446b..c14ea27c 100644
+--- a/src/frame_compare/render/prepare.py
++++ b/src/frame_compare/render/prepare.py
+@@ -27,6 +27,7 @@ def should_tonemap(source_info: SourceInfo, config: ConfigSchema) -> bool:
+ 
+ def resolve_tonemap_settings(config: ConfigSchema) -> TonemapSettings:
+     from frame_compare.vs.tonemap import get_preset_settings
++    from frame_compare.vs.types import TonemapSettings
+ 
+     preset = config.color.preset
+     settings = get_preset_settings(preset)
+@@ -36,7 +37,14 @@ def resolve_tonemap_settings(config: ConfigSchema) -> TonemapSettings:
+     if "target_nits" in explicit_color_fields:
+         settings = replace(settings, target_nits=config.color.target_nits)
+     if "tone_curve" in explicit_color_fields:
+-        settings = replace(settings, tone_curve=config.color.tone_curve)
++        # The plugin's generic parameter has different meanings across curves.
++        # Do not carry a preset's tuned knee into spline contrast or Reinhard.
++        parameter = (
++            settings.knee_offset
++            if config.color.tone_curve is settings.tone_curve
++            else TonemapSettings().knee_offset
++        )
++        settings = replace(settings, tone_curve=config.color.tone_curve, knee_offset=parameter)
+     if "gamma_lift" in explicit_color_fields:
+         settings = replace(settings, gamma_lift=config.color.gamma_lift)
+     if "contrast_recovery" in explicit_color_fields:
+diff --git a/src/frame_compare/vs/tonemap_presets.py b/src/frame_compare/vs/tonemap_presets.py
+index f75f0970..778eb853 100644
+--- a/src/frame_compare/vs/tonemap_presets.py
++++ b/src/frame_compare/vs/tonemap_presets.py
+@@ -54,6 +54,13 @@ TONEMAP_PRESETS: dict[TonemapPreset, TonemapSettings] = {
+         target_nits=180,
+         gamma_lift=False,
+     ),
++    TonemapPreset.HIGHLIGHT_PRESERVE: TonemapSettings(
++        preset=TonemapPreset.HIGHLIGHT_PRESERVE,
++        tone_curve=ToneCurve.BT2390,
++        target_nits=100,
++        knee_offset=1.0,
++        gamma_lift=False,
++    ),
+ }
+ 
+ 
+diff --git a/tests/config/test_color_roundtrip.py b/tests/config/test_color_roundtrip.py
+index 2ad2d9e8..1ecbe9b9 100644
+--- a/tests/config/test_color_roundtrip.py
++++ b/tests/config/test_color_roundtrip.py
+@@ -9,12 +9,34 @@ from frame_compare.config.loader import get_default_config, load_config
+ from frame_compare.config.overrides import CLIConfigOverrides, apply_cli_overrides
+ from frame_compare.config.persistence import dump_config_for_persistence
+ from frame_compare.config.presets import apply_preset, save_preset
+-from frame_compare.config.schema import ColorConfig, TonemapPreset
++from frame_compare.config.schema import ColorConfig, ToneCurve, TonemapPreset
+ from frame_compare.config.schema_enums import TonemapSpeed
+ from frame_compare.render.prepare import resolve_tonemap_settings
+ from frame_compare.vs.tonemap_presets import get_preset_settings
+ 
+ 
++@pytest.mark.parametrize("curve", list(ToneCurve))
++def test_highlight_preserve_opt_in_and_curve_override(curve: ToneCurve) -> None:
++    from dataclasses import asdict
++
++    config = get_default_config()
++    baseline = resolve_tonemap_settings(config)
++    assert baseline.knee_offset == 0.5
++    selected = apply_cli_overrides(
++        config, CLIConfigOverrides(tm_preset=TonemapPreset.HIGHLIGHT_PRESERVE)
++    )
++    preserved = resolve_tonemap_settings(selected)
++    assert preserved.knee_offset == 1.0
++    expected = asdict(baseline)
++    expected.update(preset=TonemapPreset.HIGHLIGHT_PRESERVE, knee_offset=1.0)
++    assert asdict(preserved) == expected
++    changed = apply_cli_overrides(selected, CLIConfigOverrides(tm_curve=curve))
++    resolved = resolve_tonemap_settings(changed)
++    assert resolved.tone_curve is curve
++    assert resolved.knee_offset == (1.0 if curve is ToneCurve.BT2390 else 0.5)
++    assert resolve_tonemap_settings(config) == baseline
++
++
+ @pytest.mark.parametrize("preset", list(TonemapPreset))
+ @pytest.mark.parametrize("explicit_defaults", [False, True])
+ def test_color_semantics_survive_merges_and_persisted_reload(
+diff --git a/tests/vs/test_tonemap.py b/tests/vs/test_tonemap.py
+index f57e3e63..097c883c 100644
+--- a/tests/vs/test_tonemap.py
++++ b/tests/vs/test_tonemap.py
+@@ -39,6 +39,13 @@ def test_apply_tonemap_enabled_false_returns_clip_unchanged():
+         pytest.param(
+             TonemapPreset.HIGHLIGHT_GUARD, ToneCurve.SPLINE, 180, False, id="highlight_guard"
+         ),
++        pytest.param(
++            TonemapPreset.HIGHLIGHT_PRESERVE,
++            ToneCurve.BT2390,
++            100,
++            False,
++            id="highlight_preserve",
++        ),
+     ],
+ )
+ def test_tonemap_preset_settings(

@@ -27,6 +27,7 @@ def should_tonemap(source_info: SourceInfo, config: ConfigSchema) -> bool:
 
 def resolve_tonemap_settings(config: ConfigSchema) -> TonemapSettings:
     from frame_compare.vs.tonemap import get_preset_settings
+    from frame_compare.vs.types import TonemapSettings
 
     preset = config.color.preset
     settings = get_preset_settings(preset)
@@ -36,7 +37,14 @@ def resolve_tonemap_settings(config: ConfigSchema) -> TonemapSettings:
     if "target_nits" in explicit_color_fields:
         settings = replace(settings, target_nits=config.color.target_nits)
     if "tone_curve" in explicit_color_fields:
-        settings = replace(settings, tone_curve=config.color.tone_curve)
+        # The plugin's generic parameter has different meanings across curves.
+        # Do not carry a preset's tuned knee into spline contrast or Reinhard.
+        parameter = (
+            settings.knee_offset
+            if config.color.tone_curve is settings.tone_curve
+            else TonemapSettings().knee_offset
+        )
+        settings = replace(settings, tone_curve=config.color.tone_curve, knee_offset=parameter)
     if "gamma_lift" in explicit_color_fields:
         settings = replace(settings, gamma_lift=config.color.gamma_lift)
     if "contrast_recovery" in explicit_color_fields:

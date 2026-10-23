@@ -1,0 +1,516 @@
+{
+  "scene": "substance",
+  "variant": "baseline",
+  "source": "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-20\\hdr-color-study\\cross-title\\media\\substance-hdr-1.mkv",
+  "source_frame": 72,
+  "source_frame_kind": "retained_excerpt",
+  "provenance": {
+    "title": "the substance 2024",
+    "role": "substance-hdr",
+    "scene": 1,
+    "path": "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-20\\hdr-color-study\\cross-title\\media\\substance-hdr-1.mkv",
+    "source": "G:\\data\\media\\movies\\The Substance (2024) {imdb-tt17526714}\\The Substance (2024) {imdb-tt17526714} - [Bluray-2160p][DTS-HD MA 5.1][DV HDR10][x265]-MainFrame.mkv",
+    "requested_seek_seconds": 1271.927,
+    "requested_duration_seconds": 16,
+    "actual_duration_seconds": "20.103000",
+    "source_first_packet_pts": "1268.058000",
+    "copied_first_packet_pts": "0.083000",
+    "conserved_video_packets": 480,
+    "all_packet_payload_hashes_identical": true,
+    "video_properties": {
+      "codec_name": "hevc",
+      "profile": "Main 10",
+      "width": 3840,
+      "height": 1608,
+      "pix_fmt": "yuv420p10le",
+      "color_range": "tv",
+      "color_space": "bt2020nc",
+      "color_transfer": "smpte2084",
+      "color_primaries": "bt2020"
+    },
+    "dovi_configuration": [
+      {
+        "side_data_type": "DOVI configuration record",
+        "dv_version_major": 1,
+        "dv_version_minor": 0,
+        "dv_profile": 8,
+        "dv_level": 6,
+        "rpu_present_flag": 1,
+        "el_present_flag": 0,
+        "bl_present_flag": 1,
+        "dv_bl_signal_compatibility_id": 1,
+        "dv_md_compression": "none"
+      }
+    ],
+    "sha256": "9d6d742f70a7ed0bd44e8ebead9911bf25b765c214951c506c4276550e5a07b3",
+    "bytes": 147261947,
+    "boundary": "Exact encoded packet identity includes in-band HDR/RPU NAL payloads. Container/config equality does not prove a full Dolby Vision display transform or equivalent adaptive history."
+  },
+  "source_props": {
+    "DolbyVisionRPU": {
+      "bytes": 215,
+      "sha256": "93153689c801f29a5281713f4fb282cba9fdc4c3f7af99e506668c8c4cd45cad"
+    },
+    "MasteringDisplayMaxLuminance": 4000.0,
+    "MasteringDisplayMinLuminance": 0.005,
+    "MasteringDisplayPrimariesX": [
+      0.68,
+      0.265,
+      0.15
+    ],
+    "MasteringDisplayPrimariesY": [
+      0.32,
+      0.69,
+      0.06
+    ],
+    "MasteringDisplayWhitePointX": 0.3127,
+    "MasteringDisplayWhitePointY": 0.329,
+    "_AbsoluteTime": 3.128,
+    "_ChromaLocation": 2,
+    "_DurationDen": 24000,
+    "_DurationNum": 1001,
+    "_FieldBased": 0,
+    "_Matrix": 9,
+    "_PictType": "B",
+    "_Primaries": 9,
+    "_Range": 0,
+    "_SARDen": 1,
+    "_SARNum": 1,
+    "_Transfer": 16
+  },
+  "source_time": 3.128,
+  "removed_props": [],
+  "settings": {
+    "enabled": true,
+    "preset": "reference",
+    "tonemap_speed": "quality",
+    "tone_curve": "bt2390",
+    "target_nits": 100,
+    "source_peak": null,
+    "dynamic_peak_detection": true,
+    "dst_min_nits": 0.18,
+    "knee_offset": 0.5,
+    "smoothing_period": 45.0,
+    "scene_threshold_low": 0.8,
+    "scene_threshold_high": 2.4,
+    "percentile": 99.995,
+    "gamut_mapping": 1,
+    "metadata": 0,
+    "use_dovi": true,
+    "contrast_recovery": 0.3,
+    "gamma_lift": false
+  },
+  "applied": {
+    "requested": {
+      "enabled": true,
+      "preset": "reference",
+      "tonemap_speed": "quality",
+      "tone_curve": "bt2390",
+      "target_nits": 100,
+      "source_peak": null,
+      "dynamic_peak_detection": true,
+      "dst_min_nits": 0.18,
+      "knee_offset": 0.5,
+      "smoothing_period": 45.0,
+      "scene_threshold_low": 0.8,
+      "scene_threshold_high": 2.4,
+      "percentile": 99.995,
+      "gamut_mapping": 1,
+      "metadata": 0,
+      "use_dovi": true,
+      "contrast_recovery": 0.3,
+      "gamma_lift": false
+    },
+    "transform": {
+      "curve": "bt2390",
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "source_peak": {
+        "nits": 1000,
+        "origin": "default"
+      },
+      "frame_policy": "independent_frames"
+    }
+  },
+  "calls": [
+    {
+      "src_max": 1000,
+      "dst_max": 100,
+      "tone_mapping_function_s": "bt2390",
+      "tone_mapping_param": 0.5,
+      "dst_csp": 0,
+      "dst_prim": 3,
+      "dst_min": 0.18,
+      "dynamic_peak_detection": 1,
+      "smoothing_period": 45.0,
+      "scene_threshold_low": 0.8,
+      "scene_threshold_high": 2.4,
+      "percentile": 99.995,
+      "gamut_mapping": 1,
+      "contrast_recovery": 0.3,
+      "log_level": 6,
+      "metadata": 0,
+      "use_dovi": 1,
+      "src_csp": 1
+    },
+    {
+      "src_max": 1000,
+      "dst_max": 100,
+      "tone_mapping_function_s": "bt2390",
+      "tone_mapping_param": 0.5,
+      "dst_csp": 0,
+      "dst_prim": 3,
+      "dst_min": 0.18,
+      "dynamic_peak_detection": 1,
+      "smoothing_period": 45.0,
+      "scene_threshold_low": 0.8,
+      "scene_threshold_high": 2.4,
+      "percentile": 99.995,
+      "gamut_mapping": 1,
+      "contrast_recovery": 0.3,
+      "log_level": 6,
+      "metadata": 0,
+      "use_dovi": 1,
+      "src_csp": 1
+    }
+  ],
+  "rgb8_sha256": "3b78a40e03246ebca5056bd33ddbcd27e44fe5d6f0476dd1b4e7579dda44e572",
+  "png_sha256": "79846b9be5047a9c024df04c03dc6caabec2884bd1d429bf7ac869d2a3cdc2b5",
+  "rgb8_metrics": {
+    "picture": {
+      "bounds_xyxy": [
+        0,
+        250,
+        3840,
+        1608
+      ],
+      "stride": 4,
+      "pixels": 326400,
+      "mean_code8": 24.921889297385622,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 20.042863313406546,
+      "horizontal_gradient_code8": 2.493542797644605,
+      "unique_rgb_triplets": 43572
+    },
+    "upper_center": {
+      "bounds_xyxy": [
+        1344,
+        321,
+        2496,
+        723
+      ],
+      "stride": 4,
+      "pixels": 29088,
+      "mean_code8": 15.86726485148515,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 14.824262282122413,
+      "horizontal_gradient_code8": 2.209242798495878,
+      "unique_rgb_triplets": 9561
+    },
+    "left_middle": {
+      "bounds_xyxy": [
+        192,
+        562,
+        1152,
+        1045
+      ],
+      "stride": 4,
+      "pixels": 29040,
+      "mean_code8": 29.013429752066116,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 11.06201463862879,
+      "horizontal_gradient_code8": 3.0620185829385527,
+      "unique_rgb_triplets": 10155
+    },
+    "center": {
+      "bounds_xyxy": [
+        1344,
+        643,
+        2496,
+        1125
+      ],
+      "stride": 4,
+      "pixels": 34848,
+      "mean_code8": 11.667699724517908,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 13.552328365989863,
+      "horizontal_gradient_code8": 2.1022975091427414,
+      "unique_rgb_triplets": 8161
+    }
+  },
+  "source_identity": {
+    "sha": "f1d3b9bf4c3406e3d0cddbfbbc536e0ac8a9279e",
+    "status": "?? docs/plans/2026-10-18-vsview-anchor-alignment-workflow.md\n?? docs/plans/2026-10-18-vsview-live-alignment-overlays.md\n?? docs/plans/2026-10-18-vsview-overlays-fresh-session-handoff.md\n?? docs/plans/2026-10-18-vsview-presentation-capture-contract.md\n?? docs/plans/2026-10-18-vsview-simple-anchor-workflow.md\n?? docs/plans/2026-10-23-highlight-verification.md\n?? docs/reviews/2026-10-23-tonemapping-highlight-research.md\n",
+    "files": {
+      "src\\frame_compare\\vs\\tonemap.py": "e8fe0ff2a161f4b4618ee221f08a1bc70060a839a7df2c50a6650e411c43c427",
+      "src\\frame_compare\\vs\\tonemap_conversion.py": "5eae2baccc3a9a2828dfa83e2435fb3ec6df373038a146717bb539ac2c8c8445",
+      "src\\frame_compare\\vs\\tonemap_fallback.py": "9b08fa1b180f21a5e3d8e4f8c54ea2e310e315d521badd9f5749a4309cbbf99e",
+      "src\\frame_compare\\vs\\tonemap_libplacebo.py": "0e50fbbba3f3f486f71a3c3e1324d933ab9aae4119aaf7ab54fbb4bb3f3b60ae",
+      "src\\frame_compare\\vs\\tonemap_presets.py": "4c66e839007497bfb3b5632e6e857f9e28364d207ae433c329b3dccf59fed1ca",
+      "src\\frame_compare\\vs\\tonemap_runtime.py": "a2c2bb1d621b1d64fca9686082bc03c8e2f9754b9adb5600cada1b30a9661f95",
+      "src\\frame_compare\\vs\\types.py": "329ee52217bce57a8d9261b069ac32b2ea1ffc794347d851b2ff288a3bbb51e1",
+      "src\\frame_compare\\render\\encoders.py": "e6969c4fb449093a480b6b8a72587f395192ed0caab2f8098c600bf240bd7756",
+      "config\\config.toml": "b976717cc1d209b1ebe0dc3a1e1ae2b04ffac63590ca212e0b402693131e42d6"
+    }
+  },
+  "runtime": {
+    "python": "3.13.7 (main, Sep  2 2025, 14:16:00) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "core": "VapourSynth Video Processing Library\nCopyright (c) 2012-2026 Fredrik Mellbin\n\tCore R81\n\tAPI R4.3\n\tOptions: -\n\tNumber of Threads: 4\n\tMax Cache Size: 128\n",
+    "tonemap_signature": "clip:vnode;src_csp:int:opt;dst_csp:int:opt;dst_prim:int:opt;src_max:float:opt;src_min:float:opt;dst_max:float:opt;dst_min:float:opt;dynamic_peak_detection:int:opt;smoothing_period:float:opt;scene_threshold_low:float:opt;scene_threshold_high:float:opt;percentile:float:opt;gamut_mapping:int:opt;tone_mapping_function:int:opt;tone_mapping_function_s:data:opt;tone_mapping_param:float:opt;metadata:int:opt;use_dovi:int:opt;dovi_el:vnode:opt;visualize_lut:int:opt;show_clipping:int:opt;contrast_recovery:float:opt;log_level:int:opt;",
+    "plugins": [
+      {
+        "namespace": "placebo",
+        "name": "libplacebo plugin for VapourSynth",
+        "identifier": "com.vs.placebo",
+        "path": "C:/Software/video/frame-compare/.venv/Lib/site-packages/vapoursynth/plugins/libvs_placebo.dll",
+        "sha256": "b0a0689946e03f6f7467b798fba4678018bb28ba6b1caecdded8d08945049310"
+      },
+      {
+        "namespace": "lsmas",
+        "name": "LSMASHSource for VapourSynth",
+        "identifier": "systems.innocent.lsmas",
+        "path": "C:/Software/video/frame-compare/.venv/Lib/site-packages/vapoursynth/plugins/LSMASHSource.dll",
+        "sha256": "98ce1bc67218bd09bf84f45d7fc726bbf0972a90dd4c29d68f0797dd1606e7ea"
+      }
+    ]
+  },
+  "index": {
+    "original": "None",
+    "before": null,
+    "after": null,
+    "scratch": "C:\\Users\\zinez\\AppData\\Local\\Temp\\frame-compare-highlight-A-75wplqya\\source.lwi"
+  },
+  "capture_boundary": "native ModifyFrame and sRGB float taps observed upstream of the SAME final RGB8 get_frame; no second native get_frame",
+  "native_props": {
+    "DolbyVisionRPU": {
+      "bytes": 215,
+      "sha256": "93153689c801f29a5281713f4fb282cba9fdc4c3f7af99e506668c8c4cd45cad"
+    },
+    "MasteringDisplayMaxLuminance": 4000.0,
+    "MasteringDisplayMinLuminance": 0.005,
+    "MasteringDisplayPrimariesX": [
+      0.68,
+      0.265,
+      0.15
+    ],
+    "MasteringDisplayPrimariesY": [
+      0.32,
+      0.69,
+      0.06
+    ],
+    "MasteringDisplayWhitePointX": 0.3127,
+    "MasteringDisplayWhitePointY": 0.329,
+    "_AbsoluteTime": 3.128,
+    "_DurationDen": 24000,
+    "_DurationNum": 1001,
+    "_FieldBased": 0,
+    "_Matrix": 0,
+    "_PictType": "B",
+    "_Primaries": 9,
+    "_Range": 1,
+    "_SARDen": 1,
+    "_SARNum": 1,
+    "_Transfer": 16
+  },
+  "input_props": {
+    "DolbyVisionRPU": {
+      "bytes": 215,
+      "sha256": "93153689c801f29a5281713f4fb282cba9fdc4c3f7af99e506668c8c4cd45cad"
+    },
+    "MasteringDisplayMaxLuminance": 4000.0,
+    "MasteringDisplayMinLuminance": 0.005,
+    "MasteringDisplayPrimariesX": [
+      0.68,
+      0.265,
+      0.15
+    ],
+    "MasteringDisplayPrimariesY": [
+      0.32,
+      0.69,
+      0.06
+    ],
+    "MasteringDisplayWhitePointX": 0.3127,
+    "MasteringDisplayWhitePointY": 0.329,
+    "_AbsoluteTime": 3.128,
+    "_DurationDen": 24000,
+    "_DurationNum": 1001,
+    "_FieldBased": 0,
+    "_Matrix": 0,
+    "_PictType": "B",
+    "_Primaries": 9,
+    "_Range": 1,
+    "_SARDen": 1,
+    "_SARNum": 1,
+    "_Transfer": 16
+  },
+  "input_rgb16_sha256": "5360c448fafde08a4b2390ee7457503cb4eeb0628499205c77c9a487b270eff3",
+  "native16_sha256": "daa2df64fab1d3c6c1d7792b145eb01a43eb26af32e3085bffb4690d5bf4d456",
+  "srgb_float_sha256": "b964f8ee2c5151fcb05647ec6e6c90299133e706e4371e86f67548c5ca66ec55",
+  "native16_metrics": {
+    "picture": {
+      "bounds_xyxy": [
+        0,
+        250,
+        3840,
+        1608
+      ],
+      "stride": 4,
+      "pixels": 326400,
+      "mean_code8": 23.683899971548282,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 18.782297910007614,
+      "horizontal_gradient_code8": 2.3470609046268964,
+      "unique_rgb_triplets": 247045
+    },
+    "upper_center": {
+      "bounds_xyxy": [
+        1344,
+        321,
+        2496,
+        723
+      ],
+      "stride": 4,
+      "pixels": 29088,
+      "mean_code8": 15.203877022754154,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 13.487796919652364,
+      "horizontal_gradient_code8": 2.07272698838967,
+      "unique_rgb_triplets": 28577
+    },
+    "left_middle": {
+      "bounds_xyxy": [
+        192,
+        562,
+        1152,
+        1045
+      ],
+      "stride": 4,
+      "pixels": 29040,
+      "mean_code8": 27.079413743019156,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 10.331274274879245,
+      "horizontal_gradient_code8": 2.837134878783259,
+      "unique_rgb_triplets": 28151
+    },
+    "center": {
+      "bounds_xyxy": [
+        1344,
+        643,
+        2496,
+        1125
+      ],
+      "stride": 4,
+      "pixels": 34848,
+      "mean_code8": 11.461961615923412,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 12.42665032826176,
+      "horizontal_gradient_code8": 1.948801450177421,
+      "unique_rgb_triplets": 33839
+    }
+  },
+  "srgb_float_metrics": {
+    "picture": {
+      "bounds_xyxy": [
+        0,
+        250,
+        3840,
+        1608
+      ],
+      "stride": 4,
+      "pixels": 326400,
+      "mean_code8": 24.92241495378261,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 20.041034171028077,
+      "horizontal_gradient_code8": 2.485217471006856,
+      "unique_rgb_triplets": 247045
+    },
+    "upper_center": {
+      "bounds_xyxy": [
+        1344,
+        321,
+        2496,
+        723
+      ],
+      "stride": 4,
+      "pixels": 29088,
+      "mean_code8": 15.867880959435897,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 14.823420348885213,
+      "horizontal_gradient_code8": 2.200716559029755,
+      "unique_rgb_triplets": 28577
+    },
+    "left_middle": {
+      "bounds_xyxy": [
+        192,
+        562,
+        1152,
+        1045
+      ],
+      "stride": 4,
+      "pixels": 29040,
+      "mean_code8": 29.013640295173357,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 11.060179694333666,
+      "horizontal_gradient_code8": 3.0544432741609677,
+      "unique_rgb_triplets": 28151
+    },
+    "center": {
+      "bounds_xyxy": [
+        1344,
+        643,
+        2496,
+        1125
+      ],
+      "stride": 4,
+      "pixels": 34848,
+      "mean_code8": 11.670760936112048,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 0.0,
+      "luma_code8_std": 13.54921629100134,
+      "horizontal_gradient_code8": 2.0962652902204257,
+      "unique_rgb_triplets": 33839
+    }
+  }
+}

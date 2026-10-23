@@ -711,6 +711,16 @@ unchanged.
 - `--write-config` writes the effective config to disk, then exits without invoking the
   runtime pipeline.
 
+### Opt-in highlight preservation
+
+`--tm-preset highlight_preserve` (or `[color] preset = "highlight_preserve"`)
+selects BT.2390 at 100 nits with knee offset 1.0. Other settings match reference;
+reference remains the default with knee 0.5. Existing explicit color overrides
+retain precedence. An explicit different curve resets the native generic curve
+parameter to 0.5 so the tuned BT.2390 knee is not reused as spline/Reinhard
+contrast. The option is not a no-clipping guarantee and does not enable softclip.
+The existing `highlight_guard` spline preset is unchanged.
+
 ### CLI Choice, Frame, And Count Validation
 
 - `--overlay`, `--tm-preset`, `--tm-curve`, and `--tm-speed` are parsed as raw strings, not Typer

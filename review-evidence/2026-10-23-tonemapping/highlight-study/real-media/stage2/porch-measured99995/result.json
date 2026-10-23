@@ -1,0 +1,477 @@
+{
+  "scene": "porch",
+  "variant": "measured99995",
+  "source": "C:\\Software\\video\\frame-compare\\comparison_videos\\Kill Bill Vol. 2 (2004) {imdb-tt0378194} - [Bluray-2160p][DTS-HD MA 5.1][DV HDR10][x265]-MainFrame.mkv",
+  "source_frame": 12382,
+  "source_frame_kind": "original",
+  "provenance": null,
+  "source_props": {
+    "ContentLightLevelAverage": 92,
+    "ContentLightLevelMax": 448,
+    "DolbyVisionRPU": {
+      "bytes": 188,
+      "sha256": "24d2e865f7f5902e9e7adbba36fbd931db8dd62cf87932bedda480f16623ded4"
+    },
+    "MasteringDisplayMaxLuminance": 1000.0,
+    "MasteringDisplayMinLuminance": 0.0001,
+    "MasteringDisplayPrimariesX": [
+      0.68,
+      0.265,
+      0.15
+    ],
+    "MasteringDisplayPrimariesY": [
+      0.32,
+      0.69,
+      0.06
+    ],
+    "MasteringDisplayWhitePointX": 0.3127,
+    "MasteringDisplayWhitePointY": 0.329,
+    "_AbsoluteTime": 516.433,
+    "_ChromaLocation": 2,
+    "_DurationDen": 24000,
+    "_DurationNum": 1001,
+    "_FieldBased": 0,
+    "_Matrix": 9,
+    "_PictType": "P",
+    "_Primaries": 9,
+    "_Range": 0,
+    "_SARDen": 1,
+    "_SARNum": 1,
+    "_Transfer": 16
+  },
+  "source_time": 516.433,
+  "removed_props": [
+    "DolbyVisionRPU",
+    "PLSceneMax",
+    "PLSceneAvg"
+  ],
+  "settings": {
+    "enabled": true,
+    "preset": "reference",
+    "tonemap_speed": "quality",
+    "tone_curve": "bt2390",
+    "target_nits": 100,
+    "source_peak": null,
+    "dynamic_peak_detection": true,
+    "dst_min_nits": 0.18,
+    "knee_offset": 0.5,
+    "smoothing_period": 45.0,
+    "scene_threshold_low": 0.8,
+    "scene_threshold_high": 2.4,
+    "percentile": 99.995,
+    "gamut_mapping": 1,
+    "metadata": 4,
+    "use_dovi": false,
+    "contrast_recovery": 0.3,
+    "gamma_lift": false
+  },
+  "applied": {
+    "requested": {
+      "enabled": true,
+      "preset": "reference",
+      "tonemap_speed": "quality",
+      "tone_curve": "bt2390",
+      "target_nits": 100,
+      "source_peak": null,
+      "dynamic_peak_detection": true,
+      "dst_min_nits": 0.18,
+      "knee_offset": 0.5,
+      "smoothing_period": 45.0,
+      "scene_threshold_low": 0.8,
+      "scene_threshold_high": 2.4,
+      "percentile": 99.995,
+      "gamut_mapping": 1,
+      "metadata": 4,
+      "use_dovi": false,
+      "contrast_recovery": 0.3,
+      "gamma_lift": false
+    },
+    "transform": {
+      "curve": "bt2390",
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 4,
+        "use_dovi": false,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "source_peak": {
+        "nits": 448,
+        "origin": "max_cll"
+      },
+      "frame_policy": "independent_frames"
+    }
+  },
+  "calls": [
+    {
+      "src_max": 448,
+      "dst_max": 100,
+      "tone_mapping_function_s": "bt2390",
+      "tone_mapping_param": 0.5,
+      "dst_csp": 0,
+      "dst_prim": 3,
+      "dst_min": 0.18,
+      "dynamic_peak_detection": 1,
+      "smoothing_period": 45.0,
+      "scene_threshold_low": 0.8,
+      "scene_threshold_high": 2.4,
+      "percentile": 99.995,
+      "gamut_mapping": 1,
+      "contrast_recovery": 0.3,
+      "log_level": 6,
+      "metadata": 4,
+      "use_dovi": 0,
+      "src_csp": 1
+    },
+    {
+      "src_max": 448,
+      "dst_max": 100,
+      "tone_mapping_function_s": "bt2390",
+      "tone_mapping_param": 0.5,
+      "dst_csp": 0,
+      "dst_prim": 3,
+      "dst_min": 0.18,
+      "dynamic_peak_detection": 1,
+      "smoothing_period": 45.0,
+      "scene_threshold_low": 0.8,
+      "scene_threshold_high": 2.4,
+      "percentile": 99.995,
+      "gamut_mapping": 1,
+      "contrast_recovery": 0.3,
+      "log_level": 6,
+      "metadata": 4,
+      "use_dovi": 0,
+      "src_csp": 1
+    }
+  ],
+  "rgb8_sha256": "a8379d7224532bf9a4da3a529f37ce5c19d499b04c7b939d9d1aefc195105b67",
+  "png_sha256": "8f12f6e8182a8a3e3a6cc114157e57496efc6e1eddbda673ef6dba331499bf94",
+  "rgb8_metrics": {
+    "picture": {
+      "bounds_xyxy": [
+        0,
+        250,
+        3840,
+        1600
+      ],
+      "stride": 4,
+      "pixels": 324480,
+      "mean_code8": 139.40048385108483,
+      "all_endpoint_pct": 8.58142258382643,
+      "any_endpoint_pct": 9.986439842209073,
+      "all_near_white_pct": 22.856262327416175,
+      "luma_code8_std": 107.43639172071985,
+      "horizontal_gradient_code8": 4.725240489044925,
+      "unique_rgb_triplets": 4149
+    },
+    "upper_center": {
+      "bounds_xyxy": [
+        1344,
+        320,
+        2496,
+        720
+      ],
+      "stride": 4,
+      "pixels": 28800,
+      "mean_code8": 249.75596064814818,
+      "all_endpoint_pct": 54.659722222222214,
+      "any_endpoint_pct": 57.82291666666667,
+      "all_near_white_pct": 82.79166666666666,
+      "luma_code8_std": 13.547984827994252,
+      "horizontal_gradient_code8": 1.2743517212543607,
+      "unique_rgb_triplets": 611
+    },
+    "left_middle": {
+      "bounds_xyxy": [
+        192,
+        560,
+        1152,
+        1040
+      ],
+      "stride": 4,
+      "pixels": 28800,
+      "mean_code8": 49.13651620370369,
+      "all_endpoint_pct": 0.16319444444444445,
+      "any_endpoint_pct": 0.3368055555555556,
+      "all_near_white_pct": 1.173611111111111,
+      "luma_code8_std": 48.944937824828834,
+      "horizontal_gradient_code8": 6.869520697350071,
+      "unique_rgb_triplets": 2188
+    },
+    "center": {
+      "bounds_xyxy": [
+        1344,
+        640,
+        2496,
+        1120
+      ],
+      "stride": 4,
+      "pixels": 34560,
+      "mean_code8": 242.91383101851855,
+      "all_endpoint_pct": 2.118055555555556,
+      "any_endpoint_pct": 5.043402777777778,
+      "all_near_white_pct": 45.364583333333336,
+      "luma_code8_std": 18.55158813563367,
+      "horizontal_gradient_code8": 2.7257962485482032,
+      "unique_rgb_triplets": 913
+    }
+  },
+  "source_identity": {
+    "sha": "f1d3b9bf4c3406e3d0cddbfbbc536e0ac8a9279e",
+    "status": "?? docs/plans/2026-10-18-vsview-anchor-alignment-workflow.md\n?? docs/plans/2026-10-18-vsview-live-alignment-overlays.md\n?? docs/plans/2026-10-18-vsview-overlays-fresh-session-handoff.md\n?? docs/plans/2026-10-18-vsview-presentation-capture-contract.md\n?? docs/plans/2026-10-18-vsview-simple-anchor-workflow.md\n?? docs/plans/2026-10-23-highlight-verification.md\n?? docs/reviews/2026-10-23-tonemapping-highlight-research.md\n",
+    "files": {
+      "src\\frame_compare\\vs\\tonemap.py": "e8fe0ff2a161f4b4618ee221f08a1bc70060a839a7df2c50a6650e411c43c427",
+      "src\\frame_compare\\vs\\tonemap_conversion.py": "5eae2baccc3a9a2828dfa83e2435fb3ec6df373038a146717bb539ac2c8c8445",
+      "src\\frame_compare\\vs\\tonemap_fallback.py": "9b08fa1b180f21a5e3d8e4f8c54ea2e310e315d521badd9f5749a4309cbbf99e",
+      "src\\frame_compare\\vs\\tonemap_libplacebo.py": "0e50fbbba3f3f486f71a3c3e1324d933ab9aae4119aaf7ab54fbb4bb3f3b60ae",
+      "src\\frame_compare\\vs\\tonemap_presets.py": "4c66e839007497bfb3b5632e6e857f9e28364d207ae433c329b3dccf59fed1ca",
+      "src\\frame_compare\\vs\\tonemap_runtime.py": "a2c2bb1d621b1d64fca9686082bc03c8e2f9754b9adb5600cada1b30a9661f95",
+      "src\\frame_compare\\vs\\types.py": "329ee52217bce57a8d9261b069ac32b2ea1ffc794347d851b2ff288a3bbb51e1",
+      "src\\frame_compare\\render\\encoders.py": "e6969c4fb449093a480b6b8a72587f395192ed0caab2f8098c600bf240bd7756",
+      "config\\config.toml": "b976717cc1d209b1ebe0dc3a1e1ae2b04ffac63590ca212e0b402693131e42d6"
+    }
+  },
+  "runtime": {
+    "python": "3.13.7 (main, Sep  2 2025, 14:16:00) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "core": "VapourSynth Video Processing Library\nCopyright (c) 2012-2026 Fredrik Mellbin\n\tCore R81\n\tAPI R4.3\n\tOptions: -\n\tNumber of Threads: 4\n\tMax Cache Size: 128\n",
+    "tonemap_signature": "clip:vnode;src_csp:int:opt;dst_csp:int:opt;dst_prim:int:opt;src_max:float:opt;src_min:float:opt;dst_max:float:opt;dst_min:float:opt;dynamic_peak_detection:int:opt;smoothing_period:float:opt;scene_threshold_low:float:opt;scene_threshold_high:float:opt;percentile:float:opt;gamut_mapping:int:opt;tone_mapping_function:int:opt;tone_mapping_function_s:data:opt;tone_mapping_param:float:opt;metadata:int:opt;use_dovi:int:opt;dovi_el:vnode:opt;visualize_lut:int:opt;show_clipping:int:opt;contrast_recovery:float:opt;log_level:int:opt;",
+    "plugins": [
+      {
+        "namespace": "placebo",
+        "name": "libplacebo plugin for VapourSynth",
+        "identifier": "com.vs.placebo",
+        "path": "C:/Software/video/frame-compare/.venv/Lib/site-packages/vapoursynth/plugins/libvs_placebo.dll",
+        "sha256": "b0a0689946e03f6f7467b798fba4678018bb28ba6b1caecdded8d08945049310"
+      },
+      {
+        "namespace": "lsmas",
+        "name": "LSMASHSource for VapourSynth",
+        "identifier": "systems.innocent.lsmas",
+        "path": "C:/Software/video/frame-compare/.venv/Lib/site-packages/vapoursynth/plugins/LSMASHSource.dll",
+        "sha256": "98ce1bc67218bd09bf84f45d7fc726bbf0972a90dd4c29d68f0797dd1606e7ea"
+      }
+    ]
+  },
+  "index": {
+    "original": "C:\\Software\\video\\frame-compare\\comparison_videos\\Kill Bill Vol. 2 (2004) {imdb-tt0378194} - [Bluray-2160p][DTS-HD MA 5.1][DV HDR10][x265]-MainFrame.mkv.frame-compare-lsw1310-1ec4b81a7724.lwi",
+    "before": "c85577f6dc212282ca64d48798415e9e7c27b5e0c173e511a1e37792c0127e0a",
+    "after": "c85577f6dc212282ca64d48798415e9e7c27b5e0c173e511a1e37792c0127e0a",
+    "scratch": "C:\\Users\\zinez\\AppData\\Local\\Temp\\frame-compare-highlight-A-x0qywc8_\\source.lwi"
+  },
+  "capture_boundary": "native ModifyFrame and sRGB float taps observed upstream of the SAME final RGB8 get_frame; no second native get_frame",
+  "native_props": {
+    "ContentLightLevelAverage": 92,
+    "ContentLightLevelMax": 448,
+    "MasteringDisplayMaxLuminance": 1000.0,
+    "MasteringDisplayMinLuminance": 0.0001,
+    "MasteringDisplayPrimariesX": [
+      0.68,
+      0.265,
+      0.15
+    ],
+    "MasteringDisplayPrimariesY": [
+      0.32,
+      0.69,
+      0.06
+    ],
+    "MasteringDisplayWhitePointX": 0.3127,
+    "MasteringDisplayWhitePointY": 0.329,
+    "_AbsoluteTime": 516.433,
+    "_DurationDen": 24000,
+    "_DurationNum": 1001,
+    "_FieldBased": 0,
+    "_Matrix": 0,
+    "_PictType": "P",
+    "_Primaries": 9,
+    "_Range": 1,
+    "_SARDen": 1,
+    "_SARNum": 1,
+    "_Transfer": 16
+  },
+  "input_props": {
+    "ContentLightLevelAverage": 92,
+    "ContentLightLevelMax": 448,
+    "MasteringDisplayMaxLuminance": 1000.0,
+    "MasteringDisplayMinLuminance": 0.0001,
+    "MasteringDisplayPrimariesX": [
+      0.68,
+      0.265,
+      0.15
+    ],
+    "MasteringDisplayPrimariesY": [
+      0.32,
+      0.69,
+      0.06
+    ],
+    "MasteringDisplayWhitePointX": 0.3127,
+    "MasteringDisplayWhitePointY": 0.329,
+    "_AbsoluteTime": 516.433,
+    "_DurationDen": 24000,
+    "_DurationNum": 1001,
+    "_FieldBased": 0,
+    "_Matrix": 0,
+    "_PictType": "P",
+    "_Primaries": 9,
+    "_Range": 1,
+    "_SARDen": 1,
+    "_SARNum": 1,
+    "_Transfer": 16
+  },
+  "input_rgb16_sha256": "03a351ae9fbb512a1c0407a6e715b4bdaaa0280bc3d2fdd326a1f6959e71a420",
+  "native16_sha256": "5b7c283d8e6e0d444f47c121361e60713eff72afbcf139ae3c25f9b4735b0ac1",
+  "srgb_float_sha256": "78c72680352f630e1902d73619bc04d5dd32ef453148fcd17f95b72a69eddf7d",
+  "native16_metrics": {
+    "picture": {
+      "bounds_xyxy": [
+        0,
+        250,
+        3840,
+        1600
+      ],
+      "stride": 4,
+      "pixels": 324480,
+      "mean_code8": 138.66593484824648,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 6.87099358974359,
+      "all_near_white_pct": 21.382211538461537,
+      "luma_code8_std": 107.7647206938963,
+      "horizontal_gradient_code8": 4.651536241819079,
+      "unique_rgb_triplets": 64319
+    },
+    "upper_center": {
+      "bounds_xyxy": [
+        1344,
+        320,
+        2496,
+        720
+      ],
+      "stride": 4,
+      "pixels": 28800,
+      "mean_code8": 249.63670143392417,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 41.197916666666664,
+      "all_near_white_pct": 82.16666666666667,
+      "luma_code8_std": 13.793877754617837,
+      "horizontal_gradient_code8": 1.287834831437517,
+      "unique_rgb_triplets": 3193
+    },
+    "left_middle": {
+      "bounds_xyxy": [
+        192,
+        560,
+        1152,
+        1040
+      ],
+      "stride": 4,
+      "pixels": 28800,
+      "mean_code8": 47.31886880314166,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.24305555555555555,
+      "all_near_white_pct": 1.0833333333333335,
+      "luma_code8_std": 48.70955442253281,
+      "horizontal_gradient_code8": 6.673831814331222,
+      "unique_rgb_triplets": 20565
+    },
+    "center": {
+      "bounds_xyxy": [
+        1344,
+        640,
+        2496,
+        1120
+      ],
+      "stride": 4,
+      "pixels": 34560,
+      "mean_code8": 242.6860435581496,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 2.751736111111111,
+      "all_near_white_pct": 39.02777777777778,
+      "luma_code8_std": 18.890351136439026,
+      "horizontal_gradient_code8": 2.766438734210968,
+      "unique_rgb_triplets": 6307
+    }
+  },
+  "srgb_float_metrics": {
+    "picture": {
+      "bounds_xyxy": [
+        0,
+        250,
+        3840,
+        1600
+      ],
+      "stride": 4,
+      "pixels": 324480,
+      "mean_code8": 139.39637836917194,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 21.639854536489153,
+      "luma_code8_std": 107.4372872003133,
+      "horizontal_gradient_code8": 4.7212256903602645,
+      "unique_rgb_triplets": 64319
+    },
+    "upper_center": {
+      "bounds_xyxy": [
+        1344,
+        320,
+        2496,
+        720
+      ],
+      "stride": 4,
+      "pixels": 28800,
+      "mean_code8": 249.73742326268822,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 82.24305555555556,
+      "luma_code8_std": 13.536830670917706,
+      "horizontal_gradient_code8": 1.2636942478700433,
+      "unique_rgb_triplets": 3193
+    },
+    "left_middle": {
+      "bounds_xyxy": [
+        192,
+        560,
+        1152,
+        1040
+      ],
+      "stride": 4,
+      "pixels": 28800,
+      "mean_code8": 49.13906844014418,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 1.097222222222222,
+      "luma_code8_std": 48.94549760105428,
+      "horizontal_gradient_code8": 6.866130210380104,
+      "unique_rgb_triplets": 20565
+    },
+    "center": {
+      "bounds_xyxy": [
+        1344,
+        640,
+        2496,
+        1120
+      ],
+      "stride": 4,
+      "pixels": 34560,
+      "mean_code8": 242.91657365316146,
+      "all_endpoint_pct": 0.0,
+      "any_endpoint_pct": 0.0,
+      "all_near_white_pct": 40.11574074074074,
+      "luma_code8_std": 18.547429849191168,
+      "horizontal_gradient_code8": 2.7148544065643407,
+      "unique_rgb_triplets": 6307
+    }
+  }
+}

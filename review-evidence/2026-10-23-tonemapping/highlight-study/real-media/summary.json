@@ -1,0 +1,2151 @@
+{
+  "source": {
+    "sha": "f1d3b9bf4c3406e3d0cddbfbbc536e0ac8a9279e",
+    "status": "?? docs/plans/2026-10-18-vsview-anchor-alignment-workflow.md\n?? docs/plans/2026-10-18-vsview-live-alignment-overlays.md\n?? docs/plans/2026-10-18-vsview-overlays-fresh-session-handoff.md\n?? docs/plans/2026-10-18-vsview-presentation-capture-contract.md\n?? docs/plans/2026-10-18-vsview-simple-anchor-workflow.md\n?? docs/plans/2026-10-23-highlight-verification.md\n?? docs/reviews/2026-10-23-tonemapping-highlight-research.md\n",
+    "files": {
+      "src\\frame_compare\\vs\\tonemap.py": "e8fe0ff2a161f4b4618ee221f08a1bc70060a839a7df2c50a6650e411c43c427",
+      "src\\frame_compare\\vs\\tonemap_conversion.py": "5eae2baccc3a9a2828dfa83e2435fb3ec6df373038a146717bb539ac2c8c8445",
+      "src\\frame_compare\\vs\\tonemap_fallback.py": "9b08fa1b180f21a5e3d8e4f8c54ea2e310e315d521badd9f5749a4309cbbf99e",
+      "src\\frame_compare\\vs\\tonemap_libplacebo.py": "0e50fbbba3f3f486f71a3c3e1324d933ab9aae4119aaf7ab54fbb4bb3f3b60ae",
+      "src\\frame_compare\\vs\\tonemap_presets.py": "4c66e839007497bfb3b5632e6e857f9e28364d207ae433c329b3dccf59fed1ca",
+      "src\\frame_compare\\vs\\tonemap_runtime.py": "a2c2bb1d621b1d64fca9686082bc03c8e2f9754b9adb5600cada1b30a9661f95",
+      "src\\frame_compare\\vs\\types.py": "329ee52217bce57a8d9261b069ac32b2ea1ffc794347d851b2ff288a3bbb51e1",
+      "src\\frame_compare\\render\\encoders.py": "e6969c4fb449093a480b6b8a72587f395192ed0caab2f8098c600bf240bd7756",
+      "config\\config.toml": "b976717cc1d209b1ebe0dc3a1e1ae2b04ffac63590ca212e0b402693131e42d6"
+    }
+  },
+  "checks": {
+    "tap_equals_uninstrumented": true,
+    "source_stable": true,
+    "all_original_indexes_unchanged": true,
+    "all_scratch_removed": true
+  },
+  "case_count": 28,
+  "cases": [
+    {
+      "scene": "porch",
+      "variant": "baseline",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "b2436da1dc3daef708c655bdc139118dc9600a86d523fba932c0c3286214e721",
+      "result_path": "stage1\\porch-baseline\\result.json",
+      "image_path": "stage1/porch-baseline/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 139.13187869822485,
+        "all_endpoint_pct": 7.330498027613412,
+        "any_endpoint_pct": 8.349975345167653,
+        "all_near_white_pct": 20.903291420118343,
+        "luma_code8_std": 107.07552269460686,
+        "horizontal_gradient_code8": 4.744181210086938,
+        "unique_rgb_triplets": 4199
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "7e7c8e58b33e9f6037273648dd6cf86998605671e05a205cfb53f53a40dd3169",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 138.39265462673035,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 5.398175542406312,
+        "all_near_white_pct": 19.41352317554241,
+        "luma_code8_std": 107.40030568772168,
+        "horizontal_gradient_code8": 4.672246443724872,
+        "unique_rgb_triplets": 66048
+      }
+    },
+    {
+      "scene": "closeup",
+      "variant": "baseline",
+      "source_frame": 14943,
+      "source_frame_kind": "original",
+      "source_time": 623.248,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "79c004ff277913bc697e85f1fc07dc26dd0023d748d41c29c67b30c7f56e7cbd",
+      "result_path": "stage1b\\closeup-baseline\\result.json",
+      "image_path": "stage1b/closeup-baseline/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 86.52672172912558,
+        "all_endpoint_pct": 3.8772805719921104,
+        "any_endpoint_pct": 4.648052268244576,
+        "all_near_white_pct": 8.727194280078896,
+        "luma_code8_std": 92.23779338908295,
+        "horizontal_gradient_code8": 4.351983140722276,
+        "unique_rgb_triplets": 4519
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "6043a13b6ff8a40acbfb1c47b0b261687dc55eeac8656e88b74aef64dafb8639",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 85.4254856698184,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 3.261217948717949,
+        "all_near_white_pct": 8.502527120315582,
+        "luma_code8_std": 92.37561896264226,
+        "horizontal_gradient_code8": 4.271865595911308,
+        "unique_rgb_triplets": 62845
+      }
+    },
+    {
+      "scene": "closeup",
+      "variant": "knee1",
+      "source_frame": 14943,
+      "source_frame_kind": "original",
+      "source_time": 623.248,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "d7e7e5902ccea62000ff4bf0c7a32a2b9d884e28142aaeb35e65714ad2c59be8",
+      "result_path": "stage1b\\closeup-knee1\\result.json",
+      "image_path": "stage1b/closeup-knee1/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 84.70164262820514,
+        "all_endpoint_pct": 1.395155325443787,
+        "any_endpoint_pct": 1.5776010848126232,
+        "all_near_white_pct": 5.967393984220908,
+        "luma_code8_std": 89.48679503951152,
+        "horizontal_gradient_code8": 4.2802625997248125,
+        "unique_rgb_triplets": 4860
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "65ac9678d578f3cbfc361c003e0bd52f5dd13dc2df46cd137513d6087ad7d0a0",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 83.56246761055344,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.9495192307692307,
+        "all_near_white_pct": 5.587093195266273,
+        "luma_code8_std": 89.56135714753356,
+        "horizontal_gradient_code8": 4.199455081986333,
+        "unique_rgb_triplets": 69089
+      }
+    },
+    {
+      "scene": "closeup",
+      "variant": "spline",
+      "source_frame": 14943,
+      "source_frame_kind": "original",
+      "source_time": 623.248,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "spline",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "d5f6e9cc3e013ce0bdd4f0c4535c545a3da9573ab68b89dc6a8e2873151a3bd1",
+      "result_path": "stage1b\\closeup-spline\\result.json",
+      "image_path": "stage1b/closeup-spline/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 75.66750801282052,
+        "all_endpoint_pct": 0.04037228796844181,
+        "any_endpoint_pct": 0.045303254437869825,
+        "all_near_white_pct": 0.4863165680473373,
+        "luma_code8_std": 79.55965240937336,
+        "horizontal_gradient_code8": 3.9800599595239117,
+        "unique_rgb_triplets": 5023
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "794b3115e63b3c78d2fcf2d14faf9b0b2217028ecb44811eacd6ff916a0624eb",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 74.4570959389558,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.026503944773175542,
+        "all_near_white_pct": 0.433000493096647,
+        "luma_code8_std": 79.39303805987461,
+        "horizontal_gradient_code8": 3.8916211659313364,
+        "unique_rgb_triplets": 78581
+      }
+    },
+    {
+      "scene": "dark",
+      "variant": "baseline",
+      "source_frame": 110257,
+      "source_frame_kind": "original",
+      "source_time": 4598.636,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "fb4aed66fe221ce397163660c773b7c48c3d3b49e3af66578ab9e34ae0c51177",
+      "result_path": "stage1b\\dark-baseline\\result.json",
+      "image_path": "stage1b/dark-baseline/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 85.15931644477318,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 18.225468441814595,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 83.65632460906157,
+        "horizontal_gradient_code8": 4.389476991565425,
+        "unique_rgb_triplets": 92956
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "f60ef6105ec27825bd66220ce3e3dfd98d7068fe386477286f7e41ae2a276978",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 84.1338611817819,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 12.288892998027613,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 83.54799892497141,
+        "horizontal_gradient_code8": 4.363022423582573,
+        "unique_rgb_triplets": 273971
+      }
+    },
+    {
+      "scene": "dark",
+      "variant": "knee1",
+      "source_frame": 110257,
+      "source_frame_kind": "original",
+      "source_time": 4598.636,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "cb097206ebc122f17cb455e3baaf6f896d707e365b97d62e78ce8f8ac6845e86",
+      "result_path": "stage1b\\dark-knee1\\result.json",
+      "image_path": "stage1b/dark-knee1/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 84.12996486686389,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 16.429980276134124,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 81.7634023948839,
+        "horizontal_gradient_code8": 4.321730091749912,
+        "unique_rgb_triplets": 97258
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "b26d5685596b12003db569f6de9030743a66fbea253a17d3ce92a1a5fad5412c",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 83.08553460054696,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 12.34775641025641,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 81.6085457463946,
+        "horizontal_gradient_code8": 4.293743424963364,
+        "unique_rgb_triplets": 279575
+      }
+    },
+    {
+      "scene": "dark",
+      "variant": "spline",
+      "source_frame": 110257,
+      "source_frame_kind": "original",
+      "source_time": 4598.636,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "spline",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "9fe5933765dde8b1f618787f8b59d0db4536a393205325a25399c9750c8ce637",
+      "result_path": "stage1b\\dark-spline\\result.json",
+      "image_path": "stage1b/dark-spline/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 76.0159958497699,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 2.0740877712031556,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 71.9989415166996,
+        "horizontal_gradient_code8": 4.017272031393648,
+        "unique_rgb_triplets": 115635
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "199c7360c0990f542534837b85db6c3fdc2893c35c4010cfecd83e2079ee1544",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 74.87825603675647,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 1.0210182445759368,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 71.6081774642355,
+        "horizontal_gradient_code8": 3.9809453644529667,
+        "unique_rgb_triplets": 283998
+      }
+    },
+    {
+      "scene": "porch",
+      "variant": "knee1",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "0086d94f4d8d56b775e38e6ebc93e94aaa8ed5bd72a20b8929bb0211967e8ed9",
+      "result_path": "stage1b\\porch-knee1\\result.json",
+      "image_path": "stage1b/porch-knee1/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 135.67017998027615,
+        "all_endpoint_pct": 0.8216222879684418,
+        "any_endpoint_pct": 0.9624630177514794,
+        "all_near_white_pct": 11.452477810650889,
+        "luma_code8_std": 103.81477954088713,
+        "horizontal_gradient_code8": 4.848350114456009,
+        "unique_rgb_triplets": 4512
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "a3552356130743eb5ed674c3f6fa4af6b9a009ee7d684a0b889accff3c09c6d0",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 134.86514836389125,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.4114275147928994,
+        "all_near_white_pct": 10.976639546351084,
+        "luma_code8_std": 104.07372547715057,
+        "horizontal_gradient_code8": 4.781428953203893,
+        "unique_rgb_triplets": 70166
+      }
+    },
+    {
+      "scene": "porch",
+      "variant": "plain",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "b2436da1dc3daef708c655bdc139118dc9600a86d523fba932c0c3286214e721",
+      "result_path": "stage1b\\porch-plain\\result.json",
+      "image_path": "stage1b/porch-plain/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 139.13187869822485,
+        "all_endpoint_pct": 7.330498027613412,
+        "any_endpoint_pct": 8.349975345167653,
+        "all_near_white_pct": 20.903291420118343,
+        "luma_code8_std": 107.07552269460686,
+        "horizontal_gradient_code8": 4.744181210086938,
+        "unique_rgb_triplets": 4199
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted"
+    },
+    {
+      "scene": "porch",
+      "variant": "spline",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "spline",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "0df4c1c1ba4f258a6b1a58e360af8bce7572843412d90e2ec5af515f998c0b45",
+      "result_path": "stage1b\\porch-spline\\result.json",
+      "image_path": "stage1b/porch-spline/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 121.6819269806049,
+        "all_endpoint_pct": 0.0003081854043392505,
+        "any_endpoint_pct": 0.0003081854043392505,
+        "all_near_white_pct": 0.000616370808678501,
+        "luma_code8_std": 93.14849351491803,
+        "horizontal_gradient_code8": 4.682264681528466,
+        "unique_rgb_triplets": 4589
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "300d7da03fad8d6ab3ffb35a75d669f5dbeefb9311b94a8fbb8c095e99e19559",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 120.66105939911922,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0003081854043392505,
+        "all_near_white_pct": 0.000616370808678501,
+        "luma_code8_std": 93.16776375468868,
+        "horizontal_gradient_code8": 4.614080240007219,
+        "unique_rgb_triplets": 76640
+      }
+    },
+    {
+      "scene": "porch",
+      "variant": "measured100",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 100.0,
+        "gamut_mapping": 1,
+        "metadata": 4,
+        "use_dovi": false,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "da9933d3c6a3aa66ab6735f62dc5bf1244809bcea4e8c47a7184ce92f2e323fe",
+      "result_path": "stage2\\porch-measured100\\result.json",
+      "image_path": "stage2/porch-measured100/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 139.13288749178173,
+        "all_endpoint_pct": 7.328648915187378,
+        "any_endpoint_pct": 8.3472016765286,
+        "all_near_white_pct": 20.90051775147929,
+        "luma_code8_std": 107.07361487434179,
+        "horizontal_gradient_code8": 4.744039073615886,
+        "unique_rgb_triplets": 4181
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "8a88e32c4a953910936211ac2a3102d004938f7ea6f4b8dd038731e077f6ab07",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 138.39363243386367,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 5.397250986193294,
+        "all_near_white_pct": 19.412598619329387,
+        "luma_code8_std": 107.39837645824473,
+        "horizontal_gradient_code8": 4.672302425225703,
+        "unique_rgb_triplets": 65015
+      }
+    },
+    {
+      "scene": "porch",
+      "variant": "measured99995",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 4,
+        "use_dovi": false,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "a8379d7224532bf9a4da3a529f37ce5c19d499b04c7b939d9d1aefc195105b67",
+      "result_path": "stage2\\porch-measured99995\\result.json",
+      "image_path": "stage2/porch-measured99995/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 139.40048385108483,
+        "all_endpoint_pct": 8.58142258382643,
+        "any_endpoint_pct": 9.986439842209073,
+        "all_near_white_pct": 22.856262327416175,
+        "luma_code8_std": 107.43639172071985,
+        "horizontal_gradient_code8": 4.725240489044925,
+        "unique_rgb_triplets": 4149
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "5b7c283d8e6e0d444f47c121361e60713eff72afbcf139ae3c25f9b4735b0ac1",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 138.66593484824648,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 6.87099358974359,
+        "all_near_white_pct": 21.382211538461537,
+        "luma_code8_std": 107.7647206938963,
+        "horizontal_gradient_code8": 4.651536241819079,
+        "unique_rgb_triplets": 64319
+      }
+    },
+    {
+      "scene": "porch",
+      "variant": "metadata2",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 2,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "00208b44f9d3eec34116a958a0605271089f6f4d4abcb3cc6e26cff33df13000",
+      "result_path": "stage2\\porch-metadata2\\result.json",
+      "image_path": "stage2/porch-metadata2/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 132.17659229125576,
+        "all_endpoint_pct": 0.001232741617357002,
+        "any_endpoint_pct": 0.0015409270216962525,
+        "all_near_white_pct": 0.008012820512820512,
+        "luma_code8_std": 98.5648345124153,
+        "horizontal_gradient_code8": 4.757069163514756,
+        "unique_rgb_triplets": 4544
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "82ac05d2060a22e25438c99204d90e7c4efeb4813debb91b173d1d7b9080a55f",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 131.22942361574792,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0015409270216962525,
+        "all_near_white_pct": 0.00616370808678501,
+        "luma_code8_std": 98.79002087523658,
+        "horizontal_gradient_code8": 4.689626678858406,
+        "unique_rgb_triplets": 71926
+      }
+    },
+    {
+      "scene": "porch",
+      "variant": "static448",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": 448,
+        "dynamic_peak_detection": false,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 2,
+        "use_dovi": false,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "0e3f0ae9879d5ab4993e4f376ee0d8ca16e1496da4d28b9d5a65005d845b032e",
+      "result_path": "stage2\\porch-static448\\result.json",
+      "image_path": "stage2/porch-static448/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 136.96240651709405,
+        "all_endpoint_pct": 0.15101084812623272,
+        "any_endpoint_pct": 0.20309418145956606,
+        "all_near_white_pct": 11.36063856015779,
+        "luma_code8_std": 104.28541553978489,
+        "horizontal_gradient_code8": 4.808736465499689,
+        "unique_rgb_triplets": 4472
+      },
+      "effective_peak_status": "observed trace",
+      "native16_sha256": "fa7d51cc9efbb3d53d33bbdac2c26bb702cfdba03fa6befc30bb262fe9c72634",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 136.15780576069272,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.09615384615384616,
+        "all_near_white_pct": 10.577539447731755,
+        "luma_code8_std": 104.57566002301215,
+        "horizontal_gradient_code8": 4.740383710679523,
+        "unique_rgb_triplets": 69260
+      }
+    },
+    {
+      "scene": "immaculate",
+      "variant": "baseline",
+      "source_frame": 72,
+      "source_frame_kind": "retained_excerpt",
+      "source_time": 3.169,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "13f24640ad2c09f5fe99e4cdc3fd3e02980db86cf1318d001c7933d69f663523",
+      "result_path": "stage3\\immaculate-baseline\\result.json",
+      "image_path": "stage3/immaculate-baseline/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1920
+        ],
+        "stride": 4,
+        "pixels": 401280,
+        "mean_code8": 33.70267892743221,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 30.478134742756104,
+        "horizontal_gradient_code8": 1.9323311159451384,
+        "unique_rgb_triplets": 18997
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "76cd303c9859d847e729c52a3c13a802118ad03c25f73e47ebed65033dcc800f",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1920
+        ],
+        "stride": 4,
+        "pixels": 401280,
+        "mean_code8": 32.424246590547085,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 29.307721595649397,
+        "horizontal_gradient_code8": 1.8575429100211225,
+        "unique_rgb_triplets": 360333
+      }
+    },
+    {
+      "scene": "immaculate",
+      "variant": "knee1",
+      "source_frame": 72,
+      "source_frame_kind": "retained_excerpt",
+      "source_time": 3.169,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "13f24640ad2c09f5fe99e4cdc3fd3e02980db86cf1318d001c7933d69f663523",
+      "result_path": "stage3\\immaculate-knee1\\result.json",
+      "image_path": "stage3/immaculate-knee1/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1920
+        ],
+        "stride": 4,
+        "pixels": 401280,
+        "mean_code8": 33.70267892743221,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 30.478134742756104,
+        "horizontal_gradient_code8": 1.9323311159451384,
+        "unique_rgb_triplets": 18997
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "76cd303c9859d847e729c52a3c13a802118ad03c25f73e47ebed65033dcc800f",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1920
+        ],
+        "stride": 4,
+        "pixels": 401280,
+        "mean_code8": 32.424246590547085,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 29.307721595649397,
+        "horizontal_gradient_code8": 1.8575429100211225,
+        "unique_rgb_triplets": 360333
+      }
+    },
+    {
+      "scene": "porch",
+      "variant": "knee1-contrast0",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.0,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "418428993612bf604095a6bc56052c98e7db5f150a683c7c10d6bc0eae3cf08d",
+      "result_path": "stage3\\porch-knee1-contrast0\\result.json",
+      "image_path": "stage3/porch-knee1-contrast0/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 135.62958682610125,
+        "all_endpoint_pct": 0.0003081854043392505,
+        "any_endpoint_pct": 0.0003081854043392505,
+        "all_near_white_pct": 11.067246055226825,
+        "luma_code8_std": 103.73098511338583,
+        "horizontal_gradient_code8": 4.3699291612935065,
+        "unique_rgb_triplets": 2999
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "c72e825ff785ce8fc108e908ccd1c53e8f821a8c3a180990b1afa82d51f23914",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 134.82610048970704,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0,
+        "all_near_white_pct": 10.800357495069033,
+        "luma_code8_std": 103.98986860828123,
+        "horizontal_gradient_code8": 4.304079315094334,
+        "unique_rgb_triplets": 7051
+      }
+    },
+    {
+      "scene": "porch",
+      "variant": "knee1-gamut2",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 2,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "600bf2e0b3e28958e08da26f3685a5e27d229fe11da579c42d38eedf0263a37d",
+      "result_path": "stage3\\porch-knee1-gamut2\\result.json",
+      "image_path": "stage3/porch-knee1-gamut2/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 135.5720496383958,
+        "all_endpoint_pct": 0.8216222879684418,
+        "any_endpoint_pct": 0.9445882642998027,
+        "all_near_white_pct": 11.506410256410255,
+        "luma_code8_std": 103.80977364018332,
+        "horizontal_gradient_code8": 4.85494062108582,
+        "unique_rgb_triplets": 4260
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "33893a982d7d84e5afb0a512e082c010b33c96b1cc63812afce5b171c72f250a",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 134.7649411201992,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.39047090729783035,
+        "all_near_white_pct": 11.032421104536489,
+        "luma_code8_std": 104.06818794788322,
+        "horizontal_gradient_code8": 4.788003143842396,
+        "unique_rgb_triplets": 70209
+      }
+    },
+    {
+      "scene": "porch",
+      "variant": "knee1-gamut7",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 7,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "4e05db5937ee285e5ee65621fc8a5c5a37cf342ad721457dd10793afa44919ea",
+      "result_path": "stage3\\porch-knee1-gamut7\\result.json",
+      "image_path": "stage3/porch-knee1-gamut7/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 123.2978406476003,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 95.68652271772936,
+        "horizontal_gradient_code8": 4.475022235933634,
+        "unique_rgb_triplets": 4214
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "670a58b8d3480acf874ed4ad1d77c123548faaffb2b83f6d742a865ed52f70b8",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 122.3722908104629,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 95.66637664147322,
+        "horizontal_gradient_code8": 4.403745422017688,
+        "unique_rgb_triplets": 70213
+      }
+    },
+    {
+      "scene": "spiderverse",
+      "variant": "baseline",
+      "source_frame": 72,
+      "source_frame_kind": "retained_excerpt",
+      "source_time": 3.169,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "a29138084265f7a4ad34da28ed6a7e20ab36b07ca660fa13c2fedd71d74e1c25",
+      "result_path": "stage3\\spiderverse-baseline\\result.json",
+      "image_path": "stage3/spiderverse-baseline/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 112.52992377547666,
+        "all_endpoint_pct": 0.41235207100591714,
+        "any_endpoint_pct": 6.633074457593688,
+        "all_near_white_pct": 1.6407790927021697,
+        "luma_code8_std": 65.44518196649965,
+        "horizontal_gradient_code8": 7.780608338937873,
+        "unique_rgb_triplets": 214519
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "a1512b5e287b1ef7fba56cd8145169474fe4a098fb3c67163a33ec80f749cd38",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 110.43804264214742,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 4.7121548323471405,
+        "all_near_white_pct": 1.4040927021696252,
+        "luma_code8_std": 66.17858990783222,
+        "horizontal_gradient_code8": 7.817943771028728,
+        "unique_rgb_triplets": 288852
+      }
+    },
+    {
+      "scene": "spiderverse",
+      "variant": "knee1",
+      "source_frame": 72,
+      "source_frame_kind": "retained_excerpt",
+      "source_time": 3.169,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "0d12c25769985a119efe7ed3768861ab46fc79eba625df273304715eb7d5822c",
+      "result_path": "stage3\\spiderverse-knee1\\result.json",
+      "image_path": "stage3/spiderverse-knee1/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 111.97195410092044,
+        "all_endpoint_pct": 0.20617603550295857,
+        "any_endpoint_pct": 3.6892874753451674,
+        "all_near_white_pct": 0.9985207100591716,
+        "luma_code8_std": 64.36742989893162,
+        "horizontal_gradient_code8": 7.742762255431261,
+        "unique_rgb_triplets": 217875
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "0c1c0b21b1eda7d6edb4a9a1cf0eaadf90d64158793a88dc9ed5cb53b264e5bb",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 109.8696380536305,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 2.1841099605522682,
+        "all_near_white_pct": 0.8441198224852071,
+        "luma_code8_std": 65.0773633916399,
+        "horizontal_gradient_code8": 7.7792831145652235,
+        "unique_rgb_triplets": 294443
+      }
+    },
+    {
+      "scene": "spiderverse",
+      "variant": "knee1-gamut2",
+      "source_frame": 72,
+      "source_frame_kind": "retained_excerpt",
+      "source_time": 3.169,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 2,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "98223d43031874dc0642bc62ea846ead527ac378b847be8bf34b9f1c9e583755",
+      "result_path": "stage3\\spiderverse-knee1-gamut2\\result.json",
+      "image_path": "stage3/spiderverse-knee1-gamut2/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 111.62952929815908,
+        "all_endpoint_pct": 0.20617603550295857,
+        "any_endpoint_pct": 0.33869575936883634,
+        "all_near_white_pct": 1.1054610453648914,
+        "luma_code8_std": 64.08963474516447,
+        "horizontal_gradient_code8": 7.71731385503884,
+        "unique_rgb_triplets": 216247
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "c3b796f5a24a987973d97a34be24149b69634d16397c228b02bfeef2626124d3",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 109.52173993804634,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.14792899408284024,
+        "all_near_white_pct": 0.9254807692307693,
+        "luma_code8_std": 64.78995006533566,
+        "horizontal_gradient_code8": 7.753071242199731,
+        "unique_rgb_triplets": 294456
+      }
+    },
+    {
+      "scene": "spiderverse",
+      "variant": "knee1-gamut7",
+      "source_frame": 72,
+      "source_frame_kind": "retained_excerpt",
+      "source_time": 3.169,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 7,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "19074df0132151d5f88970902ac0b0c8153edcbcfb4ca40b0e7ae9d67b85bcd2",
+      "result_path": "stage3\\spiderverse-knee1-gamut7\\result.json",
+      "image_path": "stage3/spiderverse-knee1-gamut7/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 101.72765861275477,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.18891765285996054,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 59.53615243649724,
+        "horizontal_gradient_code8": 7.192970910280062,
+        "unique_rgb_triplets": 213395
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "2619371cdce55906f9532df5d9c3a2cd261ab2779ff364a623f28bf4abc86d57",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 99.5511507587037,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.11988412228796845,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 60.0765372050569,
+        "horizontal_gradient_code8": 7.206651870865454,
+        "unique_rgb_triplets": 294439
+      }
+    },
+    {
+      "scene": "substance",
+      "variant": "baseline",
+      "source_frame": 72,
+      "source_frame_kind": "retained_excerpt",
+      "source_time": 3.128,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "3b78a40e03246ebca5056bd33ddbcd27e44fe5d6f0476dd1b4e7579dda44e572",
+      "result_path": "stage3\\substance-baseline\\result.json",
+      "image_path": "stage3/substance-baseline/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1608
+        ],
+        "stride": 4,
+        "pixels": 326400,
+        "mean_code8": 24.921889297385622,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 20.042863313406546,
+        "horizontal_gradient_code8": 2.493542797644605,
+        "unique_rgb_triplets": 43572
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "daa2df64fab1d3c6c1d7792b145eb01a43eb26af32e3085bffb4690d5bf4d456",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1608
+        ],
+        "stride": 4,
+        "pixels": 326400,
+        "mean_code8": 23.683899971548282,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 18.782297910007614,
+        "horizontal_gradient_code8": 2.3470609046268964,
+        "unique_rgb_triplets": 247045
+      }
+    },
+    {
+      "scene": "substance",
+      "variant": "knee1",
+      "source_frame": 72,
+      "source_frame_kind": "retained_excerpt",
+      "source_time": 3.128,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.3,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "3b78a40e03246ebca5056bd33ddbcd27e44fe5d6f0476dd1b4e7579dda44e572",
+      "result_path": "stage3\\substance-knee1\\result.json",
+      "image_path": "stage3/substance-knee1/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1608
+        ],
+        "stride": 4,
+        "pixels": 326400,
+        "mean_code8": 24.921889297385622,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 20.042863313406546,
+        "horizontal_gradient_code8": 2.493542797644605,
+        "unique_rgb_triplets": 43572
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "daa2df64fab1d3c6c1d7792b145eb01a43eb26af32e3085bffb4690d5bf4d456",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1608
+        ],
+        "stride": 4,
+        "pixels": 326400,
+        "mean_code8": 23.683899971548282,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0,
+        "all_near_white_pct": 0.0,
+        "luma_code8_std": 18.782297910007614,
+        "horizontal_gradient_code8": 2.3470609046268964,
+        "unique_rgb_triplets": 247045
+      }
+    },
+    {
+      "scene": "closeup",
+      "variant": "knee1-contrast0",
+      "source_frame": 14943,
+      "source_frame_kind": "original",
+      "source_time": 623.248,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.0,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "bae4ae0adbfe628de5f4347a4a3e6fbe42b134fb8e53bd6c833b8ea40f0e6000",
+      "result_path": "stage4\\closeup-knee1-contrast0\\result.json",
+      "image_path": "stage4/closeup-knee1-contrast0/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 84.69354659763313,
+        "all_endpoint_pct": 0.8579881656804733,
+        "any_endpoint_pct": 0.9871178500986193,
+        "all_near_white_pct": 5.797275641025641,
+        "luma_code8_std": 89.43351411710054,
+        "horizontal_gradient_code8": 4.004400928605364,
+        "unique_rgb_triplets": 3322
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "a823e664e43ea51823e27fa892df387b1e0238e52f6777c54344899e0a3886be",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 83.5552258411423,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.11063856015779093,
+        "all_near_white_pct": 5.416050295857988,
+        "luma_code8_std": 89.50888470692318,
+        "horizontal_gradient_code8": 3.925580243003456,
+        "unique_rgb_triplets": 8301
+      }
+    },
+    {
+      "scene": "porch",
+      "variant": "baseline-contrast0",
+      "source_frame": 12382,
+      "source_frame_kind": "original",
+      "source_time": 516.433,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 0.5,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.0,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "b4fca44f1be885ce0f4efe2c27f6615cd0a880f5fceb5129f475c4d16ee23f12",
+      "result_path": "stage4\\porch-baseline-contrast0\\result.json",
+      "image_path": "stage4/porch-baseline-contrast0/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 139.12522702991453,
+        "all_endpoint_pct": 7.653168145956607,
+        "any_endpoint_pct": 8.58203895463511,
+        "all_near_white_pct": 20.37783530571992,
+        "luma_code8_std": 107.02502334266266,
+        "horizontal_gradient_code8": 4.285323501428386,
+        "unique_rgb_triplets": 2932
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "54b03dc876a14a3b7d804b910c0b0b2a38c283722a7629989481ae341597c3f3",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 138.36775308617106,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 0.0003081854043392505,
+        "all_near_white_pct": 18.92258382642998,
+        "luma_code8_std": 107.33334988359653,
+        "horizontal_gradient_code8": 4.2095560837282076,
+        "unique_rgb_triplets": 7060
+      }
+    },
+    {
+      "scene": "spiderverse",
+      "variant": "knee1-contrast0",
+      "source_frame": 72,
+      "source_frame_kind": "retained_excerpt",
+      "source_time": 3.169,
+      "settings": {
+        "enabled": true,
+        "preset": "reference",
+        "tonemap_speed": "quality",
+        "tone_curve": "bt2390",
+        "target_nits": 100,
+        "source_peak": null,
+        "dynamic_peak_detection": true,
+        "dst_min_nits": 0.18,
+        "knee_offset": 1.0,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "gamut_mapping": 1,
+        "metadata": 0,
+        "use_dovi": true,
+        "contrast_recovery": 0.0,
+        "gamma_lift": false
+      },
+      "rgb8_sha256": "316d0f6c5277d643c699f9d6a77b56c427f07440f9237244fa1f8acd8bff1a73",
+      "result_path": "stage4\\spiderverse-knee1-contrast0\\result.json",
+      "image_path": "stage4/spiderverse-knee1-contrast0/final.png",
+      "rgb8_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 111.99418248685076,
+        "all_endpoint_pct": 0.12974605522682447,
+        "any_endpoint_pct": 3.127157297830375,
+        "all_near_white_pct": 0.834257889546351,
+        "luma_code8_std": 64.2565367806682,
+        "horizontal_gradient_code8": 7.575304089565684,
+        "unique_rgb_triplets": 208525
+      },
+      "effective_peak_status": "unavailable: verbose native logs contain shader source but no per-frame effective-peak receipt; supplied src_max is not substituted",
+      "native16_sha256": "0f62e32f3ddcee48c58e6198705775319f356eb0c504884dff17db0524ab677b",
+      "native16_picture": {
+        "bounds_xyxy": [
+          0,
+          250,
+          3840,
+          1600
+        ],
+        "stride": 4,
+        "pixels": 324480,
+        "mean_code8": 109.89008037923034,
+        "all_endpoint_pct": 0.0,
+        "any_endpoint_pct": 1.7187500000000002,
+        "all_near_white_pct": 0.7005054240631163,
+        "luma_code8_std": 64.96698109170511,
+        "horizontal_gradient_code8": 7.612595729610938,
+        "unique_rgb_triplets": 226334
+      }
+    }
+  ],
+  "differentials": [
+    {
+      "scene": "closeup",
+      "variant": "knee1",
+      "baseline": "baseline",
+      "mean_abs_code8": 1.7126089409722223,
+      "max_abs_code8": 13,
+      "changed_components_pct": 24.420589192708334,
+      "mean_channel_delta": [
+        -1.7223479817708334,
+        -1.71119189453125,
+        -1.70421337890625
+      ]
+    },
+    {
+      "scene": "closeup",
+      "variant": "spline",
+      "baseline": "baseline",
+      "mean_abs_code8": 10.583894802517362,
+      "max_abs_code8": 46,
+      "changed_components_pct": 85.78923068576388,
+      "mean_channel_delta": [
+        -10.6295556640625,
+        -10.569877766927084,
+        -10.5522509765625
+      ]
+    },
+    {
+      "scene": "closeup",
+      "variant": "knee1-contrast0",
+      "baseline": "baseline",
+      "mean_abs_code8": 1.8227083333333334,
+      "max_abs_code8": 19,
+      "changed_components_pct": 33.36791449652778,
+      "mean_channel_delta": [
+        -1.7301780598958334,
+        -1.71540087890625,
+        -1.7114900716145833
+      ]
+    },
+    {
+      "scene": "dark",
+      "variant": "knee1",
+      "baseline": "baseline",
+      "mean_abs_code8": 0.8777798394097223,
+      "max_abs_code8": 12,
+      "changed_components_pct": 15.648980034722223,
+      "mean_channel_delta": [
+        -0.32406103515625,
+        -1.2272185872395833,
+        -1.081990234375
+      ]
+    },
+    {
+      "scene": "dark",
+      "variant": "spline",
+      "baseline": "baseline",
+      "mean_abs_code8": 8.399627061631945,
+      "max_abs_code8": 48,
+      "changed_components_pct": 76.26765407986112,
+      "mean_channel_delta": [
+        -7.8998448893229165,
+        -10.146128743489584,
+        -7.152876953125
+      ]
+    },
+    {
+      "scene": "immaculate",
+      "variant": "knee1",
+      "baseline": "baseline",
+      "mean_abs_code8": 0.0,
+      "max_abs_code8": 0,
+      "changed_components_pct": 0.0,
+      "mean_channel_delta": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "scene": "porch",
+      "variant": "knee1",
+      "baseline": "baseline",
+      "mean_abs_code8": 3.0657779947916666,
+      "max_abs_code8": 12,
+      "changed_components_pct": 47.84296332465278,
+      "mean_channel_delta": [
+        -3.085491373697917,
+        -3.0820615234375,
+        -3.02975927734375
+      ]
+    },
+    {
+      "scene": "porch",
+      "variant": "plain",
+      "baseline": "baseline",
+      "mean_abs_code8": 0.0,
+      "max_abs_code8": 0,
+      "changed_components_pct": 0.0,
+      "mean_channel_delta": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "scene": "porch",
+      "variant": "spline",
+      "baseline": "baseline",
+      "mean_abs_code8": 16.26160400390625,
+      "max_abs_code8": 44,
+      "changed_components_pct": 85.1636013454861,
+      "mean_channel_delta": [
+        -16.2850751953125,
+        -16.268103352864582,
+        -16.231633463541666
+      ]
+    },
+    {
+      "scene": "porch",
+      "variant": "measured100",
+      "baseline": "baseline",
+      "mean_abs_code8": 0.002557400173611111,
+      "max_abs_code8": 1,
+      "changed_components_pct": 0.2557400173611111,
+      "mean_channel_delta": [
+        0.0009931640625,
+        0.001052734375,
+        0.001134765625
+      ]
+    },
+    {
+      "scene": "porch",
+      "variant": "measured99995",
+      "baseline": "baseline",
+      "mean_abs_code8": 0.33318766276041667,
+      "max_abs_code8": 2,
+      "changed_components_pct": 32.46601019965278,
+      "mean_channel_delta": [
+        0.23112320963541666,
+        0.23041031901041667,
+        0.22372542317708333
+      ]
+    },
+    {
+      "scene": "porch",
+      "variant": "metadata2",
+      "baseline": "baseline",
+      "mean_abs_code8": 8.460184841579862,
+      "max_abs_code8": 21,
+      "changed_components_pct": 98.84366861979167,
+      "mean_channel_delta": [
+        -6.632889322916666,
+        -6.631566731770834,
+        -6.571099446614583
+      ]
+    },
+    {
+      "scene": "porch",
+      "variant": "static448",
+      "baseline": "baseline",
+      "mean_abs_code8": 2.6779783528645833,
+      "max_abs_code8": 8,
+      "changed_components_pct": 83.90287000868055,
+      "mean_channel_delta": [
+        -1.9828439127604167,
+        -1.9808499348958333,
+        -1.9334899088541666
+      ]
+    },
+    {
+      "scene": "porch",
+      "variant": "knee1-contrast0",
+      "baseline": "baseline",
+      "mean_abs_code8": 3.2178587239583334,
+      "max_abs_code8": 20,
+      "changed_components_pct": 58.72069769965278,
+      "mean_channel_delta": [
+        -3.12948046875,
+        -3.1157548828125,
+        -3.0781201171875
+      ]
+    },
+    {
+      "scene": "porch",
+      "variant": "knee1-gamut2",
+      "baseline": "baseline",
+      "mean_abs_code8": 3.1507489149305554,
+      "max_abs_code8": 14,
+      "changed_components_pct": 47.85852322048611,
+      "mean_channel_delta": [
+        -3.084595703125,
+        -3.0633291015625,
+        -3.3033668619791667
+      ]
+    },
+    {
+      "scene": "porch",
+      "variant": "knee1-gamut7",
+      "baseline": "baseline",
+      "mean_abs_code8": 15.612127278645833,
+      "max_abs_code8": 32,
+      "changed_components_pct": 99.99995659722222,
+      "mean_channel_delta": [
+        -15.6228330078125,
+        -15.615913899739583,
+        -15.597634928385416
+      ]
+    },
+    {
+      "scene": "porch",
+      "variant": "baseline-contrast0",
+      "baseline": "baseline",
+      "mean_abs_code8": 0.34988330078125,
+      "max_abs_code8": 9,
+      "changed_components_pct": 30.981602647569446,
+      "mean_channel_delta": [
+        0.020016438802083335,
+        0.017413248697916668,
+        0.01506103515625
+      ]
+    },
+    {
+      "scene": "spiderverse",
+      "variant": "knee1",
+      "baseline": "baseline",
+      "mean_abs_code8": 0.6133648003472222,
+      "max_abs_code8": 13,
+      "changed_components_pct": 15.662510850694444,
+      "mean_channel_delta": [
+        -0.6302374674479166,
+        -0.6501871744791666,
+        -0.5593312174479167
+      ]
+    },
+    {
+      "scene": "spiderverse",
+      "variant": "knee1-gamut2",
+      "baseline": "baseline",
+      "mean_abs_code8": 1.22785400390625,
+      "max_abs_code8": 152,
+      "changed_components_pct": 28.146115451388887,
+      "mean_channel_delta": [
+        -0.93751708984375,
+        -0.8843933919270833,
+        -1.12709619140625
+      ]
+    },
+    {
+      "scene": "spiderverse",
+      "variant": "knee1-gamut7",
+      "baseline": "baseline",
+      "mean_abs_code8": 10.947247504340277,
+      "max_abs_code8": 97,
+      "changed_components_pct": 99.12188042534721,
+      "mean_channel_delta": [
+        -10.88615478515625,
+        -10.736946126302083,
+        -11.0700576171875
+      ]
+    },
+    {
+      "scene": "spiderverse",
+      "variant": "knee1-contrast0",
+      "baseline": "baseline",
+      "mean_abs_code8": 0.7574637044270833,
+      "max_abs_code8": 17,
+      "changed_components_pct": 26.16132269965278,
+      "mean_channel_delta": [
+        -0.6194088541666667,
+        -0.6322630208333333,
+        -0.53854736328125
+      ]
+    },
+    {
+      "scene": "substance",
+      "variant": "knee1",
+      "baseline": "baseline",
+      "mean_abs_code8": 0.0,
+      "max_abs_code8": 0,
+      "changed_components_pct": 0.0,
+      "mean_channel_delta": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "limits": [
+    "Windows unmanaged native profile only; no calibrated display or SDR grade golden",
+    "Metrics use fixed stride4 coordinates below y250; exact bounds retained per result",
+    "Source identity and source packet/profile provenance retained; historical packet-copy equality not freshly rerun",
+    "Effective peak numeric trace unavailable in fresh still graphs despite log_level6; metadata4 branch backed by pinned source and stripped input props",
+    "No product changes or default recommendation accepted by this executor"
+  ]
+}

@@ -1,0 +1,160 @@
+{
+  "cases": [
+    {
+      "id": "01-reference",
+      "fixture": "ramp",
+      "metadata_fixture": "static",
+      "settings": {}
+    },
+    {
+      "id": "02-knee1",
+      "fixture": "ramp",
+      "metadata_fixture": "static",
+      "settings": {
+        "knee_offset": 1.0
+      }
+    },
+    {
+      "id": "03-spline-contrast05",
+      "fixture": "ramp",
+      "metadata_fixture": "static",
+      "settings": {
+        "tone_curve": "spline"
+      }
+    },
+    {
+      "id": "04-steps-knee1",
+      "fixture": "steps",
+      "metadata_fixture": "static",
+      "settings": {
+        "knee_offset": 1.0
+      }
+    },
+    {
+      "id": "05-impulse-p99995",
+      "fixture": "impulse",
+      "metadata_fixture": "missing",
+      "settings": {
+        "use_dovi": false
+      }
+    },
+    {
+      "id": "06-impulse-p100",
+      "fixture": "impulse",
+      "metadata_fixture": "missing",
+      "settings": {
+        "use_dovi": false,
+        "percentile": 100.0
+      }
+    },
+    {
+      "id": "07-broad-p99995",
+      "fixture": "broad",
+      "metadata_fixture": "missing",
+      "settings": {
+        "use_dovi": false
+      }
+    },
+    {
+      "id": "08-broad-p100",
+      "fixture": "broad",
+      "metadata_fixture": "missing",
+      "settings": {
+        "use_dovi": false,
+        "percentile": 100.0
+      }
+    },
+    {
+      "id": "09-scene-p99995",
+      "fixture": "impulse",
+      "metadata_fixture": "scene",
+      "settings": {
+        "use_dovi": false
+      }
+    },
+    {
+      "id": "10-scene-p100",
+      "fixture": "impulse",
+      "metadata_fixture": "scene",
+      "settings": {
+        "use_dovi": false,
+        "percentile": 100.0
+      }
+    },
+    {
+      "id": "11-understated-static",
+      "fixture": "ramp",
+      "metadata_fixture": "understated",
+      "settings": {
+        "metadata": 2,
+        "dynamic_peak_detection": false,
+        "use_dovi": false
+      }
+    },
+    {
+      "id": "12-true-static",
+      "fixture": "ramp",
+      "metadata_fixture": "static",
+      "settings": {
+        "metadata": 2,
+        "dynamic_peak_detection": false,
+        "use_dovi": false,
+        "source_peak": 4000
+      }
+    },
+    {
+      "id": "13-patch-perceptual",
+      "fixture": "patches",
+      "metadata_fixture": "static",
+      "settings": {
+        "knee_offset": 1.0
+      }
+    },
+    {
+      "id": "14-patch-softclip",
+      "fixture": "patches",
+      "metadata_fixture": "static",
+      "settings": {
+        "knee_offset": 1.0,
+        "gamut_mapping": 2
+      }
+    },
+    {
+      "id": "15-patch-darken",
+      "fixture": "patches",
+      "metadata_fixture": "static",
+      "settings": {
+        "knee_offset": 1.0,
+        "gamut_mapping": 7
+      }
+    },
+    {
+      "id": "16-clipped-knee1",
+      "fixture": "clipped",
+      "metadata_fixture": "static",
+      "settings": {
+        "knee_offset": 1.0
+      }
+    },
+    {
+      "id": "17-extended-preloss",
+      "fixture": "extended",
+      "metadata_fixture": "static",
+      "settings": {
+        "knee_offset": 1.0
+      }
+    },
+    {
+      "id": "18-knee1-no-recovery",
+      "fixture": "ramp",
+      "metadata_fixture": "static",
+      "settings": {
+        "knee_offset": 1.0,
+        "contrast_recovery": 0.0
+      }
+    }
+  ],
+  "native_status": "NOT RUN",
+  "adaptive": "Run 01/02 first; 05-10 require effective-peak trace before attributing percentile changes; 13-15 are a separate gamut comparison. Stop on failures; no full sweep required.",
+  "HLG": "Deferred: specify scene-linear normalization, reference white, nominal display peak/black, system gamma and viewing surround/OOTF assumptions before generating absolute-luminance expectations."
+}

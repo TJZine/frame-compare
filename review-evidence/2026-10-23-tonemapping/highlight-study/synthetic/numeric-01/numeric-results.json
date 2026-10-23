@@ -1,0 +1,366 @@
+{
+  "status": "passed",
+  "identity": {
+    "head": "f1d3b9bf4c3406e3d0cddbfbbc536e0ac8a9279e",
+    "baseline": "f1d3b9bf4c3406e3d0cddbfbbc536e0ac8a9279e",
+    "source_drift": "",
+    "python": "3.13.7 (main, Sep  2 2025, 14:16:00) [MSC v.1944 64 bit (AMD64)]",
+    "executable": "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "source_sha256": {
+      "vs/tonemap_libplacebo.py": "0e50fbbba3f3f486f71a3c3e1324d933ab9aae4119aaf7ab54fbb4bb3f3b60ae",
+      "vs/tonemap_conversion.py": "5eae2baccc3a9a2828dfa83e2435fb3ec6df373038a146717bb539ac2c8c8445",
+      "vs/tonemap_fallback.py": "9b08fa1b180f21a5e3d8e4f8c54ea2e310e315d521badd9f5749a4309cbbf99e",
+      "vs/types.py": "329ee52217bce57a8d9261b069ac32b2ea1ffc794347d851b2ff288a3bbb51e1",
+      "vs/props.py": "d90cf03a441042823cc3359139a59b1ebcd2092303f331f50f76dfff2717c18b",
+      "render/prepare.py": "b6bc8077bc7a97995dd54729554a6493a375b8238f813943a7a26768632b6563",
+      "render/encoders.py": "e6969c4fb449093a480b6b8a72587f395192ed0caab2f8098c600bf240bd7756"
+    },
+    "harness_sha256": "d0f3629a3b11dc958bfc03d1612a355804d822ce899fbe414a97d32cf2421332"
+  },
+  "checks": [
+    {
+      "name": "PQ roundtrip and independent anchors",
+      "passed": true,
+      "details": {
+        "nits": [
+          0,
+          0.0001,
+          0.18,
+          1,
+          100,
+          203,
+          1000,
+          4000,
+          10000
+        ],
+        "errors_nits": [
+          0.0,
+          1.0570971181733668e-18,
+          8.298917109073045e-15,
+          2.886579864025407e-15,
+          5.243805389909539e-12,
+          2.1316282072803006e-12,
+          2.0122570276726037e-11,
+          8.458300726488233e-11,
+          0.0
+        ]
+      }
+    },
+    {
+      "name": "PQ monotonic",
+      "passed": true,
+      "details": {}
+    },
+    {
+      "name": "fixture dimensions steps",
+      "passed": true,
+      "details": {
+        "size": [
+          256,
+          256
+        ],
+        "float32_rgb_sha256": "e22cebfe09c9785211195d7c378c0be18bb0af6e63a643aa1ea57d191b59fbef",
+        "metrics": {
+          "pixels": 65536,
+          "any_high": 4096,
+          "all_high": 4096,
+          "any_low": 0,
+          "near_white": 4096,
+          "unique_rgb": 16,
+          "channel_span": [
+            0.9999992690440974,
+            0.9999992690440974,
+            0.9999992690440974
+          ]
+        }
+      }
+    },
+    {
+      "name": "fixture dimensions ramp",
+      "passed": true,
+      "details": {
+        "size": [
+          256,
+          256
+        ],
+        "float32_rgb_sha256": "0cd0658aba6968731dde2ead291fcc5748e363f054467ef37608979eee02d7a6",
+        "metrics": {
+          "pixels": 65536,
+          "any_high": 0,
+          "all_high": 0,
+          "any_low": 0,
+          "near_white": 0,
+          "unique_rgb": 256,
+          "channel_span": [
+            0.3944939717935383,
+            0.3944939717935383,
+            0.3944939717935383
+          ]
+        }
+      }
+    },
+    {
+      "name": "fixture dimensions impulse",
+      "passed": true,
+      "details": {
+        "size": [
+          256,
+          256
+        ],
+        "float32_rgb_sha256": "f155b07ea165877c71a6ea4b9e886ad30fd94a66cdb6505bfddb53ce5c2bde69",
+        "metrics": {
+          "pixels": 65536,
+          "any_high": 1,
+          "all_high": 1,
+          "any_low": 0,
+          "near_white": 1,
+          "unique_rgb": 2,
+          "channel_span": [
+            0.491921578482601,
+            0.491921578482601,
+            0.491921578482601
+          ]
+        }
+      }
+    },
+    {
+      "name": "fixture dimensions broad",
+      "passed": true,
+      "details": {
+        "size": [
+          256,
+          256
+        ],
+        "float32_rgb_sha256": "919ce133f4befe5a9486f655878d3afdc6347d7afa119537c4b073afba9b1087",
+        "metrics": {
+          "pixels": 65536,
+          "any_high": 4096,
+          "all_high": 4096,
+          "any_low": 0,
+          "near_white": 4096,
+          "unique_rgb": 2,
+          "channel_span": [
+            0.491921578482601,
+            0.491921578482601,
+            0.491921578482601
+          ]
+        }
+      }
+    },
+    {
+      "name": "fixture dimensions patches",
+      "passed": true,
+      "details": {
+        "size": [
+          256,
+          256
+        ],
+        "float32_rgb_sha256": "49f44ed35b0017f8c398fefaee287e99d19a9239aa84cddfaf2e2d056344d6cc",
+        "metrics": {
+          "pixels": 65536,
+          "any_high": 0,
+          "all_high": 0,
+          "any_low": 0,
+          "near_white": 0,
+          "unique_rgb": 32,
+          "channel_span": [
+            0.9025716623550347,
+            0.9025716623550347,
+            0.9025716623550347
+          ]
+        }
+      }
+    },
+    {
+      "name": "fixture dimensions clipped",
+      "passed": true,
+      "details": {
+        "size": [
+          256,
+          256
+        ],
+        "float32_rgb_sha256": "e22153fb1492b81651aa37f23d42952fc3f452b753a8fa2c80d7e46571b59b21",
+        "metrics": {
+          "pixels": 65536,
+          "any_high": 0,
+          "all_high": 0,
+          "any_low": 0,
+          "near_white": 0,
+          "unique_rgb": 60,
+          "channel_span": [
+            0.243748674729642,
+            0.243748674729642,
+            0.243748674729642
+          ]
+        }
+      }
+    },
+    {
+      "name": "fixture dimensions extended",
+      "passed": true,
+      "details": {
+        "size": [
+          256,
+          256
+        ],
+        "float32_rgb_sha256": "c43388309bfcaca476b9335e1e579846c131d441b4cccd05d1ee45f1a3772504",
+        "metrics": {
+          "pixels": 65536,
+          "any_high": 24576,
+          "all_high": 0,
+          "any_low": 24576,
+          "near_white": 0,
+          "unique_rgb": 8,
+          "channel_span": [
+            1.1,
+            0.0,
+            0.0
+          ]
+        }
+      }
+    },
+    {
+      "name": "impulse below excluded tail; broad above",
+      "passed": true,
+      "details": {
+        "impulse_percent": 0.00152587890625,
+        "broad_percent": 6.25,
+        "warning": "Histogram detector is not an exact order statistic; this is a fixture geometry check."
+      }
+    },
+    {
+      "name": "flattening negative control and restoration",
+      "passed": true,
+      "details": {
+        "positive": {
+          "unique": 256,
+          "rises": 255,
+          "reversals": 0,
+          "flat_edges": 0,
+          "span": 1.0
+        },
+        "negative": {
+          "unique": 1,
+          "rises": 0,
+          "reversals": 0,
+          "flat_edges": 255,
+          "span": 0.0
+        }
+      }
+    },
+    {
+      "name": "single-channel saturation negative control",
+      "passed": true,
+      "details": {
+        "pixels": 8,
+        "any_high": 8,
+        "all_high": 0,
+        "any_low": 0,
+        "near_white": 0,
+        "unique_rgb": 1,
+        "channel_span": [
+          0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "name": "fallback cutoff 448",
+      "passed": true,
+      "details": {
+        "source_peak": 448,
+        "encoded_cutoff": 0.2232142857142857,
+        "PQ_nits_at_cutoff": 3.489809455979491,
+        "x": [
+          0.2229910714285714,
+          0.2232142857142857,
+          0.22343749999999996
+        ],
+        "y": [
+          0.9994997498749374,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "fallback cutoff 1000",
+      "passed": true,
+      "details": {
+        "source_peak": 1000,
+        "encoded_cutoff": 0.1,
+        "PQ_nits_at_cutoff": 0.3245655914644875,
+        "x": [
+          0.0999,
+          0.1,
+          0.1001
+        ],
+        "y": [
+          0.9994997498749374,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "fallback cutoff 4000",
+      "passed": true,
+      "details": {
+        "source_peak": 4000,
+        "encoded_cutoff": 0.025,
+        "PQ_nits_at_cutoff": 0.013572097842880618,
+        "x": [
+          0.024975,
+          0.025,
+          0.025025
+        ],
+        "y": [
+          0.9994997498749374,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "final8 merging arithmetic",
+      "passed": true,
+      "details": {
+        "srgb_float": [
+          0.9999251563952166,
+          0.9999401251172438,
+          0.9999550938387357,
+          0.9999700625596922,
+          0.9999850312801136,
+          0.9999999999999999
+        ],
+        "rounded8": [
+          255,
+          255,
+          255,
+          255,
+          255,
+          255
+        ],
+        "scope": "round-to-nearest model; native zimg dithering not measured"
+      }
+    },
+    {
+      "name": "sRGB endpoints",
+      "passed": true,
+      "details": {}
+    },
+    {
+      "name": "clipped source lacks recoverable ramp",
+      "passed": true,
+      "details": {}
+    },
+    {
+      "name": "native never imported",
+      "passed": true,
+      "details": {}
+    }
+  ],
+  "native_status": "NOT RUN"
+}

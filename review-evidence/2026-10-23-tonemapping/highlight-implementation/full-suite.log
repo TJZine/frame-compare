@@ -1,0 +1,1160 @@
+bringing up nodes...
+bringing up nodes...
+
+........................s.......s.....s.......s......s......s.....s..... [  1%]
+s.........................s...........s.ssss.s.........sssss............ [  3%]
+...........................................................s............ [  5%]
+........................................................................ [  6%]
+........................................................................ [  8%]
+...F.................................................................... [ 10%]
+......F................................................................. [ 11%]
+........................................................................ [ 13%]
+........................................................................ [ 15%]
+........................................................................ [ 16%]
+................sss..................................................... [ 18%]
+........................................................................ [ 20%]
+......................................sssss..ss.s...............s....... [ 21%]
+...s..s...................s............................................. [ 23%]
+.......s................................................................ [ 25%]
+.....................................................F.................. [ 26%]
+........................................................................ [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+.................s...................................................... [ 43%]
+.................................s...................................... [ 45%]
+........................................................................ [ 47%]
+........................................................................ [ 48%]
+........................................................................ [ 50%]
+........ss..............................s............................... [ 52%]
+........................................................................ [ 53%]
+........................................................................ [ 55%]
+........................................................................ [ 57%]
+........................................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+.............................sss........................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+......................s.....sss......................................... [ 75%]
+........................................................................ [ 77%]
+............................s........................................... [ 79%]
+........................................................................ [ 80%]
+........................s............................................... [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+....................F................................................... [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+..........................................sssss..s.ssssssssss..s...s.... [ 99%]
+.......sssssss....s..s.........                                          [100%]
+================================== FAILURES ===================================
+_ test_windows_portable_uninstall_preserves_user_files_across_reinstall[powershell] _
+[gw2] win32 -- Python 3.13.7 C:\Software\video\frame-compare\.venv\Scripts\python.exe
+
+tmp_path = WindowsPath('C:/Users/zinez/AppData/Local/Temp/frame-compare-highlight-suite-kzayky1y/scratch/popen-gw2/test_windows_portable_uninstal0')
+repo_root = WindowsPath('C:/Software/video/frame-compare')
+interpreter = 'powershell'
+
+    @pytest.mark.integration
+    @windows_install_uninstall_e2e
+    @pytest.mark.parametrize("interpreter", ["powershell", "pwsh"])
+    @pytest.mark.xdist_group("windows-install-lifecycle")
+    def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
+        tmp_path: Path, repo_root: Path, interpreter: str
+    ) -> None:
+        exe = shutil.which(interpreter)
+        if exe is None:
+            pytest.skip(f"{interpreter} unavailable for install/uninstall lifecycle")
+    
+        source_dir = repo_root / "tools" / "windows_portable"
+        bundle_dir = tmp_path / "bundle"
+        shim_dir = bundle_dir / "shim"
+        config_dir = bundle_dir / "config"
+        shim_dir.mkdir(parents=True)
+        config_dir.mkdir()
+    
+        install_script = bundle_dir / "install.ps1"
+        uninstall_script = bundle_dir / "uninstall.ps1"
+        shutil.copy2(source_dir / "install.ps1", install_script)
+        shutil.copy2(source_dir / "uninstall.ps1", uninstall_script)
+        (bundle_dir / "frame-compare.ps1").write_text("exit 0\n", encoding="utf-8")
+    
+        managed_bin_files = (
+            "frame-compare.ps1",
+            "frame-compare.cmd",
+            "frame-compare-update.ps1",
+            "frame-compare-version.ps1",
+            "frame-compare-update.cmd",
+            "update_public_key.xml",
+        )
+        for index, filename in enumerate(managed_bin_files):
+            (shim_dir / filename).write_bytes(f"managed-{index}\r\n".encode("ascii"))
+        (config_dir / "config.toml").write_bytes(b'[paths]\r\ninput_dir = "initial"\r\n')
+    
+        # Keep the generated-data sentinel outside every install, bundle, state, and
+        # backup subtree so lifecycle checks cannot pass by merely preserving an
+        # in-bundle path.
+        external_generated_root = tmp_path / "external-generated-root"
+        sentinel_run = external_generated_root / "Movie (2026)"
+        sentinel_screenshot = sentinel_run / "screenshots" / "frame.png"
+        sentinel_cache = external_generated_root / "cache" / "analysis" / "clip.compframes"
+        sentinel_screenshot.parent.mkdir(parents=True)
+        sentinel_cache.parent.mkdir(parents=True)
+        sentinel_run.joinpath("report.html").write_bytes(b"<html>sentinel</html>\x00")
+        sentinel_screenshot.write_bytes(b"PNG-SENTINEL\x00")
+        sentinel_cache.write_bytes(b"CACHE-SENTINEL\x00")
+        external_snapshot = _snapshot_bytes(external_generated_root)
+    
+        local_app_data = tmp_path / "local-app-data"
+        env = os.environ.copy()
+        env["LOCALAPPDATA"] = str(local_app_data)
+        install_root = local_app_data / "Programs" / "FrameCompare"
+        bin_dir = install_root / "bin"
+        state_dir = install_root / "state"
+        expected_bin_path = str(bin_dir)
+    
+        original_user_path = _get_user_path(exe)
+        controlled_user_path = r"C:\FrameCompare-E2E\preserve-me"
+        authored_generated = str(external_generated_root).replace("\\", "/")
+        edited_config = (
+            f'\\ufeff[paths]\\r\\ninput_dir = "edited-\u2713"\\r\\ngenerated_dir = "{authored_generated}"\\r\\n'
+        ).encode()
+        unknown_files = {
+            install_root / "root-user.bin": b"root-user-data\x00",
+            bin_dir / "bin-user.bin": b"bin-user-data\x00",
+            state_dir / "state-user.bin": b"state-user-data\x00",
+        }
+    
+        try:
+>           _set_user_path(exe, controlled_user_path)
+
+tests\windows_portable\test_windows_portable_install_uninstall_e2e.py:140: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\windows_portable\test_windows_portable_install_uninstall_e2e.py:59: in _set_user_path
+    subprocess.run(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = 30, check = True
+popenargs = (['c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.EXE', '-NoProfile', '-Command', '[Environment]::SetEnvironmentVariable("Path", $env:FC_TEST_USER_PATH, "User")'],)
+kwargs = {'env': {'ACSETUPSVCPORT': '23210', 'ALLUSERSPROFILE': 'C:\\ProgramData', 'APPDATA': 'C:\\Users\\zinez\\AppData\\Roaming', 'ASL.LOG': 'Destination=file', ...}, 'text': True, 'stdout': -1, 'stderr': -1}
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+    
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.EXE', '-NoProfile', '-Command', '[Environment]::SetEnvironmentVariable("Path", $env:FC_TEST_USER_PATH, "User")']' returned non-zero exit status 1.
+
+C:\Users\zinez\AppData\Roaming\uv\python\cpython-3.13.7-windows-x86_64-none\Lib\subprocess.py:577: CalledProcessError
+
+During handling of the above exception, another exception occurred:
+
+tmp_path = WindowsPath('C:/Users/zinez/AppData/Local/Temp/frame-compare-highlight-suite-kzayky1y/scratch/popen-gw2/test_windows_portable_uninstal0')
+repo_root = WindowsPath('C:/Software/video/frame-compare')
+interpreter = 'powershell'
+
+    @pytest.mark.integration
+    @windows_install_uninstall_e2e
+    @pytest.mark.parametrize("interpreter", ["powershell", "pwsh"])
+    @pytest.mark.xdist_group("windows-install-lifecycle")
+    def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
+        tmp_path: Path, repo_root: Path, interpreter: str
+    ) -> None:
+        exe = shutil.which(interpreter)
+        if exe is None:
+            pytest.skip(f"{interpreter} unavailable for install/uninstall lifecycle")
+    
+        source_dir = repo_root / "tools" / "windows_portable"
+        bundle_dir = tmp_path / "bundle"
+        shim_dir = bundle_dir / "shim"
+        config_dir = bundle_dir / "config"
+        shim_dir.mkdir(parents=True)
+        config_dir.mkdir()
+    
+        install_script = bundle_dir / "install.ps1"
+        uninstall_script = bundle_dir / "uninstall.ps1"
+        shutil.copy2(source_dir / "install.ps1", install_script)
+        shutil.copy2(source_dir / "uninstall.ps1", uninstall_script)
+        (bundle_dir / "frame-compare.ps1").write_text("exit 0\n", encoding="utf-8")
+    
+        managed_bin_files = (
+            "frame-compare.ps1",
+            "frame-compare.cmd",
+            "frame-compare-update.ps1",
+            "frame-compare-version.ps1",
+            "frame-compare-update.cmd",
+            "update_public_key.xml",
+        )
+        for index, filename in enumerate(managed_bin_files):
+            (shim_dir / filename).write_bytes(f"managed-{index}\r\n".encode("ascii"))
+        (config_dir / "config.toml").write_bytes(b'[paths]\r\ninput_dir = "initial"\r\n')
+    
+        # Keep the generated-data sentinel outside every install, bundle, state, and
+        # backup subtree so lifecycle checks cannot pass by merely preserving an
+        # in-bundle path.
+        external_generated_root = tmp_path / "external-generated-root"
+        sentinel_run = external_generated_root / "Movie (2026)"
+        sentinel_screenshot = sentinel_run / "screenshots" / "frame.png"
+        sentinel_cache = external_generated_root / "cache" / "analysis" / "clip.compframes"
+        sentinel_screenshot.parent.mkdir(parents=True)
+        sentinel_cache.parent.mkdir(parents=True)
+        sentinel_run.joinpath("report.html").write_bytes(b"<html>sentinel</html>\x00")
+        sentinel_screenshot.write_bytes(b"PNG-SENTINEL\x00")
+        sentinel_cache.write_bytes(b"CACHE-SENTINEL\x00")
+        external_snapshot = _snapshot_bytes(external_generated_root)
+    
+        local_app_data = tmp_path / "local-app-data"
+        env = os.environ.copy()
+        env["LOCALAPPDATA"] = str(local_app_data)
+        install_root = local_app_data / "Programs" / "FrameCompare"
+        bin_dir = install_root / "bin"
+        state_dir = install_root / "state"
+        expected_bin_path = str(bin_dir)
+    
+        original_user_path = _get_user_path(exe)
+        controlled_user_path = r"C:\FrameCompare-E2E\preserve-me"
+        authored_generated = str(external_generated_root).replace("\\", "/")
+        edited_config = (
+            f'\\ufeff[paths]\\r\\ninput_dir = "edited-\u2713"\\r\\ngenerated_dir = "{authored_generated}"\\r\\n'
+        ).encode()
+        unknown_files = {
+            install_root / "root-user.bin": b"root-user-data\x00",
+            bin_dir / "bin-user.bin": b"bin-user-data\x00",
+            state_dir / "state-user.bin": b"state-user-data\x00",
+        }
+    
+        try:
+            _set_user_path(exe, controlled_user_path)
+    
+            installed = _run_script(exe=exe, script=install_script, env=env)
+            assert installed.returncode == 0, (
+                f"stdout:\n{installed.stdout}\n\nstderr:\n{installed.stderr}"
+            )
+    
+            config_path = state_dir / "config.toml"
+            config_path.write_bytes(edited_config)
+            for path, content in unknown_files.items():
+                path.write_bytes(content)
+    
+            uninstalled = _run_script(exe=exe, script=uninstall_script, env=env)
+            assert uninstalled.returncode == 0, (
+                f"stdout:\n{uninstalled.stdout}\n\nstderr:\n{uninstalled.stderr}"
+            )
+    
+            assert config_path.read_bytes() == edited_config
+            for path, content in unknown_files.items():
+                assert path.read_bytes() == content
+            for filename in managed_bin_files:
+                assert not (bin_dir / filename).exists()
+            assert not (state_dir / "config.json").exists()
+            assert _get_user_path(exe) == controlled_user_path
+            assert _snapshot_bytes(external_generated_root) == external_snapshot
+    
+            replacement_bundle = tmp_path / "bundle-replacement"
+            shutil.copytree(bundle_dir, replacement_bundle)
+            reinstalled = _run_script(
+                exe=exe,
+                script=replacement_bundle / "install.ps1",
+                env=env,
+            )
+            assert reinstalled.returncode == 0, (
+                f"stdout:\n{reinstalled.stdout}\n\nstderr:\n{reinstalled.stderr}"
+            )
+    
+            assert config_path.read_bytes() == edited_config
+            for path, content in unknown_files.items():
+                assert path.read_bytes() == content
+            for filename in managed_bin_files:
+                assert (bin_dir / filename).is_file()
+            assert (state_dir / "config.json").is_file()
+            reinstalled_user_path = _get_user_path(exe)
+            if reinstalled_user_path is None:
+                pytest.fail("Reinstalled user PATH is missing")
+            assert reinstalled_user_path.split(";") == [
+                controlled_user_path,
+                expected_bin_path,
+            ]
+            config_json = json.loads((state_dir / "config.json").read_text(encoding="utf-8"))
+            assert config_json["bundle_path"] == str(replacement_bundle)
+            assert _snapshot_bytes(external_generated_root) == external_snapshot
+        finally:
+>           _set_user_path(exe, original_user_path)
+
+tests\windows_portable\test_windows_portable_install_uninstall_e2e.py:194: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\windows_portable\test_windows_portable_install_uninstall_e2e.py:59: in _set_user_path
+    subprocess.run(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = 30, check = True
+popenargs = (['c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.EXE', '-NoProfile', '-Command', '[Environment]::SetEnvironmentVariable("Path", $env:FC_TEST_USER_PATH, "User")'],)
+kwargs = {'env': {'ACSETUPSVCPORT': '23210', 'ALLUSERSPROFILE': 'C:\\ProgramData', 'APPDATA': 'C:\\Users\\zinez\\AppData\\Roaming', 'ASL.LOG': 'Destination=file', ...}, 'text': True, 'stdout': -1, 'stderr': -1}
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+    
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.EXE', '-NoProfile', '-Command', '[Environment]::SetEnvironmentVariable("Path", $env:FC_TEST_USER_PATH, "User")']' returned non-zero exit status 1.
+
+C:\Users\zinez\AppData\Roaming\uv\python\cpython-3.13.7-windows-x86_64-none\Lib\subprocess.py:577: CalledProcessError
+_ test_windows_portable_uninstall_preserves_user_files_across_reinstall[pwsh] _
+[gw2] win32 -- Python 3.13.7 C:\Software\video\frame-compare\.venv\Scripts\python.exe
+
+tmp_path = WindowsPath('C:/Users/zinez/AppData/Local/Temp/frame-compare-highlight-suite-kzayky1y/scratch/popen-gw2/test_windows_portable_uninstal1')
+repo_root = WindowsPath('C:/Software/video/frame-compare'), interpreter = 'pwsh'
+
+    @pytest.mark.integration
+    @windows_install_uninstall_e2e
+    @pytest.mark.parametrize("interpreter", ["powershell", "pwsh"])
+    @pytest.mark.xdist_group("windows-install-lifecycle")
+    def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
+        tmp_path: Path, repo_root: Path, interpreter: str
+    ) -> None:
+        exe = shutil.which(interpreter)
+        if exe is None:
+            pytest.skip(f"{interpreter} unavailable for install/uninstall lifecycle")
+    
+        source_dir = repo_root / "tools" / "windows_portable"
+        bundle_dir = tmp_path / "bundle"
+        shim_dir = bundle_dir / "shim"
+        config_dir = bundle_dir / "config"
+        shim_dir.mkdir(parents=True)
+        config_dir.mkdir()
+    
+        install_script = bundle_dir / "install.ps1"
+        uninstall_script = bundle_dir / "uninstall.ps1"
+        shutil.copy2(source_dir / "install.ps1", install_script)
+        shutil.copy2(source_dir / "uninstall.ps1", uninstall_script)
+        (bundle_dir / "frame-compare.ps1").write_text("exit 0\n", encoding="utf-8")
+    
+        managed_bin_files = (
+            "frame-compare.ps1",
+            "frame-compare.cmd",
+            "frame-compare-update.ps1",
+            "frame-compare-version.ps1",
+            "frame-compare-update.cmd",
+            "update_public_key.xml",
+        )
+        for index, filename in enumerate(managed_bin_files):
+            (shim_dir / filename).write_bytes(f"managed-{index}\r\n".encode("ascii"))
+        (config_dir / "config.toml").write_bytes(b'[paths]\r\ninput_dir = "initial"\r\n')
+    
+        # Keep the generated-data sentinel outside every install, bundle, state, and
+        # backup subtree so lifecycle checks cannot pass by merely preserving an
+        # in-bundle path.
+        external_generated_root = tmp_path / "external-generated-root"
+        sentinel_run = external_generated_root / "Movie (2026)"
+        sentinel_screenshot = sentinel_run / "screenshots" / "frame.png"
+        sentinel_cache = external_generated_root / "cache" / "analysis" / "clip.compframes"
+        sentinel_screenshot.parent.mkdir(parents=True)
+        sentinel_cache.parent.mkdir(parents=True)
+        sentinel_run.joinpath("report.html").write_bytes(b"<html>sentinel</html>\x00")
+        sentinel_screenshot.write_bytes(b"PNG-SENTINEL\x00")
+        sentinel_cache.write_bytes(b"CACHE-SENTINEL\x00")
+        external_snapshot = _snapshot_bytes(external_generated_root)
+    
+        local_app_data = tmp_path / "local-app-data"
+        env = os.environ.copy()
+        env["LOCALAPPDATA"] = str(local_app_data)
+        install_root = local_app_data / "Programs" / "FrameCompare"
+        bin_dir = install_root / "bin"
+        state_dir = install_root / "state"
+        expected_bin_path = str(bin_dir)
+    
+        original_user_path = _get_user_path(exe)
+        controlled_user_path = r"C:\FrameCompare-E2E\preserve-me"
+        authored_generated = str(external_generated_root).replace("\\", "/")
+        edited_config = (
+            f'\\ufeff[paths]\\r\\ninput_dir = "edited-\u2713"\\r\\ngenerated_dir = "{authored_generated}"\\r\\n'
+        ).encode()
+        unknown_files = {
+            install_root / "root-user.bin": b"root-user-data\x00",
+            bin_dir / "bin-user.bin": b"bin-user-data\x00",
+            state_dir / "state-user.bin": b"state-user-data\x00",
+        }
+    
+        try:
+>           _set_user_path(exe, controlled_user_path)
+
+tests\windows_portable\test_windows_portable_install_uninstall_e2e.py:140: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\windows_portable\test_windows_portable_install_uninstall_e2e.py:59: in _set_user_path
+    subprocess.run(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = 30, check = True
+popenargs = (['C:\\Program Files\\PowerShell\\7\\pwsh.EXE', '-NoProfile', '-Command', '[Environment]::SetEnvironmentVariable("Path", $env:FC_TEST_USER_PATH, "User")'],)
+kwargs = {'env': {'ACSETUPSVCPORT': '23210', 'ALLUSERSPROFILE': 'C:\\ProgramData', 'APPDATA': 'C:\\Users\\zinez\\AppData\\Roaming', 'ASL.LOG': 'Destination=file', ...}, 'text': True, 'stdout': -1, 'stderr': -1}
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+    
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['C:\\Program Files\\PowerShell\\7\\pwsh.EXE', '-NoProfile', '-Command', '[Environment]::SetEnvironmentVariable("Path", $env:FC_TEST_USER_PATH, "User")']' returned non-zero exit status 1.
+
+C:\Users\zinez\AppData\Roaming\uv\python\cpython-3.13.7-windows-x86_64-none\Lib\subprocess.py:577: CalledProcessError
+
+During handling of the above exception, another exception occurred:
+
+tmp_path = WindowsPath('C:/Users/zinez/AppData/Local/Temp/frame-compare-highlight-suite-kzayky1y/scratch/popen-gw2/test_windows_portable_uninstal1')
+repo_root = WindowsPath('C:/Software/video/frame-compare'), interpreter = 'pwsh'
+
+    @pytest.mark.integration
+    @windows_install_uninstall_e2e
+    @pytest.mark.parametrize("interpreter", ["powershell", "pwsh"])
+    @pytest.mark.xdist_group("windows-install-lifecycle")
+    def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
+        tmp_path: Path, repo_root: Path, interpreter: str
+    ) -> None:
+        exe = shutil.which(interpreter)
+        if exe is None:
+            pytest.skip(f"{interpreter} unavailable for install/uninstall lifecycle")
+    
+        source_dir = repo_root / "tools" / "windows_portable"
+        bundle_dir = tmp_path / "bundle"
+        shim_dir = bundle_dir / "shim"
+        config_dir = bundle_dir / "config"
+        shim_dir.mkdir(parents=True)
+        config_dir.mkdir()
+    
+        install_script = bundle_dir / "install.ps1"
+        uninstall_script = bundle_dir / "uninstall.ps1"
+        shutil.copy2(source_dir / "install.ps1", install_script)
+        shutil.copy2(source_dir / "uninstall.ps1", uninstall_script)
+        (bundle_dir / "frame-compare.ps1").write_text("exit 0\n", encoding="utf-8")
+    
+        managed_bin_files = (
+            "frame-compare.ps1",
+            "frame-compare.cmd",
+            "frame-compare-update.ps1",
+            "frame-compare-version.ps1",
+            "frame-compare-update.cmd",
+            "update_public_key.xml",
+        )
+        for index, filename in enumerate(managed_bin_files):
+            (shim_dir / filename).write_bytes(f"managed-{index}\r\n".encode("ascii"))
+        (config_dir / "config.toml").write_bytes(b'[paths]\r\ninput_dir = "initial"\r\n')
+    
+        # Keep the generated-data sentinel outside every install, bundle, state, and
+        # backup subtree so lifecycle checks cannot pass by merely preserving an
+        # in-bundle path.
+        external_generated_root = tmp_path / "external-generated-root"
+        sentinel_run = external_generated_root / "Movie (2026)"
+        sentinel_screenshot = sentinel_run / "screenshots" / "frame.png"
+        sentinel_cache = external_generated_root / "cache" / "analysis" / "clip.compframes"
+        sentinel_screenshot.parent.mkdir(parents=True)
+        sentinel_cache.parent.mkdir(parents=True)
+        sentinel_run.joinpath("report.html").write_bytes(b"<html>sentinel</html>\x00")
+        sentinel_screenshot.write_bytes(b"PNG-SENTINEL\x00")
+        sentinel_cache.write_bytes(b"CACHE-SENTINEL\x00")
+        external_snapshot = _snapshot_bytes(external_generated_root)
+    
+        local_app_data = tmp_path / "local-app-data"
+        env = os.environ.copy()
+        env["LOCALAPPDATA"] = str(local_app_data)
+        install_root = local_app_data / "Programs" / "FrameCompare"
+        bin_dir = install_root / "bin"
+        state_dir = install_root / "state"
+        expected_bin_path = str(bin_dir)
+    
+        original_user_path = _get_user_path(exe)
+        controlled_user_path = r"C:\FrameCompare-E2E\preserve-me"
+        authored_generated = str(external_generated_root).replace("\\", "/")
+        edited_config = (
+            f'\\ufeff[paths]\\r\\ninput_dir = "edited-\u2713"\\r\\ngenerated_dir = "{authored_generated}"\\r\\n'
+        ).encode()
+        unknown_files = {
+            install_root / "root-user.bin": b"root-user-data\x00",
+            bin_dir / "bin-user.bin": b"bin-user-data\x00",
+            state_dir / "state-user.bin": b"state-user-data\x00",
+        }
+    
+        try:
+            _set_user_path(exe, controlled_user_path)
+    
+            installed = _run_script(exe=exe, script=install_script, env=env)
+            assert installed.returncode == 0, (
+                f"stdout:\n{installed.stdout}\n\nstderr:\n{installed.stderr}"
+            )
+    
+            config_path = state_dir / "config.toml"
+            config_path.write_bytes(edited_config)
+            for path, content in unknown_files.items():
+                path.write_bytes(content)
+    
+            uninstalled = _run_script(exe=exe, script=uninstall_script, env=env)
+            assert uninstalled.returncode == 0, (
+                f"stdout:\n{uninstalled.stdout}\n\nstderr:\n{uninstalled.stderr}"
+            )
+    
+            assert config_path.read_bytes() == edited_config
+            for path, content in unknown_files.items():
+                assert path.read_bytes() == content
+            for filename in managed_bin_files:
+                assert not (bin_dir / filename).exists()
+            assert not (state_dir / "config.json").exists()
+            assert _get_user_path(exe) == controlled_user_path
+            assert _snapshot_bytes(external_generated_root) == external_snapshot
+    
+            replacement_bundle = tmp_path / "bundle-replacement"
+            shutil.copytree(bundle_dir, replacement_bundle)
+            reinstalled = _run_script(
+                exe=exe,
+                script=replacement_bundle / "install.ps1",
+                env=env,
+            )
+            assert reinstalled.returncode == 0, (
+                f"stdout:\n{reinstalled.stdout}\n\nstderr:\n{reinstalled.stderr}"
+            )
+    
+            assert config_path.read_bytes() == edited_config
+            for path, content in unknown_files.items():
+                assert path.read_bytes() == content
+            for filename in managed_bin_files:
+                assert (bin_dir / filename).is_file()
+            assert (state_dir / "config.json").is_file()
+            reinstalled_user_path = _get_user_path(exe)
+            if reinstalled_user_path is None:
+                pytest.fail("Reinstalled user PATH is missing")
+            assert reinstalled_user_path.split(";") == [
+                controlled_user_path,
+                expected_bin_path,
+            ]
+            config_json = json.loads((state_dir / "config.json").read_text(encoding="utf-8"))
+            assert config_json["bundle_path"] == str(replacement_bundle)
+            assert _snapshot_bytes(external_generated_root) == external_snapshot
+        finally:
+>           _set_user_path(exe, original_user_path)
+
+tests\windows_portable\test_windows_portable_install_uninstall_e2e.py:194: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\windows_portable\test_windows_portable_install_uninstall_e2e.py:59: in _set_user_path
+    subprocess.run(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+input = None, capture_output = True, timeout = 30, check = True
+popenargs = (['C:\\Program Files\\PowerShell\\7\\pwsh.EXE', '-NoProfile', '-Command', '[Environment]::SetEnvironmentVariable("Path", $env:FC_TEST_USER_PATH, "User")'],)
+kwargs = {'env': {'ACSETUPSVCPORT': '23210', 'ALLUSERSPROFILE': 'C:\\ProgramData', 'APPDATA': 'C:\\Users\\zinez\\AppData\\Roaming', 'ASL.LOG': 'Destination=file', ...}, 'text': True, 'stdout': -1, 'stderr': -1}
+
+    def run(*popenargs,
+            input=None, capture_output=False, timeout=None, check=False, **kwargs):
+        """Run command with arguments and return a CompletedProcess instance.
+    
+        The returned instance will have attributes args, returncode, stdout and
+        stderr. By default, stdout and stderr are not captured, and those attributes
+        will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+        or pass capture_output=True to capture both.
+    
+        If check is True and the exit code was non-zero, it raises a
+        CalledProcessError. The CalledProcessError object will have the return code
+        in the returncode attribute, and output & stderr attributes if those streams
+        were captured.
+    
+        If timeout (seconds) is given and the process takes too long,
+         a TimeoutExpired exception will be raised.
+    
+        There is an optional argument "input", allowing you to
+        pass bytes or a string to the subprocess's stdin.  If you use this argument
+        you may not also use the Popen constructor's "stdin" argument, as
+        it will be used internally.
+    
+        By default, all communication is in bytes, and therefore any "input" should
+        be bytes, and the stdout and stderr will be bytes. If in text mode, any
+        "input" should be a string, and stdout and stderr will be strings decoded
+        according to locale encoding, or by "encoding" if set. Text mode is
+        triggered by setting any of text, encoding, errors or universal_newlines.
+    
+        The other arguments are the same as for the Popen constructor.
+        """
+        if input is not None:
+            if kwargs.get('stdin') is not None:
+                raise ValueError('stdin and input arguments may not both be used.')
+            kwargs['stdin'] = PIPE
+    
+        if capture_output:
+            if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+                raise ValueError('stdout and stderr arguments may not be used '
+                                 'with capture_output.')
+            kwargs['stdout'] = PIPE
+            kwargs['stderr'] = PIPE
+    
+        with Popen(*popenargs, **kwargs) as process:
+            try:
+                stdout, stderr = process.communicate(input, timeout=timeout)
+            except TimeoutExpired as exc:
+                process.kill()
+                if _mswindows:
+                    # Windows accumulates the output in a single blocking
+                    # read() call run on child threads, with the timeout
+                    # being done in a join() on those threads.  communicate()
+                    # _after_ kill() is required to collect that and add it
+                    # to the exception.
+                    exc.stdout, exc.stderr = process.communicate()
+                else:
+                    # POSIX _communicate already populated the output so
+                    # far into the TimeoutExpired exception.
+                    process.wait()
+                raise
+            except:  # Including KeyboardInterrupt, communicate handled that.
+                process.kill()
+                # We don't call process.wait() as .__exit__ does that for us.
+                raise
+            retcode = process.poll()
+            if check and retcode:
+>               raise CalledProcessError(retcode, process.args,
+                                         output=stdout, stderr=stderr)
+E               subprocess.CalledProcessError: Command '['C:\\Program Files\\PowerShell\\7\\pwsh.EXE', '-NoProfile', '-Command', '[Environment]::SetEnvironmentVariable("Path", $env:FC_TEST_USER_PATH, "User")']' returned non-zero exit status 1.
+
+C:\Users\zinez\AppData\Roaming\uv\python\cpython-3.13.7-windows-x86_64-none\Lib\subprocess.py:577: CalledProcessError
+_ test_execute_run_propagates_collection_warning_once_through_result_summary_and_record _
+[gw1] win32 -- Python 3.13.7 C:\Software\video\frame-compare\.venv\Scripts\python.exe
+
+tmp_path = WindowsPath('C:/Users/zinez/AppData/Local/Temp/frame-compare-highlight-suite-kzayky1y/scratch/popen-gw1/test_execute_run_propagates_co0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000027631D1E970>
+
+    def test_execute_run_propagates_collection_warning_once_through_result_summary_and_record(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        reference_path = tmp_path / "comparison_videos" / "Reference.mkv"
+        reference_path.parent.mkdir(parents=True)
+        reference_path.write_bytes(b"reference")
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        workspace = _workspace(
+            tmp_path,
+            run_subdir="run",
+            screenshots_subdir="run/screenshots",
+        )
+    
+        config = ConfigSchema()
+        config.audio_alignment.enable = False
+        config.report.enable = False
+        config.slowpics.auto_upload = True
+        config.slowpics.tmdb_id = 9
+        config.slowpics.tmdb_media_type = "movie"
+        config.slowpics.title = "Explicit title"
+        reference = clip_state(reference_path, label="Reference")
+        prep = PrepState(
+            workspace=workspace,
+            config=config,
+            input_videos=[reference_path],
+            clips=[reference],
+            artifacts=RunArtifacts(
+                resolved_metadata=TmdbMetadata(
+                    tmdb_id=7,
+                    title="Resolved title",
+                    original_title="Resolved title",
+                    year=2024,
+                    media_type="tv",
+                )
+            ),
+            metadata_prefetch=MetadataPrefetch(None, False),
+            preflight_warnings=[],
+            preflight_duration=0.0,
+            load_sources_start=_zero_monotonic_timer(),
+            selection_domain=PreparedSelectionDomain(
+                token="test-selection-domain",
+                selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+                analysis_clip=None,
+            ),
+        )
+        capture = ReservedRunCapture(
+            workspace=workspace,
+            clip_count=1,
+            preflight_duration=0.0,
+            preflight_warnings=[],
+            run_warnings=[],
+        )
+        captured_collection: SlowpicsCollectionMetadata | None = None
+    
+        async def fake_execute_prep(request: RunRequest, deps: RunDependencies) -> PrepState:
+            del request
+            assert deps.capture_reserved_run is not None
+            deps.capture_reserved_run(capture)
+            return prep
+    
+        def fake_render_phase(
+            _ctx: RunContext,
+            *,
+            frames: list[int],
+            runner: object,
+        ) -> RenderPhaseOutput:
+            del runner
+            screenshot_dir = workspace.screenshots_dir
+            assert screenshot_dir is not None
+            screenshot_dir.mkdir(parents=True, exist_ok=True)
+            screenshots = []
+            for frame in frames:
+                screenshot = screenshot_dir / f"{frame}.png"
+                screenshot.write_bytes(b"PNG")
+                screenshots.append(screenshot)
+            return RenderPhaseOutput(
+                render=_render_artifacts(
+                    screenshots_by_label={"Reference": screenshots},
+                    screenshot_dir=screenshot_dir,
+                )
+            )
+    
+        async def fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
+            nonlocal captured_collection
+            captured_collection = cast(SlowpicsCollectionMetadata, kwargs["collection_metadata"])
+            upload_plan = cast(SlowpicsUploadPlan, kwargs["upload_plan"])
+            file_paths = tuple(upload_plan.file_paths)
+            return PublishResult(
+                url="https://slow.pics/c/explicit",
+                screenshot_count=len(file_paths),
+                upload_duration_seconds=0.0,
+                uploaded_file_paths=file_paths,
+            )
+    
+        async def fake_post_upload_actions(
+            *_args: object, **_kwargs: object
+        ) -> tuple[PostUploadActionResult, ...]:
+            return ()
+    
+        def reject_unexpected_http(request: httpx.Request) -> httpx.Response:
+            raise AssertionError(f"unexpected HTTP request: {request.method} {request.url}")
+    
+        monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
+        monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda *a, **kw: None)
+        monkeypatch.setattr(coordinator, "emit_final_selection_report", lambda *a, **kw: None)
+        monkeypatch.setattr(coordinator, "emit_frame_alignment_report", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            "frame_compare.orchestration.execution.run_render_phase",
+            fake_render_phase,
+        )
+        monkeypatch.setattr(
+            "frame_compare.orchestration.phase_post_render.publish_to_slowpics",
+            fake_publish_to_slowpics,
+        )
+        monkeypatch.setattr(
+            "frame_compare.orchestration.phase_post_render.run_slowpics_post_upload_actions",
+            fake_post_upload_actions,
+        )
+    
+        async def invoke() -> object:
+            transport = httpx.MockTransport(reject_unexpected_http)
+            async with httpx.AsyncClient(transport=transport) as client:
+                return await execute_run(
+                    make_run_request(
+                        root=tmp_path, config=config, skip_analysis=True, skip_metadata=True
+                    ),
+                    deps=RunDependencies(
+                        ffmpeg_runner=FakeFFmpegRunner(),
+                        http_client=client,
+                        monotonic_timer=_zero_monotonic_timer,
+                        progress=NullProgressReporter(),
+                    ),
+                )
+    
+        result = cast(RunResult, asyncio.run(invoke()))
+        mismatch = (
+            "slow.pics: explicit TMDB association differs from resolved metadata; "
+            "automatic title metadata was not combined with the explicit association"
+        )
+>       assert [warning.text for warning in result.warnings] == [mismatch]
+E       AssertionError: assert ['slow.pics u... unavailable'] == ['slow.pics: ... association']
+E         
+E         At index 0 diff: 'slow.pics upload skipped because report confirmation was unavailable' != 'slow.pics: explicit TMDB association differs from resolved metadata; automatic title metadata was not combined with the explicit association'
+E         Use -v to get more diff
+
+tests\orchestration\test_execute_run_lifecycle.py:299: AssertionError
+____ test_windows_portable_generated_bundle_launcher_restores_environment _____
+[gw1] win32 -- Python 3.13.7 C:\Software\video\frame-compare\.venv\Scripts\python.exe
+
+tmp_path = WindowsPath('C:/Users/zinez/AppData/Local/Temp/frame-compare-highlight-suite-kzayky1y/scratch/popen-gw1/test_windows_portable_generate0')
+repo_root = WindowsPath('C:/Software/video/frame-compare')
+
+    @pytest.mark.integration
+    @windows_portable_launcher_e2e
+    def test_windows_portable_generated_bundle_launcher_restores_environment(
+        tmp_path: Path, repo_root: Path
+    ) -> None:
+        exe = _powershell_exe()
+        if exe is None:
+            pytest.skip("pwsh/powershell not available")
+    
+        build_script = _read_text_or_fail(
+            repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+        )
+        match = re.search(r"\$ps1 = @'\r?\n(?P<launcher>.*?)\r?\n'@", build_script, re.DOTALL)
+        if match is None:
+            pytest.fail("Generated bundle launcher is missing")
+    
+        bundle_dir = tmp_path / "bundle"
+        python_dir = bundle_dir / "python"
+        cli_dir = bundle_dir / "app" / "src" / "frame_compare" / "cli"
+        python_dir.mkdir(parents=True)
+        cli_dir.mkdir(parents=True)
+        (bundle_dir / "app" / "site-packages").mkdir(parents=True)
+        (bundle_dir / "bundle_info.json").write_text(
+            '{"media_runtime_fingerprint":"fixture-runtime-fingerprint"}\n',
+            encoding="utf-8",
+        )
+        base_python = Path(getattr(sys, "_base_executable", sys.executable))
+        shutil.copy2(base_python, python_dir / "python.exe")
+        for dll_path in base_python.parent.glob("python*.dll"):
+            shutil.copy2(dll_path, python_dir / dll_path.name)
+    
+        (cli_dir.parent / "__init__.py").write_text("", encoding="utf-8")
+        (cli_dir / "__init__.py").write_text("", encoding="utf-8")
+        (cli_dir / "entry.py").write_text(
+            "\n".join(
+                [
+                    "from __future__ import annotations",
+                    "import os",
+                    "import sys",
+                    'os.environ["PATH"] = "bundle-python;" + os.environ.get("PATH", "")',
+                    'os.environ["PYTHONUTF8"] = "inner-utf8"',
+                    'os.environ["PYTHONDONTWRITEBYTECODE"] = "inner-dontwrite"',
+                    'os.environ["PYTHONPATH"] = "inner-pythonpath"',
+                    'os.environ["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] = "inner-extra-plugins"',
+                    'os.environ.pop("VAPOURSYNTH_PLUGIN_PATH", None)',
+                    'os.environ["FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"] = "inner-fingerprint"',
+                    'os.environ["FRAME_COMPARE_RUNTIME_KIND"] = "inner-kind"',
+                    'os.environ["FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"] = "inner-ffms2"',
+                    'os.environ["FRAME_COMPARE_FFMPEG_EXECUTABLE"] = "inner-ffmpeg"',
+                    'os.environ["FRAME_COMPARE_FFPROBE_EXECUTABLE"] = "inner-ffprobe"',
+                    'print("fake entry ran")',
+                    "sys.exit(0)",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        launcher_path = bundle_dir / "frame-compare.ps1"
+        launcher_path.write_text(match.group("launcher"), encoding="utf-8")
+    
+        proof_script = tmp_path / "prove-generated-launcher-env-restore.ps1"
+        proof_script.write_text(
+            "\n".join(
+                [
+                    '$ErrorActionPreference = "Stop"',
+                    '[Environment]::SetEnvironmentVariable("PATH", "outer-path", "Process")',
+                    '[Environment]::SetEnvironmentVariable("PYTHONUTF8", "outer-utf8", "Process")',
+                    (
+                        '[Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", '
+                        '"outer-dontwrite", "Process")'
+                    ),
+                    '[Environment]::SetEnvironmentVariable("PYTHONPATH", "outer-pythonpath", "Process")',
+                    (
+                        '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_EXTRA_PLUGIN_PATH", '
+                        '"outer-extra-plugins", "Process")'
+                    ),
+                    (
+                        '[Environment]::SetEnvironmentVariable("VAPOURSYNTH_PLUGIN_PATH", '
+                        '"outer-legacy-plugins", "Process")'
+                    ),
+                    (
+                        "[Environment]::SetEnvironmentVariable("
+                        '"FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT", "outer-fingerprint", "Process")'
+                    ),
+                    (
+                        "[Environment]::SetEnvironmentVariable("
+                        '"FRAME_COMPARE_RUNTIME_KIND", "outer-kind", "Process")'
+                    ),
+                    (
+                        "[Environment]::SetEnvironmentVariable("
+                        '"FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED", "outer-ffms2", "Process")'
+                    ),
+                    (
+                        "[Environment]::SetEnvironmentVariable("
+                        '"FRAME_COMPARE_FFMPEG_EXECUTABLE", "outer-ffmpeg", "Process")'
+                    ),
+                    (
+                        "[Environment]::SetEnvironmentVariable("
+                        '"FRAME_COMPARE_FFPROBE_EXECUTABLE", "outer-ffprobe", "Process")'
+                    ),
+                    f"& '{launcher_path}' version",
+                    'Write-Output "EXIT=$LASTEXITCODE"',
+                    'Write-Output "PATH=$env:PATH"',
+                    'Write-Output "PYTHONUTF8=$env:PYTHONUTF8"',
+                    'Write-Output "PYTHONDONTWRITEBYTECODE=$env:PYTHONDONTWRITEBYTECODE"',
+                    'Write-Output "PYTHONPATH=$env:PYTHONPATH"',
+                    'Write-Output "VAPOURSYNTH_EXTRA_PLUGIN_PATH=$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH"',
+                    'Write-Output "VAPOURSYNTH_PLUGIN_PATH=$env:VAPOURSYNTH_PLUGIN_PATH"',
+                    (
+                        'Write-Output "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT='
+                        '$env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"'
+                    ),
+                    'Write-Output "FRAME_COMPARE_RUNTIME_KIND=$env:FRAME_COMPARE_RUNTIME_KIND"',
+                    (
+                        'Write-Output "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED='
+                        '$env:FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"'
+                    ),
+                    (
+                        'Write-Output "FRAME_COMPARE_FFMPEG_EXECUTABLE='
+                        '$env:FRAME_COMPARE_FFMPEG_EXECUTABLE"'
+                    ),
+                    (
+                        'Write-Output "FRAME_COMPARE_FFPROBE_EXECUTABLE='
+                        '$env:FRAME_COMPARE_FFPROBE_EXECUTABLE"'
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+    
+        proc = subprocess.run(
+            [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(proof_script)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        assert proc.returncode == 0, f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+        output = _parse_key_value_output(proc.stdout)
+>       assert output["EXIT"] == "0"
+E       AssertionError: assert '1' == '0'
+E         
+E         - 0
+E         + 1
+
+tests\windows_portable\test_windows_portable_shim_e2e.py:687: AssertionError
+=========================== short test summary info ===========================
+SKIPPED [1] tests\browser\test_report_browser_smoke.py:332: Chrome/Chromium is unavailable; CI preflight makes this a required proof
+SKIPPED [1] tests\browser\test_report_browser_smoke.py:941: Chrome/Chromium is unavailable; CI preflight makes this a required proof
+SKIPPED [1] tests\browser\test_report_browser_smoke.py:1029: Chrome/Chromium is unavailable; CI preflight makes this a required proof
+SKIPPED [2] tests\browser\test_report_browser_smoke.py:1163: Chrome/Chromium is unavailable; CI preflight makes this a required proof
+SKIPPED [1] tests\browser\test_report_browser_smoke.py:1182: Chrome/Chromium is unavailable; CI preflight makes this a required proof
+SKIPPED [9] tests\browser\test_report_browser_smoke.py:1217: Chrome/Chromium is unavailable; CI preflight makes this a required proof
+SKIPPED [1] tests\browser\test_report_browser_smoke.py:1320: Chrome/Chromium is unavailable; CI preflight makes this a required proof
+SKIPPED [1] tests\browser\test_report_browser_smoke.py:1440: Chrome/Chromium is unavailable
+SKIPPED [2] tests\browser\test_report_browser_smoke.py:1563: Chrome/Chromium is unavailable
+SKIPPED [1] tests\browser\test_report_browser_smoke.py:1620: Chrome/Chromium is unavailable
+SKIPPED [1] tests\cli\test_cli_output.py:221: Windows does not expose POSIX execute bits
+SKIPPED [3] tests\config\test_schema.py:74: Windows filesystem encoding permits lone surrogates
+SKIPPED [2] tests\e2e\test_media_alignment.py:17: media E2E tier requires FRAME_COMPARE_E2E_REQUIRE_MEDIA=1
+SKIPPED [2] tests\e2e\test_media_render.py:14: media E2E tier requires FRAME_COMPARE_E2E_REQUIRE_MEDIA=1
+SKIPPED [1] tests\e2e\test_media_tonemap.py:142: media E2E tier requires FRAME_COMPARE_E2E_REQUIRE_MEDIA=1
+SKIPPED [1] tests\e2e\test_media_tonemap.py:158: media E2E tier requires FRAME_COMPARE_E2E_REQUIRE_MEDIA=1
+SKIPPED [1] tests\e2e\test_media_tonemap.py:214: media E2E tier requires FRAME_COMPARE_E2E_REQUIRE_MEDIA=1
+SKIPPED [1] tests\e2e\test_media_cache.py:15: media E2E tier requires FRAME_COMPARE_E2E_REQUIRE_MEDIA=1
+SKIPPED [1] tests\integration\test_alignment_streaming_resources.py:349: set FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1
+SKIPPED [1] tests\integration\test_alignment_streaming_resources.py:374: set FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1
+SKIPPED [1] tests\integration\test_alignment_streaming_resources.py:405: set FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1
+SKIPPED [1] tests\manual\test_slowpics_live.py:188: Set FRAME_COMPARE_LIVE_SLOWPICS=1 to run passive slow.pics probes
+SKIPPED [1] tests\manual\test_slowpics_live.py:28: Set FRAME_COMPARE_LIVE_WEBHOOK=1 and FRAME_COMPARE_LIVE_WEBHOOK_URL to post one live smoke notification
+SKIPPED [1] tests\render\test_orchestrator.py:1086: POSIX SIGINT injection; Windows console behavior requires physical acceptance
+SKIPPED [1] tests\services\test_alignment_cancellation.py:495: os.kill(SIGINT) uses POSIX signal delivery
+SKIPPED [2] tests\services\test_alignment_paired_streaming.py:332: POSIX signal death
+SKIPPED [1] tests\services\test_alignment_paired_streaming.py:911: Windows terminate and kill are equivalent
+SKIPPED [1] tests\services\test_slowpics_webhook.py:1035: copied ._pth fixture requires the host POSIX CPython interpreter
+SKIPPED [2] tests\services\test_slowpics_webhook.py:1060: copied ._pth fixture requires the host POSIX CPython interpreter
+SKIPPED [1] tests\utils\test_subproc.py:192: Windows does not expose POSIX execute bits
+SKIPPED [3] tests\utils\test_terminal.py:36: Real PTY signal proof requires a POSIX host
+SKIPPED [1] tests\vs\test_runtime_contract.py:483: Perl is required to execute the Dockerfile Meson rewrite proof
+SKIPPED [1] tests\vsview\test_adapter.py:493: SIGINT wait interruption is POSIX-specific
+SKIPPED [18] tests\workflows\test_release_on_merge.py:84: jq is required to execute the release workflow script
+SKIPPED [1] tests\workflows\test_source_checkout_contract.py:302: source checkout process proof requires POSIX process and rename semantics
+SKIPPED [2] tests\workflows\test_source_checkout_contract.py:353: source checkout process proof requires POSIX process and rename semantics
+SKIPPED [2] tests\workflows\test_source_checkout_contract.py:381: source checkout process proof requires POSIX process and rename semantics
+SKIPPED [1] tests\workflows\test_source_checkout_contract.py:413: source checkout process proof requires POSIX process and rename semantics
+SKIPPED [2] tests\workflows\test_source_checkout_contract.py:436: source checkout process proof requires POSIX process and rename semantics
+SKIPPED [1] tests\workflows\test_source_checkout_contract.py:327: source checkout process proof requires POSIX process and rename semantics
+FAILED tests/windows_portable/test_windows_portable_install_uninstall_e2e.py::test_windows_portable_uninstall_preserves_user_files_across_reinstall[powershell]@windows-install-lifecycle
+FAILED tests/windows_portable/test_windows_portable_install_uninstall_e2e.py::test_windows_portable_uninstall_preserves_user_files_across_reinstall[pwsh]@windows-install-lifecycle
+FAILED tests/orchestration/test_execute_run_lifecycle.py::test_execute_run_propagates_collection_warning_once_through_result_summary_and_record
+FAILED tests/windows_portable/test_windows_portable_shim_e2e.py::test_windows_portable_generated_bundle_launcher_restores_environment

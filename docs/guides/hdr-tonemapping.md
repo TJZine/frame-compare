@@ -103,7 +103,27 @@ still override it (source: `src/frame_compare/render/prepare.py:37-74`).
 | `spline` | `spline` | 203 nits | Off |
 | `contrast` | `reinhard` | 203 nits | Off |
 | `highlight_guard` | `spline` | 180 nits | Off |
+| `highlight_preserve` | `bt2390` | 100 nits | Off |
 | `bright_lift` | `bt2390` | 250 nits | On |
+
+`highlight_preserve` is an opt-in BT.2390 shoulder adjustment: knee offset 1.0
+instead of the reference preset's 0.5. All other reference settings, including
+perceptual gamut mapping and contrast recovery, stay the same. It can preserve
+more highlight distinctions, but does not guarantee unclipped output or restore
+source detail that is already lost. `highlight_guard` remains the separate spline
+preset; neither preset changes the default.
+
+For a run with an explicit BT.2390/100-nit quality policy, use:
+
+```bash
+frame-compare run --tm-preset highlight_preserve --tm-curve bt2390 --tm-target 100 --tm-speed quality
+```
+
+Or set `preset = "highlight_preserve"` in `[color]`. Explicit target, curve,
+gamma-lift and contrast-recovery overrides still take precedence. Overriding the
+curve to spline or Reinhard resets the generic native curve parameter to 0.5;
+the BT.2390 knee 1.0 must not become another algorithm's contrast parameter.
+Softclip is not bundled with this option.
 
 ```toml
 [color]

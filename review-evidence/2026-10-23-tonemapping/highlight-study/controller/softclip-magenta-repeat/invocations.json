@@ -1,0 +1,28 @@
+[
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-softclip-expanded\\probe.py",
+      "worker",
+      "spiderverse-2-72:knee1",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\controller\\softclip-magenta-repeat\\spiderverse-2-72-knee1"
+    ],
+    "started": "2026-10-23T19:21:37.239483+00:00",
+    "exit": 0,
+    "reaped": true
+  },
+  {
+    "command": [
+      "C:\\Software\\video\\frame-compare\\.venv\\Scripts\\python.exe",
+      "C:\\Software\\video\\frame-compare\\generated\\verification\\2026-10-23\\highlight-softclip-expanded\\probe.py",
+      "worker",
+      "spiderverse-2-72:knee1-gamut2",
+      "--out",
+      "generated\\verification\\2026-10-23\\highlight-study\\controller\\softclip-magenta-repeat\\spiderverse-2-72-knee1-gamut2"
+    ],
+    "started": "2026-10-23T19:21:43.573042+00:00",
+    "exit": 0,
+    "reaped": true
+  }
+]

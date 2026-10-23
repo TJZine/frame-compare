@@ -1,0 +1,320 @@
+"""Unit B diagnostic. Numeric mode is stdlib-only; native mode requires a renderer lease."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import platform
+import struct
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+REPO = ROOT.parents[4]
+BASELINE = "f1d3b9bf4c3406e3d0cddbfbbc536e0ac8a9279e"
+WIDTH = HEIGHT = 256
+OWNERS = ["vs/tonemap_libplacebo.py", "vs/tonemap_conversion.py", "vs/tonemap_fallback.py", "vs/types.py", "vs/props.py", "render/prepare.py", "render/encoders.py"]
+
+
+def pq_encode(nits):
+    """ST2084 inverse EOTF, absolute cd/m2; independent scalar arithmetic."""
+    assert 0 <= nits <= 10000
+    p = (nits / 10000) ** (2610 / 16384)
+    return ((3424 / 4096 + (2413 / 128) * p) / (1 + (2392 / 128) * p)) ** (2523 / 32)
+
+
+def pq_decode(code):
+    assert 0 <= code <= 1
+    p = code ** (32 / 2523)
+    return 10000 * (max(p - 3424 / 4096, 0) / (2413 / 128 - (2392 / 128) * p)) ** (16384 / 2610)
+
+
+def srgb_from_native(code, black=0.18, white=100):
+    """Independent absolute BT1886 EOTF followed by endpoint-relative sRGB."""
+    luminance = (code * (white ** (1 / 2.4) - black ** (1 / 2.4)) + black ** (1 / 2.4)) ** 2.4
+    relative = min(1, max(0, (luminance - black) / (white - black)))
+    return 12.92 * relative if relative <= 0.0031308 else 1.055 * relative ** (1 / 2.4) - 0.055
+
+
+def pixel_nits(kind, x, y):
+    if kind == "steps":
+        value = [0, .18, 1, 10, 50, 100, 203, 400, 600, 800, 1000, 1500, 2000, 4000, 6000, 10000][x // 16]
+    elif kind in ("ramp", "clipped"):
+        value = 100 + 3900 * x / 255
+        if kind == "clipped":
+            value = min(value, 1000)
+    elif kind in ("impulse", "broad"):
+        value = 100
+        if (kind == "impulse" and x == 128 and y == 128) or (kind == "broad" and 96 <= x < 160 and 96 <= y < 160):
+            value = 10000
+    elif kind == "patches":
+        levels = [100, 400, 1000, 4000]
+        value = levels[y // 64]
+        mask = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (0, 1, 1), (1, 0, 1), (1, 1, 1), (1, .2, .05)][x // 32]
+        return tuple(value * c for c in mask)
+    else:
+        raise ValueError(kind)
+    return (value,) * 3
+
+
+FIXTURES = ["steps", "ramp", "impulse", "broad", "patches", "clipped", "extended"]
+
+
+def fixture(kind):
+    cache = {}
+    result = []
+    for y in range(HEIGHT):
+        for x in range(WIDTH):
+            if kind == "extended":
+                # Encoded RGB stress input, not valid absolute PQ luminance.
+                values = [-.05, -.01, 0, .5, .99, 1, 1.01, 1.05]
+                result.append((values[x // 32], .5, .5))
+            else:
+                rgb = pixel_nits(kind, x, y)
+                if rgb not in cache:
+                    cache[rgb] = tuple(pq_encode(v) for v in rgb)
+                result.append(cache[rgb])
+    return result
+
+
+def metrics(pixels, endpoint=1):
+    rows = list(pixels)
+    return {
+        "pixels": len(rows),
+        "any_high": sum(any(c >= endpoint for c in p) for p in rows),
+        "all_high": sum(all(c >= endpoint for c in p) for p in rows),
+        "any_low": sum(any(c <= 0 for c in p) for p in rows),
+        "near_white": sum(all(c >= endpoint * .98 for c in p) for p in rows),
+        "unique_rgb": len(set(rows)),
+        "channel_span": [max(p[c] for p in rows) - min(p[c] for p in rows) for c in range(3)],
+    }
+
+
+def ramp_metrics(values):
+    diffs = [b - a for a, b in zip(values, values[1:])]
+    return {"unique": len(set(values)), "rises": sum(d > 0 for d in diffs), "reversals": sum(d < 0 for d in diffs), "flat_edges": sum(d == 0 for d in diffs), "span": max(values) - min(values)}
+
+
+def cases():
+    # metadata=0 with no PLScene/RPU is the measured candidate, never assumed proven.
+    rows = []
+    def add(name, kind, metadata_fixture="static", **settings):
+        rows.append({"id": f"{len(rows)+1:02d}-{name}", "fixture": kind, "metadata_fixture": metadata_fixture, "settings": settings})
+    add("reference", "ramp")
+    add("knee1", "ramp", knee_offset=1.0)
+    add("spline-contrast05", "ramp", tone_curve="spline")
+    add("steps-knee1", "steps", knee_offset=1.0)
+    add("impulse-p99995", "impulse", "missing", use_dovi=False)
+    add("impulse-p100", "impulse", "missing", use_dovi=False, percentile=100.0)
+    add("broad-p99995", "broad", "missing", use_dovi=False)
+    add("broad-p100", "broad", "missing", use_dovi=False, percentile=100.0)
+    add("scene-p99995", "impulse", "scene", use_dovi=False)
+    add("scene-p100", "impulse", "scene", use_dovi=False, percentile=100.0)
+    add("understated-static", "ramp", "understated", metadata=2, dynamic_peak_detection=False, use_dovi=False)
+    add("true-static", "ramp", "static", metadata=2, dynamic_peak_detection=False, use_dovi=False, source_peak=4000)
+    add("patch-perceptual", "patches", knee_offset=1.0)
+    add("patch-softclip", "patches", knee_offset=1.0, gamut_mapping=2)
+    add("patch-darken", "patches", knee_offset=1.0, gamut_mapping=7)
+    add("clipped-knee1", "clipped", knee_offset=1.0)
+    add("extended-preloss", "extended", knee_offset=1.0)
+    add("knee1-no-recovery", "ramp", knee_offset=1.0, contrast_recovery=0.0)
+    return rows
+
+
+def identity():
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=REPO, text=True).strip()
+    return {"head": git("rev-parse", "HEAD"), "baseline": BASELINE, "source_drift": git("diff", "--", "src", "config"), "python": sys.version, "executable": sys.executable, "platform": platform.platform(), "source_sha256": {p: hashlib.sha256((REPO / "src/frame_compare" / p).read_bytes()).hexdigest() for p in OWNERS}, "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+
+
+def numeric(output):
+    checks = []
+    def check(name, condition, details):
+        checks.append({"name": name, "passed": bool(condition), "details": details})
+    samples = [0, .0001, .18, 1, 100, 203, 1000, 4000, 10000]
+    errors = [abs(pq_decode(pq_encode(v)) - v) for v in samples]
+    check("PQ roundtrip and independent anchors", max(errors) < 1e-6 and abs(pq_encode(100) - .5080784215) < 1e-9 and abs(pq_encode(1000) - .7518270962) < 1e-9 and pq_decode(0) == 0 and pq_encode(10000) == 1, {"nits": samples, "errors_nits": errors})
+    check("PQ monotonic", all(pq_encode(a) < pq_encode(b) for a, b in zip(samples, samples[1:])), {})
+    manifests = {}
+    for name in FIXTURES:
+        pixels = fixture(name)
+        packed = b"".join(struct.pack("<3f", *p) for p in pixels)
+        manifests[name] = {"size": [WIDTH, HEIGHT], "float32_rgb_sha256": hashlib.sha256(packed).hexdigest(), "metrics": metrics(pixels)}
+        check("fixture dimensions " + name, len(pixels) == WIDTH * HEIGHT, manifests[name])
+    impulse_fraction = 100 / (WIDTH * HEIGHT)
+    check("impulse below excluded tail; broad above", impulse_fraction < .005 < 100 * 64 * 64 / (WIDTH * HEIGHT), {"impulse_percent": impulse_fraction, "broad_percent": 6.25, "warning": "Histogram detector is not an exact order statistic; this is a fixture geometry check."})
+    ramp = [x / 255 for x in range(256)]
+    good = ramp_metrics(ramp)
+    bad = ramp_metrics([.9] * 256)
+    restored = ramp_metrics(ramp)
+    check("flattening negative control and restoration", good["rises"] == 255 and bad["rises"] == 0 and bad["span"] == 0 and restored == good, {"positive": good, "negative": bad})
+    saturated = metrics([(1, .5, .25)] * 8)
+    check("single-channel saturation negative control", saturated["any_high"] == 8 and saturated["all_high"] == 0, saturated)
+    cutoffs = []
+    for peak in (448, 1000, 4000):
+        r = peak / 100
+        t = 1 / r
+        xs = [t * .999, t, t * 1.001]
+        ys = [min(1, 2 * r * x / (1 + r * x)) for x in xs]
+        cutoffs.append({"source_peak": peak, "encoded_cutoff": t, "PQ_nits_at_cutoff": pq_decode(t), "x": xs, "y": ys})
+        check("fallback cutoff " + str(peak), ys[0] < 1 and ys[1] == 1 and ys[2] == 1, cutoffs[-1])
+    floats = [srgb_from_native(v / 65535) for v in (65530, 65531, 65532, 65533, 65534, 65535)]
+    codes = [round(v * 255) for v in floats]
+    check("final8 merging arithmetic", len(set(floats)) == 6 and len(set(codes)) == 1, {"srgb_float": floats, "rounded8": codes, "scope": "round-to-nearest model; native zimg dithering not measured"})
+    check("sRGB endpoints", abs(srgb_from_native(0)) < 1e-12 and abs(srgb_from_native(1) - 1) < 1e-12, {})
+    check("clipped source lacks recoverable ramp", len({pixel_nits("clipped", x, 0) for x in range(128, 256)}) == 1, {})
+    check("native never imported", "vapoursynth" not in sys.modules and not any(k.startswith("frame_compare") for k in sys.modules), {})
+    write(output / "fixtures.json", manifests)
+    write(output / "case-plan.json", {"cases": cases(), "native_status": "NOT RUN", "adaptive": "Run 01/02 first; 05-10 require effective-peak trace before attributing percentile changes; 13-15 are a separate gamut comparison. Stop on failures; no full sweep required.", "HLG": "Deferred: specify scene-linear normalization, reference white, nominal display peak/black, system gamma and viewing surround/OOTF assumptions before generating absolute-luminance expectations."})
+    receipt = {"status": "passed" if all(c["passed"] for c in checks) else "failed", "identity": identity(), "checks": checks, "native_status": "NOT RUN"}
+    write(output / "numeric-results.json", receipt)
+    print(json.dumps({"status": receipt["status"], "checks": len(checks), "failed": [c["name"] for c in checks if not c["passed"]]}))
+    return 0 if receipt["status"] == "passed" else 1
+
+
+def write(path, value):
+    path.write_text(json.dumps(value, indent=2, default=str) + "\n", encoding="utf-8")
+
+
+def native(case, output):
+    # This function is deliberately unreachable from numeric mode.
+    import numpy as np
+    import vapoursynth as vs
+    from PIL import Image
+    from dataclasses import asdict, replace
+    from unittest.mock import patch
+    from frame_compare.config.schema import ToneCurve
+    from frame_compare.vs import tonemap_libplacebo as owner
+    from frame_compare.vs.types import TonemapSettings, TonemapResult
+
+    result = {"status": "running", "identity": identity(), "case": case}
+    logs = []
+    try:
+        core = vs.core
+        core.num_threads = 2
+        core.max_cache_size = 64
+        core.add_log_handler(lambda level, message: logs.append({"level": str(level), "message": message}))
+        plugin = Path(core.placebo.plugin_path)
+        result.update(plugin_path=str(plugin), plugin_sha256=hashlib.sha256(plugin.read_bytes()).hexdigest(), signature=core.placebo.Tonemap.signature, vapoursynth=str(vs.__version__))
+        pixels = np.asarray(fixture(case["fixture"]), dtype=np.float32).reshape(HEIGHT, WIDTH, 3).transpose(2, 0, 1)
+        blank = core.std.BlankClip(width=WIDTH, height=HEIGHT, format=vs.RGBS, length=1)
+        def fill(n, f):
+            frame = f.copy()
+            for p in range(3):
+                np.copyto(np.asarray(frame[p]), pixels[p])
+            return frame
+        props = dict(_Matrix=0, _Transfer=16, _Primaries=9, _ColorRange=0)
+        # Explicit mastering primaries avoid the pinned wrapper's missing-prop P3 fallback.
+        props.update(MasteringDisplayPrimariesX=[.708, .170, .131], MasteringDisplayPrimariesY=[.292, .797, .046], MasteringDisplayWhitePointX=.3127, MasteringDisplayWhitePointY=.3290)
+        metadata = case["metadata_fixture"]
+        if metadata != "missing":
+            props.update(ContentLightLevelMax=4000.0 if metadata != "understated" else 400.0, ContentLightLevelAverage=100.0, MasteringDisplayMaxLuminance=4000.0, MasteringDisplayMinLuminance=.0001)
+        if metadata == "scene":
+            props.update(PLSceneMax=[400.0], PLSceneAvg=100.0)
+        source = blank.std.ModifyFrame(clips=blank, selector=fill).std.SetFrameProps(**props)
+        changes = dict(case["settings"])
+        if "tone_curve" in changes:
+            changes["tone_curve"] = ToneCurve(changes["tone_curve"])
+        settings = replace(TonemapSettings(), **changes)
+        result.update(settings=asdict(settings), input_props=props)
+        snapshots = {}
+        counts = {}
+        def tap(node, stage):
+            def capture(n, f):
+                frame = f.copy()
+                counts[stage] = counts.get(stage, 0) + 1
+                token = counts[stage]
+                snapshots[stage, token] = np.stack([np.asarray(f[p]).copy() for p in range(3)])
+                frame.props["_FCB_" + stage] = token
+                return frame
+            return node.std.ModifyFrame(clips=node, selector=capture)
+        original_convert = owner.convert_for_libplacebo
+        def convert(clip, inputs):
+            return tap(original_convert(clip, inputs), "pre16")
+        class PlaceboProxy:
+            def Tonemap(self, clip, **kwargs):
+                kwargs["log_level"] = 6
+                result["tone_kwargs"] = kwargs
+                return tap(core.placebo.Tonemap(clip, **kwargs), "native16")
+        class CoreProxy:
+            placebo = PlaceboProxy()
+            def __getattr__(self, key):
+                return getattr(core, key)
+        with patch.object(owner, "convert_for_libplacebo", convert):
+            mapped = owner.apply_libplacebo(source, settings, CoreProxy(), still_image=True)
+        if not isinstance(mapped, TonemapResult):
+            raise RuntimeError("Native mapper fell back: " + str(mapped))
+        final = tap(mapped.clip, "srgb_float").resize.Point(format=vs.RGB24)
+        with final.get_frame(0) as frame:
+            arrays = {stage: snapshots[stage, frame.props["_FCB_" + stage]] for stage in ("pre16", "native16", "srgb_float")}
+            arrays["final8"] = np.stack([np.asarray(frame[p]).copy() for p in range(3)])
+            arrays["input_float"] = pixels
+            result["tokens"] = {stage: frame.props["_FCB_" + stage] for stage in ("pre16", "native16", "srgb_float")}
+            result["final_props"] = dict(frame.props)
+        np.savez_compressed(output / "checkpoints.npz", **arrays)
+        Image.fromarray(arrays["final8"].transpose(1, 2, 0)).save(output / "final.png")
+        result["arrays"] = {}
+        for stage, data in arrays.items():
+            flat = data.transpose(1, 2, 0).reshape(-1, 3)
+            scale = 65535 if stage in ("pre16", "native16") else 255 if stage == "final8" else 1
+            result["arrays"][stage] = {"sha256": hashlib.sha256(data.tobytes()).hexdigest(), "dtype": str(data.dtype), "shape": list(data.shape), "metrics": metrics(map(tuple, flat.tolist()), scale), "center_row": [ramp_metrics(data[p, 128].astype(float).tolist()) for p in range(3)]}
+            result["arrays"][stage]["patch_means"] = [[float(data[p, y+8:y+56, x+4:x+28].mean()) for p in range(3)] for y in range(0, 256, 64) for x in range(0, 256, 32)]
+        if case["fixture"] == "extended":
+            pre = arrays["pre16"][0, 128]
+            result["pre16_extended_collapse"] = bool(pre[0] == pre[32] == 0 and pre[192] == pre[224] == 65535)
+        # Independent conversion oracle; does not predict the upstream tone curve.
+        expected = np.array([srgb_from_native(float(v) / 65535) for v in arrays["native16"].ravel()]).reshape(arrays["native16"].shape)
+        result["srgb_max_abs_error"] = float(np.max(np.abs(expected - arrays["srgb_float"])))
+        if result["srgb_max_abs_error"] > 2e-5:
+            raise AssertionError("sRGB boundary differs from independent arithmetic")
+        # One fresh uninstrumented equivalence check, never stage data from that evaluation.
+        if case["id"] == "01-reference":
+            plain = owner.apply_libplacebo(source, settings, core, still_image=True)
+            if not isinstance(plain, TonemapResult):
+                raise RuntimeError("Uninstrumented baseline fell back")
+            with plain.clip.resize.Point(format=vs.RGB24).get_frame(0) as f:
+                other = np.stack([np.asarray(f[p]).copy() for p in range(3)])
+            result["tap_baseline_equal"] = bool(np.array_equal(other, arrays["final8"]))
+            if not result["tap_baseline_equal"]:
+                raise AssertionError("Instrumentation equivalence failed")
+        result.update(status="captured", tap_counts=counts, effective_peak="Inspect native-log.json; supplied kwargs are not effective-peak evidence")
+        return 0
+    except Exception as exc:
+        result.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+        raise
+    finally:
+        write(output / "native-log.json", logs)
+        write(output / "result.json", result)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("mode", choices=["numeric", "native", "_native-worker"])
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--case", choices=[c["id"] for c in cases()])
+    parser.add_argument("--renderer-lease", action="store_true")
+    args = parser.parse_args()
+    output = args.output.resolve()
+    if not output.is_relative_to(ROOT) or output == ROOT:
+        parser.error("output must be a fresh child of this unit's synthetic directory")
+    if args.mode != "numeric" and (not args.case or not args.renderer_lease):
+        parser.error("native mode needs one --case and an explicitly assigned --renderer-lease")
+    output.mkdir(parents=True, exist_ok=False)
+    if args.mode == "numeric":
+        return numeric(output)
+    if args.mode == "native":
+        command = [sys.executable, "-B", str(Path(__file__).resolve()), "_native-worker", "--case", args.case, "--renderer-lease", "--output", str(output / "capture")]
+        with (output / "stdout.txt").open("w") as stdout, (output / "stderr.txt").open("w") as stderr:
+            try:
+                run = subprocess.run(command, cwd=REPO, stdout=stdout, stderr=stderr, timeout=180)
+                receipt = {"command": command, "exit": run.returncode, "timeout": False}
+            except subprocess.TimeoutExpired:
+                receipt = {"command": command, "exit": 124, "timeout": True}
+        write(output / "invocation.json", receipt)
+        return receipt["exit"]
+    return native(next(c for c in cases() if c["id"] == args.case), output)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

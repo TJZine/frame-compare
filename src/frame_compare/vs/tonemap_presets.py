@@ -54,6 +54,13 @@ TONEMAP_PRESETS: dict[TonemapPreset, TonemapSettings] = {
         target_nits=180,
         gamma_lift=False,
     ),
+    TonemapPreset.HIGHLIGHT_PRESERVE: TonemapSettings(
+        preset=TonemapPreset.HIGHLIGHT_PRESERVE,
+        tone_curve=ToneCurve.BT2390,
+        target_nits=100,
+        knee_offset=1.0,
+        gamma_lift=False,
+    ),
 }
 
 

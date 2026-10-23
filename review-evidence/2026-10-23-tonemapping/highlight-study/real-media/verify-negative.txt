@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "C:\Software\video\frame-compare\generated\verification\2026-10-23\highlight-study\real-media\verify_results.py", line 13, in <module>
+    assert kwhite<bwhite*.25, 'candidate must materially reduce endpoint area, not equal baseline'
+           ^^^^^^^^^^^^^^^^^
+AssertionError: candidate must materially reduce endpoint area, not equal baseline
