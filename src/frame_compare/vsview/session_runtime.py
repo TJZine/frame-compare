@@ -364,8 +364,8 @@ class SessionConsole:
     ) -> list[str | _SectionKeyValue]:
         body: list[str | _SectionKeyValue] = [
             "1  Open Tool Panel " + self.arrow() + " Frame Compare Alignment Review.",
-            "2  Choose any source/Original frame as anchor; select matching numbers in the panel.",
-            "3  Save the alignment in the panel, then close VSView to continue Frame Compare.",
+            "2  Browse each source to the same visual moment; original frames update automatically.",
+            "3  Confirm matching frames in the panel, then close VSView to continue Frame Compare.",
             "",
             *self._output_table_rows(reference, targets, short_names),
         ]

@@ -772,15 +772,14 @@ projections in stable output order. Immutable validated source facts and authori
 opening offsets stay frozen after panel Save/Keep. Precomputed numeric/status slots
 reserve complete wrapped row extents; per-frame work stamps finite masks without
 font/raster calls or retained per-n caches. Whole-set fit failure explicitly falls back
-to unavailable live hints; the panel describes its separate pinned-anchor context.
+to unavailable live hints; the panel lists tracked original source positions.
 Finite glyph resources, source
 immutability, independent fresh-copy static fallback and raw-degradation warning remain.
 Static labels contain no current frame; source/decoder and native post-return errors
-still propagate. No GUI playhead/image-capture or mutable selected-state bridge exists.
-`vsview.alignment_selection` owns pure session-local numeric cohort transitions and
-shared opening-offset projection math and fixed-anchor panel predictions. Authority-first raw offsets use
-`c + d_anchor - d_target`, distinguish zero/missing and provisional edges, check only
-target bounds and do not change trims or evidence authority. Any source can anchor;
+still propagate. No presented-pixel identity claim is made.
+`vsview.alignment_selection` owns shared immutable opening-offset projection math.
+Authority-first raw offsets use `c + d_own - d_target`, distinguish zero/missing and
+provisional edges, check target bounds and do not change trims or evidence authority.
 Reference remains the persistence baseline rather than a required visual first step.
 
 The runtime otherwise uses
@@ -795,25 +794,31 @@ strict metadata-v5/result-v1 topology and primitive DTO validation, trusted
 sibling-sidecar path, atomic
 result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
 is the sole human review surface inside VSView: it stays inert for rejected/ordinary
-sessions and presents entry authority/evidence separately from proposed numeric fields,
-explicit selected pins and saved outcomes. Public output/frame hooks may prefill only
-an active unprotected proposal. Each draft owns following/manual/Predicted intent;
-focused editing defers passive writes, pin actions take ownership, and active-only
-Use viewer frame deliberately resumes following without selecting.
-An explicit source-row action binds the validated source/session/cohort and integer;
-pins use exact field text, never a substituted viewer number. One panel-owned
-single-shot timer settles callback expectations against fresh public current_frame
-at 25 ms, bounded by both a monotonic 500 ms deadline and 20 attempts. Pending/timeout automatic values
-are unready in UI and handlers. Tokens plus source/file/session/generation/ownership
-checks prevent stale deliveries after cancellation. No inactive position cache,
-continuous timer, renderer access or presented-frame identity claim is introduced. Same-moment reanchor preserves
-pins; a confirmed new moment/reset clears them with context revalidation. Only the
-complete selected cohort including Reference, or separate complete known-offset basis,
-may write confirmed decisions. Keep saves a distinct whole-set
-`keep_current` decision per comparison. The panel derives immutable audio-review
-presentations, summary text, and details once per comparison at workspace activation;
-unload or replacement clears them. Preview callbacks reuse that evidence while
-updating active navigation/markers and eligible active proposals, never selected pins. `alignment_vsview` owns availability policy,
+sessions and presents entry authority/evidence separately from original frame drafts
+and saved outcomes. `vsview.workspace_positions` is the sole private integration
+with explicitly version-gated VSView 0.13.0: it reads the owning workspace’s retained
+`VideoOutput.last_frame` values by validated output identity and sets that generated
+workspace’s own playhead control to Unlink. It never changes global preferences or
+patches dependency hooks. The panel exists and receives workspace-load hooks even
+while hidden. Its owned 50 ms timer snapshots all sources from initial workspace
+binding, including when closed or another tool is selected. Snapshots fail closed
+for playback, queued/in-flight seeks, startup/reload, identity mismatch, invalid
+bounds and inconsistent active state. Reload/destruction stops tracking and rebinds
+fresh state without adding callbacks. Unsupported integration exposes manual entry.
+Confirmation also requires VSView's shared Qt worker pool to be idle: a paused
+playback worker can still commit a frame it already dequeued. This conservatively
+waits for other workspace/tool background jobs too; it uses no fixed settling delay.
+
+Each draft owns either tracked or manual intent. Editing, including invalid/empty
+text, protects that row; focused editing defers updates. Use viewer frame explicitly
+resumes tracking for that source. One Confirm matching frames action submits the
+complete stable set, including Reference. The handler re-reads workspace authority,
+rejects a changed set or pending state, and preserves valid zero. Separate complete
+known-offset input remains available. Keep saves a distinct whole-set `keep_current`
+decision per comparison. Successful writes freeze frames; failed writes stay editable.
+The panel builds immutable audio-review presentations once per comparison at workspace
+activation; replacement clears them. Navigation never grants evidence authority or
+writes results. `alignment_vsview` owns availability policy,
 expected-comparison construction from raw source counts, result acceptance, and
 applying confirmed offsets; its service, persistence, override, cache, and CLI/config
 boundaries remain unchanged and it does not parse terminal input. The

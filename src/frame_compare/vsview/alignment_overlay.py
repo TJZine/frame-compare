@@ -44,7 +44,7 @@ class _CopyableFrame(Protocol):
 
 PANEL_LABEL_EXPLANATION = (
     "Match each row to the video’s Original frame number. "
-    "Panel hints refer to the pinned anchor; video hints follow the viewed frame."
+    "Video hints follow the viewed frame. Confirm matching original frame numbers in the panel."
 )
 _PREDICTION_HEADER = "Predicted for this frame (opening hints)"
 
@@ -129,7 +129,7 @@ class LaunchOverlay:
         return (
             self.heading,
             "Static labels - live hints unavailable",
-            "Panel shows pinned-anchor hints",
+            "Panel shows original frame numbers",
         )
 
 
@@ -501,7 +501,7 @@ class _Renderer:
         message = (
             "Alignment video labels unavailable; using raw preview and Alignment Review panel."
             if kind == "raw"
-            else "Live alignment video labels unavailable; using static labels; live hints unavailable. Panel shows pinned-anchor hints."
+            else "Live alignment video labels unavailable; using static labels; live hints unavailable. Panel shows original frame numbers."
         )
         # Diagnostics are never a reason to fail an already acquired video frame.
         with suppress(Exception):

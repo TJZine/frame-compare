@@ -321,6 +321,7 @@ panel_api = types.SimpleNamespace(
     current_voutput=voutputs[0],
     current_frame=1,
     timeline=Timeline(),
+    register_on_destroy=lambda cb: None,
 )
 from vsengine.loops import get_loop, set_loop
 from vsview.vsenv import QtEventLoop
@@ -332,7 +333,7 @@ try:
     active_panel = AlignmentReviewPanel(active_parent, panel_api)
     active_panel.on_workspace_loaded()
     app.processEvents()
-    if active_panel.progress_label.text() != "0/3 frames selected":
+    if active_panel.progress_label.text() != "0/3 frames ready":
         raise SystemExit("alignment panel did not start with an empty three-source lineup")
     if active_panel.use_positions_button.isEnabled() or session.result_path.exists():
         raise SystemExit("empty alignment lineup was ready to save or already saved")
@@ -344,24 +345,18 @@ try:
         app.processEvents()
         active_panel.on_current_frame_changed(frame)
         app.processEvents()
-        if active_panel.progress_label.text() != f"{selected_count}/3 frames selected":
+        if active_panel.progress_label.text() != f"{selected_count}/3 frames ready":
             raise SystemExit("viewer navigation unexpectedly selected an alignment frame")
         if active_panel.use_positions_button.isEnabled() or session.result_path.exists():
             raise SystemExit("navigation or an incomplete lineup admitted alignment saving")
         active_panel.frame_inputs[output_index].setText(str(frame))
-        if output_index == 1:
-            active_panel.anchor_buttons[output_index].click()
-            app.processEvents()
-        else:
-            active_panel.select_buttons[output_index].click()
-            app.processEvents()
         if active_panel.use_positions_button.isEnabled() != (selected_count == 2):
             raise SystemExit("alignment save readiness did not require every selected source")
         if session.result_path.exists():
             raise SystemExit("selecting a source unexpectedly saved alignment")
-    if active_panel.progress_label.text() != "3/3 frames selected \u2014 ready to save":
+    if active_panel.progress_label.text() != "3/3 frames ready":
         raise SystemExit("alignment panel did not select each explicit source number")
-    if active_panel.use_positions_button.text() != "Save selected alignment":
+    if active_panel.use_positions_button.text() != "Confirm matching frames":
         raise SystemExit("alignment panel primary action label changed")
     if active_panel.keep_button.text() != "Keep current alignment":
         raise SystemExit("alignment panel keep action label changed")
@@ -385,12 +380,6 @@ try:
     app.processEvents()
     for output_index, frame in ((1, 0), (2, 2), (0, 1)):
         keep_panel.frame_inputs[output_index].setText(str(frame))
-        if output_index == 1:
-            keep_panel.anchor_buttons[output_index].click()
-            app.processEvents()
-        else:
-            keep_panel.select_buttons[output_index].click()
-            app.processEvents()
     if not keep_panel.use_positions_button.isEnabled() or session.result_path.exists():
         raise SystemExit("keep proof did not start with a complete unsaved selected lineup")
     keep_panel.keep_button.click()
@@ -402,7 +391,7 @@ try:
         raise SystemExit("keep-current action did not write complete session-bound keep decisions")
     if _confirmed_offsets(observed_result):
         raise SystemExit("keeping current alignment unexpectedly confirmed the selected lineup")
-    if keep_panel.progress_label.text() != "Keep decision saved \u2014 selected lineup was not confirmed":
+    if keep_panel.progress_label.text() != "Keep decision saved \u2014 frame lineup was not confirmed":
         raise SystemExit("keep-current outcome did not distinguish the unconfirmed selected lineup")
     print("DOCKER_GUI_PROOF alignment_keep_current=ok")
 finally:

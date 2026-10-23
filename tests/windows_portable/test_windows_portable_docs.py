@@ -57,7 +57,7 @@ def test_windows_portable_docs_define_native_alignment_handoff(repo_root: Path) 
     assert "Missing, malformed," in review
     assert "stale, mixed-session, duplicate, incomplete" in review
     assert "ordinary VSView session" in review
-    assert "Save selected alignment" in review
+    assert "Confirm matching frames" in review
     assert "Keep current alignment" in review
     assert "Keep current offset" not in portable + review
     assert "## 10. Native VSView panel acceptance" in validation

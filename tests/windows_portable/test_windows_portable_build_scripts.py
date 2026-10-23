@@ -842,9 +842,23 @@ def test_windows_portable_python_vsview_proof_covers_viewer_first_whole_set(
                     assert ast.unparse(following.value.func) == "app.processEvents"
     assert observed_callbacks.count("on_workspace_loaded") == 2
     assert observed_callbacks.count("on_current_voutput_changed") == 1
-    assert observed_callbacks.count("click") == 4
-    assert '"0/3 frames selected"' in proof
-    assert r'"3/3 frames selected \u2014 ready to save"' in proof
+    assert observed_callbacks.count("click") == 2
+    clicks = {
+        ast.unparse(node.func.value)
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "click"
+    }
+    assert clicks == {"active_panel.use_positions_button", "keep_panel.keep_button"}
+    assert "anchor_buttons" not in proof
+    assert "select_buttons" not in proof
+    assert "active_panel.frame_inputs[output_index].setText(str(frame))" in proof
+    assert "[decision.action for decision in observed_result.decisions]" in proof
+    assert '["confirmed", "confirmed"]' in proof
+    assert '["keep_current", "keep_current"]' in proof
+    assert '"0/3 frames ready"' in proof
+    assert r'"3/3 frames ready"' in proof
     assert '"alignment_positions=ok"' in proof
     assert '"alignment_keep_current=ok"' in proof
     assert '"alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 "' in proof

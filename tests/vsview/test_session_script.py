@@ -269,11 +269,11 @@ def test_generated_ready_block_output_cases(
         assert "VSView is open \u00b7 waiting for you" in output
         assert "Open Tool Panel \u2192 Frame Compare Alignment Review." in output
         assert (
-            "Choose any source/Original frame as anchor; select matching numbers in the panel."
+            "Browse each source to the same visual moment; original frames update automatically."
             in output
         )
         assert (
-            "Save the alignment in the panel, then close VSView to continue Frame Compare."
+            "Confirm matching frames in the panel, then close VSView to continue Frame Compare."
             in output
         )
         assert "outputs" in output

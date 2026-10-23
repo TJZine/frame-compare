@@ -850,11 +850,11 @@ def test_generated_session_guides_panel_discovery_and_unlinked_playheads(
         assert "at session open" not in overlay
     output = capsys.readouterr().err
     assert (
-        "│ 2  Choose any source/Original frame as anchor; select matching numbers in the panel."
+        "│ 2  Browse each source to the same visual moment; original frames update automatically."
         in output
     )
     assert (
-        "│ 3  Save the alignment in the panel, then close VSView to continue Frame Compare."
+        "│ 3  Confirm matching frames in the panel, then close VSView to continue Frame Compare."
         in output
     )
     assert "VSView is open" in output

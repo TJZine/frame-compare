@@ -517,6 +517,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             current_voutput=voutputs[0],
             current_frame=1,
             timeline=Timeline(),
+            register_on_destroy=lambda cb: None,
         )
         app = QApplication.instance() or QApplication([])
         previous_loop = get_loop()
@@ -527,7 +528,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             active_panel.on_workspace_loaded()
             app.processEvents()
             assert_true(
-                active_panel.progress_label.text() == "0/3 frames selected",
+                active_panel.progress_label.text() == "0/3 frames ready",
                 "alignment panel did not start with an empty three-source lineup",
             )
             for selected_count, (output_index, frame) in enumerate(((1, 0), (2, 2), (0, 1))):
@@ -536,18 +537,12 @@ def prove_generated_vsview_session(media_path: Path) -> None:
                 active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
                 app.processEvents()
                 assert_true(
-                    active_panel.progress_label.text() == f"{selected_count}/3 frames selected",
+                    active_panel.progress_label.text() == f"{selected_count}/3 frames ready",
                     "navigation unexpectedly selected a frame",
                 )
                 active_panel.frame_inputs[output_index].setText(str(frame))
-                if output_index == 1:
-                    active_panel.anchor_buttons[output_index].click()
-                    app.processEvents()
-                else:
-                    active_panel.select_buttons[output_index].click()
-                    app.processEvents()
             assert_true(
-                active_panel.progress_label.text() == "3/3 frames selected \u2014 ready to save",
+                active_panel.progress_label.text() == "3/3 frames ready",
                 "alignment panel did not select each explicit source number",
             )
             assert_true(

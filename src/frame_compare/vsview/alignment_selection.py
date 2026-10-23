@@ -1,8 +1,8 @@
-"""Session-local numeric pins and opening-offset hints; no viewer or persistence access."""
+"""Session-opening offset hints; no viewer or persistence access."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Literal
 
 from frame_compare.vsview.alignment_review_contract import AlignmentReviewComparisonMetadata
@@ -41,81 +41,3 @@ def project_frame(frame: int, own: OpeningHint, target: OpeningHint, count: int)
     if not 0 <= predicted < count:
         return Projection(None, "outside source range")
     return Projection(predicted, "available", own.provisional or target.provisional)
-
-
-@dataclass(frozen=True, slots=True)
-class Prediction:
-    frame: int | None
-    description: str
-
-
-@dataclass(frozen=True, slots=True)
-class SelectedCohort:
-    counts: tuple[int, ...]
-    selected: tuple[int | None, ...]
-    anchor: int | None = None
-    revision: int = 0
-
-    @classmethod
-    def empty(cls, counts: tuple[int, ...], *, revision: int = 0) -> SelectedCohort:
-        return cls(counts, (None,) * len(counts), revision=revision)
-
-    def _validate(self, index: int, frame: int) -> None:
-        if (
-            isinstance(index, bool)
-            or not 0 <= index < len(self.counts)
-            or isinstance(frame, bool)
-            or not 0 <= frame < self.counts[index]
-        ):
-            raise ValueError("selected source/frame is outside its source")
-
-    def needs_new_moment(self, index: int, frame: int) -> bool:
-        self._validate(index, frame)
-        return self.anchor is not None and self.selected[index] != frame
-
-    def set_anchor(self, index: int, frame: int) -> SelectedCohort:
-        self._validate(index, frame)
-        pins: list[int | None] = (
-            list(self.selected)
-            if not self.needs_new_moment(index, frame)
-            else [None] * len(self.counts)
-        )
-        pins[index] = frame
-        return replace(self, selected=tuple(pins), anchor=index, revision=self.revision + 1)
-
-    def select(self, index: int, frame: int) -> SelectedCohort:
-        self._validate(index, frame)
-        if self.anchor is None or index == self.anchor:
-            raise ValueError("choose an anchor or explicitly choose a new anchor moment")
-        pins = list(self.selected)
-        pins[index] = frame
-        return replace(self, selected=tuple(pins), revision=self.revision + 1)
-
-    def clear(self, index: int) -> SelectedCohort:
-        if not 0 <= index < len(self.counts):
-            raise ValueError("unknown source")
-        if index == self.anchor:
-            return self.reset()
-        pins = list(self.selected)
-        pins[index] = None
-        return replace(self, selected=tuple(pins), revision=self.revision + 1)
-
-    def reset(self) -> SelectedCohort:
-        return self.empty(self.counts, revision=self.revision + 1)
-
-    def predict(self, index: int, hints: tuple[OpeningHint, ...]) -> Prediction:
-        if self.anchor is None:
-            return Prediction(None, "Choose an anchor")
-        frame = self.selected[self.anchor]
-        assert frame is not None
-        if index == self.anchor:
-            return Prediction(frame, f"Anchor frame {frame}")
-        projected = project_frame(frame, hints[self.anchor], hints[index], self.counts[index])
-        if projected.status == "unavailable":
-            return Prediction(None, "Unavailable opening offset — match manually")
-        if projected.status == "outside source range":
-            return Prediction(None, "Prediction outside source range — match manually")
-        provenance = (
-            "Provisional opening hint" if projected.provisional else "Opening alignment hint"
-        )
-        return Prediction(projected.frame, f"Predicted frame {projected.frame} — {provenance}")

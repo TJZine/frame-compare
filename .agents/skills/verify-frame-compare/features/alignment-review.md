@@ -29,28 +29,35 @@ not a substitute for a visible review session. Capture evidence alongside the
 interaction without suppressing that prerequisite.
 
 When the generated session opens, choose **Tool Panel → Frame Compare Alignment Review**.
-Enter/verify **Frame** in any stable source row, then choose **Anchor [source]: [number]**.
-Switch A/B with the existing source selector; active-source **Go to [number]** requests
-a predicted seek and fills a proposal without selecting. Explicitly **Select [source]: [number]**
-for each match, including Reference, then **Save selected alignment**.
-Active unprotected Frame proposals follow validated public navigation; no callback
-may select/save or change a pin. Manual empty/invalid edits, Anchor/Select and Predicted
-Go suspend that row’s follow; active-only Use viewer frame deliberately resumes it.
-Focus editing stays protected. Paused callback13/API12 must converge to13 after public
-commit without a second callback. Pending/timeout values stay unready in UI/handlers;
-check 25 ms resampling, 500 ms deadline/20-attempt caps, source/session/token cancellation,
-stale enabled actions, modal/mode/reload/destruction, and no idle retry. This observes
-navigation, not displayed pixels. Clear/reset/basis preserve ownership. Verify exact source/
-number action text, provisional/missing hints, reset/cancel/reanchor, failed seek/write,
-and separate known-offset draft preservation. **Keep current alignment** saves a keep
-decision, not confirmation of the unsaved selected lineup.
+Browse each source to matching content; original-frame numbers update automatically,
+including before first opening the panel, while hidden, or with another tool selected.
+Generated review sessions automatically Unlink their own playheads. Verify independent
+positions, rapid seeks, valid zero and source identity. Pause and choose **Confirm matching
+frames** once. Browsing and editing never save alignment. Check rejection of playback,
+queued and in-flight seeks (including an empty pending queue), startup/reload and
+wrong-session/unavailable positions. A stale click refreshes changed numbers and requires
+another confirmation.
+Also hold a dequeued frame's future, pause playback, and prove confirmation remains
+blocked until the real worker drains; paused flags alone are insufficient. Cover
+queued-but-not-started playback work as well as an already running frame task.
+With a real background job held, enter every source frame manually: the persistent
+guidance must still explain the wait and Confirm must remain disabled without a
+sidecar. Release the job and verify readiness returns with drafts intact. In the
+loaded workspace, focus actions and press Space: disclosure, audio details, Use
+viewer frame, Confirm in both bases, and Keep must activate once without playback.
+Verify Space outside those controls still starts viewer playback.
+Manual edits, including empty/invalid values, protect that row; **Use viewer frame**
+resumes it. Focus editing stays protected. Known offsets remain a separate complete
+basis; Keep writes keep decisions without confirming the lineup. Failed writes stay
+editable; success freezes the saved set. Reload/destruction stops and rebinds tracking
+without accumulating callbacks. These are numeric positions, not displayed-pixel proof.
 
 Video hints follow requested native frames and immutable session-opening offsets for
-all other named sources in stable order. Panel hints follow the named pinned anchor;
-verify these can differ when browsing. Unknown/outside hints are explicit, never
+all other named sources in stable order. The panel shows tracked original frame numbers.
+Unknown/outside video hints are explicit, never
 clamped or silently omitted. Check comma/digit/status transitions and whole-set fit
-fallback. After Save/Keep, panel prediction labels/markers hide while video opening
-hints remain. Known-offset/Keep retained pins stay unsaved; failed writes stay editable.
+fallback. Video opening hints remain after confirmation or Keep. Known offsets and Keep
+do not confirm source-frame drafts that were not submitted.
 A standalone demo must say no parent comparison resumes in both console and panel.
 Normal CLI close/resume semantics remain unchanged.
 
@@ -104,6 +111,13 @@ the actual panel actions, saved session-bound sidecar, close/resume and resultin
 alignment. Capture command/doctor, relevant UI states and bounded sanitized
 run/result artifacts; preserve the original attempt provenance alongside confirmed
 zero/nonzero offsets. Do not infer confirmation from an existing cache entry.
+
+`tests/vsview/test_native_workspace_positions.py` drives the installed VSView workspace
+with generated SDR media in an isolated offscreen child. It covers never-opened,
+hidden/reopened/other-tool tracking, independent positions, in-flight seek rejection,
+zero, exact sidecar, manual ownership, write failure, freeze, reload and cleanup.
+It changes no global preferences and never attaches to the user's app. This is native
+offscreen proof, distinct from visible desktop and packaged acceptance.
 
 ## Gotchas
 

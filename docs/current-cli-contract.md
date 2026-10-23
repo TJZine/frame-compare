@@ -1549,26 +1549,28 @@ Normal VSView labels reuse the release-aware presentation identities prepared by
 typed alignment request. Paths and stems remain the internal source, suggested
 offset, manual-override, and alignment-result identities. The generated workspace
 contains each source exactly once: one `Reference` and one ordered `Comparison N`
-output per comparison. In the native panel, the default workflow unlinks playheads,
-positions each source on the same visible moment, and reports the active output as
-`Viewing: frame N` separately from its callback-derived `Captured position: frame N`.
-Inactive sources show only their last captured position. Before saving, viewer drafts
-use `{n}/{total} positions captured`, source-frame drafts use `{n}/{total} source frames
-entered`, and known-offset drafts use `{n}/{total} offsets entered`; complete valid
-drafts add ` — ready to confirm`. Manual source drafts use `Entered source frame: N`
-and invalid drafts use `Needs attention — {validation message}`. Manual source-frame or
-known-offset entry and keep-current completion do not require viewer visits. Public
-current-output/current-frame callbacks update the live source lineup; the panel does not
-inspect or change hidden playheads or synchronization mode.
-**Confirm these aligned positions** writes the complete ordered result once; the
-known-offset equivalent is **Confirm these known offsets**. **Keep current alignment**
-writes one `keep_current` decision for every comparison. The collapsed manual
-disclosure offers source-frame or known-offset input, and both use the same whole-set
-save action. The panel calculates `reference - comparison` and shows the trim meaning;
-closing without saving produces no result. The viewer guidance is `To confirm a new
-alignment, unlink the playheads and position each source on the same visible moment. Or
-keep the current alignment.` Known-offset guidance is `Enter the signed
-reference-minus-comparison offsets, then confirm. Or keep the current alignment.`
+output per comparison. In the native panel, generated review sessions automatically
+unlink their own playheads. Browse each source to the same visible moment, inspect
+its tracked original-frame number, then choose **Confirm matching frames** once.
+Tracking starts at workspace load and continues while the panel is hidden or another
+tool is selected. The pinned VSView 0.13.0 integration reads retained per-source
+positions; it does not infer inactive positions from active-source callbacks.
+`{n}/{total} frames ready` reports complete, in-range readiness. Playing, queued or
+in-flight seeking, paused playback workers still draining a frame, loading/reload
+and invalid workspace/source state block automatic
+confirmation. The handler revalidates the complete snapshot; changed numbers require
+another click. Confirmation expresses manual numeric intent, not displayed-pixel proof.
+
+Editing a frame protects that row from passive updates, including empty/invalid text.
+**Use viewer frame** resumes tracking for that source. When automatic tracking is
+unavailable, explicit manual original-frame entry remains available with manual-unlink
+guidance. The collapsed manual controls offer separate **Known offsets** input;
+`{n}/{total} offsets entered` and **Confirm these known offsets** apply only to that
+complete basis. **Keep current alignment** writes one `keep_current` decision per
+comparison without confirming the frame lineup. It shows **Keep decision saved —
+frame lineup was not confirmed**. Successful writes freeze edits; failed writes remain
+editable. The panel calculates `reference - comparison`, preserving valid zero.
+Closing without confirmation or Keep produces no result.
 Generated accent output uses `38;2;210;172;107` when `COLORTERM` is `truecolor`
 or `24bit` or `WT_SESSION` is set, else `38;5;180` when `TERM` contains
 `256color`, else `33`, keeping the `NO_COLOR` and TTY checks. Glyphs follow S3
@@ -1600,7 +1602,7 @@ action is `Close VSView to resume Frame Compare.`, stale keep-current help is hi
 and actions stay disabled. Saved outcomes are `Accepted alignment retained: +Nf`,
 `Current alignment retained: +Nf — manually confirmed`, the explicit unresolved
 provisional outcome, the explicit unresolved unavailable outcome, or
-`Alignment confirmed: +Nf — manually confirmed` for a confirmation.
+`Saved offset (Reference − Comparison): +N frames — manually confirmed` for a confirmation.
 
 The Frame Compare alignment-review tool panel registers with first priority so it is
 the first Tool Panel tab when VSView constructs the sidebar for this workflow.
