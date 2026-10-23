@@ -1,3 +1,0 @@
-[32m    Device Name: NVIDIA GeForce RTX 5080[0m
-[32m    Driver info: 621.01[0m
-[30;1mSpent 0.120 ms on shader: bt2390 tone map (448 -> 100), gamut map (perceptual), color encoding[0m
