@@ -136,6 +136,14 @@ def apply_libplacebo(
     inputs = resolve_hdr_tonemap_inputs(clip, hdr_metadata)
     clip = convert_for_libplacebo(clip, inputs)
 
+    source_peak = resolve_source_peak(settings, inputs.hdr_metadata)
+    if not settings.dynamic_peak_detection and source_peak.origin == "default":
+        log.warning(
+            "fast_tonemap_no_hdr_peak_metadata_using_default",
+            message="No HDR peak metadata was found; using the default source peak.",
+            source_peak_nits=source_peak.nits,
+        )
+
     try:
         clip = normalize_rgb_props(clip, transfer=inputs.transfer, primaries=inputs.primaries)
     except Exception as e:
@@ -149,7 +157,9 @@ def apply_libplacebo(
         )
         raise_if_cancelling()
         clip = (
-            _still_frame_tonemap(clip, core, tm_kwargs)
+            core.placebo.Tonemap(clip, **tm_kwargs)
+            if still_image and not settings.dynamic_peak_detection
+            else _still_frame_tonemap(clip, core, tm_kwargs)
             if still_image
             else core.placebo.Tonemap(clip, **tm_kwargs)
         )
@@ -177,8 +187,14 @@ def apply_libplacebo(
             LibplaceboTonemap(
                 settings.tone_curve,
                 settings,
-                resolve_source_peak(settings, inputs.hdr_metadata),
-                frame_policy="independent_frames" if still_image else "sequence",
+                source_peak,
+                frame_policy=(
+                    "shared_stateless"
+                    if still_image and not settings.dynamic_peak_detection
+                    else "independent_frames"
+                    if still_image
+                    else "sequence"
+                ),
             ),
         ),
     )

@@ -713,13 +713,14 @@ unchanged.
 
 ### CLI Choice, Frame, And Count Validation
 
-- `--overlay`, `--tm-preset`, and `--tm-curve` are parsed as raw strings, not Typer
+- `--overlay`, `--tm-preset`, `--tm-curve`, and `--tm-speed` are parsed as raw strings, not Typer
   enums, so an invalid value stays on the typed `FC-1003`/`CONFIG_VALIDATION_ERROR`
   path with exit code 2 instead of a Click usage error. Normal (non-verbose) output
   names the actual flag and the allowed values without requiring `--verbose`:
   `Invalid value for --overlay: banana` followed by
   `Choose one of: minimal, standard, diagnostic, none.` The allowed-value list is
-  read from `OverlayMode`/`TonemapPreset`/`ToneCurve` at the point of the error, so
+  read from `OverlayMode`/`TonemapPreset`/`ToneCurve`/`TonemapSpeed` at the point of
+  the error, so
   it cannot drift from the schema enums. JSON mode keeps the existing structured
   `validation_errors` entry (`type`, `loc`, `msg`, `input`, `ctx.expected`) with
   `loc` pointing at the mapped config path (for example
@@ -746,7 +747,8 @@ unchanged.
 - `frame-compare run --help` uses task-scoped metavariables instead of generic
   placeholders: `FRAME[,FRAME…]` for `--frames`, `COUNT` for the four frame-count
   options, `NITS` for `--tm-target`, and a short choice metavar (`MODE`, `PRESET`,
-  `CURVE`) for `--overlay`, `--tm-preset`, and `--tm-curve` respectively. Each
+  `CURVE`, `SPEED`) for `--overlay`, `--tm-preset`, `--tm-curve`, and `--tm-speed`
+  respectively. Each
   choice option's help text also lists its allowed values (`Choose one of: ...`),
   read from the same schema enums as the validation error above, so help and
   errors cannot disagree.
@@ -1085,6 +1087,12 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
   for mixed requests), and a `shared` implementation/algorithm/effective-controls
   projection only when all tonemapped clips agree. Per-clip peaks and fallback causes
   do not prevent a shared run summary.
+- Requested and applied libplacebo controls include `tonemap_speed`. `quality` keeps
+  the `independent_frames` still policy; `fast` disables dynamic peak detection and
+  uses the `shared_stateless` policy, labeled `Shared (metadata peak, no per-frame
+  measurement)`. The per-clip applied facts disclose the resolved source-peak origin.
+  When fast mode uses the `default` origin, the report notes that no HDR peak metadata
+  was found and the default 1000-nit peak was used.
 - The primary report toolbar keeps frame navigation, view modes, and mode-specific
   context/alignment in three stable CSS-owned zones on wide screens. It becomes a
   two-row layout at medium widths and a stacked layout at narrow widths without
@@ -1289,6 +1297,7 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 | --- | --- | --- |
 | `--input` | `paths.input_dir` | Relative values remain relative to the workspace root. |
 | `--tm-preset` | `color.preset` | Tonemap preset override. |
+| `--tm-speed` | `color.tonemap_speed` | Tonemap source-peak policy override (`quality` or `fast`). |
 | `--tm-target` | `color.target_nits` | Tonemap target nits override. |
 | `--tm-curve` | `color.tone_curve` | Tonemap curve override. |
 | `--frames` | `analysis.user_frames` | Comma-separated original reference source-frame numbers. Values outside the effective selectable domain are dropped with warnings at runtime. |
@@ -2067,6 +2076,15 @@ and no stale source HDR metadata. PNG encoding preserves those samples; the exis
 limited-to-full guard remains for other clips whose props indicate limited RGB.
 SDR sources and the degraded fallback do not inherit this libplacebo-specific
 conversion or destination-black assumption.
+
+`color.tonemap_speed` is orthogonal to presets. `quality` is the default and keeps
+per-frame peak measurement for stills. `fast` sets dynamic peak detection off and
+uses source metadata or the resolved static peak hint, so still preparation can share
+one stateless native mapper. `--tm-speed` takes precedence over the config value for
+one run; like the other mapped rendering overrides, it is persisted only with
+`--write-config`. This speed choice is disclosed in requested and applied report
+controls, while the degraded fallback ignores it and retains its existing effective
+controls.
 
 ## `wizard` Command Contract
 

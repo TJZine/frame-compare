@@ -109,6 +109,7 @@ class ReportFramePayload(TypedDict):
 class ReportTonemapSettingsPayload(TypedDict):
     enabled: bool
     preset: str
+    tonemap_speed: str
     tone_curve: str
     target_nits: int
     source_peak: int | None
@@ -692,6 +693,7 @@ def _tonemap_settings_payload(settings: TonemapSettings) -> ReportTonemapSetting
     return {
         "enabled": settings.enabled,
         "preset": settings.preset.value,
+        "tonemap_speed": settings.tonemap_speed.value,
         "tone_curve": settings.tone_curve.value,
         "target_nits": settings.target_nits,
         "source_peak": settings.source_peak,

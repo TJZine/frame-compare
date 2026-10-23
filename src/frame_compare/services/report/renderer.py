@@ -310,17 +310,16 @@ def _render_tonemap_number(value: object) -> str:
     return str(value)
 
 
-def _render_tonemap_details(rendering: object) -> str:
+def _render_tonemap_details(rendering: object, clips: object = ()) -> str:
     """Render shared applied tonemap controls into an accessible details list."""
     rendering_map = _object_mapping(rendering)
     tonemap_map = _object_mapping(rendering_map.get("tonemap"))
     shared = _object_mapping(tonemap_map.get("shared"))
     settings_map = _object_mapping(shared.get("effective_controls"))
-    if not settings_map:
-        return ""
     labels = (
         ("output_encoding", "Image encoding"),
         ("frame_policy", "Frame processing"),
+        ("tonemap_speed", "Tonemap speed"),
         ("dynamic_peak_detection", "Dynamic peak detection"),
         ("contrast_recovery", "Contrast recovery"),
         ("gamma_lift", "Gamma lift"),
@@ -353,8 +352,18 @@ def _render_tonemap_details(rendering: object) -> str:
             value_text = "Automatic" if key == "source_peak" else None
         elif key == "output_encoding" and value == "srgb":
             value_text = "sRGB"
-        elif key == "frame_policy" and value in ("sequence", "independent_frames"):
-            value_text = "Independent frames" if value == "independent_frames" else "Sequence"
+        elif key == "frame_policy" and value in (
+            "sequence",
+            "independent_frames",
+            "shared_stateless",
+        ):
+            value_text = {
+                "sequence": "Sequence",
+                "independent_frames": "Independent frames",
+                "shared_stateless": "Shared (metadata peak, no per-frame measurement)",
+            }[value]
+        elif key == "tonemap_speed" and value in ("quality", "fast"):
+            value_text = "Quality" if value == "quality" else "Fast"
         elif key == "gamut_mapping" and isinstance(value, int) and not isinstance(value, bool):
             value_text = _GAMUT_MAPPING_LABELS.get(value, str(value))
         elif key == "metadata" and isinstance(value, int) and not isinstance(value, bool):
@@ -367,6 +376,28 @@ def _render_tonemap_details(rendering: object) -> str:
             value_text = str(value)
         if value_text is not None:
             rows.append(f"<div><dt>{_esc_text(label)}</dt><dd>{_esc_text(value_text)}</dd></div>")
+    default_peak_sources: list[str] = []
+    if isinstance(clips, list):
+        for clip in cast(list[object], clips):
+            clip_map = _object_mapping(clip)
+            presentation = _object_mapping(clip_map.get("presentation"))
+            applied = _object_mapping(presentation.get("tonemap"))
+            controls = _object_mapping(applied.get("effective_controls"))
+            if (
+                controls.get("tonemap_speed") == "fast"
+                and applied.get("source_peak_origin") == "default"
+            ):
+                label = clip_map.get("label")
+                default_peak_sources.append(str(label) if label else "a source")
+    if default_peak_sources:
+        rows.append(
+            "<div><dt>Source peak note</dt><dd>"
+            + _esc_text(
+                "Fast mode used the default 1000-nit source peak because no HDR peak "
+                "metadata was found."
+            )
+            + "</dd></div>"
+        )
     return "".join(rows)
 
 
@@ -398,7 +429,7 @@ def _render_info_modal(data: ReportPayload) -> str:
     shared_line_html = '<p class="rv-inspector-shared" data-info-clips-shared hidden></p>'
     rendering = data.get("rendering")
     tonemap_summary = _render_tonemap_summary(rendering)
-    advanced_rows = _render_tonemap_details(rendering)
+    advanced_rows = _render_tonemap_details(rendering, data.get("clips", []))
     advanced_details = (
         f"""<details class="rv-tonemap-details" data-rendering-details>
                         <summary>Advanced tonemap settings</summary>

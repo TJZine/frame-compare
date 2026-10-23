@@ -5,6 +5,7 @@ import pytest
 import vapoursynth as vs
 
 from frame_compare.config.schema import ToneCurve, TonemapPreset
+from frame_compare.config.schema_enums import TonemapSpeed
 from frame_compare.vs.tonemap_conversion import (
     apply_post_processing,
     convert_non_rgb_with_matrix_hint,
@@ -17,7 +18,13 @@ from frame_compare.vs.tonemap_libplacebo import (
     build_libplacebo_tonemap_kwargs,
 )
 from frame_compare.vs.tonemap_presets import get_preset_settings
-from frame_compare.vs.types import HDRMetadata, TonemapFallbackCause, TonemapResult, TonemapSettings
+from frame_compare.vs.types import (
+    HDRMetadata,
+    LibplaceboTonemap,
+    TonemapFallbackCause,
+    TonemapResult,
+    TonemapSettings,
+)
 
 if TYPE_CHECKING:
     from vapoursynth import Core, VideoNode
@@ -249,6 +256,32 @@ def test_libplacebo_uses_probed_hdr_signal_for_untagged_yuv_conversion() -> None
         "primaries_in": 9,
     }
     assert placebo.calls[0]["src_csp"] == 1
+
+
+def test_apply_libplacebo_fast_still_uses_one_shared_stateless_node() -> None:
+    clip = _Clip(
+        props={
+            "_Transfer": 16,
+            "_Primaries": 9,
+        }
+    )
+    placebo = _Placebo([clip])
+    core = SimpleNamespace(placebo=placebo)
+
+    result = apply_libplacebo(
+        cast("VideoNode", clip),
+        TonemapSettings(tonemap_speed=TonemapSpeed.FAST, dynamic_peak_detection=False),
+        cast("Core", core),
+        HDRMetadata(None, 1000, 400, 9, 16, 9),
+        still_image=True,
+    )
+
+    assert isinstance(result, TonemapResult)
+    assert len(placebo.calls) == 1
+    assert placebo.calls[0]["dynamic_peak_detection"] == 0
+    assert result.applied is not None
+    assert isinstance(result.applied.transform, LibplaceboTonemap)
+    assert result.applied.transform.frame_policy == "shared_stateless"
 
 
 @pytest.mark.parametrize(

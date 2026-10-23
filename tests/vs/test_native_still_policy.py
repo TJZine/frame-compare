@@ -14,8 +14,10 @@ from unittest.mock import Mock
 import pytest
 import vapoursynth as vs
 
+from frame_compare.config.schema_enums import TonemapSpeed
 from frame_compare.vs import tonemap_libplacebo, tonemap_runtime
 from frame_compare.vs.errors import TonemapError
+from frame_compare.vs.types import HDRMetadata, LibplaceboTonemap, TonemapResult, TonemapSettings
 
 
 def _reviewed_plugin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
@@ -198,6 +200,37 @@ def test_native_constructor_failure_is_not_retried_as_fresh(
         )
     assert core.placebo.Tonemap.call_count == 1
     legacy.assert_not_called()
+
+
+def test_fast_still_bypasses_experimental_native_still_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clip = Mock()
+    clip.format.bits_per_sample = 16
+    clip.format.color_family = vs.RGB
+    clip.get_frame.return_value.props = {"_Transfer": 16, "_Primaries": 9}
+    clip.std.SetFrameProps.return_value = clip
+    clip.std.Expr.return_value = clip
+    clip.std.RemoveFrameProps.return_value = clip
+    clip.resize.Point.return_value = clip
+    core = SimpleNamespace(placebo=SimpleNamespace(Tonemap=Mock(return_value=clip)))
+    still_gate = Mock(side_effect=AssertionError("fast mode entered native still gate"))
+    monkeypatch.setattr(tonemap_libplacebo, "_still_frame_tonemap", still_gate)
+
+    result = tonemap_libplacebo.apply_libplacebo(
+        clip,
+        TonemapSettings(tonemap_speed=TonemapSpeed.FAST, dynamic_peak_detection=False),
+        cast("vs.Core", core),
+        HDRMetadata(None, 1000, 400, 9, 16, 9),
+        still_image=True,
+    )
+
+    assert isinstance(result, TonemapResult)
+    assert result.applied is not None
+    assert isinstance(result.applied.transform, LibplaceboTonemap)
+    assert result.applied.transform.frame_policy == "shared_stateless"
+    still_gate.assert_not_called()
+    core.placebo.Tonemap.assert_called_once()
 
 
 def test_safety_cache_does_not_authorize_a_different_loaded_plugin(

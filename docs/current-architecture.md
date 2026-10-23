@@ -135,9 +135,16 @@ load that same experimental binary; its cached result does not authorize another
 plugin. Unsupported inputs and old/unknown plugins retain fresh per-frame mapping.
 The native node owns reusable resources and permanent poisoning; late errors
 propagate without per-frame fallback or retry. Constructor fallback remains
-source-level and carries truthful fallback facts. The opt-in changes no persisted
-color settings, sequence controls, mathematical frame policy or output encoding,
-and does not declare the experimental binary accepted for production. Each parallel render batch owns one
+source-level and carries truthful fallback facts. The experimental native-still
+opt-in changes no persisted color settings, sequence controls, mathematical frame
+policy or output encoding, and does not declare the experimental binary accepted for
+production. The fast HDR still setting is separate from that experimental native
+reuse: it disables dynamic
+peak detection, uses the resolved stream/static source peak, and selects one shared
+stateless libplacebo node for still preparation. Quality mode continues to use fresh
+per-frame mapper state, and fast mode never routes through the experimental
+`independent=1` path. The speed setting is an ordinary persisted color field, but it
+does not change preset values or output encoding. Each parallel render batch owns one
 `threading.Event`: its main-thread 50 ms future-wait poll sets it on cancellation
 or a real failure, and workers check it before each render frame. Stopped units
 retain completed frame results as cleanup outcomes; real-failure ordering remains authoritative.
@@ -1102,6 +1109,9 @@ peak-detector history across source frames. No Python node cache retains per-fra
 GPU contexts. Subsequent native failures propagate rather than silently mixing
 fallback pixels into a source labeled libplacebo. Other callers retain sequence
 mode; preset kwargs, including temporal smoothing settings, remain unchanged.
+When `dynamic_peak_detection` is disabled by the fast speed setting, still preparation
+instead applies one `placebo.Tonemap` node over the clip and reports
+`shared_stateless`; this policy follows detection state, not the setting name.
 
 The known libplacebo SDR destination is BT.709-primary BT.1886 encoded RGB. After
 the existing optional gamma adjustment, `tonemap_conversion` decodes that transfer
@@ -1124,7 +1134,9 @@ while Inspector/info and ARIA surfaces consume primary identity and exact filena
 Per-clip presentation contains applied tonemap facts; the rendering summary derives a
 shared implementation/algorithm/control projection, excluding clip-specific peaks and
 causes. Identity includes applied output facts and excludes requested settings and
-fallback causes in both clip and rendering projections.
+fallback causes in both clip and rendering projections. Resolved source-peak origin,
+tonemap speed, and frame policy participate in applied report identity; reports note
+when fast mode uses the default peak because no HDR peak metadata was available.
 Stage labels show the control name plus muted resolution and size, adding an
 HDR/SDR word only when the name has none; toolbar selects cap at `20rem` with an
 end ellipsis and carry the full name on each option. Canonical clip labels continue

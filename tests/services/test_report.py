@@ -38,7 +38,7 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
     SourceSignalFacts,
 )
-from frame_compare.vs.types import TonemapSettings
+from frame_compare.vs.types import AppliedTonemap, TonemapSettings
 from tests.tonemap_test_support import libplacebo_tonemap
 
 
@@ -565,3 +565,43 @@ def test_applied_tonemap_identity_and_shared_projection(
     assert peaks["report_id"] != payload(placebo, placebo)["report_id"]
     control_changed = replace(fallback, transform=replace(fallback.transform, gamma_lift=True))
     assert payload(placebo, control_changed)["report_id"] != mixed["report_id"]
+
+
+def test_fast_tonemap_speed_is_disclosed_and_changes_report_identity(
+    report_data: ReportData, tmp_path: Path
+) -> None:
+    from frame_compare.config.schema_enums import TonemapSpeed
+
+    quality = libplacebo_tonemap(TonemapSettings())
+    fast_settings = TonemapSettings(tonemap_speed=TonemapSpeed.FAST, dynamic_peak_detection=False)
+    fast = libplacebo_tonemap(fast_settings)
+
+    def payload(tonemap: AppliedTonemap) -> ReportPayload:
+        return build_report_payload(
+            replace(
+                report_data,
+                clips=[
+                    replace(
+                        clip,
+                        presentation_state=PresentationState.HDR_TONEMAPPED,
+                        tonemap=tonemap,
+                    )
+                    for clip in report_data.clips
+                ],
+            ),
+            ReportConfig(),
+            report_dir=tmp_path,
+        )
+
+    fast_payload = payload(fast)
+    requested = fast_payload["rendering"]["tonemap"]["requested"]
+    shared = fast_payload["rendering"]["tonemap"]["shared"]
+    assert requested is not None
+    assert requested["tonemap_speed"] == "fast"
+    assert shared is not None
+    assert shared["effective_controls"]["tonemap_speed"] == "fast"
+    assert shared["effective_controls"]["frame_policy"] == "sequence"
+    applied = fast_payload["clips"][0]["presentation"]["tonemap"]
+    assert applied is not None
+    assert applied["source_peak_origin"] == "default"
+    assert fast_payload["report_id"] != payload(quality)["report_id"]

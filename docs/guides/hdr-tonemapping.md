@@ -29,6 +29,20 @@ remain unchanged; the report records `independent_frames` as the applied frame
 policy. This is a still-image rendering policy, not chronological playback with
 temporal smoothing.
 
+## Fast screenshots
+
+For a large still-image batch, set `color.tonemap_speed = "fast"` or pass
+`--tm-speed fast`. Fast mode turns off dynamic peak detection and lets libplacebo use
+per-frame stream metadata when available, then static HDR metadata, then the resolved
+source-peak default. Still preparation can therefore share one stateless native
+mapper, and the report records `shared_stateless` as
+**Shared (metadata peak, no per-frame measurement)**. This is faster and reproducible,
+but it can look different from `quality`, which measures each frame independently;
+inspect scenes where the source peak changes. If no HDR peak metadata is available,
+the report calls out use of the default 1000-nit peak and the run log warns about it.
+The setting is independent of the tone curve, target, and preset, and the degraded
+fallback continues to ignore it.
+
 The sRGB conversion uses the native destination's configured black and white
 endpoints: the selected black maps to sRGB zero and white to one. It preserves
 BT.709 primaries and D65. It changes the representation for browser images, not

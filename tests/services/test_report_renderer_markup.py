@@ -386,6 +386,7 @@ def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settin
     settings: ReportTonemapSettingsPayload = {
         "enabled": True,
         "preset": "reference",
+        "tonemap_speed": "quality",
         "tone_curve": "bt2390",
         "target_nits": 100,
         "source_peak": None,
@@ -426,6 +427,7 @@ def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settin
     details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
     assert "open" not in details.attrs
     pairs = parse_definition_pairs(details)
+    assert pairs["Tonemap speed"] == "Quality"
     assert pairs["Dynamic peak detection"] == "On"
     assert pairs["Gamma lift"] == "Off"
     assert "Source peak" not in pairs
@@ -478,6 +480,48 @@ def test_build_html_tonemap_labels(
     html = build_html(payload)
     details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
     assert parse_definition_pairs(details)[label] == expected
+
+
+def test_build_html_discloses_fast_default_peak_note(
+    report_payload: ReportPayload,
+) -> None:
+    payload = deepcopy(report_payload)
+    payload["rendering"]["tonemap"] = {
+        "ran": True,
+        "requested": None,
+        "shared": {
+            "implementation": "libplacebo",
+            "algorithm": "bt2390",
+            "effective_controls": {
+                "tonemap_speed": "fast",
+                "frame_policy": "shared_stateless",
+            },
+        },
+    }
+    payload["clips"][0]["presentation"] = {
+        "state": "hdr_tonemapped",
+        "tonemap": {
+            "implementation": "libplacebo",
+            "algorithm": "bt2390",
+            "target_nits": 100,
+            "source_peak_nits": 1000,
+            "source_peak_origin": "default",
+            "effective_controls": {
+                "tonemap_speed": "fast",
+                "frame_policy": "shared_stateless",
+            },
+            "fallback_cause": None,
+        },
+    }
+
+    html = build_html(payload)
+
+    details = require_first(parse_elements(html), tag="details", class_name="rv-tonemap-details")
+    pairs = parse_definition_pairs(details)
+    assert pairs["Frame processing"] == "Shared (metadata peak, no per-frame measurement)"
+    assert pairs["Source peak note"] == (
+        "Fast mode used the default 1000-nit source peak because no HDR peak metadata was found."
+    )
 
 
 def test_build_html_avoids_inline_styles(report_payload: ReportPayload) -> None:
