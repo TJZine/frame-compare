@@ -5,23 +5,29 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-# Skip if VapourSynth is not installed
-vs = pytest.importorskip("vapoursynth")
+# Required native proof must fail before optional-runtime collection skips.
+try:
+    import vapoursynth as vs
+except ImportError as exc:
+    if os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1":
+        pytest.fail(f"VapourSynth required for native proof: {exc}", pytrace=False)
+    pytest.skip(f"VapourSynth unavailable: {exc}", allow_module_level=True)
 
 # Skip if VapourSynth is mocked (e.g. by test_exports.py running first in a no-VS env)
-if isinstance(vs, MagicMock) or hasattr(vs, "_mock_methods"):
+if hasattr(vs, "_mock_methods"):
+    if os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1":
+        pytest.fail("Real VapourSynth required for native proof; module is mocked", pytrace=False)
     pytest.skip("VapourSynth is mocked, skipping integration test", allow_module_level=True)
 
-from frame_compare.vs import (  # noqa: E402
+from frame_compare.vs import (
     detect_plugins,
     is_vapoursynth_available,
 )
-from frame_compare.vs.env import ensure_vs_environment  # noqa: E402
-from frame_compare.vs.loader import DefaultVSLoader  # noqa: E402
+from frame_compare.vs.env import ensure_vs_environment
+from frame_compare.vs.loader import DefaultVSLoader
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
