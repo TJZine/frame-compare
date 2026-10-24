@@ -31,17 +31,19 @@ def prove_package_imports() -> None:
 
 def prove_vsview_distribution_contract() -> None:
     expected = {
-        "jetpytools": "3.1.2",
-        "pyside6": "6.11.2",
-        "pyside6-addons": "6.11.2",
-        "pyside6-essentials": "6.11.2",
-        "shiboken6": "6.11.2",
+        "jetpytools": "3.2.0",
+        "pyside6": "6.12.0",
+        "pyside6-addons": "6.12.0",
+        "pyside6-essentials": "6.12.0",
+        "pyside6-pdf": "6.12.0.140",
+        "pyside6-webengine": "6.12.0.140",
+        "shiboken6": "6.12.0",
         "vapoursynth-bestsource": "22",
         "vapoursynth-lsmas": "1310.0.0.0",
         "vspackrgb": "2.0.0",
-        "vsview": "0.12.1",
-        "cyclopts": "5.2.0",
-        "vsjetengine": "1.8.0",
+        "vsview": "0.13.0",
+        "cyclopts": "5.3.0",
+        "vsjetengine": "1.8.1",
     }
     observed = {name: importlib.metadata.version(name) for name in expected}
     assert_true(observed == expected, f"VSView distribution mismatch: {observed}")
@@ -84,7 +86,10 @@ def prove_project_entrypoint_and_panel() -> None:
 
     app = QApplication.instance() or QApplication([])
     parent = QWidget()
-    panel = panel_type(parent, types.SimpleNamespace(file_path=None))
+    panel = panel_type(
+        parent,
+        types.SimpleNamespace(file_path=None, register_on_destroy=lambda cb: None),
+    )
     assert_true(
         "Inactive" in panel.progress_label.text(),
         "alignment panel is not inert outside a generated session",
@@ -331,7 +336,7 @@ def prove_apply_tonemap_frame() -> None:
     import vapoursynth as vs
 
     from frame_compare.vs.tonemap import _libplacebo_runtime_usable, apply_tonemap
-    from frame_compare.vs.types import TonemapSettings
+    from frame_compare.vs.types import LibplaceboTonemap, TonemapSettings
 
     core = vs.core
     tonemap_clip = core.std.BlankClip(
@@ -341,7 +346,12 @@ def prove_apply_tonemap_frame() -> None:
 
     libplacebo_runtime_usable = _libplacebo_runtime_usable()
     app_out = apply_tonemap(tonemap_clip, TonemapSettings(enabled=True))
-    app_frame = app_out.get_frame(0)
+    assert_true(app_out.applied is not None, "apply_tonemap omitted applied facts")
+    assert_true(
+        isinstance(app_out.applied.transform, LibplaceboTonemap) == libplacebo_runtime_usable,
+        "apply_tonemap implementation does not match runtime capability",
+    )
+    app_frame = app_out.clip.get_frame(0)
     assert_true(
         app_frame.width == 16 and app_frame.height == 16, "apply_tonemap frame render failed"
     )
@@ -384,6 +394,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
     from PySide6.QtWidgets import QApplication, QWidget
     from vsengine.loops import get_loop, set_loop
     from vsview.api import get_outputs
+    from vsview.app.outputs import VideoMetadata
     from vsview.vsenv import QtEventLoop
 
     cache_dir = media_path.parent / "runtime-smoke-cache"
@@ -442,6 +453,13 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             "generated VSView session omitted BT.709 preview defaults",
         )
         outputs = get_outputs()
+        assert_true(
+            all(
+                isinstance(output, VideoMetadata) and output.hdr is False
+                for output in outputs.values()
+            ),
+            "alignment outputs did not reserve SDR presentation",
+        )
         names = [output.name for output in outputs.values()]
         assert_true(
             names == ["Reference", "Comparison 1", "Comparison 2"],
@@ -502,6 +520,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             current_voutput=voutputs[0],
             current_frame=1,
             timeline=Timeline(),
+            register_on_destroy=lambda cb: None,
         )
         app = QApplication.instance() or QApplication([])
         previous_loop = get_loop()
@@ -512,18 +531,22 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             active_panel.on_workspace_loaded()
             app.processEvents()
             assert_true(
-                active_panel.progress_label.text() == "0/3 positions captured",
+                active_panel.progress_label.text() == "0/3 frames ready",
                 "alignment panel did not start with an empty three-source lineup",
             )
-            for output_index, frame in enumerate((1, 0, 2)):
+            for selected_count, (output_index, frame) in enumerate(((1, 0), (2, 2), (0, 1))):
                 panel_api.current_voutput = voutputs[output_index]
                 panel_api.current_frame = frame
                 active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
                 app.processEvents()
+                assert_true(
+                    active_panel.progress_label.text() == f"{selected_count}/3 frames ready",
+                    "navigation unexpectedly selected a frame",
+                )
+                active_panel.frame_inputs[output_index].setText(str(frame))
             assert_true(
-                active_panel.progress_label.text()
-                == "3/3 positions captured \u2014 ready to confirm",
-                "alignment panel did not record every source position",
+                active_panel.progress_label.text() == "3/3 frames ready",
+                "alignment panel did not select each explicit source number",
             )
             assert_true(
                 active_panel.use_positions_button.isEnabled(),
@@ -595,22 +618,33 @@ def prove_vsview_runtime(media_path: Path) -> None:
     proof("pyside6_event_loop=ok platform=offscreen")
 
     import vspackrgb.rust  # noqa: F401, I001
-    import vsview  # noqa: F401
-    import vsview.app.main  # noqa: F401
+    import vsview
+    import vsview.app.main
     import vsview.cli  # noqa: F401
     from vsview import set_output  # noqa: F401
 
     proof("vsview_deep_imports=ok modules=vsview.app.main,vsview.cli,vspackrgb.rust")
+    importlib.import_module("PySide6.QtPdf")
+    proof("qt_pdf_runtime=ok deployment=retained")
     site_packages = Path(sys.executable).resolve().parent.parent / "app" / "site-packages"
     qt_ffmpeg_dlls = [
         site_packages / "PySide6" / name
-        for name in ("avcodec-61.dll", "avformat-61.dll", "avutil-59.dll")
+        for name in (
+            "avcodec-63.dll",
+            "avformat-63.dll",
+            "avutil-61.dll",
+            "swresample-7.dll",
+            "swscale-10.dll",
+        )
     ]
     assert_true(
         all(path.is_file() for path in qt_ffmpeg_dlls),
         f"Qt FFmpeg DLL set incomplete: {qt_ffmpeg_dlls}",
     )
-    proof("qt_ffmpeg_runtime=ok lineage=7.1.5 dlls=avcodec-61,avformat-61,avutil-59")
+    proof(
+        "qt_ffmpeg_runtime=ok lineage=9.0.1 "
+        "dlls=avcodec-63,avformat-63,avutil-61,swresample-7,swscale-10"
+    )
     prove_qt_webengine_excluded()
     prove_vsview_distribution_contract()
     prove_project_entrypoint_and_panel()

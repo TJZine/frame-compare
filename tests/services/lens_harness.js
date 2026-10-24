@@ -1,897 +1,881 @@
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-const { domMechanics } = require('./dom_fixture');
+async function lensContracts() {
+    const assert = require('node:assert/strict');
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const vm = require('node:vm');
+    const { domMechanics } = require('./dom_fixture');
 
-const lensPath = path.resolve(
-    __dirname,
-    '..',
-    '..',
-    'src',
-    'frame_compare',
-    'services',
-    'report',
-    'assets',
-    'lens.js',
-);
-const viewerFormatPath = path.join(path.dirname(lensPath), 'viewer_format.js');
-
-let focusDocument = null;
-
-function fakeElement(rect = { left: 0, top: 0, width: 0, height: 0 }) {
-    const attributes = new Map();
-    const classes = new Set();
-    const capturedPointers = new Set();
-    let currentRect = { ...rect };
-    let srcValue = '';
-    const element = {
-        ...domMechanics(() => focusDocument),
-        hidden: false,
-        disabled: false,
-        checked: false,
-        value: '',
-        textContent: '',
-        dataset: {},
-        naturalWidth: 1920,
-        naturalHeight: 1080,
-        complete: true,
-        srcAssignments: 0,
-        currentSrc: '',
-        style: {
-            values: {},
-            setProperty(name, value) { this.values[name] = value; },
-        },
-        classList: {
-            toggle(name, force) {
-                if (force) classes.add(name);
-                else classes.delete(name);
-            },
-            contains(name) { return classes.has(name); },
-        },
-        setAttribute(name, value) { attributes.set(name, String(value)); },
-        getAttribute(name) { return attributes.get(name) ?? null; },
-        removeAttribute(name) {
-            attributes.delete(name);
-            if (name === 'src') srcValue = '';
-        },
-        getBoundingClientRect() {
-            return {
-                ...currentRect,
-                right: currentRect.left + currentRect.width,
-                bottom: currentRect.top + currentRect.height,
-            };
-        },
-        setRect(nextRect) { currentRect = { ...nextRect }; },
-        closest() { return null; },
-        querySelector() { return this.children[0] || null; },
-        setPointerCapture(pointerId) { capturedPointers.add(pointerId); },
-        releasePointerCapture(pointerId) {
-            if (!capturedPointers.delete(pointerId)) return;
-            this.dispatch('lostpointercapture', { pointerId });
-        },
-        hasPointerCapture(pointerId) { return capturedPointers.has(pointerId); },
-    };
-    Object.defineProperty(element, 'src', {
-        configurable: true,
-        get() { return srcValue; },
-        set(value) {
-            srcValue = String(value ?? '');
-            element.srcAssignments += 1;
-        },
-    });
-    return element;
-}
-
-function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones = true } = {}) {
-    const stage = fakeElement({ left: 0, top: 0, width: 1000, height: 700 });
-    const activeImage = fakeElement({ left: 100, top: 100, width: 800, height: 450 });
-    activeImage.src = 'clip-2/frame.png';
-    activeImage.currentSrc = activeImage.src;
-    const rightImage = fakeElement({ left: 120, top: 110, width: 800, height: 450 });
-    rightImage.src = 'clip-1/frame.png';
-    rightImage.currentSrc = rightImage.src;
-    const lens = fakeElement({ left: 600, top: 80, width: 240, height: 240 });
-    const palette = fakeElement({ left: 600, top: 632, width: 380, height: 40 });
-    const paletteGroup = fakeElement({ left: 700, top: 640, width: 280, height: 32 });
-    const activeControls = fakeElement();
-    activeControls.hidden = true;
-    const popover = fakeElement({ left: 700, top: 312, width: 260, height: 320 });
-    popover.hidden = true;
-    const firstSetting = fakeElement();
-    popover.querySelector = () => firstSetting;
-    popover.append(firstSetting);
-    const sizeButtons = ['small', 'medium', 'large'].map(size => {
-        const button = fakeElement();
-        button.dataset.lensSize = size;
-        return button;
-    });
-    const markerButtons = ['off', 'ring', 'brackets'].map(markerStyle => {
-        const button = fakeElement();
-        button.dataset.lensMarker = markerStyle;
-        return button;
-    });
-    const captionButtons = ['off', 'on'].map(caption => {
-        const button = fakeElement();
-        button.dataset.lensCaption = caption;
-        return button;
-    });
-    const captionRow = fakeElement();
-    captionRow.hidden = true;
-    const elements = {
-        'btn-lens': fakeElement(),
-        'rv-lens': lens,
-        'rv-lens-target': fakeElement(),
-        'btn-lens-zoom-out': fakeElement(),
-        'btn-lens-zoom-in': fakeElement(),
-        'btn-lens-settings': fakeElement(),
-        'lens-settings-popover': popover,
-        'btn-lens-reset': fakeElement(),
-    };
-    const selectors = {
-        '.rv-viewport-palette': palette,
-        '[data-lens-palette-group]': paletteGroup,
-        '[data-lens-active-controls]': activeControls,
-        '[data-lens-drag-handle]': fakeElement({ left: 804, top: 88, width: 28, height: 28 }),
-        '[data-lens-zoom]': fakeElement(),
-        '[data-lens-persistence]': fakeElement(),
-        '[data-lens-caption-row]': captionRow,
-        '[data-lens-image="active"]': fakeElement(),
-        '[data-lens-image="difference"]': fakeElement(),
-        '[data-lens-status="active"]': fakeElement(),
-        '[data-lens-identity="active"]': fakeElement(),
-        '[data-lens-identity="second"]': fakeElement(),
-    };
-    selectors['[data-lens-identity="second"]'].hidden = true;
-    const storageValues = new Map();
-    const detachedLoaders = [];
-    const storage = {
-        getItem(key) { return storageValues.get(key) ?? null; },
-        setItem(key, value) {
-            if (failingWrites) throw new Error('blocked');
-            storageValues.set(key, value);
-        },
-    };
-    const document = {
-        activeElement: null,
-        getElementById(id) { return elements[id] || null; },
-        querySelector(selector) { return selectors[selector] || null; },
-        querySelectorAll(selector) {
-            if (selector === '[data-lens-size]') return sizeButtons;
-            if (selector === '[data-lens-marker]') return markerButtons;
-            if (selector === '[data-lens-caption]') return captionButtons;
-            return [];
-        },
-        createElement(tagName) {
-            const element = fakeElement();
-            element.tagName = tagName.toUpperCase();
-            if (element.tagName === 'IMG') {
-                element.complete = autoLoadClones;
-                detachedLoaders.push(element);
-            }
-            return element;
-        },
-        addEventListener() {},
-    };
-    focusDocument = document;
-    lens.append(selectors['[data-lens-drag-handle]']);
-    paletteGroup.append(
-        elements['btn-lens'],
-        activeControls,
-        elements['btn-lens-zoom-out'],
-        elements['btn-lens-zoom-in'],
-        elements['btn-lens-settings'],
+    const lensPath = path.resolve(
+        __dirname,
+        '..',
+        '..',
+        'src',
+        'frame_compare',
+        'services',
+        'report',
+        'assets',
+        'lens.js',
     );
-    const context = {
-        console,
-        document,
-        window: {
-            matchMedia() { return { matches: coarse }; },
-            setTimeout(callback) { callback(); },
-        },
-    };
-    vm.runInNewContext(
-        `${fs.readFileSync(viewerFormatPath, 'utf8')}\n${fs.readFileSync(lensPath, 'utf8')}\nglobalThis.__Lens = Lens;`,
-        context,
-        { filename: lensPath },
-    );
-    const frame = {
-        images: [
-            { src: 'clip-1/frame.png' },
-            { src: 'clip-2/frame.png' },
-            { src: 'clip-3/frame.png' },
-        ],
-    };
-    const announcements = [];
-    const viewer = {
-        state: {
-            data: {
-                report_id: 'lens-report',
-                clips: [
-                    { label: 'Reference_camera_original_capture_001_master.exr', resolution: [1920, 1080] },
-                    { label: 'Active_camera_color_managed_comparison_002_master.exr', resolution: [1920, 1080] },
-                    { label: 'Alternate', resolution: [1280, 720] },
-                ].map(clip => ({
-                    ...clip,
-                    display: {
-                        primary: clip.label,
-                        release: '',
-                        control: clip.label,
-                        micro: clip.label,
-                        filename: clip.label,
+    const viewerFormatPath = path.join(path.dirname(lensPath), 'viewer_format.js');
+
+    function createElementFactory(documentFor = () => null) {
+        return function element(rect = { left: 0, top: 0, width: 0, height: 0 }) {
+            const attributes = new Map();
+            const classes = new Set();
+            const capturedPointers = new Set();
+            let currentRect = { ...rect };
+            let srcValue = '';
+            const element = {
+                ...domMechanics(documentFor),
+                hidden: false,
+                disabled: false,
+                checked: false,
+                value: '',
+                textContent: '',
+                dataset: {},
+                naturalWidth: 1920,
+                naturalHeight: 1080,
+                complete: true,
+                srcAssignments: 0,
+                currentSrc: '',
+                style: {
+                    values: {},
+                    setProperty(name, value) { this.values[name] = value; },
+                },
+                classList: {
+                    toggle(name, force) {
+                        if (force) classes.add(name);
+                        else classes.delete(name);
                     },
-                })),
+                    contains(name) { return classes.has(name); },
+                },
+                setAttribute(name, value) { attributes.set(name, String(value)); },
+                getAttribute(name) { return attributes.get(name) ?? null; },
+                removeAttribute(name) {
+                    attributes.delete(name);
+                    if (name === 'src') srcValue = '';
+                },
+                getBoundingClientRect() {
+                    return {
+                        ...currentRect,
+                        right: currentRect.left + currentRect.width,
+                        bottom: currentRect.top + currentRect.height,
+                    };
+                },
+                setRect(nextRect) { currentRect = { ...nextRect }; },
+                closest() { return null; },
+                querySelector() { return this.children[0] || null; },
+                setPointerCapture(pointerId) { capturedPointers.add(pointerId); },
+                releasePointerCapture(pointerId) {
+                    if (!capturedPointers.delete(pointerId)) return;
+                    this.dispatch('lostpointercapture', { pointerId });
+                },
+                hasPointerCapture(pointerId) { return capturedPointers.has(pointerId); },
+            };
+            Object.defineProperty(element, 'src', {
+                configurable: true,
+                get() { return srcValue; },
+                set(value) {
+                    srcValue = String(value ?? '');
+                    element.srcAssignments += 1;
+                },
+            });
+            return element;
+        };
+    }
+
+    const geometryElement = createElementFactory();
+
+    function makeEnvironment({ failingWrites = false, coarse = false, autoLoadClones = true } = {}) {
+        let document;
+        const element = createElementFactory(() => document);
+        const stage = element({ left: 0, top: 0, width: 1000, height: 700 });
+        const activeImage = element({ left: 100, top: 100, width: 800, height: 450 });
+        activeImage.src = 'clip-2/frame.png';
+        activeImage.currentSrc = activeImage.src;
+        const rightImage = element({ left: 120, top: 110, width: 800, height: 450 });
+        rightImage.src = 'clip-1/frame.png';
+        rightImage.currentSrc = rightImage.src;
+        const lens = element({ left: 600, top: 80, width: 240, height: 240 });
+        const palette = element({ left: 600, top: 632, width: 380, height: 40 });
+        const paletteGroup = element({ left: 700, top: 640, width: 280, height: 32 });
+        const activeControls = element();
+        activeControls.hidden = true;
+        const popover = element({ left: 700, top: 312, width: 260, height: 320 });
+        popover.hidden = true;
+        const firstSetting = element();
+        popover.querySelector = () => firstSetting;
+        popover.append(firstSetting);
+        const sizeButtons = ['small', 'medium', 'large'].map(size => {
+            const button = element();
+            button.dataset.lensSize = size;
+            return button;
+        });
+        const markerButtons = ['off', 'ring', 'brackets'].map(markerStyle => {
+            const button = element();
+            button.dataset.lensMarker = markerStyle;
+            return button;
+        });
+        const captionButtons = ['off', 'on'].map(caption => {
+            const button = element();
+            button.dataset.lensCaption = caption;
+            return button;
+        });
+        const captionRow = element();
+        captionRow.hidden = true;
+        const elements = {
+            'btn-lens': element(),
+            'rv-lens': lens,
+            'rv-lens-target': element(),
+            'btn-lens-zoom-out': element(),
+            'btn-lens-zoom-in': element(),
+            'btn-lens-settings': element(),
+            'lens-settings-popover': popover,
+            'btn-lens-reset': element(),
+        };
+        const selectors = {
+            '.rv-viewport-palette': palette,
+            '[data-lens-palette-group]': paletteGroup,
+            '[data-lens-active-controls]': activeControls,
+            '[data-lens-drag-handle]': element({ left: 804, top: 88, width: 28, height: 28 }),
+            '[data-lens-zoom]': element(),
+            '[data-lens-persistence]': element(),
+            '[data-lens-caption-row]': captionRow,
+            '[data-lens-image="active"]': element(),
+            '[data-lens-image="difference"]': element(),
+            '[data-lens-status="active"]': element(),
+            '[data-lens-identity="active"]': element(),
+            '[data-lens-identity="second"]': element(),
+        };
+        selectors['[data-lens-identity="second"]'].hidden = true;
+        const storageValues = new Map();
+        const detachedLoaders = [];
+        const storage = {
+            getItem(key) { return storageValues.get(key) ?? null; },
+            setItem(key, value) {
+                if (failingWrites) throw new Error('blocked');
+                storageValues.set(key, value);
             },
-            mode: 'overlay',
-            activeClipIdx: 1,
-            leftClipIdx: 0,
-            rightClipIdx: 1,
-            revealPercent: 50,
-        },
-        dom: { stage, leftImg: activeImage, rightImg: rightImage },
-        localStorage() { return storage; },
-        currentFrame() { return frame; },
-        clipDisplay(clip, profile = 'control') { return clip.display[profile]; },
-        clipAccessibleName(clip) { return clip.display.primary; },
-        referenceClipIndex() { return 0; },
-        viewport: { sliderCanvasRect() { return activeImage.getBoundingClientRect(); } },
-        bindRadioGroup() {},
-        syncRadioGroupTabStops() {},
-        announce(message) { announcements.push(message); },
-        gridView: { entries() { return []; } },
-    };
-    return {
-        Lens: context.__Lens,
-        viewer,
-        elements,
-        selectors,
-        sizeButtons,
-        markerButtons,
-        captionButtons,
-        storageValues,
-        frame,
-        document,
-        detachedLoaders,
-        announcements,
-        palette,
-    };
-}
+        };
+        document = {
+            activeElement: null,
+            getElementById(id) { return elements[id] || null; },
+            querySelector(selector) { return selectors[selector] || null; },
+            querySelectorAll(selector) {
+                if (selector === '[data-lens-size]') return sizeButtons;
+                if (selector === '[data-lens-marker]') return markerButtons;
+                if (selector === '[data-lens-caption]') return captionButtons;
+                return [];
+            },
+            createElement(tagName) {
+                const created = element();
+                created.tagName = tagName.toUpperCase();
+                if (created.tagName === 'IMG') {
+                    created.complete = autoLoadClones;
+                    detachedLoaders.push(created);
+                }
+                return created;
+            },
+            addEventListener() {},
+        };
+        lens.append(selectors['[data-lens-drag-handle]']);
+        paletteGroup.append(
+            elements['btn-lens'],
+            activeControls,
+            elements['btn-lens-zoom-out'],
+            elements['btn-lens-zoom-in'],
+            elements['btn-lens-settings'],
+        );
+        const context = {
+            console,
+            document,
+            window: {
+                matchMedia() { return { matches: coarse }; },
+                setTimeout(callback) { callback(); },
+            },
+        };
+        vm.runInNewContext(
+            `${fs.readFileSync(viewerFormatPath, 'utf8')}\n${fs.readFileSync(lensPath, 'utf8')}\nglobalThis.__Lens = Lens;`,
+            context,
+            { filename: lensPath },
+        );
+        const frame = {
+            images: [
+                { src: 'clip-1/frame.png' },
+                { src: 'clip-2/frame.png' },
+                { src: 'clip-3/frame.png' },
+            ],
+        };
+        const announcements = [];
+        const viewer = {
+            state: {
+                data: {
+                    report_id: 'lens-report',
+                    clips: [
+                        { label: 'Reference_camera_original_capture_001_master.exr', resolution: [1920, 1080] },
+                        { label: 'Active_camera_color_managed_comparison_002_master.exr', resolution: [1920, 1080] },
+                        { label: 'Alternate', resolution: [1280, 720] },
+                    ].map(clip => ({
+                        ...clip,
+                        display: {
+                            primary: clip.label,
+                            release: '',
+                            control: clip.label,
+                            micro: clip.label,
+                            filename: clip.label,
+                        },
+                    })),
+                },
+                mode: 'overlay',
+                activeClipIdx: 1,
+                leftClipIdx: 0,
+                rightClipIdx: 1,
+                revealPercent: 50,
+            },
+            dom: { stage, leftImg: activeImage, rightImg: rightImage },
+            localStorage() { return storage; },
+            currentFrame() { return frame; },
+            clipDisplay(clip, profile = 'control') { return clip.display[profile]; },
+            clipAccessibleName(clip) { return clip.display.primary; },
+            referenceClipIndex() { return 0; },
+            viewport: { sliderCanvasRect() { return activeImage.getBoundingClientRect(); } },
+            bindRadioGroup() {},
+            syncRadioGroupTabStops() {},
+            announce(message) { announcements.push(message); },
+            gridView: { entries() { return []; } },
+        };
+        return {
+            element,
+            Lens: context.__Lens,
+            viewer,
+            elements,
+            selectors,
+            sizeButtons,
+            markerButtons,
+            captionButtons,
+            storageValues,
+            frame,
+            document,
+            detachedLoaders,
+            announcements,
+            palette,
+        };
+    }
 
-const pure = makeEnvironment();
-const Lens = pure.Lens;
+    const first = makeEnvironment();
+    const second = makeEnvironment();
+    const parent = first.element();
+    const child = first.element();
+    parent.append(child);
+    second.elements['btn-lens'].focus();
+    child.focus();
+    assert.equal(first.document.activeElement, child);
+    assert.equal(second.document.activeElement, second.elements['btn-lens']);
+    child.remove();
+    assert.equal(first.document.activeElement, null);
+    parent.append(child);
+    child.focus();
+    parent.replaceChildren();
+    assert.equal(first.document.activeElement, null);
+    assert.equal(second.document.activeElement, second.elements['btn-lens']);
 
-assert.deepEqual(
-    JSON.parse(JSON.stringify(Lens.normalizePreferences({}))),
-    { magnification: 4, size: 'medium', markerStyle: 'ring', caption: 'off' },
-);
-assert.deepEqual(
-    JSON.parse(JSON.stringify(Lens.normalizePreferences({
-        magnification: 12,
-        size: 'large',
-        markerStyle: 'brackets',
-        caption: 'on',
-    }))),
-    { magnification: 12, size: 'large', markerStyle: 'brackets', caption: 'on' },
-);
-assert.deepEqual(
-    JSON.parse(JSON.stringify(Lens.normalizePreferences({
-        magnification: 5,
-        size: 'huge',
-        markerStyle: 'crosshair',
-        caption: 'sometimes',
-    }))),
-    { magnification: 4, size: 'medium', markerStyle: 'ring', caption: 'off' },
-);
-assert.deepEqual(
-    JSON.parse(JSON.stringify(Lens.normalizePreferences({ markerStyle: 'off' }))),
-    { magnification: 4, size: 'medium', markerStyle: 'off', caption: 'off' },
-);
-assert.deepEqual(
-    JSON.parse(JSON.stringify(Lens.normalizeReportState(
-        { enabled: true, comparisonEnabled: true, comparisonTarget: 1 },
-    ))),
-    { enabled: true, parkedPosition: { u: 0.82, v: 0.12 } },
-);
-assert.equal(
-    Lens.lensCaptionText('Some File', 'iT WEB-DL · DV HDR · ThisBlockHasProblems'),
-    'iT WEB-DL · ThisBlockHasProblems',
-);
-assert.equal(Lens.lensCaptionText('My Encode', 'My Encode'), 'My Encode');
-assert.equal(Lens.lensCaptionText('Director Cut · DV', 'Director Cut · DV'), 'Director Cut · DV');
-assert.equal(Lens.lensCaptionText('Anything', 'HDR'), 'HDR');
-assert.equal(Lens.lensCaptionText('Anything', ''), '');
+    const pure = makeEnvironment();
+    const Lens = pure.Lens;
 
-const bounded = Lens.normalizedPosition({ u: -4, v: 2 });
-assert.equal(bounded.u, 0);
-assert.equal(bounded.v, 1);
-const mapped = Lens.normalizedPoint(
-    fakeElement({ left: 10, top: 20, width: 200, height: 100 }),
-    110,
-    45,
-);
-assert.deepEqual(JSON.parse(JSON.stringify(mapped)), { u: 0.5, v: 0.25 });
-assert.equal(Lens.normalizedPoint(fakeElement({ left: 0, top: 0, width: 0, height: 0 }), 0, 0), null);
-const splitGeometry = Lens.lensImageGeometry(mapped, 200, 100, 4, 240, 120);
-assert.deepEqual(JSON.parse(JSON.stringify(splitGeometry)), {
-    width: 800,
-    height: 400,
-    left: -340,
-    top: 20,
-});
-assert.equal(Lens.captionCharacterCapacity, undefined);
-assert.equal(Lens.endEllipsis, undefined);
-assert.equal(Lens.CAPTION_METRICS, undefined);
-const rightBound = Lens.boundedPopoverPosition(
-    { left: 0, top: 0, width: 1000, height: 700 },
-    { left: 760, top: 80, width: 240, height: 272 },
-    { width: 260, height: 320 },
-);
-assert.ok(760 + rightBound.left + 260 <= 992);
-const leftBound = Lens.boundedPopoverPosition(
-    { left: 0, top: 0, width: 1000, height: 700 },
-    { left: 0, top: 400, width: 240, height: 272 },
-    { width: 260, height: 320 },
-);
-assert.ok(leftBound.left >= 8);
-const tinyBound = Lens.boundedPopoverPosition(
-    { left: 0, top: 0, width: 180, height: 180 },
-    { left: 8, top: 8, width: 160, height: 128 },
-    { width: 260, height: 320 },
-);
-assert.equal(tinyBound.maxWidth, 164);
-assert.equal(tinyBound.maxHeight, 164);
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(Lens.normalizePreferences({}))),
+        { magnification: 4, size: 'medium', markerStyle: 'ring', caption: 'off' },
+    );
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(Lens.normalizePreferences({
+            magnification: 12,
+            size: 'large',
+            markerStyle: 'brackets',
+            caption: 'on',
+        }))),
+        { magnification: 12, size: 'large', markerStyle: 'brackets', caption: 'on' },
+    );
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(Lens.normalizePreferences({
+            magnification: 5,
+            size: 'huge',
+            markerStyle: 'crosshair',
+            caption: 'sometimes',
+        }))),
+        { magnification: 4, size: 'medium', markerStyle: 'ring', caption: 'off' },
+    );
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(Lens.normalizePreferences({ markerStyle: 'off' }))),
+        { magnification: 4, size: 'medium', markerStyle: 'off', caption: 'off' },
+    );
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(Lens.normalizeReportState(
+            { enabled: true, comparisonEnabled: true, comparisonTarget: 1 },
+        ))),
+        { enabled: true, parkedPosition: { u: 0.82, v: 0.12 } },
+    );
+    assert.equal(
+        Lens.lensCaptionText('Some File', 'iT WEB-DL · DV HDR · ThisBlockHasProblems'),
+        'iT WEB-DL · ThisBlockHasProblems',
+    );
+    assert.equal(Lens.lensCaptionText('My Encode', 'My Encode'), 'My Encode');
+    assert.equal(Lens.lensCaptionText('Director Cut · DV', 'Director Cut · DV'), 'Director Cut · DV');
+    assert.equal(Lens.lensCaptionText('Anything', 'HDR'), 'HDR');
+    assert.equal(Lens.lensCaptionText('Anything', ''), '');
 
-const ringDefaultEnvironment = makeEnvironment();
-const ringDefaultController = ringDefaultEnvironment.Lens.create(ringDefaultEnvironment.viewer);
-assert.equal(ringDefaultController.state.preferences.markerStyle, 'ring');
-assert.equal(ringDefaultController.state.preferences.caption, 'off');
-const savedOffEnvironment = makeEnvironment();
-savedOffEnvironment.storageValues.set(
-    'frame-compare:lens-preferences:v2',
-    JSON.stringify({ markerStyle: 'off', caption: 'on' }),
-);
-const savedOffController = savedOffEnvironment.Lens.create(savedOffEnvironment.viewer);
-assert.equal(savedOffController.state.preferences.markerStyle, 'off');
-assert.equal(savedOffController.state.preferences.caption, 'on');
-
-const environment = makeEnvironment();
-const controller = environment.Lens.create(environment.viewer);
-controller.bind();
-assert.equal(controller.state.report.enabled, false);
-controller.setEnabled(true);
-assert.equal(controller.state.report.enabled, true);
-assert.equal(environment.elements['btn-lens'].getAttribute('aria-pressed'), 'true');
-assert.equal(environment.elements['rv-lens'].hidden, false);
-assert.equal(environment.elements['btn-lens'].hidden, false);
-assert.equal(environment.selectors['[data-lens-active-controls]'].hidden, false);
-assert.equal(environment.viewer.dom.stage.classList.contains('rv-lens-active'), true);
-assert.equal(environment.selectors['[data-lens-caption-row]'].hidden, true);
-assert.equal(environment.selectors['[data-lens-identity="active"]'].textContent, '');
-assert.equal(
-    environment.elements['rv-lens'].getAttribute('aria-label'),
-    'Image magnification lens. Current source: Active_camera_color_managed_comparison_002_master.exr',
-);
-environment.captionButtons[1].dispatch('click');
-assert.equal(controller.state.preferences.caption, 'on');
-assert.equal(environment.selectors['[data-lens-caption-row]'].hidden, false);
-const singleCaption = environment.selectors['[data-lens-identity="active"]'].textContent;
-assert.equal(singleCaption, 'Active_camera_color_managed_comparison_002_master.exr');
-assert.doesNotMatch(singleCaption, /…$/);
-assert.equal(
-    environment.selectors['[data-lens-identity="active"]'].getAttribute('aria-label'),
-    'Active_camera_color_managed_comparison_002_master.exr',
-);
-assert.equal(environment.selectors['[data-lens-identity="second"]'].hidden, true);
-environment.elements['btn-lens-settings'].dispatch('click');
-assert.equal(environment.elements['lens-settings-popover'].hidden, false);
-assert.equal(environment.elements['lens-settings-popover'].style.left, '720px');
-assert.equal(environment.elements['lens-settings-popover'].style.top, '316px');
-environment.elements['lens-settings-popover'].dispatch('keydown', { key: 'Escape' });
-assert.equal(environment.elements['lens-settings-popover'].hidden, true);
-assert.equal(controller.state.point.u, 0.5);
-assert.equal(controller.state.point.v, 0.5);
-const fixedLeft = environment.elements['rv-lens'].style.left;
-const fixedTop = environment.elements['rv-lens'].style.top;
-controller.handleStagePointerMove({ clientX: 300, clientY: 200, pointerType: 'mouse' });
-assert.equal(environment.elements['rv-lens'].hidden, false);
-assert.equal(controller.state.point.u, 0.25);
-assert.equal(controller.state.point.v, 2 / 9);
-assert.equal(environment.elements['rv-lens'].style.left, fixedLeft);
-assert.equal(environment.elements['rv-lens'].style.top, fixedTop);
-
-const coarseMouse = makeEnvironment({ coarse: true });
-const coarseMouseController = coarseMouse.Lens.create(coarseMouse.viewer);
-coarseMouseController.bind();
-coarseMouseController.setEnabled(true);
-assert.equal(
-    coarseMouseController.handleStagePointerDown({
-        pointerId: 21,
-        clientX: 300,
-        clientY: 200,
-        pointerType: 'mouse',
-    }),
-    false,
-);
-assert.equal(coarseMouseController.state.touchPending, null);
-assert.equal(
-    coarseMouseController.handleStagePointerMove({
-        pointerId: 21,
-        clientX: 300,
-        clientY: 200,
-        pointerType: 'mouse',
-    }),
-    true,
-);
-assert.equal(coarseMouseController.state.point.u, 0.25);
-assert.equal(coarseMouseController.state.point.v, 2 / 9);
-
-environment.viewer.state.mode = 'diff';
-controller.sync();
-assert.equal(environment.elements['rv-lens'].dataset.renderMode, 'diff');
-const diffCaption = environment.selectors['[data-lens-identity="active"]'].textContent;
-assert.equal(diffCaption, 'Reference_camera_original_capture_001_master.exr');
-assert.doesNotMatch(diffCaption, /…$/);
-const diffSecondCaption = environment.selectors['[data-lens-identity="second"]'].textContent;
-assert.equal(diffSecondCaption, '↔ Active_camera_color_managed_comparison_002_master.exr');
-assert.doesNotMatch(diffSecondCaption, /…$/);
-assert.equal(environment.selectors['[data-lens-identity="second"]'].hidden, false);
-assert.equal(
-    environment.selectors['[data-lens-identity="active"]'].getAttribute('aria-label'),
-    'Reference_camera_original_capture_001_master.exr ↔ Active_camera_color_managed_comparison_002_master.exr',
-);
-assert.match(
-    environment.elements['rv-lens'].getAttribute('aria-label'),
-    /Reference_camera_original_capture_001_master\.exr versus Active_camera_color_managed_comparison_002_master\.exr/,
-);
-assert.equal(environment.selectors['[data-lens-image="difference"]'].dataset.source, 'clip-1/frame.png');
-assert.notEqual(
-    environment.selectors['[data-lens-image="difference"]'].style.left,
-    environment.selectors['[data-lens-image="active"]'].style.left,
-);
-environment.viewer.state.mode = 'overlay';
-controller.sync();
-
-const gridImage = fakeElement({ left: 8, top: 12, width: 200, height: 100 });
-gridImage.src = 'clip-3/frame.png';
-gridImage.currentSrc = gridImage.src;
-environment.viewer.gridView.entries = () => [{ clipIdx: 2, image: gridImage, unavailable: false }];
-environment.viewer.state.mode = 'grid';
-controller.sync();
-assert.equal(controller.state.activeClipIdx, 2);
-assert.equal(controller.state.point.u, 0.5);
-assert.equal(controller.state.point.v, 0.5);
-assert.equal(
-    environment.selectors['[data-lens-image="active"]'].dataset.source,
-    'clip-3/frame.png',
-);
-const gridCaption = environment.selectors['[data-lens-identity="active"]'].textContent;
-assert.equal(environment.selectors['[data-lens-caption-row]'].hidden, false);
-assert.equal(gridCaption, 'Alternate');
-assert.equal(environment.elements['rv-lens'].dataset.renderMode, 'source');
-environment.viewer.state.mode = 'overlay';
-controller.sync();
-assert.equal(controller.state.activeClipIdx, 1);
-assert.equal(
-    environment.selectors['[data-lens-image="active"]'].dataset.source,
-    'clip-2/frame.png',
-);
-
-assert.equal(controller.state.report.comparisonEnabled, undefined);
-assert.equal(controller.state.report.comparisonTarget, undefined);
-assert.equal('comparison' in environment.elements['rv-lens'].dataset, false);
-const savedReport = JSON.parse(
-    environment.storageValues.get('frame-compare:report-lens:v1:lens-report') || '{}',
-);
-assert.equal('comparisonEnabled' in savedReport, false);
-assert.equal('comparisonTarget' in savedReport, false);
-
-controller.clearTransient();
-assert.equal(controller.state.report.enabled, true);
-assert.equal(controller.state.point, null);
-assert.equal(environment.elements['rv-lens'].hidden, true);
-assert.equal(environment.selectors['[data-lens-image="active"]'].dataset.source, undefined);
-controller.sync();
-assert.equal(controller.state.report.enabled, true);
-assert.equal(controller.state.point.u, 0.5);
-assert.equal(controller.state.point.v, 0.5);
-assert.equal(environment.elements['rv-lens'].hidden, false);
-assert.equal(
-    environment.selectors['[data-lens-image="active"]'].dataset.source,
-    'clip-2/frame.png',
-);
-
-environment.sizeButtons[2].dispatch('click');
-assert.equal(controller.state.preferences.size, 'large');
-assert.equal(environment.elements['rv-lens'].style.values['--lens-size'], '320px');
-const normalizedPositionBeforeResize = { ...controller.state.report.parkedPosition };
-environment.viewer.dom.stage.setRect({ left: 0, top: 0, width: 300, height: 220 });
-controller.refresh();
-assert.deepEqual(
-    JSON.parse(JSON.stringify(controller.state.report.parkedPosition)),
-    normalizedPositionBeforeResize,
-);
-assert.equal(environment.elements['rv-lens'].style.values['--lens-size'], '204px');
-assert.equal(
-    environment.selectors['[data-lens-identity="active"]'].textContent,
-    'Active_camera_color_managed_comparison_002_master.exr',
-);
-assert.doesNotMatch(
-    environment.selectors['[data-lens-identity="active"]'].textContent,
-    /…$/,
-);
-environment.viewer.dom.stage.setRect({ left: 0, top: 0, width: 1000, height: 700 });
-controller.refresh();
-
-assert.equal(environment.elements['rv-lens-target'].hidden, false);
-assert.equal(environment.elements['rv-lens-target'].dataset.markerStyle, 'ring');
-environment.markerButtons[0].dispatch('click');
-assert.equal(controller.state.preferences.markerStyle, 'off');
-assert.equal(environment.elements['rv-lens-target'].hidden, true);
-environment.markerButtons[1].dispatch('click');
-assert.equal(controller.state.preferences.markerStyle, 'ring');
-assert.equal(environment.elements['rv-lens-target'].dataset.markerStyle, 'ring');
-assert.equal(environment.elements['rv-lens-target'].hidden, false);
-const beforeTap = { ...controller.state.point };
-assert.equal(
-    controller.handleStagePointerDown({ pointerId: 7, clientX: 300, clientY: 200, pointerType: 'touch' }),
-    true,
-);
-assert.equal(
-    controller.handleStagePointerMove({ pointerId: 7, clientX: 304, clientY: 202, pointerType: 'touch' }),
-    'pending',
-);
-assert.deepEqual(JSON.parse(JSON.stringify(controller.state.point)), beforeTap);
-assert.equal(
-    controller.endStagePointer({ pointerId: 7, clientX: 300, clientY: 200, pointerType: 'touch' }),
-    true,
-);
-assert.equal(controller.state.point.u, 0.25);
-assert.equal(controller.state.point.v, 2 / 9);
-const tapPoint = { ...controller.state.point };
-controller.handleStagePointerDown({ pointerId: 8, clientX: 300, clientY: 200, pointerType: 'touch' });
-assert.equal(
-    controller.handleStagePointerMove({ pointerId: 8, clientX: 320, clientY: 220, pointerType: 'touch' }),
-    'released',
-);
-assert.deepEqual(JSON.parse(JSON.stringify(controller.state.point)), tapPoint);
-assert.equal(controller.endStagePointer({ pointerId: 8, clientX: 320, clientY: 220 }), false);
-
-environment.viewer.state.mode = 'diff';
-controller.sync();
-const touchSample = { ...controller.state.point };
-const differenceBeforeLayout = environment.selectors['[data-lens-image="difference"]'].style.left;
-environment.viewer.dom.leftImg.setRect({ left: 350, top: 250, width: 400, height: 225 });
-environment.viewer.dom.rightImg.setRect({ left: 375, top: 260, width: 400, height: 225 });
-controller.refresh();
-assert.deepEqual(JSON.parse(JSON.stringify(controller.state.point)), touchSample);
-assert.equal(controller.state.activeClipIdx, environment.viewer.state.leftClipIdx);
-assert.notEqual(
-    environment.selectors['[data-lens-image="difference"]'].style.left,
-    differenceBeforeLayout,
-);
-environment.viewer.dom.leftImg.setRect({ left: 100, top: 100, width: 800, height: 450 });
-environment.viewer.dom.rightImg.setRect({ left: 120, top: 110, width: 800, height: 450 });
-environment.viewer.state.mode = 'overlay';
-controller.sync();
-
-const dragHandle = environment.selectors['[data-lens-drag-handle]'];
-dragHandle.dispatch('pointerdown', { pointerId: 10, button: 0, clientX: 620, clientY: 100 });
-dragHandle.dispatch('pointermove', { pointerId: 10, clientX: 760, clientY: 360 });
-const captureLossPosition = { ...controller.state.report.parkedPosition };
-assert.equal(dragHandle.classList.contains('is-dragging'), true);
-dragHandle.releasePointerCapture(10);
-assert.equal(dragHandle.hasPointerCapture(10), false);
-assert.equal(dragHandle.classList.contains('is-dragging'), false);
-assert.equal(controller.state.drag, null);
-assert.deepEqual(
-    JSON.parse(environment.storageValues.get('frame-compare:report-lens:v1:lens-report')).parkedPosition,
-    captureLossPosition,
-);
-const sampleBeforeCaptureLossRecovery = { ...controller.state.point };
-assert.equal(
-    controller.handleStagePointerMove({ clientX: 700, clientY: 300, pointerType: 'mouse' }),
-    true,
-);
-assert.notDeepEqual(JSON.parse(JSON.stringify(controller.state.point)), sampleBeforeCaptureLossRecovery);
-const positionBeforeSecondDrag = { ...controller.state.report.parkedPosition };
-dragHandle.dispatch('pointerdown', { pointerId: 11, button: 0, clientX: 620, clientY: 100 });
-assert.equal(dragHandle.hasPointerCapture(11), true);
-dragHandle.dispatch('pointermove', { pointerId: 11, clientX: 500, clientY: 240 });
-dragHandle.dispatch('pointerup', { pointerId: 11, clientX: 500, clientY: 240 });
-assert.notDeepEqual(
-    JSON.parse(JSON.stringify(controller.state.report.parkedPosition)),
-    positionBeforeSecondDrag,
-);
-assert.equal(dragHandle.hasPointerCapture(11), false);
-assert.equal(controller.state.drag, null);
-
-dragHandle.dispatch('pointerdown', { pointerId: 9, button: 0, clientX: 620, clientY: 100 });
-assert.equal(dragHandle.hasPointerCapture(9), true);
-dragHandle.dispatch('pointermove', { pointerId: 9, clientX: 990, clientY: 690 });
-dragHandle.dispatch('pointerup', { pointerId: 9, clientX: 990, clientY: 690 });
-assert.equal(dragHandle.hasPointerCapture(9), false);
-assert.ok(controller.state.report.parkedPosition.u >= 0 && controller.state.report.parkedPosition.u <= 1);
-assert.ok(controller.state.report.parkedPosition.v >= 0 && controller.state.report.parkedPosition.v <= 1);
-assert.equal(dragHandle.classList.contains('is-dragging'), false);
-const afterDrag = { ...controller.state.report.parkedPosition };
-let keyboardPrevented = false;
-let keyboardStopped = false;
-dragHandle.dispatch('keydown', {
-    key: 'ArrowLeft',
-    shiftKey: true,
-    preventDefault() { keyboardPrevented = true; },
-    stopPropagation() { keyboardStopped = true; },
-});
-assert.ok(controller.state.report.parkedPosition.u < afterDrag.u);
-assert.equal(keyboardPrevented, true);
-assert.equal(keyboardStopped, true);
-assert.match(environment.announcements.at(-1), /Lens position/);
-
-environment.viewer.state.mode = 'slider';
-controller.sync();
-assert.equal(controller.state.report.comparisonEnabled, undefined);
-assert.equal(controller.state.report.enabled, true);
-
-const reportPayload = JSON.parse(
-    environment.storageValues.get('frame-compare:report-lens:v1:lens-report'),
-);
-assert.equal(reportPayload.enabled, true);
-assert.equal(Object.hasOwn(reportPayload, 'comparisonEnabled'), false);
-assert.equal(Object.hasOwn(reportPayload, 'comparisonTarget'), false);
-assert.equal(Object.hasOwn(reportPayload, 'point'), false);
-assert.equal(Object.hasOwn(reportPayload, 'pointer'), false);
-const preferencePayload = JSON.parse(
-    environment.storageValues.get('frame-compare:lens-preferences:v2'),
-);
-assert.equal(preferencePayload.markerStyle, 'ring');
-assert.equal(preferencePayload.caption, 'on');
-assert.equal(Object.hasOwn(preferencePayload, 'behavior'), false);
-
-environment.elements['btn-lens-reset'].dispatch('click');
-assert.deepEqual(
-    JSON.parse(JSON.stringify(controller.state.preferences)),
-    { magnification: 4, size: 'medium', markerStyle: 'ring', caption: 'off' },
-);
-assert.equal(environment.selectors['[data-lens-caption-row]'].hidden, true);
-assert.equal(environment.selectors['[data-lens-persistence]'].textContent, '');
-assert.equal(environment.selectors['[data-lens-persistence]'].hidden, true);
-
-const failing = makeEnvironment({ failingWrites: true, coarse: true });
-const memoryController = failing.Lens.create(failing.viewer);
-memoryController.bind();
-memoryController.setEnabled(true);
-memoryController.handleStagePointerDown({ pointerId: 1, clientX: 300, clientY: 200, pointerType: 'touch' });
-memoryController.endStagePointer({ pointerId: 1, clientX: 300, clientY: 200, pointerType: 'touch' });
-assert.equal(memoryController.state.memoryOnly, true);
-assert.match(failing.selectors['[data-lens-persistence]'].textContent, /session only/);
-assert.equal(failing.selectors['[data-lens-persistence]'].hidden, false);
-assert.equal(failing.elements['rv-lens'].hidden, false);
-
-const focusEnvironment = makeEnvironment();
-const focusController = focusEnvironment.Lens.create(focusEnvironment.viewer);
-focusController.bind();
-focusController.setEnabled(true);
-focusEnvironment.elements['btn-lens-settings'].dispatch('click');
-focusEnvironment.document.activeElement = focusEnvironment.elements['lens-settings-popover'].querySelector();
-focusController.setEnabled(false);
-assert.equal(focusController.state.report.enabled, false);
-assert.equal(focusEnvironment.elements['btn-lens'].hidden, false);
-assert.equal(focusEnvironment.viewer.dom.stage.classList.contains('rv-lens-active'), false);
-assert.equal(focusEnvironment.document.activeElement, focusEnvironment.elements['btn-lens']);
-focusController.setEnabled(true);
-const externalFocus = fakeElement();
-focusEnvironment.document.activeElement = externalFocus;
-focusController.setEnabled(false);
-assert.equal(focusEnvironment.document.activeElement, externalFocus);
-
-const transientFocusEnvironment = makeEnvironment();
-const transientFocusController = transientFocusEnvironment.Lens.create(
-    transientFocusEnvironment.viewer,
-);
-transientFocusController.bind();
-transientFocusController.setEnabled(true);
-transientFocusEnvironment.document.activeElement = (
-    transientFocusEnvironment.selectors['[data-lens-drag-handle]']
-);
-transientFocusController.clearTransient();
-assert.equal(
-    transientFocusEnvironment.document.activeElement,
-    transientFocusEnvironment.elements['btn-lens'],
-);
-assert.equal(transientFocusEnvironment.elements['rv-lens'].hidden, true);
-assert.equal(transientFocusController.state.report.enabled, true);
-
-transientFocusController.sync();
-transientFocusEnvironment.elements['btn-lens-settings'].dispatch('click');
-assert.equal(transientFocusEnvironment.elements['lens-settings-popover'].hidden, false);
-transientFocusController.clearTransient();
-assert.equal(transientFocusEnvironment.elements['lens-settings-popover'].hidden, true);
-assert.equal(
-    transientFocusEnvironment.elements['btn-lens-settings'].getAttribute('aria-expanded'),
-    'false',
-);
-assert.equal(
-    transientFocusEnvironment.document.activeElement,
-    transientFocusEnvironment.elements['btn-lens'],
-);
-
-transientFocusController.sync();
-const transientExternalFocus = fakeElement();
-transientFocusEnvironment.document.activeElement = transientExternalFocus;
-transientFocusController.clearTransient();
-assert.equal(transientFocusEnvironment.document.activeElement, transientExternalFocus);
-
-transientFocusController.sync();
-const visiblePaletteControl = transientFocusEnvironment.elements['btn-lens-zoom-in'];
-transientFocusEnvironment.document.activeElement = visiblePaletteControl;
-transientFocusController.clearTransient();
-assert.equal(transientFocusEnvironment.document.activeElement, visiblePaletteControl);
-
-const activeFailure = makeEnvironment({ autoLoadClones: false });
-const activeClone = activeFailure.selectors['[data-lens-image="active"]'];
-const activeFailureController = activeFailure.Lens.create(activeFailure.viewer);
-activeFailureController.bind();
-activeFailure.captionButtons[1].dispatch('click');
-activeFailureController.setEnabled(true);
-assert.equal(activeFailure.selectors['[data-lens-status="active"]'].textContent, 'LOADING');
-assert.equal(
-    activeFailure.selectors['[data-lens-identity="active"]'].textContent,
-    'Active_camera_color_managed_comparison_002_master.exr',
-);
-const sourceALoader = activeFailure.detachedLoaders.at(-1);
-const queuedSourceACallbacks = [
-    ...sourceALoader.listenerCallbacks('load'),
-    ...sourceALoader.listenerCallbacks('error'),
-];
-activeFailure.viewer.dom.leftImg.src = 'clip-2/new-frame.png';
-activeFailure.viewer.dom.leftImg.currentSrc = activeFailure.viewer.dom.leftImg.src;
-activeFailureController.sync();
-const sourceBLoader = activeFailure.detachedLoaders.at(-1);
-assert.notEqual(sourceBLoader, sourceALoader);
-assert.equal(sourceALoader.listenerCount('load'), 0);
-assert.equal(sourceALoader.listenerCount('error'), 0);
-assert.equal(activeClone.dataset.requestSource, 'clip-2/new-frame.png');
-assert.equal(activeClone.dataset.source, undefined);
-assert.equal(activeClone.src, '');
-queuedSourceACallbacks.forEach(callback => callback({
-    target: sourceALoader,
-    currentTarget: sourceALoader,
-}));
-assert.equal(activeClone.dataset.requestSource, 'clip-2/new-frame.png');
-assert.equal(activeClone.dataset.source, undefined);
-assert.equal(activeClone.hidden, true);
-sourceBLoader.dispatch('load');
-assert.equal(activeClone.dataset.source, 'clip-2/new-frame.png');
-assert.equal(activeClone.hidden, false);
-assert.equal(sourceBLoader.listenerCount('load'), 0);
-assert.equal(sourceBLoader.listenerCount('error'), 0);
-activeFailure.viewer.dom.leftImg.src = 'clip-2/failed-frame.png';
-activeFailure.viewer.dom.leftImg.currentSrc = activeFailure.viewer.dom.leftImg.src;
-activeFailureController.sync();
-const failedActiveLoader = activeFailure.detachedLoaders.at(-1);
-failedActiveLoader.dispatch('error');
-assert.equal(activeClone.hidden, true);
-assert.equal(activeClone.dataset.source, undefined);
-assert.equal(activeFailure.selectors['[data-lens-status="active"]'].textContent, 'UNAVAILABLE');
-assert.equal(activeFailure.selectors['[data-lens-status="active"]'].hidden, false);
-assert.equal(
-    activeFailure.selectors['[data-lens-identity="active"]'].textContent,
-    'Active_camera_color_managed_comparison_002_master.exr',
-);
-assert.equal(failedActiveLoader.listenerCount('load'), 0);
-assert.equal(failedActiveLoader.listenerCount('error'), 0);
-const failedActiveLoaderCount = activeFailure.detachedLoaders.length;
-activeFailureController.refresh();
-assert.equal(activeFailure.detachedLoaders.length, failedActiveLoaderCount);
-activeFailure.viewer.dom.leftImg.src = 'clip-2/recovered-frame.png';
-activeFailure.viewer.dom.leftImg.currentSrc = activeFailure.viewer.dom.leftImg.src;
-activeFailureController.sync();
-const recoveredActiveLoader = activeFailure.detachedLoaders.at(-1);
-assert.equal(activeFailure.detachedLoaders.length, failedActiveLoaderCount + 1);
-recoveredActiveLoader.dispatch('load');
-assert.equal(activeClone.hidden, false);
-assert.equal(activeClone.dataset.source, 'clip-2/recovered-frame.png');
-assert.equal(recoveredActiveLoader.listenerCount('load'), 0);
-assert.equal(recoveredActiveLoader.listenerCount('error'), 0);
-assert.equal(
-    activeFailure.detachedLoaders.every(loader => (
-        loader.listenerCount('load') === 0 && loader.listenerCount('error') === 0
-    )),
-    true,
-);
-
-{
-    const captionClampEnvironment = makeEnvironment();
-    const captionClampController = captionClampEnvironment.Lens.create(captionClampEnvironment.viewer);
-    captionClampController.bind();
-    captionClampEnvironment.captionButtons[1].dispatch('click');
-    captionClampController.setEnabled(true);
-    captionClampEnvironment.viewer.state.mode = 'diff';
-    captionClampController.sync();
-    // Simulate the measured footprint of a medium lens with a two-line Diff caption.
-    captionClampEnvironment.elements['rv-lens'].setRect({ left: 0, top: 0, width: 240, height: 300 });
-    captionClampController.state.report.parkedPosition = { u: 0.5, v: 1 };
-    captionClampController.refresh();
-    const parkedLeft = Number.parseFloat(captionClampEnvironment.elements['rv-lens'].style.left);
-    const parkedTop = Number.parseFloat(captionClampEnvironment.elements['rv-lens'].style.top);
-    assert.ok(parkedLeft >= 8 && parkedLeft + 240 <= 1000);
-    assert.ok(parkedTop >= 8 && parkedTop + 300 <= 700);
-    captionClampEnvironment.selectors['[data-lens-drag-handle]'].dispatch('keydown', {
-        key: 'ArrowDown',
-        shiftKey: false,
+    const bounded = Lens.normalizedPosition({ u: -4, v: 2 });
+    assert.equal(bounded.u, 0);
+    assert.equal(bounded.v, 1);
+    const mapped = Lens.normalizedPoint(
+        geometryElement({ left: 10, top: 20, width: 200, height: 100 }),
+        110,
+        45,
+    );
+    assert.deepEqual(JSON.parse(JSON.stringify(mapped)), { u: 0.5, v: 0.25 });
+    assert.equal(Lens.normalizedPoint(geometryElement({ left: 0, top: 0, width: 0, height: 0 }), 0, 0), null);
+    const splitGeometry = Lens.lensImageGeometry(mapped, 200, 100, 4, 240, 120);
+    assert.deepEqual(JSON.parse(JSON.stringify(splitGeometry)), {
+        width: 800,
+        height: 400,
+        left: -340,
+        top: 20,
     });
-    const nudgedTop = Number.parseFloat(captionClampEnvironment.elements['rv-lens'].style.top);
-    assert.ok(nudgedTop >= 8 && nudgedTop + 300 <= 700);
+    assert.equal(Lens.captionCharacterCapacity, undefined);
+    assert.equal(Lens.endEllipsis, undefined);
+    assert.equal(Lens.CAPTION_METRICS, undefined);
+    const rightBound = Lens.boundedPopoverPosition(
+        { left: 0, top: 0, width: 1000, height: 700 },
+        { left: 760, top: 80, width: 240, height: 272 },
+        { width: 260, height: 320 },
+    );
+    assert.ok(760 + rightBound.left + 260 <= 992);
+    const leftBound = Lens.boundedPopoverPosition(
+        { left: 0, top: 0, width: 1000, height: 700 },
+        { left: 0, top: 400, width: 240, height: 272 },
+        { width: 260, height: 320 },
+    );
+    assert.ok(leftBound.left >= 8);
+    const tinyBound = Lens.boundedPopoverPosition(
+        { left: 0, top: 0, width: 180, height: 180 },
+        { left: 8, top: 8, width: 160, height: 128 },
+        { width: 260, height: 320 },
+    );
+    assert.equal(tinyBound.maxWidth, 164);
+    assert.equal(tinyBound.maxHeight, 164);
+
+    const ringDefaultEnvironment = makeEnvironment();
+    const ringDefaultController = ringDefaultEnvironment.Lens.create(ringDefaultEnvironment.viewer);
+    assert.equal(ringDefaultController.state.preferences.markerStyle, 'ring');
+    assert.equal(ringDefaultController.state.preferences.caption, 'off');
+    const savedOffEnvironment = makeEnvironment();
+    savedOffEnvironment.storageValues.set(
+        'frame-compare:lens-preferences:v2',
+        JSON.stringify({ markerStyle: 'off', caption: 'on' }),
+    );
+    const savedOffController = savedOffEnvironment.Lens.create(savedOffEnvironment.viewer);
+    assert.equal(savedOffController.state.preferences.markerStyle, 'off');
+    assert.equal(savedOffController.state.preferences.caption, 'on');
+
+    const environment = makeEnvironment();
+    const controller = environment.Lens.create(environment.viewer);
+    controller.bind();
+    assert.equal(controller.state.report.enabled, false);
+    controller.setEnabled(true);
+    assert.equal(controller.state.report.enabled, true);
+    assert.equal(environment.elements['btn-lens'].getAttribute('aria-pressed'), 'true');
+    assert.equal(environment.elements['rv-lens'].hidden, false);
+    assert.equal(environment.elements['btn-lens'].hidden, false);
+    assert.equal(environment.selectors['[data-lens-active-controls]'].hidden, false);
+    assert.equal(environment.viewer.dom.stage.classList.contains('rv-lens-active'), true);
+    assert.equal(environment.selectors['[data-lens-caption-row]'].hidden, true);
+    assert.equal(environment.selectors['[data-lens-identity="active"]'].textContent, '');
+    assert.equal(
+        environment.elements['rv-lens'].getAttribute('aria-label'),
+        'Image magnification lens. Current source: Active_camera_color_managed_comparison_002_master.exr',
+    );
+    environment.captionButtons[1].dispatch('click');
+    assert.equal(controller.state.preferences.caption, 'on');
+    assert.equal(environment.selectors['[data-lens-caption-row]'].hidden, false);
+    const singleCaption = environment.selectors['[data-lens-identity="active"]'].textContent;
+    assert.equal(singleCaption, 'Active_camera_color_managed_comparison_002_master.exr');
+    assert.doesNotMatch(singleCaption, /…$/);
+    assert.equal(
+        environment.selectors['[data-lens-identity="active"]'].getAttribute('aria-label'),
+        'Active_camera_color_managed_comparison_002_master.exr',
+    );
+    assert.equal(environment.selectors['[data-lens-identity="second"]'].hidden, true);
+    environment.elements['btn-lens-settings'].dispatch('click');
+    assert.equal(environment.elements['lens-settings-popover'].hidden, false);
+    assert.equal(environment.elements['lens-settings-popover'].style.left, '720px');
+    assert.equal(environment.elements['lens-settings-popover'].style.top, '316px');
+    environment.elements['lens-settings-popover'].dispatch('keydown', { key: 'Escape' });
+    assert.equal(environment.elements['lens-settings-popover'].hidden, true);
+    assert.equal(controller.state.point.u, 0.5);
+    assert.equal(controller.state.point.v, 0.5);
+    const fixedLeft = environment.elements['rv-lens'].style.left;
+    const fixedTop = environment.elements['rv-lens'].style.top;
+    controller.handleStagePointerMove({ clientX: 300, clientY: 200, pointerType: 'mouse' });
+    assert.equal(environment.elements['rv-lens'].hidden, false);
+    assert.equal(controller.state.point.u, 0.25);
+    assert.equal(controller.state.point.v, 2 / 9);
+    assert.equal(environment.elements['rv-lens'].style.left, fixedLeft);
+    assert.equal(environment.elements['rv-lens'].style.top, fixedTop);
+
+    const coarseMouse = makeEnvironment({ coarse: true });
+    const coarseMouseController = coarseMouse.Lens.create(coarseMouse.viewer);
+    coarseMouseController.bind();
+    coarseMouseController.setEnabled(true);
+    assert.equal(
+        coarseMouseController.handleStagePointerDown({
+            pointerId: 21,
+            clientX: 300,
+            clientY: 200,
+            pointerType: 'mouse',
+        }),
+        false,
+    );
+    assert.equal(coarseMouseController.state.touchPending, null);
+    assert.equal(
+        coarseMouseController.handleStagePointerMove({
+            pointerId: 21,
+            clientX: 300,
+            clientY: 200,
+            pointerType: 'mouse',
+        }),
+        true,
+    );
+    assert.equal(coarseMouseController.state.point.u, 0.25);
+    assert.equal(coarseMouseController.state.point.v, 2 / 9);
+
+    environment.viewer.state.mode = 'diff';
+    controller.sync();
+    assert.equal(environment.elements['rv-lens'].dataset.renderMode, 'diff');
+    const diffCaption = environment.selectors['[data-lens-identity="active"]'].textContent;
+    assert.equal(diffCaption, 'Reference_camera_original_capture_001_master.exr');
+    assert.doesNotMatch(diffCaption, /…$/);
+    const diffSecondCaption = environment.selectors['[data-lens-identity="second"]'].textContent;
+    assert.equal(diffSecondCaption, '↔ Active_camera_color_managed_comparison_002_master.exr');
+    assert.doesNotMatch(diffSecondCaption, /…$/);
+    assert.equal(environment.selectors['[data-lens-identity="second"]'].hidden, false);
+    assert.equal(
+        environment.selectors['[data-lens-identity="active"]'].getAttribute('aria-label'),
+        'Reference_camera_original_capture_001_master.exr ↔ Active_camera_color_managed_comparison_002_master.exr',
+    );
+    assert.match(
+        environment.elements['rv-lens'].getAttribute('aria-label'),
+        /Reference_camera_original_capture_001_master\.exr versus Active_camera_color_managed_comparison_002_master\.exr/,
+    );
+    assert.equal(environment.selectors['[data-lens-image="difference"]'].dataset.source, 'clip-1/frame.png');
+    assert.notEqual(
+        environment.selectors['[data-lens-image="difference"]'].style.left,
+        environment.selectors['[data-lens-image="active"]'].style.left,
+    );
+    environment.viewer.state.mode = 'overlay';
+    controller.sync();
+
+    const gridImage = geometryElement({ left: 8, top: 12, width: 200, height: 100 });
+    gridImage.src = 'clip-3/frame.png';
+    gridImage.currentSrc = gridImage.src;
+    environment.viewer.gridView.entries = () => [{ clipIdx: 2, image: gridImage, unavailable: false }];
+    environment.viewer.state.mode = 'grid';
+    controller.sync();
+    assert.equal(controller.state.activeClipIdx, 2);
+    assert.equal(controller.state.point.u, 0.5);
+    assert.equal(controller.state.point.v, 0.5);
+    assert.equal(
+        environment.selectors['[data-lens-image="active"]'].dataset.source,
+        'clip-3/frame.png',
+    );
+    const gridCaption = environment.selectors['[data-lens-identity="active"]'].textContent;
+    assert.equal(environment.selectors['[data-lens-caption-row]'].hidden, false);
+    assert.equal(gridCaption, 'Alternate');
+    assert.equal(environment.elements['rv-lens'].dataset.renderMode, 'source');
+    environment.viewer.state.mode = 'overlay';
+    controller.sync();
+    assert.equal(controller.state.activeClipIdx, 1);
+    assert.equal(
+        environment.selectors['[data-lens-image="active"]'].dataset.source,
+        'clip-2/frame.png',
+    );
+
+    assert.equal(controller.state.report.comparisonEnabled, undefined);
+    assert.equal(controller.state.report.comparisonTarget, undefined);
+    assert.equal('comparison' in environment.elements['rv-lens'].dataset, false);
+    const savedReport = JSON.parse(
+        environment.storageValues.get('frame-compare:report-lens:v1:lens-report') || '{}',
+    );
+    assert.equal('comparisonEnabled' in savedReport, false);
+    assert.equal('comparisonTarget' in savedReport, false);
+
+    controller.clearTransient();
+    assert.equal(controller.state.report.enabled, true);
+    assert.equal(controller.state.point, null);
+    assert.equal(environment.elements['rv-lens'].hidden, true);
+    assert.equal(environment.selectors['[data-lens-image="active"]'].dataset.source, undefined);
+    controller.sync();
+    assert.equal(controller.state.report.enabled, true);
+    assert.equal(controller.state.point.u, 0.5);
+    assert.equal(controller.state.point.v, 0.5);
+    assert.equal(environment.elements['rv-lens'].hidden, false);
+    assert.equal(
+        environment.selectors['[data-lens-image="active"]'].dataset.source,
+        'clip-2/frame.png',
+    );
+
+    environment.sizeButtons[2].dispatch('click');
+    assert.equal(controller.state.preferences.size, 'large');
+    assert.equal(environment.elements['rv-lens'].style.values['--lens-size'], '320px');
+    const normalizedPositionBeforeResize = { ...controller.state.report.parkedPosition };
+    environment.viewer.dom.stage.setRect({ left: 0, top: 0, width: 300, height: 220 });
+    controller.refresh();
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(controller.state.report.parkedPosition)),
+        normalizedPositionBeforeResize,
+    );
+    assert.equal(environment.elements['rv-lens'].style.values['--lens-size'], '204px');
+    assert.equal(
+        environment.selectors['[data-lens-identity="active"]'].textContent,
+        'Active_camera_color_managed_comparison_002_master.exr',
+    );
+    assert.doesNotMatch(
+        environment.selectors['[data-lens-identity="active"]'].textContent,
+        /…$/,
+    );
+    environment.viewer.dom.stage.setRect({ left: 0, top: 0, width: 1000, height: 700 });
+    controller.refresh();
+
+    assert.equal(environment.elements['rv-lens-target'].hidden, false);
+    assert.equal(environment.elements['rv-lens-target'].dataset.markerStyle, 'ring');
+    environment.markerButtons[0].dispatch('click');
+    assert.equal(controller.state.preferences.markerStyle, 'off');
+    assert.equal(environment.elements['rv-lens-target'].hidden, true);
+    environment.markerButtons[1].dispatch('click');
+    assert.equal(controller.state.preferences.markerStyle, 'ring');
+    assert.equal(environment.elements['rv-lens-target'].dataset.markerStyle, 'ring');
+    assert.equal(environment.elements['rv-lens-target'].hidden, false);
+    const beforeTap = { ...controller.state.point };
+    assert.equal(
+        controller.handleStagePointerDown({ pointerId: 7, clientX: 300, clientY: 200, pointerType: 'touch' }),
+        true,
+    );
+    assert.equal(
+        controller.handleStagePointerMove({ pointerId: 7, clientX: 304, clientY: 202, pointerType: 'touch' }),
+        'pending',
+    );
+    assert.deepEqual(JSON.parse(JSON.stringify(controller.state.point)), beforeTap);
+    assert.equal(
+        controller.endStagePointer({ pointerId: 7, clientX: 300, clientY: 200, pointerType: 'touch' }),
+        true,
+    );
+    assert.equal(controller.state.point.u, 0.25);
+    assert.equal(controller.state.point.v, 2 / 9);
+    const tapPoint = { ...controller.state.point };
+    controller.handleStagePointerDown({ pointerId: 8, clientX: 300, clientY: 200, pointerType: 'touch' });
+    assert.equal(
+        controller.handleStagePointerMove({ pointerId: 8, clientX: 320, clientY: 220, pointerType: 'touch' }),
+        'released',
+    );
+    assert.deepEqual(JSON.parse(JSON.stringify(controller.state.point)), tapPoint);
+    assert.equal(controller.endStagePointer({ pointerId: 8, clientX: 320, clientY: 220 }), false);
+
+    environment.viewer.state.mode = 'diff';
+    controller.sync();
+    const touchSample = { ...controller.state.point };
+    const differenceBeforeLayout = environment.selectors['[data-lens-image="difference"]'].style.left;
+    environment.viewer.dom.leftImg.setRect({ left: 350, top: 250, width: 400, height: 225 });
+    environment.viewer.dom.rightImg.setRect({ left: 375, top: 260, width: 400, height: 225 });
+    controller.refresh();
+    assert.deepEqual(JSON.parse(JSON.stringify(controller.state.point)), touchSample);
+    assert.equal(controller.state.activeClipIdx, environment.viewer.state.leftClipIdx);
+    assert.notEqual(
+        environment.selectors['[data-lens-image="difference"]'].style.left,
+        differenceBeforeLayout,
+    );
+    environment.viewer.dom.leftImg.setRect({ left: 100, top: 100, width: 800, height: 450 });
+    environment.viewer.dom.rightImg.setRect({ left: 120, top: 110, width: 800, height: 450 });
+    environment.viewer.state.mode = 'overlay';
+    controller.sync();
+
+    const dragHandle = environment.selectors['[data-lens-drag-handle]'];
+    dragHandle.dispatch('pointerdown', { pointerId: 10, button: 0, clientX: 620, clientY: 100 });
+    dragHandle.dispatch('pointermove', { pointerId: 10, clientX: 760, clientY: 360 });
+    const captureLossPosition = { ...controller.state.report.parkedPosition };
+    assert.equal(dragHandle.classList.contains('is-dragging'), true);
+    dragHandle.releasePointerCapture(10);
+    assert.equal(dragHandle.hasPointerCapture(10), false);
+    assert.equal(dragHandle.classList.contains('is-dragging'), false);
+    assert.equal(controller.state.drag, null);
+    assert.deepEqual(
+        JSON.parse(environment.storageValues.get('frame-compare:report-lens:v1:lens-report')).parkedPosition,
+        captureLossPosition,
+    );
+    const sampleBeforeCaptureLossRecovery = { ...controller.state.point };
+    assert.equal(
+        controller.handleStagePointerMove({ clientX: 700, clientY: 300, pointerType: 'mouse' }),
+        true,
+    );
+    assert.notDeepEqual(JSON.parse(JSON.stringify(controller.state.point)), sampleBeforeCaptureLossRecovery);
+    const positionBeforeSecondDrag = { ...controller.state.report.parkedPosition };
+    dragHandle.dispatch('pointerdown', { pointerId: 11, button: 0, clientX: 620, clientY: 100 });
+    assert.equal(dragHandle.hasPointerCapture(11), true);
+    dragHandle.dispatch('pointermove', { pointerId: 11, clientX: 500, clientY: 240 });
+    dragHandle.dispatch('pointerup', { pointerId: 11, clientX: 500, clientY: 240 });
+    assert.notDeepEqual(
+        JSON.parse(JSON.stringify(controller.state.report.parkedPosition)),
+        positionBeforeSecondDrag,
+    );
+    assert.equal(dragHandle.hasPointerCapture(11), false);
+    assert.equal(controller.state.drag, null);
+
+    dragHandle.dispatch('pointerdown', { pointerId: 9, button: 0, clientX: 620, clientY: 100 });
+    assert.equal(dragHandle.hasPointerCapture(9), true);
+    dragHandle.dispatch('pointermove', { pointerId: 9, clientX: 990, clientY: 690 });
+    dragHandle.dispatch('pointerup', { pointerId: 9, clientX: 990, clientY: 690 });
+    assert.equal(dragHandle.hasPointerCapture(9), false);
+    assert.ok(controller.state.report.parkedPosition.u >= 0 && controller.state.report.parkedPosition.u <= 1);
+    assert.ok(controller.state.report.parkedPosition.v >= 0 && controller.state.report.parkedPosition.v <= 1);
+    assert.equal(dragHandle.classList.contains('is-dragging'), false);
+    const afterDrag = { ...controller.state.report.parkedPosition };
+    let keyboardPrevented = false;
+    let keyboardStopped = false;
+    dragHandle.dispatch('keydown', {
+        key: 'ArrowLeft',
+        shiftKey: true,
+        preventDefault() { keyboardPrevented = true; },
+        stopPropagation() { keyboardStopped = true; },
+    });
+    assert.ok(controller.state.report.parkedPosition.u < afterDrag.u);
+    assert.equal(keyboardPrevented, true);
+    assert.equal(keyboardStopped, true);
+    assert.match(environment.announcements.at(-1), /Lens position/);
+
+    environment.viewer.state.mode = 'slider';
+    controller.sync();
+    assert.equal(controller.state.report.comparisonEnabled, undefined);
+    assert.equal(controller.state.report.enabled, true);
+
+    const reportPayload = JSON.parse(
+        environment.storageValues.get('frame-compare:report-lens:v1:lens-report'),
+    );
+    assert.equal(reportPayload.enabled, true);
+    assert.equal(Object.hasOwn(reportPayload, 'comparisonEnabled'), false);
+    assert.equal(Object.hasOwn(reportPayload, 'comparisonTarget'), false);
+    assert.equal(Object.hasOwn(reportPayload, 'point'), false);
+    assert.equal(Object.hasOwn(reportPayload, 'pointer'), false);
+    const preferencePayload = JSON.parse(
+        environment.storageValues.get('frame-compare:lens-preferences:v2'),
+    );
+    assert.equal(preferencePayload.markerStyle, 'ring');
+    assert.equal(preferencePayload.caption, 'on');
+    assert.equal(Object.hasOwn(preferencePayload, 'behavior'), false);
+
+    environment.elements['btn-lens-reset'].dispatch('click');
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(controller.state.preferences)),
+        { magnification: 4, size: 'medium', markerStyle: 'ring', caption: 'off' },
+    );
+    assert.equal(environment.selectors['[data-lens-caption-row]'].hidden, true);
+    assert.equal(environment.selectors['[data-lens-persistence]'].textContent, '');
+    assert.equal(environment.selectors['[data-lens-persistence]'].hidden, true);
+
+    const failing = makeEnvironment({ failingWrites: true, coarse: true });
+    const memoryController = failing.Lens.create(failing.viewer);
+    memoryController.bind();
+    memoryController.setEnabled(true);
+    memoryController.handleStagePointerDown({ pointerId: 1, clientX: 300, clientY: 200, pointerType: 'touch' });
+    memoryController.endStagePointer({ pointerId: 1, clientX: 300, clientY: 200, pointerType: 'touch' });
+    assert.equal(memoryController.state.memoryOnly, true);
+    assert.match(failing.selectors['[data-lens-persistence]'].textContent, /session only/);
+    assert.equal(failing.selectors['[data-lens-persistence]'].hidden, false);
+    assert.equal(failing.elements['rv-lens'].hidden, false);
+
+    const focusEnvironment = makeEnvironment();
+    const focusController = focusEnvironment.Lens.create(focusEnvironment.viewer);
+    focusController.bind();
+    focusController.setEnabled(true);
+    focusEnvironment.elements['btn-lens-settings'].dispatch('click');
+    focusEnvironment.document.activeElement = focusEnvironment.elements['lens-settings-popover'].querySelector();
+    focusController.setEnabled(false);
+    assert.equal(focusController.state.report.enabled, false);
+    assert.equal(focusEnvironment.elements['btn-lens'].hidden, false);
+    assert.equal(focusEnvironment.viewer.dom.stage.classList.contains('rv-lens-active'), false);
+    assert.equal(focusEnvironment.document.activeElement, focusEnvironment.elements['btn-lens']);
+    focusController.setEnabled(true);
+    const externalFocus = focusEnvironment.element();
+    focusEnvironment.document.activeElement = externalFocus;
+    focusController.setEnabled(false);
+    assert.equal(focusEnvironment.document.activeElement, externalFocus);
+
+    const transientFocusEnvironment = makeEnvironment();
+    const transientFocusController = transientFocusEnvironment.Lens.create(
+        transientFocusEnvironment.viewer,
+    );
+    transientFocusController.bind();
+    transientFocusController.setEnabled(true);
+    transientFocusEnvironment.document.activeElement = (
+        transientFocusEnvironment.selectors['[data-lens-drag-handle]']
+    );
+    transientFocusController.clearTransient();
+    assert.equal(
+        transientFocusEnvironment.document.activeElement,
+        transientFocusEnvironment.elements['btn-lens'],
+    );
+    assert.equal(transientFocusEnvironment.elements['rv-lens'].hidden, true);
+    assert.equal(transientFocusController.state.report.enabled, true);
+
+    transientFocusController.sync();
+    transientFocusEnvironment.elements['btn-lens-settings'].dispatch('click');
+    assert.equal(transientFocusEnvironment.elements['lens-settings-popover'].hidden, false);
+    transientFocusController.clearTransient();
+    assert.equal(transientFocusEnvironment.elements['lens-settings-popover'].hidden, true);
+    assert.equal(
+        transientFocusEnvironment.elements['btn-lens-settings'].getAttribute('aria-expanded'),
+        'false',
+    );
+    assert.equal(
+        transientFocusEnvironment.document.activeElement,
+        transientFocusEnvironment.elements['btn-lens'],
+    );
+
+    transientFocusController.sync();
+    const transientExternalFocus = transientFocusEnvironment.element();
+    transientFocusEnvironment.document.activeElement = transientExternalFocus;
+    transientFocusController.clearTransient();
+    assert.equal(transientFocusEnvironment.document.activeElement, transientExternalFocus);
+
+    transientFocusController.sync();
+    const visiblePaletteControl = transientFocusEnvironment.elements['btn-lens-zoom-in'];
+    transientFocusEnvironment.document.activeElement = visiblePaletteControl;
+    transientFocusController.clearTransient();
+    assert.equal(transientFocusEnvironment.document.activeElement, visiblePaletteControl);
+
+    const activeFailure = makeEnvironment({ autoLoadClones: false });
+    const activeClone = activeFailure.selectors['[data-lens-image="active"]'];
+    const activeFailureController = activeFailure.Lens.create(activeFailure.viewer);
+    activeFailureController.bind();
+    activeFailure.captionButtons[1].dispatch('click');
+    activeFailureController.setEnabled(true);
+    assert.equal(activeFailure.selectors['[data-lens-status="active"]'].textContent, 'LOADING');
+    assert.equal(
+        activeFailure.selectors['[data-lens-identity="active"]'].textContent,
+        'Active_camera_color_managed_comparison_002_master.exr',
+    );
+    const sourceALoader = activeFailure.detachedLoaders.at(-1);
+    const queuedSourceACallbacks = [
+        ...sourceALoader.listenerCallbacks('load'),
+        ...sourceALoader.listenerCallbacks('error'),
+    ];
+    activeFailure.viewer.dom.leftImg.src = 'clip-2/new-frame.png';
+    activeFailure.viewer.dom.leftImg.currentSrc = activeFailure.viewer.dom.leftImg.src;
+    activeFailureController.sync();
+    const sourceBLoader = activeFailure.detachedLoaders.at(-1);
+    assert.notEqual(sourceBLoader, sourceALoader);
+    assert.equal(sourceALoader.listenerCount('load'), 0);
+    assert.equal(sourceALoader.listenerCount('error'), 0);
+    assert.equal(activeClone.dataset.requestSource, 'clip-2/new-frame.png');
+    assert.equal(activeClone.dataset.source, undefined);
+    assert.equal(activeClone.src, '');
+    queuedSourceACallbacks.forEach(callback => callback({
+        target: sourceALoader,
+        currentTarget: sourceALoader,
+    }));
+    assert.equal(activeClone.dataset.requestSource, 'clip-2/new-frame.png');
+    assert.equal(activeClone.dataset.source, undefined);
+    assert.equal(activeClone.hidden, true);
+    sourceBLoader.dispatch('load');
+    assert.equal(activeClone.dataset.source, 'clip-2/new-frame.png');
+    assert.equal(activeClone.hidden, false);
+    assert.equal(sourceBLoader.listenerCount('load'), 0);
+    assert.equal(sourceBLoader.listenerCount('error'), 0);
+    activeFailure.viewer.dom.leftImg.src = 'clip-2/failed-frame.png';
+    activeFailure.viewer.dom.leftImg.currentSrc = activeFailure.viewer.dom.leftImg.src;
+    activeFailureController.sync();
+    const failedActiveLoader = activeFailure.detachedLoaders.at(-1);
+    failedActiveLoader.dispatch('error');
+    assert.equal(activeClone.hidden, true);
+    assert.equal(activeClone.dataset.source, undefined);
+    assert.equal(activeFailure.selectors['[data-lens-status="active"]'].textContent, 'UNAVAILABLE');
+    assert.equal(activeFailure.selectors['[data-lens-status="active"]'].hidden, false);
+    assert.equal(
+        activeFailure.selectors['[data-lens-identity="active"]'].textContent,
+        'Active_camera_color_managed_comparison_002_master.exr',
+    );
+    assert.equal(failedActiveLoader.listenerCount('load'), 0);
+    assert.equal(failedActiveLoader.listenerCount('error'), 0);
+    const failedActiveLoaderCount = activeFailure.detachedLoaders.length;
+    activeFailureController.refresh();
+    assert.equal(activeFailure.detachedLoaders.length, failedActiveLoaderCount);
+    activeFailure.viewer.dom.leftImg.src = 'clip-2/recovered-frame.png';
+    activeFailure.viewer.dom.leftImg.currentSrc = activeFailure.viewer.dom.leftImg.src;
+    activeFailureController.sync();
+    const recoveredActiveLoader = activeFailure.detachedLoaders.at(-1);
+    assert.equal(activeFailure.detachedLoaders.length, failedActiveLoaderCount + 1);
+    recoveredActiveLoader.dispatch('load');
+    assert.equal(activeClone.hidden, false);
+    assert.equal(activeClone.dataset.source, 'clip-2/recovered-frame.png');
+    assert.equal(recoveredActiveLoader.listenerCount('load'), 0);
+    assert.equal(recoveredActiveLoader.listenerCount('error'), 0);
+    assert.equal(
+        activeFailure.detachedLoaders.every(loader => (
+            loader.listenerCount('load') === 0 && loader.listenerCount('error') === 0
+        )),
+        true,
+    );
+
+    {
+        const captionClampEnvironment = makeEnvironment();
+        const captionClampController = captionClampEnvironment.Lens.create(captionClampEnvironment.viewer);
+        captionClampController.bind();
+        captionClampEnvironment.captionButtons[1].dispatch('click');
+        captionClampController.setEnabled(true);
+        captionClampEnvironment.viewer.state.mode = 'diff';
+        captionClampController.sync();
+        // Simulate the measured footprint of a medium lens with a two-line Diff caption.
+        captionClampEnvironment.elements['rv-lens'].setRect({ left: 0, top: 0, width: 240, height: 300 });
+        captionClampController.state.report.parkedPosition = { u: 0.5, v: 1 };
+        captionClampController.refresh();
+        const parkedLeft = Number.parseFloat(captionClampEnvironment.elements['rv-lens'].style.left);
+        const parkedTop = Number.parseFloat(captionClampEnvironment.elements['rv-lens'].style.top);
+        assert.ok(parkedLeft >= 8 && parkedLeft + 240 <= 1000);
+        assert.ok(parkedTop >= 8 && parkedTop + 300 <= 700);
+        captionClampEnvironment.selectors['[data-lens-drag-handle]'].dispatch('keydown', {
+            key: 'ArrowDown',
+            shiftKey: false,
+        });
+        const nudgedTop = Number.parseFloat(captionClampEnvironment.elements['rv-lens'].style.top);
+        assert.ok(nudgedTop >= 8 && nudgedTop + 300 <= 700);
+    }
+
+    {
+        const sizeEnvironment = makeEnvironment();
+        const sizeController = sizeEnvironment.Lens.create(sizeEnvironment.viewer);
+        sizeController.bind();
+        const sizedLens = sizeEnvironment.elements['rv-lens'];
+        const staticRect = sizedLens.getBoundingClientRect.bind(sizedLens);
+        // Simulate the browser, where the applied --lens-size drives the measured
+        // box: the placement footprint follows the new size, not the previous rect.
+        sizedLens.getBoundingClientRect = () => {
+            const applied = Number.parseFloat(sizedLens.style.values['--lens-size']);
+            const side = Number.isFinite(applied) && applied > 0 ? applied : staticRect().width;
+            return { left: 0, top: 0, width: side, height: side, right: side, bottom: side };
+        };
+        sizeController.setEnabled(true);
+        sizeController.sync();
+        sizeController.state.report.parkedPosition = { u: 1, v: 1 };
+        sizeController.refresh();
+        sizeEnvironment.sizeButtons[2].dispatch('click');
+        assert.equal(sizeController.state.preferences.size, 'large');
+        assert.equal(sizedLens.style.values['--lens-size'], '320px');
+        assert.equal(sizedLens.dataset.size, 'large');
+        const sizedLeft = Number.parseFloat(sizedLens.style.left);
+        const sizedTop = Number.parseFloat(sizedLens.style.top);
+        assert.ok(sizedLeft >= 8 && sizedLeft + 320 <= 1000);
+        assert.ok(sizedTop >= 8 && sizedTop + 320 <= 700);
+    }
+
+
+
 }
 
-{
-    const sizeEnvironment = makeEnvironment();
-    const sizeController = sizeEnvironment.Lens.create(sizeEnvironment.viewer);
-    sizeController.bind();
-    const sizedLens = sizeEnvironment.elements['rv-lens'];
-    const staticRect = sizedLens.getBoundingClientRect.bind(sizedLens);
-    // Simulate the browser, where the applied --lens-size drives the measured
-    // box: the placement footprint follows the new size, not the previous rect.
-    sizedLens.getBoundingClientRect = () => {
-        const applied = Number.parseFloat(sizedLens.style.values['--lens-size']);
-        const side = Number.isFinite(applied) && applied > 0 ? applied : staticRect().width;
-        return { left: 0, top: 0, width: side, height: side, right: side, bottom: side };
-    };
-    sizeController.setEnabled(true);
-    sizeController.sync();
-    sizeController.state.report.parkedPosition = { u: 1, v: 1 };
-    sizeController.refresh();
-    sizeEnvironment.sizeButtons[2].dispatch('click');
-    assert.equal(sizeController.state.preferences.size, 'large');
-    assert.equal(sizedLens.style.values['--lens-size'], '320px');
-    assert.equal(sizedLens.dataset.size, 'large');
-    const sizedLeft = Number.parseFloat(sizedLens.style.left);
-    const sizedTop = Number.parseFloat(sizedLens.style.top);
-    assert.ok(sizedLeft >= 8 && sizedLeft + 320 <= 1000);
-    assert.ok(sizedTop >= 8 && sizedTop + 320 <= 700);
-}
-
-console.log(JSON.stringify({
-    defaultsNormalized: true,
-    strictOptionsNormalized: true,
-    mappingAndClamping: true,
-    lensImageGeometry: true,
-    boundedPopover: true,
-    captionTextRule: true,
-    captionWrapsWithoutTruncation: true,
-    diffCompositionAndAlignment: true,
-    staleContextReseeds: true,
-    immediateActivation: true,
-    stablePaletteAndWindow: true,
-    coarsePrimaryMouseTracking: true,
-    fixedTouchSampling: true,
-    lostPointerCaptureRecovers: true,
-    touchDragReleasesWithoutSampling: true,
-    touchLayoutRefreshStable: true,
-    focusedDisableRestoresToggle: true,
-    programmaticDisablePreservesFocus: true,
-    clearTransientRestoresVisibleFocus: true,
-    clearTransientClosesPopover: true,
-    clearTransientPreservesExternalFocus: true,
-    clearTransientPreservesPaletteFocus: true,
-    cloneFailuresAreSourceMatched: true,
-    detachedLoadersAreIsolated: true,
-    detachedLoaderHandlersCleaned: true,
-    cloneSourceChangeRetries: true,
-    staleCloneCallbacksIgnored: true,
-    ringDefaultWithoutSavedPrefs: true,
-    savedOffMarkerKept: true,
-    captionDefaultOff: true,
-    captionShowsSourceText: true,
-    captionDiffShowsPair: true,
-    captionPersistedWithPrefs: true,
-    storedComparisonKeysIgnored: true,
-    captionResetRestoresDefault: true,
-    persistenceHiddenWhenSaved: true,
-    clearTransientRetainsEnabled: true,
-    enabledAcrossContextChange: true,
-    reportPersistenceExcludesPointer: true,
-    storageFailureIsSessionOnly: true,
-    captionHeightClampsToStage: true,
-    lensSizeAppliedBeforePlacement: true,
-}));
+module.exports = { lensContracts };
+if (require.main === module) require('./harness_runner').run(module.exports);

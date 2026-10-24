@@ -35,13 +35,7 @@ if (!(Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
   throw "Portable bundle ZIP not found: $ZipPath"
 }
 
-function Test-PathWithin([string]$Path, [string]$Parent) {
-  $parentPrefix = $Parent.TrimEnd(
-    [System.IO.Path]::DirectorySeparatorChar,
-    [System.IO.Path]::AltDirectorySeparatorChar
-  ) + [System.IO.Path]::DirectorySeparatorChar
-  return $Path.StartsWith($parentPrefix, [System.StringComparison]::OrdinalIgnoreCase)
-}
+. (Join-Path $PSScriptRoot "path_safety.ps1")
 
 $extractPathRoot = [System.IO.Path]::GetPathRoot($ExtractRoot)
 if (
@@ -70,12 +64,6 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-
-public static class FrameCompareNativeDirectory {
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool CreateDirectory(string path, IntPtr securityAttributes);
-}
 
 public sealed class FrameCompareProcessJob : IDisposable {
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
@@ -267,21 +255,6 @@ public sealed class FrameCompareCappedFileStream : Stream {
 }
 "@
 
-function New-AtomicallyReservedDirectory([string]$Path) {
-  [System.IO.Directory]::CreateDirectory((Split-Path -Parent $Path)) | Out-Null
-  if ([FrameCompareNativeDirectory]::CreateDirectory($Path, [IntPtr]::Zero)) {
-    return
-  }
-  $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-  if ($errorCode -eq 183) {
-    throw "ExtractRoot must not already exist; choose a fresh verification directory: $Path"
-  }
-  throw [System.ComponentModel.Win32Exception]::new(
-    $errorCode,
-    "Could not atomically reserve ExtractRoot: $Path"
-  )
-}
-
 function Assert-SafeWindowsSegment([string]$Segment, [string]$EntryName) {
   if (
     [string]::IsNullOrEmpty($Segment) -or
@@ -375,6 +348,7 @@ try {
     "frame-compare-portable-win-x64/licenses/THIRD_PARTY_NOTICES.txt",
     "frame-compare-portable-win-x64/shim/frame-compare.cmd",
     "frame-compare-portable-win-x64/shim/frame-compare-update.cmd",
+    "frame-compare-portable-win-x64/shim/frame-compare-version.ps1",
     "frame-compare-portable-win-x64/shim/frame-compare-update.ps1"
   )
   foreach ($requiredEntry in $requiredEntries) {
@@ -384,7 +358,7 @@ try {
   }
   Write-Host "WINDOWS_EXTRACTED_PROOF zip_layout=ok zip=$ZipPath"
 
-  New-AtomicallyReservedDirectory -Path $ExtractRoot
+  $null = New-AtomicallyReservedDirectory -Path $ExtractRoot
   Write-Host "WINDOWS_EXTRACTED_PROOF extraction_root_reserved=ok root=$ExtractRoot"
   foreach ($validatedEntry in $validatedEntries) {
     $destinationPath = [System.IO.Path]::GetFullPath(
@@ -758,16 +732,18 @@ foreach ($collectionName in @("corresponding_sources", "python_distributions")) 
 }
 
 $requiredVsViewDistributions = [ordered]@{
-  "jetpytools" = "3.1.2"
-  "pyside6" = "6.11.2"
-  "pyside6-addons" = "6.11.2"
-  "pyside6-essentials" = "6.11.2"
-  "shiboken6" = "6.11.2"
+  "jetpytools" = "3.2.0"
+  "pyside6" = "6.12.0"
+  "pyside6-addons" = "6.12.0"
+  "pyside6-essentials" = "6.12.0"
+  "pyside6-pdf" = "6.12.0.140"
+  "pyside6-webengine" = "6.12.0.140"
+  "shiboken6" = "6.12.0"
   "vapoursynth-bestsource" = "22"
   "vspackrgb" = "2.0.0"
-  "vsview" = "0.12.1"
-  "cyclopts" = "5.2.0"
-  "vsjetengine" = "1.8.0"
+  "vsview" = "0.13.0"
+  "cyclopts" = "5.3.0"
+  "vsjetengine" = "1.8.1"
 }
 $inventoryDistributionVersions = [Collections.Generic.Dictionary[string, string]]::new(
   [System.StringComparer]::OrdinalIgnoreCase
@@ -847,6 +823,8 @@ foreach ($source in $inventorySources) {
 $requiredSourceScripts = @(
   ".github/workflows/windows-portable-build.yml",
   "tools/windows_portable/build_portable.ps1",
+  "tools/windows_portable/path_safety.ps1",
+  "tools/windows_portable/shim/frame-compare-version.ps1",
   "tools/windows_portable/runtime_smoke.py",
   "tools/windows_portable/bundle_info.schema.json",
   "tools/windows_portable/manifest.windows-x64.json",

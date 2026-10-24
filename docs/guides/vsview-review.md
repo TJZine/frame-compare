@@ -24,70 +24,87 @@ use_vsview = true
 If optional review cannot start, Frame Compare keeps the current alignment and points
 you to `doctor`, while forced review fails.
 
-## Open the panel
+## Confirm matching frames
 
-1. Run the comparison. Frame Compare generates a session and opens VSView.
-2. Open **Frame Compare Alignment Review** from VSView’s **Tool Panel**.
-3. Confirm that the workspace shows one `Reference` output and one `Comparison N`
-   output per comparison.
+1. Browse each source to the same visual moment with VSView’s source selector.
+   Generated review sessions automatically **Unlink** playheads so each source keeps
+   its own original-frame position.
+2. Open **Tool Panel → Frame Compare Alignment Review** and check the original-frame
+   numbers for Reference and every comparison. Tracking starts when the workspace
+   loads, including while the panel is closed or another tool is selected.
+3. Pause playback and allow any seek to finish, then choose **Confirm matching frames**.
+   This saves the complete set once. Close VSView to resume Frame Compare.
 
-The panel stays inactive in an ordinary VSView session.
+Browsing and editing never save alignment. The confirmation expresses your intent
+that the listed original frames match; it does not certify which pixels finished
+presenting. Confirmation is disabled while the workspace is playing, seeking,
+loading, draining a paused frame, or unavailable. Other VSView background jobs may
+temporarily postpone confirmation while its shared worker pool is busy.
+The panel keeps the waiting reason visible even when every frame is manually
+entered; manual frame entry does not bypass this wait. Focus a panel action and
+press Space to activate it; Space elsewhere retains the viewer playback shortcut.
+A changed set refreshes the numbers and requires another
+click. A valid frame zero is preserved.
 
-## Confirm the positions
+You can enter original frame numbers directly in the source rows. Any edit, including
+an empty or invalid value, protects that row from automatic updates. **Use viewer frame**
+replaces that manual draft with its source’s retained viewer position and resumes
+tracking. Focused editing is protected. Other source rows continue tracking.
+Automatic tracking uses a contained bridge to the pinned VSView 0.13.0 workspace;
+if unavailable, the panel explains how to unlink playheads and enter frames manually.
+Ordinary VSView sessions are unaffected.
 
-1. Unlink the playheads.
-2. Visit every output and leave each on the same visible moment.
-3. Watch the source lineup until it shows `{n}/{total} positions captured — ready to confirm`.
-4. Select **Confirm these aligned positions**.
+### Read the preview labels
 
-The panel distinguishes the frame you are viewing from the captured position and
-previews the signed offset and which source is trimmed. It shows the audio candidate
-under **Audio evidence** without applying it.
+Video labels show the source and its native **Original frame**, followed by
+**Predicted for this frame (opening hints)** for every other source in output order.
+Names and stable roles identify each target. These estimates follow the viewed frame
+using immutable session-opening offsets, even after Save or Keep. Provisional edges
+are marked; unavailable or outside-range hints never mean matching content is absent.
+If the whole list cannot fit, static labels explicitly say live hints are unavailable.
+The panel lists the actual tracked or manually entered original frames for confirmation.
 
-<figure class="fc-figure fc-figure--narrow">
-  <img src="../images/vsview-alignment-panel.webp" alt="VSView alignment panel listing the Reference and Comparison 1 positions as captured and ready to confirm." width="748" height="1142" loading="lazy">
-  <figcaption>When every source shows a captured position, the panel is ready to confirm the whole lineup.</figcaption>
-</figure>
+The preview is untrimmed and uses ordinary SDR packing even for HDR sources,
+leaving final report tone mapping unchanged. Correct PQ/HLG/source color properties
+remain intact. If neither live nor static labels fit, a warning accompanies raw
+preview; explicit numeric entry remains available.
 
 ## Enter known values
 
-<div class="fc-steps" markdown>
-
-1.  **Expand the manual controls.** Select **Enter alignment manually...**.
-2.  **Choose the input type.** Choose **Source frames** or **Known offsets**.
-3.  **Enter the values.** Enter one non-negative untrimmed frame per source for
-    **Source frames**, or one signed integer per comparison for **Known offsets**,
-    using `reference − comparison`.
-
-</div>
-
-Source frames use **Confirm these aligned positions**.
-Known offsets use **Confirm these known offsets**.
-With no base trims, a positive offset trims the reference and a negative offset
-trims the comparison. Base trims do not change the value you enter.
+Source frame numbers use the stable lineup and the same **Confirm matching frames** action.
+For known offsets, expand **Enter alignment manually...**, choose **Known offsets**,
+enter every signed `reference − comparison` offset, then choose **Confirm these known offsets**.
+This is a separate input basis: source frame drafts are retained but not submitted. Closing the
+manual controls returns to source frames without losing the offset drafts.
+With no base trims a positive offset trims Reference and a negative offset trims the comparison.
 
 ## Keep the current alignment
 
-**Keep current alignment** keeps existing applied offsets and leaves a
-provisional candidate unconfirmed.
+**Keep current alignment** retains existing applied offsets without confirming a
+provisional candidate or the unsaved frame lineup. The terminal message is
+**Keep decision saved — frame lineup was not confirmed**.
 
 ## What happens next
 
-After either action the panel shows `Alignment choices saved`.
-The panel then shows `Close VSView to resume Frame Compare.`
+Successful confirmation shows **Alignment choices saved**, followed by
+**Close VSView to resume Frame Compare.** Successful confirmation or Keep freezes edits;
+a failed write leaves the drafts editable. Successful confirmation shows
+**Saved offset (Reference − Comparison)** with the actual signed frame value.
+Video opening hints continue after saving. Known offsets and Keep do not confirm
+any source frame drafts that were not submitted. A standalone generated demo has no parent comparison to resume;
+its helper says to close the demo, while normal CLI review resumes Frame Compare.
 Frame Compare writes one typed, atomic sibling sidecar named
-`vsview_*.alignment-result.json` for the complete source set. It checks the sidecar
-against the session and applies it.
-
-Closing VSView without saving writes no result.
-Missing, malformed, stale, mixed-session, duplicate, incomplete, and out-of-bounds results fail closed.
+`vsview_*.alignment-result.json` for the complete source set and checks session freshness.
+Closing VSView without saving writes no result. Missing, malformed,
+stale, mixed-session, duplicate, incomplete, and out-of-bounds results fail closed. An ordinary VSView session
+stays inactive.
 
 ## Troubleshooting
 
 | Symptom | Action |
 | --- | --- |
-| `doctor` reports the alignment panel is missing | Install the `vsview` extra in the environment that runs Frame Compare, or reinstall the complete Windows portable bundle |
-| VSView will not launch | Run `frame-compare doctor`; check that a desktop session is available; continue without review, or use the Windows portable bundle |
-| The panel stays inactive | Open the session Frame Compare generated; ordinary sessions and hand-written scripts stay inactive |
-| VSView closed before saving | No result was written; run again, visit every source, and choose **Confirm these aligned positions** or **Keep current alignment** |
-| The saved result is rejected | Run again to generate a fresh session; Frame Compare rejects stale, mixed, duplicate, incomplete, and out-of-bounds results |
+| Panel missing | Install the vsview extra in the same environment, or reinstall the complete Windows portable bundle |
+| Inactive panel | Open a newly generated Frame Compare session; ordinary VSView sessions stay inactive |
+| Prediction unavailable | Choose/verify matching original frame numbers manually; unknown hints do not prevent confirmation |
+| Seek rejected | Pause playback, activate the intended source, then wait for the frame to settle before confirmation |
+| Saved result rejected | Generate a fresh session; stale, mixed-session, duplicate, incomplete and out-of-bounds results are rejected |

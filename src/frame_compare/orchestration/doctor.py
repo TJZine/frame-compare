@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING
 import structlog
 
 from frame_compare.orchestration.doctor_checks import collect_checks
-from frame_compare.orchestration.doctor_types import CheckResult, DoctorCheck, DoctorReport
+from frame_compare.orchestration.doctor_types import (
+    CheckResult,
+    DoctorCheck,
+    DoctorConfigSelection,
+    DoctorReport,
+)
 
 if TYPE_CHECKING:
     from frame_compare.utils.progress_protocol import ProgressReporter
@@ -26,6 +31,7 @@ log = structlog.get_logger()
 def run_doctor(
     checks: list[DoctorCheck] | None = None,
     reporter: ProgressReporter | None = None,
+    selection: DoctorConfigSelection | None = None,
 ) -> DoctorReport:
     """Execute diagnostic checks and report results.
 
@@ -37,7 +43,7 @@ def run_doctor(
         DoctorReport with all check results
     """
     if checks is None:
-        checks = collect_checks()
+        checks = collect_checks(selection)
 
     if reporter is not None:
         reporter.start_phase("doctor", total=len(checks))

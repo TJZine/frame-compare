@@ -10,6 +10,7 @@ from frame_compare.utils.media_facts import (
     RenderedFrameFacts,
     normalize_picture_type,
 )
+from frame_compare.vs.types import FallbackTonemap
 
 _PRIMARIES = {1: "BT.709", 9: "BT.2020"}
 _TRANSFER = {1: "BT.709", 16: "PQ", 18: "HLG"}
@@ -133,13 +134,19 @@ def _diagnostic_lines(config: OverlayConfig, facts: RenderedFrameFacts) -> list[
         signal_parts.append("tonemap off")
     lines.append(f"Signal: {' • '.join(signal_parts)}")
 
-    settings = config.tonemap_settings
-    if settings is not None and config.presentation_state == PresentationState.HDR_TONEMAPPED:
-        curve = {
-            "bt2390": "BT.2390",
-            "spline": "Spline",
-            "reinhard": "Reinhard",
-        }.get(settings.tone_curve.value, settings.tone_curve.value)
+    tonemap = config.tonemap
+    transform = tonemap.transform if tonemap is not None else None
+    if transform is not None and config.presentation_state == PresentationState.HDR_TONEMAPPED:
+        settings = transform.settings if not isinstance(transform, FallbackTonemap) else transform
+        curve = (
+            "fallback (peak-scaled)"
+            if isinstance(transform, FallbackTonemap)
+            else {
+                "bt2390": "BT.2390",
+                "spline": "Spline",
+                "reinhard": "Reinhard",
+            }.get(transform.curve.value, transform.curve.value)
+        )
         lines.append(f"Tonemap: {curve} → {settings.target_nits} nits")
 
     static = signal.hdr_static

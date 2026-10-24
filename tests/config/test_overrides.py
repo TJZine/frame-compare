@@ -16,6 +16,7 @@ from frame_compare.config.schema import (
     ToneCurve,
     TonemapPreset,
 )
+from frame_compare.config.schema_enums import TonemapSpeed
 
 
 def test_apply_cli_overrides_inverts_no_upload() -> None:
@@ -70,12 +71,14 @@ def test_apply_cli_overrides_omitted_flags_preserve_config(false_flags: bool) ->
         (
             CLIConfigOverrides(
                 tm_preset=TonemapPreset.FILMIC,
+                tm_speed=TonemapSpeed.FAST,
                 tm_curve=ToneCurve.REINHARD,
                 overlay_mode=OverlayMode.DIAGNOSTIC,
             ),
             None,
             [
                 ("color", "preset", TonemapPreset.FILMIC),
+                ("color", "tonemap_speed", TonemapSpeed.FAST),
                 ("color", "tone_curve", ToneCurve.REINHARD),
                 ("screenshots", "overlay_mode", OverlayMode.DIAGNOSTIC),
             ],
@@ -139,4 +142,7 @@ def test_apply_cli_overrides_preserves_implicit_color_target_for_unrelated_overr
     new_config = apply_cli_overrides(config, CLIConfigOverrides(random_frame_count=12))
 
     assert new_config.analysis.random_frame_count == 12
-    assert new_config.color.model_fields_set == {"preset"}
+    assert not (
+        {"target_nits", "tone_curve", "gamma_lift", "contrast_recovery"}
+        & new_config.color.model_fields_set
+    )

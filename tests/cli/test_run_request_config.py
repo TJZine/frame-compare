@@ -8,9 +8,12 @@ from _pytest.monkeypatch import MonkeyPatch
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode
 from frame_compare.cli.run_command import RunCliOptions, build_run_request_from_cli
+from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import OverlayMode, ToneCurve, TonemapPreset
+from frame_compare.config.schema_enums import TonemapSpeed
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
+from frame_compare.orchestration.run_inputs import acquire_run_config, resolve_run_workspace
 
 from .cli_helpers import (
     MINIMAL_CONFIG,
@@ -57,9 +60,9 @@ def test_run_builds_run_request_from_cli_args(monkeypatch: MonkeyPatch, tmp_path
     assert result.exit_code == 0
 
     request = captured["request"]
-    assert request.config_overrides.tm_target_nits == 203
-    assert request.config_overrides.overlay_mode == OverlayMode.DIAGNOSTIC
-    assert request.config_overrides.force_interactive_alignment is True
+    assert request.inputs.config.color.target_nits == 203
+    assert request.inputs.config.screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
+    assert request.inputs.config.audio_alignment.force_interactive is True
 
 
 def test_run_builds_run_request_with_typed_choice_overrides(
@@ -80,6 +83,8 @@ def test_run_builds_run_request_with_typed_choice_overrides(
             "filmic",
             "--tm-curve",
             "spline",
+            "--tm-speed",
+            "fast",
             "--overlay",
             "diagnostic",
         ],
@@ -89,9 +94,10 @@ def test_run_builds_run_request_with_typed_choice_overrides(
 
     assert result.exit_code == 0
     request = captured["request"]
-    assert request.config_overrides.tm_preset == TonemapPreset.FILMIC
-    assert request.config_overrides.tm_curve == ToneCurve.SPLINE
-    assert request.config_overrides.overlay_mode == OverlayMode.DIAGNOSTIC
+    assert request.inputs.config.color.preset == TonemapPreset.FILMIC
+    assert request.inputs.config.color.tone_curve == ToneCurve.SPLINE
+    assert request.inputs.config.color.tonemap_speed is TonemapSpeed.FAST
+    assert request.inputs.config.screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
 
 
 def test_cli_and_runtime_share_the_complete_config_overrides() -> None:
@@ -110,6 +116,7 @@ def test_cli_and_runtime_share_the_complete_config_overrides() -> None:
             input_dir=Path("external-input"),
             no_upload=True,
             tm_preset=TonemapPreset.FILMIC,
+            tm_speed=TonemapSpeed.FAST,
             tm_target_nits=203,
             tm_curve=ToneCurve.SPLINE,
             user_frames=[3, 5],
@@ -125,6 +132,7 @@ def test_cli_and_runtime_share_the_complete_config_overrides() -> None:
     expected = CLIConfigOverrides(
         input_dir=Path("external-input"),
         tm_preset=TonemapPreset.FILMIC,
+        tm_speed=TonemapSpeed.FAST,
         tm_target_nits=203,
         tm_curve=ToneCurve.SPLINE,
         user_frames=[3, 5],
@@ -139,9 +147,34 @@ def test_cli_and_runtime_share_the_complete_config_overrides() -> None:
     )
 
     assert options.config_overrides == expected
-    request = build_run_request_from_cli(options)
-    assert request.config_overrides is options.config_overrides
-    assert request.config_overrides == expected
+    request = build_run_request_from_cli(
+        options,
+        acquire_run_config(
+            root=options.root,
+            config_path=options.config_path,
+            overrides=options.config_overrides,
+            load_config_fn=lambda config_path=None, overrides=None: get_default_config(),
+        ),
+    )
+    assert request.inputs.config.analysis.user_frames == expected.user_frames
+    assert request.inputs.config.slowpics.auto_upload is False
+    assert (
+        resolve_run_workspace(request.inputs).input_dir
+        == (options.root / (expected.input_dir or Path("comparison_videos"))).resolve()
+    )
+
+    config = request.inputs.config
+    assert config.color.preset == TonemapPreset.FILMIC
+    assert config.color.target_nits == 203
+    assert config.color.tone_curve == ToneCurve.SPLINE
+    assert config.analysis.random_frame_count == 7
+    assert config.analysis.dark_frame_count == 2
+    assert config.analysis.bright_frame_count == 1
+    assert config.analysis.motion_frame_count == 4
+    assert config.analysis.random_seed == 19
+    assert config.screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
+    assert config.audio_alignment.force_interactive is True
+    assert config.audio_alignment.use_vsview is True
 
 
 def test_cli_and_runtime_preserve_absent_and_explicit_empty_overrides() -> None:
@@ -175,9 +208,21 @@ def test_cli_and_runtime_preserve_absent_and_explicit_empty_overrides() -> None:
     expected = CLIConfigOverrides(user_frames=[])
 
     assert options.config_overrides == expected
-    request = build_run_request_from_cli(options)
-    assert request.config_overrides is options.config_overrides
-    assert request.config_overrides == expected
+    request = build_run_request_from_cli(
+        options,
+        acquire_run_config(
+            root=options.root,
+            config_path=options.config_path,
+            overrides=options.config_overrides,
+            load_config_fn=lambda config_path=None, overrides=None: get_default_config(),
+        ),
+    )
+    assert request.inputs.config.analysis.user_frames == expected.user_frames
+    assert request.inputs.config.slowpics.auto_upload is False
+    assert (
+        resolve_run_workspace(request.inputs).input_dir
+        == (options.root / (expected.input_dir or Path("comparison_videos"))).resolve()
+    )
 
 
 def test_run_builds_run_request_with_input_dir(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -193,7 +238,10 @@ def test_run_builds_run_request_with_input_dir(monkeypatch: MonkeyPatch, tmp_pat
         ["--input", "custom_inputs"], tmp_path=tmp_path, monkeypatch=monkeypatch
     )
     assert result.exit_code == 0
-    assert captured["request"].config_overrides.input_dir == Path("custom_inputs")
+    assert (
+        resolve_run_workspace(captured["request"].inputs).input_dir
+        == captured["request"].inputs.root / "custom_inputs"
+    )
 
 
 def test_run_write_config_respects_root_and_config_and_does_not_invoke_runner(

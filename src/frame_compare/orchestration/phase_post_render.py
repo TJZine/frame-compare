@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -21,12 +22,8 @@ from frame_compare.orchestration.execution_types import (
     RenderArtifacts,
     ReportPhaseOutput,
 )
-from frame_compare.orchestration.phase_selection import (
-    map_aligned_to_source_frame,
-    selection_detail_for_frame,
-    selection_label_for_frame,
-)
 from frame_compare.orchestration.presentation import clip_role
+from frame_compare.orchestration.selection_rows import selection_rows
 from frame_compare.orchestration.slowpics_metadata import (
     resolve_slowpics_collection_metadata,
 )
@@ -68,6 +65,7 @@ from frame_compare.services.slowpics_upload_plan import (
 )
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
+from frame_compare.utils.cancellation import cancellation_checkpoint
 from frame_compare.utils.run_warnings import RunWarning
 
 log = structlog.get_logger()
@@ -150,6 +148,7 @@ async def run_publish_phase(
     metadata: TmdbMetadata | None,
     render: RenderArtifacts | None = None,
     selected_frames: list[int] | None = None,
+    on_upload_confirmed: Callable[[str, tuple[Path, ...]], None] | None = None,
 ) -> PublishPhaseOutput:
     if client is None:
         return PublishPhaseOutput(slowpics_url=None)
@@ -161,7 +160,9 @@ async def run_publish_phase(
     upload_plan = build_slowpics_upload_plan(
         selected_frames=selected_frames,
         clips=_slowpics_upload_clips(ctx),
-        screenshots_by_label=render.screenshots_by_label,
+        screenshots_by_label={
+            clip.label: [shot.result.path for shot in clip.screenshots] for clip in render.clips
+        },
     )
     collection_resolution = resolve_slowpics_collection_metadata(
         config=ctx.config.slowpics,
@@ -183,6 +184,11 @@ async def run_publish_phase(
         progress=ctx.reporter,
         upload_plan=upload_plan,
     )
+    # Remote success is already a fact even if cancellation prevents this phase's
+    # output from being applied. Retain it synchronously before any more awaits.
+    if on_upload_confirmed is not None:
+        on_upload_confirmed(result.url, result.uploaded_file_paths)
+    await cancellation_checkpoint()
     post_upload_actions = await run_slowpics_post_upload_actions(
         SlowpicsPostUploadRequest(
             workspace=ctx.workspace,
@@ -197,6 +203,7 @@ async def run_publish_phase(
         slowpics_url=result.url,
         uploaded_file_paths=result.uploaded_file_paths,
         post_upload_actions=post_upload_actions,
+        warnings=tuple(collection_resolution.warnings),
         success_summary=(
             f"{uploaded_count} {uploaded_unit} uploaded · {ctx.config.slowpics.visibility.value}"
         ),
@@ -276,7 +283,7 @@ def run_report_phase(
     metadata: TmdbMetadata | None,
     slowpics_url: str | None,
 ) -> ReportPhaseOutput:
-    if render is None or not render.screenshots_by_label:
+    if render is None or not render.clips:
         return ReportPhaseOutput(report_path=None, report_succeeded=True)
 
     clips = [ctx.reference, *ctx.comparisons]
@@ -322,28 +329,16 @@ def run_report_phase(
         protected=protected,
     )
     clip_info: list[ClipInfo] = []
-    for clip_index, clip in enumerate(clips):
-        paths = render.screenshots_by_label[clip.label]
-        facts = render.frame_facts_by_label[clip.label]
-        if len(paths) != len(frames) or len(facts) != len(frames):
+    for clip_index, (clip, rendered_clip) in enumerate(zip(clips, render.clips, strict=True)):
+        if rendered_clip.label != clip.label:
             raise ValueError(
-                f"report artifacts for {clip.label!r} must contain one path and fact "
-                f"per frame: expected {len(frames)}, got {len(paths)} paths and "
-                f"{len(facts)} facts"
+                f"report clip label mismatch: {rendered_clip.label!r} != {clip.label!r}"
             )
-        images: list[ReportImageInfo] = []
-        for index, comparison_frame in enumerate(frames):
-            source_frame = map_aligned_to_source_frame(
-                clip=clip,
-                aligned_frame=comparison_frame,
-            )
-            if facts[index].source_frame != source_frame:
-                raise ValueError(
-                    f"report source-frame mapping mismatch for {clip.label!r} at "
-                    f"comparison frame {comparison_frame}"
-                )
-            images.append(ReportImageInfo(paths[index], source_frame, facts[index]))
-        clip_facts = render.clip_facts_by_label[clip.label]
+        images = [
+            ReportImageInfo(shot.result.path, shot.selection.source_frame, shot.result.facts)
+            for shot in rendered_clip.screenshots
+        ]
+        clip_facts = rendered_clip.clip_facts
         clip_info.append(
             ClipInfo(
                 name=clip.label,
@@ -354,7 +349,7 @@ def run_report_phase(
                 size_bytes=clip_facts.size_bytes,
                 signal=clip_facts.signal,
                 presentation_state=clip_facts.presentation_state,
-                tonemap_settings=clip_facts.tonemap_settings,
+                tonemap=clip_facts.tonemap,
                 active_picture=clip_facts.geometry.active_picture,
                 images=images,
                 label=clip.label,
@@ -368,21 +363,6 @@ def run_report_phase(
                 ),
             )
         )
-    applied_settings = next(
-        (
-            facts.tonemap_settings
-            for facts in render.clip_facts_by_label.values()
-            if facts.tonemap_settings is not None
-        ),
-        None,
-    )
-    if applied_settings is not None and any(
-        facts.tonemap_settings is not None and facts.tonemap_settings != applied_settings
-        for facts in render.clip_facts_by_label.values()
-    ):
-        raise ValueError(
-            "report rendering disclosure cannot represent mixed effective tonemap settings"
-        )
     report_data = ReportData(
         clips=clip_info,
         frames=frames,
@@ -391,10 +371,7 @@ def run_report_phase(
             # batch expansion has no post-render override or fallback for them.
             overlay_mode=ctx.config.screenshots.overlay_mode,
             include_frame_number=ctx.config.screenshots.include_frame_number,
-            tonemap_settings=applied_settings,
-            geometry_by_label={
-                label: facts.geometry for label, facts in render.clip_facts_by_label.items()
-            },
+            geometry_by_label={clip.label: clip.clip_facts.geometry for clip in render.clips},
         ),
         metadata=metadata,
         slowpics_url=slowpics_url,
@@ -421,32 +398,17 @@ def _report_selection_detail(detail: SelectionDetail | None) -> SourceFrameSelec
 
 
 def report_frame_details_for_frames(ctx: RunContext, *, frames: list[int]) -> list[FrameDetail]:
-    if ctx.selection_breakdown is None and ctx.selection_details_by_source_frame is None:
+    if ctx.selection.breakdown is None and ctx.selection.details_by_source_frame is None:
         return []
 
-    frame_details: list[FrameDetail] = []
-    for aligned_frame in frames:
-        source_frame = map_aligned_to_source_frame(
-            clip=ctx.reference,
-            aligned_frame=aligned_frame,
+    return [
+        frame_detail_for_comparison_frame(
+            comparison_frame=row.frame,
+            selection_detail=_report_selection_detail(row.detail),
+            selection_label=row.label,
         )
-        detail = selection_detail_for_frame(
-            source_frame,
-            ctx.selection_details_by_source_frame,
-        )
-        selection_label = (
-            detail.label
-            if detail is not None
-            else selection_label_for_frame(source_frame, ctx.selection_breakdown)
-        )
-        frame_details.append(
-            frame_detail_for_comparison_frame(
-                comparison_frame=aligned_frame,
-                selection_detail=_report_selection_detail(detail),
-                selection_label=selection_label,
-            )
-        )
-    return frame_details
+        for row in selection_rows(ctx, frames=frames)
+    ]
 
 
 def run_post_report_cleanup_phase(

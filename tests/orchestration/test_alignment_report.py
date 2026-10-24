@@ -97,6 +97,8 @@ def test_build_frame_alignment_report_uses_final_normalized_trim_domain() -> Non
             reference_path=Path("ref.mkv"),
             comparison_path=Path("encode.mkv"),
             presentation_name="Encode",
+            short_name="Encode",
+            reference_short_name="Reference",
         ),
     )
 
@@ -127,14 +129,14 @@ def test_emit_frame_alignment_report_renders_human_panel_to_stderr(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Frame Alignment" in captured.err
-    assert "After Alignment" in captured.err
-    assert "comparison" in captured.err
+    assert "Frame alignment" in captured.err
+    assert "After Alignment" not in captured.err
     assert "Encode [candidate]" in captured.err
-    assert "manual" in captured.err
-    assert "+155f" in captured.err
+    assert "trims" in captured.err
+    assert "+155f" not in captured.err
+    assert "offset" not in captured.err
     assert "Reference source 155 <-> Encode [candidate] source 0" in captured.err
-    assert "Reference 155..999, Encode [candidate] 0..844" in captured.err
+    assert "Reference 155..999 · Encode [candidate] 0..844" in captured.err
     assert "aligned 0, 28, 83" in captured.err
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
@@ -192,10 +194,10 @@ def test_emit_frame_alignment_report_renders_human_panel_to_stderr(
             False,
             True,
             [
-                "Frame Alignment",
-                "+0f",
+                "Frame alignment",
+                "trims",
                 "Reference source 12 <-> Encode source 8",
-                "Reference 12..90, Encode 8..86",
+                "Reference 12..90 · Encode 8..86",
             ],
             id="renders_zero_offset_trim_change-0",
         ),
@@ -341,11 +343,9 @@ def test_emit_frame_alignment_report_shows_material_stability_concisely(
         no_color=True,
     )
 
-    output = capsys.readouterr().err
-    assert (
-        "possible discontinuity; +178..+202 frames; scoped to 4 credible chunks; "
-        "approximate interval between observations around 00:47:12"
-    ) in output
+    output = " ".join(capsys.readouterr().err.split())
+    assert "possible discontinuity; +178..+202 frames; scoped to 4 credible chunks;" in output
+    assert "observations around 00:47:12" in output
     assert "valid windows" not in output
 
 
@@ -377,11 +377,10 @@ def test_emit_frame_alignment_report_renders_alignment_warning_context(
     )
 
     captured = capsys.readouterr()
-    assert "Frame Alignment" in captured.err
+    assert "Frame alignment" in captured.err
     assert "Encode" in captured.err
-    assert "none" in captured.err
-    assert "warnings" in captured.err
-    assert "warning" in captured.err
+    assert "warnings" not in captured.err
+    assert "! align: encode low confidence" in captured.err
     assert "rejected" not in captured.err
     assert "align: encode low confidence; left unapplied and untrimmed" in captured.err
 
@@ -427,7 +426,7 @@ def test_emit_frame_alignment_report_does_not_label_applied_stability_warning_re
     )
 
     output = capsys.readouterr().err
-    assert "warning" in output
+    assert "!" in output
     assert "applied constant offset was retained" in output
     assert "rejected" not in output
 
@@ -485,9 +484,9 @@ def test_emit_frame_alignment_report_prioritizes_normal_alignment_evidence(
 
     captured = capsys.readouterr()
     output = captured.err
-    assert output.index("offset") < output.index("source")
-    assert output.index("source") < output.index("trims")
-    assert output.index("trims") < output.index("warnings")
+    assert output.index("trims") < output.index("confidence warning")
+    assert "  offset" not in output
+    assert "  source" not in output
     assert "align: confidence warning" in output
     assert "row 0" not in output
 
@@ -529,7 +528,7 @@ def test_emit_frame_alignment_report_verbose_retains_row_zero_frames_and_paths(
     assert str(comparison_path) in captured.err
 
 
-def test_emit_frame_alignment_report_uses_compact_name_only_in_normal_mode(
+def test_emit_frame_alignment_report_uses_short_names_in_normal_mode_and_canonical_label_in_verbose_mode(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     comparison = AlignmentReportComparison(
@@ -541,6 +540,8 @@ def test_emit_frame_alignment_report_uses_compact_name_only_in_normal_mode(
         comparison_row_zero_source_frame=0,
         reference_trim_range=(2, 99),
         comparison_trim_range=(0, 97),
+        short_name="Kitsune",
+        reference_short_name="SCOPE",
     )
 
     emit_frame_alignment_report(
@@ -553,7 +554,9 @@ def test_emit_frame_alignment_report_uses_compact_name_only_in_normal_mode(
         no_color=True,
     )
     normal = capsys.readouterr().err
-    assert "2160p | ATV WEB-DL | DV | Kitsune" in normal
+    assert "Kitsune" in normal
+    assert "SCOPE 2..99 · Kitsune 0..97" in normal
+    assert "2160p | ATV WEB-DL | DV | Kitsune" not in normal
     assert "Canonical Encode" not in normal
 
     emit_frame_alignment_report(
@@ -566,7 +569,9 @@ def test_emit_frame_alignment_report_uses_compact_name_only_in_normal_mode(
         no_color=True,
         verbose=True,
     )
-    assert "Canonical Encode" in capsys.readouterr().err
+    verbose = capsys.readouterr().err
+    assert "Canonical Encode" in verbose
+    assert "SCOPE 2..99 · Kitsune 0..97" in verbose
 
 
 @pytest.mark.parametrize("columns", [60, 80, 120, 240])
@@ -602,7 +607,7 @@ def test_emit_frame_alignment_report_wraps_at_narrow_terminal_widths(
     )
 
     captured = capsys.readouterr()
-    assert "Frame Alignment" in captured.err
+    assert "Frame alignment" in captured.err
     assert "align: a long warning" in captured.err
     assert "\x1b[" not in captured.err
     assert all(len(line) <= columns for line in captured.err.splitlines())

@@ -223,3 +223,22 @@ def test_previous_format_is_rejected_and_replaced(tmp_path: Path, confirmed: str
     save_manual_override(tmp_path, replacement)
     assert load_manual_overrides(tmp_path) == {"ref:new": replacement}
     assert "confirmed" not in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+    ],
+)
+def test_parser_limits_miss_and_write_repairs(tmp_path: Path, content: str) -> None:
+    (tmp_path / MANUAL_OVERRIDES_FILE).write_text(content, encoding="utf-8")
+    assert load_manual_overrides(tmp_path) == {}
+    override = _override("comp", 7)
+    with patch("frame_compare.services.alignment_manual_overrides.log.warning") as warning:
+        save_manual_override(tmp_path, override)
+    warning.assert_called_once_with(
+        "manual_overrides_corrupt_on_write", path=str(tmp_path / MANUAL_OVERRIDES_FILE)
+    )
+    assert load_manual_overrides(tmp_path) == {"ref:comp": override}

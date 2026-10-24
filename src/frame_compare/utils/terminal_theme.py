@@ -86,7 +86,22 @@ def human_console(
     )
 
 
-_ASCII_PUNCTUATION = str.maketrans({"·": "|", "×": "x", "–": "-", "—": "-", "…": "...", "›": ">"})
+_ASCII_PUNCTUATION = str.maketrans(
+    {
+        "·": "|",
+        "×": "x",
+        "–": "-",
+        "—": "-",
+        "…": "...",
+        "›": ">",
+        "╭": "+",
+        "─": "-",
+        "│": "|",
+        "╰": "+",
+        "●": "*",
+        "○": "o",
+    }
+)
 _ASCII_FALLBACK_ERRORS = "frame_compare.ascii_fallback"
 
 

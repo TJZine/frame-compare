@@ -1,20 +1,3 @@
-"""Whole-track audio alignment evidence (schema v4).
-
-This module is the single definition of the audio-evidence schema. Services
-import these frozen dataclasses from here; the diagnostics writer serializes
-them with ``dataclasses.asdict``; the VSView review contract validates an
-embedded attempt by calling :func:`evidence_from_payload` and
-translating ``ValueError`` into its contract error.
-
-Standard library only: this module must stay importable from the VSView panel
-process without NumPy.
-
-Every Literal vocabulary is defined once as a type alias below and enforced
-through :func:`typing.get_args`, never repeated. Parsing is one generic
-dataclass parser; every invariant lives in ``__post_init__`` so services
-constructing an invalid attempt fail at construction with ``ValueError``.
-"""
-
 from __future__ import annotations
 
 import math
@@ -38,7 +21,9 @@ type AudioSelectionMethod = Literal["explicit_override", "automatic_metadata"]
 type AudioMetadataMatch = Literal["match", "mismatch", "unknown", "not_applicable"]
 type AudioPeakRatio = float | Literal["unbounded"]
 type AudioStartBasis = Literal["metadata", "default_zero"]
-type AudioDurationBasis = Literal["duration_ts", "stream_duration", "stream_tag", "unavailable"]
+type AudioDurationBasis = Literal[
+    "duration_ts", "stream_duration", "stream_tag", "packet_tail", "unavailable"
+]
 type AudioOutcomeStatus = Literal["agreed", "no_single_offset", "search_edge", "no_usable_audio"]
 type AudioCollectionObservation = Literal["observed", "not_observed"]
 type AudioCandidateBasis = Literal["audio_only"]
@@ -86,14 +71,12 @@ MAX_VIDEO_TARGET_POSITIONS = 12
 MAX_VIDEO_ALTERNATIVE_OFFSETS = 3
 MAX_VIDEO_CHECK_POINTS = 5
 
-#: Plain-words reason phrases for unavailable audio states (m4). Both the
-#: terminal presentation and the VSView panel render these; collection failure
-#: categories share one generic phrase.
 AUDIO_UNAVAILABLE_REASON_PHRASES: dict[str, str] = {
     "no_single_offset": "no single offset across the track",
     "search_edge": "best offset at the search edge",
     "no_usable_audio": "no usable audio signal",
     "selected_audio_timeline_unavailable": "selected audio timeline unavailable",
+    "retime_rate_unsupported": "retimed audio rate unsupported",
     "analysis_budget_exceeded": "analysis budget exceeded",
     "source_identity_changed": "source changed during analysis",
 }
@@ -101,7 +84,6 @@ AUDIO_COLLECTION_FAILURE_PHRASE = "audio collection failed"
 
 
 def audio_unavailable_phrase(reason: str) -> str:
-    """Return the plain-words phrase for an unavailable primary reason."""
     phrase = AUDIO_UNAVAILABLE_REASON_PHRASES.get(reason)
     if phrase is not None:
         return phrase
@@ -111,7 +93,6 @@ def audio_unavailable_phrase(reason: str) -> str:
 
 
 def analysis_stream_start(start: Fraction, timeline_scale: Fraction) -> Fraction:
-    """Return a native stream start on the effective analysis timeline."""
     return start * timeline_scale
 
 
@@ -125,7 +106,6 @@ def _unwrap(annotation: object) -> object:
 
 
 def _walk_value(annotation: object, value: Any, what: str, *, parse: bool) -> Any:
-    """Check or parse one value using the same type-driven walk."""
     annotation = _unwrap(annotation)
     if annotation is None or annotation is _NONE_TYPE:
         if value is None:
@@ -217,7 +197,6 @@ def _walk_value(annotation: object, value: Any, what: str, *, parse: bool) -> An
 
 
 def _check_shallow(obj: object) -> None:
-    """Run the strict type check over every field of one evidence object."""
     hints: dict[str, Any] = get_type_hints(type(obj))
     for field in fields(cast(Any, obj)):
         _walk_value(hints[field.name], getattr(obj, field.name), field.name, parse=False)
@@ -268,7 +247,7 @@ def evidence_from_payload[T](cls: type[T], data: object) -> T:
     parsed: dict[str, Any] = {
         name: _walk_value(hints[name], raw[name], f"{what}.{name}", parse=True) for name in names
     }
-    return cls(**parsed)  # type: ignore[call-arg]
+    return cls(**parsed)
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,14 +293,12 @@ class SelectedAudioStreamEvidence:
 
     @property
     def analysis_audio_start(self) -> Fraction:
-        """Audio stream start on the analysis (effective) timeline."""
         return analysis_stream_start(
             Fraction(self.stream_start_num, self.stream_start_den), self.timeline_scale
         )
 
     @property
     def analysis_video_start(self) -> Fraction:
-        """Video stream start on the analysis (effective) timeline."""
         return analysis_stream_start(
             Fraction(self.video_start_num, self.video_start_den), self.timeline_scale
         )
@@ -359,8 +336,6 @@ class SelectedAudioStreamEvidence:
 
 @dataclass(frozen=True, slots=True)
 class AudioAnalysisFacts:
-    """Whole-track chunk plan facts: fixed 8 kHz rate, search radius, tiling."""
-
     analysis_rate: int
     max_offset_seconds: float
     chunk_samples: int
@@ -467,8 +442,6 @@ class AudioChunkRun:
 
 @dataclass(frozen=True, slots=True)
 class AudioStageOutcome:
-    """Chunked-estimator outcome with the A5 compensation and A6 sub-frame estimate."""
-
     status: AudioOutcomeStatus
     global_lag: int | None
     active_chunks: int
@@ -519,8 +492,6 @@ class AudioCollectionFacts:
 
 @dataclass(frozen=True, slots=True)
 class AudioCollectionFailure:
-    """One pair-level collection failure (m14): the category plus its side, if any."""
-
     category: CollectionFailureCategory
     side: AudioPairSide | None
 
@@ -546,8 +517,6 @@ class VideoPositionDifference:
 
 @dataclass(frozen=True, slots=True)
 class VideoTargetPosition:
-    """One V3a position's relative two-hypothesis result."""
-
     position_index: int
     reference_frame: int
     confirmed_score: float
@@ -625,7 +594,6 @@ class VideoTargetEvidence:
             raise ValueError("local video inconclusive is non-credible neither-win context")
 
     def representative_offset(self) -> int:
-        """Return the offset supported by the first authoritative target position."""
         if self.resolution == "alternative_confirmed":
             return next(
                 position.alternative_offset
@@ -667,8 +635,6 @@ class AudioAuthorityRecount:
 
 @dataclass(frozen=True, slots=True)
 class VideoCheckPoint:
-    """A bounded P4a frame pair for quick manual review."""
-
     timestamp_seconds: float
     reference_frame: int
     suggested_comparison_frame: int
@@ -759,8 +725,6 @@ class VideoCheckObservation:
 
 @dataclass(frozen=True, slots=True)
 class AudioDecisionCandidate:
-    """Observed frame candidate with the sub-frame estimate it came from."""
-
     frame_offset: int
     time_offset_seconds: float
     subframe_estimate: float
@@ -790,8 +754,6 @@ class AudioAlignmentDecision:
 
 @dataclass(frozen=True)
 class AlignmentStabilitySummary:
-    """Compact diagnostic classification of offset variation over time."""
-
     classification: AlignmentStabilityClassification
     valid_windows: int
     offset_min_frames: int | None
@@ -814,8 +776,6 @@ class AlignmentStabilitySummary:
 
 @dataclass(frozen=True)
 class AudioAlignmentAttempt:
-    """Complete immutable evidence for one current-run audio attempt."""
-
     reference_identity_digest: str
     comparison_identity_digest: str
     comparison_ordinal: int
@@ -871,8 +831,6 @@ class AudioAlignmentAttempt:
             raise ValueError("observed collection facts need both paired sides in order")
         planned = self.analysis.planned_chunk_count
         lag_radius = self.analysis.lag_samples
-        # The span is analyzed for complete attempts, planned for aborted
-        # attempts, and zero when no plan exists.
         total_samples = self.chunks.total_samples
         if planned == 0:
             if total_samples != 0:
@@ -953,7 +911,6 @@ class AudioAlignmentAttempt:
 
 
 def audio_attempt_payload(attempt: AudioAlignmentAttempt) -> dict[str, object]:
-    """Serialize one attempt without truncating or deriving evidence."""
     return cast(dict[str, object], asdict(attempt))
 
 

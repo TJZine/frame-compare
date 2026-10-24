@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import sys
 import types
 from contextlib import redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from rich.cells import cell_len
 
-from frame_compare.vsview.session_runtime import SessionConsole
+from frame_compare.vsview.session_runtime import AudioReviewPayload, SessionConsole
 from frame_compare.vsview.session_script import (
     _build_script_content,
     write_vsview_session_script,
@@ -186,6 +188,7 @@ def _execute_ready_block(
     *,
     stderr_encoding: str,
     audio_review_by_key: dict[str, str] | None = None,
+    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
 ) -> str:
     reference = tmp_path / "ref.mkv"
     comparisons = [tmp_path / "a.mkv", tmp_path / "b.mkv"]
@@ -196,6 +199,7 @@ def _execute_ready_block(
     class FakeClip:
         def __init__(self, stem: str) -> None:
             self.stem = stem
+            self.num_frames = 20_000
             self.fps = SimpleNamespace(numerator=24, denominator=1)
 
     clips = {path.stem: FakeClip(path.stem) for path in (reference, *comparisons)}
@@ -204,11 +208,6 @@ def _execute_ready_block(
         def LWLibavSource(self, path: str, **_kwargs: object) -> FakeClip:
             return clips[Path(path).stem]
 
-    class FakeText:
-        def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
-            assert alignment == 7
-            return clip
-
     class FakeStd:
         def AssumeFPS(self, clip: FakeClip, **_kwargs: object) -> FakeClip:
             return clip
@@ -216,7 +215,7 @@ def _execute_ready_block(
         def SetFrameProps(self, clip: FakeClip, **_kwargs: object) -> FakeClip:
             return clip
 
-    core = SimpleNamespace(lsmas=FakeLsmas(), text=FakeText(), std=FakeStd())
+    core = SimpleNamespace(lsmas=FakeLsmas(), std=FakeStd())
     fake_vapoursynth = types.ModuleType("vapoursynth")
     fake_vapoursynth.core = core  # pyright: ignore[reportAttributeAccessIssue]
     fake_vsview = types.ModuleType("vsview")
@@ -232,7 +231,9 @@ def _execute_ready_block(
         audio_review_by_key=audio_review_by_key
         if audio_review_by_key is not None
         else {"ref:a": _accepted_review(), "ref:b": _provisional_review()},
-        frame_props_by_stem={
+        frame_props_by_stem=frame_props_by_stem
+        if frame_props_by_stem is not None
+        else {
             stem: {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_Range": 0}
             for stem in ("ref", "a", "b")
         },
@@ -241,7 +242,7 @@ def _execute_ready_block(
             "a": "2160p \u00b7 A",
             "b": "2160p \u00b7 B",
         },
-        short_names_by_stem={"a": "ShortA", "b": "LongerB"},
+        short_names_by_stem={"ref": "Ref", "a": "ShortA", "b": "LongerB"},
     )
     stderr: io.StringIO = _AsciiStderr() if stderr_encoding == "ascii" else _StubStderr()
     with redirect_stderr(stderr):
@@ -267,25 +268,142 @@ def test_generated_ready_block_output_cases(
     if case == "utf8":
         assert "VSView is open \u00b7 waiting for you" in output
         assert "Open Tool Panel \u2192 Frame Compare Alignment Review." in output
-        assert "Unlink playheads, then position every source on the same visible moment." in output
         assert (
-            "Save the alignment in the panel, then close VSView to continue Frame Compare."
+            "Browse each source to the same visual moment; original frames update automatically."
             in output
         )
-        assert "2160p \u00b7 REF" in output
-        assert "2160p \u00b7 A" in output
-        assert "2160p \u00b7 B" in output
-        lines = output.splitlines()
-        assert any("ShortA" in line and "Audio alignment accepted: +0f" in line for line in lines)
-        assert any("LongerB" in line and "Provisional +0f - NOT APPLIED" in line for line in lines)
+        assert (
+            "Confirm matching frames in the panel, then close VSView to continue Frame Compare."
+            in output
+        )
+        assert "outputs" in output
+        assert "Ref" in output
+        assert "ShortA" in output
+        assert "LongerB" in output
+        assert "audio +0f · reused" in output
+        assert "audio +0f · not applied" in output
+        assert "hints" not in output
     elif case == "ascii":
-        assert "> VSView is open \u00b7 waiting for you" in output.splitlines()
-        assert "  1  Open Tool Panel -> Frame Compare Alignment Review." in output.splitlines()
-        assert "  hints    ShortA   Audio alignment accepted: +0f" in output.splitlines()
+        assert "+- > VSView is open | waiting for you" in output.splitlines()
+        assert "| 1  Open Tool Panel -> Frame Compare Alignment Review." in output.splitlines()
+        assert "audio +0f | reused" in output
+        assert "hints" not in output
     else:
-        lines = output.splitlines()
-        assert any("ShortA" in line and "Audio alignment accepted: +0f" in line for line in lines)
-        assert any("LongerB" in line and "No usable audio candidate" in line for line in lines)
+        assert "ShortA" in output and "audio +0f · reused" in output
+        assert "LongerB" in output and "no audio match" in output
+        assert "hints" not in output
+
+
+def test_generated_ready_block_keeps_display_assumptions_inside_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = _execute_ready_block(
+        tmp_path,
+        monkeypatch,
+        stderr_encoding="utf-8",
+        frame_props_by_stem={
+            "ref": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+            "a": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_Range": 0},
+            "b": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_Range": 0},
+        },
+    )
+
+    lines = output.splitlines()
+    assert "│ ! VSView display assumptions" in lines
+    note_index = lines.index("│ ! VSView display assumptions")
+    assert lines[note_index + 1].startswith("│ source")
+    assert "│ range" in lines[note_index + 2]
+    assert "│ impact" in lines[note_index + 3]
+    assert lines[-2] == "╰─"
+    assert "VSView Display Assumptions" not in output
+
+
+@pytest.mark.parametrize(
+    "value", ["very-long-source-name-" * 4, "日本語映像" * 9, "Cafe\u0301" * 20]
+)
+@pytest.mark.parametrize("no_color", [False, True])
+def test_session_section_wraps_key_values_and_list_rows_at_terminal_width(
+    monkeypatch: pytest.MonkeyPatch, value: str, no_color: bool
+) -> None:
+    if no_color:
+        monkeypatch.setenv("NO_COLOR", "1")
+    else:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(
+        "frame_compare.vsview.session_runtime.shutil.get_terminal_size",
+        lambda **_kwargs: SimpleNamespace(columns=40, lines=24),
+    )
+    stderr = _StubStderr()
+    with redirect_stderr(stderr):
+        console = SessionConsole()
+        console.section(
+            "› VSView is open · waiting for you",
+            [
+                console.key_value("source", console.dim(value)),
+                "A long instruction row that must continue after the rail without losing text.",
+                console.note("warning", "A long warning row that also needs to wrap."),
+            ],
+        )
+
+    output = stderr.getvalue()
+    lines = output.splitlines()
+    visible_lines = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in lines]
+    assert all(cell_len(line) <= 40 for line in visible_lines)
+    assert any(line.startswith("│                 ") for line in visible_lines)
+    assert any(
+        line.startswith("│ ") and not line.startswith("│                 ")
+        for line in visible_lines[2:-2]
+    )
+    source_start = next(
+        index for index, line in enumerate(visible_lines) if line.startswith("│ source")
+    )
+    source_lines = []
+    for line in visible_lines[source_start:]:
+        if source_lines and not line.startswith("│                 "):
+            break
+        source_lines.append(line[18:])
+    assert "".join(source_lines) == value
+    assert "instruction row" in output
+    assert "warning row" in output
+
+
+@pytest.mark.parametrize(
+    ("origin", "offset", "decision", "expected", "warning"),
+    [
+        ("computed_this_run", 4, "trusted_automatic", "audio +4f", False),
+        ("shared_computed_offsets", -2, None, "audio -2f · reused", False),
+        ("interactive_confirmed_this_run", 3, None, "previously confirmed +3f", False),
+        ("shared_previous_offsets", 5, None, "previously confirmed +5f", False),
+        ("preexisting_manual_override", -1, None, "manual offset -1f", False),
+        ("none", None, "provisional", "audio +6f · not applied", True),
+        ("none", None, "unavailable", "no audio match", True),
+    ],
+)
+def test_audio_output_state_preserves_authority_and_candidate_state(
+    origin: str,
+    offset: int | None,
+    decision: str | None,
+    expected: str,
+    warning: bool,
+) -> None:
+    attempt: dict[str, object] | None = None
+    if decision is not None:
+        candidate: dict[str, object] | None = (
+            {"frame_offset": 4 if decision == "trusted_automatic" else 6}
+            if decision != "unavailable"
+            else None
+        )
+        attempt = {"decision": {"state": decision, "candidate": candidate}}
+    payload = cast(
+        AudioReviewPayload,
+        {
+            "current_authority": {"origin": origin, "frame_offset": offset},
+            "audio_attempt": attempt,
+        },
+    )
+    console = _session_console(stderr=_StubStderr())
+
+    assert console._audio_output_state(payload) == (expected, warning)
 
 
 def test_short_names_by_stem_defaults_to_display_names(tmp_path: Path) -> None:
@@ -338,3 +456,69 @@ def test_session_script_optional_frame_cache_limit(
         exec(compile(script, "session.py", "exec"), {"__file__": "session_x.py"})
     assert caught.value.code == 1
     assert observed == [(321 if memory_limit_mb is None else memory_limit_mb, memory_limit_mb)]
+
+
+def test_session_output_names_pad_by_terminal_cells(monkeypatch: pytest.MonkeyPatch) -> None:
+    from frame_compare.vsview.session_runtime import ComparisonSource, ReferenceSource
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    stderr = _StubStderr()
+    with redirect_stderr(stderr):
+        console = SessionConsole()
+        reference = ReferenceSource(
+            label="ref", path="ref.mkv", index_path="ref.lwi", display_name="日本語"
+        )
+        target = ComparisonSource(
+            path="a.mkv",
+            index_path="a.lwi",
+            display_name="Cafe\u0301",
+            comparison_key="ref:a",
+            suggested_offset=0,
+            audio_review=_accepted_review(),
+        )
+        console.section("Outputs", console._output_table_rows(reference, {"a": target}, {}))
+    lines = stderr.getvalue().splitlines()
+    reference_line = next(line for line in lines if "reference" in line)
+    comparison_line = next(line for line in lines if "audio +0f" in line)
+    assert cell_len(reference_line[: reference_line.index("reference")]) == 29
+    assert cell_len(comparison_line[: comparison_line.index("audio")]) == 29
+    assert "Cafe\u0301" in comparison_line
+
+
+@pytest.mark.parametrize("speed", ["quality", "fast"])
+def test_generated_settings_roundtrip_preserves_enums(speed: str) -> None:
+    from pydantic import TypeAdapter
+
+    from frame_compare.config.schema import ConfigSchema
+    from frame_compare.render.prepare import resolve_tonemap_settings
+    from frame_compare.vs.types import TonemapSettings
+
+    config = ConfigSchema.model_validate({"color": {"tonemap_speed": speed, "target_nits": 120}})
+    settings = resolve_tonemap_settings(config)
+    script = _build_script_content(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("comparison.mkv")],
+        suggested_offsets_by_key={"ref:comparison": 0},
+        audio_review_by_key={"ref:comparison": "{}"},
+        preview_tonemap=settings,
+    )
+    import ast
+
+    assignment = next(
+        node
+        for node in ast.parse(script).body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "SESSION_DATA"
+    )
+    # Read the literal JSON embedded in the real generated script without starting VSView.
+    payload = next(
+        node.value
+        for node in ast.walk(assignment)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
+    restored = TypeAdapter(TonemapSettings).validate_python(json.loads(payload)["preview_tonemap"])
+    assert restored == settings
+    assert restored.tonemap_speed is settings.tonemap_speed
+    assert restored.preset is settings.preset
+    assert restored.tone_curve is settings.tone_curve

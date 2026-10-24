@@ -11,6 +11,7 @@ from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode, format_error_json
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport, run_doctor
+from frame_compare.orchestration.doctor_types import DoctorConfigSelection
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal_theme import GLYPHS_ASCII
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
@@ -148,6 +149,7 @@ def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -201,6 +203,7 @@ def test_doctor_exit_code_is_3_on_core_failure(monkeypatch: MonkeyPatch) -> None
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -248,6 +251,7 @@ def test_doctor_human_output_is_verdict_last_and_grouped(monkeypatch: MonkeyPatc
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -302,6 +306,7 @@ def test_doctor_managed_optional_policy_failure_blocks_human_and_json_output(
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -342,6 +347,7 @@ def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -376,6 +382,7 @@ def test_doctor_human_marks_optional_failed_check_neutrally(monkeypatch: MonkeyP
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -419,7 +426,9 @@ def test_doctor_optional_vsview_presentation(
     report = DoctorReport(checks=[(check, check.check_fn())], all_passed=True, critical_failures=[])
 
     def _run_doctor(
-        checks: list[DoctorCheck] | None = None, reporter: ProgressReporter | None = None
+        checks: list[DoctorCheck] | None = None,
+        reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -462,6 +471,7 @@ def test_doctor_text_preserves_literal_brackets(monkeypatch: MonkeyPatch) -> Non
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -503,6 +513,7 @@ def test_doctor_preserves_supplied_hint_text_in_human_and_json_output(
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -559,6 +570,7 @@ def test_doctor_verdict_combines_failure_and_warning_counts(
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -589,6 +601,7 @@ def test_doctor_ascii_fallback_uses_ascii_glyphs(monkeypatch: MonkeyPatch) -> No
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -622,6 +635,7 @@ def test_doctor_generic_check_failure_sanitizes_json_details(monkeypatch: Monkey
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
 
@@ -647,6 +661,7 @@ def test_doctor_top_level_frame_compare_error_uses_cli_error_contract(
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         raise error
 
@@ -672,6 +687,7 @@ def test_doctor_top_level_error_uses_default_terminal_color_policy(
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         raise error
 
@@ -708,6 +724,7 @@ def test_doctor_json_top_level_frame_compare_error_uses_standard_error_schema(
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
         reporter: ProgressReporter | None = None,
+        selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         raise error
 
@@ -718,3 +735,123 @@ def test_doctor_json_top_level_frame_compare_error_uses_standard_error_schema(
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
     assert result.stderr == ""
     assert json.loads(result.stdout) == format_error_json(error)
+
+
+@pytest.mark.parametrize(
+    "kind", ["disabled", "enabled", "invalid", "invalid-setting", "missing", "directory"]
+)
+def test_doctor_selected_config_matches_run_and_keeps_config_failures_in_check(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    kind: str,
+) -> None:
+    from frame_compare.config.errors import ConfigParseError, ConfigValidationError
+    from frame_compare.orchestration.run_inputs import acquire_run_config
+
+    root = tmp_path / "workspace"
+    root.mkdir()
+    selected = root / "selected.toml"
+    if kind == "directory":
+        selected.mkdir()
+    elif kind != "missing":
+        selected.write_text(
+            "[tmdb]\nenabled = "
+            + {"disabled": "false", "enabled": "true", "invalid": "[", "invalid-setting": "'bad'"}[
+                kind
+            ]
+            + "\n"
+        )
+    for key in ("TMDB_API_KEY", "FRAME_COMPARE_TMDB__API_KEY", "FRAME_COMPARE_TMDB__ENABLED"):
+        monkeypatch.delenv(key, raising=False)
+    for name in ("vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg", "vsview"):
+        monkeypatch.setattr(
+            f"frame_compare.orchestration.doctor_checks._check_{name}",
+            lambda: CheckResult(passed=True, message="Runtime available"),
+        )
+    with (
+        patch("httpx.Client.send", side_effect=AssertionError("Unexpected HTTP")),
+        patch("httpx.AsyncClient.send", side_effect=AssertionError("Unexpected HTTP")),
+    ):
+        result = runner.invoke(
+            app, ["doctor", "--root", str(root), "--config", selected.name, "--json"]
+        )
+    assert result.exit_code == 0
+    entry = _doctor_check_entry(json.loads(result.stdout), "tmdb_api_key")
+    if kind in {"disabled", "enabled"}:
+        config = acquire_run_config(root=root, config_path=Path(selected.name)).config
+        assert config.tmdb.enabled is (kind == "enabled")
+        assert entry["message"] == (
+            "TMDB API key not configured"
+            if config.tmdb.enabled
+            else "TMDB metadata lookup disabled"
+        )
+    else:
+        error_type = (
+            ConfigNotFoundError
+            if kind == "missing"
+            else ConfigValidationError
+            if kind == "invalid-setting"
+            else ConfigParseError
+        )
+        with pytest.raises(error_type):
+            acquire_run_config(root=root, config_path=selected)
+        details = entry["details"]
+        assert isinstance(details, dict)
+        assert details["exception_type"] == error_type.__name__
+        assert details["config_file"] == str(selected)
+
+
+def test_doctor_selection_rejects_escape_as_typed_top_level_json_error(
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(
+        app, ["doctor", "--root", str(tmp_path), "--config", "../outside.toml", "--json"]
+    )
+    assert result.exit_code == int(ExitCode.INPUT_ERROR)
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == "FC-3009"
+    assert "doctor" not in payload
+
+
+@pytest.mark.parametrize(
+    "env_enabled", [None, "false", "bad"], ids=["defaults", "env", "invalid-env"]
+)
+@pytest.mark.parametrize(
+    "cwd_content", ["[tmdb]\nenabled = false\n", "[malformed"], ids=["valid-cwd", "malformed-cwd"]
+)
+def test_doctor_absent_selected_default_never_reads_another_workspace_config(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    env_enabled: str | None,
+    cwd_content: str,
+) -> None:
+    selected_root = tmp_path / "selected"
+    selected_root.mkdir()
+    cwd = tmp_path / "cwd"
+    (cwd / "config").mkdir(parents=True)
+    (cwd / "config/config.toml").write_text(cwd_content)
+    monkeypatch.chdir(cwd)
+    for key in ("TMDB_API_KEY", "FRAME_COMPARE_TMDB__API_KEY", "FRAME_COMPARE_TMDB__ENABLED"):
+        monkeypatch.delenv(key, raising=False)
+    if env_enabled is not None:
+        monkeypatch.setenv("FRAME_COMPARE_TMDB__ENABLED", env_enabled)
+    for name in ("vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg", "vsview"):
+        monkeypatch.setattr(
+            f"frame_compare.orchestration.doctor_checks._check_{name}",
+            lambda: CheckResult(passed=True, message="Runtime available"),
+        )
+    result = runner.invoke(app, ["doctor", "--root", str(selected_root), "--json"])
+    assert result.exit_code == 0
+    entry = _doctor_check_entry(json.loads(result.stdout), "tmdb_api_key")
+    assert entry["message"] == (
+        "TMDB API key not configured"
+        if env_enabled is None
+        else "TMDB metadata lookup disabled"
+        if env_enabled == "false"
+        else "TMDB configuration could not be loaded"
+    )
+    if env_enabled == "bad":
+        details = entry["details"]
+        assert isinstance(details, dict)
+        assert details["exception_type"] == "ConfigValidationError"
+        assert details["config_file"] == str(selected_root / "config/config.toml")

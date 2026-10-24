@@ -75,6 +75,14 @@ class TonemapPreset(StrEnum):
     SPLINE = "spline"
     BRIGHT_LIFT = "bright_lift"
     HIGHLIGHT_GUARD = "highlight_guard"
+    HIGHLIGHT_PRESERVE = "highlight_preserve"
+
+
+class TonemapSpeed(StrEnum):
+    """Source-peak policy for tone mapping."""
+
+    QUALITY = "quality"
+    FAST = "fast"
 
 
 class ToneCurve(StrEnum):
@@ -128,6 +136,7 @@ __all__ = [
     "SourceMatchFpsMode",
     "ToneCurve",
     "TonemapPreset",
+    "TonemapSpeed",
     "ViewerMode",
     "Visibility",
     "VsScreenshotWriter",

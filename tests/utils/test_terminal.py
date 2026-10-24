@@ -58,8 +58,12 @@ from frame_compare.cli.run_command import (
     build_confirm_full_window_retry_callback, build_confirm_slowpics_upload_callback,
     confirm_full_window_retry_on_stderr,
 )
-from frame_compare.config.schema import ConfigSchema, Visibility
-from frame_compare.services.alignment_reuse_prompt import _read_reuse_response
+from frame_compare.config.loader import get_default_config
+from frame_compare.config.schema import Visibility
+from frame_compare.orchestration.run_inputs import AcquiredRunConfig
+from frame_compare.services.alignment_reuse_prompt import (
+    REUSE_PREVIOUS_OFFSETS_PROMPT, _read_reuse_response,
+)
 from frame_compare.orchestration.types import (
     FullWindowRetryConfirmationRequest, SlowpicsUploadConfirmationRequest,
 )
@@ -78,7 +82,7 @@ async def main():
     saved = signal.getsignal(signal.SIGINT)
     try:
         if sys.argv[1] == "reuse":
-            _read_reuse_response(no_color=True)
+            _read_reuse_response(REUSE_PREVIOUS_OFFSETS_PROMPT, no_color=True)
         elif sys.argv[1] == "retry":
             callback = build_confirm_full_window_retry_callback(deps=deps(DepsOptions(
                 confirm_full_window_retry=confirm_full_window_retry_on_stderr,
@@ -87,7 +91,7 @@ async def main():
         else:
             callback = build_confirm_slowpics_upload_callback(
                 args=base_args(), deps=deps(DepsOptions(confirm_upload=typer.confirm)),
-                console=Console(stderr=True), resolve_effective_config=ConfigSchema,
+                console=Console(stderr=True), inputs=AcquiredRunConfig(Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()),
                 visibility=Visibility.PUBLIC,
             )
             callback(SlowpicsUploadConfirmationRequest(report_path=Path("report.html")))
@@ -109,7 +113,7 @@ finally:
 """
     stack_path = tmp_path / "prompt-child-stack.txt"
     master, slave = pty.openpty()
-    process = subprocess.Popen(  # noqa: S603 - explicit test interpreter and argv
+    process = subprocess.Popen(
         [sys.executable, "-c", code, prompt, str(stack_path)],
         stdin=slave,
         stderr=slave,

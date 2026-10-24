@@ -3,19 +3,16 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import structlog
 from rich.markup import escape
-from rich.padding import Padding
-from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.types import (
     AlignmentConfig,
-    AlignmentProvenance,
-    AlignmentResult,
+    ComparisonResolution,
 )
 from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
@@ -26,24 +23,22 @@ from frame_compare.utils.alignment_review_projection import (
     audio_evidence_rows,
     build_audio_review_presentation,
 )
+from frame_compare.utils.artifact_paths import artifact_link
 from frame_compare.utils.progress import RichProgressReporter
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.terminal_sections import Section, section_title
 from frame_compare.utils.terminal_theme import (
     ACCENT,
     BORDER_NEUTRAL,
     BORDER_PENDING,
     MUTED,
     OK,
-    VALUE,
     WARN,
-    glyphs_for_console,
     human_console,
 )
 from frame_compare.utils.types import AlignmentRequest
 
 log = structlog.get_logger()
-
-type _StyledRow = tuple[str, str, str]
 
 
 def _format_stream_summary(attempt: AudioAlignmentAttempt) -> str:
@@ -69,88 +64,83 @@ def _format_stream_summary(attempt: AudioAlignmentAttempt) -> str:
     )
 
 
+def _audio_evidence_summary(attempt: AudioAlignmentAttempt) -> Text:
+    agreeing = (
+        attempt.authority_recount.authority_agreeing_chunks
+        if attempt.authority_recount is not None
+        else attempt.audio.agreeing_chunks
+    )
+    text = f"{agreeing} of {attempt.audio.active_chunks} sections agree"
+    video = attempt.video_check
+    if video.observation == "observed":
+        text += (
+            f" · video check {video.confirmed_offset:+d}f"
+            if video.confirmed_offset is not None
+            else " · video check inconclusive"
+        )
+    stability = attempt.stability.classification.replace("_", " ")
+    line = Text(text + " · ", style=MUTED)
+    line.append(
+        stability,
+        style=WARN
+        if stability in {"possible drift", "possible discontinuity", "variable"}
+        else MUTED,
+    )
+    return line
+
+
 def _normal_evidence_rows(
-    *, ordinal: int, result: AlignmentResult, provenance: AlignmentProvenance
-) -> tuple[_StyledRow, ...]:
-    prefix = f"Comparison {ordinal} - "
-    offset = result.frame_offset
-    if result.applied and offset is not None:
-        if provenance.provenance == "shared_computed_offsets":
-            heading = "Accepted audio alignment reused"
-            detail = (
-                "Historical chunk and selected-stream details are unavailable; "
-                "no audio analysis ran this time."
-            )
-        elif provenance.provenance == "shared_previous_offsets":
-            heading = "Manually confirmed alignment reused"
-            detail = (
-                "Historical audio details are unavailable."
-                if result.audio_attempt is None
-                else None
-            )
-        elif result.source == "manual" or provenance.provenance in {
-            "interactive_confirmed_this_run",
-            "preexisting_manual_override",
-        }:
-            heading = "Manually confirmed alignment"
-            detail = (
-                "Historical audio details are unavailable."
-                if result.audio_attempt is None
-                else None
-            )
-        else:
-            heading = "Audio alignment accepted"
-            detail = None
-        rows: list[_StyledRow] = [
-            ("", f"{prefix}{heading}: {offset:+d}f - APPLIED", OK),
-            ("", "No additional confirmation needed.", MUTED),
-        ]
-        if detail is not None:
-            rows.append(("", detail, MUTED))
-        elif result.source == "computed" and result.audio_attempt is not None:
-            noted = build_audio_review_presentation(result.audio_attempt).noted_line()
+    *, resolution: ComparisonResolution, review_pending: bool
+) -> tuple[Text, ...]:
+    result = resolution.result
+    attempt = result.audio_attempt
+    pending = " · confirm in VSView" if review_pending else ""
+    rows: list[Text] = []
+    if result.applied and result.frame_offset is not None:
+        origin = resolution.origin
+        state = {
+            "shared_computed_offsets": "reused from last run",
+            "shared_previous_offsets": "previously confirmed",
+            "interactive_confirmed_this_run": "manual offset",
+            "preexisting_manual_override": "manual offset",
+        }.get(origin, "" if review_pending else "applied")
+        heading = f"{result.frame_offset:+d}f" + (f" · {state}" if state else "")
+        rows.append(Text(heading + pending, style=OK))
+        if origin == "shared_computed_offsets":
+            rows.append(Text("no audio analysis ran this time", style=MUTED))
+        elif origin == "computed_this_run" and attempt is not None:
+            rows.append(_audio_evidence_summary(attempt))
+            noted = build_audio_review_presentation(attempt).noted_line()
             if noted is not None:
-                rows.append(("", noted, MUTED))
+                rows.append(Text(noted, style=MUTED))
         return tuple(rows)
 
-    attempt = result.audio_attempt
     decision = attempt.decision if attempt is not None else None
     review = build_audio_review_presentation(attempt) if attempt is not None else None
-    if (
-        attempt is not None
-        and decision is not None
-        and decision.state in {"provisional", "unavailable"}
-        and review is not None
-        and review.suggested_offset is not None
-    ):
-        suggested = review.suggested_offset
-        assert suggested is not None
-        rows = [
-            (
-                "",
-                f"{prefix}Provisional audio candidate: {suggested:+d}f - NOT APPLIED",
-                WARN,
-            ),
-        ]
-        rows.extend(
-            (
-                "",
-                row.value,
-                WARN if row.style == "warn" else MUTED,
-            )
-            for row in review.normal_review_rows(
-                panel=False,
-                action_line="Align manually or keep the current alignment.",
-            )
+    if review is not None and review.suggested_offset is not None:
+        rows.append(Text(f"{review.suggested_offset:+d}f · not applied" + pending, style=WARN))
+    else:
+        reason = decision.primary_reason if decision is not None else result.diagnostic
+        phrase = audio_unavailable_phrase(reason) if reason else "no usable audio signal"
+        rows.append(Text(f"no audio match ({phrase})" + pending, style=WARN))
+    if attempt is not None:
+        rows.append(_audio_evidence_summary(attempt))
+        noted = review.noted_line() if review is not None else None
+        if noted is not None:
+            rows.append(Text(noted, style=MUTED))
+    if review is not None:
+        # Keep the existing reason/region/check-point copy and its bounds.
+        detail_rows = review.normal_review_rows(
+            panel=False, action_line="Align manually or keep the current alignment."
         )
-        return tuple(rows)
-
-    reason = decision.primary_reason if decision is not None else result.diagnostic
-    phrase = audio_unavailable_phrase(reason) if reason else "no usable audio signal"
-    return (
-        ("", f"{prefix}No usable audio candidate ({phrase}) - NOT APPLIED", WARN),
-        ("", "Align manually or keep the current alignment.", MUTED),
-    )
+        rows.extend(
+            Text(row.value, style=WARN if row.style == "warn" else MUTED)
+            for row in detail_rows
+            if not (review_pending and row.value == "Align manually or keep the current alignment.")
+        )
+    elif not review_pending:
+        rows.append(Text("Align manually or keep the current alignment.", style=MUTED))
+    return tuple(rows)
 
 
 def _original_audio_attempt_line(attempt: AudioAlignmentAttempt) -> str:
@@ -164,9 +154,6 @@ def _original_audio_attempt_line(attempt: AudioAlignmentAttempt) -> str:
         "Original audio attempt: No usable audio candidate "
         f"({audio_unavailable_phrase(decision.primary_reason)}) - NOT APPLIED"
     )
-
-
-_ROW_STYLES = {"value": VALUE, "warn": WARN, "muted": MUTED}
 
 
 def _verbose_evidence_rows(attempt: AudioAlignmentAttempt) -> tuple[EvidenceRow, ...]:
@@ -190,134 +177,58 @@ def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
 
 def _render_alignment_evidence_panel(
     *,
-    entries: list[
-        tuple[
-            str,
-            tuple[_StyledRow, ...],
-            tuple[EvidenceRow, ...],
-            tuple[_StyledRow, ...],
-        ]
-    ],
-    diagnostics_written: bool,
+    entries: list[tuple[str, tuple[Text, ...], tuple[EvidenceRow, ...]]],
+    diagnostics_dir: Path | None,
     no_color: bool,
-    actionable: bool,
-    needs_review_count: int = 0,
+    needs_review_count: int,
+    root: Path | None,
+    verbose: bool,
 ) -> None:
-    table = Table(
-        show_header=False,
-        box=None,
-        pad_edge=False,
-        padding=(0, 2, 0, 0),
-        expand=True,
-    )
-    table.add_column("key", style="dim", no_wrap=True, min_width=14, overflow="fold")
-    table.add_column("value", overflow="fold")
-    console = human_console(stderr=True, no_color=no_color, height=1000)
-    waiting_glyph = glyphs_for_console(console).waiting
-    for index, (comparison_name, lines, verbose_rows, review_lines) in enumerate(entries):
-        if index:
-            table.add_row("", "")
-        table.add_row("", f"[bold]{escape(comparison_name)}[/]")
-        for key, value, style in lines:
-            table.add_row(key, f"[{style}]{escape(value)}[/]")
-        for row in verbose_rows:
-            style = _ROW_STYLES[row.style]
-            table.add_row(f"  {row.key}", f"[{style}]{escape(row.value)}[/]")
-        for key, value, style in review_lines:
-            value = f"{waiting_glyph} {value}"
-            table.add_row(key, f"[{style}]{escape(value)}[/]")
-    if diagnostics_written:
-        table.add_row("", "")
-        table.add_row("diagnostics", "alignment_diagnostics/")
-
-    title = f"[bold {ACCENT} not dim]Audio alignment[/]"
-    if actionable:
-        title += f" [dim]· {needs_review_count} needs review[/]"
-    console.print(
-        Padding(
-            Panel(
-                table,
-                title=title,
-                title_align="left",
-                border_style=BORDER_PENDING if actionable else BORDER_NEUTRAL,
-            ),
-            (0, 0, 0, 2),
+    section = Section(
+        title=section_title(
+            "Audio alignment",
+            detail=(f"{needs_review_count} needs review" if needs_review_count else None),
         ),
-        crop=False,
+        rail_style=BORDER_PENDING if needs_review_count else BORDER_NEUTRAL,
     )
-
-
-def print_pre_review_summary(
-    *,
-    request: AlignmentRequest,
-    results_map: dict[str, AlignmentResult],
-    progress: ProgressReporter | None,
-    no_color: bool,
-) -> None:
-    """Print the Rich-only Align summary line before native review."""
-    if not isinstance(progress, RichProgressReporter):
-        return
-    states: list[tuple[str, bool]] = []
-    for comparison in request.comparisons:
-        key = alignment_key(request.reference.path, comparison.path)
-        result = results_map[key]
-        short = comparison.short_name or comparison.label or comparison.path.name
-        states.append((short, result.applied))
-    actionable = any(not applied for _, applied in states)
-    console = human_console(stderr=True, no_color=no_color)
-    glyphs = glyphs_for_console(console)
-    if actionable:
-        glyph, style = glyphs.warning, WARN
-    else:
-        glyph, style = glyphs.ok, OK
-    line = Text.assemble((glyph, style), f" {'Align':<9} ")
-    for index, (short, applied) in enumerate(states):
+    for index, (name, rows, verbose_rows) in enumerate(entries):
         if index:
-            line.append(" · ", style="dim")
-        if applied:
-            line.append(f"{short} alignment applied")
-        else:
-            line.append(f"{short} needs visual confirmation", style=WARN)
-    progress.suspend()
-    try:
-        console.print(line)
-    finally:
-        progress.resume()
+            section.add_line()
+        section.add_line(Text.assemble((name, "bold"), "  ", rows[0]))
+        for line in rows[1:]:
+            section.add_line(line)
+        for row in verbose_rows:
+            section.add_row(row.key, f"[dim]{escape(row.value)}[/]")
+    if diagnostics_dir is not None:
+        section.add_line()
+        section.add_row("diagnostics", artifact_link(diagnostics_dir, root=root, verbose=verbose))
+    section.print(human_console(stderr=True, no_color=no_color, height=1000))
 
 
 def present_alignment_evidence(
     *,
     request: AlignmentRequest,
-    results_map: dict[str, AlignmentResult],
-    provenances: dict[str, AlignmentProvenance],
+    resolutions: dict[str, ComparisonResolution],
     config: AlignmentConfig,
     progress: ProgressReporter | None,
     verbose: bool,
     quiet: bool,
     json_output: bool,
     diagnostics_written: bool,
+    review_pending: bool = False,
 ) -> None:
     lines: list[str] = []
-    entries: list[
-        tuple[
-            str,
-            tuple[_StyledRow, ...],
-            tuple[EvidenceRow, ...],
-            tuple[_StyledRow, ...],
-        ]
-    ] = []
-    has_actionable_result = False
+    entries: list[tuple[str, tuple[Text, ...], tuple[EvidenceRow, ...]]] = []
     needs_review_count = 0
     for ordinal, comparison in enumerate(request.comparisons, start=1):
         key = alignment_key(request.reference.path, comparison.path)
-        result = results_map[key]
-        provenance = provenances[key]
+        resolution = resolutions[key]
+        result = resolution.result
         decision = result.audio_attempt.decision if result.audio_attempt is not None else None
         human_actionable = not result.applied
         json_actionable = human_actionable or (
             decision is not None and decision.state != "trusted_automatic"
         )
-        has_actionable_result = has_actionable_result or human_actionable
         if json_output:
             if json_actionable:
                 log.warning(
@@ -335,11 +246,13 @@ def present_alignment_evidence(
         if quiet and not human_actionable:
             continue
         normal_rows = _normal_evidence_rows(
-            ordinal=ordinal,
-            result=result,
-            provenance=provenance,
+            resolution=resolution,
+            review_pending=review_pending,
         )
-        normal_lines = [value for _key, value, _style in normal_rows]
+        normal_lines = [line.plain for line in normal_rows]
+        short = comparison.short_name or comparison.label or comparison.path.name
+        normal_lines[0] = f"{short}: {normal_lines[0]}"
+        normal_lines[1:] = [f"  {line}" for line in normal_lines[1:]]
         verbose_lines: list[str] = []
         verbose_rows: tuple[EvidenceRow, ...] = ()
         if verbose and not quiet and result.audio_attempt is not None:
@@ -347,38 +260,21 @@ def present_alignment_evidence(
                 verbose_rows = _verbose_evidence_rows(result.audio_attempt)
             else:
                 verbose_lines = _verbose_evidence_lines(result.audio_attempt)
-        review_lines: list[str] = []
-        review_rows: list[_StyledRow] = []
-        if human_actionable and (config.use_vsview or config.force_interactive):
-            if decision is not None and decision.candidate is not None:
-                review_line = (
-                    "Opening VSView for manual review. The candidate is a hint, not a "
-                    "confirmed alignment."
-                )
-            else:
-                review_line = (
-                    "Opening VSView for manual review. No automatic candidate is available; "
-                    "align the sources manually."
-                )
-            review_lines.append(review_line)
-            review_rows.append(("  review", review_line, ACCENT))
-        comparison_lines = [*normal_lines, *verbose_lines, *review_lines]
-        lines.extend(comparison_lines)
+        if human_actionable and review_pending:
+            review_line = (
+                "Opening VSView for manual review. The candidate is a hint, not a confirmed alignment."
+                if decision is not None and decision.candidate is not None
+                else "Opening VSView for manual review. No automatic candidate is available; align the sources manually."
+            )
+            normal_rows = (*normal_rows, Text(review_line, style=ACCENT))
+            normal_lines.append("  " + review_line)
+        lines.extend([*normal_lines, *(f"  {line}" for line in verbose_lines)])
         if human_actionable:
             needs_review_count += 1
-        entries.append(
-            (
-                comparison.compact_name
-                or comparison.presentation_name
-                or comparison.label
-                or comparison.path.name,
-                normal_rows,
-                verbose_rows,
-                tuple(review_rows),
-            )
-        )
-    if diagnostics_written and not quiet and not json_output:
-        lines.append("Audio diagnostics: alignment_diagnostics/.")
+        entries.append((short, normal_rows, verbose_rows))
+    diagnostics_dir = request.alignment_diagnostics_dir if diagnostics_written else None
+    if diagnostics_dir is not None and not quiet and not json_output:
+        lines.append(f"Audio diagnostics: {diagnostics_dir}")
     if not lines:
         return
     if progress is not None:
@@ -387,10 +283,11 @@ def present_alignment_evidence(
         if isinstance(progress, RichProgressReporter):
             _render_alignment_evidence_panel(
                 entries=entries,
-                diagnostics_written=diagnostics_written,
+                diagnostics_dir=diagnostics_dir if not quiet else None,
                 no_color=config.no_color,
-                actionable=has_actionable_result,
                 needs_review_count=needs_review_count,
+                root=request.workspace_root,
+                verbose=verbose,
             )
         else:
             print("\n".join(lines), file=sys.stderr)

@@ -16,6 +16,7 @@ import tomli_w
 
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
 MANUAL_OVERRIDES_VERSION = "2"
 MANUAL_OVERRIDES_FILE = "manual_overrides.toml"
@@ -83,7 +84,7 @@ def _read_manual_overrides(cache_path: Path) -> dict[str, object] | None:
             error=str(e),
         )
         return None
-    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+    except SERIALIZED_DECODE_FAILURES as e:
         log.warning(
             "manual_overrides_parse_error",
             path=str(cache_path),
@@ -157,19 +158,20 @@ def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
         try:
             with cache_path.open("rb") as f:
                 existing = tomllib.load(f)
-                if existing.get("version") == MANUAL_OVERRIDES_VERSION:
-                    data.update(existing)
         except OSError as e:
             log.warning(
                 "manual_overrides_read_existing_error",
                 path=str(cache_path),
                 error=str(e),
             )
-        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+        except SERIALIZED_DECODE_FAILURES:
             log.warning(
                 "manual_overrides_corrupt_on_write",
                 path=str(cache_path),
             )
+        else:
+            if existing.get("version") == MANUAL_OVERRIDES_VERSION:
+                data.update(existing)
 
     key = f"{override.reference_clip}:{override.comparison_clip}"
     entry = {

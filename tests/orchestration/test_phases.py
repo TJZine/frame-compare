@@ -11,7 +11,7 @@ import pytest
 
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     RunContext,
@@ -22,18 +22,19 @@ from frame_compare.orchestration.execution_types import (
     ExecutionState,
 )
 from frame_compare.orchestration.phases import Phase, execute_phases
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.utils.progress import (
     NullProgressReporter,
     RichProgressReporter,
 )
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+from frame_compare.utils.progress_protocol import AlignmentSummary, ProgressPhaseStatus
 
 from .execute_run_helpers import clip_state
 from .phase_task_helpers import _workspace
 
 
 def _make_context(tmp_path: Path) -> RunContext:
-    config = ConfigSchema()
+    config = get_default_config()
     workspace = _workspace(
         tmp_path, input_subdir="input", run_subdir=None, screenshots_subdir="screens"
     )
@@ -57,9 +58,12 @@ def _make_context(tmp_path: Path) -> RunContext:
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
         reporter=NullProgressReporter(),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )
 
 
@@ -155,9 +159,10 @@ def test_execute_phases_marks_cancellation_failed_before_propagating(
             retain: bool | None = None,
             summary: str | None = None,
             duration_text: str | None = None,
+            alignment_summary: AlignmentSummary | None = None,
             presentation: str | None = None,
         ) -> None:
-            del retain, summary, duration_text, presentation
+            del retain, summary, duration_text, alignment_summary, presentation
             self.complete_phase_calls.append(status)
 
     reporter = SpyReporter()
@@ -239,6 +244,6 @@ def test_warn_only_executor_interrupt_is_failed_and_never_applied(tmp_path: Path
             execute_phases([phase, Phase("later", downstream)], context, NullProgressReporter())
         )
     assert phase.status == PhaseStatus.FAILED
-    assert state.selected_frames == []
+    assert list(context.selection.frames) == []
     assert state.warnings == []
     assert later == []

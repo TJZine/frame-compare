@@ -26,6 +26,7 @@ windows_portable_launcher_e2e = pytest.mark.skipif(
     ("args", "expected_prefix"),
     (
         (("wizard",), ("wizard", "--config")),
+        (("doctor", "--json"), ("doctor", "--config")),
         (("run", "--diagnose-paths"), ("run", "--config")),
         (("preset", "list"), ("preset", "list", "--config")),
         (("history", "list"), ("history", "list", "--config")),

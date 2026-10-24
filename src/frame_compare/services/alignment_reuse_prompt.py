@@ -12,23 +12,20 @@ from typing import Literal
 
 from rich.console import Console
 from rich.markup import escape
-from rich.padding import Padding
-from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 
 from frame_compare.services.alignment_reuse_cache import CACHE_FILE_NAME
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import interruptible_prompt, stream_is_tty
-from frame_compare.utils.terminal_theme import ACCENT, glyphs_for_console, human_console
+from frame_compare.utils.terminal_sections import Section, section_title
+from frame_compare.utils.terminal_theme import ACCENT, human_console
 from frame_compare.utils.types import AlignmentRequest
 
 PROMPT_UNAVAILABLE_MESSAGE = (
     "Previous alignment offset reuse prompt unavailable; continuing without reuse."
 )
 REUSE_PREVIOUS_OFFSETS_PROMPT = "Reuse these offsets? [y/N]: "
-_DECISION_PROMPT_INDENT = "    "
-_PROMPT_CONSOLE_WIDTH = 180
+_PROMPT_CONSOLE_WIDTH = 120
 
 __all__ = [
     "PROMPT_UNAVAILABLE_MESSAGE",
@@ -55,19 +52,15 @@ class PreviousOffsetPromptRow:
     time_offset_seconds: float
     accepted_at: str
     source: PreviousOffsetPromptSource
-    presentation_name: str | None = None
+    short_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class PreviousOffsetPromptInput:
     """Complete human-display input for the previous-offset reuse prompt."""
 
-    reference_label: str
-    reference_filename: str
     shared_cache_path: Path
     rows: tuple[PreviousOffsetPromptRow, ...]
-    content: str | None = None
-    reference_name_is_prebuilt: bool = False
 
 
 def _console(*, no_color: bool) -> Console:
@@ -97,11 +90,11 @@ def _display_label(*, label: str, filename: str, stem: str) -> str:
 
 
 def _format_offset(value: int) -> str:
-    return f"{value:+d} frames" if value else "0 frames"
+    return f"{value:+d}f"
 
 
 def _format_source(value: PreviousOffsetPromptSource) -> str:
-    return "Preview-confirmed" if value == "confirmed" else "Computed"
+    return "confirmed in VSView" if value == "confirmed" else "audio"
 
 
 def _format_accepted_at(value: str) -> str:
@@ -121,82 +114,36 @@ def previous_offset_prompt_input_from_rows(
 ) -> PreviousOffsetPromptInput:
     """Build prompt input from pre-resolved shared-cache display rows."""
     return PreviousOffsetPromptInput(
-        reference_label=request.reference.presentation_name
-        or _display_label(
-            label=request.reference.label,
-            filename=request.reference.path.name,
-            stem=request.reference.path.stem,
-        ),
-        reference_filename=request.reference.path.name,
         shared_cache_path=request.shared_alignment_cache_dir / CACHE_FILE_NAME,
         rows=tuple(rows),
-        content=request.presentation_content,
-        reference_name_is_prebuilt=request.reference.presentation_name is not None,
     )
 
 
-def _render_previous_offsets_table(
+def _render_previous_offsets_section(
     *,
     prompt_input: PreviousOffsetPromptInput,
-) -> Table:
-    table = Table(
-        show_header=False,
-        box=None,
-        pad_edge=False,
-        padding=(0, 2, 0, 0),
-        expand=True,
-    )
-    table.add_column("key", style="dim", no_wrap=True, min_width=12, overflow="fold")
-    table.add_column("value", overflow="fold")
-    if prompt_input.content:
-        table.add_row("Content", f"{escape(prompt_input.content)}")
-        table.add_row("", "")
-    reference_identity = (
-        prompt_input.reference_label
-        if prompt_input.reference_name_is_prebuilt
-        else _display_label(
-            label=prompt_input.reference_label,
-            filename=prompt_input.reference_filename,
-            stem=Path(prompt_input.reference_filename).stem,
-        )
-    )
-    table.add_row(
-        "reference",
-        f"{escape(reference_identity)}",
-    )
-    if reference_identity not in {
-        prompt_input.reference_filename,
-        Path(prompt_input.reference_filename).stem,
-    }:
-        table.add_row("  File", f"{escape(prompt_input.reference_filename)}")
+    verbose: bool,
+) -> Section:
+    section = Section(title=section_title("› Reuse previous offsets?"), rail_style=ACCENT)
     for row in prompt_input.rows:
-        table.add_row("", "")
-        display_label = row.presentation_name or _display_label(
+        display_label = row.short_name or _display_label(
             label=row.label, filename=row.filename, stem=row.stem
         )
-        table.add_row("comparison", f"{escape(display_label)}")
-        if row.presentation_name is None and display_label not in {row.filename, row.stem}:
-            table.add_row("  File", f"{escape(row.filename)}")
-        table.add_row(
-            "  Offset",
-            f"{escape(_format_offset(row.frame_offset))} "
-            f"[dim]· {escape(f'{row.time_offset_seconds:.6g}s')}[/]",
+        value = (
+            f"[bold]{escape(display_label)}[/]  {_format_offset(row.frame_offset)}"
+            f" · {_format_source(row.source)} · {escape(_format_accepted_at(row.accepted_at))}"
         )
-        table.add_row("  Evidence", f"{escape(_format_source(row.source))}")
-        table.add_row("  Accepted", f"{escape(_format_accepted_at(row.accepted_at))}")
-        if row.presentation_name is None and Path(row.path).name != row.filename:
-            table.add_row("  Path", f"[dim]{escape(row.path)}[/]")
-    table.add_row("", "")
-    table.add_row(
-        "Cache",
-        Text(
-            str(prompt_input.shared_cache_path),
-            style="dim",
-            overflow="fold",
-            no_wrap=False,
-        ),
-    )
-    return table
+        if verbose:
+            value += f" · {row.time_offset_seconds:.6g} s"
+        section.add_line(value)
+        if verbose and row.short_name is None and display_label not in {row.filename, row.stem}:
+            section.add_row("file", Text(row.filename, style="dim"))
+        if verbose and row.short_name is None and Path(row.path).name != row.filename:
+            section.add_row("path", Text(row.path, style="dim"))
+    section.add_line()
+    section.add_row("cache", Text(str(prompt_input.shared_cache_path), style="dim"))
+    section.add_line()
+    return section
 
 
 def _stderr_is_visible() -> bool:
@@ -207,36 +154,21 @@ def _stdin_is_interactive() -> bool:
     return stream_is_tty(sys.stdin)
 
 
-def _print_prompt_unavailable(*, no_color: bool, leading_newline: bool = False) -> None:
+def _print_prompt_unavailable(*, no_color: bool) -> None:
     console = _console(no_color=no_color)
-    if leading_newline:
-        console.print()
-    console.print(PROMPT_UNAVAILABLE_MESSAGE)
+    console.print(Text.assemble(("!", "yellow"), " ", PROMPT_UNAVAILABLE_MESSAGE))
 
 
-def _read_reuse_response(*, no_color: bool) -> bool:
-    stderr_visible = _stderr_is_visible()
-    if not stderr_visible:
-        return False
-    if not _stdin_is_interactive():
-        _print_prompt_unavailable(no_color=no_color)
-        return False
-
+def _read_reuse_response(question: str, *, no_color: bool) -> str | None:
     console = _console(no_color=no_color)
-    console.print(Text(f"{_DECISION_PROMPT_INDENT}{REUSE_PREVIOUS_OFFSETS_PROMPT}"), end="")
+    console.print(Text(question), end="")
     try:
         with interruptible_prompt():
             raw_response = sys.stdin.readline()
     except OSError:
-        _print_prompt_unavailable(no_color=no_color, leading_newline=True)
-        return False
-    if raw_response == "":
-        _print_prompt_unavailable(no_color=no_color, leading_newline=True)
-        return False
-
+        raw_response = ""
     console.print()
-    normalized = raw_response.strip().lower()
-    return normalized in {"y", "yes"}
+    return raw_response.strip().lower() if raw_response else None
 
 
 def prompt_for_previous_offset_reuse(
@@ -244,6 +176,7 @@ def prompt_for_previous_offset_reuse(
     prompt_input: PreviousOffsetPromptInput,
     progress: ProgressReporter | None,
     no_color: bool,
+    verbose: bool = False,
 ) -> bool:
     """Return whether the user accepts complete reusable previous offsets."""
     if not prompt_input.rows:
@@ -260,19 +193,15 @@ def prompt_for_previous_offset_reuse(
         progress_suspended = True
     try:
         console = _console(no_color=no_color)
-        waiting_glyph = glyphs_for_console(console).waiting
-        console.print(
-            Padding(
-                Panel(
-                    _render_previous_offsets_table(prompt_input=prompt_input),
-                    title=f"[bold {ACCENT}]{waiting_glyph} Alignment reuse[/]",
-                    border_style=ACCENT,
-                ),
-                (0, 0, 0, 2),
-            ),
-            crop=False,
+        section = _render_previous_offsets_section(prompt_input=prompt_input, verbose=verbose)
+        response = section.prompt(
+            console,
+            REUSE_PREVIOUS_OFFSETS_PROMPT.removesuffix(" [y/N]: "),
+            lambda question: _read_reuse_response(question + " [y/N]: ", no_color=no_color),
         )
-        return _read_reuse_response(no_color=no_color)
+        if response is None:
+            _print_prompt_unavailable(no_color=no_color)
+        return response in {"y", "yes"}
     finally:
         if progress_suspended and progress is not None:
             progress.resume()

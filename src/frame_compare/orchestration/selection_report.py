@@ -6,12 +6,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from rich.markup import escape
-from rich.panel import Panel
-from rich.table import Table
 
 from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.orchestration.presentation import report_console_width
-from frame_compare.utils.terminal_theme import ACCENT, BORDER_NEUTRAL, human_console
+from frame_compare.utils.terminal_sections import Section, section_title
+from frame_compare.utils.terminal_theme import human_console
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,38 +97,24 @@ def _render_human_selection_report(
     *,
     no_color: bool,
 ) -> None:
-    table = Table(
-        show_header=False,
-        box=None,
-        pad_edge=False,
-        padding=(0, 2, 0, 0),
-        expand=False,
-    )
-    table.add_column("key", style="dim", no_wrap=True, min_width=12, overflow="fold")
-    table.add_column("value", overflow="fold")
-    table.add_row(
+    section = Section(section_title("Final selection"))
+    section.add_row(
         "final",
-        f"{escape(_format_count(report.final_count, domain='aligned'))}",
+        escape(_format_count(report.final_count, domain="aligned")),
     )
 
     for category in report.categories:
         count = _format_count(category.count, domain="source")
-        table.add_row(
+        section.add_row(
             category.label,
             f"{escape(count)} [dim]{escape(category.ranges)}[/]",
         )
 
     if not report.breakdown_available:
-        table.add_row("breakdown", "[dim]unavailable[/]")
+        section.add_row("breakdown", "[dim]unavailable[/]")
 
-    console = human_console(stderr=True, no_color=no_color, width=report_console_width(minimum=100))
-    console.print(
-        Panel(
-            table,
-            title=f"[bold {ACCENT} not dim]Final Selection[/] [dim]After Alignment[/]",
-            border_style=BORDER_NEUTRAL,
-        )
-    )
+    console = human_console(stderr=True, no_color=no_color, width=report_console_width())
+    section.print(console)
 
 
 def emit_final_selection_report(

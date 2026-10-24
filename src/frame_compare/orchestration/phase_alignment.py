@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from frame_compare.analysis.errors import SelectionError
+from frame_compare.analysis.errors import SelectionError, SelectionFailureKind
 from frame_compare.analysis.metrics import slice_frame_metrics
 from frame_compare.analysis.selection import select_frames, select_random_frames
 from frame_compare.analysis.types import (
@@ -32,6 +32,7 @@ from frame_compare.orchestration.phase_selection import (
     source_frames_for_reference_base_domain,
 )
 from frame_compare.orchestration.presentation import clip_role
+from frame_compare.render.prepare import resolve_tonemap_settings
 from frame_compare.services.alignment import (
     align_clips_from_request,
     format_rejected_alignment_warning,
@@ -43,16 +44,16 @@ from frame_compare.services.release_identity import (
     common_content_identity,
     format_compact_identity,
     format_content_identity,
-    format_micro_descriptor,
     format_release_descriptor,
     short_source_names,
 )
 from frame_compare.services.types import (
     AlignmentConfig,
-    AlignmentResult,
-    AlignmentReviewSummary,
+    ComparisonResolution,
 )
+from frame_compare.utils.progress_protocol import AlignmentSummary, AlignmentSummaryEntry
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.terminal_theme import format_duration
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
     AlignmentClipIdentity,
@@ -89,6 +90,9 @@ async def run_align_phase(
         force_interactive=ctx.config.audio_alignment.force_interactive,
         cache_results=ctx.config.audio_alignment.cache_results,
         no_color=ctx.no_color,
+        preview_tonemap=(
+            resolve_tonemap_settings(ctx.config) if ctx.config.color.enable_tonemap else None
+        ),
     )
     alignment_request = _alignment_request_from_context(ctx)
     log.debug(
@@ -180,9 +184,10 @@ async def run_align_phase(
             seed=ctx.config.analysis.random_seed,
             allow_fallback=(
                 generated_frame_count(ctx.config.analysis) > 0
-                and ctx.full_window_retry_override is None
+                and ctx.selection_domain.full_window_retry_override is None
             ),
-            require_full_generated_selection=ctx.full_window_retry_override is not None,
+            require_full_generated_selection=ctx.selection_domain.full_window_retry_override
+            is not None,
         )
     except SelectionError as error:
         raise_if_full_window_retry_failed(ctx, error)
@@ -201,7 +206,7 @@ async def run_align_phase(
         )
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
-    if normalized_selection.used_fallback_frame_plan and ctx.analysis_metrics is not None:
+    if normalized_selection.used_fallback_frame_plan and ctx.selection.analysis_metrics is not None:
         configured_user_source_frames = set(ctx.config.analysis.user_frames)
         normalized_user_frames = [
             frame
@@ -210,7 +215,7 @@ async def run_align_phase(
         ]
         try:
             trimmed_selection = _reselect_frames_for_trimmed_overlap(
-                metrics=ctx.analysis_metrics,
+                metrics=ctx.selection.analysis_metrics,
                 reference=reference,
                 comparisons=comparisons,
                 selection_source_window=selection_source_window,
@@ -274,42 +279,85 @@ async def run_align_phase(
         selection_breakdown=selection_breakdown,
         selection_details_by_source_frame=selection_details_by_source_frame,
         warnings=warnings,
-        success_summary=_align_success_summary(
+        alignment_summary=_align_success_summary(
             request=alignment_request,
-            results=results,
-            review=review_summary,
+            resolutions=outcome.resolutions,
+            review_ran=review_summary.review_ran,
+            extra_footage=_extra_footage_note(
+                request=alignment_request,
+                originals=[ctx.reference, *ctx.comparisons],
+                aligned=[reference, *comparisons],
+            ),
         ),
+        alignment_diagnostics_dir=outcome.diagnostics_dir,
         review_seconds=review_summary.review_seconds,
         review_unresolved=review_summary.review_unresolved,
+        has_unapplied_offsets=any(not result.applied for result in results),
     )
 
 
 def _align_success_summary(
     *,
     request: AlignmentRequest,
-    results: Sequence[AlignmentResult],
-    review: AlignmentReviewSummary,
-) -> str:
-    """Build the durable Align phase summary from short names and review counts."""
-    if review.review_ran:
-        pairs = review.pairs_confirmed
-        summary = (
-            f"{pairs} pair confirmed in VSView"
-            if pairs == 1
-            else f"{pairs} pairs confirmed in VSView"
+    resolutions: Sequence[ComparisonResolution],
+    review_ran: bool,
+    extra_footage: str | None = None,
+) -> AlignmentSummary:
+    """Build final human facts from the authority owner's ordered resolutions."""
+    entries: list[AlignmentSummaryEntry] = []
+    origins = {
+        "computed_this_run": "audio",
+        "shared_computed_offsets": "reused from last run",
+        "shared_previous_offsets": "previously confirmed",
+        "preexisting_manual_override": "manual offset",
+        "interactive_confirmed_this_run": "confirmed in VSView" if review_ran else "manual offset",
+    }
+    for comparison, resolution in zip(request.comparisons, resolutions, strict=False):
+        origin = origins[resolution.origin]
+        if review_ran and resolution.origin != "interactive_confirmed_this_run":
+            origin = "kept"
+        attempt = resolution.result.audio_attempt
+        candidate = attempt.decision.candidate if attempt is not None else None
+        entries.append(
+            AlignmentSummaryEntry(
+                name=_request_short_name(comparison),
+                offset=resolution.accepted_offset,
+                origin=origin,
+                audio_candidate=candidate.frame_offset if candidate is not None else None,
+            )
         )
-        if review.comparisons_kept > 0:
-            summary += f" · {review.comparisons_kept} kept"
-        return summary
-    parts = [
-        (
-            f"{_request_short_name(comparison)} alignment applied"
-            if result.applied
-            else f"{_request_short_name(comparison)} needs visual confirmation"
-        )
-        for comparison, result in zip(request.comparisons, results, strict=True)
-    ]
-    return " · ".join(parts)
+    return AlignmentSummary(tuple(entries), extra_footage=extra_footage)
+
+
+def _extra_footage_note(
+    *,
+    request: AlignmentRequest,
+    originals: Sequence[ClipState],
+    aligned: Sequence[ClipState],
+) -> str | None:
+    if len({clip.probe.num_frames for clip in originals}) <= 1:
+        return None
+    parts: list[str] = []
+
+    def duration(frames: int, fps: Fraction) -> str:
+        seconds = frames / float(fps)
+        return f"{seconds:.1f} s" if seconds < 1 else format_duration(seconds)
+
+    for source, original, final in zip(
+        [request.reference, *request.comparisons], originals, aligned, strict=True
+    ):
+        start = final.trim.trim_start_frames - original.trim.trim_start_frames
+        original_end = original.trim.trim_start_frames + original.effective_num_frames()
+        final_end = final.trim.trim_start_frames + final.effective_num_frames()
+        end = original_end - final_end
+        extents: list[str] = []
+        if start > 0:
+            extents.append(f"{duration(start, original.effective_fps)} more at the start")
+        if end > 0:
+            extents.append(f"{duration(end, original.effective_fps)} more at the end")
+        if extents:
+            parts.append(f"{_request_short_name(source)} has {' and '.join(extents)}")
+    return ", ".join(parts) + "; frames come from the range all sources share." if parts else None
 
 
 def _request_short_name(comparison: AlignmentClipRequest) -> str:
@@ -337,7 +385,6 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         clip.path.name if not name or counts[name] > 1 else name
         for clip, name in zip(clips, presentation_names, strict=True)
     ]
-    compact_names = [_alignment_compact_name(clip) for clip in clips]
     short_names = short_source_names(
         [
             ShortNameSource(
@@ -355,7 +402,6 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
             ctx.reference,
             selected_audio_stream=ctx.config.audio_alignment.reference_stream,
             presentation_name=presentation_names[0],
-            compact_name=compact_names[0],
             short_name=short_names[0],
         ),
         selected_reference_relationship=_selected_reference_relationship(ctx),
@@ -366,13 +412,13 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
                     comparison.path.stem
                 ),
                 presentation_name=presentation_names[index],
-                compact_name=compact_names[index],
                 short_name=short_names[index],
             )
             for index, comparison in enumerate(ctx.comparisons, start=1)
         ],
         previous_offsets=ctx.config.audio_alignment.previous_offsets,
         generated_dir=ctx.workspace.generated_dir,
+        workspace_root=ctx.workspace.root,
         shared_alignment_cache_dir=ctx.workspace.shared_alignment_cache_dir,
         settings=settings,
         presentation_content=(
@@ -392,14 +438,6 @@ def _alignment_presentation_name(clip: ClipState, has_common_content: bool) -> s
     return formatter(clip.release_identity, separator=" · ") or clip.path.name
 
 
-def _alignment_compact_name(clip: ClipState) -> str:
-    if clip.label_is_explicit and clip.label.strip():
-        return clip.label.strip()
-    if clip.release_identity is None:
-        return clip.path.name
-    return format_micro_descriptor(clip.release_identity, separator=" · ") or clip.path.name
-
-
 def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedReferenceRelationship:
     configured_reference = ctx.config.sources.reference
     if configured_reference is None or configured_reference == "auto":
@@ -412,7 +450,6 @@ def _alignment_clip_request(
     *,
     selected_audio_stream: int | None,
     presentation_name: str | None = None,
-    compact_name: str | None = None,
     short_name: str | None = None,
 ) -> AlignmentClipRequest:
     fingerprint = clip.probe.fingerprint
@@ -438,16 +475,20 @@ def _alignment_clip_request(
         active_rect_height=None if clip.active_rect is None else clip.active_rect.height,
         preserved_frame_props=dict(clip.probe.preserved_frame_props),
         presentation_name=presentation_name,
-        compact_name=compact_name,
         short_name=short_name,
     )
 
 
 def _selection_source_window_for_alignment(ctx: RunContext) -> tuple[int, int] | None:
-    if ctx.selection_window.frame_count <= 0:
+    if ctx.selection_domain.selection_window.frame_count <= 0:
         return None
-    source_start = ctx.reference.trim.trim_start_frames + ctx.selection_window.start_frame
-    source_end = ctx.reference.trim.trim_start_frames + ctx.selection_window.end_frame_exclusive
+    source_start = (
+        ctx.reference.trim.trim_start_frames + ctx.selection_domain.selection_window.start_frame
+    )
+    source_end = (
+        ctx.reference.trim.trim_start_frames
+        + ctx.selection_domain.selection_window.end_frame_exclusive
+    )
     return source_start, source_end
 
 
@@ -506,6 +547,7 @@ def _reselect_frames_for_trimmed_overlap(
             "insufficient generated candidates after alignment",
             requested=target_count,
             found=selectable_length,
+            kind=SelectionFailureKind.INSUFFICIENT_ALIGNED_CANDIDATES,
         )
     metric_reference_start = (
         selection_source_window[0]
@@ -614,6 +656,7 @@ def _normalize_selected_frames_for_trimmed_domain(
             "insufficient generated candidates after alignment",
             requested=generated_requested_count,
             found=generated_capacity,
+            kind=SelectionFailureKind.INSUFFICIENT_ALIGNED_CANDIDATES,
         )
     generated_target_count = generated_requested_count
     if (
@@ -624,6 +667,7 @@ def _normalize_selected_frames_for_trimmed_domain(
             "insufficient generated frames after full-window retry alignment",
             requested=generated_target_count,
             found=len(normalized_generated_frames),
+            kind=SelectionFailureKind.INSUFFICIENT_ALIGNED_CANDIDATES,
         )
     normalized_frames = sorted(
         {*normalized_user_frames, *normalized_generated_frames[:generated_target_count]}

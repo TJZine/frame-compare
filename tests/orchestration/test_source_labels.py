@@ -8,7 +8,7 @@ from typing import Literal
 import pytest
 
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.selection_domain import build_analysis_selection_domain_token
@@ -135,7 +135,7 @@ def test_display_labels_do_not_change_analysis_cache_identity() -> None:
         release_identity=ReleaseIdentity(ContentIdentity("Source"), resolution="1080p"),
         label_is_explicit=True,
     )
-    config = ConfigSchema()
+    config = get_default_config()
     window = SelectionWindow(start_frame=0, end_frame_exclusive=100)
 
     original_identity = build_analysis_selection_domain_token(

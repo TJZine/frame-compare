@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema_enums import OverlayMode
 from frame_compare.config.schema_models import SourcesConfig
 from frame_compare.orchestration.source_selection import resolve_source_selection
@@ -21,15 +21,14 @@ from frame_compare.utils.media_facts import (
     PresentationState,
     SourceSignalFacts,
 )
+from tests.render_test_support import selections
 
 
 def _request(label: str = "ref") -> ScreenshotBatchRequest:
     return ScreenshotBatchRequest(
         clip_path=Path(f"{label}.mkv"),
         label=label,
-        source_frames=[10, 20],
-        comparison_frames=[12, 22],
-        selection_labels=["Dark", "Bright"],
+        frames=selections([10, 20], [12, 22], ["Dark", "Bright"]),
         size_bytes=100,
         source_resolution=(1920, 1080),
         source_total_frames=100,
@@ -47,7 +46,7 @@ def _prepared(*, state: PresentationState = PresentationState.SDR) -> PreparedRe
         source_total_frames=101,
         source_is_hdr=state != PresentationState.SDR,
         presentation_state=state,
-        tonemap_settings=None,
+        tonemap=None,
     )
 
 
@@ -72,14 +71,16 @@ def test_expansion_preserves_source_mapping_and_prepared_source(
     prepared = _prepared()
     mock_prepare.return_value = prepared
     batch = _request()
-    requests, ranges, facts = expand_batch_render_requests(
+    jobs = expand_batch_render_requests(
         [batch],
         output_dir=tmp_path / "out",
-        config=ConfigSchema(),
+        config=get_default_config(),
         overlay_mode=OverlayMode.NONE,
         renderer="vapoursynth",
         ffmpeg_runner=MagicMock(),
     )
+    requests = [request for job in jobs for request in job.requests]
+    facts = {job.label: job.clip_facts for job in jobs}
 
     assert [request.frame_number for request in requests] == [10, 20]
     assert [request.output_path.name for request in requests] == [
@@ -88,33 +89,9 @@ def test_expansion_preserves_source_mapping_and_prepared_source(
     ]
     assert all(request.diagnostic_source is prepared.diagnostic_source for request in requests)
     assert all(request.clip is prepared.prepared_clip for request in requests)
-    assert all(request.progress_label is None for request in requests)
     assert mock_prepare.call_args.kwargs["source_is_hdr"] is False
-    assert ranges == {"ref": range(0, 2)}
     assert facts["ref"].source_total_frames == 101
     assert facts["ref"].presentation_state is PresentationState.SDR
-
-
-@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
-def test_expansion_copies_progress_label_without_changing_overlay_label(
-    mock_prepare: MagicMock,
-    tmp_path: Path,
-) -> None:
-    mock_prepare.return_value = _prepared()
-    batch = replace(_request(), progress_label="Reference | ATV WEB-DL")
-
-    requests, _, _ = expand_batch_render_requests(
-        [batch],
-        output_dir=tmp_path / "out",
-        config=ConfigSchema(),
-        overlay_mode=OverlayMode.STANDARD,
-        renderer="vapoursynth",
-        ffmpeg_runner=MagicMock(),
-    )
-
-    assert requests[0].progress_label == "Reference | ATV WEB-DL"
-    assert requests[0].overlay is not None
-    assert requests[0].overlay.label == "ref"
 
 
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
@@ -126,14 +103,16 @@ def test_expansion_uses_actual_preparation_state_and_overlay_facts(
     mock_prepare.return_value = prepared
     batch = _request()
     batch = replace(batch, signal=SourceSignalFacts(is_hdr=True))
-    requests, _, facts = expand_batch_render_requests(
+    jobs = expand_batch_render_requests(
         [batch],
         output_dir=tmp_path / "out",
-        config=ConfigSchema(),
+        config=get_default_config(),
         overlay_mode=OverlayMode.DIAGNOSTIC,
         renderer="vapoursynth",
         ffmpeg_runner=MagicMock(),
     )
+    requests = [request for job in jobs for request in job.requests]
+    facts = {job.label: job.clip_facts for job in jobs}
     assert facts["ref"].presentation_state is PresentationState.HDR_TONEMAP_OFF
     assert requests[0].overlay is not None
     assert requests[0].overlay.presentation_state is PresentationState.HDR_TONEMAP_OFF
@@ -147,13 +126,14 @@ def test_expansion_rejects_out_of_range_source_frame(
 ) -> None:
     mock_prepare.return_value = _prepared()
     request = replace(
-        _request(), source_frames=[101], comparison_frames=[101], selection_labels=[None]
+        _request(),
+        frames=selections([101], [101], [None]),
     )
     with pytest.raises(ValueError, match="outside valid range"):
         expand_batch_render_requests(
             [request],
             output_dir=tmp_path / "out",
-            config=ConfigSchema(),
+            config=get_default_config(),
             overlay_mode=OverlayMode.NONE,
             renderer="vapoursynth",
             ffmpeg_runner=MagicMock(),
@@ -174,7 +154,7 @@ def test_final_output_collisions_refused_before_preparation(
         expand_batch_render_requests(
             batches,
             output_dir=tmp_path,
-            config=ConfigSchema(),
+            config=get_default_config(),
             overlay_mode=OverlayMode.NONE,
             renderer="vapoursynth",
             ffmpeg_runner=MagicMock(),
@@ -193,12 +173,12 @@ def test_final_duplicate_frame_refused_before_preparation(
 ) -> None:
     from frame_compare.render.errors import ScreenshotOutputCollisionError
 
-    batch = replace(_request(), comparison_frames=[12, 12])
+    batch = replace(_request(), frames=selections([10, 20], [12, 12], ["Dark", "Bright"]))
     with pytest.raises(ScreenshotOutputCollisionError):
         expand_batch_render_requests(
             [batch],
             output_dir=tmp_path,
-            config=ConfigSchema(),
+            config=get_default_config(),
             overlay_mode=OverlayMode.NONE,
             renderer="vapoursynth",
             ffmpeg_runner=MagicMock(),
@@ -239,18 +219,19 @@ def test_source_stem_aliases_follow_output_filesystem(
     first.unlink()
     with (
         patch(
-            "frame_compare.render.batch.orchestrator.render_batch_detailed", return_value=[]
+            "frame_compare.render.batch.orchestrator.render_clip_jobs", return_value=[]
         ) as render,
     ):
         if filesystem_distinct:
-            requests, _, _ = expand_batch_render_requests(
+            jobs = expand_batch_render_requests(
                 batches,
                 output_dir=tmp_path / "screenshots",
-                config=ConfigSchema(),
+                config=get_default_config(),
                 overlay_mode=OverlayMode.NONE,
                 renderer="vapoursynth",
                 ffmpeg_runner=MagicMock(),
             )
+            requests = [request for job in jobs for request in job.requests]
             assert [request.output_path.name for request in requests] == [
                 f"{frame} - {stem}.png" for stem in stems for frame in (12, 22)
             ]
@@ -260,7 +241,7 @@ def test_source_stem_aliases_follow_output_filesystem(
                 render_screenshots_from_batch_detailed(
                     batches,
                     tmp_path / "screenshots",
-                    ConfigSchema(),
+                    get_default_config(),
                     BatchRenderOptions(renderer="vapoursynth"),
                 )
             mock_prepare.assert_not_called()
@@ -286,7 +267,7 @@ def test_expansion_stops_source_admission_after_interruption(
             expand_batch_render_requests(
                 [_request("ref"), _request("comp")],
                 output_dir=tmp_path,
-                config=ConfigSchema(),
+                config=get_default_config(),
                 overlay_mode=OverlayMode.NONE,
                 renderer="vapoursynth",
                 ffmpeg_runner=MagicMock(),

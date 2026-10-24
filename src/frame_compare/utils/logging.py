@@ -1,8 +1,102 @@
 import logging
 import sys
+from contextlib import suppress
+from threading import Lock
 from typing import Protocol, TextIO, cast
 
 import structlog
+from rich.console import Console
+from rich.text import Text
+
+from frame_compare.utils.terminal_theme import FAIL, WARN, glyphs_for_console, human_console
+
+_console_lock = Lock()
+_active_console: Console | None = None
+
+
+def register_log_console(console: Console) -> None:
+    """Route Rich log events through the console that owns live progress."""
+    global _active_console
+    with _console_lock:
+        _active_console = console
+
+
+def release_log_console(console: Console) -> None:
+    """Release only the console owned by the stopping reporter."""
+    global _active_console
+    with _console_lock:
+        if _active_console is console:
+            _active_console = None
+
+
+class _RichLogRenderer:
+    def __init__(self, *, no_color: bool) -> None:
+        self._console = human_console(stderr=True, no_color=no_color)
+
+    def __call__(
+        self,
+        logger: structlog.typing.WrappedLogger,
+        name: str,
+        event_dict: structlog.typing.EventDict,
+        *,
+        event_is_identifier: bool = True,
+    ) -> str:
+        with _console_lock:
+            console = _active_console or self._console
+        level = event_dict.pop("level", name)
+        event = str(event_dict.pop("event", ""))
+        if event_is_identifier:
+            event = event.replace("_", " ")
+        event_dict.pop("timestamp", None)
+        diagnostics = {
+            key: event_dict.pop(key)
+            for key in ("stack", "exception", "exc_info")
+            if key in event_dict
+        }
+        glyphs = glyphs_for_console(console)
+        line = Text()
+        if level == "warning":
+            line.append(f"{glyphs.warning} ", style=WARN)
+        elif level in {"error", "critical"}:
+            line.append(f"{glyphs.failed} ", style=FAIL)
+        else:
+            line.style = "dim"
+        line.append(event)
+        for key, value in sorted(event_dict.items()):
+            line.append(f" · {key}={value}", style="dim")
+        if diagnostics:
+            # Keep structlog's existing stack/exception formatter, including its
+            # traceback layout, below the new event line.
+            renderer = structlog.dev.ConsoleRenderer(colors=not console.no_color)
+            traceback = renderer(logger, name, {"event": "", **diagnostics})
+            line.append_text(Text.from_ansi(traceback))
+        console.print(line, width=min(console.width, 120))
+        raise structlog.DropEvent
+
+
+class _RichLoggingHandler(logging.Handler):
+    """Adapt propagated stdlib warnings to the same human renderer."""
+
+    def __init__(self, renderer: _RichLogRenderer, level: int) -> None:
+        super().__init__(max(logging.WARNING, level))
+        self._renderer = renderer
+
+    def emit(self, record: logging.LogRecord) -> None:
+        event: structlog.typing.EventDict = {
+            "event": record.getMessage(),
+            "level": record.levelname.lower(),
+        }
+        if record.exc_info:
+            event["exc_info"] = record.exc_info
+        if record.stack_info:
+            event["stack"] = record.stack_info
+        with suppress(structlog.DropEvent):
+            # getMessage() is formatted text, including literal paths, rather
+            # than a structlog event identifier to normalize for human output.
+            self._renderer(record.name, record.levelname.lower(), event, event_is_identifier=False)
+
+
+_stdlib_handler: _RichLoggingHandler | None = None
 
 
 class _WritableStream(Protocol):
@@ -52,6 +146,9 @@ class _StderrStream:
 def configure_logging(
     level: str = "INFO",
     log_format: str = "console",
+    *,
+    rich_output: bool = False,
+    no_color: bool = False,
 ) -> None:
     """Configure structlog with either console or JSON output.
 
@@ -60,6 +157,8 @@ def configure_logging(
                Case-insensitive. Unknown values fall back to INFO.
         log_format: "console" for human-readable, "json" for structured.
                Unknown values fall back to "console".
+        rich_output: Use the human run format and active progress console.
+        no_color: Disable color for Rich human output.
 
     Notes:
         - Level filtering uses stdlib logging level constants (10, 20, 30, 40, 50).
@@ -67,6 +166,12 @@ def configure_logging(
         - Unknown format strings silently fall back to console renderer.
         - Safe to call multiple times; later calls reconfigure structlog globally.
     """
+    global _stdlib_handler
+    if _stdlib_handler is not None:
+        logging.getLogger().removeHandler(_stdlib_handler)
+        _stdlib_handler.close()
+        _stdlib_handler = None
+
     # Map level string to logging constant; fallback to INFO for unknown
     level_num = getattr(logging, level.upper(), logging.INFO)
 
@@ -83,6 +188,11 @@ def configure_logging(
             )
         )
         processors.append(structlog.processors.JSONRenderer())
+    elif rich_output:
+        renderer = _RichLogRenderer(no_color=no_color)
+        processors.append(renderer)
+        _stdlib_handler = _RichLoggingHandler(renderer, level_num)
+        logging.getLogger().addHandler(_stdlib_handler)
     else:
         processors.append(structlog.dev.ConsoleRenderer())
 

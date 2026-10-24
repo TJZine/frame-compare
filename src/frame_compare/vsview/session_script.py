@@ -1,21 +1,17 @@
-"""VSView session script generation.
-
-This module is responsible for construction of the VapourSynth session script
-used for interactive alignment verification.
-"""
-
 from __future__ import annotations
 
 import json
 import math
 import uuid
 from contextlib import suppress
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.vs.source import source_index_path
+from frame_compare.vs.types import TonemapSettings
 
 if TYPE_CHECKING:
     from frame_compare.vsview.session_runtime import ComparisonSource, SessionData
@@ -31,18 +27,8 @@ def write_vsview_session_script(
     presentation_names_by_stem: dict[str, str] | None = None,
     short_names_by_stem: dict[str, str] | None = None,
     memory_limit_mb: int | None = None,
+    preview_tonemap: TonemapSettings | None = None,
 ) -> Path:
-    """Generate deterministic session data and a bootstrap for the installed runtime.
-
-    Output location:
-        - Directory: `{cache_dir}/vsview_sessions/` (created if missing)
-        - Filename: `vsview_{reference_stem}_{timestamp}_{session_uuid}.py`
-        - Timestamp format: YYYYMMDDTHHMMSSZ (UTC, seconds precision)
-        - Session UUID format: 32 lowercase hexadecimal characters
-
-    The timestamp and session UUID MUST appear in the filename only; neither may
-    appear in the script body, so content remains byte-identical for the same inputs.
-    """
     sessions_dir = cache_dir / "vsview_sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
@@ -55,6 +41,7 @@ def write_vsview_session_script(
         presentation_names_by_stem=presentation_names_by_stem,
         short_names_by_stem=short_names_by_stem,
         memory_limit_mb=memory_limit_mb,
+        preview_tonemap=preview_tonemap,
     )
 
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -81,7 +68,6 @@ def write_vsview_session_script(
 
 
 def _reserve_empty_file(path: Path) -> bool:
-    """Atomically reserve a path by exclusively creating an empty file."""
     try:
         path.touch(exist_ok=False)
     except FileExistsError:
@@ -120,8 +106,8 @@ def _build_script_content(
     presentation_names_by_stem: dict[str, str] | None = None,
     short_names_by_stem: dict[str, str] | None = None,
     memory_limit_mb: int | None = None,
+    preview_tonemap: TonemapSettings | None = None,
 ) -> str:
-    """Build deterministic inputs and a small bootstrap, preserving source order."""
     presentation_names = presentation_names_by_stem or {}
     targets: dict[str, ComparisonSource] = {}
     for comparison in comparisons:
@@ -148,10 +134,10 @@ def _build_script_content(
         },
         "short_names": dict(sorted((short_names_by_stem or {}).items())),
         "memory_limit_mb": memory_limit_mb,
+        "preview_tonemap": asdict(preview_tonemap) if preview_tonemap is not None else None,
     }
-    # Target insertion order is the user's output order; sorting the whole payload
-    # would change comparison ordinals. Encode JSON as a Python string literal so
-    # arbitrary filenames and JSON null/booleans remain data rather than source.
+    # Encode JSON as a Python string literal so filenames and JSON null/booleans
+    # remain data rather than source.
     payload = json.dumps(data, ensure_ascii=True, allow_nan=False, indent=4)
     return f'''#!/usr/bin/env python3
 """VSView alignment verification session.

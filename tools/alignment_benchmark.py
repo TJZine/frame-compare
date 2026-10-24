@@ -43,7 +43,8 @@ from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.context import ClipActiveRect, RunContext
 from frame_compare.orchestration.phase_alignment import run_align_phase
-from frame_compare.orchestration.types import RunDependencies, RunRequest
+from frame_compare.orchestration.run_inputs import build_run_request
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.paths import require_managed_immediate_child
@@ -263,11 +264,11 @@ async def _prepare_pair(
     _ensure_media_link(comparison_link, pair.comparison)
     write_text_atomic(config_dir / "config.toml", _pair_config(pair), encoding="utf-8")
     return await preparation.execute_prep(
-        RunRequest(
+        build_run_request(
             root=workspace_root,
             skip_analysis=True,
             skip_metadata=True,
-            config_overrides=CLIConfigOverrides(no_upload=True),
+            overrides=CLIConfigOverrides(no_upload=True),
         ),
         RunDependencies(vs_loader=loader),
     )
@@ -288,9 +289,7 @@ async def align_pair(
         workspace=prep.workspace,
         reference=prep.clips[0],
         comparisons=prep.clips[1:],
-        analysis_selection_domain=prep.analysis_selection_domain,
-        selection_window=prep.selection_window,
-        analysis_clip=prep.analysis_clip,
+        selection_domain=prep.selection_domain,
     )
     phase = await run_align_phase(
         ctx,

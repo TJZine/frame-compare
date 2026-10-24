@@ -6,8 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from frame_compare.config.overrides import TonemapCliOverrides
+from frame_compare.config.loader import get_default_config
+from frame_compare.config.overrides import CLIConfigOverrides, apply_cli_overrides
 from frame_compare.config.schema import ColorConfig, ConfigSchema, ToneCurve, TonemapPreset
+from frame_compare.config.schema_enums import TonemapSpeed
 from frame_compare.render.prepare import (
     prepare_clip_for_render,
     resolve_tonemap_settings,
@@ -110,19 +112,19 @@ def test_direct_ffmpeg_tonemap_gate_probes_once_without_classification() -> None
             ColorConfig(
                 enable_tonemap=True,
                 preset=TonemapPreset.FILMIC,
+                tonemap_speed=TonemapSpeed.FAST,
                 target_nits=250,
                 tone_curve=ToneCurve.SPLINE,
                 gamma_lift=True,
                 contrast_recovery=0.25,
             ),
-            {
-                "tm_preset": TonemapPreset.REFERENCE,
-                "tm_target": 400,
-                "tm_curve": ToneCurve.REINHARD,
-            },
+            CLIConfigOverrides(
+                tm_preset=TonemapPreset.REFERENCE, tm_target_nits=400, tm_curve=ToneCurve.REINHARD
+            ),
             TonemapSettings(),
             {
                 "target_nits": 400,
+                "tonemap_speed": TonemapSpeed.FAST,
                 "tone_curve": ToneCurve.REINHARD,
                 "gamma_lift": True,
                 "contrast_recovery": 0.25,
@@ -142,7 +144,7 @@ def test_direct_ffmpeg_tonemap_gate_probes_once_without_classification() -> None
 )
 def test_resolve_tonemap_settings_cases(
     color: ColorConfig,
-    overrides: TonemapCliOverrides | None,
+    overrides: CLIConfigOverrides | None,
     preset_settings: TonemapSettings,
     expected: dict[str, object],
     expected_preset: TonemapPreset | None,
@@ -150,7 +152,10 @@ def test_resolve_tonemap_settings_cases(
     with patch(
         "frame_compare.vs.tonemap.get_preset_settings", return_value=preset_settings
     ) as get_preset:
-        settings = resolve_tonemap_settings(ConfigSchema(color=color), overrides)
+        config = ConfigSchema(color=color)
+        if overrides:
+            config = apply_cli_overrides(config, overrides)
+        settings = resolve_tonemap_settings(config)
     if expected_preset is not None:
         get_preset.assert_called_once_with(expected_preset)
     for field, value in expected.items():
@@ -158,6 +163,31 @@ def test_resolve_tonemap_settings_cases(
             assert getattr(settings, field) is value
         else:
             assert getattr(settings, field) == value
+
+
+def test_fast_tonemap_speed_reaches_still_preparation_with_detection_disabled() -> None:
+    from frame_compare.vs.types import TonemapResult
+
+    source = MagicMock(is_hdr=True, width=1920, height=1080, num_frames=3, hdr_metadata=None)
+    output = MagicMock()
+    applied = MagicMock()
+    config = ConfigSchema(color=ColorConfig(tonemap_speed=TonemapSpeed.FAST))
+
+    with (
+        patch("frame_compare.vs.loader.DefaultVSLoader") as loader_cls,
+        patch("frame_compare.vs.tonemap.apply_tonemap") as apply_tonemap,
+    ):
+        loader_cls.return_value.load.return_value = source
+        apply_tonemap.return_value = TonemapResult(output, applied)
+        prepared = prepare_clip_for_render(
+            Path("hdr_video.mkv"), "vapoursynth", config, ffmpeg_runner=MagicMock()
+        )
+
+    assert prepared.prepared_clip is output
+    settings = apply_tonemap.call_args.args[1]
+    assert settings.tonemap_speed is TonemapSpeed.FAST
+    assert settings.dynamic_peak_detection is False
+    assert apply_tonemap.call_args.kwargs == {"still_image": True}
 
 
 @pytest.mark.parametrize("interruption_stage", ["before", "source", "fallback"])
@@ -284,7 +314,7 @@ def test_preparation_tonemap_dispatch_stops_after_interruption(
             loader_cls.return_value.load.return_value = source
             with pytest.raises(_RunInterrupt):
                 prepare_clip_for_render(
-                    Path("hdr.mkv"), "vapoursynth", ConfigSchema(), ffmpeg_runner=MagicMock()
+                    Path("hdr.mkv"), "vapoursynth", get_default_config(), ffmpeg_runner=MagicMock()
                 )
         # Exercise the real prepare -> dispatch -> conversion/libplacebo/fallback
         # chain; only native entry points and the probe's external result are faked.

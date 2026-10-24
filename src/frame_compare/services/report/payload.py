@@ -1,4 +1,4 @@
-"""Report v1.2 input validation, wire shaping, and stable identity."""
+"""Report v1.3 input validation, wire shaping, and stable identity."""
 
 from __future__ import annotations
 
@@ -24,9 +24,9 @@ from frame_compare.utils.media_facts import (
     SourceSignalFacts,
 )
 from frame_compare.utils.paths import require_managed_descendant
-from frame_compare.vs.types import TonemapSettings
+from frame_compare.vs.types import AppliedTonemap, FallbackTonemap, TonemapSettings
 
-REPORT_VERSION = "1.2"
+REPORT_VERSION = "1.3"
 
 
 class ClipFingerprintProtocol(Protocol):
@@ -57,8 +57,7 @@ class ReportSignalPayload(TypedDict):
 
 class ReportPresentationPayload(TypedDict):
     state: str
-    tone_curve: str | None
-    target_nits: int | None
+    tonemap: ReportAppliedTonemapPayload | None
 
 
 class ReportActivePicturePayload(TypedDict):
@@ -110,6 +109,7 @@ class ReportFramePayload(TypedDict):
 class ReportTonemapSettingsPayload(TypedDict):
     enabled: bool
     preset: str
+    tonemap_speed: str
     tone_curve: str
     target_nits: int
     source_peak: int | None
@@ -127,9 +127,26 @@ class ReportTonemapSettingsPayload(TypedDict):
     gamma_lift: bool
 
 
+class ReportAppliedTonemapPayload(TypedDict):
+    implementation: str
+    algorithm: str
+    target_nits: int
+    source_peak_nits: int
+    source_peak_origin: str
+    effective_controls: dict[str, object]
+    fallback_cause: str | None
+
+
+class ReportSharedTonemapPayload(TypedDict):
+    implementation: str
+    algorithm: str
+    effective_controls: dict[str, object]
+
+
 class ReportTonemapPayload(TypedDict):
-    applied: bool
-    settings: ReportTonemapSettingsPayload | None
+    ran: bool
+    requested: ReportTonemapSettingsPayload | None
+    shared: ReportSharedTonemapPayload | None
 
 
 class ReportGeometryPayload(TypedDict):
@@ -234,7 +251,7 @@ class ClipInfo:
     size_bytes: int
     signal: SourceSignalFacts
     presentation_state: PresentationState
-    tonemap_settings: TonemapSettings | None
+    tonemap: AppliedTonemap | None
     active_picture: ActivePictureFacts | None
     images: list[ReportImageInfo]
     display: ReportClipDisplayInfo
@@ -257,7 +274,6 @@ class ReportRenderingInfo:
 
     overlay_mode: OverlayMode
     include_frame_number: bool
-    tonemap_settings: TonemapSettings | None
     geometry_by_label: dict[str, RenderedGeometryFacts]
 
 
@@ -294,12 +310,12 @@ class ReportData:
 def build_report_payload(
     data: ReportData, config: ReportConfig, *, report_dir: Path
 ) -> ReportPayload:
-    """Shape validated report data into the embedded v1.2 JSON payload."""
+    """Shape validated report data into the embedded v1.3 JSON payload."""
     _validate_report_cardinality(data)
     title = data.metadata.title if data.metadata else data.clips[0].name
     clips = build_clip_payloads(data.clips)
     frames = build_frame_payloads(data, config, report_dir=report_dir)
-    rendering = build_rendering_payload(data.rendering)
+    rendering = build_rendering_payload(data.rendering, [clip.tonemap for clip in data.clips])
     default_selection = build_default_selection(len(data.clips))
     stats: ReportStatsPayload = {
         "frame_count": len(data.frames),
@@ -363,9 +379,7 @@ def build_clip_payloads(clips: list[ClipInfo]) -> list[ReportClipPayload]:
                 "fps": clip.fps,
                 "size_bytes": clip.size_bytes,
                 "signal": _signal_payload(clip.signal),
-                "presentation": _presentation_payload(
-                    clip.presentation_state, clip.tonemap_settings
-                ),
+                "presentation": _presentation_payload(clip.presentation_state, clip.tonemap),
                 "active_picture": (
                     None
                     if clip.active_picture is None or clip.active_picture.is_full_frame
@@ -436,18 +450,76 @@ def frame_detail_for_payload(
     )
 
 
-def build_rendering_payload(info: ReportRenderingInfo) -> ReportRenderingPayload:
-    settings = info.tonemap_settings
+def build_rendering_payload(
+    info: ReportRenderingInfo, tonemaps: list[AppliedTonemap | None]
+) -> ReportRenderingPayload:
+    applied = [tonemap for tonemap in tonemaps if tonemap is not None]
+    projections = [_shared_tonemap_payload(tonemap) for tonemap in applied]
+    shared = (
+        projections[0] if projections and all(p == projections[0] for p in projections) else None
+    )
+    requested = (
+        applied[0].requested
+        if applied and all(item.requested == applied[0].requested for item in applied)
+        else None
+    )
     return {
         "overlay_mode": info.overlay_mode.value,
         "include_frame_number": info.include_frame_number,
         "tonemap": {
-            "applied": settings is not None,
-            "settings": _tonemap_settings_payload(settings) if settings is not None else None,
+            "ran": bool(applied),
+            "requested": _tonemap_settings_payload(requested) if requested is not None else None,
+            "shared": shared,
         },
         "geometry_by_label": {
             label: _geometry_payload(geometry)
             for label, geometry in sorted(info.geometry_by_label.items())
+        },
+    }
+
+
+def _shared_tonemap_payload(tonemap: AppliedTonemap) -> ReportSharedTonemapPayload:
+    transform = tonemap.transform
+    if isinstance(transform, FallbackTonemap):
+        return {
+            "implementation": "fallback",
+            "algorithm": transform.algorithm,
+            "effective_controls": {
+                "target_nits": transform.target_nits,
+                "gamma_lift": transform.gamma_lift,
+            },
+        }
+    controls: dict[str, object] = dict(_tonemap_settings_payload(transform.settings))
+    for key in ("enabled", "preset", "tone_curve", "source_peak"):
+        controls.pop(key)
+    controls["output_encoding"] = "srgb"
+    controls["frame_policy"] = transform.frame_policy
+    return {
+        "implementation": "libplacebo",
+        "algorithm": transform.curve.value,
+        "effective_controls": controls,
+    }
+
+
+def _applied_tonemap_payload(tonemap: AppliedTonemap) -> ReportAppliedTonemapPayload:
+    shared = _shared_tonemap_payload(tonemap)
+    transform = tonemap.transform
+    return {
+        **shared,
+        "target_nits": transform.target_nits
+        if isinstance(transform, FallbackTonemap)
+        else transform.settings.target_nits,
+        "source_peak_nits": transform.source_peak.nits,
+        "source_peak_origin": transform.source_peak.origin,
+        "fallback_cause": transform.cause.value if isinstance(transform, FallbackTonemap) else None,
+    }
+
+
+def build_report_identity_rendering(rendering: ReportRenderingPayload) -> dict[str, object]:
+    return {
+        **rendering,
+        "tonemap": {
+            key: value for key, value in rendering["tonemap"].items() if key != "requested"
         },
     }
 
@@ -461,7 +533,15 @@ def build_report_identity_clips(
 ) -> list[ReportIdentityClipPayload]:
     identity_clips: list[ReportIdentityClipPayload] = []
     for info, clip in zip(clip_infos, clips, strict=True):
+        presentation = clip["presentation"]
+        tonemap = presentation["tonemap"]
         identity_clip = {key: value for key, value in clip.items() if key != "display"}
+        identity_clip["presentation"] = {
+            **presentation,
+            "tonemap": {key: value for key, value in tonemap.items() if key != "fallback_cause"}
+            if tonemap
+            else None,
+        }
         identity_clips.append(
             cast(
                 ReportIdentityClipPayload,
@@ -514,7 +594,7 @@ def build_report_id(
             "stats": stats,
             "clips": clips,
             "frames": build_report_identity_frames(frames),
-            "rendering": rendering,
+            "rendering": build_report_identity_rendering(rendering),
         },
         ensure_ascii=True,
         separators=(",", ":"),
@@ -593,13 +673,9 @@ def _signal_payload(signal: SourceSignalFacts) -> ReportSignalPayload:
 
 
 def _presentation_payload(
-    state: PresentationState, settings: TonemapSettings | None
+    state: PresentationState, tonemap: AppliedTonemap | None
 ) -> ReportPresentationPayload:
-    return {
-        "state": state.value,
-        "tone_curve": settings.tone_curve.value if settings is not None else None,
-        "target_nits": settings.target_nits if settings is not None else None,
-    }
+    return {"state": state.value, "tonemap": _applied_tonemap_payload(tonemap) if tonemap else None}
 
 
 def _active_picture_payload(active: ActivePictureFacts) -> ReportActivePicturePayload:
@@ -617,6 +693,7 @@ def _tonemap_settings_payload(settings: TonemapSettings) -> ReportTonemapSetting
     return {
         "enabled": settings.enabled,
         "preset": settings.preset.value,
+        "tonemap_speed": settings.tonemap_speed.value,
         "tone_curve": settings.tone_curve.value,
         "target_nits": settings.target_nits,
         "source_peak": settings.source_peak,

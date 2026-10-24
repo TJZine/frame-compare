@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.services.slowpics_post_upload import (
     SlowpicsPostUploadRequest,
     run_slowpics_post_upload_actions,
@@ -47,7 +47,7 @@ def _request(
     collection_title: str = "Frame Comparison",
 ) -> SlowpicsPostUploadRequest:
     root = tmp_path / "workspace"
-    config = ConfigSchema().slowpics
+    config = get_default_config().slowpics
     config.create_url_shortcut = create_url_shortcut
     config.webhook_url = webhook_url
     return SlowpicsPostUploadRequest(

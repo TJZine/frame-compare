@@ -170,6 +170,7 @@ from pathlib import Path
 import vapoursynth as vs
 from PySide6.QtWidgets import QApplication, QWidget
 
+from frame_compare.services.alignment_vsview import _confirmed_offsets
 from frame_compare.vs.source import source_index_path
 from frame_compare.vsview.adapter import (
     VSViewConfig,
@@ -180,6 +181,8 @@ from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewContractError,
     AlignmentReviewExpectedComparison,
     AlignmentReviewOutputCandidate,
+    ConfirmedAlignmentReviewDecision,
+    KeepCurrentAlignmentReviewDecision,
     parse_alignment_review_workspace_metadata,
     read_alignment_review_result,
 )
@@ -252,7 +255,10 @@ print("DOCKER_GUI_PROOF vsview_entry_point=ok")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 app = QApplication.instance() or QApplication([])
 panel_parent = QWidget()
-panel = AlignmentReviewPanel(panel_parent, types.SimpleNamespace(file_path=None))
+panel = AlignmentReviewPanel(
+    panel_parent,
+    types.SimpleNamespace(file_path=None, register_on_destroy=lambda cb: None),
+)
 if "Inactive" not in panel.progress_label.text():
     raise SystemExit("native alignment panel was not inert outside a generated session")
 panel.setParent(None)
@@ -318,6 +324,7 @@ panel_api = types.SimpleNamespace(
     current_voutput=voutputs[0],
     current_frame=1,
     timeline=Timeline(),
+    register_on_destroy=lambda cb: None,
 )
 from vsengine.loops import get_loop, set_loop
 from vsview.vsenv import QtEventLoop
@@ -329,26 +336,44 @@ try:
     active_panel = AlignmentReviewPanel(active_parent, panel_api)
     active_panel.on_workspace_loaded()
     app.processEvents()
-    if active_panel.progress_label.text() != "0/3 positions captured":
+    if active_panel.progress_label.text() != "0/3 frames ready":
         raise SystemExit("alignment panel did not start with an empty three-source lineup")
-    for output_index, frame in enumerate((1, 0, 2)):
+    if active_panel.use_positions_button.isEnabled() or session.result_path.exists():
+        raise SystemExit("empty alignment lineup was ready to save or already saved")
+    # Select both comparisons before Reference to prove the whole set is required.
+    for selected_count, (output_index, frame) in enumerate(((1, 0), (2, 2), (0, 1))):
         panel_api.current_voutput = voutputs[output_index]
         panel_api.current_frame = frame
         active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
         app.processEvents()
-    if active_panel.progress_label.text() != "3/3 positions captured \u2014 ready to confirm":
-        raise SystemExit("alignment panel did not record every source position")
-    if active_panel.use_positions_button.text() != "Confirm these aligned positions":
+        active_panel.on_current_frame_changed(frame)
+        app.processEvents()
+        if active_panel.progress_label.text() != f"{selected_count}/3 frames ready":
+            raise SystemExit("viewer navigation unexpectedly selected an alignment frame")
+        if active_panel.use_positions_button.isEnabled() or session.result_path.exists():
+            raise SystemExit("navigation or an incomplete lineup admitted alignment saving")
+        active_panel.frame_inputs[output_index].setText(str(frame))
+        if active_panel.use_positions_button.isEnabled() != (selected_count == 2):
+            raise SystemExit("alignment save readiness did not require every selected source")
+        if session.result_path.exists():
+            raise SystemExit("selecting a source unexpectedly saved alignment")
+    if active_panel.progress_label.text() != "3/3 frames ready":
+        raise SystemExit("alignment panel did not select each explicit source number")
+    if active_panel.use_positions_button.text() != "Confirm matching frames":
         raise SystemExit("alignment panel primary action label changed")
     if active_panel.keep_button.text() != "Keep current alignment":
         raise SystemExit("alignment panel keep action label changed")
-    if not active_panel.use_positions_button.isEnabled():
-        raise SystemExit("alignment positions action did not become ready for the whole set")
     active_panel.use_positions_button.click()
     app.processEvents()
     observed_result = read_alignment_review_result(session, expected)
-    if [decision.action for decision in observed_result.decisions] != ["confirmed", "confirmed"]:
-        raise SystemExit("alignment positions action did not write complete confirmed decisions")
+    comparison_keys = tuple(pair.comparison_key for pair in workspace.comparisons)
+    if observed_result.session_id != session.session_id or observed_result.decisions != (
+        ConfirmedAlignmentReviewDecision(comparison_keys[0], 1, 0),
+        ConfirmedAlignmentReviewDecision(comparison_keys[1], 1, 2),
+    ):
+        raise SystemExit("alignment save did not preserve the session, source order and selected frames")
+    if _confirmed_offsets(observed_result) != {comparison_keys[0]: 1, comparison_keys[1]: -1}:
+        raise SystemExit("selected frames did not produce signed reference-minus-comparison offsets")
     print("DOCKER_GUI_PROOF alignment_positions=ok")
 
     session.result_path.unlink()
@@ -356,11 +381,21 @@ try:
     keep_panel = AlignmentReviewPanel(keep_parent, panel_api)
     keep_panel.on_workspace_loaded()
     app.processEvents()
+    for output_index, frame in ((1, 0), (2, 2), (0, 1)):
+        keep_panel.frame_inputs[output_index].setText(str(frame))
+    if not keep_panel.use_positions_button.isEnabled() or session.result_path.exists():
+        raise SystemExit("keep proof did not start with a complete unsaved selected lineup")
     keep_panel.keep_button.click()
     app.processEvents()
     observed_result = read_alignment_review_result(session, expected)
-    if [decision.action for decision in observed_result.decisions] != ["keep_current", "keep_current"]:
-        raise SystemExit("keep-audio action did not write one decision per comparison")
+    if observed_result.session_id != session.session_id or observed_result.decisions != tuple(
+        KeepCurrentAlignmentReviewDecision(key) for key in comparison_keys
+    ):
+        raise SystemExit("keep-current action did not write complete session-bound keep decisions")
+    if _confirmed_offsets(observed_result):
+        raise SystemExit("keeping current alignment unexpectedly confirmed the selected lineup")
+    if keep_panel.progress_label.text() != "Keep decision saved \u2014 frame lineup was not confirmed":
+        raise SystemExit("keep-current outcome did not distinguish the unconfirmed selected lineup")
     print("DOCKER_GUI_PROOF alignment_keep_current=ok")
 finally:
     set_loop(previous_loop)

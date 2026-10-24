@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from frame_compare.services.alignment_keys import alignment_key
+from frame_compare.services.alignment_resolution import resolution_from_reuse
 from frame_compare.services.alignment_reuse_cache import (
     comparison_cache_key,
     load_reusable_offset_entries,
@@ -17,8 +18,8 @@ from frame_compare.services.alignment_sources import require_current_alignment_s
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
-    AlignmentProvenance,
     AlignmentResult,
+    ComparisonResolution,
     ReusableAlignmentEntry,
 )
 from frame_compare.utils.cancellation import raise_if_cancelling
@@ -28,7 +29,6 @@ from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 __all__ = [
     "apply_shared_reuse",
     "prompt_for_previous_alignment_offset_reuse",
-    "shared_write_is_service_eligible",
     "validate_previous_offsets_policy",
 ]
 
@@ -75,7 +75,7 @@ def _shared_reuse_prompt_input(
                 time_offset_seconds=result.time_offset_seconds,
                 accepted_at=entry.accepted_at,
                 source="computed" if entry.origin == "computed" else "confirmed",
-                presentation_name=comparison.presentation_name,
+                short_name=comparison.short_name,
             )
         )
     return previous_offset_prompt_input_from_rows(
@@ -89,20 +89,15 @@ def _apply_cached_alignment_result(
     request: AlignmentRequest,
     comparison: AlignmentClipRequest,
     result: AlignmentResult,
-    results_map: dict[str, AlignmentResult],
-    provenances: dict[str, AlignmentProvenance],
+    resolutions: dict[str, ComparisonResolution],
     computed_cache_hit: bool,
 ) -> None:
     raise_if_cancelling()
     require_current_alignment_sources(request)
     key = _alignment_key_from_request(request, comparison)
     comparison_key = comparison_cache_key(comparison)
-    results_map[key] = result
-    provenances[key] = AlignmentProvenance(
-        result=result,
-        comparison_cache_key=comparison_key,
-        provenance="shared_computed_offsets" if computed_cache_hit else "shared_previous_offsets",
-        evidence_availability="historical_details_unavailable",
+    resolutions[key] = resolution_from_reuse(
+        result, comparison_cache_key=comparison_key, computed=computed_cache_hit
     )
 
 
@@ -110,22 +105,22 @@ def apply_shared_reuse(
     *,
     request: AlignmentRequest,
     unresolved_comparisons: list[AlignmentClipRequest],
-    results_map: dict[str, AlignmentResult],
-    provenances: dict[str, AlignmentProvenance],
     cache_results: bool,
     progress: ProgressReporter | None,
     no_color: bool,
-) -> bool:
+    verbose: bool = False,
+) -> tuple[dict[str, ComparisonResolution], bool]:
     """Apply shared cache hits and return whether confirmed reuse completed alignment."""
+    resolutions: dict[str, ComparisonResolution] = {}
     if not cache_results or not unresolved_comparisons:
-        return False
+        return resolutions, False
 
     reusable_entries = load_reusable_offset_entries(
         request,
         comparisons=unresolved_comparisons,
     )
     if reusable_entries is None:
-        return False
+        return resolutions, False
 
     confirmed_comparisons: list[AlignmentClipRequest] = []
     for comparison in unresolved_comparisons:
@@ -135,15 +130,14 @@ def apply_shared_reuse(
                 request=request,
                 comparison=comparison,
                 result=entry.result,
-                results_map=results_map,
-                provenances=provenances,
+                resolutions=resolutions,
                 computed_cache_hit=True,
             )
             continue
         confirmed_comparisons.append(comparison)
 
     if not confirmed_comparisons:
-        return False
+        return resolutions, False
 
     if request.previous_offsets == "disabled":
         for comparison in confirmed_comparisons:
@@ -154,11 +148,10 @@ def apply_shared_reuse(
                 request=request,
                 comparison=comparison,
                 result=entry.computed_result,
-                results_map=results_map,
-                provenances=provenances,
+                resolutions=resolutions,
                 computed_cache_hit=True,
             )
-        return False
+        return resolutions, False
 
     prompt_accepted_confirmed = False
     if request.previous_offsets == "prompt":
@@ -170,6 +163,7 @@ def apply_shared_reuse(
             ),
             progress=progress,
             no_color=no_color,
+            verbose=verbose,
         )
         if not accepted:
             for comparison in confirmed_comparisons:
@@ -180,11 +174,10 @@ def apply_shared_reuse(
                     request=request,
                     comparison=comparison,
                     result=entry.computed_result,
-                    results_map=results_map,
-                    provenances=provenances,
+                    resolutions=resolutions,
                     computed_cache_hit=True,
                 )
-            return False
+            return resolutions, False
         prompt_accepted_confirmed = True
 
     for comparison in confirmed_comparisons:
@@ -194,36 +187,10 @@ def apply_shared_reuse(
             request=request,
             comparison=comparison,
             result=result,
-            results_map=results_map,
-            provenances=provenances,
+            resolutions=resolutions,
             computed_cache_hit=False,
         )
-    return prompt_accepted_confirmed or request.previous_offsets == "always"
-
-
-def shared_write_is_service_eligible(
-    *,
-    request: AlignmentRequest,
-    provenances: dict[str, AlignmentProvenance],
-) -> bool:
-    if not request.comparisons:
-        return False
-    has_current_run_write = False
-    for comparison in request.comparisons:
-        provenance = provenances.get(_alignment_key_from_request(request, comparison))
-        if provenance is None:
-            return False
-        if provenance.provenance in {"computed_this_run", "interactive_confirmed_this_run"}:
-            has_current_run_write = True
-        if provenance.provenance not in {
-            "computed_this_run",
-            "shared_computed_offsets",
-            "interactive_confirmed_this_run",
-        }:
-            return False
-        if not provenance.result.applied:
-            return False
-    return has_current_run_write
+    return resolutions, prompt_accepted_confirmed or request.previous_offsets == "always"
 
 
 def prompt_for_previous_alignment_offset_reuse(
@@ -231,10 +198,12 @@ def prompt_for_previous_alignment_offset_reuse(
     prompt_input: PreviousOffsetPromptInput,
     progress: ProgressReporter | None,
     no_color: bool,
+    verbose: bool = False,
 ) -> bool:
     """Prompt for shared previous-offset reuse without owning reuse precedence."""
     return prompt_for_previous_offset_reuse(
         prompt_input=prompt_input,
         progress=progress,
         no_color=no_color,
+        verbose=verbose,
     )

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired
+from threading import Event
 from typing import cast
 
-from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.errors import AudioAlignmentError, raise_if_alignment_cancelled
 from frame_compare.services.types import AlignmentChannelStrategy
 from frame_compare.utils.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
@@ -301,6 +302,67 @@ def _parse_audio_stream(
             start_time_basis="metadata" if parsed_start_time is not None else "default_zero",
             input_start_time_basis=input_start_time_basis,
         ),
+    )
+
+
+def measure_selected_audio_duration(
+    video_path: Path,
+    stream: AudioStreamInfo,
+    *,
+    video_seconds: Fraction,
+    cancellation: Event | None,
+) -> AudioStreamInfo:
+    """Fill missing selected-stream timing from one bounded packet-tail probe."""
+    timeline = stream.timeline
+    if timeline.duration is not None or timeline.time_base is None:
+        return stream
+    seek = max(Fraction(0), video_seconds - 60)
+    raise_if_alignment_cancelled(cancellation)
+    try:
+        payload = _load_ffprobe_json(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                f"a:{stream.audio_stream_index}",
+                "-read_intervals",
+                f"{float(seek)}%",
+                "-show_entries",
+                "packet=pts,duration",
+                "-of",
+                "json",
+                str(video_path),
+            ],
+            operation="measuring selected audio tail",
+        )
+    except FFmpegError:
+        return stream
+    packets = payload.get("packets")
+    if not isinstance(packets, list) or not packets:
+        return stream
+    latest_end: Fraction | None = None
+    reached_seek = False
+    for packet in cast(list[object], packets):
+        if not isinstance(packet, dict):
+            return stream
+        item = cast(dict[str, object], packet)
+        pts = _parse_optional_int(item.get("pts"))
+        duration = _parse_optional_int(item.get("duration"))
+        if pts is None or duration is None or duration < 0:
+            return stream
+        start = pts * timeline.time_base
+        reached_seek |= start >= seek
+        end = (pts + duration) * timeline.time_base
+        latest_end = end if latest_end is None else max(latest_end, end)
+    if not reached_seek or latest_end is None:
+        return stream
+    measured_duration = latest_end - timeline.start_time
+    if measured_duration <= 0:
+        return stream
+    return replace(
+        stream,
+        timeline=replace(timeline, duration=measured_duration, duration_basis="packet_tail"),
     )
 
 
@@ -627,7 +689,7 @@ def retime_rates(timeline_scale: Fraction) -> tuple[int, int] | None:
     """Exact resample/relabel rates that stretch audio time by ``timeline_scale``.
 
     Returns ``None`` for a scale of 1. Raises ``AudioAlignmentError`` with
-    category ``selected_audio_timeline_unavailable`` when a rate would exceed
+    category ``retime_rate_unsupported`` when a rate would exceed
     ``MAX_RETIME_RATE``.
     """
     if timeline_scale == 1:
@@ -637,7 +699,7 @@ def retime_rates(timeline_scale: Fraction) -> tuple[int, int] | None:
     if max(p, q) * m > MAX_RETIME_RATE:
         raise AudioAlignmentError(
             "retimed audio rate is not supported",
-            category="selected_audio_timeline_unavailable",
+            category="retime_rate_unsupported",
             stage="planning",
         )
     return p * m, q * m

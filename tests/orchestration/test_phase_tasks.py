@@ -18,6 +18,7 @@ from frame_compare.analysis.errors import (
     ExclusionRecoverySelectionError,
     MetricsCalculationError,
     SelectionError,
+    SelectionFailureKind,
 )
 from frame_compare.analysis.metric_identity import (
     metric_algorithm_id,
@@ -29,6 +30,7 @@ from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
     FrameSelection,
+    MetricCacheRequest,
     MetricsAcquisition,
     MetricsMetadata,
     SelectionBreakdown,
@@ -129,7 +131,10 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
             "min_window_seconds": 0.0,
         },
     )
-    ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=40, end_frame_exclusive=60),
+    )
     ctx.preflight_warnings = [
         RunWarning("active-rect auto detection", "skipped", "constrained attempt"),
         RunWarning(
@@ -142,8 +147,9 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
     confirmation_requests: list[FullWindowRetryConfirmationRequest] = []
     progress = ConfirmationProgressSpy()
 
-    def _calculate_metrics(**kwargs: Any) -> MetricsAcquisition:
-        frame_range = kwargs["metric_frame_range"]
+    def _calculate_metrics(request: MetricCacheRequest, **kwargs: Any) -> MetricsAcquisition:
+        frame_range = request.metric_frame_range
+        assert frame_range is not None
         calculate_ranges.append((frame_range.start, frame_range.end_exclusive))
         return MetricsAcquisition(
             metrics=constrained_metrics if frame_range.start == 40 else full_metrics,
@@ -206,14 +212,17 @@ def test_run_analyze_phase_satisfied_selection_never_prompts(
             "min_window_seconds": 0.0,
         },
     )
-    ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=40, end_frame_exclusive=60),
+    )
     ctx.confirm_full_window_retry = lambda request: (_ for _ in ()).throw(
         AssertionError("valid selection must not prompt")
     )
     monkeypatch.setattr(
         phase_selection,
         "calculate_metrics",
-        lambda **_kwargs: MetricsAcquisition(
+        lambda _request, **_kwargs: MetricsAcquisition(
             metrics=_metrics_for_range(start=40, end=60), disposition="computed"
         ),
     )
@@ -254,7 +263,10 @@ def test_run_analyze_phase_refused_or_failed_prompt_is_fatal_without_retry(
             "min_window_seconds": 0.0,
         },
     )
-    ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=40, end_frame_exclusive=60),
+    )
     prompt_calls = 0
     progress = ConfirmationProgressSpy()
 
@@ -272,7 +284,7 @@ def test_run_analyze_phase_refused_or_failed_prompt_is_fatal_without_retry(
     monkeypatch.setattr(
         phase_selection,
         "calculate_metrics",
-        lambda **_kwargs: MetricsAcquisition(
+        lambda _request, **_kwargs: MetricsAcquisition(
             metrics=_metrics_for_range(start=40, end=60), disposition="computed"
         ),
     )
@@ -302,7 +314,10 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
             "min_window_seconds": 0.0,
         },
     )
-    ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=40, end_frame_exclusive=60),
+    )
     ctx.run_warnings = []
     prompt_calls = 0
     dense_full_metrics = _metrics_for_range(start=0, end=100)
@@ -328,12 +343,12 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
     monkeypatch.setattr(
         phase_selection,
         "calculate_metrics",
-        lambda **kwargs: MetricsAcquisition(
+        lambda _request, **kwargs: MetricsAcquisition(
             metrics=sparse_full_metrics
-            if kwargs["metric_frame_range"].start == 0
+            if _request.metric_frame_range.start == 0
             else _metrics_for_range(
-                start=kwargs["metric_frame_range"].start,
-                end=kwargs["metric_frame_range"].end_exclusive,
+                start=_request.metric_frame_range.start,
+                end=_request.metric_frame_range.end_exclusive,
             ),
             disposition="computed",
         ),
@@ -382,7 +397,12 @@ def test_full_window_retry_progress_failure_is_fatal_before_override(
     with pytest.raises(ExclusionRecoverySelectionError) as exc_info:
         recover_from_exclusion_selection_failure(
             ctx,
-            SelectionError("insufficient_candidates", requested=8, found=4),
+            SelectionError(
+                "insufficient_candidates",
+                requested=8,
+                found=4,
+                kind=SelectionFailureKind.INSUFFICIENT_METRIC_CANDIDATES,
+            ),
             vs_loader=None,
         )
 
@@ -397,7 +417,7 @@ def test_full_window_retry_active_rect_sampling_failure_is_fatal(
         ctx.reference,
         active_rect=ClipActiveRect(0, 10, 1920, 1060, "content-derived", "auto"),
     )
-    ctx.analysis_clip = ctx.reference
+    ctx.selection_domain = replace(ctx.selection_domain, analysis_clip=ctx.reference)
     ctx.config = ctx.config.model_copy(
         update={
             "analysis": ctx.config.analysis.model_copy(
@@ -427,7 +447,12 @@ def test_full_window_retry_active_rect_sampling_failure_is_fatal(
     with pytest.raises(ExclusionRecoverySelectionError) as exc_info:
         recover_from_exclusion_selection_failure(
             ctx,
-            SelectionError("insufficient_candidates", requested=8, found=4),
+            SelectionError(
+                "insufficient_candidates",
+                requested=8,
+                found=4,
+                kind=SelectionFailureKind.INSUFFICIENT_METRIC_CANDIDATES,
+            ),
             vs_loader=cast("VSLoader", FailingLoader()),
         )
 
@@ -450,7 +475,10 @@ def test_run_analyze_phase_cache_only_exclusion_failure_does_not_offer_retry(
             "min_window_seconds": 0.0,
         },
     )
-    ctx.selection_window = SelectionWindow(start_frame=40, end_frame_exclusive=60)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=40, end_frame_exclusive=60),
+    )
     cache_calls = 0
 
     def _load_cache(*_args: object, **_kwargs: object) -> CacheLoadResult:
@@ -508,7 +536,9 @@ def test_run_analyze_phase_cache_only_invalid_cache_does_not_recompute(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, corrupt: bool
 ) -> None:
     ctx = _context(tmp_path)
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
+    ctx.selection_domain = replace(
+        ctx.selection_domain, selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=2)
+    )
     input_videos = [ctx.reference.path]
     monkeypatch.setattr(
         phase_selection.cache_io, "compute_cache_key", lambda *_args, **_kwargs: "fp"
@@ -534,11 +564,16 @@ def test_run_analyze_phase_cache_only_invalid_cache_does_not_recompute(
         )
 
 
+@pytest.mark.parametrize(
+    "corruption", ["numeric", "enum-list", "enum-dict", "deep", "integer-limit"]
+)
 def test_run_analyze_phase_cache_only_oversized_cache_is_typed_corruption(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, corruption: str
 ) -> None:
     ctx = _context(tmp_path)
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
+    ctx.selection_domain = replace(
+        ctx.selection_domain, selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=2)
+    )
     input_videos = [ctx.reference.path]
     monkeypatch.setattr(
         phase_selection.cache_io, "compute_cache_key", lambda *_args, **_kwargs: "fp"
@@ -557,6 +592,14 @@ def test_run_analyze_phase_cache_only_oversized_cache_is_typed_corruption(
         input_videos, "fp"
     )
     cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
+
+    if corruption in {"deep", "integer-limit"}:
+        cache_path.write_text("[" * 10000 if corruption == "deep" else "1" * 5000, encoding="utf-8")
+    elif corruption.startswith("enum"):
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        payload["luminance"] = [0.5]
+        payload["metadata"]["active_rect_detection_mode"] = [] if corruption == "enum-list" else {}
+        cache_path.write_text(json.dumps(payload), encoding="utf-8")
 
     class FailingLoader:
         def load(self, path: Path) -> SourceInfo:
@@ -581,7 +624,9 @@ def test_run_analyze_phase_cache_only_metadata_mismatch_does_not_recompute(
     def _fake_load_cached_metrics(*_args: object, **_kwargs: object) -> CacheLoadResult:
         return CacheLoadResult(success=False, reason="mismatched_inputs")
 
-    def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
+    def _fake_calculate_metrics(
+        request: MetricCacheRequest, **_kwargs: object
+    ) -> MetricsAcquisition:
         raise AssertionError("cache-only analyze phase must not recompute metrics")
 
     monkeypatch.setattr(
@@ -714,27 +759,49 @@ def test_run_analyze_phase_maps_analysis_metrics_into_reference_domain(
     selection_inputs: dict[str, object] = {}
     ctx = _context(tmp_path)
     if domain in {"analysis-source", "sparse"}:
-        ctx.analysis_clip = ctx.reference.with_trim(
-            trim_start_frames=20, trim_end_frame_inclusive=80
+        ctx.selection_domain = replace(
+            ctx.selection_domain,
+            analysis_clip=ctx.reference.with_trim(
+                trim_start_frames=20, trim_end_frame_inclusive=80
+            ),
         )
         if domain == "analysis-source":
-            ctx.analysis_clip = replace(ctx.analysis_clip, effective_fps=Fraction(60, 1))
+            assert ctx.selection_domain.analysis_clip is not None
+            ctx.selection_domain = replace(
+                ctx.selection_domain,
+                analysis_clip=replace(
+                    ctx.selection_domain.analysis_clip, effective_fps=Fraction(60, 1)
+                ),
+            )
         ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=70)
-        ctx.selection_window = SelectionWindow(start_frame=5, end_frame_exclusive=15)
+        ctx.selection_domain = replace(
+            ctx.selection_domain,
+            selection_window=SelectionWindow(start_frame=5, end_frame_exclusive=15),
+        )
     elif domain in {"base-trim", "untrimmed-analysis"}:
         ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=14)
-        ctx.analysis_clip = ctx.reference
-        ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=5)
+        ctx.selection_domain = replace(ctx.selection_domain, analysis_clip=ctx.reference)
+        ctx.selection_domain = replace(
+            ctx.selection_domain,
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=5),
+        )
         if domain == "untrimmed-analysis":
-            ctx.analysis_clip = _clip(
-                tmp_path / "comparison_videos" / "analysis.mkv", label="Analysis", num_frames=5
+            ctx.selection_domain = replace(
+                ctx.selection_domain,
+                analysis_clip=_clip(
+                    tmp_path / "comparison_videos" / "analysis.mkv", label="Analysis", num_frames=5
+                ),
             )
-            ctx.analysis_clip.path.write_bytes(b"analysis")
+            assert ctx.selection_domain.analysis_clip is not None
+            ctx.selection_domain.analysis_clip.path.write_bytes(b"analysis")
     else:
-        ctx.selection_window = SelectionWindow(start_frame=24, end_frame_exclusive=72)
+        ctx.selection_domain = replace(
+            ctx.selection_domain,
+            selection_window=SelectionWindow(start_frame=24, end_frame_exclusive=72),
+        )
     input_videos = [ctx.reference.path]
     if domain in {"analysis-source", "untrimmed-analysis"}:
-        input_videos.append(cast(ClipState, ctx.analysis_clip).path)
+        input_videos.append(cast(ClipState, ctx.selection_domain.analysis_clip).path)
 
     monkeypatch.setattr(
         phase_selection.cache_io,
@@ -835,7 +902,10 @@ def test_run_analyze_phase_maps_analysis_metrics_into_reference_domain(
 def test_select_initial_frame_plan_uses_effective_selection_domain(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=10)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=10),
+    )
 
     output = phase_selection.select_initial_frame_plan(ctx)
 
@@ -845,7 +915,10 @@ def test_select_initial_frame_plan_uses_effective_selection_domain(tmp_path: Pat
 
 def test_select_initial_frame_plan_uses_global_selection_window(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
-    ctx.selection_window = SelectionWindow(start_frame=24, end_frame_exclusive=48)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=24, end_frame_exclusive=48),
+    )
 
     output = phase_selection.select_initial_frame_plan(ctx)
 
@@ -858,7 +931,10 @@ def test_select_initial_frame_plan_fails_when_user_random_candidates_are_empty(
 ) -> None:
     ctx = _context(tmp_path)
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=10)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=10),
+    )
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"user_frames": [0], "random_frame_count": 0}
     )
@@ -872,7 +948,10 @@ def test_select_initial_frame_plan_warns_when_user_frames_are_dropped(
 ) -> None:
     ctx = _context(tmp_path)
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=10)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=10),
+    )
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"user_frames": [0, 12], "random_frame_count": 1}
     )
@@ -921,7 +1000,9 @@ def test_select_initial_frame_plan_fails_when_random_request_exceeds_remaining_d
     tmp_path: Path,
 ) -> None:
     ctx = _context(tmp_path)
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
+    ctx.selection_domain = replace(
+        ctx.selection_domain, selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=2)
+    )
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"user_frames": [0], "random_frame_count": 2}
     )
@@ -1037,7 +1118,9 @@ def test_run_analyze_phase_reports_actual_acquisition_after_cache_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initial_hit: bool
 ) -> None:
     ctx = _context(tmp_path)
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=2)
+    ctx.selection_domain = replace(
+        ctx.selection_domain, selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=2)
+    )
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 1, "motion_frame_count": 0}
     )
@@ -1083,14 +1166,14 @@ def test_run_analyze_phase_reports_actual_acquisition_after_cache_changes(
         reads += 1
         return real_reader(cache_dir, fingerprint)
 
-    def acquire(**kwargs: Any) -> MetricsAcquisition:
+    def acquire(request: MetricCacheRequest, **kwargs: Any) -> MetricsAcquisition:
         # Change persisted cache state at the acquisition boundary. An earlier
         # orchestration prediction would describe the opposite disposition.
         if initial_hit:
             cache_path.unlink()
         else:
             phase_selection.cache_io.save_metrics_cache(primed, ctx.workspace.cache_dir)
-        return metrics_owner.calculate_metrics(**kwargs)
+        return metrics_owner.calculate_metrics(request, **kwargs)
 
     monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics", reader)
     monkeypatch.setattr(phase_selection, "calculate_metrics", acquire)

@@ -17,7 +17,12 @@ documents that promise elsewhere.
 - `src/frame_compare/cli/entry.py` is the implementation owner for CLI command routing,
   argument parsing, stdout/stderr behavior, and interactive post-run behavior.
 - `src/frame_compare/cli/output.py` owns the human run plan, result hierarchy,
-  warning presentation, and path formatting; it does not own JSON serialization.
+  warning presentation, and path formatting; it does not own JSON serialization
+  or the shared section/path primitives.
+- `src/frame_compare/utils/terminal_sections.py` owns the shared open-rail
+  renderer for Rich human sections. `src/frame_compare/utils/artifact_paths.py`
+  owns human artifact-path formatting and terminal hyperlinks. `SessionConsole`
+  mirrors the same section rules in the VSView process.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
 - Primary executable contract checks include:
   - `tests/cli/test_help_and_import.py` for command registration, help text, and
@@ -104,6 +109,7 @@ described under Output Modes.
 These commands share the same root/config path resolution rules:
 
 - `run`
+- `doctor`
 - `wizard`
 - `preset apply`
 - `preset save`
@@ -122,7 +128,7 @@ once and may name a normal external directory; empty or whitespace-only values,
 including values that become empty after environment expansion, are invalid. Its
 managed descendants remain contained beneath that resolved generated-data root.
 Containment follows symlinks and expands environment variables in config path values,
-so invalid config paths fail through the standard typed path error. `run`, `wizard`, `preset apply`,
+so invalid config paths fail through the standard typed path error. `run`, `doctor`, `wizard`, `preset apply`,
 `preset save`, and both `history` subcommands validate their selected config
 destination before config reads or writes; `run` also validates generated-data
 root structure before diagnostics, config writes, or runtime entry. `preset list`
@@ -149,7 +155,7 @@ History does not require the configured input directory or current video files t
 exist, keeping recorded outcomes readable after media moves.
 
 For the installed Windows portable shim, the shim runs the bundle launcher from the
-bundle root and injects a default `--config` for `run`, `wizard`, supported
+bundle root and injects a default `--config` for `run`, `doctor`, `wizard`, supported
 `preset` subcommands, and `history list`/`history open` when the user did not pass
 `--config`. For subgroup commands the injection occurs after the subcommand and
 before any positional history run name or preset name. The injected default
@@ -189,6 +195,11 @@ Current fields:
   This is an AssumeFPS-style timing override; it does not resample, drop,
   interpolate, or duplicate frames. Alignment analyses retimed sources' audio on
   their effective timeline.
+- Decoder-reported source FPS values are canonicalized before mixed-FPS
+  validation and `match_fps`: a value within 10 ppm of exactly one standard rate
+  (`24000/1001`, `24`, `25`, `30000/1001`, `30`, `48`, `50`, `60000/1001`, or
+  `60`) uses that standard rate for time conversions. Frame indices and the raw
+  probe/cache value are unchanged. A value outside that tolerance remains raw.
 - `label_mode`: display-label policy. `stem` is the default; `filename` includes
   the extension; `parsed` composes available release group, title,
   season/episode marker, and episode title.
@@ -219,10 +230,11 @@ active rectangles are the highest-precedence active-picture evidence during
 preparation; when omitted, preparation may use trusted static metadata,
 dimension/aspect-ratio inference, or a full-frame fallback according to
 `screenshots.active_rect_detection`.
-`effective_fps` is an explicit AssumeFPS-style timing override: it changes
-timing/FPS interpretation without resampling, dropping, interpolating, or
-duplicating source frames. Mixed-FPS validation compares effective FPS values
-after explicit overrides and after `match_fps = "assume_reference"` or
+`effective_fps` is an explicit AssumeFPS-style timing override applied after
+source-rate canonicalization: it changes timing/FPS interpretation without
+resampling, dropping, interpolating, or duplicating source frames. Mixed-FPS
+validation compares effective FPS values after explicit overrides and after
+`match_fps = "assume_reference"` or
 `match_fps = "majority"` matching. Explicit per-source `effective_fps` values
 take precedence over `match_fps`.
 
@@ -363,33 +375,50 @@ unchanged.
   not alter the JSON fields, which continue to report effective configuration.
 #### Run-plan presentation
 
-- Normal non-quiet runs begin with a `Run plan` panel containing `Workspace`,
-  `Frames`, `Rendering`, `Alignment`, `Review`, and `Publishing` sections with
-  the section value on the section row and a blank line between sections.
-  `Workspace` is the root with `config`, `input`, and `output` (formerly
-  `generated`) sub-rows. `Frames` is `N total` with a `mix` row of non-zero
-  categories (`20 random · 10 dark · …`), a `user frames` comma list,
-  `analysis` as `{mode lower} profile · {policy} source` (plus
-  `· skipped for this run`), `cache` as `read and write` / `cache only` /
-  `refresh current entry`, `skip` as `first {lead} · last {trail}` / `none`, and `seed`.
-  `Rendering` is `automatic · VapourSynth preferred` or `FFmpeg`, with
-  `overlay` as `{mode lower}` and `geometry` as
-  `{geometry lower} geometry · active area {mode lower}`. `tone map` is
-  `{curve} {preset lower} · {N} nits` (e.g. `BT.2390 reference · 100 nits`) or
-  `disabled`. `Alignment` is `audio, then VSView review` /
-  `audio, VSView required` / `audio` / `disabled`, with a `tools` row of
-  `{glyph} FFmpeg audio   {glyph} VSView` where each unavailable tool is
-  followed by muted `(unavailable)` or the existing probe-failure text (VSView
-  omitted when not requested; FFmpeg shows `–` when alignment is disabled) and
-  an `offsets` row with the existing label lower-cased first. `Review` is
-  `HTML report · opens when done` / `HTML report` / `disabled` with `metadata`
-  as `TMDB lookup` / `disabled`. `Publishing` is
-  `slow.pics · {visibility lower} · ask after the local report` /
-  `automatic upload`, or `disabled` / `disabled by --no-upload`, with
-  `after upload` as the enabled actions
-  (`copy URL · open browser · create shortcut`) / `none`, `webhook` as
-  `configured` / muted `not configured` (the URL itself is never displayed),
-  and `cleanup` with the existing text lower-cased first.
+- Human panels, rules, and prompts use one open-rail section renderer. The first
+  line is `╭─ ` plus the title, body lines begin with `│ ` (including `│` for a
+  blank line), and the final line is `╰─`; nothing is printed on the right.
+  Rails are dim for neutral sections, green for successful completion, yellow for
+  warnings or review-needed sections, red for failures, and accent for prompts
+  waiting on the user. Titles are accent bold text with an optional dim
+  ` · {detail}`; status titles retain their glyph and semantic colour. Key/value
+  rows use a 14-character dim key column, two spaces, and a value beginning at
+  column 18. List rows start immediately after `│ `, and notes use `! …` or
+  `– …`. Render width is `min(terminal width, 120)`; values wrap at render time
+  with the rail preserved. Interpolated text is escaped. Non-UTF streams use
+  `+-`, `|`, `+-`, `*`, and `o` for the section and status glyphs, while the
+  existing `·`, `›`, `…`, `×` mappings remain in force. Rich output uses this
+  renderer for every in-scope section; the VSView process applies the same rules
+  in `SessionConsole`. There is one blank line before and after each section;
+  phase lines are grouped without blank lines between them and have one blank
+  line around the group.
+- Normal non-quiet runs begin with a dim-rail `Run plan` section containing
+  `Workspace`, `Frames`, `Rendering`, `Alignment`, `Review`, and `Publishing`
+  groups. Rows and their order are unchanged. Group keys are accent bold; their
+  sub-rows are indented two spaces, and there is one blank body line between
+  groups. `Workspace` is the root with `config`, `input`, and `output` sub-rows
+  (`output` is the resolved generated-data root). `Frames` is `N total` with a
+  `mix` row of non-zero categories, a `user frames` comma list, `analysis` as
+  `{mode lower} profile · {policy} source` plus `· skipped for this run` when
+  applicable, `cache` as `read and write` / `cache only` / `refresh current
+  entry`, `skip` as `first {lead} · last {trail}` / `none`, and `seed`.
+  `Rendering` is `automatic · VapourSynth preferred` or `FFmpeg`, with `overlay`
+  as `{mode lower}` and `geometry` as `{geometry lower} geometry · active area
+  {mode lower}`. `tone map` is `{curve} {preset lower} · {N} nits` (for example,
+  `BT.2390 reference · 100 nits`) or `disabled`. `Alignment` is `audio, then
+  VSView review` / `audio, VSView required` / `audio` / `disabled`, with a
+  `tools` row of `{glyph} FFmpeg audio · {glyph} VSView`; unavailable tools are
+  followed by muted `(unavailable)` or the existing probe-failure text, VSView
+  is omitted when not requested, and FFmpeg shows `–` when alignment is disabled.
+  Its `offsets` row uses the existing label with a lower-case first letter.
+  `Review` is `HTML report · opens when done` / `HTML report` / `disabled`, with
+  `metadata` as `TMDB lookup` / `disabled`. `Publishing` is `slow.pics ·
+  {visibility lower} · ask after the local report` / `automatic upload`, or
+  `disabled` / `disabled by --no-upload`, with `after upload` as
+  `copy URL · open browser · create shortcut` / `none`, `webhook` as
+  `configured` / muted `not configured` (the URL is never displayed), and
+  `cleanup` with the existing text lower-cased first. The `tools` separators are
+  ` · `.
 - Human run-plan paths show the resolved workspace root once as an absolute anchor.
   Contained config, input, generated-data, and result paths are shown relative to
   that root; external paths remain absolute. Rich folds long paths at narrow
@@ -426,96 +455,155 @@ unchanged.
   prompt would be needed.
 #### Source, alignment, and completion summaries
 
-- Human-readable non-quiet runs emit a `Frame Alignment` diagnostic to stderr after
-  the alignment phase when accepted or rejected frame alignment changes need
-  explanation. The diagnostic reports normalized source-frame row 0, final trim
-  ranges, offsets, selected aligned frames, and alignment warning context
-  for comparisons with material alignment information. Stability is derived
-  from credible chunk runs; unobserved planned chunks remain unassessed. Any
-  displayed change position is
-  approximate and between observations, not an observed edit location. Stable or
-  insufficient evidence does not warn. Verbose mode may also show stable evidence and
-  credible-chunk counts; individual diagnostic chunks are never printed.
-  It is suppressed by
-  `--quiet` and is never emitted to `run --json` stdout.
-- After sources load, normal human output uses one `Sources · N loaded` panel
-  heading (accent + muted). The first line is the content title (bold), followed
-  by a blank line. Per source: the standard name (bold) with muted `reference`
-  on the reference only; line 2 is
-  `{w}×{h} · {fps} fps · {frames:,} frames ({runtime}) · {size}` (the size
-  segment is omitted when the size is unknown or zero); line 3 is the filename
-  (muted), with a blank line between sources. When any comparison's frame count
-  differs from the reference, one warning line per distinct difference groups
-  comparisons with the same count using short names (e.g. `! Lengths differ: A
-  and B are 464 frames (19.4 s) shorter than SCOPE.`). The last line is
-  `analysis source  {short name} (fastest to decode)` for the fastest-source
-  policy or `{short name} (configured)` for the configured policy. The displayed
-  size comes from the probed fingerprint's `size_bytes`; it is not bitrate or a
-  quality signal, and it is not added to successful `run --json`.
-- After alignment, normal human output emits one collapsed line of the form
-  `✓ frame rates match · 23.976 fps (24000/1001)` (the A2 terminal FPS format)
-  only when every effective FPS is equal and no source FPS was adjusted. Any
-  adjustment or effective-FPS divergence instead keeps a compact evidence table
-  with the source-to-effective transition and status. Normal post-alignment FPS
-  output omits repeated paths; `--verbose` retains the detailed rows and full
-  absolute paths. JSON-mode FPS diagnostics retain their existing structured
-  stderr event and do not add fields to the successful stdout payload; the
-  event carries the original diagnostic wording (e.g. `Analysis source:
-  {role} | selected by fastest-source policy`); only the Rich rendering shows
-  the Sources short-name line (`analysis source  {short name} (fastest to
-  decode)` or `(configured)`).
-- Material `Frame Alignment` output puts comparison, offset, source, trim, and
-  warning evidence before verbose provenance details. Verbose mode also retains
-  canonical labels, row-zero source frames, selected aligned frames, and absolute
-  source paths; normal mode uses compact release identities.
-  Source/FPS, alignment, and previous-offset prompt panels honor the actual
-  terminal width up to their existing maximum and do not impose a 100-column
-  minimum; status meaning remains visible in no-color output at narrow widths.
-- Verbose human runs emit a concise `Final Selection` summary to stderr immediately
-  after alignment. It reports the final aligned frame count and each non-empty
-  `SelectionBreakdown` category in `User`, `Dark`, `Bright`, `Motion`, `Random`
-  order, with category counts and compact ranges kept in their existing source-frame
-  domain. If the breakdown is unavailable, the aligned count is still reported with
-  an unavailable indication. Normal, quiet, and JSON runs do not emit this summary,
-  and it does not add a JSON field or log event.
+- After sources load, normal human output uses one `Sources · N loaded` section
+  when all sources do not share one content identity, or `{content identity} ·
+  {N} sources` when they do. `1 source` is used for one source. The content
+  identity is no longer repeated in the body. Each source entry has its bold name,
+  `  reference` in dim on the reference only, the dim
+  `{w}×{h} · {fps} fps · {frames} frames ({runtime}) · {size}` line, the dim
+  filename, and the dim display path in `--verbose` mode. Length differences and
+  other load diagnostics follow the entries as `!` notes with their existing text.
+  The final key/value row is `analysis` with `{short} (fastest to decode)` or
+  `{short} (configured)`. The displayed size comes from the probed fingerprint's
+  `size_bytes`; it is not bitrate or a quality signal, and it is not added to
+  successful `run --json`.
+- If every effective frame rate matches and no source FPS was adjusted, frame-rate
+  output is omitted. Otherwise a dim-rail `Frame rates` section contains the
+  existing table content as key/value rows; the `After Alignment` stage label is
+  omitted. JSON-mode FPS diagnostics retain their existing structured stderr event
+  and do not add fields to successful stdout.
+- Material alignment information is printed in a dim-rail `Frame alignment`
+  section when accepted or rejected frame-alignment changes need explanation. Each
+  comparison has a bold short-name line, `trims`, `stability` when present, and
+  `frames` (`aligned …`).
+  The `offset` and `source` rows are removed; the Align phase summary carries the
+  final offsets and origins. Alignment warnings are `!` notes, and verbose
+  `details` rows are unchanged. The existing evidence still reports normalized
+  source-frame row 0, final trim ranges, selected aligned frames, and alignment
+  warning context. Stability is derived from credible chunk runs; unobserved
+  planned chunks remain unassessed. Individual diagnostic chunks are never printed.
+  The section is suppressed by `--quiet` and never emitted to `run --json` stdout.
+- `--verbose` adds a dim-rail `Final selection` section after alignment. Its rows
+  are unchanged; the `After Alignment` stage label is omitted.
+- Audio alignment uses a dim rail, or a yellow rail when any comparison needs
+  review, with title `Audio alignment` and optional dim ` · {N} needs review`.
+  Each entry starts with a bold short name and one of the exact states `{+Nf} ·
+  applied`, `{+Nf} · confirm in VSView`, `{+Nf} · reused from last run`,
+  `{+Nf} · previously confirmed`, `{+Nf} · manual offset`, `{+Nf} · not applied`,
+  or `no audio match ({reason phrase})`. Fresh results include the dim evidence
+  line `{agreeing} of {active} sections agree · video check {+Nf} · {stability}`.
+  The agreeing count is `authority_recount.authority_agreeing_chunks` when an
+  authority recount exists, otherwise `audio.agreeing_chunks`; both are counted
+  over `audio.active_chunks`. When `video_check.observation` is `observed`, the
+  evidence says `video check {+Nf}` when `confirmed_offset` is set and
+  `video check inconclusive` otherwise. When the observation is not `observed`,
+  the video-check segment is omitted. `stability.classification` replaces `_`
+  with spaces; `possible drift`, `possible discontinuity`, and `variable` are
+  yellow, and other classifications are dim. A present `noted_line` follows this
+  evidence in dim text. Reused computed results instead say `no audio analysis ran
+  this time`; reused manual results and manual offsets have no second line.
+  Provisional and no-candidate entries retain these exact reason sentences:
+  `The video confirms {+Nf} in <range>, so the sources likely differ by an edit
+  there.`; `Audio in <range> points to {+Nf}, and the video could not settle which
+  offset is right there.`; `Audio in <range> points to {+Nf}, and the video could
+  not rule that out.`; `The audio points to {+Nf}, but the video could not confirm
+  the exact frame (little motion or different framing at the checked points).`;
+  and `The audio points to {+Nf}, but the video could not be read to confirm the
+  exact frame.`. They also retain up to three region lines, up to two check points,
+  and `Align manually or keep the current alignment.` only when review is not
+  pending. A valid applied zero offset is printed as `+0f`; no usable audio
+  evidence remains `no audio match ({reason phrase})`, and an unapplied candidate
+  remains visibly distinct. Absence of usable evidence is never rewritten as zero.
+  Provisional evidence never authorizes trims, persistence, or computed-cache
+  authority. Verbose evidence remains as dim key/value rows,
+  including the original attempt and stream/chunk/video facts without fabricating
+  current details for reused results. A written diagnostics directory appears as
+  the `diagnostics` hyperlink row. Plain mode prints `{short}: {line 1 state}` and
+  indents following lines two spaces, then `Audio diagnostics: {path}`. The
+  pre-review `✓ Align … alignment applied` line is removed. Quiet mode retains
+  only actionable entries and the final screenshots line.
+- When previous offsets are reused interactively, the prompt section is
+  `› Reuse previous offsets?`. Each line is bold `{short}`, two spaces,
+  `{+Nf} · {origin} · {accepted}` where origin is `confirmed in VSView` or
+  `audio`; verbose mode may append seconds and add `file` and `path` rows. A
+  `cache` row follows. The question is inside the rail as
+  `│ Reuse these offsets? [y/N]: `, followed by the answer and `╰─`. The
+  `reference` and `Content` rows are omitted. If the prompt is unavailable, the
+  `!` note outside the section remains
+  `Previous alignment offset reuse prompt unavailable; continuing without reuse.`
+- The VSView hand-off section is `› VSView is open · waiting for you`, with the
+  three numbered steps, then an `outputs` table. The table's third column uses
+  `reference`, `audio {+Nf}`, `audio {+Nf} · not applied`, `audio {+Nf} · reused`,
+  `previously confirmed {+Nf}`, `manual offset {+Nf}`, or `no audio match` as
+  applicable. Separate `hints` rows are removed. Display assumptions follow the
+  outputs after a blank line as a `! VSView display assumptions` note and the
+  existing `source`/`preview`/`range`/`impact` rows. `[WARN]` and `[FAIL]`
+  source-loading status lines remain outside the section.
+- VSView unavailable output is a yellow-rail `! VSView review unavailable`
+  section with `{reason}`, `Continuing with the current alignment offsets.`, and
+  `Check the VSView setup with frame-compare doctor.`. Verbose launch telemetry is
+  a dim-rail `VSView session` section; verbose failure details are a dim-rail
+  `VSView failure details` section. A successful review prints nothing at this
+  point. Rejected or invalid review results use the phase-style line
+  `! VSView review    {reason}; current offsets were kept.`
+- The Align phase summary always prints when Align ran. It uses
+  `{short} {+Nf} · {short} {+Nf} · {origin}` when origins are shared, or per-entry
+  origins when they differ. Origins are `confirmed in VSView`, `audio`, `reused
+  from last run`, `previously confirmed`, `manual offset`, and `kept`. A changed
+  final offset is shown as `{short} +2f (audio +0f)`. A comparison without an
+  applied offset is `{short} not applied`, or `{short} not applied (kept)` after
+  a keep-current review; `not applied` is yellow. If the value wraps, the rows
+  form is `{N} sources aligned · {origin}` followed by one row per comparison at
+  column 18. Length differences add the dim extra-footage line. Review duration
+  is `· {machine} + {review} review`. The Align phase is warned whenever any
+  comparison ends without an applied offset, whether or not review ran; this
+  changes only the phase glyph and colour and does not change authority, trims,
+  persistence, the warnings list, or the completion title.
 - Human-readable non-quiet successful runs use `✓ Comparison complete`,
   `! Comparison complete · N warnings`, or `✗ Comparison failed` as the result
-  panel title with a matching border, using a de-duplicated warning
-  presentation count. Rows in order: `slow.pics` (the URL as an accent
-  underlined link when uploaded; muted `not uploaded (declined)` when declined,
-  otherwise the existing skip text); an unlabelled row of follow-up results
-  (`✓ URL copied`, `✓ opened in browser`, or `! browser didn't open` plus the
-  muted reason); `  shortcut` path; `  webhook` only when configured
-  (`✓ delivered` / `! delivery failed`); `report`; `screenshots` plus muted
-  `{n} files`; a blank row; then `run` as
-  `{frames} frames · {sources} sources · cache {status}`; a blank row; then the
-  `time` rows: `time` as `{total} total`; `  machine` as Columns of
-  `setup {preflight + load_sources}`, `analyze`, `align` (machine time),
-  `render`, and `upload` (publish, when it ran), each omitted when zero (the
-  row is omitted when every component is zero); `  you` as Columns of
-  `VSView review {t}` and `prompts {confirm_slowpics_upload}`, omitted when
-  both are zero. The total and the phase timings share the same start, so no
-  unmeasured remainder is shown. The review wait is memory-only telemetry: it
-  never enters `phase_timings`, the run record, or JSON output. A warning tied
-  to one of the follow-up rows is
-  shown on that row and removed from the separate warnings panel. The report
-  path is shown before screenshots, and artifact paths are Rich hyperlinks.
-  Durations use human units.
-- Final warnings are grouped by producer-selected source in a `Warnings` panel.
-  Producers provide severity, message, and optional detail directly; labels and
-  diagnostic wording do not change warning or skipped status. Records are
-  de-duplicated for display. A warning tied to one of the follow-up rows
-  (clipboard, browser, shortcut, webhook) is shown on that row and removed from
-  the separate warnings panel, using warning-record equality to associate it.
-  Producer-provided detail is shown once.
-  Normal output shows at most eight warning rows and summarizes hidden rows by
-  source; `--verbose` shows every warning. Panel rows use the `!` (warning) and
-  `–` (skipped) glyphs, with color only reinforcing meaning.
+  section title with a matching rail. Rows are `slow.pics` with the URL only when
+  uploaded, followed by the existing copy/open result items and `  shortcut` and
+  `  webhook` rows; `report`; `screenshots` with `  {N} files`; `alignment` when
+  alignment ran; `diagnostics` when written; and the `slow.pics` row `upload
+  skipped because the report could not be confirmed` when that happened.
+  Declined uploads get no row. After one blank body line, `run` is `{N} frames ·
+  {N} sources · analysis cached` or `analysis computed`, with nothing for
+  `skipped`, followed by `time` as `{dur} total`, `  machine`, and `  you` with
+  their existing items. Artifact paths are Rich hyperlinks and use the shared
+  path formatter. `--quiet` is unchanged.
+- Final warnings are grouped by producer-selected source in a yellow-rail
+  `! Warnings` section. Each source has its accent bold name, `!` notes (or `–`
+  for skipped items), dim detail lines indented two spaces, and one blank body
+  line between sources. The hidden-count line is unchanged. Records are
+  de-duplicated for display, and warning rows associated with post-upload action
+  rows remain on those rows.
+- The output redesign moves information rather than dropping it:
+
+  | Removed or changed | Information now shown in |
+  | --- | --- |
+  | Pre-review `✓ Align … alignment applied` line | Audio alignment entries |
+  | `No additional confirmation needed.` | `applied` when no review follows; it was wrong when a review followed |
+  | `Comparison N - ` prefixes and `Comparison N \|` in progress | Short names, unique by construction |
+  | Historical chunk and selected-stream details are unavailable | `no audio analysis ran this time` |
+  | Historical audio details are unavailable on manual results | The origin (`previously confirmed`, `manual offset`) and absent evidence line |
+  | `Align manually or keep the current alignment.` when review follows | The VSView steps |
+  | VSView `hints` rows | The third column of VSView `outputs` rows; the VSView overlay keeps its full detail |
+  | `VSView alignment review / Accepted N confirmed pairs.` | The Align line with per-source offsets and origins |
+  | Frame alignment `offset` and `source` rows | Align line offsets and origins, and the completion `alignment` row |
+  | `After Alignment` stage labels | These panels only exist after alignment |
+  | `✓ frame rates match · …` line | Per-source fps in Sources; mismatch or adjustment still prints Frame rates |
+  | Sources body title line | The section title |
+  | `analysis source` and `diagnostic` keys | `analysis` key and `!` notes with the same text |
+  | Reuse prompt `Content` and `reference` rows | Sources title and the `reference` tag in Sources |
+  | Reuse prompt per-row `File`, `Path`, and seconds | `--verbose`; normal mode uses unique short names and Sources lists every filename |
+  | Publish prompt `Visibility` row | The question `Upload to {visibility} slow.pics?` |
+  | Completion `slow.pics  not uploaded (declined)` row | `– Publish  declined` phase line |
+  | Completion `cache hit` / `cache miss` | `analysis cached` / `analysis computed` |
+  | `Execution` rules | The step map in the live footer |
+  | `Hint:` prefix in VSView unavailable text | The same sentence without the prefix |
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs,
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
-- Applied results use `alignment applied` in both short alignment summaries;
-  native-review counts and `needs visual confirmation` wording are unchanged.
 - When the Run plan reports optional VSView probe failures, it uses a
   sanitized summary (e.g. `probe failed (RuntimeError)`) rather than raw probe
   exception text; the secret exception message itself is never displayed.
@@ -535,15 +623,16 @@ unchanged.
   are not configuration rows.
 #### Progress and terminal behavior
 
-- Human Rich progress uses title-case product phase labels: `Plan`, `Analyze`,
-  `Align`, `Render`, `Metadata`, `Publish`, `Report`, `Confirm`, and `Cleanup`,
-  with completed lines as `{glyph} {Label:<9} {summary}` and the duration
-  right-aligned and muted. After a native VSView review, the `Align` line keeps
-  its review summary on the left and shows `{align machine time} + {review
-  time} review` as the duration, where machine time is `phase_timings["align"]`
-  minus the review time. The plain and log reporters keep the uppercase
-  labels. Internal phase names in logs and `phase_timings` remain the runtime
-  keys such as `frame_plan`, `analyze`, `align`, and `confirm_slowpics_upload`.
+- Rich phase lines use `{glyph} {Label:<16}{summary}`, so the summary begins at
+  column 18. The duration is appended inline in dim as `{summary} · {dur}`; with
+  no summary, the duration alone begins at column 18. Retention rules are
+  unchanged for completed top-level phases of 10 seconds or more, skipped,
+  warned, and failed phases, and successful uploads. Plain mode keeps
+  `[OK] ALIGN  Completed in …` and related existing renderers.
+- Phase summaries are unchanged except for Align: Analyze uses `{N} frames
+  selected`, Render uses `{N} screenshots ({F} frames × {S} sources)`, Publish
+  uses `{N} screenshots uploaded · {visibility}`, and a skipped phase uses its
+  lower-cased detail, such as `– Publish          declined`.
 - Non-TTY human runs use those product phase labels in chronological ASCII
   progress lines on stderr. Each top-level phase emits once when it completes;
   successful lines include elapsed time, skips preserve their detail, and failed
@@ -552,97 +641,32 @@ unchanged.
   work may emit one line when needed to preserve a material outcome. Expected
   warn-only phase failures do not add a console traceback or duplicate warning
   event; JSON progress retains the structured `phase_warned` exception evidence.
-- Interactive Rich runs place those runtime phases and their diagnostics inside a
-  lightweight `Execution` rule band after the Sources panel and before the Result
-  panel. Loose live and durable runtime lines use a consistent two-space inset;
-  evidence and blocking-decision panels remain panels, with nested decision
-  questions using a four-space inset immediately below their panel. JSON, quiet,
-  and non-TTY output do not gain the band or inset.
-- Every Rich phase remains live while active with the `…` running glyph in the
-  accent colour. The plain and log reporters keep their existing markers. Meaningful
-  measurable tasks use a Rich progress bar separated from preceding
-  durable output by one blank line and report completed/total work with a labeled
-  `ETA` once Rich has an estimate; before then, only completed/total work is shown.
-  Indeterminate activity uses an ASCII spinner after its description, while
-  one-step phases remain simple activity lines without a bar. The nested screenshot
-  bar uses the stable aggregate description `Screenshots` and advances as each
-  screenshot completes; an FFmpeg batch advances together when the batch completes.
-  A successful top-level phase leaves a durable status line with elapsed time
-  when it runs for at least 10.0 seconds (Rich: `{glyph} {Label:<9} {summary}`;
-  the plain and log reporters keep their uppercase ASCII markers). Successful
-  nested tasks remain transient, while skipped,
-  warned, and failed phases always remain visible. A successful slow.pics upload
-  also leaves a durable `Publish` line regardless of duration. The report-confirmed
-  prompt is recorded by its confirmation panel; it does not add a redundant
-  generic successful completion line. Progress is suspended around that blocking
-  prompt and restored afterward. Rich status color is confined to the semantic
-  marker: the running `…` is the accent colour, `✓` green, `!` yellow, and `✗`
-  red; the skipped `–` carries no color. The description remains normally styled,
-  and no-color output retains the same literal glyphs. The plain and log
-  reporters keep their existing ASCII markers.
+- Interactive Rich runs show the live task line and a two-space-indented step map
+  in execution order: `✓ Analyze  ● Align  ○ Render  ○ Report  ○ Publish`.
+  Only Analyze, Align, Render, Report, and Publish appear; disabled phases are
+  omitted and phases skipped while running show `–`. The map is hidden while the
+  live area is suspended for prompts or VSView. There is no `Execution` rule band.
+  Measurable tasks use a Rich bar with completed/total work and an `ETA` once an
+  estimate exists; indeterminate tasks show a spinner followed by elapsed time.
+  The live area refreshes at least four times per second while a phase runs and
+  stops refreshing while suspended. Successful top-level phases retain the same
+  duration-based lines, while skipped, warned, failed, and successful upload
+  phases remain visible. Plain and log reporters keep their existing markers and
+  uppercase labels.
+- The Align live descriptions are `Align · checking saved offsets`,
+  `Align · using cached audio evidence · {short}`, `Align · {short}`, and
+  `Align · VSView review`. Fresh comparisons show staged descriptions with the
+  comparison position: `Align · {short} ({i} of {n}) · preparing audio`,
+  `reading audio`, `indexing video`, and `checking video`. Preparing, indexing,
+  and checking use a spinner plus elapsed time. Reading audio uses a per-
+  comparison chunk bar with `{done}/{total}` and ETA. Cached/reused comparisons
+  are not counted in `{n}`. Stage changes and chunk ticks reach the reporter via
+  the worker-to-loop callback path; stages that do not run are not shown.
 - On a non-UTF stdout or stderr, human output never fails on characters the
   stream cannot encode: generated punctuation degrades to ASCII (`·` as `|`,
   `×` as `x`, dashes as `-`, `…` as `...`, `›` as `>`) and any other
   unencodable character becomes `?`. Encodable text, including cp1252 output,
   is unchanged, and JSON output is ASCII-escaped.
-#### Audio-alignment presentation
-
-- Audio alignment remains one coherent `Align` phase in Rich output (`ALIGN`
-  in plain/log output). Saved/manual/shared offset
-  lookup is shown as `ALIGN | Checking saved offsets` without a nested task. Fresh
-  comparison work is shown while active as `ALIGN | Analyzing audio | Comparison N |
-  <prepared presentation>`; a declined confirmed offset that can reuse its earlier
-  computed evidence is shown as `ALIGN | Using cached audio evidence | Comparison N |
-  <prepared presentation>`. Completed typed comparison milestones use `ALIGN |
-  Comparison N | <prepared presentation>`, and optional native VSView panel review is
-  labeled `ALIGN | Native VSView review`. Interactive
-  alignment uses a plain left-aligned activity line without a bar, count, ETA, or
-  spinner: the comparison count is too small to make those indicators useful, while
-  the changing description still identifies the active comparison. Structured JSON
-  progress keeps its measurable comparison milestones.
-- Before an optional native review opens, each current attempt emits a compact,
-  inset `Audio Alignment` panel. A fresh video-confirmed result is
-  `Comparison N - Audio alignment accepted: +Nf - APPLIED`; reused computed and
-  manual authority retain `Accepted audio alignment reused: +Nf - APPLIED` and
-  `Manually confirmed alignment: +Nf - APPLIED`, followed by `No additional
-  confirmation needed.` A non-applied candidate is `Comparison N - Provisional
-  audio candidate: +Nf - NOT APPLIED`, followed by the shared plain-language reason,
-  up to three region lines, up to two check points, and `Align manually or keep the
-  current alignment.` The exact reason sentences are:
-  `The video confirms +Nf in <range>, so the sources likely differ by an edit there.`
-  for `competing_offset_confirmed_by_video`; `Audio in <range> points to +Nf, and
-  the video could not settle which offset is right there.` for `competing_offset`;
-  `Audio in <range> points to +Nf, and the video could not rule that out.` for
-  `unresolved_audio_disagreement`; `The audio points to +Nf, but the video could not
-  confirm the exact frame (little motion or different framing at the checked
-  points).` for `video_check_inconclusive`; and `The audio points to +Nf, but the
-  video could not be read to confirm the exact frame.` for
-  `video_check_unavailable`. Unexamined sections add their bounded plain-language
-  sentence. Unavailable results emit `Comparison N - No usable audio candidate
-  (<plain-words reason>) - NOT APPLIED` followed by `Align manually or keep the
-  current alignment.` A previously shared manual result is labeled
-  `Manually confirmed alignment reused: +Nf - APPLIED`; current-run and preexisting
-  manual results keep the unqualified manual label.
-  The current applied result and provenance lead even when an original attempt is
-  retained as historical evidence. This does not
-  add a successful JSON field or write human text to JSON stdout. The run-local
-  diagnostic location is reported only after a successful write. The human Rich panel
-  owns that success presentation; `alignment_diagnostics_written` remains a structured
-  event for JSON/log output and is suppressed from interactive human output.
-- The pre-review evidence block keeps trusted/manual `+0f`, provisional
-  `+0f`, and absence distinct. Provisional audio evidence never authorizes a
-  correction. Verbose output retains the reason, estimator policy, chunk
-  active/credible/agreeing counts with lag and compensation, the sub-frame estimate,
-  selected stream ordinals and start-time bases, collection facts,
-  V5/V5a video outcomes, targets, review regions/check points, and original attempt
-  state; historical computed and human reuse are labeled
-  separately and do not fabricate current stream/chunk details.
-- `--verbose` adds bounded selected-stream, chunk, gate, runtime/policy, work, and
-  credible-chunk counts; individual diagnostic chunks are never printed.
-  `--quiet` suppresses routine accepted/status evidence but
-  retains actionable rejection and diagnostic-write warnings. `--no-color` and
-  redirected/non-TTY output remain static plain text without cursor control or a
-  blocking read.
 - `run --json` suppresses the human alignment blocks and tables. Actionable rejection
   uses the existing structured stderr logging boundary with bounded scalar fields,
   including the `audio_alignment_requires_review` warning carrying the comparison
@@ -663,6 +687,13 @@ unchanged.
   normal TTY runs because the product progress stream already represents the same
   lifecycle. Retry, rate-limit, server, timeout, and network warnings remain
   normal warning events.
+- In Rich mode, structured log lines are routed through the console that owns the
+  live area and appear above it. They have no timestamp or level column. Event names
+  replace `_` with spaces and fields follow in dim as ` · key=value`; warnings
+  begin `!` in yellow, errors and critical events begin `✗` in red, and info/debug
+  events are dim without a glyph. The same level threshold and call sites remain
+  in force. Plain mode and `--json` keep their existing renderers, and attached exception
+  tracebacks remain below the event line.
 - `--no-color` disables ANSI color in interactive Rich progress output. It does
   not switch an interactive human run to structlog progress. It also disables
   ANSI styling for the previous-offset reuse table and prompt. Quiet and JSON
@@ -680,15 +711,26 @@ unchanged.
 - `--write-config` writes the effective config to disk, then exits without invoking the
   runtime pipeline.
 
+### Opt-in highlight preservation
+
+`--tm-preset highlight_preserve` (or `[color] preset = "highlight_preserve"`)
+selects BT.2390 at 100 nits with knee offset 1.0. Other settings match reference;
+reference remains the default with knee 0.5. Existing explicit color overrides
+retain precedence. An explicit different curve resets the native generic curve
+parameter to 0.5 so the tuned BT.2390 knee is not reused as spline/Reinhard
+contrast. The option is not a no-clipping guarantee and does not enable softclip.
+The existing `highlight_guard` spline preset is unchanged.
+
 ### CLI Choice, Frame, And Count Validation
 
-- `--overlay`, `--tm-preset`, and `--tm-curve` are parsed as raw strings, not Typer
+- `--overlay`, `--tm-preset`, `--tm-curve`, and `--tm-speed` are parsed as raw strings, not Typer
   enums, so an invalid value stays on the typed `FC-1003`/`CONFIG_VALIDATION_ERROR`
   path with exit code 2 instead of a Click usage error. Normal (non-verbose) output
   names the actual flag and the allowed values without requiring `--verbose`:
   `Invalid value for --overlay: banana` followed by
   `Choose one of: minimal, standard, diagnostic, none.` The allowed-value list is
-  read from `OverlayMode`/`TonemapPreset`/`ToneCurve` at the point of the error, so
+  read from `OverlayMode`/`TonemapPreset`/`ToneCurve`/`TonemapSpeed` at the point of
+  the error, so
   it cannot drift from the schema enums. JSON mode keeps the existing structured
   `validation_errors` entry (`type`, `loc`, `msg`, `input`, `ctx.expected`) with
   `loc` pointing at the mapped config path (for example
@@ -715,7 +757,8 @@ unchanged.
 - `frame-compare run --help` uses task-scoped metavariables instead of generic
   placeholders: `FRAME[,FRAME…]` for `--frames`, `COUNT` for the four frame-count
   options, `NITS` for `--tm-target`, and a short choice metavar (`MODE`, `PRESET`,
-  `CURVE`) for `--overlay`, `--tm-preset`, and `--tm-curve` respectively. Each
+  `CURVE`, `SPEED`) for `--overlay`, `--tm-preset`, `--tm-curve`, and `--tm-speed`
+  respectively. Each
   choice option's help text also lists its allowed values (`Choose one of: ...`),
   read from the same schema enums as the validation error above, so help and
   errors cannot disagree.
@@ -743,7 +786,16 @@ unchanged.
 
 After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. In-flight FFmpeg batch extraction is stopped and reaped with bounded cleanup; frame extraction keeps its existing timeout. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
 
-The interrupted run follows the failure-record path and exits 130. The shared
+The interrupted run follows the failure-record path and exits 130. On Windows,
+once the standalone CLI has completed its Python cleanup and selected exit 130,
+it ignores further Ctrl+C during interpreter/native-module teardown to preserve
+that exit status. This does not change repeated-interrupt behavior while the run
+or its cleanup is active, or the signal policy of the reusable Typer application.
+Its failure
+record retains a confirmed slow.pics upload outcome and URL if remote
+publishing completed before the interrupt, even when optional post-upload work
+did not finish. That does not make the run successful or permit new work after
+cancellation. The shared
 TMDB response cache is an exception to the publication rule: an already-in-flight
 validated upstream response may finish its locked, atomic worker publication.
 It carries no run, selection, alignment, or analysis-cache authority, and the
@@ -756,12 +808,24 @@ CLI drains the executor before exit. No new TMDB request starts after the interr
   raises its typed insufficient-candidates outcome from the exclusion-constrained
   shared domain. Valid selection windows, zero-margin configurations, skipped
   analysis, and unrelated metric/runtime failures retain their existing behavior.
-- In an interactive human run, the CLI asks exactly once on stderr, defaulting to No:
+- In an interactive human run, the CLI asks exactly once on stderr through the
+  accent-rail `› Analyze the full clip?` section, defaulting to No:
 
   ```text
-  Configured lead/trail exclusions leave too little media to satisfy the
-  requested frame selection. Analyze the full shared clip for this run? [y/N]
+  ╭─ › Analyze the full clip?
+  │ The skip settings leave too few frames for this selection.
+  │
+  │ requested       50 frames
+  │ available       31 frames
+  │ skip            first 4m 00s · last 5m 00s
+  │
+  │ Analyze the full shared clip for this run? [y/N]: n
+  ╰─
   ```
+
+  The `requested`, `available`, and `skip` values come from the selection
+  confirmation request; the displayed numbers above are illustrative of the
+  documented layout.
 
 - Yes creates a run-scoped effective config copy with only the effective lead and
   trail exclusions set to `0.0`. It recomputes the normal shared selection window,
@@ -979,8 +1043,9 @@ recovery requirement.
   - `--json` was not used
   - `--quiet` was not used
   - stdout is attached to a TTY
-  - the CLI can reload the effective config and `report.auto_open` is true, or the
-    post-run config reload fails and the CLI falls back to opening the report anyway
+  - `refresh_report_auto_open_preference` rereads the selected config through the
+    injected loader and `report.auto_open` is true, or that refresh fails and the CLI
+    falls back to opening the report anyway
 
 There is currently no dedicated `run` flag for `report.auto_open`; it is a config-only
 surface.
@@ -993,15 +1058,16 @@ Report-confirmed slow.pics upload is the exception to that precedence rule. In
 that opted-in workflow, the CLI presents the local report before prompting for
 upload, regardless of whether a later confirmed upload will open the slow.pics
 URL in a browser. The same report auto-open rules decide whether the report is
-opened. A compact `› Publish to slow.pics?` panel (`>` on non-UTF consoles) shows the visibility and,
-if the report was not opened, its path exactly once before the visibility-specific
-default-No question. The confirmation seam receives the literal
-four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</code>, where
-`<visibility>` is `public` or `unlisted`, with `default=False`.
+opened. The prompt is an accent-rail `› Publish to slow.pics?` section. When the
+report opened, its body is `The report is open in your browser. Review it first.`
+Otherwise the body is `Review the report before publishing:` followed by the
+report path as a dim link. The `Visibility` row is removed. The question inside
+the rail is `│ Upload to {visibility} slow.pics? [y/N]: `, followed by the answer
+and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 
 ### Report And Overlay Metadata Contract
 
-- Newly generated standalone reports use payload version `1.2`. Each clip carries a
+- Newly generated standalone reports use payload version `1.3`. Each clip carries a
   presentation-only `display` object with full primary identity, release descriptor,
   ordinary-control label, constrained micro label, and exact filename. These strings
   are assembled once from prepared release identity and explicit-label state. They do
@@ -1010,9 +1076,9 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   number is the common comparison-domain frame; every image separately records its
   mapped untrimmed source frame, exact-frame picture type, and selected-frame Dolby
   Vision RPU presence when available.
-- Existing payload v1.1 HTML reports remain self-contained and viewable as generated;
+- Existing payload v1.1/v1.2 HTML reports remain self-contained and viewable as generated;
   Frame Compare does not rewrite or migrate them. Because the payload version
-  participates in report ID generation, a newly generated v1.2 report may use a new
+  participates in report ID generation, a newly generated v1.3 report may use a new
   browser-local viewer/review storage key. Review JSON is valid only for the exact report
   ID and payload version; there is no cross-version review-state migration or import.
 - The existing Frame inspector follows the images visible in Single, Slider, Diff,
@@ -1023,7 +1089,20 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   and informative release identity, retain the complete wrapping filename, and wrap
   compact source signal, presentation, file-size, and non-full active-picture facts
   without horizontal panel scrolling. Report Information owns the Rendering
-  disclosure, including resolved tonemap settings when tonemapping ran.
+  disclosure, including the shared applied transform when tonemapping ran; the Clips
+  inspector shows each clip's implementation, algorithm, resolved source peak and
+  origin, and fallback cause; per-clip effective controls remain in the payload. Payload `clips[].presentation` contains
+  `state` and `tonemap` (applied facts or null), replacing the old flat requested curve
+  and target fields. `rendering.tonemap` contains `ran`, `requested` settings (or null
+  for mixed requests), and a `shared` implementation/algorithm/effective-controls
+  projection only when all tonemapped clips agree. Per-clip peaks and fallback causes
+  do not prevent a shared run summary.
+- Requested and applied libplacebo controls include `tonemap_speed`. `quality` keeps
+  the `independent_frames` still policy; `fast` disables dynamic peak detection and
+  uses the `shared_stateless` policy, labeled `Shared (metadata peak, no per-frame
+  measurement)`. The per-clip applied facts disclose the resolved source-peak origin.
+  When fast mode uses the `default` origin, the report notes that no HDR peak metadata
+  was found and the default 1000-nit peak was used.
 - The primary report toolbar keeps frame navigation, view modes, and mode-specific
   context/alignment in three stable CSS-owned zones on wide screens. It becomes a
   two-row layout at medium widths and a stacked layout at narrow widths without
@@ -1042,11 +1121,21 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
   Unparseable date text is shown unchanged.
 - Report identity includes output-affecting overlay, geometry, tonemap, presentation,
   signal, and per-image provenance facts. It excludes absolute paths, image bytes or
-  `src` values, timestamps, transient browser state, and clip display strings.
+  `src` values, timestamps, transient browser state, clip display strings, requested
+  tonemap settings, and fallback causes. Applied implementation, algorithm, effective
+  controls and resolved per-clip peaks participate in identity. Identical output via
+  different fallback causes shares identity; regenerated 1.3 reports start fresh
+  browser-local state and reject 1.2 review imports.
 - `screenshots.overlay_mode` has four exact presentation levels: `none` bakes no text;
   `minimal` carries source identity plus compact frame/type/size context; `standard`
   adds selection and source/output context; `diagnostic` adds only observed signal,
   applied tonemap, HDR static, exceptional geometry, and proven exact-frame facts.
+- When vs-placebo is unavailable, unusable, or fails at runtime, Frame Compare keeps
+  its existing fallback policy and discloses `frame_compare_peak_scaled_rational_v1`
+  per clip, rather than the requested curve. Diagnostic overlays say
+  `Tonemap: fallback (peak-scaled) → <target> nits`; one render warning names all
+  affected clips and their cause classes. Signature/configuration errors remain fatal.
+  The pre-run CLI preview describes requested settings, not applied output facts.
 - Picture type is collected from the exact selected original source frame. Its absence
   is nonfatal and is omitted from baked text rather than inferred from keyframe status.
 - Selected-frame Dolby Vision RPU presence is collected from that same original
@@ -1056,7 +1145,7 @@ four-space-inset question <code>    Upload to &lt;visibility&gt; slow.pics?</cod
 - Displayed file size is the complete container storage cost in IEC units. It is not a
   bitrate, quality, efficiency, or winner metric. The existing value appears in visible
   Single, Slider, Diff, Blink, and Grid source labels when positive and available;
-  hiding source labels hides the size, and the report payload remains version `1.2`.
+  hiding source labels hides the size, and the report payload is version `1.3`.
 
 ### slow.pics Upload Behavior
 
@@ -1218,6 +1307,7 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 | --- | --- | --- |
 | `--input` | `paths.input_dir` | Relative values remain relative to the workspace root. |
 | `--tm-preset` | `color.preset` | Tonemap preset override. |
+| `--tm-speed` | `color.tonemap_speed` | Tonemap source-peak policy override (`quality` or `fast`). |
 | `--tm-target` | `color.target_nits` | Tonemap target nits override. |
 | `--tm-curve` | `color.tone_curve` | Tonemap curve override. |
 | `--frames` | `analysis.user_frames` | Comma-separated original reference source-frame numbers. Values outside the effective selectable domain are dropped with warnings at runtime. |
@@ -1245,6 +1335,9 @@ The separate VSView session applies the same cap immediately after acquiring
 its core. When unset, neither process changes the VapourSynth default.
 
 ## Config-Only TMDB Surface
+
+`[tmdb].timeout_seconds` defaults to `10.0` and must be finite and at least
+`1.0` second.
 
 `[tmdb].unattended` remains an accepted, persisted boolean with default `false`.
 It currently has no behavioral effect: both values use the resolver's selected
@@ -1379,10 +1472,10 @@ association omits multipart `tmdbId`.
 per-comparison fields. Public maps to `public=true`/`PUBLIC`; explicit unlisted
 maps to `public=false`/`LINK_ONLY`. `remove_after_days` is a strict `0..999999`
 remote retention value: zero sends empty `removeAfter`, positive values send
-decimal days. `image_upload_timeout_seconds` is at least 10 seconds and is the
+decimal days. `image_upload_timeout_seconds` must be finite and at least 10 seconds; it is the
 image write-timeout floor; the floor also cannot be lower than
 `file_size / 256 KiB/s + 15 seconds`. Navigation and metadata continue using
-`timeout_seconds`.
+`timeout_seconds`, which must be finite and at least 10 seconds.
 
 `confirm_upload_after_report` is a config-only, interactive-only opt-in. It only
 has effect when effective `auto_upload = true`; it adds no `run` flag, no wizard
@@ -1433,7 +1526,7 @@ toggles or tags.
 
 ## VSView Native Alignment Diagnostics
 
-VSView 0.12.1 parent telemetry and generated Frame Compare session diagnostics use
+VSView 0.13.0 parent telemetry and generated Frame Compare session diagnostics use
 stderr as the single human diagnostic stream. The native VSView panel is the sole
 human alignment-review interface: the terminal never reads review input, parses a
 confirmation response, or writes a result. The VSView child process is launched with
@@ -1444,44 +1537,50 @@ are written to stderr.
 When native VSView panel review launches a generated session, the diagnostic order
 is:
 
-1. parent `VSView Session` telemetry
+1. parent `VSView session` telemetry when `--verbose` is enabled
 2. generated source loading, which prints nothing on success (native indexing
    diagnostics remain inherited without buffering); failures and warnings keep
-   their current text with `✗`/`!` glyphs
-3. generated `! VSView Display Assumptions`, only when assumptions exist
-4. the generated ready block:
+   their current text with `✗`/`!` glyphs. These `[WARN]`/`[FAIL]` lines remain
+   outside the section.
+3. the generated ready block:
    `› VSView is open · waiting for you`, three numbered instruction lines, then
-   an `outputs` section (one row per output with the release-aware presentation
-   identity) and a `hints` section (one row per comparison with the S1 short
-   name padded to one column plus the existing audio-hint string verbatim)
-5. parent waits for the bounded VSView process to close, then reports whether the
-   trusted result sidecar was accepted or retained the current alignment, using the
-   standard two-space status indentation
+   an `outputs` section (one row per output with the short name padded to the
+   longest and a third column using `reference`, `audio {+Nf}`, `audio {+Nf} ·
+   not applied`, `audio {+Nf} · reused`, `previously confirmed {+Nf}`, `manual
+   offset {+Nf}`, or `no audio match`). Separate `hints` rows are not printed.
+   After a blank line inside the same section, display assumptions (when
+   present) are a `! VSView display assumptions` note followed by the existing
+   `source`/`preview`/`range`/`impact` rows.
+4. parent waits for the bounded VSView process to close. A successful review
+   prints nothing; rejected or invalid results use the phase-style line
+   `! VSView review    {reason}; current offsets were kept.`
 
 Normal VSView labels reuse the release-aware presentation identities prepared by the
 typed alignment request. Paths and stems remain the internal source, suggested
 offset, manual-override, and alignment-result identities. The generated workspace
 contains each source exactly once: one `Reference` and one ordered `Comparison N`
-output per comparison. In the native panel, the default workflow unlinks playheads,
-positions each source on the same visible moment, and reports the active output as
-`Viewing: frame N` separately from its callback-derived `Captured position: frame N`.
-Inactive sources show only their last captured position. Before saving, viewer drafts
-use `{n}/{total} positions captured`, source-frame drafts use `{n}/{total} source frames
-entered`, and known-offset drafts use `{n}/{total} offsets entered`; complete valid
-drafts add ` — ready to confirm`. Manual source drafts use `Entered source frame: N`
-and invalid drafts use `Needs attention — {validation message}`. Manual source-frame or
-known-offset entry and keep-current completion do not require viewer visits. Public
-current-output/current-frame callbacks update the live source lineup; the panel does not
-inspect or change hidden playheads or synchronization mode.
-**Confirm these aligned positions** writes the complete ordered result once; the
-known-offset equivalent is **Confirm these known offsets**. **Keep current alignment**
-writes one `keep_current` decision for every comparison. The collapsed manual
-disclosure offers source-frame or known-offset input, and both use the same whole-set
-save action. The panel calculates `reference - comparison` and shows the trim meaning;
-closing without saving produces no result. The viewer guidance is `To confirm a new
-alignment, unlink the playheads and position each source on the same visible moment. Or
-keep the current alignment.` Known-offset guidance is `Enter the signed
-reference-minus-comparison offsets, then confirm. Or keep the current alignment.`
+output per comparison. In the native panel, generated review sessions automatically
+unlink their own playheads. Browse each source to the same visible moment, inspect
+its tracked original-frame number, then choose **Confirm matching frames** once.
+Tracking starts at workspace load and continues while the panel is hidden or another
+tool is selected. The pinned VSView 0.13.0 integration reads retained per-source
+positions; it does not infer inactive positions from active-source callbacks.
+`{n}/{total} frames ready` reports complete, in-range readiness. Playing, queued or
+in-flight seeking, paused playback workers still draining a frame, loading/reload
+and invalid workspace/source state block automatic
+confirmation. The handler revalidates the complete snapshot; changed numbers require
+another click. Confirmation expresses manual numeric intent, not displayed-pixel proof.
+
+Editing a frame protects that row from passive updates, including empty/invalid text.
+**Use viewer frame** resumes tracking for that source. When automatic tracking is
+unavailable, explicit manual original-frame entry remains available with manual-unlink
+guidance. The collapsed manual controls offer separate **Known offsets** input;
+`{n}/{total} offsets entered` and **Confirm these known offsets** apply only to that
+complete basis. **Keep current alignment** writes one `keep_current` decision per
+comparison without confirming the frame lineup. It shows **Keep decision saved —
+frame lineup was not confirmed**. Successful writes freeze edits; failed writes remain
+editable. The panel calculates `reference - comparison`, preserving valid zero.
+Closing without confirmation or Keep produces no result.
 Generated accent output uses `38;2;210;172;107` when `COLORTERM` is `truecolor`
 or `24bit` or `WT_SESSION` is set, else `38;5;180` when `TERM` contains
 `256color`, else `33`, keeping the `NO_COLOR` and TTY checks. Glyphs follow S3
@@ -1513,7 +1612,7 @@ action is `Close VSView to resume Frame Compare.`, stale keep-current help is hi
 and actions stay disabled. Saved outcomes are `Accepted alignment retained: +Nf`,
 `Current alignment retained: +Nf — manually confirmed`, the explicit unresolved
 provisional outcome, the explicit unresolved unavailable outcome, or
-`Alignment confirmed: +Nf — manually confirmed` for a confirmation.
+`Saved offset (Reference − Comparison): +N frames — manually confirmed` for a confirmation.
 
 The Frame Compare alignment-review tool panel registers with first priority so it is
 the first Tool Panel tab when VSView constructs the sidebar for this workflow.
@@ -1632,7 +1731,7 @@ dedicated `run` flags for them:
   compression input for Pillow and VapourSynth fpng. Pillow receives the value
   directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;
   unsupported values fail config validation rather than being silently clamped.
-- `ffmpeg_timeout_seconds` defaults to `30.0` and must be at least `5.0`. It
+- `ffmpeg_timeout_seconds` defaults to `30.0` and must be finite and at least `5.0`. It
   controls only FFmpeg frame extraction. The separate ffprobe HDR metadata
   probe keeps its fixed `15.0` second timeout.
 
@@ -1652,6 +1751,16 @@ The implemented `[logging]` surface contains only:
 
 - `level = "INFO"`, accepting `DEBUG`, `INFO`, `WARNING`, or `ERROR`
 - `format = "console"`, accepting `console` or `json`
+
+For `run`, `orchestration.run_inputs.acquire_run_config` loads TOML and environment
+once and applies CLI overrides before admission. Logging, preview, callback policy,
+preparation, execution, and post-actions use that same acquired configuration;
+preparation rechecks filesystem containment and discovers current sources without
+reloading settings. The preview input row uses the resolved input directory.
+Environment variables in `--config` are expanded for acquisition, `--diagnose-paths`,
+and the secret-safe `--write-config` destination. The preflight timing excludes
+configuration acquisition. Only the named report auto-open preference refresh
+rereads settings later, before an interactive report-open attempt.
 
 For `run`, logging is configured only after the effective config loads and
 validates. `--quiet` forces level `WARNING`; otherwise `--verbose` forces
@@ -1711,9 +1820,11 @@ this sign convention before decision evidence, hints, caching, and trim applicat
   `disabled` is the default and
   does not read or reuse shared interactively confirmed offsets. Newly validated manual
   results may still write to the shared reuse cache when `cache_results = true`.
-  `prompt` shows a Rich stderr table for a complete
-  valid interactively confirmed offset set and asks
-  <code>    Reuse these offsets? [y/N]: </code>; default, EOF,
+  `prompt` shows an accent-rail `› Reuse previous offsets?` section for a complete
+  valid interactively confirmed offset set. Each row uses the source short name,
+  signed frame offset, origin, and accepted time; `--verbose` may add seconds,
+  `file`, and `path` rows. The section ends with its `cache` row and the in-rail
+  question <code>│ Reuse these offsets? [y/N]: </code>; default, EOF,
   unavailable stdin, or unavailable stderr all continue without confirmed-offset
   reuse. Declining the prompt rejects only confirmed-offset reuse; the provisional
   audio candidate stays unapplied.
@@ -1726,15 +1837,11 @@ this sign convention before decision evidence, hints, caching, and trim applicat
   stdin is not a TTY, or EOF occurs while prompting, the CLI emits
   `Previous alignment offset reuse prompt unavailable; continuing without reuse.`
   to stderr and continues without reuse.
-- The nested `Alignment reuse` decision panel consumes primitive presentation strings
-  prepared by orchestration; it never reparses source paths. It factors reliable
-  common content, uses compact release identities or canonical filename fallbacks,
-  displays the
-  signed frame offset and time offset, humanizes evidence as `Computed` or
-  `Preview-confirmed`, and renders valid timestamps in UTC while preserving invalid
-  values verbatim. The shared cache path remains the final evidence row;
-  legacy/fallback prompt inputs also retain exact filename and path evidence. It does
-  not derive freshness from file mtime or index mtime.
+- The `› Reuse previous offsets?` section consumes primitive presentation strings
+  prepared by orchestration; it never reparses source paths. It uses compact source
+  short names, shows `confirmed in VSView` or `audio` as the origin, and keeps the
+  shared cache path as the final evidence row. The `reference` and `Content` rows
+  are omitted. It does not derive freshness from file mtime or index mtime.
 - Shared previous-offset entries live under
   `<resolved paths.generated_dir>/cache/alignment/`. This is shared generated-data
   cache state and does not live inside a fresh run folder.
@@ -1787,7 +1894,7 @@ with chunk runs for diagnosis. A global lag within 2 ms of `+/-M` is `search_edg
 and is never applied. The sub-frame estimate `x = offset_seconds x fps_reference`
 is kept as evidence; only the video check may confirm an applied frame. Normal
 optional VSView/manual review and best-effort rendering policy handle rejected
-computed alignments as before.
+computed alignments without changing the authority or persistence rules above.
 
 Video confirmation divides the usable base range and each examined disagreement
 target into equal slots, then chooses the highest-motion reference frame from four
@@ -1873,9 +1980,13 @@ claim drift compensation or per-segment edit matching.
 The shared source-set identity includes the scoped alignment runtime fingerprint.
 That scope covers the selected standalone FFmpeg/ffprobe lineage and, because final
 authority depends on decoded frame numbering, the selected VapourSynth and
-L-SMASH-Works identity. A change misses the cache and recomputes. Resolved active
-rectangles affect video scoring but intentionally do not enter this source-relationship
-cache identity; clearing the cache forces re-verification after a crop change.
+L-SMASH-Works identity. A change misses the cache and recomputes. Each source's
+resolved active rectangle, or its explicit absence, also enters the identity
+because that region supplies video-confirmation evidence. Changing either region
+misses the cache without requiring manual clearing. Entries written before the
+active-rectangle identity revision remain on disk as historical information but
+cannot authorize reuse: their original scoring region is unknown. Unchanged
+resolved geometry remains reusable regardless of detector provenance.
 
 ## Persistence Rules
 
@@ -1967,9 +2078,36 @@ CLI overrides validates already-resolved values without reacquiring ambient sett
 
 The default `reference` baseline also uses `contrast_recovery = 0.3`. This value is
 forwarded to libplacebo tonemapping, not applied as a separate post-tonemap contrast
-curve. VapourSynth HDR screenshot export preserves the live tonemap-output range and
-only applies limited-to-full expansion during PNG encoding when the rendered frame
-props still indicate limited-range RGB on the active VapourSynth runtime.
+curve. Libplacebo HDR screenshots isolate native mapper state per source frame,
+without changing preset controls. Applied facts disclose `frame_policy` as
+`independent_frames` and `output_encoding` as `srgb`; both participate in report
+identity. Its BT.1886 SDR output is converted once to endpoint-relative sRGB before
+RGB8 quantization, using the configured destination black and target white. The
+converted frames carry truthful full-range RGB, sRGB transfer and BT.709 primaries
+and no stale source HDR metadata. PNG encoding preserves those samples; the existing
+limited-to-full guard remains for other clips whose props indicate limited RGB.
+SDR sources and the degraded fallback do not inherit this libplacebo-specific
+conversion or destination-black assumption.
+
+`color.tonemap_speed` is orthogonal to presets. `quality` is the default and keeps
+per-frame peak measurement for stills. `fast` sets dynamic peak detection off and
+uses source metadata or the resolved static peak hint, so still preparation can share
+one stateless native mapper. `--tm-speed` takes precedence over the config value for
+one run; like the other mapped rendering overrides, it is persisted only with
+`--write-config`. This speed choice is disclosed in requested and applied report
+controls, while the degraded fallback ignores it and retains its existing effective
+controls.
+
+Configured VSView alignment previews use the same resolved tone settings when
+`color.enable_tonemap` is enabled. HDR evidence comes from the original loaded
+source, with the existing metadata probe for unspecified signals. Mapping happens
+before preview defaults and overlays; mapped output retains its sRGB properties.
+Both speeds use the sequence policy: quality previews retain temporal peak
+measurement, while quality screenshots measure each still independently. Fast
+previews and screenshots use the same metadata peak policy. SDR, disabled mapping,
+and legacy sessions without settings retain their existing preview handling.
+Review outputs keep original frame positions/counts, reference FPS, ordering,
+`hdr=False` registration and the existing metadata-v5/session result authority.
 
 ## `wizard` Command Contract
 
@@ -2030,12 +2168,11 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
   temporary cleanup remains best effort.
 - After a successful write, or a true no-op, `wizard` prints a compact `Next steps`
   block to stderr: diagnose with `frame-compare doctor`, preview with `run --dry-run`,
-  then `run`. Both suggested `run` commands always carry the exact resolved `--root`
+  then `run`. All three suggestions always carry the exact resolved `--root`
   and the exact selected `--config` path, which is the same file already named in the
   no-op/write confirmation, including the Windows portable fallback file when that
   exception applies, so a suggestion cannot silently target a different workspace or
-  config. `doctor` is suggested with no options, matching its actual supported
-  surface. These are suggestions only; the wizard never executes them. POSIX values
+  config. These are suggestions only; the wizard never executes them. POSIX values
   are quoted with `shlex.quote`; Windows values use PowerShell literal single-quoted
   strings with every single-quote delimiter, including typographic ones, doubled; the
   block names which shell its quoting targets. No
@@ -2052,6 +2189,14 @@ props still indicate limited-range RGB on the active VapourSynth runtime.
 ## `doctor` Command Contract
 
 - `doctor` runs dependency diagnostics through `run_doctor`.
+- `--root/-r` defaults to `.`; `--config/-c` selects a file relative to that root,
+  defaulting to `config/config.toml`. Selection uses the same owner as `run`, including
+  the exact Windows portable state-file exception and shim injection. Doctor never
+  searches parent directories. Environment variables retain their normal precedence.
+- Invalid or escaping selected paths are typed top-level failures. An explicit
+  missing, nonregular, unreadable, malformed, or invalid config is a failed TMDB check
+  with config details. An absent default config uses defaults plus environment.
+  This does not change the doctor JSON schema.
 - `doctor` makes no HTTP requests and does not test slow.pics reachability. The
   `tmdb_api_key` check validates local configuration and credential format only;
   it does not contact TMDB. slow.pics connectivity is exercised by the

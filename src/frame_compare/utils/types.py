@@ -172,7 +172,6 @@ class AlignmentClipRequest:
     active_rect_height: int | None = None
     preserved_frame_props: PreservedFrameProps = field(default_factory=dict[str, str | int | float])
     presentation_name: str | None = None
-    compact_name: str | None = None
     short_name: str | None = None
 
     def __post_init__(self) -> None:
@@ -248,6 +247,7 @@ class AlignmentRequest:
     generated_dir: Path
     shared_alignment_cache_dir: Path
     settings: AlignmentCacheSettings
+    workspace_root: Path | None = None
     presentation_content: str | None = None
     alignment_diagnostics_dir: Path | None = None
     alignment_diagnostics_root: Path | None = None

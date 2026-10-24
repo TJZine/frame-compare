@@ -108,7 +108,7 @@ def _paired_kwargs(
     return {
         "chunks": chunks,
         "lag_samples": 100,
-        "consumer": consumer,
+        "consume_borrowed_chunk": consumer,
         "reference_limit_samples": 8_000_000,
         "comparison_limit_samples": 8_000_000,
         "total_timeout_seconds": 30.0,
@@ -367,7 +367,6 @@ def _paired_failure(
 ) -> PairedAudioCollectionFailure:
     def facts() -> CollectionFacts:
         return CollectionFacts(
-            planned_end_sample=4800000,
             emitted_sample_count=8000,
             emitted_byte_count=32000,
             retained_sample_count=8000,

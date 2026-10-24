@@ -19,7 +19,50 @@ HDR tonemapping.
 3. Decide whether the frame requires HDR-to-SDR conversion.
 4. Convert to the working color representation without unnecessary 8-bit reduction.
 5. Apply the configured vs-placebo tonemapping preset and target luminance.
-6. Render the screenshot and selected overlay.
+6. Convert the native SDR destination's BT.1886 samples to full-range sRGB before
+   reducing to RGB8, then render the screenshot and selected overlay.
+
+Screenshot rendering gives each source frame its own native mapper state. Random
+access, helper reads of frame zero, parallel requests and cache eviction cannot
+carry peak-detector history from another frame into a screenshot. Preset controls
+remain unchanged; the report records `independent_frames` as the applied frame
+policy. This policy renders still images independently of chronological playback and
+temporal smoothing.
+
+## Fast screenshots
+
+For a large still-image batch, set `color.tonemap_speed = "fast"` or pass
+`--tm-speed fast`. Fast mode turns off dynamic peak detection and lets libplacebo use
+per-frame stream metadata when available, then static HDR metadata, then the resolved
+source-peak default. Still preparation can therefore share one stateless native
+mapper, and the report records `shared_stateless` as
+**Shared (metadata peak, no per-frame measurement)**. This is faster and reproducible,
+but it can look different from `quality`, which measures each frame independently;
+inspect scenes where the source peak changes. If no HDR peak metadata is available,
+the report calls out use of the default 1000-nit peak and the run log warns about it.
+The setting is independent of the tone curve, target, and preset, and the degraded
+fallback continues to ignore it.
+
+VSView alignment previews also use these configured tone settings for HDR sources
+when tonemapping is enabled. Fast previews use the same metadata peak policy as
+fast screenshots. Quality previews retain temporal sequence measurement; quality
+screenshots measure each still independently, so their appearance can differ.
+Mapping occurs before alignment labels and preserves sRGB output properties.
+SDR sources, disabled tonemapping and older sessions without tone settings keep
+their existing preview handling. Source frame positions and alignment decisions
+are unchanged.
+
+The sRGB conversion uses the native destination's configured black and white
+endpoints: the selected black maps to sRGB zero and white to one. It preserves
+BT.709 primaries and D65. It changes the representation for browser images while preserving
+the tone curve and source grade. The monitor controls physical luminance. Pillow PNGs declare sRGB; an untagged PNG from the fpng writer also
+contains sRGB samples. Original source metadata remains available in diagnostics;
+converted SDR frames no longer claim PQ/BT.2020 or carry source HDR metadata.
+
+This conversion applies only to the known vs-placebo SDR destination. Existing SDR
+sources and the separately identified degraded fallback keep their existing
+interpretation; they are not assigned the native mapper's black point or passed
+through this conversion.
 
 The FFmpeg fallback leaves ambiguous transfer or primaries metadata unknown. It does
 not treat that metadata as ordinary SDR.
@@ -45,11 +88,12 @@ VapourSynth, source-plugin, or vs-placebo change.
 The wizard does not configure tonemapping. Choose a preset in `[color]`, save it in a
 preset, or override it for one run with `--tm-preset`, `--tm-target`, and `--tm-curve`.
 
-The preset sets every value; `target_nits`, `tone_curve`, `gamma_lift`, and
-`contrast_recovery` override it only when explicitly supplied in the configuration file
-or environment variables. `--tm-target` and `--tm-curve` take precedence for one run;
+The preset sets every value. Explicit `[color]` values for `target_nits`,
+`tone_curve`, `gamma_lift`, and `contrast_recovery` override any preset when
+supplied in the configuration file or environment variables. `--tm-target` and
+`--tm-curve` take precedence for one run;
 `--tm-preset` replaces only the preset, and explicitly supplied configuration values
-still override it (source: `src/frame_compare/render/prepare.py:37-74`).
+still override it (source: `render.prepare.resolve_tonemap_settings`).
 
 | Preset | Curve | Target | Gamma lift |
 | --- | --- | --- | --- |
@@ -59,7 +103,26 @@ still override it (source: `src/frame_compare/render/prepare.py:37-74`).
 | `spline` | `spline` | 203 nits | Off |
 | `contrast` | `reinhard` | 203 nits | Off |
 | `highlight_guard` | `spline` | 180 nits | Off |
+| `highlight_preserve` | `bt2390` | 100 nits | Off |
 | `bright_lift` | `bt2390` | 250 nits | On |
+
+`highlight_preserve` is an opt-in BT.2390 shoulder adjustment: knee offset 1.0
+instead of the reference preset's 0.5. All other reference settings, including
+perceptual gamut mapping and contrast recovery, stay the same. It can preserve
+more highlight distinctions, but does not guarantee unclipped output or restore
+source detail that is already lost. `highlight_guard` remains the separate spline
+preset; neither preset changes the default.
+
+To select the preset for one run:
+
+```bash
+frame-compare run --tm-preset highlight_preserve
+```
+
+Or set `preset = "highlight_preserve"` in `[color]`. Explicit target, curve,
+gamma-lift and contrast-recovery overrides still take precedence. Overriding the
+tone curve to any value other than `bt2390` returns the curve parameter to 0.5.
+Softclip remains experimental and is unavailable through this preset.
 
 ```toml
 [color]
@@ -113,6 +176,16 @@ For publication-bound comparisons:
 - check for raised blacks, clipped highlights, hue shifts, and range mistakes;
 - validate the result on the physical Windows/GPU environment intended for release.
 
+## Applied transforms and fallback
+
+The pre-run preview shows your requested preset and settings. Reports disclose the
+transform that actually ran for each source, including its resolved source peak and
+origin. If vs-placebo is missing, unusable, or fails at runtime, Frame Compare uses
+its existing peak-scaled fallback and emits one render warning naming the affected
+sources and causes. The fallback is labeled **fallback (peak-scaled)**. It uses source peak, target nits,
+and gamma lift; other requested plugin controls do not become effective fallback
+controls. Configuration and signature errors still fail the run.
+
 ## Overlays and measurements
 
 `diagnostic` overlays can include observed mastering metadata, MaxCLL/MaxFALL, source
@@ -126,7 +199,7 @@ missing values without placeholders or fabricated defaults.
 
 <figure class="fc-figure">
   <img src="../images/hdr-diagnostic-overlay.webp" alt="Diagnostic overlay on the EBU DVB HLG10 comparison at frame 1000, listing the source, geometry, HLG BT.2020 signal, and BT.2390 tonemap at 100 nits." width="1920" height="1080" loading="lazy">
-  <figcaption>A diagnostic overlay bakes the observed signal and the applied tonemap into the screenshot. The target nits describe the output transform, not measured luminance. Footage © EBU, CC BY 4.0.</figcaption>
+  <figcaption>A diagnostic overlay bakes the observed signal and the applied tonemap into the screenshot. The target nits describe the output transform. Luminance requires separate measurement. Footage © EBU, CC BY 4.0.</figcaption>
 </figure>
 
 Selection scores explain why Frame Compare chose a frame. Use calibrated luminance

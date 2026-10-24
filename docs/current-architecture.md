@@ -21,7 +21,7 @@ Frame Compare is a CLI-first packaged Python app with importable internal module
 
 ## Composition Roots
 
-- CLI entrypoint: `frame_compare.cli.entry:app`
+- Standalone CLI entrypoint: `frame_compare.cli.entry:console_main`; reusable Typer application: `frame_compare.cli.entry:app`.
 - Runtime entry surface: `frame_compare.runner.run(...)`
 - Async orchestration root: `frame_compare.orchestration.execute_run(...)`
 - Diagnostic entry surface: `frame_compare.orchestration.doctor.run_doctor(...)`
@@ -29,9 +29,12 @@ Frame Compare is a CLI-first packaged Python app with importable internal module
 The CLI keeps VS-heavy imports lazy through proxy functions so help text and simple commands do not import the full runtime stack at module import time.
 
 `config.overrides.CLIConfigOverrides` owns typed persistent CLI overrides. Parsing
-creates one value carried by both `RunCliOptions.config_overrides` and
-`RunRequest.config_overrides`; effective-config resolution and preparation consume
-it directly. Raw flag parsing and run-mode controls remain CLI-owned.
+creates one value consumed by `orchestration.run_inputs.acquire_run_config`.
+That dependency-light owner selects and loads TOML/environment once, applies CLI
+overrides, and validates configured paths. Admission, callbacks, preview, preparation,
+execution, and post-actions consume `RunRequest.inputs: AcquiredRunConfig`.
+Programmatic callers use `build_run_request`; the CLI constructs its request from
+the value already acquired. Raw flag parsing and run-mode controls remain CLI-owned.
 
 Preparation creates the run's default `DefaultVSLoader` immediately after
 resolving effective config, before loading sources. Injected loaders remain
@@ -46,10 +49,12 @@ frame caching, not total process memory or audio-alignment buffers.
 
 The main run path is:
 
-1. Resolve root and config.
-2. Prepare preflight and workspace paths, containing config and writable state
-   beneath the resolved workspace root while permitting external media reads.
-3. Discover input clips.
+1. Select and acquire the run configuration once before admission and preview.
+2. Recompute workspace path facts and containment at each use through
+   `resolve_run_workspace`, permitting external media reads. Preparation consumes
+   the admitted configuration without reloading it or reapplying overrides.
+3. Check the input directory and discover input clips once during preparation;
+   acquisition does not freeze source existence.
 4. Validate shared analysis cache mode flags when needed.
 5. Create a fresh run folder for every run that proceeds to output reservation.
 6. Load or compute clip probe data.
@@ -74,6 +79,23 @@ boundaries. `frame_compare.orchestration.types` owns the public run request,
 dependency, result, and callback DTO contract; internal phase outputs and
 mutable preparation/execution carriers live in
 `frame_compare.orchestration.execution_types`.
+
+`RunContext.selection` is one frozen `SelectionSnapshot`: comparison-relative frame
+indices, reference-source breakdown/details, and analysis-source metric evidence.
+`apply_phase_output` is its only production writer. FramePlan clears metric evidence,
+Analyze replaces the full snapshot, and Align replaces frames/evidence together with
+the reference/comparison trims. Align, render, publish, and report read the current
+snapshot when they execute; phase construction does not capture a mutable frame list.
+`selection_rows` maps comparison frames through the current reference trim and supplies
+the same source-detail/label lookup to render overlays and report frame details.
+
+`PreparedSelectionDomain` carries the trim-relative shared window, pre-alignment
+analysis clip, cache-domain token, and accepted full-window retry override. Preparation
+and recovery build and replace that value together. It carries no effective config or
+second live clip collection. `metric_request_for_domain` constructs a request only at
+Analyze and the existing cache-only/no-cache preparation boundaries, preserving
+warn-only Analyze validation timing for ordinary runs.
+
 `RunDependencies` supplies aware UTC wall time for persisted start/completion
 timestamps and a separate monotonic timer for preflight, source loading, phases,
 and total success/failure durations. Persisted `duration_seconds` comes from that
@@ -104,7 +126,25 @@ each source preparation. Source preparation checks between native source loading
 frame inspection, HDR probing, and index recovery/retry operations. Tonemap preparation
 checks between capability probing, frame inspection, native conversion/filter
 operations, and fallback admission. Already admitted native work still drains before
-cleanup. Each parallel render batch owns one
+cleanup. Experimental native still reuse is default-off and owned by
+`vs.tonemap_runtime` and `vs.tonemap_libplacebo`; it requires the explicit
+`FRAME_COMPARE_EXPERIMENTAL_NATIVE_STILLS=1` runtime opt-in, a reviewed actual
+canonical plugin identity/signature/binary hash, and fixed integer RGB48
+HDR10/PQ-to-SDR input without an enhancement layer. The generic safety probe must
+load that same experimental binary; its cached result does not authorize another
+plugin. Unsupported inputs and old/unknown plugins retain fresh per-frame mapping.
+The native node owns reusable resources and permanent poisoning; late errors
+propagate without per-frame fallback or retry. Constructor fallback remains
+source-level and carries truthful fallback facts. The experimental native-still
+opt-in changes no persisted color settings, sequence controls, mathematical frame
+policy or output encoding, and does not declare the experimental binary accepted for
+production. The fast HDR still setting is separate from that experimental native
+reuse: it disables dynamic
+peak detection, uses the resolved stream/static source peak, and selects one shared
+stateless libplacebo node for still preparation. Quality mode continues to use fresh
+per-frame mapper state, and fast mode never routes through the experimental
+`independent=1` path. The speed setting is an ordinary persisted color field, but it
+does not change preset values or output encoding. Each parallel render batch owns one
 `threading.Event`: its main-thread 50 ms future-wait poll sets it on cancellation
 or a real failure, and workers check it before each render frame. Stopped units
 retain completed frame results as cleanup outcomes; real-failure ordering remains authoritative.
@@ -132,14 +172,19 @@ sanitized warning summaries.
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
 builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
 identity in schema v8 payload metadata, and orchestration only passes the effective
-analysis config, active-rect-aware selection-domain token, analysis-owned metric
-active rectangle, active-rect provenance, and exact source-frame metric range into
-the analysis/cache owner.
+analysis config, active-rect-aware selection-domain token, and one intact
+`MetricCacheRequest` into the analysis/cache owner. Computation and metadata consume
+that same request. Keying fills an absent analysis-source path only; absent range/FPS
+remain distinct from explicit full-range/source-FPS values until computation resolves
+them. Performance sampling identity derives its fraction and burst count from the
+sampling owner's constants, retaining the algorithm-version decision boundary.
 `frame_compare.analysis.metrics.calculate_metrics` owns normal cache acquisition
 and returns a `MetricsAcquisition` containing the metrics and the actual `hit` or
 `computed` disposition. Analyze presentation consumes that result without a
-predictive cache read. Cache-only preparation still validates before reserving
-output, and cache-only analysis reads again without permission to compute.
+predictive cache read. `cache_io.acquire_required_metrics` owns required-cache
+classification and reading at two distinct lifecycle points: cache-only preparation
+validates before reserving output, and cache-only Analyze reacquires without permission
+to compute. The first read is not memoized.
 Analyze is required for cache-only execution: a failed second acquisition aborts
 the run before rendering or publishing rather than using the initial frame plan.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
@@ -239,6 +284,15 @@ the explicit owner of the import-time contract. Owner-specific exceptions belong
 imports belong in focused protocol modules such as
 `frame_compare.utils.progress_protocol`.
 
+`frame_compare.utils.terminal_sections` owns the shared open-rail renderer used by
+Rich human panels, rules, and prompts. `frame_compare.utils.artifact_paths` owns
+human artifact-path display and terminal hyperlinks. The VSView `SessionConsole`
+implements the same section rules in its separate process because Rich is not
+available there. `progress_protocol.AlignmentSummary` and
+`AlignmentSummaryEntry` are memory-only final alignment facts carried through
+phase output, artifacts, `RunResult`, and completion presentation; they do not
+change JSON or persistence projections.
+
 Render orchestration derives optional, unique progress labels from already-parsed
 release identities and passes them through the batch request seam. Render workers only
 present that string; `OverlayConfig.label`, overlay pixels, output paths, and
@@ -269,6 +323,13 @@ Frame Compare-owned indexes before reuse. See
 recovery requirement.
 
 ### Configuration persistence
+
+`orchestration.run_inputs` owns the selected run configuration. The only intentional
+later config reads are named `refresh_report_auto_open_preference` calls before an
+interactive report open (including the pre-upload confirmation path). They reread
+only the selected file's report preference through the CLI's injected loader; they
+do not replace admitted run settings. Doctor shares `select_run_config_path` and
+never searches parent directories.
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
@@ -313,7 +374,8 @@ recovery requirement.
   shared previous alignment offset reuse cache owned by
   `frame_compare.services.alignment_reuse_cache`. It stores eligible computed or
   interactively confirmed offsets keyed by a typed source-set identity, source
-  fingerprints, source trims, effective FPS values, selected reference
+  fingerprints, source trims, effective FPS values, resolved active-rectangle
+  geometry (or explicit absence), selected reference
   relationship, selected audio streams, alignment settings that affect
   computed offsets, an internal estimator-policy revision, and the scoped
   media-runtime alignment fingerprint. For the
@@ -329,6 +391,13 @@ recovery requirement.
   origins, requires a bounded scalar stability summary for computed entries and
   embedded computed results, and persists no per-chunk evidence or audio. A v1
   cache is ignored and recomputed; there is no v1 migration or compatibility reader.
+  The canonical clip identity also carries an active-rectangle identity revision.
+  Entries written before that dependency was recorded cannot authorize reuse,
+  including for a request with no rectangle: their original video region is
+  unknown. Their source sets remain in the v2 container as historical information
+  when current entries are saved, but require fresh computation or confirmation
+  before reuse. Detector provenance is not part of the key when the resolved
+  geometry is unchanged.
   Unreadable, corrupt, unsupported-version, malformed source-table, or
   invalid-entry shared reuse data degrades to the normal alignment path with a
   warning log event. Ordinary no-match, incomplete, or stale source-set misses
@@ -374,7 +443,12 @@ recovery requirement.
   `frame_compare.services.run_result_record` and written atomically only after a
   reserved run completes or fails. It stores sanitized run-folder-relative output
   facts, UTC lifecycle timing, bounded warning summaries, cache/phase facts,
-  slow.pics outcome, and a sanitized typed failure when applicable. The service
+  slow.pics outcome, and a sanitized typed failure when applicable. A failed run
+  can still record an uploaded slow.pics outcome and URL when the publisher
+  confirmed remote success before cancellation. Orchestration captures that fact
+  synchronously before optional post-upload work or another cancellation
+  checkpoint; it does not turn interruption into success or start new work.
+  The service
   also owns strict TOML validation, immediate-child history discovery that admits
   only folders containing a supported result record, malformed-record isolation,
   deterministic ordering, exact run-name validation, record-file/run-directory
@@ -423,7 +497,20 @@ recovery requirement.
   or out-of-bounds results are rejected; panel metadata never supplies the result path
   or frame counts.
 - screenshot output directories and generated HTML reports
-- Windows portable bundle outputs under `dist/frame-compare-portable-win-x64`
+- Windows source installs build verified bundles under
+  `dist/frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z` (UTC); the AppData
+  active-bundle pointer selects the workspace. The builder validates inputs before
+  atomically reserving the final output path, refuses occupied/unsafe paths, and
+  cleans up only its own reservation on failure. Building at the final path keeps
+  the requirements-lock fingerprint unchanged for CI's fixed build location.
+  Source reinstalls move non-empty `config/`, `comparison_videos/`, and `generated/`
+  folders by default (`-UserData Leave` opts out), reverse moves on activation
+  failure even after pointer replacement, and restore previous shims. A fresh
+  pointer byte snapshot after building owns migration and rollback under an
+  exclusive activation lock shared with current bundle installation. Reparse-point
+  ancestry is refused where physical containment is unproven; stored pointers must
+  be fully qualified. They never delete previous bundles. Recovery diagnostics
+  preserve and report all known paths even when the pointer cannot be read.
 
 `frame_compare.vs.runtime_contract` is the sole component-identity owner for the
 coordinated media stack. It emits narrow analysis, probe, alignment, and index
@@ -562,7 +649,17 @@ stale-policy shared entries miss and recompute.
 Computed alignment work runs whole-track chunked correlation over each selected audio
 stream. `alignment_audio` owns stream probing and deterministic selection, audio and
 video start-time probing with container-start compensation, and the canonical
-whole-track 8 kHz mono FFmpeg recipe. Without overrides, a non-commentary reference
+whole-track 8 kHz mono FFmpeg recipe. Selected audio duration comes from stream
+`duration_ts`, stream duration, or a `DURATION` tag. When those are absent, one
+15-second-bounded ffprobe call reads selected-stream packets starting at
+`max(0, source_frame_count / source_fps - 60)` seconds. A `packet_tail` duration
+is the latest packet end minus the stream start, accepted only if every packet
+value parses, a packet reaches the seek point, and the duration is positive.
+Container duration is never substituted. Missing tail evidence remains
+`selected_audio_timeline_unavailable`; exact retime rates above the supported
+bound produce the distinct `retime_rate_unsupported` rejection. These durations
+only bound planning and collection; audio/video authority remains unchanged.
+Without overrides, a non-commentary reference
 default with a known language switches to the best-ranked non-commentary reference
 stream in a known language shared by both sides when its language is missing from the
 comparison. Each source's audio is analysed on its
@@ -639,7 +736,8 @@ plain explicit records, and the shared per-comparison byte bound. Pure shared al
 math and vote policy live in `utils.alignment_policy`; the shared P4/P4a
 decision/region/check-point projection lives in `utils.alignment_review_projection`
 and is consumed by both terminal and panel renderers. `alignment_presentation`
-owns the terminal/Rich and structured-warning rendering of that projection;
+owns the terminal/Rich and structured-warning rendering of that projection, using
+the shared `utils.terminal_sections` and `utils.artifact_paths` primitives;
 `alignment_review_panel` renders the same projection in VSView. Native metadata v5
 uses a bounded projection that omits all per-chunk row columns while retaining runs,
 `chunks.total_samples`, authoritative target facts, aggregate
@@ -648,23 +746,43 @@ counts, video checks, and review check points.
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
 prompt/table helper, including TTY fallback behavior and no-color rendering.
-`frame_compare.services.types.AlignmentProvenance` carries service-owned
-write-source provenance such as `computed_this_run`,
-`interactive_confirmed_this_run`, `shared_computed_offsets`,
-`shared_previous_offsets`, and
-`preexisting_manual_override`; shared-cache writes require at least one current-run
-computed or interactively confirmed result and otherwise admit only trusted current-run
-or shared-computed provenance rather than inferring eligibility from the final flattened
-`AlignmentResult.source`. Shared cache schema v2 remains
-accepted-authority-only and does not serialize the richer attempt. Warm cache entries
-therefore report historical stream/chunk details as unavailable rather than
-inventing them.
+`frame_compare.services.types.ComparisonResolution` carries each comparison's current
+result, write origin, original evidence, and optional computed fallback in one frozen
+record. Evidence availability is derived from the retained attempt. The alignment
+service keeps one map of these records; `alignment_resolution.confirm_manual` replaces
+one record without changing the original attempt, and retains an applied computed
+result as the fallback when appropriate.
+`alignment_reuse_cache.prepare_reusable_source_set` admits complete source sets with
+matching comparison identities, trusted current-run or shared-computed authority,
+required stability, and at least one current-run computation or confirmation. The
+writer consumes that prepared candidate and rechecks source freshness before and
+inside locked atomic publication. A mixed publication refreshes the shared acceptance
+time for all entries. Shared cache schema v2 remains accepted-authority-only and does
+not serialize the richer attempt. Warm cache entries therefore report historical
+stream/chunk details as unavailable rather than inventing them.
 
-Native alignment review is deliberately split across the existing owners. The
-`frame_compare.vsview.session_script` owner reserves the script path and generates
-deterministic session data plus a small installed-package bootstrap.
-`frame_compare.vsview.session_runtime` owns preview source loading, defaults,
-console guidance, and output registration after all sources are prepared. It uses
+Native alignment review is split across existing owners. `vsview.session_script` reserves
+and generates the session; `vsview.session_runtime` prepares every untrimmed source,
+retains actual color props/defaults/FPS and registers outputs with reserved `hdr=False`
+separately from strict metadata-v5 kwargs. Ordinary SDR packing is used even with the
+HDR viewer environment flag; final rendering/tone-map settings are unaffected.
+`vsview.alignment_overlay` uses one public ModifyFrame per source, with n/f together,
+to paint source identity, Original frame and all other sources' live opening-hint
+projections in stable output order. Immutable validated source facts and authority-first
+opening offsets stay frozen after panel Save/Keep. Precomputed numeric/status slots
+reserve complete wrapped row extents; per-frame work stamps finite masks without
+font/raster calls or retained per-n caches. Whole-set fit failure explicitly falls back
+to unavailable live hints; the panel lists tracked original source positions.
+Finite glyph resources, source
+immutability, independent fresh-copy static fallback and raw-degradation warning remain.
+Static labels contain no current frame; source/decoder and native post-return errors
+still propagate. No presented-pixel identity claim is made.
+`vsview.alignment_selection` owns shared immutable opening-offset projection math.
+Authority-first raw offsets use `c + d_own - d_target`, distinguish zero/missing and
+provisional edges, check target bounds and do not change trims or evidence authority.
+Reference remains the persistence baseline rather than a required visual first step.
+
+The runtime otherwise uses
 the explicit generated script path for session identity, creates one `Reference`
 output and the complete ordered `Comparison N` output set, registering each source once and
 serializing role/key/ordinal/name, the authoritative integer/null offset, and bounded
@@ -675,17 +793,32 @@ typed `frame_compare.vsview.alignment_review_contract` owns the session identity
 strict metadata-v5/result-v1 topology and primitive DTO validation, trusted
 sibling-sidecar path, atomic
 result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
-is the sole human review surface inside VSView: it remains inert for ordinary or
-rejected sessions, renders accepted/provisional/unavailable evidence without importing
-service policy, observes only public current-output/current-frame callbacks after
-activation, requires each source to be visited for the default viewer-position
-workflow, and writes only a complete typed
-sidecar through one whole-set action. The panel's manual source-frame and known-offset
-inputs feed that same result model; its secondary keep-current action writes one
-`keep_current` decision per comparison. The panel derives immutable audio-review
-presentations, summary text, and details once per comparison at workspace activation;
-unload or replacement clears them. Preview callbacks reuse that evidence while
-updating live frame drafts and markers. `alignment_vsview` owns availability policy,
+is the sole human review surface inside VSView: it stays inert for rejected/ordinary
+sessions and presents entry authority/evidence separately from original frame drafts
+and saved outcomes. `vsview.workspace_positions` is the sole private integration
+with explicitly version-gated VSView 0.13.0: it reads the owning workspace’s retained
+`VideoOutput.last_frame` values by validated output identity and sets that generated
+workspace’s own playhead control to Unlink. It never changes global preferences or
+patches dependency hooks. The panel exists and receives workspace-load hooks even
+while hidden. Its owned 50 ms timer snapshots all sources from initial workspace
+binding, including when closed or another tool is selected. Snapshots fail closed
+for playback, queued/in-flight seeks, startup/reload, identity mismatch, invalid
+bounds and inconsistent active state. Reload/destruction stops tracking and rebinds
+fresh state without adding callbacks. Unsupported integration exposes manual entry.
+Confirmation also requires VSView's shared Qt worker pool to be idle: a paused
+playback worker can still commit a frame it already dequeued. This conservatively
+waits for other workspace/tool background jobs too; it uses no fixed settling delay.
+
+Each draft owns either tracked or manual intent. Editing, including invalid/empty
+text, protects that row; focused editing defers updates. Use viewer frame explicitly
+resumes tracking for that source. One Confirm matching frames action submits the
+complete stable set, including Reference. The handler re-reads workspace authority,
+rejects a changed set or pending state, and preserves valid zero. Separate complete
+known-offset input remains available. Keep saves a distinct whole-set `keep_current`
+decision per comparison. Successful writes freeze frames; failed writes stay editable.
+The panel builds immutable audio-review presentations once per comparison at workspace
+activation; replacement clears them. Navigation never grants evidence authority or
+writes results. `alignment_vsview` owns availability policy,
 expected-comparison construction from raw source counts, result acceptance, and
 applying confirmed offsets; its service, persistence, override, cache, and CLI/config
 boundaries remain unchanged and it does not parse terminal input. The
@@ -780,7 +913,7 @@ owners. Its explicit X11 contract is:
 The optional GUI proof is non-CI and non-default. Its verifier contract requires the
 `gui-linux` image to discover and load the exact Frame Compare VSView entry point,
 construct the panel in its inert ordinary-session state, load a production-generated
-L-SMASH session with VSView 0.12.1, register one `Reference` and ordered comparison
+L-SMASH session with VSView 0.13.0, register one `Reference` and ordered comparison
 outputs, render frame 0 for each output, exercise complete source readiness plus the
 whole-set positions and keep-current actions, and round-trip/validate the sibling
 result sidecar. The 2026-10-07 dependency-refresh handoff records a reported
@@ -964,13 +1097,73 @@ link's safe http(s) href; no viewer script re-derives it. The viewer's Inspector
 the Report Information source cards, Opens in, and Default pair at startup; renderer.py
 emits only their containers.
 
-Report payload v1.2 carries one orchestration-built, presentation-only display profile
+Tonemap dispatch returns a `TonemapResult`: the prepared graph and immutable
+`AppliedTonemap` facts. `LibplaceboTonemap` and `FallbackTonemap` retain the actual
+algorithm, controls and resolved source peak; requested `TonemapSettings` remain
+separate. The shared peak resolver preserves configured → MaxCLL → 1000-nit
+precedence. Fallback reasons are plugin unavailable, runtime unusable, and runtime
+call failed. Preparation, rendered clip facts, diagnostic overlays, orchestration,
+and report serialization carry the same per-clip facts. One render warning aggregates
+fallback clips. The fallback graph and frame properties are unchanged.
+
+Screenshot preparation defaults to fresh independent native frames: an eager one-frame
+libplacebo prototype preserves backend admission/fallback behavior, and FrameEval
+creates a transient one-frame mapper for each other source position. Looping takes
+place after Tonemap to preserve original frame addressing without sharing native
+peak-detector history across source frames. No Python node cache retains per-frame
+GPU contexts. Subsequent native failures propagate rather than silently mixing
+fallback pixels into a source labeled libplacebo. Other callers retain sequence
+mode; preset kwargs, including temporal smoothing settings, remain unchanged.
+When `dynamic_peak_detection` is disabled by the fast speed setting, still preparation
+instead applies one `placebo.Tonemap` node over the clip and reports
+`shared_stateless`; this policy follows detection state, not the setting name.
+
+`config.schema_enums.TonemapPreset.HIGHLIGHT_PRESERVE` is an opt-in public
+preset owned by `vs.tonemap_presets`: reference settings with BT.2390 knee 1.0.
+`render.prepare.resolve_tonemap_settings` applies authored overrides; changing
+from BT.2390 to another algorithm resets the generic native curve parameter
+to the default 0.5. An explicit BT.2390 override retains knee 1.0. Applied
+tonemap/report identity continues to contain the resolved preset and knee.
+Reference and existing presets retain their prior values; softclip remains
+experimental and is not part of this preset.
+
+Configured VSView previews receive immutable settings resolved by
+`render.prepare.resolve_tonemap_settings` in the alignment orchestration phase,
+through `AlignmentConfig`, `VSViewSessionRequest`, and the generated JSON payload.
+Session startup validates that payload back into `TonemapSettings`, including its
+enums. Original loaded frame evidence and, when unspecified, the existing HDR
+metadata probe determine whether to map each source before preview defaults and
+overlays. Successfully mapped sRGB props are preserved. Disabled tonemapping, SDR,
+and legacy sessions without settings retain the existing preview-default path.
+Both preview speeds use `sequence`: quality retains temporal peak measurement;
+fast disables it, using the same metadata peak policy as fast screenshots. Original
+frame addresses, counts, effective reference FPS, output order, `hdr=False`
+registration, metadata-v5 review authority and sidecar identity remain unchanged.
+
+The known libplacebo SDR destination is BT.709-primary BT.1886 encoded RGB. After
+the existing optional gamma adjustment, `tonemap_conversion` decodes that transfer
+with its explicit destination black/white, normalizes between those endpoints,
+and encodes sRGB in RGBS before RGB8 quantization. The resulting props specify
+RGB/full-range/sRGB/BT.709 and remove stale source HDR metadata. Source diagnostics
+read the original node. Pillow declares sRGB without changing supplied samples;
+fpng writes the same sRGB samples with its existing metadata behavior. This boundary
+does not convert arbitrary SDR or fallback output. Applied report controls and
+report identity include output encoding and frame policy separately from requested
+settings.
+
+Report payload v1.3 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
 provenance, shared formatters, stable roles, and set-level collision handling once per
 report, joining profile segments with `·` (slow.pics image names keep the `|`
 separator; burned-in screenshot text is the clip label and does not use release
 descriptors). Report controls consume control or micro names,
 while Inspector/info and ARIA surfaces consume primary identity and exact filename.
+Per-clip presentation contains applied tonemap facts; the rendering summary derives a
+shared implementation/algorithm/control projection, excluding clip-specific peaks and
+causes. Identity includes applied output facts and excludes requested settings and
+fallback causes in both clip and rendering projections. Resolved source-peak origin,
+tonemap speed, and frame policy participate in applied report identity; reports note
+when fast mode uses the default peak because no HDR peak metadata was available.
 Stage labels show the control name plus muted resolution and size, adding an
 HDR/SDR word only when the name has none; toolbar selects cap at `20rem` with an
 end ellipsis and carry the full name on each option. Canonical clip labels continue
@@ -1077,7 +1270,14 @@ before focus moves into the drawer.
 
 `assets/viewport.js` owns zoom clamping and pointer anchoring, pan bounds and Grid
 normalization, fit/reset/reveal math, transient pointer/pinch mechanics, directional
-pair-alignment normalization and offsets, and Lens/Grid viewport refreshes. It mutates
+pair-alignment normalization and offsets, and Lens/Grid viewport refreshes.
+`currentAlignment()` derives a normalized copy from the selected directional pair's
+`pairAlignments` entry; missing entries mean neutral. Offset edits write that map,
+while `rawAlignX`/`rawAlignY` remain transient input drafts. Visiting a pair or
+resetting its offset does not create a neutral entry. The root viewer's `selectPair`
+owns source selection, mode-driven distinct-pair repair, draft clearing, and Blink's
+active-source validity; other modes retain an active source outside the pair.
+It mutates
 the root viewer's canonical state and routes persistence back through the root; it does
 not create a second state or storage owner. The owner holds an explicit reference to
 the root viewer rather than inheriting the root prototype, and consumers call the
@@ -1089,7 +1289,13 @@ sequence rendering.
 bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
 V1 JSON export, strict import validation, a selected merge/replace candidate shared by
 preview and atomic apply, stale-preview rejection, and
-the Review tab's dedicated edit/import/export interaction lifecycle. That controller is
+the Review tab's dedicated edit/import/export interaction lifecycle. Saves and
+import Apply share a per-report Web Lock and a same-tab queue. The owner checks
+the expected storage snapshot inside the exclusive operation before replacing
+it; a stale writer keeps its local draft for export rather than overwriting
+another tab's saved records. External changes invalidate import previews too.
+Pending Apply can be cancelled before its write by changing choices, editing,
+choosing another file, or cancelling the import. That controller is
 the single editor-limit owner: notes are bounded to 1000 Unicode scalars in editing,
 stored records, and V1 import/export. The textarea has no native maxlength because
 browsers count UTF-16 code units rather than Unicode scalars. The controller is
@@ -1097,9 +1303,11 @@ created on first visible Review use, keeps form rendering stable across unrelate
 refreshes, and routes transition announcements through the existing shared polite live
 region. A persistent status line states how many review records are saved in this
 browser (singular/plural and the zero count are each phrased truthfully) beside a static
-reminder that notes live in browser storage, not the report file; a storage-unavailable
-or failed-write state instead says changes are kept only for the session, and never
-claims persistence it did not achieve. Its storage is
+reminder that notes live in browser storage, not the report file. Pending writes
+remain unsaved until the exclusive write finishes. A conflict warns the user to
+export local drafts before reloading saved changes; it does not merge or reload
+automatically. Unavailable storage or Web Locks uses the memory-only/export
+fallback, and failed writes never claim persistence they did not achieve. Its storage is
 separate from viewport preferences and never writes into the report or run directory.
 `assets/viewer.js` caches the Review DOM and composes those focused owners with the
 existing canonical report, mode, viewport, alignment, and Inspector state
@@ -1140,18 +1348,33 @@ consumes it through render-local request fields. Screenshot rendering still owns
 geometry and writer policy inside `frame_compare.render`: `frame_compare.render.geometry` plans
 optional aligned crop/scale/pad geometry, mod-safe crop rectangles, fit-to-target
 scale/canvas policy, padding, and overlay origins. Render batch expansion treats
-prepared active rectangles as already resolved for normal orchestration requests,
-while direct render batch calls without provenance can still use render-local
-static geometry inference; render does not sample content. Native screenshot
+required canonical active-picture facts as resolved for every batch request and
+checks containment against the prepared dimensions before planning. `SourceGeometry`
+requires a rectangle and canonical provenance; render has no inference mode, candidate
+ranking, or provenance translation. Orchestration projects its cache-stable
+`ClipActiveRectSource` vocabulary to canonical provenance at the render boundary. Native screenshot
 render remains full-frame. The FFmpeg backend applies geometry filters after
 exact frame selection, and the VapourSynth path chooses between the Pillow writer
 and eligible `core.fpng.Write` output without changing CLI import-time behavior.
-The render batch scheduler treats each clip as one production work unit and runs at
-most two clip units at once. Compatible ordered FFmpeg requests within a clip use one
-decode pass; VapourSynth, custom-runner, and non-PNG frames within one clip render
-sequentially while a second clip may overlap. Results remain in request order, and
-overlay/color processing is unchanged. Nested screenshot progress advances after each
-serialized frame completes, or for all FFmpeg frames when their batch completes.
+Render selection crosses the batch boundary as `SelectedScreenshot` records containing
+comparison frame, source frame, and selection label. Expansion validates all physical
+output paths before native preparation and produces one `PreparedClipRender` per clip,
+with clip facts, selections, and render requests. Its constructor checks request count
+and source-frame identity. The scheduler returns ordered `RenderedClip` records;
+each `RenderedScreenshot` checks that its result facts identify the selected source
+frame. There are no flattened request ranges or label-map reconstruction steps.
+
+The scheduler runs at most two clip jobs at once. A clip uses one FFmpeg decode pass
+only when every request is compatible and source frames are ordered; otherwise all
+its frames render sequentially while another clip may overlap. Screenshot progress
+is count-only and locked across workers: each serialized frame advances the count,
+or a completed FFmpeg batch advances it together. Parallel cancellation polls every
+50 ms, closes admission, signals FFmpeg abort, cancels unstarted work, and drains
+owned work before returning. Real failures are selected by lowest clip-job index.
+Report orchestration pairs context clips with rendered clips using strict ordered
+iteration and label checks, then consumes their screenshot records directly. The
+publishing boundary projects plain path dictionaries for services without importing
+render types into the service layer. Overlay, geometry, and color policy are unchanged.
 
 Runtime ownership matrix:
 
@@ -1175,6 +1398,9 @@ Runtime ownership matrix:
 | Shared compensation, sample/frame conversion, vote, and confirmation policy | `frame_compare.utils.alignment_policy` |
 | Shared P4/P4a terminal/panel presentation projection | `frame_compare.utils.alignment_review_projection` |
 | Terminal/Rich rendering and JSON review warning for the shared alignment presentation | `frame_compare.services.alignment_presentation` |
+| Shared open-rail human section rendering and ASCII fallback | `frame_compare.utils.terminal_sections` |
+| Human artifact-path display and terminal hyperlinks | `frame_compare.utils.artifact_paths` |
+| Memory-only final alignment summary carried to phase and completion output | `frame_compare.utils.progress_protocol` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
 | Native VSView alignment-review panel, public callback observation, source-lineup decisions, and marker lifecycle | `frame_compare.vsview.alignment_review_panel` |
@@ -1214,6 +1440,12 @@ These files currently carry disproportionate change risk:
   `alignment_review_contract.py`, and `alignment_review_panel.py`
 
 Working rule: changes to these files should usually trigger full verification and, when they reshape behavior or ownership, a same-pass update to this document.
+
+The render scheduler hotspot now owns only per-clip job scheduling, progress, and
+stop/drain behavior. Selection/request identity belongs to `PreparedClipRender`,
+selection/result identity belongs to `RenderedScreenshot`, and report cardinality
+remains guarded by `ReportData`. Orchestration no longer reconstructs or validates
+parallel path/fact maps.
 
 Native alignment-review hotspot dispositions for the current implementation:
 

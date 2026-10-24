@@ -50,7 +50,8 @@ tracked `.codanna/settings.toml.in` template; never commit the rendered
 ## Branch and pull request workflow
 
 1. Start from the base branch named in the issue, handoff, or maintainer request.
-   Otherwise target `main`.
+   Otherwise start from and target `pre-release` for normal development. `main`
+   receives the reviewed squash promotion of a complete release.
 2. Create a focused branch:
 
    ```bash
@@ -62,6 +63,13 @@ tracked `.codanna/settings.toml.in` template; never commit the rendered
    documentation. Reuse sufficient proof; do not add tests merely to satisfy a step.
 5. Run applicable verification from the repository profile and specialist runbook.
 6. Open a pull request against the intended integration branch.
+
+Delete completed development branches after merging. Freeze `pre-release` during
+release acceptance; after successful stable publication, approved branch maintenance
+archives its accepted head and starts it again from the published `main` commit.
+Start new-cycle branches from the refreshed `pre-release`. Unmerged or local-only
+work must be carried forward explicitly before approving that operation. See the
+[release branch procedure](docs/ENGINEERING_RUNBOOK.md#pre-release-staging-and-dependency-update-flow).
 
 Do not assume `main`, `staging`, `cleanup`, or a version-development branch is the
 correct target when the task names another base explicitly.
@@ -158,9 +166,15 @@ known-current images.
 
 The verifier sets `FRAME_COMPARE_TEST_MEDIA_CACHE` to
 `/workspace/generated/test-media-cache` (host `generated/test-media-cache`) for u4
-media only. Entries use `<cache>/<generator>/<key>/`, keyed by exact generator
-source and complete FFmpeg version output. Tests use temporary symlinks, keeping
-indexes outside the cache; unset the variable for temporary generation. Run the
+media only. Entries use `<cache>/<generator>/<key>/`, keyed by exact
+`tests/integration/alignment_u4_media_recipes.py` source and complete `ffmpeg -version`
+output. Assertion-only and store-only edits retain the cache. Recipes generate on
+demand, publishing each file with temporary file + atomic replace; the complete gate
+passes `FRAME_COMPARE_U4_MEDIA_FULL=1` to generate all 37 files. Focused
+`--pytest-path` runs remain demand-driven. Temporary symlinks keep indexes outside the
+cache; unset the cache variable for lazy temporary generation. Worker stats are
+written as JSON under `FRAME_COMPARE_E2E_ARTIFACTS`; measurements live in
+`tests/integration/NOTES-u4-media-preparation.md`. Run the
 verifier one at a time from a checkout because cache pruning cannot overlap.
 CI starts cold, adds no media cache, and retains Docker `--no-cache`.
 

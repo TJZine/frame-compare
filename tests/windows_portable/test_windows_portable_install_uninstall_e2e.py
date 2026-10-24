@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from ._helpers import powershell_exe as _powershell_exe
 from ._helpers import snapshot_bytes as _snapshot_bytes
 
 windows_install_uninstall_e2e = pytest.mark.skipif(
@@ -69,12 +68,14 @@ def _set_user_path(exe: str, value: str | None) -> None:
 
 @pytest.mark.integration
 @windows_install_uninstall_e2e
+@pytest.mark.parametrize("interpreter", ["powershell", "pwsh"])
+@pytest.mark.xdist_group("windows-install-lifecycle")
 def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
-    tmp_path: Path, repo_root: Path
+    tmp_path: Path, repo_root: Path, interpreter: str
 ) -> None:
-    exe = _powershell_exe()
+    exe = shutil.which(interpreter)
     if exe is None:
-        pytest.fail("Windows PowerShell is required for the portable installer")
+        pytest.skip(f"{interpreter} unavailable for install/uninstall lifecycle")
 
     source_dir = repo_root / "tools" / "windows_portable"
     bundle_dir = tmp_path / "bundle"
@@ -93,6 +94,7 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
         "frame-compare.ps1",
         "frame-compare.cmd",
         "frame-compare-update.ps1",
+        "frame-compare-version.ps1",
         "frame-compare-update.cmd",
         "update_public_key.xml",
     )

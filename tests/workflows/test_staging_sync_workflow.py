@@ -53,8 +53,8 @@ def test_integration_check_triggers_do_not_change_release_please_scope(
     docker = _load_workflow(repo_root / ".github" / "workflows" / "docker-integration.yml")
     release_please = _load_workflow(repo_root / ".github" / "workflows" / "release-please.yml")
 
-    assert ci["on"]["push"]["branches"] == ["main", "staging"]
-    assert docs["on"]["push"]["branches"] == ["main", "staging"]
+    assert ci["on"]["push"]["branches"] == ["main", "pre-release", "staging"]
+    assert docs["on"]["push"]["branches"] == ["main", "pre-release", "staging"]
     assert docs["on"]["pull_request"]["branches"] == [
         "main",
         "pre-release",
@@ -64,4 +64,4 @@ def test_integration_check_triggers_do_not_change_release_please_scope(
         pr_options = workflow["on"]["pull_request"] or {}
         assert "branches" not in pr_options
         assert "branches-ignore" not in pr_options
-    assert release_please["on"]["push"]["branches"] == ["main"]
+    assert release_please["on"]["push"]["branches"] == ["pre-release"]
