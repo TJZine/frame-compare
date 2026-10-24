@@ -43,8 +43,13 @@ exits without running.
 Runs and dry runs reject `--no-cache` combined with `--from-cache-only`
 ([`--no-cache` and `--from-cache-only`](../current-cli-contract.md#run-command-contract)).
 An invalid `--overlay`, `--tm-preset`, or `--tm-curve` value names the option and
-lists its choices before any work starts. Preset names are `reference`, `filmic`,
-`contrast`, `bt2390_spec`, `spline`, `bright_lift`, `highlight_guard`, and `highlight_preserve`.
+lists its choices before any work starts. Preset names are `reference`, `contrast`,
+`spline`, `bright_lift`, and `highlight_guard`. The default `reference` uses BT.2390 at 100 nits with knee 1.0.
+An explicit curve override that changes the preset curve uses that curve's default
+parameter: BT.2390 1.0, spline 0.5, or Reinhard 0.5. An explicit curve equal to the
+preset curve keeps its parameter. See the
+[preset table](../guides/hdr-tonemapping.md#configure-the-result) for targets,
+gamma lift, and parameters.
 
 `frame-compare run --help` groups the options under the same six headings as this
 section.

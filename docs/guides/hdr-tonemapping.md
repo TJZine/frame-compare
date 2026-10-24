@@ -95,42 +95,41 @@ supplied in the configuration file or environment variables. `--tm-target` and
 `--tm-preset` replaces only the preset, and explicitly supplied configuration values
 still override it (source: `render.prepare.resolve_tonemap_settings`).
 
-| Preset | Curve | Target | Gamma lift |
-| --- | --- | --- | --- |
-| `reference` (default) | `bt2390` | 100 nits | Off |
-| `bt2390_spec` | `bt2390` | 100 nits | Off |
-| `filmic` | `spline` | 203 nits | Off |
-| `spline` | `spline` | 203 nits | Off |
-| `contrast` | `reinhard` | 203 nits | Off |
-| `highlight_guard` | `spline` | 180 nits | Off |
-| `highlight_preserve` | `bt2390` | 100 nits | Off |
-| `bright_lift` | `bt2390` | 250 nits | On |
+| Preset | Curve | Target | Gamma lift | Curve parameter (`knee_offset`) |
+| --- | --- | --- | --- | --- |
+| `reference` (default) | `bt2390` | 100 nits | Off | 1.0 |
+| `contrast` | `reinhard` | 203 nits | Off | 0.5 |
+| `spline` | `spline` | 203 nits | Off | 0.5 |
+| `bright_lift` | `bt2390` | 250 nits | On | 1.0 |
+| `highlight_guard` | `spline` | 180 nits | Off | 0.5 |
 
-`highlight_preserve` is an opt-in BT.2390 shoulder adjustment: knee offset 1.0
-instead of the reference preset's 0.5. All other reference settings, including
-perceptual gamut mapping and contrast recovery, stay the same. It can preserve
-more highlight distinctions, but does not guarantee unclipped output or restore
-source detail that is already lost. `highlight_guard` remains the separate spline
-preset; neither preset changes the default.
+`reference` uses BT.2390 knee offset 1.0. This keeps more separation in bright
+areas than the earlier 0.5 default, so HDR screenshots can look slightly different.
+Clipping can still occur, and the transform cannot restore detail already lost in
+the source. Perceptual gamut mapping and contrast recovery remain unchanged.
+Softclip remains experimental and is unavailable through these presets.
 
-To select the preset for one run:
+An explicit curve override that changes the preset's curve uses the new curve's
+default parameter: BT.2390 1.0, spline 0.5, or Reinhard 0.5. An explicit curve equal
+to the preset's curve keeps the preset's parameter. For example, `highlight_guard`
+with `--tm-curve bt2390` uses knee 1.0. The field name `knee_offset` describes
+BT.2390's knee offset; the same field controls contrast for spline and Reinhard.
+
+To select a preset for one run:
 
 ```bash
-frame-compare run --tm-preset highlight_preserve
+frame-compare run --tm-preset spline
 ```
 
-Or set `preset = "highlight_preserve"` in `[color]`. Explicit target, curve,
-gamma-lift and contrast-recovery overrides still take precedence. Overriding the
-tone curve to any value other than `bt2390` returns the curve parameter to 0.5.
-Softclip remains experimental and is unavailable through this preset.
+Or set the preset and an explicit target in `[color]`:
 
 ```toml
 [color]
-preset = "filmic"
+preset = "spline"
 target_nits = 160
 ```
 
-This keeps the `filmic` curve and replaces only its target.
+This keeps the `spline` curve and replaces only its target.
 
 `enable_tonemap = false` renders HDR sources without conversion; the FFmpeg screenshot
 path (`screenshots.use_ffmpeg = true`) requires it for HDR sources (source:
