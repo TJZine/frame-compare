@@ -342,6 +342,90 @@ def test_native_still_tonemap_is_independent_of_request_history() -> None:
 
 
 @pytest.mark.vs_required
+def test_native_highlight_preserve_knee_changes_libplacebo_output() -> None:
+    """The resolved highlight-preserve knee reaches the native renderer."""
+    _require_native_libplacebo_still_runtime()
+    result = _run_vs_script(
+        """
+        import numpy as np
+        import vapoursynth as vs
+
+        from frame_compare.config.loader import get_default_config
+        from frame_compare.config.schema import TonemapPreset
+        from frame_compare.render.prepare import resolve_tonemap_settings
+        from frame_compare.vs.env import ensure_vs_environment
+        from frame_compare.vs.tonemap_libplacebo import apply_libplacebo
+        from frame_compare.vs.types import TonemapResult
+
+        core = ensure_vs_environment()
+        core.num_threads = 4
+        config = get_default_config()
+
+        def resolved_settings(preset):
+            color = config.color.model_copy(update={"preset": preset})
+            return resolve_tonemap_settings(config.model_copy(update={"color": color}))
+
+        reference_settings = resolved_settings(TonemapPreset.REFERENCE)
+        highlight_settings = resolved_settings(TonemapPreset.HIGHLIGHT_PRESERVE)
+        assert reference_settings.knee_offset == 0.5
+        assert highlight_settings.knee_offset == 1.0
+
+        width, height = 256, 16
+        source = core.std.BlankClip(width=width, height=height, format=vs.RGB48, length=1)
+
+        def fill(n, f):
+            frame = f.copy()
+            nits = np.linspace(100.0, 4000.0, width)
+            encoded = (nits / 10000.0) ** (2610 / 16384)
+            pq = ((3424 / 4096 + 2413 / 128 * encoded)
+                  / (1 + 2392 / 128 * encoded)) ** (2523 / 32)
+            codes = np.rint(pq * 65535).astype(np.uint16)
+            ramp = np.broadcast_to(codes, (height, width))
+            for plane in range(3):
+                np.copyto(np.asarray(frame[plane]), ramp)
+            return frame
+
+        source = source.std.ModifyFrame(clips=source, selector=fill).std.SetFrameProps(
+            _Range=1,
+            _Matrix=0,
+            _Primaries=9,
+            _Transfer=16,
+            ContentLightLevelMax=4000,
+            ContentLightLevelAverage=2000,
+            MasteringDisplayMinLuminance=0.005,
+            MasteringDisplayMaxLuminance=4000.0,
+        )
+
+        reference = apply_libplacebo(
+            source, reference_settings, core, still_image=True
+        )
+        highlight = apply_libplacebo(
+            source, highlight_settings, core, still_image=True
+        )
+        assert isinstance(reference, TonemapResult)
+        assert isinstance(highlight, TonemapResult)
+
+        def quantized_rgb(result):
+            frame = result.clip.get_frame(0)
+            planes = [np.asarray(frame[plane]) for plane in range(3)]
+            return np.rint(np.clip(np.stack(planes, axis=-1), 0.0, 1.0) * 255).astype(
+                np.uint8
+            )
+
+        reference_rgb = quantized_rgb(reference)
+        highlight_rgb = quantized_rgb(highlight)
+        assert not np.array_equal(reference_rgb, highlight_rgb)
+        reference_white = np.all(reference_rgb == 255, axis=-1).sum()
+        highlight_white = np.all(highlight_rgb == 255, axis=-1).sum()
+        assert highlight_white < reference_white
+        print("OK")
+        """,
+        timeout=90,
+    )
+    _assert_vs_process_ok(result)
+
+
+@pytest.mark.vs_required
 def test_native_pq_patch_reaches_srgb_once() -> None:
     if not bool(detect_plugins(vs.core).get("libplacebo")):
         if os.environ.get("FRAME_COMPARE_REQUIRE_LIBPLACEBO") == "1":

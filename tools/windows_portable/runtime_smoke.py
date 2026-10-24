@@ -86,7 +86,10 @@ def prove_project_entrypoint_and_panel() -> None:
 
     app = QApplication.instance() or QApplication([])
     parent = QWidget()
-    panel = panel_type(parent, types.SimpleNamespace(file_path=None))
+    panel = panel_type(
+        parent,
+        types.SimpleNamespace(file_path=None, register_on_destroy=lambda cb: None),
+    )
     assert_true(
         "Inactive" in panel.progress_label.text(),
         "alignment panel is not inert outside a generated session",

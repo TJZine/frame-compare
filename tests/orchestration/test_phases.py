@@ -11,7 +11,7 @@ import pytest
 
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     RunContext,
@@ -34,7 +34,7 @@ from .phase_task_helpers import _workspace
 
 
 def _make_context(tmp_path: Path) -> RunContext:
-    config = ConfigSchema()
+    config = get_default_config()
     workspace = _workspace(
         tmp_path, input_subdir="input", run_subdir=None, screenshots_subdir="screens"
     )

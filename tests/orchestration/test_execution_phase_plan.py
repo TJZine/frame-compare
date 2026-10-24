@@ -12,7 +12,7 @@ from frame_compare.analysis.types import (
     SelectionDetail,
 )
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.orchestration import execution
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies
@@ -52,7 +52,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
         screenshots_subdir="screenshots",
     )
 
-    config = ConfigSchema()
+    config = get_default_config()
     config.slowpics.confirm_upload_after_report = False
     config.analysis = config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 1}
@@ -83,7 +83,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     )
 
     plan = build_execution_phase_plan(
-        request=make_run_request(config=ConfigSchema(), root=tmp_path),
+        request=make_run_request(config=get_default_config(), root=tmp_path),
         deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
         prep=prep,
         state=ExecutionState(artifacts=prep.artifacts),
@@ -105,7 +105,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
 
     config.audio_alignment.force_interactive = True
     forced_plan = build_execution_phase_plan(
-        request=make_run_request(config=ConfigSchema(), root=tmp_path),
+        request=make_run_request(config=get_default_config(), root=tmp_path),
         deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
         prep=prep,
         state=ExecutionState(artifacts=prep.artifacts),
@@ -126,8 +126,8 @@ def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
     state = ExecutionState(artifacts=RunArtifacts())
 
     phases = build_phases_before_align(
-        request=make_run_request(config=ConfigSchema(), root=tmp_path, skip_analysis=True),
-        config=ConfigSchema(),
+        request=make_run_request(config=get_default_config(), root=tmp_path, skip_analysis=True),
+        config=get_default_config(),
         monotonic_timer=lambda: 0.0,
         state=state,
         input_videos=[tmp_path / "ref.mkv"],
@@ -136,7 +136,7 @@ def test_build_phases_before_align_skips_analyze_when_request_skips_analysis(
     )
 
     analyze_phase = next(phase for phase in phases if phase.name == "analyze")
-    config = ConfigSchema()
+    config = get_default_config()
     config.analysis = config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 1}
     )
@@ -154,7 +154,7 @@ def test_apply_phase_output_records_frame_plan_selection_labels(tmp_path: Path) 
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = execution_context(
-        config=ConfigSchema(),
+        config=get_default_config(),
         workspace=workspace,
         reference=reference,
         comparisons=[],
@@ -190,7 +190,7 @@ def test_analyze_retry_replaces_superseded_frame_plan_warnings(tmp_path: Path) -
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = execution_context(
-        config=ConfigSchema(),
+        config=get_default_config(),
         workspace=workspace,
         reference=reference,
         comparisons=[],
@@ -246,7 +246,7 @@ def test_apply_phase_output_retains_publish_post_upload_actions(tmp_path: Path) 
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = execution_context(
-        config=ConfigSchema(),
+        config=get_default_config(),
         workspace=workspace,
         reference=reference,
         comparisons=[],
@@ -294,7 +294,7 @@ def test_apply_phase_output_extends_warnings_from_render_output(tmp_path: Path) 
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = execution_context(
-        config=ConfigSchema(),
+        config=get_default_config(),
         workspace=workspace,
         reference=reference,
         comparisons=[],
@@ -331,7 +331,7 @@ def test_apply_phase_output_extends_warnings_from_align_output(tmp_path: Path) -
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     comparison = clip_state(tmp_path / "encode_b.mkv", label="Encode B")
     ctx = execution_context(
-        config=ConfigSchema(),
+        config=get_default_config(),
         workspace=workspace,
         reference=reference,
         comparisons=[comparison],
@@ -380,7 +380,7 @@ def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
     )
     reference = clip_state(tmp_path / "ref.mkv", label="Reference")
     ctx = execution_context(
-        config=ConfigSchema(),
+        config=get_default_config(),
         workspace=workspace,
         reference=reference,
         comparisons=[],

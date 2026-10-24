@@ -8,7 +8,7 @@ from typing import Protocol
 
 import pytest
 
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.orchestration.preparation import (
     _persist_probe_snapshots_for_run,
@@ -178,7 +178,7 @@ def test_normal_run_folder_probe_cache_excludes_unrelated_shared_entries(tmp_pat
         workspace=workspace,
         input_videos=[current_path],
         deps=RunDependencies(),
-        config=ConfigSchema(),
+        config=get_default_config(),
         overrides_by_path={},
         labels_by_path={current_path: current_path.stem},
         release_identities_by_path={},

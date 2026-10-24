@@ -9,31 +9,27 @@ Prepared 23 October 2026. Source examined: `f1d3b9bf4c3406e3d0cddbfbbc536e0ac8a9
 
 This report combines source and history research, primary upstream documentation, and a subsequent controlled native Windows investigation on the stated checkout. The current measurements and controller adjudication appear first; the original research and historical measurements follow with their provenance retained. This is not acceptance of a new product default. The initial research changed no product code. The later implementation addendum records the opt-in product change; user configuration and source media remain unchanged.
 
-## Portable review evidence
+## Local review evidence
 
-The implementation and review materials are committed together. The original
-handoff incorrectly depended on an uncommitted diff and ignored local artifacts;
-this has been corrected. Start with the committed
-[evidence README](../../review-evidence/2026-10-23-tonemapping/README.md),
-[comparison index](../../review-evidence/2026-10-23-tonemapping/index.html), and
-[exact implementation diff](../../review-evidence/2026-10-23-tonemapping/highlight-implementation/implementation.diff).
-All generated evidence paths below have a mirrored portable location under
-`review-evidence/2026-10-23-tonemapping/` where included. The root manifest validates
-copied evidence; omitted-local-artifacts.json names the large real-media arrays
-and original-resolution images retained locally. Source movies are not included.
-Thus the handoff supports source, measurement, test-log and comparison-image review
-without pretending that every original pixel array ships in Git.
+Review artifacts are retained only on the Windows machine under
+`generated/verification/2026-10-23/`. They include comparison images, raw summaries,
+native receipts and the implementation diff. The committed copies were removed
+from the branch tip because they included film frames, local media filenames and
+a Windows username. Local artifact paths in this report are recorded as code;
+readers need access to that machine to inspect them. Tracked source and document
+links are relative to the repository.
 
 ## Implementation follow-up: opt-in knee 1.0 and expanded softclip study
 
-The subsequent implementation request is committed with this report on the stated
-base HEAD. Review the base-to-HEAD diff or the portable bundle's implementation.diff. **`highlight_preserve` is the new public opt-in preset.** It
-uses BT.2390 at 100 nits with knee offset 1.0, retaining the other reference settings.
+The subsequent implementation was committed at `6bedfa31`, based on the source
+revision stated above. The source diff is available with
+`git diff f1d3b9bf..6bedfa31 -- src/`. `highlight_preserve` is the public opt-in
+preset. It uses BT.2390 at 100 nits with knee offset 1.0, retaining the other reference settings.
 Reference remains the default with knee 0.5; `highlight_guard` remains spline/180.
 Softclip was tested further but is not part of the option.
 
 ```bash
-frame-compare run --tm-preset highlight_preserve --tm-curve bt2390 --tm-target 100 --tm-speed quality
+frame-compare run --tm-preset highlight_preserve
 ```
 
 For persistent configuration, set `preset = "highlight_preserve"` under `[color]`.
@@ -41,8 +37,8 @@ Existing explicit target, curve, gamma and contrast-recovery fields still overri
 the preset. An explicit switch to another curve resets the generic native curve
 parameter to 0.5, preventing the tuned BT.2390 knee from becoming spline/Reinhard
 contrast. Explicit BT.2390 keeps knee 1.0. The normal applied-tonemap record retains
-the resolved preset and parameter. This is an option for highlight preservation,
-not a guarantee of zero clipping; fast mode and other overrides can change results.
+the resolved preset and parameter. Fast mode and other overrides can change results; clipping can remain
+with this highlight-preservation option.
 
 ### Additional difficult scenes
 
@@ -50,27 +46,28 @@ The expanded study evaluated five additional excerpt/frame pairs: magenta lighti
 and a blue-lit closeup in Spider-Verse; bright fabric/skin and reflective jewelry/
 skin in The Substance; and candlelight in Immaculate. Every pair holds knee 1.0
 constant and compares perceptual gamut mapping (1) against softclip (2).
-All are frame 72 of the exact retained excerpt identified in the raw receipts,
-not frame 72 of the original feature. Source hashes, source times, indexes and
-native settings are retained. A separate optional third Immaculate excerpt timed
+All use excerpt-local frame 72 of the exact retained excerpt identified in the raw
+receipts. Source hashes, source times, indexes and native settings are retained. A separate optional third Immaculate excerpt timed
 out at 150 seconds; its child was killed/reaped and owned scratch removed, and its
 softclip pair was not attempted. It supplies no quality evidence.
 
 The table uses full-picture stride-4 sampling, unlike the first study's row-250
 crop. Do not directly compare its percentages with earlier cropped metrics.
-“Active” means measurable mapping change, not recovered highlight detail.
+“Active” means measurable mapping change. Recovered highlight detail requires
+separate evidence.
 
 | Additional scene | Any channel at 255, perceptual → softclip | Mean RGB code, perceptual → softclip | Interpretation |
 | --- | ---: | ---: | --- |
 | Spider-Verse excerpt 2, magenta room | 9.2760% → 1.6003% | 76.14 → 77.97 | Strong endpoint reduction; changes color and lifts some bright details |
 | Spider-Verse excerpt 3, blue closeup | 0.5997% → 0.00625% | 58.61 → 59.01 | Strong reduction in colored highlights with modest overall mean change |
-| Substance excerpt 2, fabric/skin | 0% → 0% | 90.76 → 90.54 | Active color change, not an endpoint recovery success |
+| Substance excerpt 2, fabric/skin | 0% → 0% | 90.76 → 90.54 | Active color change; no endpoint recovery |
 | Substance excerpt 3, jewelry/skin | 0% → 0% | 63.49 → 63.46 | Smaller active color change; no clipping benefit established |
-| Immaculate excerpt 2, candlelight | 0% → 0% | 8.995 → 9.000 | Effectively inactive; not counted as support |
+| Immaculate excerpt 2, candlelight | 0% → 0% | 8.995 → 9.000 | Inactive control; supplies no quality evidence |
 
 All-white sampled occupancy was zero for every row on both sides. This matrix
-therefore tests colored endpoint behavior and other rendition changes, not a
-neutral-white clipping remedy. Four scenes across two titles were active under
+therefore tests colored endpoint behavior and other rendition changes. It
+provides no evidence of a neutral-white clipping remedy. Four scenes across two
+titles were active under
 the study's explicit activity criterion: at least 0.1% of sampled components
 change by two or more code values, with a maximum change of at least four.
 The live-action scenes satisfy that criterion but must not be described as four
@@ -80,8 +77,8 @@ The controller inspected the magenta and fabric/skin comparison sheets and
 independently reran the magenta pair. Both rerendered images matched the delegate's
 pixels exactly. The controller also ran the endpoint-reduction assertion (exit 0)
 and the unchanged-image negative control (expected exit 1), and verified all 137
-hashes in the expanded-study artifact manifest. In the magenta image the difference affects the colored light
-field and the nominally neutral character; it is not simply darkening everything.
+hashes in the expanded-study artifact manifest. In the magenta image the
+difference affects the colored light field and the nominally neutral character, with regional luma increases.
 Mean absolute code change was 2.285 there and 1.197 in the blue closeup, with
 localized maximum differences of 89 and 84 code values. Those local changes are
 large enough to deserve artistic scrutiny even though whole-image averages are
@@ -89,7 +86,25 @@ small. In the Substance fabric/skin scene, mean absolute change was 0.782 codes,
 with a maximum of 12; the visible warm-color rendition changes subtly. No
 perceptual reference or calibrated color-error metric establishes which is better.
 
-**Adjudication:** the new scenes strengthen softclip as a candidate for difficult
+Regional deltas clarify the direction of the softclip change. Values below
+are softclip minus perceptual, with knee 1.0 held constant. Chroma is the mean
+per-pixel max−min spread of gamma-coded RGB; luma is a code-value proxy. Neither
+is calibrated luminance or a perceptual color-error measure. Hue was not measured.
+
+| Region | Mean chroma delta, codes | Mean luma delta, codes |
+| --- | ---: | ---: |
+| Spider-Verse magenta lights | −2.24 | +2.52 |
+| Spider-Verse blue light | −2.53 | +2.69 |
+| Spider-Verse bright neutral character | −5.14 | +3.30 |
+| Substance orange background | +4.60 | −1.24 |
+| Substance red background | +1.63 | −0.55 |
+
+In clipped saturated regions, softclip lowers chroma and raises luma. In the
+unclipped warm backgrounds, it raises chroma and darkens slightly. Its endpoint
+reduction therefore includes desaturation, while the live-action results show
+changes to colors that were already within the output range.
+
+The new scenes support further softclip evaluation for difficult
 saturated colors, but do not justify changing the default or bundling it with the
 knee preset. Its effects extend beyond clipped pixels. Obtain an independent
 color/texture assessment before making it a public policy. Retain the distinction
@@ -107,96 +122,142 @@ scene, and the tapped and untapped versions also matched.
 
 The independent source reviewer reported no actionable findings after checking
 all 32 preset/curve combinations through in-memory TOML roundtrip, CLI merge and
-native-argument construction. This was read-only source/component review, not an
-Opus review or image-quality acceptance. Its callback was rejected by automatic
-approval review; the controller retrieved the result directly, so the review
+native-argument construction. This read-only source/component review supplied no
+image-quality acceptance. Its callback was rejected by automatic approval review; the controller retrieved the result directly, so the review
 was not lost. No callback authorization workaround was used.
 
-Pyright reported zero errors/warnings; whole-repository Ruff lint and formatting,
-Bandit at the required medium/high threshold, and both import contracts passed.
+Pyright reported zero errors/warnings; Ruff lint, Bandit at the required
+medium/high threshold, and both import contracts passed in the implementation
+checks. The earlier claim that whole-repository Ruff formatting passed was
+incorrect. At `6bedfa31`, PR #138 failed `Lint (Ruff)` because the committed
+expanded-study `REPORT.md` contained a code block rejected by
+`ruff format --check`. It also failed `Build documentation` because the handoff
+and research report contained broken local and artifact links.
 Initial focused-test attempts failed on existing cache permissions and then a
 missing scratch parent; a fresh isolated scratch run passed. Those setup failures
 are not represented as product failures or clean test runs.
 
 The expanded unit completed 12 successful native cases (five pairs plus plain
 and configured parity) and one timeout; the controller added two successful
-independent repeats. Full-suite outcome is recorded in the final verification
-receipt below. Docker/bash and Zensical are unavailable on this host, so the
-required Docker media gate and strict documentation-site build remain unverified.
+independent repeats. Full-suite outcome is recorded in the historical Windows verification
+receipt below. Docker/bash and Zensical were unavailable on the Windows
+investigation host, leaving the Docker media gate and strict documentation-site
+build unverified in that phase.
 No new Windows portable build, installed-CLI full media render, HLG, or calibrated
 physical-display acceptance is claimed.
 
-The [Opus 5.5 handoff](C:/Software/video/frame-compare/docs/reviews/2026-10-23-opus-5-5-tonemapping-handoff.md)
-asks for a read-only challenge of implementation, evidence and recommendations.
-The new [comparison viewer](C:/Software/video/frame-compare/generated/verification/2026-10-23/highlight-softclip-expanded/comparison.html),
-[raw scene summary](C:/Software/video/frame-compare/generated/verification/2026-10-23/highlight-softclip-expanded/summary.json)
-and [implementation evidence](C:/Software/video/frame-compare/generated/verification/2026-10-23/highlight-implementation)
-are local artifacts. The earlier research and initial-study sections below remain
-historical records; their statements about unexposed controls and unchanged code
-refer to that earlier phase, superseded by this opt-in implementation.
+### Independent review
 
-### Final verification receipt
+The independent review of `6bedfa31` found six issues: committed film frames and
+private local-path evidence (R1), broken documentation links (R2), missing proof
+that the knee reaches the native plugin (R3), tests inheriting local configuration
+and environment settings (R4), overstated or inaccurate report claims (R5), and
+misplaced architecture text and configuration-specific guide instructions (R6).
+The preset values and resolver rule were accepted without a product-code change.
+
+The review ran the strict documentation build at base `f1d3b9bf` (pass) and
+`6bedfa31` (seven warnings, failure). The full macOS suite at `6bedfa31` exited 0
+with 3,746 passed and 336 skipped. A mutation hardcoding the native curve parameter
+to 0.5 still passed that suite, demonstrating the missing boundary coverage.
+CWD-config and environment reproductions each triggered the collection-warning
+test failure. The reviewer also inspected the porch and Spider-Verse comparison
+sheets and raw summaries. These are historical review results; they are separate
+from checks run while correcting this documentation.
+
+Knee 1.0 is a sound opt-in with modest measured separation: fewer near-white and
+endpoint pixels, slightly more distinct values, and a mean reduction of about
+3.5 RGB codes on the porch. Much of the bright sky remains near white, and the
+visible change is small. Softclip stays experimental. It reduces colored
+endpoints partly by desaturating clipped colors and also changes unclipped
+saturated colors. Hue was not measured.
+
+The local implementation artifacts are
+`generated/verification/2026-10-23/highlight-implementation/`; expanded-study
+artifacts are `generated/verification/2026-10-23/highlight-softclip-expanded/`.
+The earlier research and initial-study sections below retain their historical
+provenance. Statements there about unexposed controls and unchanged code describe
+that earlier phase, before the opt-in implementation.
+
+### Historical Windows implementation verification receipt
 
 Full repository pytest completed in 396.7 seconds: **4,197 passed, 78 skipped,
 4 failed** (4,279 collected; exit 1). This is not a clean full gate. Failures:
 
 - Both PowerShell variants of the portable install/uninstall lifecycle failed at
   the helper that sets the user PATH. These tests use copied installer scripts
-  and a stub launcher, not the changed tone-map implementation. No permission
+  and a stub launcher. No permission
   escalation or retry of the user-PATH mutation was attempted.
 - The generated portable-bundle launcher environment-restoration check observed
   child exit 1 instead of 0. It uses a copied Python executable and synthetic CLI
-  entry, not the new preset. Its underlying environment failure was not diagnosed
+  entry. Its underlying environment failure was not diagnosed
   or fixed in this scope.
 - The collection-warning orchestration test expected a metadata-mismatch warning
   but received “upload skipped because report confirmation was unavailable.”
-  The controller reproduced that same assertion on an isolated copy of source
-  with all three changed production files restored from base HEAD. It is therefore
-  not introduced by this preset change. No upload was performed; the test uses
+  The earlier base-source reproduction restored the three changed production
+  files but still ran from the checkout and inherited its local configuration.
+  Independent review traced the failure to a bare `ConfigSchema()` reading
+  `config/config.toml` and `FRAME_COMPARE_*` variables. At base on macOS the test
+  passes. It fails from a scratch CWD with
+  `[slowpics] confirm_upload_after_report = true`, or with
+  `FRAME_COMPARE_SLOWPICS__CONFIRM_UPLOAD_AFTER_REPORT=true`. The evidence
+  identifies test isolation as the cause. No upload was performed; the test uses
   a mocked publisher and rejects unexpected HTTP.
 
 No unrelated installer, launcher or publishing behavior was changed to make these
-checks pass. The skipped cases and unavailable Docker/site-build gates remain
-explicit acceptance gaps. The implemented option has focused, public configuration,
+checks pass. The skipped cases and unavailable Docker/site-build gates were
+explicit acceptance gaps in that Windows run. The implemented option has focused
+public configuration,
 installed-console persistence and actual native-render evidence; broader release
 acceptance is incomplete. Exact receipts and the reviewable diff are in
-[verification.json](C:/Software/video/frame-compare/generated/verification/2026-10-23/highlight-implementation/verification.json)
+verification.json (`generated/verification/2026-10-23/highlight-implementation/verification.json`)
 and the adjacent XML/log/manifest files.
 
-## Current native investigation and final adjudication
+## Native investigation and adjudication before implementation
 
 The requested orchestration is complete for this diagnostic scope. Two separate chats gathered real-media evidence and synthetic controls under explicit handoffs and completion-callback instructions. The controller reviewed their evidence, inspected the porch and Spider-Verse comparison images, reran the real-media positive and negative controls, and personally executed the synthetic native matrix. Native GPU execution was serialized. No proposed change was promoted into product defaults.
 
-**Final recommendation: prioritize an opt-in BT.2390 knee 1.0 policy, evaluate softclip separately for colored highlights, and add effective-peak observability before adopting a new automatic peak policy.** Spline remains a useful stronger-compression alternative with a visible rendition cost. Neither knee 1.0 nor any other tested option is a general guarantee against blown highlights.
+The native investigation recommended an opt-in BT.2390 knee 1.0 policy, separate
+softclip evaluation for colored highlights, and effective-peak observability
+before adopting a new automatic peak policy. Spline remains a useful stronger-compression alternative with a visible rendition cost. Neither knee 1.0 nor any other tested option is a general guarantee against blown highlights.
 
 ### What actually ran
 
 - Real-media unit: 28 bounded native case subprocesses, all exit 0, on six selected frames across Kill Bill, Spider-Verse, The Substance, and Immaculate. A successful native doctor receipt accompanied the runs.
-- Controller: three additional fresh real-media subprocesses—porch baseline, knee 1.0, and uninstrumented baseline—all exit 0. Their decoded PNG pixels exactly matched the corresponding original baseline/candidate evidence; the tapped and untapped baselines also matched.
+- Controller: three additional fresh real-media subprocesses (porch baseline, knee 1.0, and uninstrumented baseline), all exit 0. Their decoded PNG pixels exactly matched the corresponding original baseline/candidate evidence; the tapped and untapped baselines also matched.
 - Controller: 17 fresh synthetic native case subprocesses, all exit 0 and all acquisition/oracle checks passed. The prepared step-pattern case 04 was not run; it was unnecessary for the bounded decisions here.
 - Synthetic preparation: 19 pure numeric checks passed. These are arithmetic/fixture checks, distinct from the native executions above.
 - The real-media endpoint-reduction assertion passed. Replacing the candidate with the baseline deliberately failed the required reduction assertion, exit 1. This proves the check discriminates that regression; it is not a comprehensive perceptual-quality oracle.
 - Native environment: Windows 10 build 19045, Python 3.13.7, VapourSynth R81/API 4.3, vs-placebo 2.0.4, libplacebo 7.371, RTX 5080, NVIDIA driver 621.01. Source remained at the report's stated HEAD with no tracked source/configuration drift.
 
-This is **48 successful diagnostic case processes**, not 48 independent artistic acceptance tests. Real-media cases used the current still-image owner and final encoder boundary. Synthetic inputs bypassed the decoder and exercised the current conversion/mapper boundary. The knee, gamut, percentile, and metadata candidates are internal settings, not supported public CLI recipes. The controller separately exercised actual configuration resolution: preset-only `highlight_guard` stayed BT.2390/100 under this checkout's explicit local overrides; explicit curve/target resolved to spline/180. That was a runtime-free configuration check, not an installed-CLI end-to-end render. No packaged/Docker or calibrated physical-display acceptance is claimed.
+These 48 successful diagnostic case processes establish bounded numeric and
+repeatability results. Artistic acceptance requires separate assessment. Real-media cases used the current still-image owner and final encoder boundary. Synthetic inputs bypassed the decoder and exercised the current conversion/mapper boundary. The knee, gamut, percentile, and metadata candidates were internal settings at
+that stage and unavailable as public CLI recipes. The controller separately exercised actual configuration resolution: preset-only `highlight_guard` stayed BT.2390/100 under this checkout's explicit local overrides; explicit curve/target resolved to spline/180. That runtime-free configuration check did not render through the installed CLI. No packaged/Docker or calibrated physical-display acceptance is claimed.
 
-### Current real-media results
+### Real-media results from the corrected pipeline
 
 Percentages below count sampled final sRGB8 pixels with all channels exactly 255. The real-media sampling uses every fourth pixel in both dimensions, starting at row 250; these figures are not whole-frame luminance measurements. Mean RGB is a gamma-encoded code average, useful only as a coarse guard against broadly darkening the image.
 
 | Scene / intervention | All-white pixels | Mean RGB code | Controller interpretation |
 | --- | ---: | ---: | --- |
 | Porch, reference | 7.3305% | 139.13 | Current corrected-pipeline baseline |
-| Porch, knee 1.0 | 0.8216% | 135.67 | About 89% less endpoint area; promising narrow change, remaining bright flat areas still visible |
+| Porch, knee 1.0 | 0.8216% | 135.67 | Modest visible separation; much of the sky remains near white |
 | Porch, spline / 100 nits | 0.0003% | 121.68 | Strong compression with substantial overall appearance change |
 | Porch, metadata policy 2 | 0.0012% | 132.18 | Output improves this endpoint metric, but effective peak was not observed in fresh logs |
 | Porch, measured CIE Y / 99.995 | 8.5814% | 139.40 | Does not solve this frame |
 | Porch, measured CIE Y / 100 | 7.3286% | 139.13 | Better than 99.995 here, essentially baseline endpoint area |
-| Porch, controlled static 448 | 0.1510% | 136.96 | Useful policy experiment; not proof that 448 was the correct artistic rendering authority |
-| Closeup, reference → knee 1.0 | 3.8773% → 1.3952% | — | Direction agrees with porch |
+| Porch, controlled static 448 | 0.1510% | 136.96 | Useful policy experiment; artistic authority remains unproven |
+| Closeup, reference → knee 1.0 | 3.8773% → 1.3952% | Unrecorded here | Direction agrees with porch |
 | Closeup, spline / 100 nits | 0.0404% | 75.67 versus reference 86.53 | Same retention-versus-rendition tradeoff |
 
-The porch's metadata-policy-2 experiment retained its original RPU and detection settings; the measured/static experiments deliberately removed RPU and scene properties and disabled Dolby Vision use. These are distinct policy comparisons, not interchangeable evidence that one metadata field is wrong. The historical 285/1001-nit effective peaks discussed later were **not** remeasured in these fresh runs.
+On the same porch picture sample, near-white occupancy (all channels at or
+above 250) falls from 20.90% to 11.45%. Distinct sampled RGB triplets increase
+from 4,199 to 4,512, and mean RGB code falls from 139.13 to 135.67, about 3.5 codes.
+In the upper-center sky region, near-white occupancy remains 76.20%, compared
+with 81.88% at reference. The endpoint reduction alone overstates the visible
+change; the inspected comparison shows a small improvement in separation.
+
+The porch's metadata-policy-2 experiment retained its original RPU and detection settings; the measured/static experiments deliberately removed RPU and scene properties and disabled Dolby Vision use. Each comparison changes a different policy; attributing the effect to one
+metadata field requires a separate control. The historical 285/1001-nit effective peaks discussed later were **not** remeasured in these fresh runs.
 
 For colored highlights, Spider-Verse provides a more discriminating result:
 
@@ -207,9 +268,10 @@ For colored highlights, Spider-Verse provides a more discriminating result:
 | Knee 1.0 + softclip | 0.3387% | 0.2062% | 111.63 |
 | Knee 1.0 + darken | 0.1889% | 0% | 101.73 |
 
-Softclip reduced single-channel endpoint occupancy substantially with a small mean-code change and a relatively subtle visual difference in this scene. It did not remove neutral white pixels. Darken also reduced endpoints but visibly darkened the rendition; it is not the preferred default candidate. These are one-scene color observations, not perceptual color-error measurements.
+Softclip reduced single-channel endpoint occupancy substantially with a small mean-code change and a relatively subtle visual difference in this scene. It did not remove neutral white pixels. Darken also reduced endpoints but visibly darkened the rendition; it is not the preferred default candidate. These one-scene color observations lack a perceptual color-error measurement.
 
-The selected Substance and Immaculate baseline/knee images were identical and endpoint-free. They serve as inactive controls, not evidence of success on those titles' difficult highlights. The Kill Bill dark frame had no all-white pixels but did have single-channel saturation: 18.2255% at reference versus 16.4300% with knee 1.0. All-white counts alone would have missed that behavior.
+The selected Substance and Immaculate baseline/knee images were identical and endpoint-free. They serve as inactive controls and supply no quality evidence for those titles'
+difficult highlights. The Kill Bill dark frame had no all-white pixels but did have single-channel saturation: 18.2255% at reference versus 16.4300% with knee 1.0. All-white counts alone would have missed that behavior.
 
 ### Why zero clipped pixels is the wrong acceptance target
 
@@ -230,30 +292,34 @@ Fixtures were explicit BT.2020/PQ float RGB with controlled metadata. Same-evalu
 | Understated versus true static ramp metadata | White occupancy 96.0983% versus 62.2665% | Bad peak policy can be harmful; true static metadata alone is not sufficient to eliminate compression |
 | Saturated patches with knee 1.0 | Any-channel endpoint area: perceptual 62.5015%, softclip 50.9399%, darken 30.5862% | Gamut policy matters separately; none removes every saturated endpoint |
 | Already-clipped source ramp | Flat source region remained unrecoverable | Tone mapping cannot reconstruct absent source detail |
-| Extended encoded RGB stress values | Distinct negative values collapsed to zero and values above one collapsed to 65535 before the plugin | Confirms a bounded integer-input loss mechanism for invalid/extended RGB, not that real decoded movie samples suffer it |
+| Extended encoded RGB stress values | Distinct negative values collapsed to zero and values above one collapsed to 65535 before the plugin | Confirms a bounded integer-input loss mechanism for invalid/extended RGB; its relevance to real decoded samples remains unproven |
 
 The ramp's native rows include reversals, and knee 1.0 has three final8 red-channel reversals; disabling recovery removes those final8 reversals in this fixture. These measurements include the renderer's full spatial processing and quantization. They do not establish that the isolated analytic tone curve is nonmonotonic. A spatially uniform patch series and explicit dithering/recovery controls would be needed to assign that cause.
 
-Fresh native logs did not provide numeric effective-peak traces, including in synthetic runs. Therefore the impulse results establish output sensitivity, not the detector's exact histogram estimate or a numerical precedence proof. HLG was deliberately deferred until its OOTF/system-gamma and display assumptions are specified. Synthetic PNGs are convenient previews without an explicit sRGB chunk; numerical adjudication used the saved arrays, not their viewer appearance.
+Fresh native logs did not provide numeric effective-peak traces, including in synthetic runs. The impulse results establish output sensitivity. The detector's exact histogram
+estimate and numerical precedence remain unobserved. HLG was deliberately deferred until its OOTF/system-gamma and display assumptions are specified. Synthetic PNGs are convenient previews without an explicit sRGB chunk; numerical adjudication used the saved arrays.
 
 ### Accepted next work, rejected shortcuts, and evidence access
 
-1. **Narrow opt-in candidate:** expose a curve-specific BT.2390 knee control or documented highlight-preserving policy, then validate a larger set of actively difficult scenes. Keep baseline available. The current evidence justifies this candidate, not a global default switch.
-2. **Separate color candidate:** evaluate softclip with the chosen shoulder on more saturated real scenes, including hue/saturation and local texture checks. Do not silently bundle gamut changes into the knee conclusion.
-3. **Observability first for peak policy:** record supplied metadata, selected authority, detector settings, and—where the native interface can actually expose it—the effective peak. Do not label a supplied hint as a measured effective value. Compare static, scene, and measured policies with the same curve.
-4. **Retain spline as an explicit alternate look:** its highlight compression is stronger, with a real brightness/contrast cost. A parameter comparison is more useful than rebranding it as a guarantee.
-5. **Keep final-output separation in acceptance:** use selected ROIs, near-white occupancy, local gradients, distinct output values, and visual comparison alongside both endpoint counts. More export precision cannot recover distinctions already lost in native output.
+1. BT.2390 opt-in: expose a curve-specific BT.2390 knee control or documented highlight-preserving policy, then validate a larger set of actively difficult scenes. Keep baseline available. A global default switch requires further evidence.
+2. Gamut mapping: evaluate softclip with the chosen shoulder on more saturated real scenes, including hue/saturation and local texture checks. Do not silently bundle gamut changes into the knee conclusion.
+3. Peak diagnostics: record supplied metadata, selected authority, detector settings, and the effective peak where the native interface can expose it. Do not label a supplied hint as a measured effective value. Compare static, scene, and measured policies with the same curve.
+4. Spline: its highlight compression is stronger, with a real brightness/contrast cost. A parameter comparison is more useful than rebranding it as a guarantee.
+5. Output acceptance: use selected ROIs, near-white occupancy, local gradients, distinct output values, and visual comparison alongside both endpoint counts. More export precision cannot recover distinctions already lost in native output.
 
 Rejected as general fixes: changing percentile to 100 alone; disabling contrast recovery alone; picking darken because its endpoint count is smallest; assuming `source_peak` is the effective peak; removing the final sRGB clamp; repeating already-fixed range/primaries/double-expansion changes. The fallback remains a separate hardening opportunity and was not exercised as a native alternative in this matrix.
 
-Evidence is retained locally under [the study directory](C:/Software/video/frame-compare/generated/verification/2026-10-23/highlight-study). Start with the [real-media report](C:/Software/video/frame-compare/generated/verification/2026-10-23/highlight-study/real-media/REPORT.md), [comparison viewer](C:/Software/video/frame-compare/generated/verification/2026-10-23/highlight-study/real-media/comparison.html), [synthetic summary](C:/Software/video/frame-compare/generated/verification/2026-10-23/highlight-study/controller/synthetic-summary.json), and [controller receipt](C:/Software/video/frame-compare/generated/verification/2026-10-23/highlight-study/controller/adjudication-receipt.json). These generated outputs are local evidence, not committed product fixtures. The [orchestration plan](C:/Software/video/frame-compare/docs/plans/2026-10-23-highlight-verification.md) records chat ownership and callback authorization. One child's callback was blocked by automatic approval review; its report was retrieved directly, so that did not prevent controller verification.
+Evidence is retained locally under the study directory (`generated/verification/2026-10-23/highlight-study`). Start with the real-media report (`generated/verification/2026-10-23/highlight-study/real-media/REPORT.md`), comparison viewer (`generated/verification/2026-10-23/highlight-study/real-media/comparison.html`), synthetic summary (`generated/verification/2026-10-23/highlight-study/controller/synthetic-summary.json`), and controller receipt (`generated/verification/2026-10-23/highlight-study/controller/adjudication-receipt.json`). These generated outputs remain local evidence outside the product fixtures. The [orchestration plan](../plans/2026-10-23-highlight-verification.md) records chat ownership and callback authorization. One child's callback was blocked by automatic approval review; its report was retrieved directly, so that did not prevent controller verification.
 
 ## Initial research findings and recommendation
 
+The initial research recommended a controlled comparison on the corrected
+pipeline, centered on BT.2390 knee 1.0 and explicit peak-selection policy. Prior
+trials showed highlight changes with both. Neither had been adopted as a general
+product default. The initial search found no completed representative real-content
+study of gamut mapping or true-maximum peak detection.
 
-**There is useful work left to do. The strongest next step is a small, controlled comparison on the corrected current pipeline, centered on BT.2390 knee 1.0 and explicit peak-selection policy.** We have already demonstrated substantial highlight changes with both, but have not adopted either as a general product default. Gamut mapping and true-maximum peak detection are the most useful additional investigations that I could not find completed on representative real content.
-
-The problem is broader than a single clipping switch:
+The investigation covers several mechanisms:
 
 - A shoulder can squeeze distinct highlights into almost identical values; subsequent RGB8 quantization can turn them all white.
 - Individual color channels can reach their endpoints even when the complete pixel is not white.
@@ -261,7 +327,7 @@ The problem is broader than a single clipping switch:
 - Gamut conversion can lose colored highlight detail independently of the luminance curve.
 - The degraded fallback has its own explicit saturation threshold.
 
-**What we should prioritize:**
+The initial priorities were:
 
 | Priority | Action | Why it earns the next investigation |
 | --- | --- | --- |
@@ -274,7 +340,7 @@ The problem is broader than a single clipping switch:
 | 3 | Replace or make strict-mode refusal possible for the degraded fallback | Its formula can mathematically flatten a large range to white; unrelated to the confirmed libplacebo Kill Bill case |
 | Later | Evaluate additional modern curves, richer local mapping, or another rendering backend | Higher cost and larger appearance changes; current evidence does not require replacing libplacebo |
 
-Two practical cautions shape these recommendations. First, the browser sRGB and independent-still corrections are already implemented and should be retained. Second, **`highlight_guard` is currently just spline at 180 nits, with the shared defaults. Its name does not represent a no-clipping guarantee.**
+Two practical cautions shape these recommendations. First, the browser sRGB and independent-still corrections are already implemented and should be retained. Second, **`highlight_guard` is spline at 180 nits, with the shared defaults. Its name does not represent a no-clipping guarantee.**
 
 ## What the current application actually does
 
@@ -284,25 +350,25 @@ Current reference settings are:
 
 | Setting | Value | Consequence for this investigation |
 | --- | --- | --- |
-| Curve / destination | BT.2390 / 100 nits | Baseline appearance, not a physical monitor calibration |
+| Curve / destination | BT.2390 / 100 nits | Baseline appearance; physical monitor calibration remains separate |
 | BT.2390 knee offset | 0.5 | The value whose alternatives helped in prior studies |
 | Destination black | 0.18 nits | Part of both native output and subsequent sRGB conversion |
 | Dynamic peak detection | On in quality; off in fast | Does not by itself identify the effective peak chosen under automatic metadata |
 | Percentile | 99.995 | Below the absolute-maximum setting |
-| Gamut mapping | 1, perceptual | Already a gamut mapping policy; gamut mapping is not absent |
+| Gamut mapping | 1, perceptual | Existing gamut mapping policy |
 | Metadata policy | 0, automatic | Dynamic metadata can matter even when peak detection is disabled |
 | Dolby Vision use | Requested true | Does not establish full Dolby Vision reconstruction/rendering |
 | Contrast recovery | 0.3 | An existing additional image transformation |
 | Gamma lift | Off | Not responsible for the default-path example |
 | Sequence smoothing | 45 frames | Relevant to sequence previews; fresh still nodes prevent cross-frame history |
 
-These values come from [TonemapSettings][types] and [presets][presets], not assumed upstream defaults. The application explicitly targets BT.709 primaries using the plugin's `dst_prim=3`.
+These application values are defined in [TonemapSettings][types] and [presets][presets]. The application explicitly targets BT.709 primaries using the plugin's `dst_prim=3`.
 
 ### The public configuration is narrower than the internal settings
 
 Public `[color]` accepts enable/disable, preset, speed, target, curve, gamma lift, and contrast recovery. It does **not** currently expose knee offset, percentile, gamut policy, metadata policy, source peak, or Dolby Vision policy. Unknown configuration keys are rejected. Internal `TonemapSettings.source_peak` exists, but the ordinary color resolver does not populate it from a public configuration field. See [ColorConfig][schema] and [resolution][prepare].
 
-The local [config color section][local-config] explicitly contains `target_nits=100`, `tone_curve="bt2390"`, `gamma_lift=false`, and `contrast_recovery=0.3`. Explicit fields override preset values. Consequently, **using only `--tm-preset highlight_guard` with that configuration does not switch the actual curve to spline or target to 180.** This is an important confound when interpreting a preset trial. It is established by source/configuration inspection; it is not proof that a particular earlier user run encountered it.
+The local config color section (`config/config.toml:129`) explicitly contains `target_nits=100`, `tone_curve="bt2390"`, `gamma_lift=false`, and `contrast_recovery=0.3`. Explicit fields override preset values. Consequently, **using only `--tm-preset highlight_guard` with that configuration does not switch the actual curve to spline or target to 180.** This is an important confound when interpreting a preset trial. It is established by source/configuration inspection; it is not proof that a particular earlier user run encountered it.
 
 For a reproducible comparison using existing controls, append explicit flags to the existing run command:
 
@@ -311,7 +377,12 @@ For a reproducible comparison using existing controls, append explicit flags to 
 --tm-speed quality --tm-curve spline --tm-target 100
 ```
 
-These are two alternative runs. They isolate the curve at one target, with the other resolved controls held constant. To actually evaluate the named 180-nit preset under this config, explicitly supply `--tm-preset highlight_guard --tm-curve spline --tm-target 180 --tm-speed quality`. That changes both curve and target relative to reference, so it is a practical preset comparison, not a curve-only experiment. No such run was executed for this report.
+These are two alternative runs. They isolate the curve at one target, with the
+other resolved controls held constant. To evaluate the named 180-nit preset under
+this config, supply
+`--tm-preset highlight_guard --tm-curve spline --tm-target 180 --tm-speed quality`.
+That preset comparison changes both curve and target relative to reference. No
+such run was executed in the initial research phase.
 
 ## What we have already tried
 
@@ -319,14 +390,14 @@ These are two alternative runs. They isolate the curve at one target, with the o
 
 | Work | Evidence / status | What it establishes and what it does not |
 | --- | --- | --- |
-| Initial curve presets, including `highlight_guard` | Present since `c4293723`; current preset remains spline / 180 nits / no gamma lift | Existing option, not a newly proposed technique. No retained controlled real-content acceptance specifically for this preset was found |
-| Earlier HDR/range export repairs | `3c45a94f`, `7fe23ba0`, `f14118bf` | Historical repairs to HDR/export behavior, including avoiding repeated range expansion; not a reason to apply another global range expansion |
+| Initial curve presets, including `highlight_guard` | Present since `c4293723`; current preset remains spline / 180 nits / no gamma lift | Existing option. No retained controlled real-content acceptance specifically for this preset was found |
+| Earlier HDR/range export repairs | `3c45a94f`, `7fe23ba0`, `f14118bf` | Historical repairs to HDR/export behavior, including avoiding repeated range expansion; retain the corrected range handling |
 | Removed postprocessing contrast multiply/clamp | `7fe23ba0` | Replaced that older operation with native contrast recovery. Removing the old contrast clamp is already completed work; the separate fallback formula below still exists |
 | Applied-transform reporting | `bc182b07` | Reports can distinguish requested settings from actual fallback/native transforms |
 | Correct destination primaries | `44dc3ba7`; independent native check in `b7856f53` | Fixed erroneous BT.601/SMPTE-C selection to BT.709. Earlier diagnosis found this alone did not solve brightness |
-| BT.1886-to-sRGB export and PNG declaration | `5c15cbf4` | Implemented output correctness. The retained porch control got slightly brighter after correct conversion, not less blown out |
+| BT.1886-to-sRGB export and PNG declaration | `5c15cbf4` | Implemented output correctness. The retained porch control got slightly brighter after correct conversion; clipping remained |
 | Independent mapper state for quality stills | `5c15cbf4`, retained harness `79c52a6c` | Prevents another requested frame's detector history influencing the still. Does not select a more protective shoulder |
-| Experimental native mapper reuse | `e193e955`, default off and capability gated | Primarily a determinism/performance investigation; not an accepted highlight-quality improvement |
+| Experimental native mapper reuse | `e193e955`, default off and capability gated | Determinism/performance investigation; highlight-quality acceptance remains unproven |
 | Fast metadata-based stills | `3117e850`, configuration in `7f7ef883`, verification `3be9edc3` | Implemented optional detector-off path. Not equivalent to forced HDR10-only metadata, and not guaranteed to preserve more highlights |
 | Configured HDR previews | `1130d64e` | Preview now respects configured transform; quality preview/still temporal policy still differs |
 
@@ -334,18 +405,18 @@ Current code confirms the relevant implemented state. Historical verification sc
 
 ### Actual highlight and color trials
 
-The most useful retained evidence is the [18 October diagnosis][initial], [20 October fixed-frame matrix][matrix], [metadata Experiment A][experiment-a], [eight-scene color study][study], [cross-title assessment][cross-title], and [output/history controls][history]. Much of it lives under ignored `generated/verification`, so those receipts are local evidence rather than tracked release tests.
+The retained evidence includes the 18 October diagnosis (`generated/verification/2026-10-18/kill-bill-diagnosis/findings.json`), 20 October fixed-frame matrix (`generated/verification/2026-10-20/hdr-pro-handoff/diagnostic-summary.json`), metadata Experiment A (`generated/verification/2026-10-20/hdr-experiment-a/experiment-a-summary.json`), eight-scene color study (`generated/verification/2026-10-20/hdr-color-study/study-summary.json`), cross-title assessment (`generated/verification/2026-10-20/hdr-color-study/mastering-audit/assessment.json`), and output/history controls (`generated/verification/2026-10-20/hdr-color-study/output-history-controls/summary.json`). Much of it lives under ignored `generated/verification`, so those receipts remain local evidence outside the tracked release tests.
 
 | Trial already performed | Recorded result | Interpretation today |
 | --- | --- | --- |
 | Strip Dolby Vision RPU | Did not resolve the original porch problem; one later automatic/dynamic trial increased white occupancy | Do not assume disabling DV is the solution |
 | Set `src_max=1000` alone | Did not resolve tested highlights in the initial diagnosis | A constructor value alone does not prove the native mapper used that peak |
 | Disable dynamic detection / use controlled static branches | Later controlled branches reduced white occupancy; several early toggles did not | The exact metadata branch and retained props matter; these are not interchangeable experiments |
-| BT.2390 knee 1.0 and 2.0 | Large reductions in porch/close-up white occupancy | Strong candidate evidence; not adopted, and effects vary by scene |
+| BT.2390 knee 1.0 and 2.0 | Large reductions in porch/close-up white occupancy | Candidate evidence at the time; effects vary by scene |
 | Knee 1.5 | Included in the later eight-scene study | Already tried; no need for another unconstrained broad sweep |
 | Spline | Strong reductions on problem highlights, with changes elsewhere | Already tried at 100 nits. This does not validate the 180/203-nit presets or prove universal fidelity |
 | Reinhard | Included in the initial diagnostic script | Already screened; no broad acceptance evidence found |
-| Contrast recovery 0 versus 0.3 | Modest improvement, substantial white areas remained | Useful secondary control, not the leading standalone remedy |
+| Contrast recovery 0 versus 0.3 | Modest improvement, substantial white areas remained | Secondary control with a smaller effect than knee or metadata changes |
 | CLL/FALL integer-to-float conversion only | Native16 and RGB8 outputs byte-identical on the porch automatic/RPU branch | Not the leading cause there; does not validate types on every other metadata path |
 | Zero smoothing | Selected real-media histories initially matched; later epsilon investigation found detector-metadata history dependence even where native16/RGB8 pixels matched | Insufficient to guarantee state independence; this is not a claim that those matching images visibly differed. Current fresh-per-frame mapper is the stronger implemented solution |
 | Correct output conversion / tags | Numerically validated; tags alone did not change pixel data | Already corrected. Do not merely relabel or double-convert samples |
@@ -355,7 +426,9 @@ The October 20 spline study omitted the generic curve parameter; a separate fixe
 
 ### The historical numbers worth retaining
 
-These are **historical sampled RGB code statistics**, not calibrated luminance, fidelity scores, or current-checkout output. They precede the final sRGB/independent-still corrections. The fixed-frame study sampled below the overlay, rather than evaluating every pixel in the full frame.
+These historical sampled RGB code statistics precede the final sRGB and
+independent-still corrections. They provide no calibrated luminance or fidelity
+measurement. The fixed-frame study sampled below the overlay.
 
 | Historical variant at 100-nit target | Porch, HDR frame 12382: all-channel RGB8 white | Close-up, HDR frame 14943: all-channel RGB8 white |
 | --- | ---: | ---: |
@@ -365,13 +438,14 @@ These are **historical sampled RGB code statistics**, not calibrated luminance, 
 | Reference, contrast recovery disabled | 6.6864% | 3.2249% |
 | Controlled HDR10 static branch | 0.1467% | 0.5877% |
 
-Source: [fixed-frame matrix][matrix]. The initial spline porch result was approximately 0.000308%, but this reduction accompanied a different rendering of midtones and shadows. Fewer white pixels alone does not establish greater fidelity.
+Source: fixed-frame matrix (`generated/verification/2026-10-20/hdr-pro-handoff/diagnostic-summary.json`). The initial spline porch result was approximately 0.000308%, but this reduction accompanied a different rendering of midtones and shadows. Fewer white pixels alone does not establish greater fidelity.
 
-In the particularly informative [Experiment A][experiment-a], changing **only `metadata=0` to `metadata=2`**, while retaining the RPU and detector setting, changed the native trace from approximately **285 → 100 nits** to **1001 → 100 nits**. Porch RGB8 white occupancy changed from **7.1934% to 0.001233%**. It also lowered the average code value. This demonstrates a powerful metadata-policy effect; it does not demonstrate that 1001 nits was the correct artistic or physical source peak.
+In Experiment A (`generated/verification/2026-10-20/hdr-experiment-a/experiment-a-summary.json`), changing **only `metadata=0` to `metadata=2`**, while retaining the RPU and detector setting, changed the native trace from approximately **285 → 100 nits** to **1001 → 100 nits**. Porch RGB8 white occupancy changed from **7.1934% to 0.001233%**. It also lowered the average code value. This demonstrates a metadata-policy effect; it does not demonstrate that 1001 nits was the correct artistic or physical source peak.
 
-A later provenance assessment found the porch's RPU scene peak around 284.85 nits agreed with a measured PQ-base luminance maximum around 285.04 nits. Thus **a badly understated scene-luminance peak was not demonstrated for that case**. Forcing a larger range can relieve a steep shoulder even when the smaller measured peak is meaningful. The right response is to evaluate shoulder shape and color-volume behavior, not label the DV metadata corrupt. [Cross-title/provenance assessment][cross-title]
+A later provenance assessment found the porch's RPU scene peak around 284.85 nits agreed with a measured PQ-base luminance maximum around 285.04 nits. Thus **a badly understated scene-luminance peak was not demonstrated for that case**. Forcing a larger range can relieve a steep shoulder even when the smaller measured peak is meaningful. These observations support evaluating shoulder shape and color-volume behavior.
+They provide no basis for labeling the DV metadata corrupt. Cross-title/provenance assessment (`generated/verification/2026-10-20/hdr-color-study/mastering-audit/assessment.json`)
 
-The [output conversion control][history] changed porch white occupancy from 7.1934% to 7.3872%. It establishes why the sRGB correction cannot be advertised as the highlight fix.
+The output conversion control (`generated/verification/2026-10-20/hdr-color-study/output-history-controls/summary.json`) changed porch white occupancy from 7.1934% to 7.3872%. It establishes why the sRGB correction cannot be advertised as the highlight fix.
 
 There is also an important reconciliation of earlier wording: the porch had **zero all-channel native16 endpoint occupancy**, but **5.4691% any-channel native16 endpoint occupancy** in the later audit. These statements are compatible. Neither permits the blanket conclusion that no native component clipped. Exact endpoint occupancy by itself still does not locate where saturation occurred.
 
@@ -381,11 +455,13 @@ I found no completed representative real-content acceptance study for percentile
 
 The retained studies also do not establish a generally accepted new default, a calibrated physical display result, or equivalence to an independently graded SDR release.
 
-## Further work with the strongest technical basis
+## Further work proposed by the initial research
 
 ### 1. Promote BT.2390 knee 1.0 from historical candidate to a current-pipeline decision
 
-This is the best-supported narrow appearance change. Test 0.5 versus 1.0 first; retain 2.0 as a diagnostic bound rather than assuming the largest value is best. The actual prior improvements make this more compelling than inventing another preset name.
+The initial evidence supported a narrow appearance change. Compare 0.5 with 1.0
+first and retain 2.0 as a diagnostic bound. Judge each result by its measured
+separation and appearance.
 
 The pinned libplacebo implementation gives BT.2390 a parameter default of 1.0 and range 0.5–2.0. Its compatibility parameter means **knee offset for BT.2390, spline contrast for spline, and Reinhard contrast for Reinhard**. The same numerical change therefore has different meanings across curves. [Pinned curve implementation](https://raw.githubusercontent.com/haasn/libplacebo/a7a18af88ff0a17c04840dcb3246047bb6b46df3/src/tone_mapping.c)
 
@@ -405,7 +481,7 @@ Recommended work:
 
 1. Disclose the distinction between the supplied source-peak hint and the measured/metadata-derived effective peak. Where a native value cannot be observed reliably, say it is unavailable.
 2. In diagnostics, retain input MaxCLL, mastering maximum, exact-frame RPU presence, selected metadata policy, detector state, and native effective-peak trace together.
-3. Compare automatic metadata, a genuinely measured branch, and a controlled static branch at identical curve settings. Confirm which branch actually ran.
+3. Compare automatic metadata, a branch with verified measured-peak authority, and a controlled static branch at identical curve settings. Confirm which branch actually ran.
 4. Only then consider a public peak policy or explicit override. Specify whether an override is a hint, floor, or authoritative replacement.
 
 Do not simply substitute mastering-display maximum for content peak: those describe different quantities. Likewise, stripping RPU and changing metadata policy together cannot identify which change helped. For a true no-RPU control, remove the RPU property in an isolated diagnostic graph and verify the native result; do not trust a flag name alone.
@@ -434,7 +510,7 @@ If the existing modes show a clear tradeoff that cannot be balanced, richer gamu
 
 ### 5. Retain contrast recovery as a secondary, measurable choice
 
-We have already tried zero. The historical improvement was real but much smaller than knee/metadata changes. Re-test it in combination with the shortlisted curve, not as another standalone broad investigation.
+We have already tried zero. The historical improvement was real but much smaller than knee/metadata changes. Re-test it in combination with the shortlisted curve.
 
 In the pinned shader, contrast recovery mixes a base tone map with a detail-restored value and clamps to the destination range. It can therefore affect endpoint behavior; its name does not mean it recovers information already lost earlier. [Pinned color-mapping shader](https://raw.githubusercontent.com/haasn/libplacebo/a7a18af88ff0a17c04840dcb3246047bb6b46df3/src/shaders/colorspace.c)
 
@@ -463,7 +539,8 @@ y = clamp(2*r*x / (1 + r*x), 0, 1)
 r = source_peak / target_nits
 ```
 
-For nonnegative input, `y` reaches 1 when `x >= 1/r`, or `x >= target_nits/source_peak`. At 1000/100, every component at or above 0.1 saturates; at 448/100, the threshold is about 0.2232. This follows directly from the expression, not a new runtime measurement. [Fallback implementation][fallback]
+For nonnegative input, `y` reaches 1 when `x >= 1/r`, or `x >= target_nits/source_peak`. At 1000/100, every component at or above 0.1 saturates; at 448/100, the threshold is about 0.2232. These thresholds follow directly from the expression and were calculated
+without a new runtime measurement. [Fallback implementation][fallback]
 
 Its conversion helper does not explicitly linearize PQ/HLG and perform the complete HDR-to-BT.709 rendering operation before this expression. It is a deliberately degraded path and should not be represented as equivalent to the requested curve. Current reporting already distinguishes it.
 
@@ -481,11 +558,12 @@ A new local tone mapper or custom shader could preserve spatial contrast differe
 
 Our RGB48 input conversion is compatible with the plugin and avoids early RGB8 reduction. However, integer RGB can bound values before tone mapping. For extreme/saturated samples, compare decoder output with the actual pre-plugin RGB48 input to determine whether distinctions are already gone. A YUV16 plugin-input experiment would change conversion/chroma/DV assumptions and requires separate proof; it should not be adopted solely to avoid one intermediate format.
 
-For HLG, use a separate fixture with explicitly defined viewing/peak assumptions rather than carrying over PQ conclusions. For DV, distinguish an HDR-compatible base plus metadata from full reconstruction, especially enhancement-layer and non-HDR10-compatible cases.
+For HLG, use a separate fixture with explicitly defined viewing/peak assumptions. For DV, distinguish an HDR-compatible base plus metadata from full reconstruction, especially enhancement-layer and non-HDR10-compatible cases.
 
-For browser-only discrepancies, record browser, monitor profile, Windows HDR state, and SDR brightness setting. Compare decoded image values with actual display observations. Our target nits describes a transform, not the physical brightness the browser produces. Existing SDR inputs also retain their current interpretation, so a separately mastered SDR comparison should not silently be treated as an output-transfer oracle.
+For browser-only discrepancies, record browser, monitor profile, Windows HDR state, and SDR brightness setting. Compare decoded image values with actual display observations. Our target nits describes a transform. The browser's physical brightness depends
+on its display environment. Existing SDR inputs also retain their current interpretation, so a separately mastered SDR comparison should not silently be treated as an output-transfer oracle.
 
-## A focused next experiment
+## Experiment proposed by the initial research
 
 The goal is to decide a protective default or opt-in policy without repeating every earlier study.
 
@@ -497,16 +575,17 @@ Start with the retained porch 12382 and close-up 14943, plus a dark control. The
 
 ### Separate the variables
 
-| Stage | Comparison | Decision it can answer |
+| Stage | Comparison | Decision supported |
 | --- | --- | --- |
-| A | BT.2390 knee 0.5 vs 1.0, same automatic metadata | Does the narrowest previously promising change still help after the implemented corrections? |
-| B | Automatic vs measured vs controlled static peaks, same curve | Is the remaining problem peak authority, curve compression, or both? |
-| C | Percentile 99.995 vs 100 on a confirmed measured branch | Are isolated highlights sacrificed by the estimator? |
-| D | Perceptual vs softclip vs darken on shortlisted settings | Are colored highlight losses primarily gamut-related? |
-| E | Contrast recovery 0 vs 0.3; then final-quantization controls if needed | What additional detail/noise/endpoint tradeoffs remain? |
-| F | Current reference vs selected candidate vs spline at the same target | Does the chosen policy generalize without unacceptable changes elsewhere? |
+| A | BT.2390 knee 0.5 vs 1.0, same automatic metadata | Effect of knee 1.0 after the pipeline corrections |
+| B | Automatic vs measured vs controlled static peaks, same curve | Contribution of peak authority and curve compression |
+| C | Percentile 99.995 vs 100 on a confirmed measured branch | Effect of the estimator on isolated highlights |
+| D | Perceptual vs softclip vs darken on shortlisted settings | Contribution of gamut mapping to colored highlight loss |
+| E | Contrast recovery 0 vs 0.3; then final-quantization controls if needed | Remaining detail, noise and endpoint tradeoffs |
+| F | Current reference vs selected candidate vs spline at the same target | Generalization and appearance changes outside the highlights |
 
-Avoid a full Cartesian sweep. Stop pursuing a control when it is proven inactive on the tested branch. Treat a deliberately larger static peak as a rendering choice, not evidence of a more accurate source measurement.
+Avoid a full Cartesian sweep. Stop pursuing a control when it is proven inactive on the tested branch. Treat a deliberately larger static peak as a rendering choice. A more accurate
+source measurement requires independent evidence.
 
 ### Capture useful measurements
 
@@ -523,13 +602,14 @@ Measure separately:
 
 Include synthetic PQ ramps with peaks below and above metadata, tiny bright impulses, broad bright patches, saturated colors, and a source that is already clipped. Add missing, inaccurate, and type-varied metadata controls. Define HLG separately.
 
-**Acceptance should require preserved meaningful highlight distinctions without an unacceptable midtone/color penalty.** Zero white pixels is not a valid standalone target: legitimate white and already-clipped source regions can remain white. Matching the older SDR release is also not a valid standalone target.
+Acceptance requires meaningful highlight distinctions with acceptable midtone and
+color changes. Zero white pixels is not a valid standalone target: legitimate white and already-clipped source regions can remain white. Matching the older SDR release is also not a valid standalone target.
 
 Reuse the existing [native integration tests][integration], [media tests][media-tests], and [same-evaluation checkpoint harness][probe] where appropriate. They already establish important conversion and request-history contracts; they do not currently constitute broad highlight-quality acceptance. A production change would also need the affected runtime/platform verification from the repository runbook. That was the scope of the initial research pass. The subsequent native investigation is documented at the start of this report; its limited diagnostic acceptance does not establish a production or packaged-platform pass.
 
-## Proposed product direction after that evidence
+## Product direction proposed by the initial research
 
-My preferred sequence is:
+The initial research proposed this sequence:
 
 1. Make peak-source reporting unambiguous and add a diagnostic path for the active curve/peak.
 2. Evaluate a tuned BT.2390 knee-1 policy against the corrected reference pipeline.
@@ -537,11 +617,11 @@ My preferred sequence is:
 4. Add a tested highlight-preserving preset only after its peak, gamut, and export behavior are defined. Avoid promising that every source will be unclipped.
 5. Address fallback behavior separately, and add higher-precision/dither options only where the staged evidence shows a benefit.
 
-This preserves the substantial fixes already made while tackling the still-open artistic and numeric behavior. The largest historical improvements came from the shoulder and peak-selection policy. The most promising genuinely underexplored areas are gamut handling, true-maximum measured peaks, and final-output detail retention.
+This preserves the substantial fixes already made while tackling the still-open artistic and numeric behavior. The largest historical improvements came from the shoulder and peak-selection policy. The remaining areas for investigation are gamut handling, true-maximum measured peaks, and final-output detail retention.
 
 ## Evidence boundaries and source index
 
-This report used read-only code/history inspection, local JSON/text evidence, and current primary-source web research. No source media was newly decoded, no candidate was rendered, no browser/display acceptance was performed, and no configuration/default was changed. Missing or inaccessible historical evidence cannot prove an experiment never happened; “not found” above means no completed result was found in the inspected repository and retained targeted evidence.
+The initial research phase used read-only code/history inspection, local JSON/text evidence, and primary-source web research. That phase decoded no source media, rendered no candidate, performed no browser/display acceptance, and changed no configuration or default. The later native investigation and opt-in implementation are recorded above. Missing or inaccessible historical evidence cannot prove an experiment never happened; “not found” above means no completed result was found in the inspected repository and retained targeted evidence.
 
 The packaged runtime pins examined are vs-placebo `3cfd23f257ecb62b0cbd81eaaca092e18ae8e579` and libplacebo `a7a18af88ff0a17c04840dcb3246047bb6b46df3`, corroborated by Docker and Windows manifest declarations. Current online options may exceed the pinned wrapper's API; recommendations distinguish existing application controls, wrapper controls, and future integration work.
 
@@ -549,29 +629,21 @@ Local primary evidence:
 
 - [Current settings and screenshot caller][prepare], [native mapper][mapper], [presets][presets], [types][types], [public configuration][schema].
 - [Output conversion][conversion], [source-peak resolver][peak], [fallback][fallback], [encoder][encoder].
-- [Original Kill Bill diagnosis][initial], [fixed-frame matrix][matrix], [metadata Experiment A][experiment-a].
-- [Color study][study], [cross-title/mastering assessment][cross-title], [output/history controls][history], [sRGB implementation results][srgb-results].
+- Original Kill Bill diagnosis (`generated/verification/2026-10-18/kill-bill-diagnosis/findings.json`), fixed-frame matrix (`generated/verification/2026-10-20/hdr-pro-handoff/diagnostic-summary.json`), metadata Experiment A (`generated/verification/2026-10-20/hdr-experiment-a/experiment-a-summary.json`).
+- Color study (`generated/verification/2026-10-20/hdr-color-study/study-summary.json`), cross-title/mastering assessment (`generated/verification/2026-10-20/hdr-color-study/mastering-audit/assessment.json`), output/history controls (`generated/verification/2026-10-20/hdr-color-study/output-history-controls/summary.json`), sRGB implementation results (`generated/verification/2026-10-20/hdr-color-study/srgb-implementation/summary.json`).
 - [Verification ledger][ledger], [HDR guide][guide].
 
-[prepare]: /C:/Software/video/frame-compare/src/frame_compare/render/prepare.py:28
-[mapper]: /C:/Software/video/frame-compare/src/frame_compare/vs/tonemap_libplacebo.py:71
-[presets]: /C:/Software/video/frame-compare/src/frame_compare/vs/tonemap_presets.py
-[types]: /C:/Software/video/frame-compare/src/frame_compare/vs/types.py:46
-[schema]: /C:/Software/video/frame-compare/src/frame_compare/config/schema_models.py:252
-[conversion]: /C:/Software/video/frame-compare/src/frame_compare/vs/tonemap_conversion.py:190
-[peak]: /C:/Software/video/frame-compare/src/frame_compare/vs/tonemap_conversion.py:275
-[fallback]: /C:/Software/video/frame-compare/src/frame_compare/vs/tonemap_fallback.py:27
-[encoder]: /C:/Software/video/frame-compare/src/frame_compare/render/encoders.py:343
-[local-config]: /C:/Software/video/frame-compare/config/config.toml:129
-[initial]: /C:/Software/video/frame-compare/generated/verification/2026-10-18/kill-bill-diagnosis/findings.json
-[matrix]: /C:/Software/video/frame-compare/generated/verification/2026-10-20/hdr-pro-handoff/diagnostic-summary.json
-[experiment-a]: /C:/Software/video/frame-compare/generated/verification/2026-10-20/hdr-experiment-a/experiment-a-summary.json
-[study]: /C:/Software/video/frame-compare/generated/verification/2026-10-20/hdr-color-study/study-summary.json
-[cross-title]: /C:/Software/video/frame-compare/generated/verification/2026-10-20/hdr-color-study/mastering-audit/assessment.json
-[history]: /C:/Software/video/frame-compare/generated/verification/2026-10-20/hdr-color-study/output-history-controls/summary.json
-[srgb-results]: /C:/Software/video/frame-compare/generated/verification/2026-10-20/hdr-color-study/srgb-implementation/summary.json
-[ledger]: /C:/Software/video/frame-compare/docs/reviews/2026-10-17-outstanding-verification.md
-[guide]: /C:/Software/video/frame-compare/docs/guides/hdr-tonemapping.md
-[integration]: /C:/Software/video/frame-compare/tests/vs/test_integration.py
-[media-tests]: /C:/Software/video/frame-compare/tests/e2e/test_media_tonemap.py
-[probe]: /C:/Software/video/frame-compare/tools/hdr_still_probe.py
+[prepare]: ../../src/frame_compare/render/prepare.py
+[mapper]: ../../src/frame_compare/vs/tonemap_libplacebo.py
+[presets]: ../../src/frame_compare/vs/tonemap_presets.py
+[types]: ../../src/frame_compare/vs/types.py
+[schema]: ../../src/frame_compare/config/schema_models.py
+[conversion]: ../../src/frame_compare/vs/tonemap_conversion.py
+[peak]: ../../src/frame_compare/vs/tonemap_conversion.py
+[fallback]: ../../src/frame_compare/vs/tonemap_fallback.py
+[encoder]: ../../src/frame_compare/render/encoders.py
+[ledger]: 2026-10-17-outstanding-verification.md
+[guide]: ../guides/hdr-tonemapping.md
+[integration]: ../../tests/vs/test_integration.py
+[media-tests]: ../../tests/e2e/test_media_tonemap.py
+[probe]: ../../tools/hdr_still_probe.py

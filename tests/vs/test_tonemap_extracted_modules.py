@@ -4,8 +4,10 @@ from typing import TYPE_CHECKING, cast
 import pytest
 import vapoursynth as vs
 
+from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import ToneCurve, TonemapPreset
 from frame_compare.config.schema_enums import TonemapSpeed
+from frame_compare.render.prepare import resolve_tonemap_settings
 from frame_compare.vs.tonemap_conversion import (
     apply_post_processing,
     convert_non_rgb_with_matrix_hint,
@@ -183,7 +185,32 @@ def test_resolve_hdr_inputs_preserves_explicit_sdr_signal_and_range() -> None:
     }
 
 
-def test_build_libplacebo_kwargs_uses_hdr10_hints_and_metadata_peak() -> None:
+@pytest.mark.parametrize(
+    ("preset", "tone_curve", "expected_curve", "expected_knee"),
+    [
+        pytest.param(TonemapPreset.REFERENCE, None, "bt2390", 0.5, id="reference"),
+        pytest.param(
+            TonemapPreset.HIGHLIGHT_PRESERVE,
+            None,
+            "bt2390",
+            1.0,
+            id="highlight_preserve",
+        ),
+        pytest.param(
+            TonemapPreset.HIGHLIGHT_PRESERVE,
+            ToneCurve.SPLINE,
+            "spline",
+            0.5,
+            id="highlight_preserve_spline_override",
+        ),
+    ],
+)
+def test_build_libplacebo_kwargs_uses_hdr10_hints_and_metadata_peak(
+    preset: TonemapPreset,
+    tone_curve: ToneCurve | None,
+    expected_curve: str,
+    expected_knee: float,
+) -> None:
     metadata = HDRMetadata(
         mastering_display=None,
         max_cll=1000,
@@ -200,17 +227,19 @@ def test_build_libplacebo_kwargs_uses_hdr10_hints_and_metadata_peak() -> None:
         detected_is_hdr=True,
     )
 
-    kwargs = build_libplacebo_tonemap_kwargs(
-        settings=TonemapSettings(tone_curve=ToneCurve.BT2390),
-        target_nits=203,
-        inputs=inputs,
-    )
+    config = get_default_config()
+    color = config.color.model_copy(update={"preset": preset})
+    if tone_curve is not None:
+        color = color.model_copy(update={"tone_curve": tone_curve})
+    settings = resolve_tonemap_settings(config.model_copy(update={"color": color}))
+
+    kwargs = build_libplacebo_tonemap_kwargs(settings=settings, target_nits=203, inputs=inputs)
 
     assert kwargs == {
         "src_max": 1000,
         "dst_max": 203,
-        "tone_mapping_function_s": "bt2390",
-        "tone_mapping_param": 0.5,
+        "tone_mapping_function_s": expected_curve,
+        "tone_mapping_param": expected_knee,
         "dst_csp": 0,
         "dst_prim": 3,
         "dst_min": 0.18,

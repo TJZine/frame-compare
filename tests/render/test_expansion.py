@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema_enums import OverlayMode
 from frame_compare.config.schema_models import SourcesConfig
 from frame_compare.orchestration.source_selection import resolve_source_selection
@@ -74,7 +74,7 @@ def test_expansion_preserves_source_mapping_and_prepared_source(
     jobs = expand_batch_render_requests(
         [batch],
         output_dir=tmp_path / "out",
-        config=ConfigSchema(),
+        config=get_default_config(),
         overlay_mode=OverlayMode.NONE,
         renderer="vapoursynth",
         ffmpeg_runner=MagicMock(),
@@ -106,7 +106,7 @@ def test_expansion_uses_actual_preparation_state_and_overlay_facts(
     jobs = expand_batch_render_requests(
         [batch],
         output_dir=tmp_path / "out",
-        config=ConfigSchema(),
+        config=get_default_config(),
         overlay_mode=OverlayMode.DIAGNOSTIC,
         renderer="vapoursynth",
         ffmpeg_runner=MagicMock(),
@@ -133,7 +133,7 @@ def test_expansion_rejects_out_of_range_source_frame(
         expand_batch_render_requests(
             [request],
             output_dir=tmp_path / "out",
-            config=ConfigSchema(),
+            config=get_default_config(),
             overlay_mode=OverlayMode.NONE,
             renderer="vapoursynth",
             ffmpeg_runner=MagicMock(),
@@ -154,7 +154,7 @@ def test_final_output_collisions_refused_before_preparation(
         expand_batch_render_requests(
             batches,
             output_dir=tmp_path,
-            config=ConfigSchema(),
+            config=get_default_config(),
             overlay_mode=OverlayMode.NONE,
             renderer="vapoursynth",
             ffmpeg_runner=MagicMock(),
@@ -178,7 +178,7 @@ def test_final_duplicate_frame_refused_before_preparation(
         expand_batch_render_requests(
             [batch],
             output_dir=tmp_path,
-            config=ConfigSchema(),
+            config=get_default_config(),
             overlay_mode=OverlayMode.NONE,
             renderer="vapoursynth",
             ffmpeg_runner=MagicMock(),
@@ -226,7 +226,7 @@ def test_source_stem_aliases_follow_output_filesystem(
             jobs = expand_batch_render_requests(
                 batches,
                 output_dir=tmp_path / "screenshots",
-                config=ConfigSchema(),
+                config=get_default_config(),
                 overlay_mode=OverlayMode.NONE,
                 renderer="vapoursynth",
                 ffmpeg_runner=MagicMock(),
@@ -241,7 +241,7 @@ def test_source_stem_aliases_follow_output_filesystem(
                 render_screenshots_from_batch_detailed(
                     batches,
                     tmp_path / "screenshots",
-                    ConfigSchema(),
+                    get_default_config(),
                     BatchRenderOptions(renderer="vapoursynth"),
                 )
             mock_prepare.assert_not_called()
@@ -267,7 +267,7 @@ def test_expansion_stops_source_admission_after_interruption(
             expand_batch_render_requests(
                 [_request("ref"), _request("comp")],
                 output_dir=tmp_path,
-                config=ConfigSchema(),
+                config=get_default_config(),
                 overlay_mode=OverlayMode.NONE,
                 renderer="vapoursynth",
                 ffmpeg_runner=MagicMock(),

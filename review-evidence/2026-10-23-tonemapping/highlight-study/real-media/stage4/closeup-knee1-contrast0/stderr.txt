@@ -1,2 +1,0 @@
-C:\Software\video\frame-compare\generated\verification\2026-10-23\highlight-study\real-media\probe.py:116: DeprecationWarning: core.version() is deprecated, use str(core)!
-  'runtime':{'python':sys.version,'platform':platform.platform(),'core':str(core.version()),'tonemap_signature':str(core.placebo.Tonemap.signature),

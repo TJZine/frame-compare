@@ -227,7 +227,7 @@ def test_confirmation_callback_uses_nested_prompt_and_returns_confirmed(
         ),
         console=Console(file=output, no_color=True),
         inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
         ),
         visibility=visibility,
     )
@@ -380,7 +380,7 @@ def test_confirmation_callback_prints_report_path(auto_open: bool) -> None:
         ),
         console=Console(file=output, no_color=True, force_terminal=False),
         inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
         ),
         visibility=Visibility.PUBLIC,
     )
@@ -418,7 +418,7 @@ def test_confirmation_panel_fits_narrow_no_color_console(width: int) -> None:
             force_terminal=False,
         ),
         inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
         ),
         visibility=Visibility.UNLISTED,
     )
@@ -488,7 +488,7 @@ def test_maybe_open_run_report_is_suppressed_for_quiet_args() -> None:
             load_config=lambda config_path=None, overrides=None: get_default_config(),
         ),
         inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
         ),
     )
     maybe_open_run_report(
@@ -499,7 +499,7 @@ def test_maybe_open_run_report_is_suppressed_for_quiet_args() -> None:
             load_config=lambda config_path=None, overrides=None: get_default_config(),
         ),
         inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
         ),
     )
     maybe_open_run_report(
@@ -510,7 +510,7 @@ def test_maybe_open_run_report_is_suppressed_for_quiet_args() -> None:
             load_config=lambda config_path=None, overrides=None: get_default_config(),
         ),
         inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
         ),
     )
     maybe_open_run_report(
@@ -521,7 +521,7 @@ def test_maybe_open_run_report_is_suppressed_for_quiet_args() -> None:
             load_config=lambda config_path=None, overrides=None: get_default_config(),
         ),
         inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
         ),
     )
 
@@ -542,7 +542,7 @@ def test_maybe_open_run_report_respects_config_and_reload_failure() -> None:
             load_config=lambda _path: (lambda: disabled)(),
         ),
         inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
         ),
     )
     maybe_open_run_report(
@@ -553,7 +553,7 @@ def test_maybe_open_run_report_respects_config_and_reload_failure() -> None:
             load_config=lambda _path: (lambda: enabled)(),
         ),
         inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
         ),
     )
     maybe_open_run_report(
@@ -566,7 +566,7 @@ def test_maybe_open_run_report_respects_config_and_reload_failure() -> None:
             )(),
         ),
         inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
         ),
     )
 
@@ -734,7 +734,7 @@ def test_report_auto_open_can_be_suppressed_by_slowpics_browser_attempt() -> Non
             load_config=lambda config_path=None, overrides=None: get_default_config(),
         ),
         inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), ConfigSchema()
+            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
         ),
         suppress_report_open=True,
     )

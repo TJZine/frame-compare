@@ -1,2 +1,0 @@
-C:\Software\video\frame-compare\generated\verification\2026-10-23\highlight-study\synthetic\highlight_probe.py:215: DeprecationWarning: The _ColorRange frame property has been deprecated, use _Range instead
-  source = blank.std.ModifyFrame(clips=blank, selector=fill).std.SetFrameProps(**props)

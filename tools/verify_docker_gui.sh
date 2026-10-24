@@ -255,7 +255,10 @@ print("DOCKER_GUI_PROOF vsview_entry_point=ok")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 app = QApplication.instance() or QApplication([])
 panel_parent = QWidget()
-panel = AlignmentReviewPanel(panel_parent, types.SimpleNamespace(file_path=None))
+panel = AlignmentReviewPanel(
+    panel_parent,
+    types.SimpleNamespace(file_path=None, register_on_destroy=lambda cb: None),
+)
 if "Inactive" not in panel.progress_label.text():
     raise SystemExit("native alignment panel was not inert outside a generated session")
 panel.setParent(None)

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.run_inputs import acquire_run_config, resolve_run_workspace
 from frame_compare.orchestration.types import RunDependencies
@@ -92,7 +92,7 @@ def _prepared_metric_cache_fingerprint(source_paths: list[Path], *, prep: PrepSt
 
 def test_execute_prep_rejects_mutually_exclusive_cache_flags(tmp_path: Path) -> None:
     request = make_run_request(
-        config=ConfigSchema(), root=tmp_path, no_cache=True, from_cache_only=True
+        config=get_default_config(), root=tmp_path, no_cache=True, from_cache_only=True
     )
 
     with pytest.raises(ConfigValidationError, match="mutually exclusive"):
