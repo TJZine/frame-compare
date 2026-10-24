@@ -14,7 +14,7 @@ def test_get_preset_settings_unknown_raises_tonemap_error():
         get_preset_settings(cast(TonemapPreset, "invalid"))
     assert exc.value.context.code == "FC-4003"
     assert exc.value.context.hint is not None
-    assert "reference, filmic" in exc.value.context.hint
+    assert "reference, contrast" in exc.value.context.hint
 
 
 def test_apply_tonemap_enabled_false_returns_clip_unchanged():
@@ -31,20 +31,11 @@ def test_apply_tonemap_enabled_false_returns_clip_unchanged():
     "preset, curve, nits, gamma",
     [
         pytest.param(TonemapPreset.REFERENCE, ToneCurve.BT2390, 100, False, id="reference"),
-        pytest.param(TonemapPreset.FILMIC, ToneCurve.SPLINE, 203, False, id="filmic"),
         pytest.param(TonemapPreset.CONTRAST, ToneCurve.REINHARD, 203, False, id="contrast"),
-        pytest.param(TonemapPreset.BT2390_SPEC, ToneCurve.BT2390, 100, False, id="bt2390_spec"),
         pytest.param(TonemapPreset.SPLINE, ToneCurve.SPLINE, 203, False, id="spline"),
         pytest.param(TonemapPreset.BRIGHT_LIFT, ToneCurve.BT2390, 250, True, id="bright_lift"),
         pytest.param(
             TonemapPreset.HIGHLIGHT_GUARD, ToneCurve.SPLINE, 180, False, id="highlight_guard"
-        ),
-        pytest.param(
-            TonemapPreset.HIGHLIGHT_PRESERVE,
-            ToneCurve.BT2390,
-            100,
-            False,
-            id="highlight_preserve",
         ),
     ],
 )
@@ -58,3 +49,6 @@ def test_tonemap_preset_settings(
     assert settings.target_nits == nits
     assert settings.gamma_lift == gamma
     assert settings.enabled is True
+    assert settings.knee_offset == (1.0 if curve is ToneCurve.BT2390 else 0.5)
+    if preset is TonemapPreset.REFERENCE:
+        assert TonemapSettings() == settings

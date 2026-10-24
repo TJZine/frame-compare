@@ -111,7 +111,7 @@ def test_direct_ffmpeg_tonemap_gate_probes_once_without_classification() -> None
         pytest.param(
             ColorConfig(
                 enable_tonemap=True,
-                preset=TonemapPreset.FILMIC,
+                preset=TonemapPreset.SPLINE,
                 tonemap_speed=TonemapSpeed.FAST,
                 target_nits=250,
                 tone_curve=ToneCurve.SPLINE,
@@ -133,7 +133,7 @@ def test_direct_ffmpeg_tonemap_gate_probes_once_without_classification() -> None
             id="config_cli_overrides",
         ),
         pytest.param(
-            ColorConfig(preset=TonemapPreset.FILMIC),
+            ColorConfig(preset=TonemapPreset.SPLINE),
             None,
             TonemapSettings(target_nits=150),
             {"target_nits": 150},

@@ -342,11 +342,13 @@ def test_native_still_tonemap_is_independent_of_request_history() -> None:
 
 
 @pytest.mark.vs_required
-def test_native_highlight_preserve_knee_changes_libplacebo_output() -> None:
-    """The resolved highlight-preserve knee reaches the native renderer."""
+def test_native_reference_knee_changes_libplacebo_output() -> None:
+    """The reference knee differs from an explicit BT.2390 knee of 0.5."""
     _require_native_libplacebo_still_runtime()
     result = _run_vs_script(
         """
+        from dataclasses import replace
+
         import numpy as np
         import vapoursynth as vs
 
@@ -366,9 +368,9 @@ def test_native_highlight_preserve_knee_changes_libplacebo_output() -> None:
             return resolve_tonemap_settings(config.model_copy(update={"color": color}))
 
         reference_settings = resolved_settings(TonemapPreset.REFERENCE)
-        highlight_settings = resolved_settings(TonemapPreset.HIGHLIGHT_PRESERVE)
-        assert reference_settings.knee_offset == 0.5
-        assert highlight_settings.knee_offset == 1.0
+        old_knee_settings = replace(reference_settings, knee_offset=0.5)
+        assert reference_settings.knee_offset == 1.0
+        assert old_knee_settings.knee_offset == 0.5
 
         width, height = 256, 16
         source = core.std.BlankClip(width=width, height=height, format=vs.RGB48, length=1)
@@ -399,11 +401,11 @@ def test_native_highlight_preserve_knee_changes_libplacebo_output() -> None:
         reference = apply_libplacebo(
             source, reference_settings, core, still_image=True
         )
-        highlight = apply_libplacebo(
-            source, highlight_settings, core, still_image=True
+        old_knee = apply_libplacebo(
+            source, old_knee_settings, core, still_image=True
         )
         assert isinstance(reference, TonemapResult)
-        assert isinstance(highlight, TonemapResult)
+        assert isinstance(old_knee, TonemapResult)
 
         def quantized_rgb(result):
             frame = result.clip.get_frame(0)
@@ -413,11 +415,11 @@ def test_native_highlight_preserve_knee_changes_libplacebo_output() -> None:
             )
 
         reference_rgb = quantized_rgb(reference)
-        highlight_rgb = quantized_rgb(highlight)
-        assert not np.array_equal(reference_rgb, highlight_rgb)
+        old_knee_rgb = quantized_rgb(old_knee)
+        assert not np.array_equal(reference_rgb, old_knee_rgb)
         reference_white = np.all(reference_rgb == 255, axis=-1).sum()
-        highlight_white = np.all(highlight_rgb == 255, axis=-1).sum()
-        assert highlight_white < reference_white
+        old_knee_white = np.all(old_knee_rgb == 255, axis=-1).sum()
+        assert reference_white < old_knee_white
         print("OK")
         """,
         timeout=90,
