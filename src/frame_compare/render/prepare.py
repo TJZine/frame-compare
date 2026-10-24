@@ -27,7 +27,7 @@ def should_tonemap(source_info: SourceInfo, config: ConfigSchema) -> bool:
 
 def resolve_tonemap_settings(config: ConfigSchema) -> TonemapSettings:
     from frame_compare.vs.tonemap import get_preset_settings
-    from frame_compare.vs.types import TonemapSettings
+    from frame_compare.vs.tonemap_presets import CURVE_PARAMETER_DEFAULTS
 
     preset = config.color.preset
     settings = get_preset_settings(preset)
@@ -42,7 +42,7 @@ def resolve_tonemap_settings(config: ConfigSchema) -> TonemapSettings:
         parameter = (
             settings.knee_offset
             if config.color.tone_curve is settings.tone_curve
-            else TonemapSettings().knee_offset
+            else CURVE_PARAMETER_DEFAULTS[config.color.tone_curve]
         )
         settings = replace(settings, tone_curve=config.color.tone_curve, knee_offset=parameter)
     if "gamma_lift" in explicit_color_fields:

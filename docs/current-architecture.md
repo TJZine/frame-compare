@@ -1118,14 +1118,18 @@ When `dynamic_peak_detection` is disabled by the fast speed setting, still prepa
 instead applies one `placebo.Tonemap` node over the clip and reports
 `shared_stateless`; this policy follows detection state, not the setting name.
 
-`config.schema_enums.TonemapPreset.HIGHLIGHT_PRESERVE` is an opt-in public
-preset owned by `vs.tonemap_presets`: reference settings with BT.2390 knee 1.0.
-`render.prepare.resolve_tonemap_settings` applies authored overrides; changing
-from BT.2390 to another algorithm resets the generic native curve parameter
-to the default 0.5. An explicit BT.2390 override retains knee 1.0. Applied
-tonemap/report identity continues to contain the resolved preset and knee.
-Reference and existing presets retain their prior values; softclip remains
-experimental and is not part of this preset.
+`vs.tonemap_presets.CURVE_PARAMETER_DEFAULTS` owns the per-curve parameter
+defaults: BT.2390 1.0, spline 0.5, and Reinhard 0.5. Every preset takes its
+`knee_offset` from this table. `reference` and `bright_lift` use BT.2390 knee 1.0;
+`contrast`, `spline`, and `highlight_guard` use parameter 0.5.
+`TonemapSettings()` equals the `reference` preset, including knee offset 1.0.
+
+`render.prepare.resolve_tonemap_settings` applies authored overrides. An explicit
+curve equal to the preset curve keeps the preset's parameter; a different curve
+uses `CURVE_PARAMETER_DEFAULTS` for the new curve. Thus `highlight_guard` with an
+explicit BT.2390 override uses knee 1.0. Applied tonemap/report identity continues
+to contain the resolved preset and `knee_offset`; the report payload key and
+renderer label remain unchanged.
 
 Configured VSView previews receive immutable settings resolved by
 `render.prepare.resolve_tonemap_settings` in the alignment orchestration phase,

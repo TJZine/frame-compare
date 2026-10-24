@@ -711,15 +711,22 @@ unchanged.
 - `--write-config` writes the effective config to disk, then exits without invoking the
   runtime pipeline.
 
-### Opt-in highlight preservation
+### Tonemap curve parameter defaults
 
-`--tm-preset highlight_preserve` (or `[color] preset = "highlight_preserve"`)
-selects BT.2390 at 100 nits with knee offset 1.0. Other settings match reference;
-reference remains the default with knee 0.5. Existing explicit color overrides
-retain precedence. An explicit different curve resets the native generic curve
-parameter to 0.5 so the tuned BT.2390 knee is not reused as spline/Reinhard
-contrast. The option is not a no-clipping guarantee and does not enable softclip.
-The existing `highlight_guard` spline preset is unchanged.
+The available presets are `reference`, `contrast`, `spline`, `bright_lift`, and
+`highlight_guard`. `reference` uses BT.2390 at 100 nits with knee offset 1.0;
+`bright_lift` uses BT.2390 at 250 nits with knee offset 1.0 and gamma lift.
+`contrast` uses Reinhard at 203 nits, `spline` uses spline at 203 nits, and
+`highlight_guard` uses spline at 180 nits; all three use parameter 0.5 without
+gamma lift.
+
+`vs.tonemap_presets.CURVE_PARAMETER_DEFAULTS` owns the per-curve defaults:
+BT.2390 1.0, spline 0.5, and Reinhard 0.5. Every preset takes its `knee_offset`
+from that table. `render.prepare.resolve_tonemap_settings` keeps the preset's
+parameter when an explicit curve equals the preset curve. A different curve takes
+its parameter from the same table, so `highlight_guard` with `--tm-curve bt2390`
+uses knee 1.0. Existing explicit color overrides retain precedence. The field name
+`knee_offset`, report payload key, and renderer label remain unchanged.
 
 ### CLI Choice, Frame, And Count Validation
 
@@ -2062,8 +2069,9 @@ option; see [Run Help Presentation](#run-help-presentation).
 ### Tonemap Preset And Target Resolution
 
 `color.preset` selects the baseline tonemap settings. The `reference` preset targets
-100 nits. `color.target_nits` overrides that preset target only when the value is
-explicitly present in config or supplied through `--tm-target`; unrelated CLI overrides
+100 nits with BT.2390 knee 1.0. `color.target_nits` overrides that preset target only
+when the value is explicitly present in config or supplied through `--tm-target`;
+unrelated CLI overrides
 must not turn schema defaults into explicit tonemap target overrides.
 
 `tone_curve`, `gamma_lift`, and `contrast_recovery` follow the same rule as
