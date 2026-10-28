@@ -10,9 +10,9 @@ from contextlib import suppress
 from pathlib import Path
 from shutil import which
 from subprocess import CompletedProcess, Popen, TimeoutExpired, run
-from tempfile import TemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryFile
 from time import monotonic
-from typing import BinaryIO
+from typing import IO
 
 _MEDIA_EXECUTABLE_ENV = {
     "ffmpeg": "FRAME_COMPARE_FFMPEG_EXECUTABLE",
@@ -129,6 +129,8 @@ def run_subprocess(
     cwd: Path | None = None,
     check: bool = True,
     abort: Callable[[], bool] | None = None,
+    stdout_consumer: Callable[[bytes], None] | None = None,
+    max_stdout_bytes: int | None = None,
 ) -> CompletedProcess[bytes]:
     """
     Execute a command with explicit argv validation and captured output.
@@ -139,11 +141,25 @@ def run_subprocess(
         cwd: Working directory
         check: Whether to raise CalledProcessError on non-zero exit code
         abort: Optional owner-provided check for stopping and reaping the child
+        stdout_consumer: Consume bounded chunks instead of retaining stdout
+        max_stdout_bytes: Required output limit when consuming stdout
     """
+    if (stdout_consumer is None) != (max_stdout_bytes is None):
+        raise ValueError("stdout_consumer and max_stdout_bytes must be supplied together")
+    if max_stdout_bytes is not None and max_stdout_bytes < 0:
+        raise ValueError("max_stdout_bytes must be nonnegative")
     resolved_cwd = _resolve_cwd(cwd)
     normalized_argv = _normalize_argv(argv, resolved_cwd)
-    if abort is not None:
-        return _run_abortable(normalized_argv, resolved_cwd, timeout_seconds, check, abort)
+    if abort is not None or stdout_consumer is not None:
+        return _run_abortable(
+            normalized_argv,
+            resolved_cwd,
+            timeout_seconds,
+            check,
+            abort or (lambda: False),
+            stdout_consumer,
+            max_stdout_bytes,
+        )
     return run(
         normalized_argv,
         cwd=resolved_cwd,
@@ -156,6 +172,10 @@ def run_subprocess(
 
 class SubprocessAborted(Exception):
     """The owner stopped a process; incomplete output is not a successful result."""
+
+
+class SubprocessOutputLimitExceeded(Exception):
+    """Captured stdout exceeded the owner's byte limit; the child was reaped."""
 
 
 def _reap_stopped_process(process: Popen[bytes]) -> None:
@@ -173,7 +193,7 @@ def _reap_stopped_process(process: Popen[bytes]) -> None:
         process.wait(timeout=2.0)
 
 
-def _read_captured_output(stream: BinaryIO) -> bytes:
+def _read_captured_output(stream: IO[bytes]) -> bytes:
     size = os.fstat(stream.fileno()).st_size
     stream.seek(0)
     return stream.read(size)
@@ -185,35 +205,66 @@ def _run_abortable(
     timeout_seconds: float | None,
     check: bool,
     abort: Callable[[], bool],
+    stdout_consumer: Callable[[bytes], None] | None = None,
+    max_stdout_bytes: int | None = None,
 ) -> CompletedProcess[bytes]:
     if abort():
         raise SubprocessAborted()
 
     # Files avoid Windows pipe-reader threads, whose read/close can outlive a
     # drain deadline when a descendant retains an inherited write handle.
-    with TemporaryFile() as stdout_file, TemporaryFile() as stderr_file:
+    # Reopen stdout so reading never changes the child's write offset.
+    with (
+        NamedTemporaryFile(delete_on_close=False) as stdout_file,
+        TemporaryFile() as stderr_file,
+        open(stdout_file.name, "rb") as stdout_reader,
+    ):
         process = Popen(argv, cwd=cwd, stdout=stdout_file, stderr=stderr_file, shell=False)
         try:
             deadline = None if timeout_seconds is None else monotonic() + timeout_seconds
+            stdout_bytes = 0
+
+            def consume_stdout() -> None:
+                nonlocal stdout_bytes
+                if stdout_consumer is None or max_stdout_bytes is None:
+                    return
+                while chunk := stdout_reader.read(min(65536, max_stdout_bytes - stdout_bytes + 1)):
+                    if abort():
+                        raise SubprocessAborted()
+                    if (
+                        timeout_seconds is not None
+                        and deadline is not None
+                        and monotonic() >= deadline
+                    ):
+                        raise TimeoutExpired(argv, timeout_seconds)
+                    stdout_bytes += len(chunk)
+                    if stdout_bytes > max_stdout_bytes:
+                        raise SubprocessOutputLimitExceeded()
+                    stdout_consumer(chunk)
+
             while True:
                 if abort():
                     raise SubprocessAborted()
                 remaining = None if deadline is None else deadline - monotonic()
                 if timeout_seconds is not None and remaining is not None and remaining <= 0:
                     raise TimeoutExpired(argv, timeout_seconds)
+                consume_stdout()
                 try:
                     process.wait(timeout=0.1 if remaining is None else min(0.1, remaining))
-                    break
                 except TimeoutExpired:
-                    pass
+                    continue
+                consume_stdout()
+                break
         except BaseException as exc:
             _reap_stopped_process(process)
             if isinstance(exc, TimeoutExpired):
                 with suppress(BaseException):
-                    exc.stdout = _read_captured_output(stdout_file)
+                    exc.stdout = (
+                        _read_captured_output(stdout_file) if stdout_consumer is None else b""
+                    )
                     exc.stderr = _read_captured_output(stderr_file)
             raise
-        stdout = _read_captured_output(stdout_file)
+        stdout = _read_captured_output(stdout_file) if stdout_consumer is None else b""
         stderr = _read_captured_output(stderr_file)
     result = CompletedProcess(argv, process.returncode, stdout, stderr)
     if check:
@@ -221,4 +272,10 @@ def _run_abortable(
     return result
 
 
-__all__ = ["SubprocessAborted", "prepare_python_child", "resolve_executable", "run_subprocess"]
+__all__ = [
+    "SubprocessAborted",
+    "SubprocessOutputLimitExceeded",
+    "prepare_python_child",
+    "resolve_executable",
+    "run_subprocess",
+]
