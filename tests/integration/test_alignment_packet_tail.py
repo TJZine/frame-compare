@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import shutil
 import subprocess
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from threading import Event
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -129,7 +130,31 @@ def test_packet_tail_probe_lifecycle(
     packet_tail_media: Path, monkeypatch: pytest.MonkeyPatch, stop: str, audio_codec: str
 ) -> None:
     stream = probe_streams(packet_tail_media).audio[0]
-    expected_duration = Fraction(2001, 1000) if audio_codec == "libopus" else Fraction(2)
+    # Read independent timestamp facts from this small fixture. FFmpeg versions
+    # differ in Opus priming/padding and stream start; CSV must agree with JSON.
+    packet_probe = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "packet=pts_time,duration_time",
+            "-of",
+            "json",
+            str(packet_tail_media),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    packet_facts = cast(dict[str, list[dict[str, str]]], json.loads(packet_probe.stdout))
+    latest_end = max(
+        Fraction(packet["pts_time"]) + Fraction(packet["duration_time"])
+        for packet in packet_facts["packets"]
+    )
+    expected_duration = latest_end - stream.timeline.start_time
     if audio_codec == "libopus":
         assert stream.timeline.duration is None
     # ffprobe versions may derive metadata duration even for live Matroska.
@@ -140,7 +165,7 @@ def test_packet_tail_probe_lifecycle(
             stream.timeline,
             duration=None,
             duration_basis="unavailable",
-            start_time=expected_duration if stop == "nonpositive" else stream.timeline.start_time,
+            start_time=latest_end if stop == "nonpositive" else stream.timeline.start_time,
         ),
     )
     cancellation = Event()
