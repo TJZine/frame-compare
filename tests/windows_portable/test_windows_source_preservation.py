@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -644,11 +645,12 @@ def test_source_install_owns_activation_until_recovery_or_commit(
     import time
 
     script, previous, pointer = source_fixture
-    builder = script.parent / "build_portable.ps1"
-    builder.write_text(
-        builder.read_text().replace(
-            "if ($env:FAILURE -eq 'before-pointer')",
-            r"""if ($env:HOLD_ACTIVATION -eq '1') {
+    pointer_before = pointer.read_bytes()
+    marker = pointer.parent / "source-migration.pending.json"
+    script.write_text(
+        script.read_text().replace(
+            'Write-Host "Installing shim from built bundle..."',
+            r'''if ($env:HOLD_ACTIVATION -eq '1') {
   Set-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'activation-held') -Value 'ready'
   $deadline = [DateTime]::UtcNow.AddSeconds(15)
   while (!(Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'activation-release'))) {
@@ -656,7 +658,7 @@ def test_source_install_owns_activation_until_recovery_or_commit(
     Start-Sleep -Milliseconds 50
   }
 }
-if ($env:FAILURE -eq 'before-pointer')""",
+Write-Host "Installing shim from built bundle..."''',
         )
     )
     first_out = script.parents[2] / "dist/first"
@@ -666,7 +668,6 @@ if ($env:FAILURE -eq 'before-pointer')""",
         "INSTALL": str(script),
         "OUT": str(first_out),
         "HOLD_ACTIVATION": "1",
-        "FAILURE": "",
     }
     first = subprocess.Popen(
         [
@@ -681,13 +682,24 @@ if ($env:FAILURE -eq 'before-pointer')""",
         stderr=subprocess.PIPE,
         text=True,
     )
-    release = tmp_path / "appdata/activation-release"
     try:
         ready = tmp_path / "appdata/activation-held"
         deadline = time.monotonic() + 10
         while not ready.exists() and first.poll() is None and time.monotonic() < deadline:
             time.sleep(0.05)
-        assert ready.exists(), "first installer did not reach the held activation boundary"
+        assert ready.exists(), "first installer did not reach the held post-migration boundary"
+        assert marker.exists()
+        marker_payload = json.loads(marker.read_text())
+        assert marker_payload["previous_bundle"] == str(previous)
+        assert marker_payload["candidate_bundle"] == str(first_out)
+        assert marker_payload["pointer_bytes_base64"] == base64.b64encode(pointer_before).decode()
+        assert {
+            (folder["name"], Path(folder["source"]), Path(folder["target"]))
+            for folder in marker_payload["folders"]
+        } == {
+            (name, previous / name, first_out / name)
+            for name in ("config", "comparison_videos", "generated")
+        }
         second = _run(
             pwsh,
             "function uv {}; & $env:INSTALL -SkipSync -OutDir $env:OUT",
@@ -695,17 +707,44 @@ if ($env:FAILURE -eq 'before-pointer')""",
             INSTALL=str(script),
             OUT=str(second_out),
             HOLD_ACTIVATION="",
-            FAILURE="",
         )
         assert second.returncode != 0
         assert "Cannot own source-install activation lock" in second.stdout + second.stderr
         assert Path(json.loads(pointer.read_text())["bundle_path"]) == previous
         assert (first_out / "config/config.toml").read_text() == "user config"
-        assert not list((second_out / "config").iterdir())
-        release.write_text("go")
+        assert not second_out.exists()
+        first.kill()
         stdout, stderr = first.communicate(timeout=10)
-        assert first.returncode == 0, stdout + stderr
-        assert Path(json.loads(pointer.read_text())["bundle_path"]) == first_out
+        assert first.returncode != 0, stdout + stderr
+        assert marker.exists()
+        for name in ("config", "comparison_videos", "generated"):
+            assert not (previous / name).exists()
+            assert (first_out / name).exists()
+
+        retry = _run(
+            pwsh,
+            "function uv {}; & $env:INSTALL -SkipSync -OutDir $env:OUT",
+            tmp_path,
+            INSTALL=str(script),
+            OUT=str(second_out),
+            HOLD_ACTIVATION="",
+        )
+        assert retry.returncode != 0
+        output = retry.stdout + retry.stderr
+        assert "pending source migration" in output
+        assert str(previous) in output and str(first_out) in output
+        for name in ("config", "comparison_videos", "generated"):
+            assert str(previous / name) in output and str(first_out / name) in output
+        assert not second_out.exists()
+        assert pointer.read_bytes() == pointer_before
+        assert marker.exists()
+
+        # This is the manual repair the refused retry instructs the user to perform.
+        for name in ("config", "comparison_videos", "generated"):
+            if (first_out / name).exists():
+                (first_out / name).rename(previous / name)
+        marker.unlink()
+
         # An occupied leftover lock file is reusable after its owning handle closes.
         third = _run(
             pwsh,
@@ -713,14 +752,43 @@ if ($env:FAILURE -eq 'before-pointer')""",
             tmp_path,
             INSTALL=str(script),
             OUT=str(script.parents[2] / "dist/third"),
+            HOLD_ACTIVATION="",
             FAILURE="",
         )
         assert third.returncode == 0, third.stdout + third.stderr
     finally:
-        release.write_text("go")
         if first.poll() is None:
             first.kill()
         first.communicate(timeout=5)
+
+
+def test_source_install_pipeline_stop_reverses_data_and_removes_marker(
+    pwsh: str, tmp_path: Path, source_fixture: tuple[Path, Path, Path]
+) -> None:
+    script, previous, pointer = source_fixture
+    before = _snapshot(previous)
+    pointer_before = pointer.read_bytes()
+    script.write_text(
+        script.read_text().replace(
+            'Write-Host "Installing shim from built bundle..."',
+            "throw [System.Management.Automation.PipelineStoppedException]::new()",
+        )
+    )
+    result = _run(
+        pwsh,
+        "function uv {}; & $env:INSTALL -SkipSync",
+        tmp_path,
+        INSTALL=str(script),
+    )
+    assert result.returncode != 0
+    assert _snapshot(previous) == before
+    assert pointer.read_bytes() == pointer_before
+    assert not (pointer.parent / "source-migration.pending.json").exists()
+    candidate = next((script.parents[2] / "dist").iterdir())
+    for name in ("config", "comparison_videos", "generated"):
+        assert (previous / name).exists()
+        assert (candidate / name).is_dir()
+        assert not list((candidate / name).iterdir())
 
 
 def _junction(pwsh: str, root: Path, alias: Path, target: Path) -> None:
