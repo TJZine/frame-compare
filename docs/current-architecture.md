@@ -1370,7 +1370,9 @@ requires a rectangle and canonical provenance; render has no inference mode, can
 ranking, or provenance translation. Orchestration projects its cache-stable
 `ClipActiveRectSource` vocabulary to canonical provenance at the render boundary. Native screenshot
 render remains full-frame. The FFmpeg backend applies geometry filters after
-exact frame selection, and the VapourSynth path chooses between the Pillow writer
+exact frame selection, preserves exact crop origins, and converts to full-chroma
+YUV without reducing source precision before odd-origin crops and padding. The
+VapourSynth path chooses between the Pillow writer
 and eligible `core.fpng.Write` output without changing CLI import-time behavior.
 Render selection crosses the batch boundary as `SelectedScreenshot` records containing
 comparison frame, source frame, and selection label. Expansion validates all physical
