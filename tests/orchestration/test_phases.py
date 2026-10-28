@@ -173,6 +173,7 @@ def test_execute_phases_marks_cancellation_failed_before_propagating(
     phase = Phase(name="cancel", execute=phase_cancel)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(execute_phases([phase], context, reporter))
+    assert reporter.complete_phase_calls == [ProgressPhaseStatus.FAILED]
 
 
 @pytest.mark.parametrize("explicit_skip", [True, False], ids=["false-predicate", "no-predicate"])
