@@ -104,7 +104,9 @@ entry.
 
 ### `--no-cache` and `--from-cache-only` are rejected together
 
-Choose one: the first disables cache use, the second requires it.
+`--no-cache` deletes and recomputes the matching analysis cache entry, while
+`--from-cache-only` requires an existing entry, so they cannot be combined. See
+[Cache Mode Semantics](../current-cli-contract.md#cache-mode-semantics).
 
 ### Docker prints `without an L-SMASH index cache`
 
