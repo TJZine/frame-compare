@@ -17,16 +17,16 @@ _TRANSFER_BY_NAME = {"bt709": 1, "smpte2084": 16, "arib-std-b67": 18}
 _MATRIX_BY_NAME = {"bt709": 1, "bt2020nc": 9, "bt2020c": 10}
 
 
-def probe_hdr_metadata(video: Path) -> HDRMetadata | None:
-    """Return recognized stream color metadata, or ``None`` when unavailable."""
+def probe_video_streams(video: Path) -> list[dict[str, object]]:
+    """List real video streams, excluding attached cover pictures."""
     argv = [
         "ffprobe",
         "-v",
         "error",
         "-select_streams",
-        "v:0",
+        "v",
         "-show_entries",
-        "stream=color_transfer,color_primaries,color_space",
+        "stream=color_transfer,color_primaries,color_space:stream_disposition=attached_pic",
         "-of",
         "json",
         str(video),
@@ -49,13 +49,32 @@ def probe_hdr_metadata(video: Path) -> HDRMetadata | None:
         raise FFmpegError("ffprobe returned invalid json object", proc.returncode)
     payload_dict = cast(dict[str, object], payload)
     streams_obj = payload_dict.get("streams")
-    if not isinstance(streams_obj, list) or not streams_obj:
+    if not isinstance(streams_obj, list):
+        return []
+    streams: list[dict[str, object]] = []
+    for stream_obj in cast(list[object], streams_obj):
+        if not isinstance(stream_obj, dict):
+            continue
+        stream = cast(dict[str, object], stream_obj)
+        disposition = stream.get("disposition")
+        if (
+            isinstance(disposition, dict)
+            and cast(dict[str, object], disposition).get("attached_pic") == 1
+        ):
+            continue
+        streams.append(stream)
+    return streams
+
+
+def probe_hdr_metadata(
+    video: Path, *, streams: list[dict[str, object]] | None = None
+) -> HDRMetadata | None:
+    """Return color metadata from the first real video stream, when available."""
+    if streams is None:
+        streams = probe_video_streams(video)
+    if not streams:
         return None
-    streams = cast(list[object], streams_obj)
-    stream_obj = streams[0]
-    if not isinstance(stream_obj, dict):
-        return None
-    stream = cast(dict[str, object], stream_obj)
+    stream = streams[0]
 
     transfer_raw = _normalized_string(stream.get("color_transfer"))
     primaries_raw = _normalized_string(stream.get("color_primaries"))

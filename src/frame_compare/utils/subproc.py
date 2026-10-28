@@ -40,6 +40,24 @@ def _resolve_cwd(cwd: Path | None) -> Path | None:
     return resolved
 
 
+def _media_override_name(executable: str) -> str | None:
+    executable_name = Path(executable).name.casefold()
+    if executable_name.endswith(".exe"):
+        executable_name = executable_name[:-4]
+    return _MEDIA_EXECUTABLE_ENV.get(executable_name)
+
+
+def resolve_optional_executable(executable: str, cwd: Path | None = None) -> str | None:
+    """Resolve an optional tool, while rejecting invalid configured media overrides."""
+    override_name = _media_override_name(executable)
+    if override_name is not None and override_name in os.environ:
+        return resolve_executable(executable, cwd)
+    try:
+        return resolve_executable(executable, cwd)
+    except FileNotFoundError:
+        return None
+
+
 def resolve_executable(executable: str, cwd: Path | None = None) -> str:
     """Resolve an executable, honoring fail-closed bundled media overrides.
 
@@ -51,10 +69,7 @@ def resolve_executable(executable: str, cwd: Path | None = None) -> str:
     if not executable:
         raise ValueError("argv[0] must be a non-empty executable name")
 
-    executable_name = Path(executable).name.casefold()
-    if executable_name.endswith(".exe"):
-        executable_name = executable_name[:-4]
-    override_name = _MEDIA_EXECUTABLE_ENV.get(executable_name)
+    override_name = _media_override_name(executable)
     if override_name is not None and (override := os.environ.get(override_name)) is not None:
         override_path = Path(override)
         if not override_path.is_absolute() or not _is_executable_file(override_path):
@@ -277,5 +292,6 @@ __all__ = [
     "SubprocessOutputLimitExceeded",
     "prepare_python_child",
     "resolve_executable",
+    "resolve_optional_executable",
     "run_subprocess",
 ]

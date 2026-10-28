@@ -418,10 +418,10 @@ never searches parent directories.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation. The file format remains version 1, while each probe key
-  uses key schema 2 and includes the scoped media-runtime probe fingerprint so a
+  uses key schema 3 and includes the scoped media-runtime probe fingerprint so a
   selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
   portable or Debian/Docker profiles misses without invalidating unrelated file-format
-  data.
+  data. Older probe keys miss so source stream admission runs again.
 - `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
   `lsw1310-f125953022b6` on managed/portable Windows,
@@ -435,6 +435,14 @@ never searches parent directories.
   comparison source loads, allowing L-SMASH-Works to create it there when missing.
   The managed VSView preview runtime leaves rejected parent-owned indexes untouched and
   retries only index-construction failures cache-free.
+
+The subprocess executable resolver finds optional ffprobe, including the portable
+runtime's absolute override. When it resolves, source admission refuses files
+containing multiple video streams other than attached pictures. Native-only loading
+remains available when ffprobe is absent. HDR probing and FFmpeg screenshots use the
+first video stream that is not an attached picture; extraction explicitly maps
+`0:V:0`. Selected-video
+identity is not persisted.
 
 ### Run records and review artifacts
 

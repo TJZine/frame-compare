@@ -13,6 +13,7 @@ from frame_compare.utils.subproc import (
     SubprocessAborted,
     prepare_python_child,
     resolve_executable,
+    resolve_optional_executable,
     run_subprocess,
 )
 
@@ -173,6 +174,7 @@ def test_run_subprocess_not_found():
     """Assert FileNotFoundError raised when bin missing."""
     with pytest.raises(FileNotFoundError):
         run_subprocess(["non_existent_command_12345"])
+    assert resolve_optional_executable("non_existent_command_12345") is None
 
 
 def test_run_subprocess_inside_running_event_loop() -> None:
@@ -245,6 +247,7 @@ def test_resolve_executable_media_overrides(
     state: str,
     message: str | None,
 ) -> None:
+    monkeypatch.setenv("PATH", "")
     binary = tmp_path / executable
     if state in {"valid", "nonexec"}:
         binary.write_bytes(b"")
@@ -252,9 +255,12 @@ def test_resolve_executable_media_overrides(
     monkeypatch.setenv(environment, "" if state == "empty" else str(binary.resolve()))
     if message is None:
         assert resolve_executable(requested) == str(binary.resolve())
+        assert resolve_optional_executable(requested) == str(binary.resolve())
     else:
         with pytest.raises(FileNotFoundError, match=message):
             resolve_executable(requested)
+        with pytest.raises(FileNotFoundError, match=message):
+            resolve_optional_executable(requested)
 
 
 @pytest.mark.parametrize("stop", ["abort", "timeout", "abort-kill"])

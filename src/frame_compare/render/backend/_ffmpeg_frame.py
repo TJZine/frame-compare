@@ -86,6 +86,8 @@ def build_extract_frame_argv(
         [
             "-i",
             str(video),
+            "-map",
+            "0:V:0",
             "-vf",
             ",".join(filters),
             "-frames:v",
@@ -130,6 +132,8 @@ def build_extract_frames_argv(
         [
             "-i",
             str(video),
+            "-map",
+            "0:V:0",
             "-vf",
             ",".join(filters),
             "-fps_mode",

@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from frame_compare.utils.cancellation import raise_if_cancelling
+from frame_compare.utils.subproc import resolve_optional_executable
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
-from frame_compare.vs.hdr_probe import probe_hdr_metadata
+from frame_compare.vs.hdr_probe import probe_hdr_metadata, probe_video_streams
 from frame_compare.vs.props import detect_hdr, hdr_signal_is_unspecified
 from frame_compare.vs.runtime_contract import index_cache_token
 from frame_compare.vs.types import SourceInfo
@@ -78,6 +79,14 @@ def load_source(
         core = ensure_vs_environment()
 
     try:
+        streams = (
+            probe_video_streams(path)
+            if resolve_optional_executable("ffprobe") is not None
+            else None
+        )
+        if streams is not None and len(streams) > 1:
+            raise SourceLoadError(path, "multiple video streams are not supported")
+
         # Propagates PluginNotFoundError (FC-2003) if lsmas missing
         require_plugin(core, "lsmas")
 
@@ -102,11 +111,11 @@ def load_source(
         fps = Fraction(clip_fps.numerator, clip_fps.denominator)
         frame_props = dict(frame.props)
         probed_metadata = None
-        if hdr_signal_is_unspecified(frame_props):
+        if streams is not None and hdr_signal_is_unspecified(frame_props):
             raise_if_cancelling()
-            probed_metadata = probe_hdr_metadata(Path(path))
+            probed_metadata = probe_hdr_metadata(Path(path), streams=streams)
         is_hdr, hdr_metadata = detect_hdr(frame_props, probed_metadata)
-    except PluginNotFoundError:
+    except (PluginNotFoundError, SourceLoadError):
         raise
     except Exception as e:
         raise SourceLoadError(path, str(e)) from e

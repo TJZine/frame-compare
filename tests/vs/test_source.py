@@ -23,8 +23,11 @@ from frame_compare.vs.types import SourceInfo
 
 
 @pytest.fixture(autouse=True)
-def _stub_hdr_probe(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(source_module, "probe_hdr_metadata", lambda _path: None)
+def _stub_hdr_probe(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    if request.node.get_closest_marker("vs_required") is not None:
+        return
+    monkeypatch.setattr(source_module, "probe_video_streams", lambda _path: [])
+    monkeypatch.setattr(source_module, "probe_hdr_metadata", lambda _path, **_kwargs: None)
 
 
 class MockClip:
@@ -412,7 +415,7 @@ def test_load_source_falls_back_to_ffprobe_for_absent_hdr_props(
     assert source.hdr_metadata is not None
     assert source.hdr_metadata.transfer == 16
     assert source.hdr_metadata.color_primaries == 9
-    probe_hdr_metadata.assert_called_once_with(Path("video.mkv"))
+    probe_hdr_metadata.assert_called_once_with(Path("video.mkv"), streams=[])
 
 
 def test_load_source_falls_back_to_ffprobe_for_unspecified_hdr_props(
@@ -427,7 +430,7 @@ def test_load_source_falls_back_to_ffprobe_for_unspecified_hdr_props(
     monkeypatch.setattr(
         source_module,
         "probe_hdr_metadata",
-        lambda _path: HDRMetadata(None, None, None, 9, 18, 9),
+        lambda _path, **_kwargs: HDRMetadata(None, None, None, 9, 18, 9),
     )
 
     source = load_source(Path("video.mkv"), cast(Core, core))
@@ -456,7 +459,7 @@ def test_load_source_merges_partial_frame_signal_before_hdr_classification(
     monkeypatch.setattr(
         source_module,
         "probe_hdr_metadata",
-        lambda _path: HDRMetadata("probe mastering", 900, 350, 9, 1, 1),
+        lambda _path, **_kwargs: HDRMetadata("probe mastering", 900, 350, 9, 1, 1),
     )
 
     source = load_source(Path("video.mkv"), cast(Core, core))
@@ -492,7 +495,7 @@ def test_load_source_combines_partial_frame_and_probe_signal_for_hdr(
     monkeypatch.setattr(
         source_module,
         "probe_hdr_metadata",
-        lambda _path: HDRMetadata(None, None, None, primaries, transfer, matrix),
+        lambda _path, **_kwargs: HDRMetadata(None, None, None, primaries, transfer, matrix),
     )
 
     source = load_source(Path("video.mkv"), cast(Core, core))
@@ -517,7 +520,7 @@ def test_load_source_backfills_malformed_matrix_without_overriding_explicit_sign
 
     assert source.is_hdr is True
     assert source.hdr_metadata == HDRMetadata(None, None, None, 9, 16, 9)
-    probe.assert_called_once_with(Path("video.mkv"))
+    probe.assert_called_once_with(Path("video.mkv"), streams=[])
 
 
 @pytest.mark.parametrize("matrix", [None, "malformed"])
@@ -546,7 +549,7 @@ def test_load_source_wraps_malformed_ffprobe_metadata(
 ) -> None:
     from frame_compare.utils.ffmpeg_errors import FFmpegError
 
-    def fail_probe(_path: Path) -> None:
+    def fail_probe(_path: Path, **_kwargs: object) -> None:
         raise FFmpegError("ffprobe returned invalid json", 0)
 
     monkeypatch.setattr(source_module, "probe_hdr_metadata", fail_probe)
@@ -663,7 +666,7 @@ def test_load_source_stops_native_admission_after_interruption(
                 raise RuntimeError("failed to construct index")
             return InterruptingClip()
 
-        def probe(_path: Path) -> None:
+        def probe(_path: Path, **_kwargs: object) -> None:
             calls.append("probe")
 
         monkeypatch.setattr(source_module, "probe_hdr_metadata", probe)
@@ -677,3 +680,170 @@ def test_load_source_stops_native_admission_after_interruption(
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(run())
+
+
+@pytest.mark.vs_required
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "multiple-video",
+        "attached-cover",
+        "no-ffprobe",
+        "multiple-override",
+        "cover-override",
+        "invalid-override",
+    ],
+)
+def test_load_source_real_video_stream_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    import json
+    import shutil
+
+    import vapoursynth as vs
+    from PIL import Image
+
+    from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
+    from frame_compare.utils.subproc import run_subprocess
+    from frame_compare.vs.hdr_probe import probe_hdr_metadata
+
+    if isinstance(cast(object, vs), MagicMock) or not hasattr(vs.core, "lsmas"):
+        pytest.skip("native VapourSynth with L-SMASH is unavailable")
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        pytest.skip("FFmpeg tools are unavailable")
+    ffprobe = shutil.which("ffprobe")
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffprobe is not None and ffmpeg is not None
+    video = tmp_path / "streams.mp4"
+    if mode == "no-ffprobe":
+        run_subprocess(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=white:s=32x24:r=2",
+                "-frames:v",
+                "2",
+                "-c:v",
+                "libx264",
+                str(video),
+            ],
+            timeout_seconds=15,
+        )
+        monkeypatch.delenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", raising=False)
+        monkeypatch.setenv("PATH", "")
+        source = load_source(video)
+        assert (source.width, source.height) == (32, 24)
+        assert source.is_hdr is False
+        return
+    if mode in {"multiple-video", "multiple-override", "invalid-override"}:
+        inputs = [
+            "-f",
+            "lavfi",
+            "-i",
+            "color=red:s=64x48:r=2",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=white:s=32x24:r=2",
+        ]
+        encoding = ["-c:v", "libx264", "-frames:v", "2"]
+    else:
+        cover = tmp_path / "cover.png"
+        Image.new("RGB", (64, 48), (255, 0, 0)).save(cover)
+        # Map the cover first; the MP4 demuxer may expose cover art after tracks.
+        inputs = ["-i", str(cover), "-f", "lavfi", "-i", "color=white:s=32x24:r=2"]
+        encoding = [
+            "-c:v:0",
+            "png",
+            "-disposition:v:0",
+            "attached_pic",
+            "-c:v:1",
+            "libx264",
+            "-frames:v:1",
+            "2",
+            "-x264-params:v:1",
+            "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc",
+            "-color_primaries:v:1",
+            "bt2020",
+            "-color_trc:v:1",
+            "smpte2084",
+            "-colorspace:v:1",
+            "bt2020nc",
+        ]
+    run_subprocess(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            *inputs,
+            "-map",
+            "0:v",
+            "-map",
+            "1:v",
+            *encoding,
+            str(video),
+        ],
+        timeout_seconds=15,
+    )
+    if mode.endswith("-override"):
+        monkeypatch.setenv("PATH", "")
+        monkeypatch.setenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", ffprobe)
+        monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", ffmpeg)
+    if mode == "invalid-override":
+        monkeypatch.setenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", str(tmp_path / "missing-ffprobe"))
+        with pytest.raises(SourceLoadError):
+            load_source(video)
+        assert not source_index_path(video).exists()
+        return
+    if mode in {"multiple-video", "multiple-override"}:
+        with pytest.raises(SourceLoadError, match="multiple video streams are not supported"):
+            load_source(video)
+        assert not source_index_path(video).exists()
+        return
+    # This generated MP4 has one track and cover metadata at the end of moov.
+    # Put udta before trak so the demuxer discovers the attached picture first.
+    # Atom byte counts stay unchanged, preserving every media chunk offset.
+    data = video.read_bytes()
+    moov_start = data.index(b"moov") - 4
+    moov_size = int.from_bytes(data[moov_start : moov_start + 4], "big")
+    assert moov_size >= 8 and moov_start + moov_size == len(data)
+    children: list[bytes] = []
+    cursor = moov_start + 8
+    while cursor < len(data):
+        size = int.from_bytes(data[cursor : cursor + 4], "big")
+        assert 8 <= size <= len(data) - cursor
+        children.append(data[cursor : cursor + size])
+        cursor += size
+    assert [child[4:8] for child in children] == [b"mvhd", b"trak", b"udta"]
+    video.write_bytes(data[: moov_start + 8] + children[0] + children[2] + children[1])
+    stream_probe = run_subprocess(
+        ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(video)],
+        timeout_seconds=15,
+    )
+    streams = json.loads(stream_probe.stdout)["streams"]
+    assert [(stream["index"], stream["disposition"]["attached_pic"]) for stream in streams] == [
+        (0, 1),
+        (1, 0),
+    ]
+    source = load_source(video)
+    assert (source.width, source.height) == (32, 24)
+    assert source.is_hdr is True
+    metadata = probe_hdr_metadata(video)
+    assert metadata is not None
+    assert (metadata.color_primaries, metadata.transfer, metadata.matrix) == (9, 16, 9)
+    runner = DefaultFFmpegRunner()
+    output = tmp_path / "single.png"
+    runner.extract_frame(video, 0, output)
+    runner.extract_frames(video, [0, 1], tmp_path / "batch")
+    for screenshot in [output, *sorted((tmp_path / "batch").glob("*.png"))]:
+        with Image.open(screenshot) as image:
+            assert image.size == (32, 24)
+            pixel = image.convert("RGB").getpixel((16, 12))
+            assert isinstance(pixel, tuple)
+            assert min(pixel) >= 250
