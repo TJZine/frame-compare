@@ -101,6 +101,8 @@ def _run_browser_dump(
     command = [
         browser,
         "--headless=new",
+        # Let our subprocess timeout bound teardown, not Chrome's shorter macOS watchdog.
+        "--test-type",
         "--disable-background-networking",
         "--disable-default-apps",
         "--disable-gpu",
@@ -1400,6 +1402,7 @@ def _run_browser_input(
         [
             browser,
             "--headless=new",
+            "--test-type",
             "--disable-background-networking",
             "--disable-default-apps",
             "--disable-gpu",
