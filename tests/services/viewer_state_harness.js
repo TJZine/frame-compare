@@ -300,6 +300,8 @@ function loadViewer({ clipCount, savedState = null }) {
         },
         canvas: makeElement(),
         sizerImg: {
+            naturalWidth: 1920,
+            naturalHeight: 1080,
             ...makeElement(),
             getBoundingClientRect() {
                 return { width: 1920, height: 1080 };
@@ -794,7 +796,7 @@ function viewerStorageKey() {
     const { viewer, format } = loadViewer({ clipCount: 4 });
     assert.equal(
         viewer.state.storageKey,
-        'frame-compare:report-viewer:report_viewer_state_contract:viewport',
+        'frame-compare:report-viewer:report_viewer_state_contract:viewport-v2',
     );
 
     const clip = {
@@ -1767,7 +1769,8 @@ function restoredWidthFitNoVisibleRadio() {
     assert.equal(viewer.state.fitMode, 'width');
 
     viewer.dom.stage.getBoundingClientRect = () => ({ width: 800, height: 1080 });
-    viewer.dom.sizerImg.getBoundingClientRect = () => ({ width: 1600, height: 1080 });
+    viewer.dom.sizerImg.naturalWidth = 1600;
+    viewer.dom.sizerImg.naturalHeight = 1080;
     viewer.viewport.applyFitMode({ resetPan: true });
     assert.equal(viewer.state.zoom, 0.5);
 

@@ -1002,7 +1002,7 @@ const ReportViewer = {
 
     viewerStorageKey() {
         const reportId = this.state.data?.report_id || 'unknown-report';
-        return `frame-compare:report-viewer:${reportId}:viewport`;
+        return `frame-compare:report-viewer:${reportId}:viewport-v2`;
     },
 
     restorePersistedState() {

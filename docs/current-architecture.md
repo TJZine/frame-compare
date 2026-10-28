@@ -1279,6 +1279,11 @@ before focus moves into the drawer.
 `assets/viewport.js` owns zoom clamping and pointer anchoring, pan bounds and Grid
 normalization, fit/reset/reveal math, transient pointer/pinch mechanics, directional
 pair-alignment normalization and offsets, and Lens/Grid viewport refreshes.
+Outside Grid, actual size is the loaded base image's natural dimensions in CSS
+pixels, independent of DPR; fit zoom and pair offsets use that baseline. Diff lens
+images share the stage comparison transform and offset, while Single and Slider
+magnify each native source. Viewport preferences use the report-scoped
+`viewport-v2` key; older viewport state is ignored.
 `currentAlignment()` derives a normalized copy from the selected directional pair's
 `pairAlignments` entry; missing entries mean neutral. Offset edits write that map,
 while `rawAlignX`/`rawAlignY` remain transient input drafts. Visiting a pair or

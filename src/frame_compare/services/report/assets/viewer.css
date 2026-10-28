@@ -558,14 +558,15 @@ select optgroup {
 .rv-canvas {
     position: relative;
     display: inline-block;
+    flex: 0 0 auto;
     transform-origin: center center;
     transform: translate(var(--pan-x, 0px), var(--pan-y, 0px)) scale(var(--zoom-level, 1));
 }
 
 .rv-sizer {
     display: block;
-    max-width: 96vw;
-    max-height: 100%;
+    max-width: none;
+    max-height: none;
     width: auto;
     height: auto;
     opacity: 0;

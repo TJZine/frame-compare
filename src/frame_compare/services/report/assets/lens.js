@@ -53,15 +53,6 @@ const Lens = (() => {
         };
     }
 
-    function compositionPoint(image, clientX, clientY) {
-        const rect = image?.getBoundingClientRect?.();
-        if (!rect || !validDimensions(rect.width, rect.height)) return null;
-        return {
-            u: (clientX - rect.left) / rect.width,
-            v: (clientY - rect.top) / rect.height,
-        };
-    }
-
     function normalizedPosition(value, fallback = DEFAULT_REPORT_STATE.parkedPosition) {
         const u = value?.u;
         const v = value?.v;
@@ -563,6 +554,19 @@ const Lens = (() => {
             dom.marker.hidden = false;
         }
 
+        function comparisonGeometry(point, size, shifted = false) {
+            const transform = viewer.viewport.comparisonTransform(point);
+            // Magnification is in base-source pixels. Both clones share the stage's
+            // comparison canvas, including the second source's resampling and offset.
+            const scale = state.preferences.magnification / transform.scale;
+            return {
+                width: transform.width * scale,
+                height: (shifted ? transform.comparisonHeight : transform.height) * scale,
+                left: size / 2 - (transform.originX - (shifted ? transform.offsetX : 0)) * scale,
+                top: size / 2 - (transform.originY - (shifted ? transform.offsetY : 0)) * scale,
+            };
+        }
+
         function renderDiff(point, size) {
             const showing = viewer.state.mode === 'diff';
             dom.lens.dataset.renderMode = showing ? 'diff' : 'source';
@@ -570,19 +574,7 @@ const Lens = (() => {
                 clearLensImage('difference');
                 return true;
             }
-            const activeRect = state.activeImage?.getBoundingClientRect?.();
-            const sample = activeRect && validDimensions(activeRect.width, activeRect.height)
-                ? {
-                    clientX: activeRect.left + point.u * activeRect.width,
-                    clientY: activeRect.top + point.v * activeRect.height,
-                }
-                : null;
-            const differencePoint = compositionPoint(
-                viewer.dom.rightImg,
-                sample?.clientX,
-                sample?.clientY,
-            );
-            const geometry = setImageGeometry(viewer.dom.rightImg, differencePoint, size);
+            const geometry = comparisonGeometry(point, size, true);
             const source = viewer.dom.rightImg.currentSrc
                 || viewer.dom.rightImg.src
                 || sourceFor(viewer.state.rightClipIdx);
@@ -625,7 +617,9 @@ const Lens = (() => {
             }
             const size = lensSize();
             const source = state.activeImage.currentSrc || state.activeImage.src || sourceFor(state.activeClipIdx);
-            const geometry = setImageGeometry(state.activeImage, state.point, size, size);
+            const geometry = viewer.state.mode === 'diff'
+                ? comparisonGeometry(state.point, size)
+                : setImageGeometry(state.activeImage, state.point, size, size);
             const activeAvailable = applyLensImage('active', source, geometry);
             const differenceAvailable = renderDiff(state.point, size);
             renderCaption();
@@ -1028,7 +1022,6 @@ const Lens = (() => {
         normalizePreferences,
         normalizeReportState,
         normalizedPoint,
-        compositionPoint,
         normalizedPosition,
         lensImageGeometry,
         boundedPopoverPosition,

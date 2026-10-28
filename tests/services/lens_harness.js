@@ -227,6 +227,7 @@ async function lensContracts() {
                     })),
                 },
                 mode: 'overlay',
+                zoom: 1,
                 activeClipIdx: 1,
                 leftClipIdx: 0,
                 rightClipIdx: 1,
@@ -238,7 +239,16 @@ async function lensContracts() {
             clipDisplay(clip, profile = 'control') { return clip.display[profile]; },
             clipAccessibleName(clip) { return clip.display.primary; },
             referenceClipIndex() { return 0; },
-            viewport: { sliderCanvasRect() { return activeImage.getBoundingClientRect(); } },
+            viewport: {
+                sliderCanvasRect() { return activeImage.getBoundingClientRect(); },
+                comparisonTransform(point) {
+                    return {
+                        width: 1920, height: 1080, comparisonHeight: 1080, scale: 1,
+                        originX: point.u * 1920, originY: point.v * 1080,
+                        offsetX: 48, offsetY: 24,
+                    };
+                },
+            },
             bindRadioGroup() {},
             syncRadioGroupTabStops() {},
             announce(message) { announcements.push(message); },
@@ -587,7 +597,7 @@ async function lensContracts() {
     controller.refresh();
     assert.deepEqual(JSON.parse(JSON.stringify(controller.state.point)), touchSample);
     assert.equal(controller.state.activeClipIdx, environment.viewer.state.leftClipIdx);
-    assert.notEqual(
+    assert.equal(
         environment.selectors['[data-lens-image="difference"]'].style.left,
         differenceBeforeLayout,
     );
