@@ -91,7 +91,7 @@ def test_live_matroska_packet_tail(tmp_path: Path, early_end: bool) -> None:
 
 
 @pytest.fixture
-def packet_tail_media(tmp_path: Path) -> Path:
+def packet_tail_media(tmp_path: Path, audio_codec: str) -> Path:
     path = tmp_path / "live.mkv"
     subprocess.run(
         [
@@ -101,9 +101,15 @@ def packet_tail_media(tmp_path: Path) -> Path:
             "-f",
             "lavfi",
             "-i",
+            "color=white:s=32x24:r=24:d=2",
+            "-f",
+            "lavfi",
+            "-i",
             "sine=frequency=440:sample_rate=48000:duration=2",
+            "-c:v",
+            "ffv1",
             "-c:a",
-            "pcm_s16le",
+            audio_codec,
             "-live",
             "1",
             str(path),
@@ -115,13 +121,17 @@ def packet_tail_media(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.mark.parametrize("audio_codec", ["pcm_s16le", "libopus"])
 @pytest.mark.parametrize(
     "stop", ["cap", "cancel", "timeout", "complete", "before-seek", "nonpositive"]
 )
 def test_packet_tail_probe_lifecycle(
-    packet_tail_media: Path, monkeypatch: pytest.MonkeyPatch, stop: str
+    packet_tail_media: Path, monkeypatch: pytest.MonkeyPatch, stop: str, audio_codec: str
 ) -> None:
     stream = probe_streams(packet_tail_media).audio[0]
+    expected_duration = Fraction(2001, 1000) if audio_codec == "libopus" else Fraction(2)
+    if audio_codec == "libopus":
+        assert stream.timeline.duration is None
     # ffprobe versions may derive metadata duration even for live Matroska.
     # Exercise the fallback explicitly against the real packet timestamps.
     stream = replace(
@@ -130,7 +140,7 @@ def test_packet_tail_probe_lifecycle(
             stream.timeline,
             duration=None,
             duration_basis="unavailable",
-            start_time=Fraction(2 if stop == "nonpositive" else 0),
+            start_time=expected_duration if stop == "nonpositive" else stream.timeline.start_time,
         ),
     )
     cancellation = Event()
@@ -170,7 +180,7 @@ def test_packet_tail_probe_lifecycle(
             assert measured == stream
         else:
             assert measured.timeline.duration is not None
-            assert measured.timeline.duration == Fraction(2)
+            assert measured.timeline.duration == expected_duration
             assert measured.timeline.duration_basis == "packet_tail"
     assert len(processes) == 1
     assert processes[0].returncode is not None

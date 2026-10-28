@@ -330,7 +330,9 @@ class _PacketTailParser:
             self.pending = b""
 
     def _row(self, row: bytes) -> None:
-        fields = row.rstrip(b"\r").split(b",")
+        # ffprobe appends a side-data section after packet fields (for example
+        # Opus discard padding), even when no side-data values were requested.
+        fields = row.rstrip(b"\r").split(b",", 2)[:2]
         if len(fields) != 2 or any(not field.lstrip(b"+-").isdigit() for field in fields):
             raise ValueError("invalid packet row")
         pts, duration = (int(field) for field in fields)

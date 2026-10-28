@@ -900,6 +900,7 @@ def test_select_audio_pair_prefers_a_shared_language(
         ([b"300", b"00,100", b"0\n89900,100"], True, Fraction(90)),
         ([b"29999,1000\n"], False, Fraction(30999, 1000)),
         ([b"90000,0\r\n30000,100\r\n"], True, Fraction(90)),
+        ([b"30000,1000,\n89900,100", b",\n"], True, Fraction(90)),
         ([], False, None),
     ],
 )
@@ -915,7 +916,18 @@ def test_selected_audio_packet_tail_parser(
 
 
 @pytest.mark.parametrize(
-    "row", [b"\n", b"30000\n", b"N/A,100\n", b"true,100\n", b"30000,-1\n", b"1_000,10\n"]
+    "row",
+    [
+        b"\n",
+        b"30000\n",
+        b"N/A,100\n",
+        b"true,100\n",
+        b"30000,-1\n",
+        b"1_000,10\n",
+        b"30000,,\n",
+        b"N/A,100,\n",
+        b"30000,N/A,\n",
+    ],
 )
 def test_selected_audio_packet_tail_parser_rejects_malformed_rows(row: bytes) -> None:
     parser = _PacketTailParser(Fraction(1, 1000), Fraction(30))
