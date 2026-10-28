@@ -20,6 +20,47 @@ def _source(clip: object) -> SourceInfo:
     return cast(SourceInfo, SimpleNamespace(clip=clip))
 
 
+@pytest.mark.parametrize(
+    ("format", "color", "width", "height", "expected"),
+    [
+        pytest.param(vs.RGB24, [255, 255, 255], 17, 15, 1.0, id="rgb24-white-odd"),
+        pytest.param(vs.RGB24, [255, 0, 0], 17, 15, 0.2126, id="rgb24-red-odd"),
+        pytest.param(vs.RGBS, [1.0, 0.0, 0.0], 17, 15, 0.2126, id="rgbs-red-odd"),
+        pytest.param(vs.GRAY8, 255, 16, 16, 1.0, id="gray8-white"),
+        pytest.param(vs.GRAY16, 65535, 16, 16, 1.0, id="gray16-white"),
+        pytest.param(
+            vs.GRAY16,
+            32768,
+            16,
+            16,
+            32768 / 65535,
+            id="gray16-midpoint-native-precision",
+        ),
+        pytest.param(vs.YUV420P8, [255, 128, 128], 16, 16, 1.0, id="yuv420p8-luma-control"),
+    ],
+)
+@pytest.mark.vs_required
+def test_quality_strategy_uses_native_precision_bt709_luma(
+    format: int,
+    color: int | list[float],
+    width: int,
+    height: int,
+    expected: float,
+) -> None:
+    clip = vs.core.std.BlankClip(
+        width=width,
+        height=height,
+        length=1,
+        format=format,
+        color=color,
+    )
+
+    result = calculate_metric_strategy(_source(clip), AnalysisConfig(), reporter=None)
+
+    assert result.luminance == pytest.approx([expected], abs=0.001)
+    assert result.motion == pytest.approx([0.0])
+
+
 @pytest.mark.vs_required
 def test_performance_strategy_black_clip_has_zero_luminance_and_motion() -> None:
     clip = vs.core.std.BlankClip(width=16, height=16, length=3, format=vs.GRAY8, color=0)

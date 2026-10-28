@@ -1,4 +1,4 @@
-"""Literal keys/tokens/v8 bytes captured from b2dcd6aa before the P7 migration."""
+"""Literal keys/tokens/v8 bytes captured from the fixed analysis identity."""
 
 import json
 import os
@@ -23,7 +23,7 @@ BASELINE: dict[str, Any] = json.loads(
 
 
 @pytest.mark.parametrize("case", list(BASELINE["vectors"]))
-def test_request_identity_and_persisted_bytes_match_pre_migration(
+def test_request_identity_and_persisted_bytes_match_frozen_vectors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     case: str,
@@ -91,6 +91,6 @@ def test_request_identity_and_persisted_bytes_match_pre_migration(
 
 
 def test_sampling_constants_require_a_deliberate_algorithm_version_decision() -> None:
-    assert metric_identity._ALGORITHM_VERSION == "analysis_metrics_v7"
+    assert metric_identity._ALGORITHM_VERSION == "analysis_metrics_v8"
     assert Fraction(1, 4) == PERFORMANCE_SAMPLING_FRACTION
     assert PERFORMANCE_BURST_COUNT == 8
