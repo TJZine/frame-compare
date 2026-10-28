@@ -1892,3 +1892,63 @@ def test_report_actual_pixels_fit_and_diff_lens_share_coordinates(
     if source_width == 3840:
         assert proof["fitZoom"] < 0.25, proof
     assert proof["zoomed"] > proof["fitZoom"], proof
+
+
+@pytest.mark.integration
+def test_fullscreen_help_and_inspector_are_reachable_with_trusted_input(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    script = _viewer_input_script(r"""
+        async function click(selector) {
+            const point = await evaluate(`(() => {
+                const rect = document.querySelector('${selector}').getBoundingClientRect();
+                return {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+            })()`);
+            await command('Input.dispatchMouseEvent', {type: 'mousePressed', button: 'left', clickCount: 1, ...point});
+            await command('Input.dispatchMouseEvent', {type: 'mouseReleased', button: 'left', clickCount: 1, ...point});
+        }
+        async function key(key, code, text = '') {
+            await command('Input.dispatchKeyEvent', {type: 'keyDown', key, code, text});
+            await command('Input.dispatchKeyEvent', {type: 'keyUp', key, code});
+            await pause();
+        }
+        async function until(expression) {
+            for (let attempt = 0; attempt < 30; attempt += 1) {
+                if (await evaluate(expression)) return;
+                await pause();
+            }
+            assert.fail(expression);
+        }
+        const hit = selector => `(() => {
+            const element = document.querySelector('${selector}');
+            const rect = element.getBoundingClientRect();
+            return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === element;
+        })()`;
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1366, height: 1000, deviceScaleFactor: 1, mobile: false,
+        });
+        await click('#btn-fullscreen');
+        await until('Boolean(document.fullscreenElement)');
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-header')).display"), 'none');
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-controls')).display"), 'none');
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-bottom-panel')).display"), 'none');
+        assert.equal(await evaluate('ReportViewer.dom.stage.getBoundingClientRect().height === innerHeight'), true);
+        await key('?', 'Slash', '?');
+        await until("ReportViewer.isHelpModalOpen()");
+        assert.equal(await evaluate(hit('#btn-close-help')), true, 'Help close button is behind fullscreen');
+        await click('#btn-close-help');
+        assert.equal(await evaluate('document.fullscreenElement.contains(document.activeElement)'), true);
+        assert.equal(await evaluate('document.activeElement === ReportViewer.dom.stage'), true);
+        await key('I', 'KeyI', 'I');
+        await until('ReportViewer.inspector.isVisible()');
+        await until(hit('#btn-inspector-close'));
+        await key('Escape', 'Escape');
+        await until('document.fullscreenElement === null');
+        assert.equal(await evaluate("document.querySelector('#btn-fullscreen').getAttribute('aria-pressed')"), 'false');
+        console.log('Fullscreen Help, Inspector, focus and Escape passed');
+""")
+    result = _run_browser_input(browser, report_path, tmp_path / "chrome-fullscreen", script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Fullscreen Help, Inspector, focus and Escape passed" in result.stdout

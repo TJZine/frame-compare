@@ -1066,6 +1066,9 @@ zero.
 Help and Report Information share the local `HelpInfoDialog` owner in
 `assets/viewer.js` for visibility, focus restoration, Tab trapping, and Escape
 handling. The Inspector retains its separate drawer lifecycle and focus policy.
+Fullscreen includes the stage, Inspector, and dialogs while hiding the header,
+toolbar, and filmstrip. Closing a dialog whose trigger is hidden returns focus to
+the stage.
 
 Viewer appearance remains owned by `assets/viewer.css`: neutral charcoal surfaces,
 readable text tiers, restrained brass comparison markers, and neutral utility states.

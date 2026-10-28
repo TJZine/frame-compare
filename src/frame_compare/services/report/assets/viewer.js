@@ -492,6 +492,10 @@ const ReportViewer = {
     },
 
     focusElement(element) {
+        const outsideFullscreen = document.fullscreenElement
+            && !document.fullscreenElement.contains(element);
+        const hidden = element?.getClientRects && element.getClientRects().length === 0;
+        if (outsideFullscreen || hidden) element = this.dom.stage;
         if (element && typeof element.focus === 'function') {
             element.focus({ preventScroll: true });
         }
@@ -617,6 +621,7 @@ const ReportViewer = {
         document.addEventListener('fullscreenchange', () => {
             this.viewport.applyFitMode();
             this.updateFullscreenButton();
+            if (document.fullscreenElement) this.focusElement(this.dom.stage);
         });
         this.dom.btnFullscreen.addEventListener('click', () => this.toggleFullscreen());
         this.updateFullscreenButton();
@@ -908,6 +913,12 @@ const ReportViewer = {
     },
 
     bindKeyboardEvents() {
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape' || !document.fullscreenElement) return;
+            // Fullscreen owns Escape even when focus is inside the Inspector.
+            this.handleKey(e);
+            e.stopPropagation();
+        }, true);
         document.addEventListener('keydown', (e) => this.handleKey(e));
     },
 
@@ -1504,14 +1515,14 @@ const ReportViewer = {
                 this.closeAlignmentPopover();
                 return;
             }
+            if (document.fullscreenElement) {
+                e.preventDefault();
+                this.toggleFullscreen();
+                return;
+            }
             if (this.inspector.isVisible()) {
                 e.preventDefault();
                 this.inspector.setOpen(false);
-                return;
-            }
-            if (document.fullscreenElement) {
-                e.preventDefault();
-                document.exitFullscreen?.();
                 return;
             }
         }
@@ -1762,12 +1773,14 @@ const ReportViewer = {
         }
     },
 
-    toggleFullscreen() {
-        if (document.fullscreenElement) {
-            document.exitFullscreen?.();
-            return;
+    async toggleFullscreen() {
+        try {
+            if (document.fullscreenElement) await document.exitFullscreen?.();
+            else await document.body.requestFullscreen?.();
+        } catch {
+            // Rejected requests leave the browser's actual fullscreen state authoritative.
+            this.updateFullscreenButton();
         }
-        this.dom.stage.requestFullscreen?.();
     },
 
     updateFullscreenButton() {

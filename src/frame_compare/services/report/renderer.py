@@ -684,7 +684,7 @@ def _render_viewport_palette() -> str:
 
 
 def _render_stage() -> str:
-    return f"""    <div class="rv-viewer-stage rv-mode-slider" role="region" aria-label="Comparison viewer">
+    return f"""    <div class="rv-viewer-stage rv-mode-slider" tabindex="0" role="region" aria-label="Comparison viewer">
         <div class="rv-empty-state" data-empty-state hidden></div>
         <div class="rv-canvas" role="img" aria-label="Comparison image canvas">
             <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="" class="rv-sizer" aria-hidden="true">
