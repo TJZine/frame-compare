@@ -1,3 +1,5 @@
+import os
+import stat
 from pathlib import Path
 from typing import cast
 
@@ -100,6 +102,31 @@ def test_write_bytes_atomic_preserves_existing_file_permissions(tmp_path: Path) 
     assert (target.stat().st_mode & 0o777) == expected_mode
 
 
+def test_atomic_write_sets_existing_mode_before_fsync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "private.txt"
+    target.write_text("old", encoding="utf-8")
+    target.chmod(0o600)
+    real_fsync = os.fsync
+    observed_modes: list[int] = []
+
+    def inspect_temp_mode(fd: int) -> None:
+        real_fsync(fd)
+        observed_modes.append(stat.S_IMODE(os.fstat(fd).st_mode))
+
+    previous_umask = os.umask(0o022)
+    try:
+        monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", inspect_temp_mode)
+        write_text_atomic(target, "new", encoding="utf-8")
+    finally:
+        os.umask(previous_umask)
+
+    assert observed_modes
+    assert all(mode & 0o077 == 0 for mode in observed_modes)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
 @pytest.mark.parametrize(
     ("filename", "error_type"),
     [("out.toml", OSError), ("out.bin", PermissionError)],
@@ -145,6 +172,31 @@ def test_write_text_atomic_does_not_mask_replace_failure_when_cleanup_fails(
     monkeypatch.setattr("frame_compare.utils.atomic_write.Path.unlink", _fail_cleanup)
 
     with pytest.raises(OSError, match="replace failed") as exc_info:
+        write_text_atomic(target, "new", encoding="utf-8")
+
+    assert target.read_text(encoding="utf-8") == "old"
+    assert "cleanup failed" in "\n".join(exc_info.value.__notes__)
+
+
+def test_write_text_atomic_does_not_mask_fchmod_failure_when_cleanup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "out.toml"
+    target.write_text("old", encoding="utf-8")
+    original_unlink = Path.unlink
+
+    def _fail_fchmod(_fd: int, _mode: int) -> None:
+        raise OSError("fchmod failed")
+
+    def _fail_cleanup(self: Path, *, missing_ok: bool = False) -> None:
+        if self.name.startswith(".out.toml."):
+            raise PermissionError("cleanup failed")
+        original_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fchmod", _fail_fchmod)
+    monkeypatch.setattr("frame_compare.utils.atomic_write.Path.unlink", _fail_cleanup)
+
+    with pytest.raises(OSError, match="fchmod failed") as exc_info:
         write_text_atomic(target, "new", encoding="utf-8")
 
     assert target.read_text(encoding="utf-8") == "old"
