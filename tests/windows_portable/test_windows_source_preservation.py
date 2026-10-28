@@ -785,10 +785,11 @@ def test_source_install_pipeline_stop_reverses_data_and_removes_marker(
     assert pointer.read_bytes() == pointer_before
     assert not (pointer.parent / "source-migration.pending.json").exists()
     candidate = next((script.parents[2] / "dist").iterdir())
-    for name in ("config", "comparison_videos", "generated"):
+    for name in ("config", "comparison_videos"):
         assert (previous / name).exists()
         assert (candidate / name).is_dir()
         assert not list((candidate / name).iterdir())
+    assert not (candidate / "generated").exists()
 
 
 def _junction(pwsh: str, root: Path, alias: Path, target: Path) -> None:
