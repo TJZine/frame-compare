@@ -172,19 +172,76 @@ $stateDirectory = Split-Path -Parent $pointerPath
 $activationLockPath = Join-Path $stateDirectory "source-install.lock"
 $pendingMigrationPath = Join-Path $stateDirectory "source-migration.pending.json"
 
+function Read-ActivePointerBundle() {
+  try {
+    $pointer = Get-Content -LiteralPath $pointerPath -Raw | ConvertFrom-Json
+    if ($pointer -isnot [pscustomobject] -or
+        ($pointer.schema_version -isnot [int] -and $pointer.schema_version -isnot [long]) -or
+        $pointer.schema_version -ne 1 -or $pointer.install_type -ne "portable_bundle" -or
+        $pointer.bundle_path -isnot [string] -or
+        !([IO.Path]::IsPathFullyQualified($pointer.bundle_path))) {
+      return $null
+    }
+    return [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($pointer.bundle_path))
+  } catch { return $null }
+}
+
 function Write-PendingMigrationRefusal([string]$MarkerPath) {
   Write-Warning "A pending source migration marker was found: $MarkerPath"
   try {
     $pending = Get-Content -LiteralPath $MarkerPath -Raw | ConvertFrom-Json
-    Write-Warning "Previous bundle: $($pending.previous_bundle)"
-    Write-Warning "Candidate bundle: $($pending.candidate_bundle)"
-    foreach ($folder in @($pending.folders)) {
-      Write-Warning "Move folder back manually: $($folder.target) -> $($folder.source)"
+    $previous = [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($pending.previous_bundle))
+    $candidate = [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($pending.candidate_bundle))
+    $active = Read-ActivePointerBundle
+    $locations = @(foreach ($folder in @($pending.folders)) {
+      $sourceExists = Test-Path -LiteralPath $folder.source
+      $targetExists = Test-Path -LiteralPath $folder.target
+      $sourceHasData = Test-NonEmptyDirectory $folder.source
+      $targetHasData = Test-NonEmptyDirectory $folder.target
+      $state = "conflict"
+      if ($sourceHasData -and !$targetHasData) { $state = "in place" }
+      elseif ($targetHasData -and !$sourceExists) { $state = "moved" }
+      [pscustomobject]@{
+        Name = $folder.name; Source = $folder.source; Target = $folder.target
+        SourceExists = $sourceExists; TargetExists = $targetExists; State = $state
+      }
+    })
+    if ($locations.Count -eq 0) { throw "Marker contains no user folders" }
+    Write-Warning "Previous bundle: $previous"
+    Write-Warning "Candidate bundle: $candidate"
+    foreach ($folder in $locations) {
+      Write-Warning "User folder $($folder.Name): source=$($folder.Source) (exists=$($folder.SourceExists)); target=$($folder.Target) (exists=$($folder.TargetExists)); $($folder.State)"
+    }
+    $movedFolders = @($locations | Where-Object { $_.State -eq "moved" })
+    $conflicts = @($locations | Where-Object { $_.State -eq "conflict" })
+    if ($active -eq $candidate -and $movedFolders.Count -eq $locations.Count) {
+      Write-Warning "The migration completed. User data is in the candidate bundle: $candidate"
+      Write-Warning "It is safe to delete the pending migration marker: $MarkerPath"
+    } elseif ($active -eq $previous -and $conflicts.Count -eq 0) {
+      Write-Warning "The migration was not committed. The active pointer still names the previous bundle."
+      foreach ($folder in $locations) {
+        if ($folder.State -eq "moved") {
+          Write-Warning "Move back manually: $($folder.Target) -> $($folder.Source)"
+        } else {
+          Write-Warning "Already in place: $($folder.Source)"
+        }
+      }
+      if ($movedFolders.Count -eq 0) {
+        Write-Warning "No folder moved. It is safe to delete the pending migration marker: $MarkerPath"
+      } else {
+        Write-Warning "After restoring the listed folders, delete $MarkerPath before retrying installation."
+      }
+    } else {
+      Write-Warning "Migration state conflict. Active pointer path: $pointerPath; normalized bundle: $active"
+      try { Write-Warning "Current pointer value: $([IO.File]::ReadAllText($pointerPath))" }
+      catch { Write-Warning "Current pointer value unavailable: $($_.Exception.Message)" }
+      Write-Warning "Do not move anything until every path and the pointer have been checked by hand."
     }
   } catch {
     Write-Warning "Could not read pending migration details: $($_.Exception.Message)"
+    Write-Warning "Check the marker and folder locations by hand before retrying installation."
   }
-  Write-Warning "Move the listed folders back manually, then delete $MarkerPath before retrying installation. No automatic recovery was attempted."
+  Write-Warning "No automatic recovery was attempted."
 }
 
 function Read-PreviousBundle() {

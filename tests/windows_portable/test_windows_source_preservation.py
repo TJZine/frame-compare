@@ -732,6 +732,8 @@ Write-Host "Installing shim from built bundle..."''',
         assert retry.returncode != 0
         output = retry.stdout + retry.stderr
         assert "pending source migration" in output
+        assert "migration was not committed" in output
+        assert "Move back manually" in output
         assert str(previous) in output and str(first_out) in output
         for name in ("config", "comparison_videos", "generated"):
             assert str(previous / name) in output and str(first_out / name) in output
@@ -756,6 +758,139 @@ Write-Host "Installing shim from built bundle..."''',
             FAILURE="",
         )
         assert third.returncode == 0, third.stdout + third.stderr
+    finally:
+        if first.poll() is None:
+            first.kill()
+        first.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("boundary", ["after-commit", "before-first-move", "conflicting-target"])
+def test_source_install_refusal_reports_interrupted_migration_state(
+    pwsh: str, tmp_path: Path, source_fixture: tuple[Path, Path, Path], boundary: str
+) -> None:
+    import time
+
+    script, previous, pointer = source_fixture
+    pointer_before = pointer.read_bytes()
+    marker = pointer.parent / "source-migration.pending.json"
+    first_out = script.parents[2] / "dist/first"
+    second_out = script.parents[2] / "dist/second"
+    anchor = (
+        "    $succeeded = $true"
+        if boundary == "after-commit"
+        else "          try { [IO.Directory]::Move($folder.Source, $folder.Target) }"
+    )
+    hold = r"""
+if ($env:HOLD_ACTIVATION -eq '1' -and !$script:migrationHeld) {
+  $script:migrationHeld = $true
+  Set-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'activation-held') -Value 'ready'
+  $deadline = [DateTime]::UtcNow.AddSeconds(15)
+  while (!(Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'activation-release'))) {
+    if ([DateTime]::UtcNow -gt $deadline) { throw 'migration hold timed out' }
+    Start-Sleep -Milliseconds 50
+  }
+}
+"""
+    source = script.read_text()
+    assert source.count(anchor) == 1
+    replacement = anchor + hold if boundary == "after-commit" else hold + anchor
+    script.write_text(
+        source.replace(
+            '$ErrorActionPreference = "Stop"',
+            '$ErrorActionPreference = "Stop"\n$script:migrationHeld = $false',
+            1,
+        ).replace(anchor, replacement, 1)
+    )
+    environment = os.environ | {
+        "LOCALAPPDATA": str(tmp_path / "appdata"),
+        "INSTALL": str(script),
+        "OUT": str(first_out),
+        "HOLD_ACTIVATION": "1",
+        "FAILURE": "",
+        "NO_COLOR": "1",
+    }
+    first = subprocess.Popen(
+        [
+            pwsh,
+            "-NoProfile",
+            "-Command",
+            "function uv {}; & $env:INSTALL -SkipSync -OutDir $env:OUT",
+        ],
+        cwd=tmp_path,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    sentinels = {
+        "config/config.toml": "user config",
+        "comparison_videos/x.mkv": "media",
+        "generated/run/result": "result",
+    }
+    try:
+        ready = tmp_path / "appdata/activation-held"
+        deadline = time.monotonic() + 10
+        while not ready.exists() and first.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert ready.exists(), f"installer did not reach {boundary}"
+        assert marker.exists()
+        if boundary == "conflicting-target":
+            target = first_out / "config"
+            target.mkdir(exist_ok=True)
+            (target / "conflicting-user-data").write_text("keep both copies")
+        first.kill()
+        stdout, stderr = first.communicate(timeout=10)
+        assert first.returncode != 0, stdout + stderr
+        if boundary == "after-commit":
+            assert Path(json.loads(pointer.read_text())["bundle_path"]) == first_out
+            data_root = first_out
+            for name in ("config", "comparison_videos", "generated"):
+                assert not (previous / name).exists()
+        else:
+            assert pointer.read_bytes() == pointer_before
+            data_root = previous
+            # The real builder's still-empty placeholder is an unmoved folder.
+            assert (first_out / "comparison_videos").is_dir()
+            assert not list((first_out / "comparison_videos").iterdir())
+        for relative, payload in sentinels.items():
+            assert (data_root / relative).read_text() == payload
+        before = _snapshot(tmp_path)
+
+        retry = _run(
+            pwsh,
+            "function uv {}; & $env:INSTALL -SkipSync -OutDir $env:OUT",
+            tmp_path,
+            INSTALL=str(script),
+            OUT=str(second_out),
+            HOLD_ACTIVATION="",
+            FAILURE="",
+        )
+
+        assert retry.returncode != 0
+        output = (retry.stdout + retry.stderr).lower()
+        assert "pending source migration" in output
+        assert "move back" not in output
+        assert str(marker).lower() in output
+        if boundary == "after-commit":
+            assert "migration completed" in output
+            assert str(first_out).lower() in output
+            assert "safe to delete" in output
+        elif boundary == "before-first-move":
+            assert "not committed" in output
+            assert "no folder moved" in output
+            assert "already in place" in output
+            assert "safe to delete" in output
+        else:
+            assert "migration state conflict" in output
+            assert "current pointer value" in output
+            assert "do not move anything" in output
+            assert "safe to delete" not in output
+            for name in ("config", "comparison_videos", "generated"):
+                assert str(previous / name).lower() in output
+                assert str(first_out / name).lower() in output
+        assert not second_out.exists()
+        assert marker.exists()
+        assert _snapshot(tmp_path) == before
     finally:
         if first.poll() is None:
             first.kill()

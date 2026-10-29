@@ -283,9 +283,10 @@ fully qualified absolute paths. Drive-relative and root-relative values are malf
 Move is all-or-nothing for failures and Ctrl+C: a move or activation failure restores
 completed moves, empty placeholders, the previous pointer, and its shims. If recovery
 fails, the installer stops and reports the pointer and every folder location for manual
-repair. If the process is killed after moving folders, the next run stops and prints
-where each folder is; move them back by hand and delete the pending migration marker
-before retrying. Cross-volume moves refuse activation; use Leave and relocate data manually.
+repair. After an interrupted migration, the next run refuses installation and reports
+whether migration completed or which folders need to move back; empty candidate
+placeholders count as unmoved. Conflicting data or pointer state requires a manual
+check before moving anything or deleting the pending migration marker. Cross-volume moves refuse activation; use Leave and relocate data manually.
 Moving media makes path-keyed caches recompute once. Absolute paths in config are
 not rewritten. Previous bundles are never deleted; remove them manually only once
 you have accepted the new installation. A missing or stale active pointer is treated
