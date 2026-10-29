@@ -798,8 +798,12 @@ def test_load_source_real_video_stream_policy(
         monkeypatch.delenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", raising=False)
         monkeypatch.setenv("PATH", "")
         if mode == "no-ffprobe-untagged":
-            with pytest.raises(SourceLoadError):
+            with pytest.raises(SourceLoadError) as exc_info:
                 load_source(video)
+            assert exc_info.value.code == "FC-4015"
+            assert isinstance(exc_info.value.__cause__, hdr_probe_module.FFmpegNotFoundError)
+            assert isinstance(exc_info.value.__cause__.__cause__, FileNotFoundError)
+            assert "ffprobe" in str(exc_info.value.__cause__.__cause__)
             return
         source = load_source(video)
         assert (source.width, source.height) == (32, 24)
