@@ -111,7 +111,7 @@ def load_source(
         fps = Fraction(clip_fps.numerator, clip_fps.denominator)
         frame_props = dict(frame.props)
         probed_metadata = None
-        if streams is not None and hdr_signal_is_unspecified(frame_props):
+        if hdr_signal_is_unspecified(frame_props):
             raise_if_cancelling()
             probed_metadata = probe_hdr_metadata(Path(path), streams=streams)
         is_hdr, hdr_metadata = detect_hdr(frame_props, probed_metadata)

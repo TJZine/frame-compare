@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from vapoursynth import Core, VideoFormat, VideoNode
 
+import frame_compare.vs.hdr_probe as hdr_probe_module
 import frame_compare.vs.source as source_module
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.source import (
@@ -26,6 +27,9 @@ from frame_compare.vs.types import SourceInfo
 def _stub_hdr_probe(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
     if request.node.get_closest_marker("vs_required") is not None:
         return
+    monkeypatch.setattr(
+        source_module, "resolve_optional_executable", lambda _executable: "/fake/ffprobe"
+    )
     monkeypatch.setattr(source_module, "probe_video_streams", lambda _path: [])
     monkeypatch.setattr(source_module, "probe_hdr_metadata", lambda _path, **_kwargs: None)
 
@@ -418,6 +422,47 @@ def test_load_source_falls_back_to_ffprobe_for_absent_hdr_props(
     probe_hdr_metadata.assert_called_once_with(Path("video.mkv"), streams=[])
 
 
+def test_load_source_requires_ffprobe_for_unspecified_hdr_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(source_module, "resolve_optional_executable", lambda _executable: None)
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.delenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", raising=False)
+    monkeypatch.setattr(source_module, "probe_hdr_metadata", hdr_probe_module.probe_hdr_metadata)
+    monkeypatch.setattr(source_module, "probe_video_streams", hdr_probe_module.probe_video_streams)
+
+    with pytest.raises(SourceLoadError) as exc_info:
+        load_source(Path("video.mkv"), cast(Core, make_mock_core()))
+
+    assert exc_info.value.code == "FC-4015"
+    assert isinstance(exc_info.value.__cause__, hdr_probe_module.FFmpegNotFoundError)
+    assert isinstance(exc_info.value.__cause__.__cause__, FileNotFoundError)
+    assert "ffprobe" in str(exc_info.value.__cause__.__cause__)
+
+
+def test_load_source_loads_signaled_source_without_ffprobe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(source_module, "resolve_optional_executable", lambda _executable: None)
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.delenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", raising=False)
+    hdr_probe = MagicMock(wraps=hdr_probe_module.probe_hdr_metadata)
+    stream_probe = MagicMock(wraps=hdr_probe_module.probe_video_streams)
+    monkeypatch.setattr(source_module, "probe_hdr_metadata", hdr_probe)
+    monkeypatch.setattr(source_module, "probe_video_streams", stream_probe)
+    props = {"_Primaries": 1, "_Transfer": 1, "_Matrix": 1}
+    core = SimpleNamespace(
+        lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
+    )
+
+    source = load_source(Path("video.mkv"), cast(Core, core))
+
+    assert source.num_frames == 1000
+    assert source.is_hdr is False
+    hdr_probe.assert_not_called()
+    stream_probe.assert_not_called()
+
+
 def test_load_source_falls_back_to_ffprobe_for_unspecified_hdr_props(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -689,6 +734,7 @@ def test_load_source_stops_native_admission_after_interruption(
         "multiple-video",
         "attached-cover",
         "no-ffprobe",
+        "no-ffprobe-untagged",
         "multiple-override",
         "cover-override",
         "invalid-override",
@@ -715,7 +761,21 @@ def test_load_source_real_video_stream_policy(
     ffmpeg = shutil.which("ffmpeg")
     assert ffprobe is not None and ffmpeg is not None
     video = tmp_path / "streams.mp4"
-    if mode == "no-ffprobe":
+    if mode in {"no-ffprobe", "no-ffprobe-untagged"}:
+        color_tags = (
+            [
+                "-color_primaries",
+                "bt709",
+                "-color_trc",
+                "bt709",
+                "-colorspace",
+                "bt709",
+                "-x264-params",
+                "colorprim=bt709:transfer=bt709:colormatrix=bt709",
+            ]
+            if mode == "no-ffprobe"
+            else []
+        )
         run_subprocess(
             [
                 "ffmpeg",
@@ -730,12 +790,17 @@ def test_load_source_real_video_stream_policy(
                 "2",
                 "-c:v",
                 "libx264",
+                *color_tags,
                 str(video),
             ],
             timeout_seconds=15,
         )
         monkeypatch.delenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", raising=False)
         monkeypatch.setenv("PATH", "")
+        if mode == "no-ffprobe-untagged":
+            with pytest.raises(SourceLoadError):
+                load_source(video)
+            return
         source = load_source(video)
         assert (source.width, source.height) == (32, 24)
         assert source.is_hdr is False

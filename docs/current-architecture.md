@@ -439,7 +439,9 @@ never searches parent directories.
 The subprocess executable resolver finds optional ffprobe, including the portable
 runtime's absolute override. When it resolves, source admission refuses files
 containing multiple video streams other than attached pictures. Native-only loading
-remains available when ffprobe is absent. HDR probing and FFmpeg screenshots use the
+remains available when ffprobe is absent. Sources whose native frame properties leave
+the HDR signal unspecified still need ffprobe and fail with a typed source-load error
+without it. HDR probing and FFmpeg screenshots use the
 first video stream that is not an attached picture; extraction explicitly maps
 `0:V:0`. Selected-video
 identity is not persisted.
