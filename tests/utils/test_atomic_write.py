@@ -102,6 +102,10 @@ def test_write_bytes_atomic_preserves_existing_file_permissions(tmp_path: Path) 
     assert (target.stat().st_mode & 0o777) == expected_mode
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="POSIX permission bits; Windows ACLs are outside the atomic-write contract",
+)
 def test_atomic_write_sets_existing_mode_before_fsync(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
