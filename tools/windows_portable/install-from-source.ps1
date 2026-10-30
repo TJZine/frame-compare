@@ -215,8 +215,10 @@ function Write-PendingMigrationRefusal([string]$MarkerPath) {
     $movedFolders = @($locations | Where-Object { $_.State -eq "moved" })
     $conflicts = @($locations | Where-Object { $_.State -eq "conflict" })
     if ($active -eq $candidate -and $movedFolders.Count -eq $locations.Count) {
-      Write-Warning "The migration completed. User data is in the candidate bundle: $candidate"
-      Write-Warning "It is safe to delete the pending migration marker: $MarkerPath"
+      Write-Warning "The active pointer names the candidate bundle, and the listed user folders are there: $candidate"
+      Write-Warning "Activation may be incomplete: configuration and PATH setup occur after pointer publication. Keep user data in the candidate bundle."
+      Write-Warning "Retain the pending marker until candidate activation is verified: check its config\config.toml (or state\config.toml), installed shim, and user PATH; then open a new terminal and confirm frame-compare launches the candidate."
+      Write-Warning "Only after those checks succeed, delete the pending migration marker before retrying installation: $MarkerPath"
     } elseif ($active -eq $previous -and $conflicts.Count -eq 0) {
       Write-Warning "The migration was not committed. The active pointer still names the previous bundle."
       foreach ($folder in $locations) {
@@ -470,7 +472,7 @@ try {
       }
     } catch {
       $recoveryFailure = $_
-      Write-RecoveryLocations -Folders $folders
+      if (!$succeeded) { Write-RecoveryLocations -Folders $folders }
     } finally {
       Pop-Location
     }

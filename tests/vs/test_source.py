@@ -681,9 +681,23 @@ def test_load_source_hdr_cases(
             assert getattr(source.hdr_metadata, field) == value
 
 
-@pytest.mark.parametrize("stage", ["load", "frame", "index_retry"])
+@pytest.mark.parametrize(
+    ("stage", "ffprobe_available", "signaled_sdr"),
+    [
+        pytest.param("load", True, False, id="load"),
+        pytest.param("index_retry", True, False, id="index-retry"),
+        pytest.param("frame", True, False, id="frame-unspecified-with-probe"),
+        pytest.param("frame", False, False, id="frame-unspecified-without-probe"),
+        pytest.param("frame", True, True, id="frame-sdr-with-probe"),
+        pytest.param("frame", False, True, id="frame-sdr-without-probe"),
+    ],
+)
 def test_load_source_stops_native_admission_after_interruption(
-    stage: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    stage: str,
+    ffprobe_available: bool,
+    signaled_sdr: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
 
@@ -691,6 +705,11 @@ def test_load_source_stops_native_admission_after_interruption(
     index_path = source_index_path(video_path)
     index_path.write_bytes(b"existing-index")
     calls: list[str] = []
+    monkeypatch.setattr(
+        source_module,
+        "resolve_optional_executable",
+        lambda _executable: "/fake/ffprobe" if ffprobe_available else None,
+    )
 
     async def run() -> None:
         task = asyncio.current_task()
@@ -709,7 +728,9 @@ def test_load_source_stops_native_admission_after_interruption(
                 task.cancel()
             if stage == "index_retry":
                 raise RuntimeError("failed to construct index")
-            return InterruptingClip()
+            return InterruptingClip(
+                frame_props={"_Primaries": 1, "_Transfer": 1, "_Matrix": 1} if signaled_sdr else {}
+            )
 
         def probe(_path: Path, **_kwargs: object) -> None:
             calls.append("probe")

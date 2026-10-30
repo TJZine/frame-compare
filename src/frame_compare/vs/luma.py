@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -18,30 +18,22 @@ def luma_plane(clip: vs.VideoNode) -> vs.VideoNode:
     """
     import vapoursynth as vs
 
-    runtime_vs = cast(Any, vs)
-    runtime_clip = cast(Any, clip)
-    color_family = runtime_clip.format.color_family
-    if color_family == runtime_vs.GRAY:
+    color_family = clip.format.color_family
+    if color_family == vs.GRAY:
         return clip
-    if color_family == runtime_vs.YUV:
-        return cast(
-            "vs.VideoNode",
-            runtime_clip.std.ShufflePlanes(planes=0, colorfamily=runtime_vs.GRAY),
-        )
-    if color_family == runtime_vs.RGB:
-        source_format = runtime_clip.format
-        gray_format = runtime_vs.core.query_video_format(
-            color_family=runtime_vs.GRAY,
+    if color_family == vs.YUV:
+        return clip.std.ShufflePlanes(planes=0, colorfamily=vs.GRAY)
+    if color_family == vs.RGB:
+        source_format = clip.format
+        gray_format = vs.core.query_video_format(
+            color_family=vs.GRAY,
             sample_type=source_format.sample_type,
             bits_per_sample=source_format.bits_per_sample,
         )
-        return cast(
-            "vs.VideoNode",
-            runtime_clip.resize.Bicubic(
-                format=gray_format.id,
-                matrix_s="709",
-                range_s="full",
-            ),
+        return clip.resize.Bicubic(
+            format=gray_format.id,
+            matrix_s="709",
+            range_s="full",
         )
     raise ValueError(f"Unsupported VapourSynth color family: {color_family!r}")
 

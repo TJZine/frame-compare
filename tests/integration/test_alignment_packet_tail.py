@@ -155,8 +155,6 @@ def test_packet_tail_probe_lifecycle(
         for packet in packet_facts["packets"]
     )
     expected_duration = latest_end - stream.timeline.start_time
-    if audio_codec == "libopus":
-        assert stream.timeline.duration is None
     # ffprobe versions may derive metadata duration even for live Matroska.
     # Exercise the fallback explicitly against the real packet timestamps.
     stream = replace(

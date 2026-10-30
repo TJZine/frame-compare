@@ -556,12 +556,14 @@ const Lens = (() => {
 
         function comparisonGeometry(point, size, shifted = false) {
             const transform = viewer.viewport.comparisonTransform(point);
+            const height = shifted ? transform.comparisonHeight : transform.height;
+            if (!validDimensions(transform.width, height)) return null;
             // Magnification is in base-source pixels. Both clones share the stage's
             // comparison canvas, including the second source's resampling and offset.
             const scale = state.preferences.magnification / transform.scale;
             return {
                 width: transform.width * scale,
-                height: (shifted ? transform.comparisonHeight : transform.height) * scale,
+                height: height * scale,
                 left: size / 2 - (transform.originX - (shifted ? transform.offsetX : 0)) * scale,
                 top: size / 2 - (transform.originY - (shifted ? transform.offsetY : 0)) * scale,
             };

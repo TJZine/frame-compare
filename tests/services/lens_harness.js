@@ -480,6 +480,32 @@ async function lensContracts() {
         environment.selectors['[data-lens-image="difference"]'].style.left,
         environment.selectors['[data-lens-image="active"]'].style.left,
     );
+    const comparisonTransform = environment.viewer.viewport.comparisonTransform;
+    const activeDiffClone = environment.selectors['[data-lens-image="active"]'];
+    const differenceClone = environment.selectors['[data-lens-image="difference"]'];
+    const diffStatus = environment.selectors['[data-lens-status="active"]'];
+    for (const dimensions of [
+        { width: 0, height: 0, comparisonHeight: 0 },
+        { comparisonHeight: 0 },
+    ]) {
+        environment.viewer.viewport.comparisonTransform = point => ({
+            ...comparisonTransform(point),
+            ...dimensions,
+        });
+        controller.refresh();
+        assert.equal(activeDiffClone.hidden, dimensions.width === 0);
+        assert.equal(differenceClone.hidden, true);
+        assert.equal(differenceClone.dataset.source, undefined);
+        assert.equal(diffStatus.textContent, 'UNAVAILABLE');
+        assert.equal(diffStatus.hidden, false);
+
+        environment.viewer.viewport.comparisonTransform = comparisonTransform;
+        controller.refresh();
+        assert.equal(activeDiffClone.hidden, false);
+        assert.equal(differenceClone.hidden, false);
+        assert.equal(differenceClone.dataset.source, 'clip-1/frame.png');
+        assert.equal(diffStatus.hidden, true);
+    }
     environment.viewer.state.mode = 'overlay';
     controller.sync();
 

@@ -144,6 +144,11 @@ def test_ffmpeg_geometry_preserves_exact_pixels(
     x, y = crop_origin
     left, top = pad_origin
     source_size = (6 + 2 * x, 4 + 2 * y)
+    source_filter = f"color=white:s={source_size[0]}x{source_size[1]}:r=1"
+    if x:
+        source_filter += f",drawbox=x=0:y=0:w={x}:h=ih:color=black:t=fill"
+    if y:
+        source_filter += f",drawbox=x=0:y=0:w=iw:h={y}:color=black:t=fill"
     video = tmp_path / "white.mkv"
     run_subprocess(
         [
@@ -152,10 +157,7 @@ def test_ffmpeg_geometry_preserves_exact_pixels(
             "-f",
             "lavfi",
             "-i",
-            f"color=white:s={source_size[0]}x{source_size[1]}:r=1,"
-            f"drawbox=x=0:y=0:w={x}:h=ih:color=black:t=fill"
-            if x
-            else f"color=white:s={source_size[0]}x{source_size[1]}:r=1",
+            source_filter,
             "-frames:v",
             "2",
             "-c:v",

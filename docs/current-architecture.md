@@ -525,6 +525,12 @@ identity is not persisted.
   ancestry is refused where physical containment is unproven; stored pointers must
   be fully qualified. They never delete previous bundles. Recovery diagnostics
   preserve and report all known paths even when the pointer cannot be read.
+  A pending migration blocks another source install. Candidate-pointer and folder
+  state establish data locations, not completed activation: configuration and PATH
+  setup follow pointer publication. Candidate data stays in place while activation,
+  configuration, installed shims, and PATH are verified before marker removal.
+  Marker-cleanup failure after successful activation reports a nonzero cleanup
+  error without reversing the candidate pointer or data.
 
 `frame_compare.vs.runtime_contract` is the sole component-identity owner for the
 coordinated media stack. It emits narrow analysis, probe, alignment, and index

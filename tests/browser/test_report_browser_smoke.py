@@ -1842,10 +1842,24 @@ def test_report_actual_pixels_fit_and_diff_lens_share_coordinates(
         await command('Emulation.setDeviceMetricsOverride', {
             width: WINDOW_WIDTH, height: 768, deviceScaleFactor: 1, mobile: false,
         });
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-            if (await evaluate('ReportViewer.dom.leftImg.naturalWidth === SOURCE_WIDTH')) break;
-            await pause();
+        async function until(expression, message) {
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+                if (await evaluate(expression)) return;
+                await pause();
+            }
+            assert.fail(message);
         }
+        await until(`(() => {
+            const viewer = ReportViewer;
+            const frame = viewer.currentFrame();
+            const leftSource = new URL(frame.images[viewer.state.leftClipIdx].src, document.baseURI).href;
+            const rightSource = new URL(frame.images[viewer.state.rightClipIdx].src, document.baseURI).href;
+            const loaded = (image, source, width) => image.complete
+                && image.currentSrc === source && image.naturalWidth === width && image.naturalHeight > 0;
+            return loaded(viewer.dom.leftImg, leftSource, SOURCE_WIDTH)
+                && loaded(viewer.dom.sizerImg, leftSource, SOURCE_WIDTH)
+                && loaded(viewer.dom.rightImg, rightSource, SOURCE_WIDTH / 2);
+        })()`, 'main and sizing images did not load their current sources');
         const proof = await evaluate(`(() => {
             const viewer = ReportViewer;
             viewer.viewport.setFitMode('actual');
@@ -1861,10 +1875,19 @@ def test_report_actual_pixels_fit_and_diff_lens_share_coordinates(
         })()`);
         proof.cases = [];
         for (const offset of [0, 1]) {
-            await evaluate(`ReportViewer.viewport.setManualAlignment(${offset}, 0)`);
-            await pause();
+            await evaluate(`ReportViewer.viewport.setManualAlignment(${offset}, 0); ReportViewer.lens.refresh()`);
+            await until(`(() => {
+                const loaded = (slot, source) => {
+                    const image = document.querySelector('[data-lens-image="' + slot + '"]');
+                    const rect = image.getBoundingClientRect();
+                    return !image.hidden && image.complete && image.currentSrc === source
+                        && image.naturalWidth > 0 && image.naturalHeight > 0
+                        && rect.width > 0 && rect.height > 0;
+                };
+                return loaded('active', ReportViewer.dom.leftImg.currentSrc)
+                    && loaded('difference', ReportViewer.dom.rightImg.currentSrc);
+            })()`, 'Diff Lens clones did not become visible for their current sources');
             proof.cases.push(await evaluate(`(() => {
-                ReportViewer.lens.refresh();
                 const left = ReportViewer.dom.leftImg.getBoundingClientRect();
                 const right = ReportViewer.dom.rightImg.getBoundingClientRect();
                 const active = document.querySelector('[data-lens-image="active"]').getBoundingClientRect();
