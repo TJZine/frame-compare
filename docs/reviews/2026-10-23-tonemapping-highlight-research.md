@@ -21,6 +21,8 @@ links are relative to the repository.
 
 ## Implementation follow-up: opt-in knee 1.0 and expanded softclip study
 
+24 October 2026 update: `reference` now uses knee 1.0, and `highlight_preserve` was removed.
+
 The subsequent implementation was committed at `6bedfa31`, based on the source
 revision stated above. The source diff is available with
 `git diff f1d3b9bf..6bedfa31 -- src/`. `highlight_preserve` is the public opt-in

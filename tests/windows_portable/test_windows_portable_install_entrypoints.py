@@ -75,14 +75,30 @@ def test_windows_cmd_launchers_have_absolute_powershell_fallbacks(repo_root: Pat
 )
 def test_source_install_requires_ps7_before_bootstrap(repo_root: Path, entrypoint: str) -> None:
     source = _read_text_or_fail(repo_root / entrypoint)
-    guard = source.index("$PSVersionTable.PSVersion.Major -lt 7")
     assert "PowerShell 7 or newer is required to build Frame Compare from source." in source
-    boundary = (
-        source.index("Update-ProcessPathFromRegistry\nEnsure-UvOnPath")
-        if "install-from-source.ps1" in entrypoint
-        else source.index("& (Join-Path $PSScriptRoot")
-    )
-    assert guard < boundary
+    if "install-from-source.ps1" in entrypoint:
+        lines = source.splitlines()
+        guard_line = next(
+            index
+            for index, line in enumerate(lines)
+            if "$PSVersionTable.PSVersion.Major -lt 7" in line
+        )
+        invocation_lines = [
+            index
+            for index, line in enumerate(lines)
+            if line.strip()
+            in {
+                "Update-ProcessPathFromRegistry",
+                "Ensure-UvOnPath",
+                "uv sync --group dev --frozen",
+            }
+        ]
+        assert invocation_lines, "source bootstrap invocations are missing"
+        assert guard_line < min(invocation_lines)
+    else:
+        guard = source.index("$PSVersionTable.PSVersion.Major -lt 7")
+        boundary = source.index("& (Join-Path $PSScriptRoot")
+        assert guard < boundary
 
 
 @pytest.mark.parametrize(

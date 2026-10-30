@@ -151,9 +151,6 @@ if (!(Test-Path -LiteralPath $buildScript)) {
   throw "Build script not found: $buildScript"
 }
 
-Update-ProcessPathFromRegistry
-Ensure-UvOnPath
-
 if ([string]::IsNullOrWhiteSpace($OutDir)) {
   $OutDir = Join-Path $repoRoot ("dist\frame-compare-portable-win-x64-" + [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmss") + "Z")
 }
@@ -171,6 +168,84 @@ if (!(Test-Path -LiteralPath $manifestFullPath)) {
 
 . (Join-Path $PSScriptRoot "path_safety.ps1")
 $pointerPath = Join-Path $env:LOCALAPPDATA "Programs\FrameCompare\state\config.json"
+$stateDirectory = Split-Path -Parent $pointerPath
+$activationLockPath = Join-Path $stateDirectory "source-install.lock"
+$pendingMigrationPath = Join-Path $stateDirectory "source-migration.pending.json"
+
+function Read-ActivePointerBundle() {
+  try {
+    $pointer = Get-Content -LiteralPath $pointerPath -Raw | ConvertFrom-Json
+    if ($pointer -isnot [pscustomobject] -or
+        ($pointer.schema_version -isnot [int] -and $pointer.schema_version -isnot [long]) -or
+        $pointer.schema_version -ne 1 -or $pointer.install_type -ne "portable_bundle" -or
+        $pointer.bundle_path -isnot [string] -or
+        !([IO.Path]::IsPathFullyQualified($pointer.bundle_path))) {
+      return $null
+    }
+    return [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($pointer.bundle_path))
+  } catch { return $null }
+}
+
+function Write-PendingMigrationRefusal([string]$MarkerPath) {
+  Write-Warning "A pending source migration marker was found: $MarkerPath"
+  try {
+    $pending = Get-Content -LiteralPath $MarkerPath -Raw | ConvertFrom-Json
+    $previous = [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($pending.previous_bundle))
+    $candidate = [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($pending.candidate_bundle))
+    $active = Read-ActivePointerBundle
+    $locations = @(foreach ($folder in @($pending.folders)) {
+      $sourceExists = Test-Path -LiteralPath $folder.source
+      $targetExists = Test-Path -LiteralPath $folder.target
+      $sourceHasData = Test-NonEmptyDirectory $folder.source
+      $targetHasData = Test-NonEmptyDirectory $folder.target
+      $state = "conflict"
+      if ($sourceHasData -and !$targetHasData) { $state = "in place" }
+      elseif ($targetHasData -and !$sourceExists) { $state = "moved" }
+      [pscustomobject]@{
+        Name = $folder.name; Source = $folder.source; Target = $folder.target
+        SourceExists = $sourceExists; TargetExists = $targetExists; State = $state
+      }
+    })
+    if ($locations.Count -eq 0) { throw "Marker contains no user folders" }
+    Write-Warning "Previous bundle: $previous"
+    Write-Warning "Candidate bundle: $candidate"
+    foreach ($folder in $locations) {
+      Write-Warning "User folder $($folder.Name): source=$($folder.Source) (exists=$($folder.SourceExists)); target=$($folder.Target) (exists=$($folder.TargetExists)); $($folder.State)"
+    }
+    $movedFolders = @($locations | Where-Object { $_.State -eq "moved" })
+    $conflicts = @($locations | Where-Object { $_.State -eq "conflict" })
+    if ($active -eq $candidate -and $movedFolders.Count -eq $locations.Count) {
+      Write-Warning "The active pointer names the candidate bundle, and the listed user folders are there: $candidate"
+      Write-Warning "Activation may be incomplete: configuration and PATH setup occur after pointer publication. Keep user data in the candidate bundle."
+      Write-Warning "Retain the pending marker until candidate activation is verified: check its config\config.toml (or state\config.toml), installed shim, and user PATH; then open a new terminal and confirm frame-compare launches the candidate."
+      Write-Warning "Only after those checks succeed, delete the pending migration marker before retrying installation: $MarkerPath"
+    } elseif ($active -eq $previous -and $conflicts.Count -eq 0) {
+      Write-Warning "The migration was not committed. The active pointer still names the previous bundle."
+      foreach ($folder in $locations) {
+        if ($folder.State -eq "moved") {
+          Write-Warning "Move back manually: $($folder.Target) -> $($folder.Source)"
+        } else {
+          Write-Warning "Already in place: $($folder.Source)"
+        }
+      }
+      if ($movedFolders.Count -eq 0) {
+        Write-Warning "No folder moved. It is safe to delete the pending migration marker: $MarkerPath"
+      } else {
+        Write-Warning "After restoring the listed folders, delete $MarkerPath before retrying installation."
+      }
+    } else {
+      Write-Warning "Migration state conflict. Active pointer path: $pointerPath; normalized bundle: $active"
+      try { Write-Warning "Current pointer value: $([IO.File]::ReadAllText($pointerPath))" }
+      catch { Write-Warning "Current pointer value unavailable: $($_.Exception.Message)" }
+      Write-Warning "Do not move anything until every path and the pointer have been checked by hand."
+    }
+  } catch {
+    Write-Warning "Could not read pending migration details: $($_.Exception.Message)"
+    Write-Warning "Check the marker and folder locations by hand before retrying installation."
+  }
+  Write-Warning "No automatic recovery was attempted."
+}
+
 function Read-PreviousBundle() {
   # A single byte snapshot owns both interpretation and rollback. An inaccessible
   # existing pointer is unsafe, whereas absent/malformed/stale state is a first install.
@@ -206,6 +281,9 @@ function Read-PreviousBundle() {
 
 Assert-NoReparsePointAncestor -Path $outDirFullPath -Label "New bundle"
 Assert-NoReparsePointAncestor -Path $pointerPath -Label "Install state"
+Assert-NoReparsePointAncestor -Path $stateDirectory -Label "Install state"
+[IO.Directory]::CreateDirectory($stateDirectory) | Out-Null
+Assert-NoReparsePointAncestor -Path $activationLockPath -Label "Activation lock"
 # This pre-build read guards containment only. Never use it for migration/rollback
 # after a long build: another installer may have activated a different bundle.
 $null = Read-PreviousBundle
@@ -247,116 +325,169 @@ function Write-RecoveryLocations([object[]]$Folders) {
   Write-Warning "No remaining user folders were deleted. Recover these paths before retrying installation."
 }
 
+function Write-PendingMigrationMarker([object[]]$Folders) {
+  $record = [pscustomobject]@{
+    previous_bundle = [IO.Path]::GetFullPath($previousBundle)
+    candidate_bundle = [IO.Path]::GetFullPath($outDirFullPath)
+    folders = @($Folders | ForEach-Object {
+        [pscustomobject]@{
+          name = $_.Name
+          source = [IO.Path]::GetFullPath($_.Source)
+          target = [IO.Path]::GetFullPath($_.Target)
+        }
+      })
+    pointer_bytes_base64 = [Convert]::ToBase64String($previousPointerBytes)
+  }
+  $temporary = $pendingMigrationPath + ".tmp-" + [Guid]::NewGuid().ToString("N")
+  try {
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($temporary, ($record | ConvertTo-Json -Depth 4), $utf8NoBom)
+    [IO.File]::Move($temporary, $pendingMigrationPath)
+  } finally {
+    if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+  }
+}
+
+function Remove-PendingMigrationMarker() {
+  if (Test-Path -LiteralPath $pendingMigrationPath) {
+    Remove-Item -LiteralPath $pendingMigrationPath -Force
+  }
+}
+
 $folders = @()
 $moved = [Collections.Generic.List[object]]::new()
 $placeholders = [Collections.Generic.List[string]]::new()
 $activationStarted = $false
+$succeeded = $false
 $activationLock = $null
-Push-Location $repoRoot
+$failure = $null
+$recoveryFailure = $null
 try {
-  if (-not $SkipSync) {
-    Write-Host "Syncing dev dependencies (frozen)..."
-    uv sync --group dev --frozen
-    Assert-LastExitCode -Label "uv sync"
-  }
-
-  Write-Host "Building portable bundle..."
-  & $buildScript -ManifestPath $manifestFullPath -OutDir $outDirFullPath -CacheDir $cacheDirFullPath -RepoRoot $repoRoot
-  if ($null -eq $LASTEXITCODE) { throw "build_portable.ps1 terminated unexpectedly." }
-  Assert-LastExitCode -Label "build_portable.ps1"
-  $installScript = Join-Path $outDirFullPath "install.ps1"
-  if (!(Test-Path -LiteralPath $installScript)) { throw "Bundle installer not found: $installScript" }
-
-  # Serialize source-install migration, activation, and recovery. Keep the file
-  # after closing: unlinking a lock file can let different handles own different
-  # files at the same path. A crashed process releases the exclusive handle.
-  $stateDirectory = Split-Path -Parent $pointerPath
-  Assert-NoReparsePointAncestor -Path $stateDirectory -Label "Install state"
-  [IO.Directory]::CreateDirectory($stateDirectory) | Out-Null
-  $activationLockPath = Join-Path $stateDirectory "source-install.lock"
-  Assert-NoReparsePointAncestor -Path $activationLockPath -Label "Activation lock"
   try {
     $activationLock = [IO.File]::Open($activationLockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
   } catch {
     throw "Cannot own source-install activation lock $activationLockPath. Another source install may be activating; retry after it finishes. $($_.Exception.Message)"
   }
-  # Re-read after the build AND after owning the activation boundary. Derive the
-  # previous bundle and byte-exact rollback material from the same snapshot.
-  $previous = Read-PreviousBundle
-  if ($null -ne $previous) {
-    $previousBundle = $previous.Bundle
-    $previousPointerBytes = $previous.PointerBytes
+
+  if (Test-Path -LiteralPath $pendingMigrationPath) {
+    Write-PendingMigrationRefusal -MarkerPath $pendingMigrationPath
+    throw "A pending source migration must be repaired manually before another source install can run."
   }
 
-  if ($null -ne $previousBundle) {
-    $folders = @(foreach ($name in @("config", "comparison_videos", "generated")) {
-      $source = Join-Path $previousBundle $name
-      if (Test-NonEmptyDirectory $source) {
-        [pscustomobject]@{ Name = $name; Source = $source; Target = (Join-Path $outDirFullPath $name) }
-      }
-    })
-  }
-  if ($UserData -eq "Move") {
-    # Check the whole set before the first rename. Directory.Move never falls back
-    # to copy/delete across volumes (including mounted volumes).
-    foreach ($folder in $folders) {
-      if (!(Test-NonEmptyDirectory $folder.Source)) { throw "User folder changed: $($folder.Source)" }
-      if (Test-NonEmptyDirectory $folder.Target) { throw "New user folder is occupied: $($folder.Target)" }
-    }
-    foreach ($folder in $folders) {
-      if (Test-Path -LiteralPath $folder.Target) {
-        if (Test-NonEmptyDirectory $folder.Target) { throw "New user folder is occupied: $($folder.Target)" }
-        [IO.Directory]::Delete($folder.Target)
-        $placeholders.Add($folder.Target)
-      }
-      try { [IO.Directory]::Move($folder.Source, $folder.Target) }
-      catch { throw "Cannot move $($folder.Source) to $($folder.Target). Move requires same-volume renames; use -UserData Leave and relocate data manually. $($_.Exception.Message)" }
-      $moved.Add($folder)
-    }
-  } elseif ($folders.Count -gt 0) {
-    Write-Warning "User data left in previous bundle ${previousBundle}: $($folders.Name -join ', '). The shim may select an older AppData state config if the new bundle has no config\config.toml."
-  }
-
-  Write-Host "Installing shim from built bundle..."
-  $activationStarted = $true
-  & $installScript -ActivationLock $activationLock
-  if ($null -eq $LASTEXITCODE) { throw "install.ps1 terminated unexpectedly." }
-  Assert-LastExitCode -Label "install.ps1"
-} catch {
-  $failure = $_
+  Push-Location $repoRoot
   try {
-    if ($activationStarted -and $null -ne $previousBundle) {
-      # Activation can throw after replacing the pointer but before finishing PATH.
-      $active = Get-Content -LiteralPath $pointerPath -Raw | ConvertFrom-Json
-      if ([IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($active.bundle_path)) -eq
-          [IO.Path]::TrimEndingDirectorySeparator($outDirFullPath)) {
-        Write-PreviousPointer
-      } elseif ([IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($active.bundle_path)) -ne $previousBundle) {
-        throw "Pointer changed unexpectedly during activation; refusing data reversal."
+    Update-ProcessPathFromRegistry
+    Ensure-UvOnPath
+    if (-not $SkipSync) {
+      Write-Host "Syncing dev dependencies (frozen)..."
+      uv sync --group dev --frozen
+      Assert-LastExitCode -Label "uv sync"
+    }
+
+    Write-Host "Building portable bundle..."
+    & $buildScript -ManifestPath $manifestFullPath -OutDir $outDirFullPath -CacheDir $cacheDirFullPath -RepoRoot $repoRoot
+    if ($null -eq $LASTEXITCODE) { throw "build_portable.ps1 terminated unexpectedly." }
+    Assert-LastExitCode -Label "build_portable.ps1"
+    $installScript = Join-Path $outDirFullPath "install.ps1"
+    if (!(Test-Path -LiteralPath $installScript)) { throw "Bundle installer not found: $installScript" }
+
+    # Re-read after the build AND after owning the activation boundary. Derive the
+    # previous bundle and byte-exact rollback material from the same snapshot.
+    $previous = Read-PreviousBundle
+    if ($null -ne $previous) {
+      $previousBundle = $previous.Bundle
+      $previousPointerBytes = $previous.PointerBytes
+    }
+
+    if ($null -ne $previousBundle) {
+      $folders = @(foreach ($name in @("config", "comparison_videos", "generated")) {
+        $source = Join-Path $previousBundle $name
+        if (Test-NonEmptyDirectory $source) {
+          [pscustomobject]@{ Name = $name; Source = $source; Target = (Join-Path $outDirFullPath $name) }
+        }
+      })
+    }
+    if ($UserData -eq "Move") {
+      # Check the whole set before the first rename. Directory.Move never falls back
+      # to copy/delete across volumes (including mounted volumes).
+      foreach ($folder in $folders) {
+        if (!(Test-NonEmptyDirectory $folder.Source)) { throw "User folder changed: $($folder.Source)" }
+        if (Test-NonEmptyDirectory $folder.Target) { throw "New user folder is occupied: $($folder.Target)" }
       }
+      if ($folders.Count -gt 0) {
+        Write-PendingMigrationMarker -Folders $folders
+        foreach ($folder in $folders) {
+          if (Test-Path -LiteralPath $folder.Target) {
+            if (Test-NonEmptyDirectory $folder.Target) { throw "New user folder is occupied: $($folder.Target)" }
+            [IO.Directory]::Delete($folder.Target)
+            $placeholders.Add($folder.Target)
+          }
+          try { [IO.Directory]::Move($folder.Source, $folder.Target) }
+          catch { throw "Cannot move $($folder.Source) to $($folder.Target). Move requires same-volume renames; use -UserData Leave and relocate data manually. $($_.Exception.Message)" }
+          $moved.Add($folder)
+        }
+      }
+    } elseif ($folders.Count -gt 0) {
+      Write-Warning "User data left in previous bundle ${previousBundle}: $($folders.Name -join ', '). The shim may select an older AppData state config if the new bundle has no config\config.toml."
     }
-    for ($index = $moved.Count - 1; $index -ge 0; $index--) {
-      $folder = $moved[$index]
-      [IO.Directory]::Move($folder.Target, $folder.Source)
-    }
-    foreach ($placeholder in $placeholders) {
-      if (!(Test-Path -LiteralPath $placeholder)) { [IO.Directory]::CreateDirectory($placeholder) | Out-Null }
-    }
-    if ($activationStarted -and $null -ne $previousBundle) {
-      & (Join-Path $previousBundle "install.ps1") -ActivationLock $activationLock
-      Assert-LastExitCode -Label "previous bundle install.ps1 (shim restoration)"
-      # Preserve the original pointer bytes even if reinstall serialized it differently.
-      Write-PreviousPointer
-    }
+
+    Write-Host "Installing shim from built bundle..."
+    $activationStarted = $true
+    & $installScript -ActivationLock $activationLock
+    if ($null -eq $LASTEXITCODE) { throw "install.ps1 terminated unexpectedly." }
+    Assert-LastExitCode -Label "install.ps1"
+    $succeeded = $true
   } catch {
-    $recoveryFailure = $_
-    Write-RecoveryLocations -Folders $folders
-    throw "Installation failed: $($failure.Exception.Message). Recovery failed: $($recoveryFailure.Exception.Message)"
+    $failure = $_
+  } finally {
+    $recoveryFailure = $null
+    try {
+      if ($succeeded) {
+        Remove-PendingMigrationMarker
+      } else {
+        if ($activationStarted -and $null -ne $previousBundle) {
+          # Activation can throw after replacing the pointer but before finishing PATH.
+          $active = Get-Content -LiteralPath $pointerPath -Raw | ConvertFrom-Json
+          if ([IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($active.bundle_path)) -eq
+              [IO.Path]::TrimEndingDirectorySeparator($outDirFullPath)) {
+            Write-PreviousPointer
+          } elseif ([IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($active.bundle_path)) -ne $previousBundle) {
+            throw "Pointer changed unexpectedly during activation; refusing data reversal."
+          }
+        }
+        for ($index = $moved.Count - 1; $index -ge 0; $index--) {
+          $folder = $moved[$index]
+          [IO.Directory]::Move($folder.Target, $folder.Source)
+        }
+        foreach ($placeholder in $placeholders) {
+          if (!(Test-Path -LiteralPath $placeholder)) { [IO.Directory]::CreateDirectory($placeholder) | Out-Null }
+        }
+        if ($activationStarted -and $null -ne $previousBundle) {
+          & (Join-Path $previousBundle "install.ps1") -ActivationLock $activationLock
+          Assert-LastExitCode -Label "previous bundle install.ps1 (shim restoration)"
+          # Preserve the original pointer bytes even if reinstall serialized it differently.
+          Write-PreviousPointer
+        }
+        Remove-PendingMigrationMarker
+      }
+    } catch {
+      $recoveryFailure = $_
+      if (!$succeeded) { Write-RecoveryLocations -Folders $folders }
+    } finally {
+      Pop-Location
+    }
   }
-  throw $failure
+  if ($null -ne $failure) {
+    if ($null -ne $recoveryFailure) {
+      throw "Installation failed: $($failure.Exception.Message). Recovery failed: $($recoveryFailure.Exception.Message)"
+    }
+    throw $failure
+  }
+  if ($null -ne $recoveryFailure) {
+    throw "Source install completed, but the pending migration marker could not be removed: $($recoveryFailure.Exception.Message)"
+  }
 } finally {
   if ($null -ne $activationLock) { $activationLock.Dispose() }
-  Pop-Location
 }
 
 Write-Host ""

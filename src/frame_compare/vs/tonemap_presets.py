@@ -6,14 +6,20 @@ from frame_compare.config.schema import ToneCurve, TonemapPreset
 from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.types import TonemapSettings
 
+CURVE_PARAMETER_DEFAULTS: dict[ToneCurve, float] = {
+    ToneCurve.BT2390: 1.0,
+    ToneCurve.SPLINE: 0.5,
+    ToneCurve.REINHARD: 0.5,
+}
+
 TONEMAP_PRESETS: dict[TonemapPreset, TonemapSettings] = {
     TonemapPreset.REFERENCE: TonemapSettings(
         preset=TonemapPreset.REFERENCE,
         tone_curve=ToneCurve.BT2390,
+        knee_offset=CURVE_PARAMETER_DEFAULTS[ToneCurve.BT2390],
         target_nits=100,
         dynamic_peak_detection=True,
         dst_min_nits=0.18,
-        knee_offset=0.50,
         smoothing_period=45.0,
         scene_threshold_low=0.8,
         scene_threshold_high=2.4,
@@ -24,41 +30,32 @@ TONEMAP_PRESETS: dict[TonemapPreset, TonemapSettings] = {
         contrast_recovery=0.30,
         gamma_lift=False,
     ),
-    TonemapPreset.FILMIC: TonemapSettings(
-        preset=TonemapPreset.FILMIC, tone_curve=ToneCurve.SPLINE, target_nits=203, gamma_lift=False
-    ),
     TonemapPreset.CONTRAST: TonemapSettings(
         preset=TonemapPreset.CONTRAST,
         tone_curve=ToneCurve.REINHARD,
+        knee_offset=CURVE_PARAMETER_DEFAULTS[ToneCurve.REINHARD],
         target_nits=203,
         gamma_lift=False,
     ),
-    TonemapPreset.BT2390_SPEC: TonemapSettings(
-        preset=TonemapPreset.BT2390_SPEC,
-        tone_curve=ToneCurve.BT2390,
-        target_nits=100,
-        gamma_lift=False,
-    ),
     TonemapPreset.SPLINE: TonemapSettings(
-        preset=TonemapPreset.SPLINE, tone_curve=ToneCurve.SPLINE, target_nits=203, gamma_lift=False
+        preset=TonemapPreset.SPLINE,
+        tone_curve=ToneCurve.SPLINE,
+        knee_offset=CURVE_PARAMETER_DEFAULTS[ToneCurve.SPLINE],
+        target_nits=203,
+        gamma_lift=False,
     ),
     TonemapPreset.BRIGHT_LIFT: TonemapSettings(
         preset=TonemapPreset.BRIGHT_LIFT,
         tone_curve=ToneCurve.BT2390,
+        knee_offset=CURVE_PARAMETER_DEFAULTS[ToneCurve.BT2390],
         target_nits=250,
         gamma_lift=True,
     ),
     TonemapPreset.HIGHLIGHT_GUARD: TonemapSettings(
         preset=TonemapPreset.HIGHLIGHT_GUARD,
         tone_curve=ToneCurve.SPLINE,
+        knee_offset=CURVE_PARAMETER_DEFAULTS[ToneCurve.SPLINE],
         target_nits=180,
-        gamma_lift=False,
-    ),
-    TonemapPreset.HIGHLIGHT_PRESERVE: TonemapSettings(
-        preset=TonemapPreset.HIGHLIGHT_PRESERVE,
-        tone_curve=ToneCurve.BT2390,
-        target_nits=100,
-        knee_offset=1.0,
         gamma_lift=False,
     ),
 }

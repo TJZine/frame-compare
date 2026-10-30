@@ -44,6 +44,8 @@ if isinstance(cast(object, vs), MagicMock):
 class _FloatFormats(Protocol):
     GRAYS: int
     YUV444PS: int
+    GRAY: int
+    GRAY8: int
 
 
 # The repo VS stub omits these real runtime constants.
@@ -65,7 +67,7 @@ def _moving_clip(
                     width=8,
                     height=9,
                     length=1,
-                    format=_FLOAT_FORMATS.GRAYS,
+                    format=_FLOAT_FORMATS.GRAY8,
                     color=(transform(value) if transform is not None else value),
                 )
             )
@@ -467,9 +469,31 @@ def test_motion_positions_pick_the_moving_frame(
     assert positions == expected
 
 
+@pytest.mark.vs_required
+def test_prepare_luma_converts_odd_rgb_with_bt709_luma() -> None:
+    clip = vs.core.std.BlankClip(
+        width=17,
+        height=15,
+        length=1,
+        format=vs.RGBS,
+        color=[1.0, 0.0, 0.0],
+    )
+
+    luma = alignment_video._prepare_luma(clip, None)
+    frame = luma.get_frame(0)
+    try:
+        assert luma.format.color_family == _FLOAT_FORMATS.GRAY
+        assert (luma.width, luma.height) == (320, 180)
+        assert float(np.asarray(frame[0], dtype=np.float32).mean()) == pytest.approx(
+            0.2126, abs=0.001
+        )
+    finally:
+        del frame
+
+
 def test_monotonic_tone_curve_preserves_confirmation(tmp_path: Path) -> None:
     reference = _moving_clip()
-    comparison = _shifted_clip(_moving_clip(transform=lambda value: min(255, value * 2)), 1)
+    comparison = _shifted_clip(_moving_clip(transform=lambda value: min(255, value + 32)), 1)
     result = _run(tmp_path, truth=1, reference_clip=reference, comparison_clip=comparison)
     assert result.confirmed_offset == 1
 
@@ -728,7 +752,7 @@ def test_tied_alternative_frames_block_through_video_and_decision(tmp_path: Path
         reference_audio_start=Fraction(1, 24),
     )
     # Fixture-derived first-chunk motion winners; no production selector computes this oracle.
-    target_frames = (6, 13, 15, 19)
+    target_frames = (5, 12, 14, 19)
     remap = {
         comparison_frame: reference_frame
         for reference_frame in target_frames

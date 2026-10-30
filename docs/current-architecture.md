@@ -191,6 +191,10 @@ the run before rendering or publishing rather than using the initial frame plan.
 `quality` is the default full-resolution VapourSynth PlaneStats behavior, while
 `performance` is an approximate temporal-sampling strategy over the same
 full-resolution luma PlaneStats metrics. Quality analyzes every eligible frame.
+Analysis luma preserves gray input at its native sample type and bit depth,
+extracts plane 0 from YUV input, and converts RGB input to matching gray precision
+with BT.709 coefficients and full-range output. This RGB rule is fixed for
+analysis and is not selected from source color metadata.
 Performance returns metrics for exactly `ceil(window_frame_count * 0.25)` sampled
 frames, distributed across up to eight deterministic centered contiguous bursts. It
 may evaluate one additional unreturned source-frame lookbehind per nonzero burst so
@@ -414,10 +418,10 @@ never searches parent directories.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation. The file format remains version 1, while each probe key
-  uses key schema 2 and includes the scoped media-runtime probe fingerprint so a
+  uses key schema 3 and includes the scoped media-runtime probe fingerprint so a
   selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
   portable or Debian/Docker profiles misses without invalidating unrelated file-format
-  data.
+  data. Older probe keys miss so source stream admission runs again.
 - `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
   `lsw1310-f125953022b6` on managed/portable Windows,
@@ -431,6 +435,16 @@ never searches parent directories.
   comparison source loads, allowing L-SMASH-Works to create it there when missing.
   The managed VSView preview runtime leaves rejected parent-owned indexes untouched and
   retries only index-construction failures cache-free.
+
+The subprocess executable resolver finds optional ffprobe, including the portable
+runtime's absolute override. When it resolves, source admission refuses files
+containing multiple video streams other than attached pictures. Native-only loading
+remains available when ffprobe is absent. Sources whose native frame properties leave
+the HDR signal unspecified still need ffprobe and fail with a typed source-load error
+without it. HDR probing and FFmpeg screenshots use the
+first video stream that is not an attached picture; extraction explicitly maps
+`0:V:0`. Selected-video
+identity is not persisted.
 
 ### Run records and review artifacts
 
@@ -511,6 +525,12 @@ never searches parent directories.
   ancestry is refused where physical containment is unproven; stored pointers must
   be fully qualified. They never delete previous bundles. Recovery diagnostics
   preserve and report all known paths even when the pointer cannot be read.
+  A pending migration blocks another source install. Candidate-pointer and folder
+  state establish data locations, not completed activation: configuration and PATH
+  setup follow pointer publication. Candidate data stays in place while activation,
+  configuration, installed shims, and PATH are verified before marker removal.
+  Marker-cleanup failure after successful activation reports a nonzero cleanup
+  error without reversing the candidate pointer or data.
 
 `frame_compare.vs.runtime_contract` is the sole component-identity owner for the
 coordinated media stack. It emits narrow analysis, probe, alignment, and index
@@ -1062,6 +1082,9 @@ zero.
 Help and Report Information share the local `HelpInfoDialog` owner in
 `assets/viewer.js` for visibility, focus restoration, Tab trapping, and Escape
 handling. The Inspector retains its separate drawer lifecycle and focus policy.
+Fullscreen includes the stage, Inspector, and dialogs while hiding the header,
+toolbar, and filmstrip. Closing a dialog whose trigger is hidden returns focus to
+the stage.
 
 Viewer appearance remains owned by `assets/viewer.css`: neutral charcoal surfaces,
 readable text tiers, restrained brass comparison markers, and neutral utility states.
@@ -1118,14 +1141,18 @@ When `dynamic_peak_detection` is disabled by the fast speed setting, still prepa
 instead applies one `placebo.Tonemap` node over the clip and reports
 `shared_stateless`; this policy follows detection state, not the setting name.
 
-`config.schema_enums.TonemapPreset.HIGHLIGHT_PRESERVE` is an opt-in public
-preset owned by `vs.tonemap_presets`: reference settings with BT.2390 knee 1.0.
-`render.prepare.resolve_tonemap_settings` applies authored overrides; changing
-from BT.2390 to another algorithm resets the generic native curve parameter
-to the default 0.5. An explicit BT.2390 override retains knee 1.0. Applied
-tonemap/report identity continues to contain the resolved preset and knee.
-Reference and existing presets retain their prior values; softclip remains
-experimental and is not part of this preset.
+`vs.tonemap_presets.CURVE_PARAMETER_DEFAULTS` owns the per-curve parameter
+defaults: BT.2390 1.0, spline 0.5, and Reinhard 0.5. Every preset takes its
+`knee_offset` from this table. `reference` and `bright_lift` use BT.2390 knee 1.0;
+`contrast`, `spline`, and `highlight_guard` use parameter 0.5.
+`TonemapSettings()` equals the `reference` preset, including knee offset 1.0.
+
+`render.prepare.resolve_tonemap_settings` applies authored overrides. An explicit
+curve equal to the preset curve keeps the preset's parameter; a different curve
+uses `CURVE_PARAMETER_DEFAULTS` for the new curve. Thus `highlight_guard` with an
+explicit BT.2390 override uses knee 1.0. Applied tonemap/report identity continues
+to contain the resolved preset and `knee_offset`; the report payload key and
+renderer label remain unchanged.
 
 Configured VSView previews receive immutable settings resolved by
 `render.prepare.resolve_tonemap_settings` in the alignment orchestration phase,
@@ -1271,6 +1298,11 @@ before focus moves into the drawer.
 `assets/viewport.js` owns zoom clamping and pointer anchoring, pan bounds and Grid
 normalization, fit/reset/reveal math, transient pointer/pinch mechanics, directional
 pair-alignment normalization and offsets, and Lens/Grid viewport refreshes.
+Outside Grid, actual size is the loaded base image's natural dimensions in CSS
+pixels, independent of DPR; fit zoom and pair offsets use that baseline. Diff lens
+images share the stage comparison transform and offset, while Single and Slider
+magnify each native source. Viewport preferences use the report-scoped
+`viewport-v2` key; older viewport state is ignored.
 `currentAlignment()` derives a normalized copy from the selected directional pair's
 `pairAlignments` entry; missing entries mean neutral. Offset edits write that map,
 while `rawAlignX`/`rawAlignY` remain transient input drafts. Visiting a pair or
@@ -1354,7 +1386,9 @@ requires a rectangle and canonical provenance; render has no inference mode, can
 ranking, or provenance translation. Orchestration projects its cache-stable
 `ClipActiveRectSource` vocabulary to canonical provenance at the render boundary. Native screenshot
 render remains full-frame. The FFmpeg backend applies geometry filters after
-exact frame selection, and the VapourSynth path chooses between the Pillow writer
+exact frame selection, preserves exact crop origins, and converts to full-chroma
+YUV without reducing source precision before odd-origin crops and padding. The
+VapourSynth path chooses between the Pillow writer
 and eligible `core.fpng.Write` output without changing CLI import-time behavior.
 Render selection crosses the batch boundary as `SelectedScreenshot` records containing
 comparison frame, source frame, and selection label. Expansion validates all physical

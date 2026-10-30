@@ -60,6 +60,20 @@ class FakeStd:
             ]
         )
 
+    def ShufflePlanes(self, *, planes: int, colorfamily: int) -> FakeBalancedClip:
+        assert planes == 0
+        return FakeBalancedClip(
+            self._clip.values,
+            width=self._clip.width,
+            height=self._clip.height,
+            color_family=colorfamily,
+            resize_calls=self._clip.resize_calls,
+            crop_calls=self._clip.crop_calls,
+            ops=self._clip.ops,
+            planestats_clipb_flags=self._clip.planestats_clipb_flags,
+            slice_calls=self._clip.slice_calls,
+        )
+
     def CropAbs(
         self,
         *,
@@ -192,26 +206,6 @@ class FakeBalancedClip:
 
 
 class FakeCoreStd:
-    def ShufflePlanes(
-        self,
-        *,
-        clips: FakeBalancedClip,
-        planes: int,
-        colorfamily: int,
-    ) -> FakeBalancedClip:
-        assert planes == 0
-        return FakeBalancedClip(
-            clips.values,
-            width=clips.width,
-            height=clips.height,
-            color_family=colorfamily,
-            resize_calls=clips.resize_calls,
-            crop_calls=clips.crop_calls,
-            ops=clips.ops,
-            planestats_clipb_flags=clips.planestats_clipb_flags,
-            slice_calls=clips.slice_calls,
-        )
-
     def Splice(self, *, clips: list[object]) -> FakeBalancedClip:
         typed_clips = [clip for clip in clips if isinstance(clip, FakeBalancedClip)]
         assert len(typed_clips) == len(clips)
@@ -299,20 +293,6 @@ def test_quality_planestats_is_full_resolution_combined_and_dense(
     }
 
 
-def test_quality_planestats_converts_non_yuv_like_quality_without_downscaling(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setitem(sys.modules, "vapoursynth", FAKE_VS)
-    clip = FakeBalancedClip([0.2, 0.4], width=1920, height=1080, color_family=99)
-
-    luminance, motion = calculate_quality_planestats_metrics(cast(VideoNode, clip))
-
-    assert luminance == [0.2, 0.4]
-    assert motion == [0.0, 0.2]
-    assert clip.resize_calls == [("Bicubic", None, None)]
-    assert clip.ops == [("Bicubic", None, None)]
-
-
 def test_quality_planestats_applies_active_rect_without_resize(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -351,20 +331,19 @@ def test_quality_planestats_reports_missing_frame_properties(
 def test_quality_planestats_wraps_graph_failure_and_completes_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    clip = FakeBalancedClip([0.0, 1.0])
     failing_vs = SimpleNamespace(
         YUV=FAKE_VS.YUV,
-        YUV420P8=FAKE_VS.YUV420P8,
         GRAY=FAKE_VS.GRAY,
-        core=SimpleNamespace(
-            std=SimpleNamespace(ShufflePlanes=FakeCoreStd().ShufflePlanes),
-        ),
+        RGB=99,
+        core=SimpleNamespace(std=SimpleNamespace()),
     )
     monkeypatch.setitem(sys.modules, "vapoursynth", failing_vs)
     reporter = MagicMock(spec=ProgressReporter)
 
     with pytest.raises(MetricsCalculationError, match="graph construction"):
         calculate_quality_planestats_metrics(
-            cast(VideoNode, FakeBalancedClip([0.0, 1.0])),
+            cast(VideoNode, clip),
             reporter=reporter,
         )
 

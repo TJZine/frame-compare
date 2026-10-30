@@ -227,6 +227,7 @@ async function lensContracts() {
                     })),
                 },
                 mode: 'overlay',
+                zoom: 1,
                 activeClipIdx: 1,
                 leftClipIdx: 0,
                 rightClipIdx: 1,
@@ -238,7 +239,16 @@ async function lensContracts() {
             clipDisplay(clip, profile = 'control') { return clip.display[profile]; },
             clipAccessibleName(clip) { return clip.display.primary; },
             referenceClipIndex() { return 0; },
-            viewport: { sliderCanvasRect() { return activeImage.getBoundingClientRect(); } },
+            viewport: {
+                sliderCanvasRect() { return activeImage.getBoundingClientRect(); },
+                comparisonTransform(point) {
+                    return {
+                        width: 1920, height: 1080, comparisonHeight: 1080, scale: 1,
+                        originX: point.u * 1920, originY: point.v * 1080,
+                        offsetX: 48, offsetY: 24,
+                    };
+                },
+            },
             bindRadioGroup() {},
             syncRadioGroupTabStops() {},
             announce(message) { announcements.push(message); },
@@ -470,6 +480,32 @@ async function lensContracts() {
         environment.selectors['[data-lens-image="difference"]'].style.left,
         environment.selectors['[data-lens-image="active"]'].style.left,
     );
+    const comparisonTransform = environment.viewer.viewport.comparisonTransform;
+    const activeDiffClone = environment.selectors['[data-lens-image="active"]'];
+    const differenceClone = environment.selectors['[data-lens-image="difference"]'];
+    const diffStatus = environment.selectors['[data-lens-status="active"]'];
+    for (const dimensions of [
+        { width: 0, height: 0, comparisonHeight: 0 },
+        { comparisonHeight: 0 },
+    ]) {
+        environment.viewer.viewport.comparisonTransform = point => ({
+            ...comparisonTransform(point),
+            ...dimensions,
+        });
+        controller.refresh();
+        assert.equal(activeDiffClone.hidden, dimensions.width === 0);
+        assert.equal(differenceClone.hidden, true);
+        assert.equal(differenceClone.dataset.source, undefined);
+        assert.equal(diffStatus.textContent, 'UNAVAILABLE');
+        assert.equal(diffStatus.hidden, false);
+
+        environment.viewer.viewport.comparisonTransform = comparisonTransform;
+        controller.refresh();
+        assert.equal(activeDiffClone.hidden, false);
+        assert.equal(differenceClone.hidden, false);
+        assert.equal(differenceClone.dataset.source, 'clip-1/frame.png');
+        assert.equal(diffStatus.hidden, true);
+    }
     environment.viewer.state.mode = 'overlay';
     controller.sync();
 
@@ -587,7 +623,7 @@ async function lensContracts() {
     controller.refresh();
     assert.deepEqual(JSON.parse(JSON.stringify(controller.state.point)), touchSample);
     assert.equal(controller.state.activeClipIdx, environment.viewer.state.leftClipIdx);
-    assert.notEqual(
+    assert.equal(
         environment.selectors['[data-lens-image="difference"]'].style.left,
         differenceBeforeLayout,
     );
