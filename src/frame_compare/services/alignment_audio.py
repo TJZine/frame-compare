@@ -22,7 +22,7 @@ from frame_compare.utils.alignment_evidence import (
     SelectedAudioStreamEvidence,
 )
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.subproc import SubprocessOutputLimitExceeded, run_subprocess
 
 _FFPROBE_TIMEOUT_SECONDS = 15.0
 
@@ -305,6 +305,44 @@ def _parse_audio_stream(
     )
 
 
+_PACKET_TAIL_MAX_BYTES = 32 * 1024 * 1024
+
+
+class _PacketTailParser:
+    """Consume CSV chunks without retaining the packet list."""
+
+    def __init__(self, time_base: Fraction, seek: Fraction) -> None:
+        self.time_base = time_base
+        self.seek = seek
+        self.pending = b""
+        self.reached_seek = False
+        self.latest_end: Fraction | None = None
+
+    def feed(self, chunk: bytes) -> None:
+        rows = (self.pending + chunk).split(b"\n")
+        self.pending = rows.pop()
+        for row in rows:
+            self._row(row)
+
+    def finish(self) -> None:
+        if self.pending:
+            self._row(self.pending)
+            self.pending = b""
+
+    def _row(self, row: bytes) -> None:
+        # ffprobe appends a side-data section after packet fields (for example
+        # Opus discard padding), even when no side-data values were requested.
+        fields = row.rstrip(b"\r").split(b",", 2)[:2]
+        if len(fields) != 2 or any(not field.lstrip(b"+-").isdigit() for field in fields):
+            raise ValueError("invalid packet row")
+        pts, duration = (int(field) for field in fields)
+        if duration < 0:
+            raise ValueError("negative packet duration")
+        self.reached_seek |= pts * self.time_base >= self.seek
+        end = (pts + duration) * self.time_base
+        self.latest_end = end if self.latest_end is None else max(self.latest_end, end)
+
+
 def measure_selected_audio_duration(
     video_path: Path,
     stream: AudioStreamInfo,
@@ -317,9 +355,15 @@ def measure_selected_audio_duration(
     if timeline.duration is not None or timeline.time_base is None:
         return stream
     seek = max(Fraction(0), video_seconds - 60)
+    parser = _PacketTailParser(timeline.time_base, seek)
     raise_if_alignment_cancelled(cancellation)
+
+    def abort() -> bool:
+        raise_if_alignment_cancelled(cancellation)
+        return False
+
     try:
-        payload = _load_ffprobe_json(
+        run_subprocess(
             [
                 "ffprobe",
                 "-v",
@@ -331,33 +375,20 @@ def measure_selected_audio_duration(
                 "-show_entries",
                 "packet=pts,duration",
                 "-of",
-                "json",
+                "csv=p=0",
                 str(video_path),
             ],
-            operation="measuring selected audio tail",
+            timeout_seconds=_FFPROBE_TIMEOUT_SECONDS,
+            abort=abort,
+            stdout_consumer=parser.feed,
+            max_stdout_bytes=_PACKET_TAIL_MAX_BYTES,
         )
-    except FFmpegError:
+        parser.finish()
+    except (OSError, CalledProcessError, TimeoutExpired, SubprocessOutputLimitExceeded, ValueError):
         return stream
-    packets = payload.get("packets")
-    if not isinstance(packets, list) or not packets:
+    if not parser.reached_seek or parser.latest_end is None:
         return stream
-    latest_end: Fraction | None = None
-    reached_seek = False
-    for packet in cast(list[object], packets):
-        if not isinstance(packet, dict):
-            return stream
-        item = cast(dict[str, object], packet)
-        pts = _parse_optional_int(item.get("pts"))
-        duration = _parse_optional_int(item.get("duration"))
-        if pts is None or duration is None or duration < 0:
-            return stream
-        start = pts * timeline.time_base
-        reached_seek |= start >= seek
-        end = (pts + duration) * timeline.time_base
-        latest_end = end if latest_end is None else max(latest_end, end)
-    if not reached_seek or latest_end is None:
-        return stream
-    measured_duration = latest_end - timeline.start_time
+    measured_duration = parser.latest_end - timeline.start_time
     if measured_duration <= 0:
         return stream
     return replace(

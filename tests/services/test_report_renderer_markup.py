@@ -392,7 +392,7 @@ def test_build_html_renders_applied_tonemap_disclosure_with_all_effective_settin
         "source_peak": None,
         "dynamic_peak_detection": True,
         "dst_min_nits": 0.18,
-        "knee_offset": 0.5,
+        "knee_offset": 1.0,
         "smoothing_period": 45.0,
         "scene_threshold_low": 0.8,
         "scene_threshold_high": 2.4,

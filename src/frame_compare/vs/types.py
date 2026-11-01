@@ -54,7 +54,7 @@ class TonemapSettings:
     source_peak: int | None = None
     dynamic_peak_detection: bool = True
     dst_min_nits: float = 0.18
-    knee_offset: float = 0.50
+    knee_offset: float = 1.0
     smoothing_period: float = 45.0
     scene_threshold_low: float = 0.8
     scene_threshold_high: float = 2.4

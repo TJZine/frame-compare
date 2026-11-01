@@ -34,6 +34,8 @@ def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
         "ffmpeg",
         "-i",
         "clip.mkv",
+        "-map",
+        "0:V:0",
         "-vf",
         "select=eq(n\\,100),showinfo=checksum=0",
         "-frames:v",
@@ -88,7 +90,7 @@ def test_build_extract_frame_argv_places_geometry_filters_after_exact_frame_sele
     )
 
     assert argv[argv.index("-vf") + 1] == (
-        "select=eq(n\\,100),showinfo=checksum=0,crop=1440:1080:240:0,scale=1280:960,pad=1280:1080:0:60:color=black"
+        "select=eq(n\\,100),showinfo=checksum=0,crop=1440:1080:240:0:exact=1,scale=1280:960,format=pix_fmts=yuv444p|yuv444p16le,pad=1280:1080:0:60:color=black"
     )
 
 
@@ -132,6 +134,8 @@ def test_build_extract_frames_argv_selects_ordered_frames_in_one_pass() -> None:
         "-y",
         "-i",
         "clip.mkv",
+        "-map",
+        "0:V:0",
         "-vf",
         "select=eq(n\\,10)+eq(n\\,20)+eq(n\\,42),showinfo=checksum=0",
         "-fps_mode",
@@ -177,6 +181,8 @@ def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
             "-y",
             "-i",
             "clip.mkv",
+            "-map",
+            "0:V:0",
             "-vf",
             "select=eq(n\\,100),showinfo=checksum=0",
             "-frames:v",

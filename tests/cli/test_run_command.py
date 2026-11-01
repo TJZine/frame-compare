@@ -241,7 +241,7 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner(tmp_path
             write_config=True,
             frames="3,5,8",
             random_frame_count="17",
-            tm_preset="filmic",
+            tm_preset="spline",
             overlay="diagnostic",
             no_upload=True,
         ),
@@ -258,7 +258,7 @@ def test_handle_run_write_config_applies_cli_overrides_and_skips_runner(tmp_path
     assert written_paths == [expected_config]
     assert written_configs[0].analysis.user_frames == [3, 5, 8]
     assert written_configs[0].analysis.random_frame_count == 17
-    assert written_configs[0].color.preset == TonemapPreset.FILMIC
+    assert written_configs[0].color.preset == TonemapPreset.SPLINE
     assert written_configs[0].screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
     assert written_configs[0].slowpics.auto_upload is False
 

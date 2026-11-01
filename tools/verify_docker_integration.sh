@@ -319,6 +319,12 @@ if python -c 'import pytest' >/dev/null 2>&1; then
   echo "ERROR: pytest test tooling leaked into the production image" >&2
   exit 6
 fi
+for ignored_path in .codex .claude; do
+  if [[ -e "/home/framecompare/frame-compare/$ignored_path" ]]; then
+    echo "ERROR: local agent state leaked into the production image: $ignored_path" >&2
+    exit 6
+  fi
+done
 echo "DOCKER_PROOF production_tooling_absent=ok"
 icd="/usr/share/vulkan/icd.d/lvp_icd.json"
 if [[ -f "$icd" ]]; then

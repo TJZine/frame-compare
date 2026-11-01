@@ -209,7 +209,7 @@ def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
         "path": str(fingerprint.path),
         "size_bytes": fingerprint.size_bytes,
         "mtime_ns": fingerprint.mtime_ns,
-        "schema_version": 2,
+        "schema_version": 3,
         "media_runtime_fingerprint": media_runtime_fingerprint("probe"),
     }
 

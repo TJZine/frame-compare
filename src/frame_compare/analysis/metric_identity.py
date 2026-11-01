@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 type MetricAlgorithmIdentity = Mapping[str, object]
 
-_ALGORITHM_VERSION = "analysis_metrics_v7"
+_ALGORITHM_VERSION = "analysis_metrics_v8"
 
 
 def build_metric_algorithm_identity(config: AnalysisConfig) -> MetricAlgorithmIdentity:

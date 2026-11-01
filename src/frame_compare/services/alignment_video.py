@@ -43,6 +43,7 @@ from frame_compare.utils.alignment_policy import (
 )
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.loader import VSLoader
+from frame_compare.vs.luma import luma_plane
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -373,16 +374,7 @@ def _prepare_luma(clip: vs.VideoNode, active_rect: ActiveRect | None) -> vs.Vide
         x, y, width, height = active_rect
         crop = (x, y, width, height)
     try:
-        import vapoursynth as vs
-
-        runtime_vs = cast(Any, vs)
-        runtime_clip = cast(Any, clip)
-        if clip.format.color_family != vs.YUV:
-            runtime_clip = runtime_clip.resize.Bicubic(format=runtime_vs.YUV444P8)
-        luma = cast(
-            "vs.VideoNode",
-            runtime_clip.std.ShufflePlanes(planes=0, colorfamily=runtime_vs.GRAY),
-        )
+        luma = luma_plane(clip)
         if crop is not None:
             x, y, width, height = crop
             luma = cast(Any, luma).std.CropAbs(width=width, height=height, left=x, top=y)

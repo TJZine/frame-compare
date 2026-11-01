@@ -24,6 +24,7 @@ class Resize:
     def Point(self, **kwargs: object) -> VideoNode: ...
 
 class Std:
+    def ShufflePlanes(self, *, planes: int, colorfamily: int) -> VideoNode: ...
     def Expr(self, *, expr: list[str], format: int | None = ...) -> VideoNode: ...
     def RemoveFrameProps(self, *, props: list[str]) -> VideoNode: ...
     def Levels(self, **kwargs: object) -> VideoNode: ...
@@ -53,6 +54,14 @@ class VideoNode:
 
 class Core:
     max_cache_size: int
+    def query_video_format(
+        self,
+        color_family: int,
+        sample_type: int,
+        bits_per_sample: int,
+        subsampling_w: int = ...,
+        subsampling_h: int = ...,
+    ) -> VideoFormat: ...
     def __getattr__(self, name: str) -> Any: ...
     @property
     def version_number(self) -> int: ...
@@ -65,6 +74,7 @@ RGB48: int
 RGBS: int
 FLOAT: int
 INTEGER: int
+GRAY: int
 YUV: int
 YUV420P8: int
 RGB: int

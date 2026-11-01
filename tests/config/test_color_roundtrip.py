@@ -15,21 +15,15 @@ from frame_compare.render.prepare import resolve_tonemap_settings
 from frame_compare.vs.tonemap_presets import get_preset_settings
 
 
+@pytest.mark.parametrize("preset", [TonemapPreset.REFERENCE, TonemapPreset.HIGHLIGHT_GUARD])
 @pytest.mark.parametrize("curve", list(ToneCurve))
-def test_highlight_preserve_opt_in_and_curve_override(curve: ToneCurve) -> None:
-    from dataclasses import asdict
-
+def test_curve_override_uses_curve_parameter_default(
+    preset: TonemapPreset, curve: ToneCurve
+) -> None:
     config = get_default_config()
     baseline = resolve_tonemap_settings(config)
-    assert baseline.knee_offset == 0.5
-    selected = apply_cli_overrides(
-        config, CLIConfigOverrides(tm_preset=TonemapPreset.HIGHLIGHT_PRESERVE)
-    )
-    preserved = resolve_tonemap_settings(selected)
-    assert preserved.knee_offset == 1.0
-    expected = asdict(baseline)
-    expected.update(preset=TonemapPreset.HIGHLIGHT_PRESERVE, knee_offset=1.0)
-    assert asdict(preserved) == expected
+    assert baseline.knee_offset == 1.0
+    selected = apply_cli_overrides(config, CLIConfigOverrides(tm_preset=preset))
     changed = apply_cli_overrides(selected, CLIConfigOverrides(tm_curve=curve))
     resolved = resolve_tonemap_settings(changed)
     assert resolved.tone_curve is curve
@@ -80,12 +74,12 @@ def test_color_semantics_survive_merges_and_persisted_reload(
 
 def test_partial_color_preset_preserves_only_authored_overrides(tmp_path: Path) -> None:
     config = get_default_config()
-    config.color = ColorConfig(preset=TonemapPreset.FILMIC, target_nits=100)
+    config.color = ColorConfig(preset=TonemapPreset.SPLINE, target_nits=100)
     (tmp_path / "partial.toml").write_text("[color]\ngamma_lift = true\n")
     updated = apply_preset(config, "partial", presets_dir=tmp_path)
     resolved = resolve_tonemap_settings(updated)
     assert resolved.target_nits == 100
-    assert resolved.tone_curve == get_preset_settings(TonemapPreset.FILMIC).tone_curve
+    assert resolved.tone_curve == get_preset_settings(TonemapPreset.SPLINE).tone_curve
     assert resolved.gamma_lift is True
     assert updated.color.model_fields_set & {
         "target_nits",
@@ -99,7 +93,7 @@ def test_fast_tonemap_speed_survives_persistence_and_is_not_preset_controlled(
     tmp_path: Path,
 ) -> None:
     config = get_default_config()
-    config.color = ColorConfig(preset=TonemapPreset.FILMIC, tonemap_speed=TonemapSpeed.FAST)
+    config.color = ColorConfig(preset=TonemapPreset.SPLINE, tonemap_speed=TonemapSpeed.FAST)
     expected = resolve_tonemap_settings(config)
     assert expected.tonemap_speed is TonemapSpeed.FAST
     assert expected.dynamic_peak_detection is False
@@ -138,13 +132,13 @@ def test_resolved_config_merges_do_not_reacquire_sources(
         )
     selected = tmp_path / "selected.toml"
     selected.write_text(
-        '[color]\npreset = "filmic"\n'
+        '[color]\npreset = "spline"\n'
         '[tmdb]\napi_key = "retained-runtime-key"\n'
         '[slowpics]\nwebhook_url = "https://discord.com/api/webhooks/id/retained-runtime-token"\n'
         '[sources.overrides."reference.mkv"]\neffective_fps = "24000/1001"\n'
     )
     config = load_config(selected)
-    expected = get_preset_settings(TonemapPreset.FILMIC)
+    expected = get_preset_settings(TonemapPreset.SPLINE)
     assert resolve_tonemap_settings(config) == expected
 
     if ambient_change == "changed_environment":

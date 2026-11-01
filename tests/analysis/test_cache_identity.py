@@ -172,7 +172,7 @@ def test_metric_algorithm_identity_changes_with_media_runtime(
 
     assert changed != original
     assert captured_scopes == ["analysis"]
-    assert '"algorithm_version":"analysis_metrics_v7"' in original
+    assert '"algorithm_version":"analysis_metrics_v8"' in original
     assert '"media_runtime"' in original
     assert '"contract_version":999' in changed
     assert '"profile":"test-runtime"' in changed

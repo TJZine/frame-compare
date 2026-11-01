@@ -70,14 +70,14 @@ def test_apply_cli_overrides_omitted_flags_preserve_config(false_flags: bool) ->
     [
         (
             CLIConfigOverrides(
-                tm_preset=TonemapPreset.FILMIC,
+                tm_preset=TonemapPreset.SPLINE,
                 tm_speed=TonemapSpeed.FAST,
                 tm_curve=ToneCurve.REINHARD,
                 overlay_mode=OverlayMode.DIAGNOSTIC,
             ),
             None,
             [
-                ("color", "preset", TonemapPreset.FILMIC),
+                ("color", "preset", TonemapPreset.SPLINE),
                 ("color", "tonemap_speed", TonemapSpeed.FAST),
                 ("color", "tone_curve", ToneCurve.REINHARD),
                 ("screenshots", "overlay_mode", OverlayMode.DIAGNOSTIC),
@@ -111,7 +111,7 @@ def test_apply_cli_overrides_omitted_flags_preserve_config(false_flags: bool) ->
         ),
         (
             CLIConfigOverrides(tm_target_nits=400),
-            ColorConfig(preset=TonemapPreset.FILMIC),
+            ColorConfig(preset=TonemapPreset.SPLINE),
             [("color", "target_nits", 400)],
         ),
     ],
@@ -136,7 +136,7 @@ def test_apply_cli_overrides_maps_explicit_fields(
 
 def test_apply_cli_overrides_preserves_implicit_color_target_for_unrelated_override() -> None:
     """Unrelated CLI overrides must not make default color values explicit."""
-    config = ConfigSchema(color=ColorConfig(preset=TonemapPreset.FILMIC))
+    config = ConfigSchema(color=ColorConfig(preset=TonemapPreset.SPLINE))
     assert config.color.model_fields_set == {"preset"}
 
     new_config = apply_cli_overrides(config, CLIConfigOverrides(random_frame_count=12))

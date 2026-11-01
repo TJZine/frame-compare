@@ -384,12 +384,15 @@ def test_dockerignore_excludes_local_residue_without_excluding_image_inputs(
     }
     assert {
         ".tmp",
+        ".codex",
+        ".claude",
         ".handoff",
         ".codanna",
         ".desloppify",
         ".agent",
         ".hypothesis",
         ".uv_cache",
+        ".portable_cache",
         "site",
         "tools/old_*.py",
     } <= patterns

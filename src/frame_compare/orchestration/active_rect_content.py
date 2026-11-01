@@ -20,6 +20,7 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.vs.luma import luma_plane
 
 if TYPE_CHECKING:
     from frame_compare.vs.loader import VSLoader
@@ -81,9 +82,7 @@ class VSActiveRectFrameSampler:
         raise_if_cancelling()
         source = self._loader.load(Path(clip.path))
         try:
-            node = source.clip
-            if node.format.color_family != vs.YUV:
-                node = node.resize.Bicubic(format=vs.YUV420P8)
+            node = luma_plane(source.clip)
             max_value: float = (
                 1.0
                 if node.format.sample_type == vs.FLOAT

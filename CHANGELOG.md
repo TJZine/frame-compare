@@ -7,6 +7,18 @@ notes used by the guarded publication workflow.
 
 ## Unreleased
 
+### Changed
+
+- Default the BT.2390 knee to 1.0, so HDR screenshots keep more separation in
+  bright areas and look slightly different from earlier versions.
+
+### Removed
+
+- Remove the `bt2390_spec`, `filmic`, and `highlight_preserve` tonemap presets.
+  Use `reference` in place of `bt2390_spec` and `highlight_preserve`, and `spline`
+  in place of `filmic`. Existing configuration using the removed names must be
+  updated before running.
+
 ### Fixed
 
 - Correct HDR screenshot colors by targeting BT.709 destination primaries; colors

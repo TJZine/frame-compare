@@ -188,20 +188,13 @@ def test_resolve_hdr_inputs_preserves_explicit_sdr_signal_and_range() -> None:
 @pytest.mark.parametrize(
     ("preset", "tone_curve", "expected_curve", "expected_knee"),
     [
-        pytest.param(TonemapPreset.REFERENCE, None, "bt2390", 0.5, id="reference"),
+        pytest.param(TonemapPreset.REFERENCE, None, "bt2390", 1.0, id="reference"),
         pytest.param(
-            TonemapPreset.HIGHLIGHT_PRESERVE,
-            None,
-            "bt2390",
-            1.0,
-            id="highlight_preserve",
-        ),
-        pytest.param(
-            TonemapPreset.HIGHLIGHT_PRESERVE,
+            TonemapPreset.REFERENCE,
             ToneCurve.SPLINE,
             "spline",
             0.5,
-            id="highlight_preserve_spline_override",
+            id="reference_spline_override",
         ),
     ],
 )
@@ -368,7 +361,7 @@ def test_apply_libplacebo_runtime_failure_reports_cause_after_rgb_prop_normaliza
 
     result = apply_libplacebo(
         cast("VideoNode", clip),
-        TonemapSettings(tone_curve=ToneCurve.SPLINE, target_nits=180),
+        TonemapSettings(tone_curve=ToneCurve.SPLINE, target_nits=180, knee_offset=0.5),
         cast("Core", core),
         metadata,
     )
@@ -433,7 +426,7 @@ def test_convert_non_rgb_matrix_presence_uses_frame_prop_boundary() -> None:
                 "target_nits": 100,
                 "dynamic_peak_detection": True,
                 "dst_min_nits": 0.18,
-                "knee_offset": 0.50,
+                "knee_offset": 1.0,
                 "smoothing_period": 45.0,
                 "scene_threshold_low": 0.8,
                 "scene_threshold_high": 2.4,

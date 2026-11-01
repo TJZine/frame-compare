@@ -34,10 +34,17 @@ def _geometry_filters(geometry_plan: RenderGeometryPlan | None) -> list[str]:
     _validate_positive_size(*geometry_plan.final_canvas_size, label="pad")
     _validate_margins(geometry_plan.pad, label="pad")
 
+    # No source-depth facts are available here. Negotiate full-chroma YUV
+    # while retaining input precision whenever geometry needs exact origins.
+    full_chroma_format = "format=pix_fmts=yuv444p|yuv444p16le"
     filters: list[str] = []
     if geometry_plan.crop_rect != geometry_plan.source_rect:
         crop = geometry_plan.crop_rect
-        filters.append(f"crop={crop.width}:{crop.height}:{crop.x}:{crop.y}")
+        if crop.x % 2 or crop.y % 2:
+            # High-depth subsampled crop buffers can also lose chroma alignment
+            # at odd origins, even with exact=1. Convert before that boundary.
+            filters.append(full_chroma_format)
+        filters.append(f"crop={crop.width}:{crop.height}:{crop.x}:{crop.y}:exact=1")
     if geometry_plan.scaled_size != geometry_plan.cropped_size:
         width, height = geometry_plan.scaled_size
         filters.append(f"scale={width}:{height}")
@@ -46,6 +53,8 @@ def _geometry_filters(geometry_plan: RenderGeometryPlan | None) -> list[str]:
         x, y = geometry_plan.content_origin
         if x < 0 or y < 0:
             raise ValueError("pad content origin must be non-negative")
+        if full_chroma_format not in filters:
+            filters.append(full_chroma_format)
         filters.append(f"pad={width}:{height}:{x}:{y}:color=black")
     return filters
 
@@ -77,6 +86,8 @@ def build_extract_frame_argv(
         [
             "-i",
             str(video),
+            "-map",
+            "0:V:0",
             "-vf",
             ",".join(filters),
             "-frames:v",
@@ -121,6 +132,8 @@ def build_extract_frames_argv(
         [
             "-i",
             str(video),
+            "-map",
+            "0:V:0",
             "-vf",
             ",".join(filters),
             "-fps_mode",

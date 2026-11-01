@@ -248,7 +248,7 @@ const Viewport = {
     },
 
     clampZoom(level) {
-        return Math.max(0.25, Math.min(4.0, this.viewer.numberOrDefault(level, 1.0)));
+        return Math.max(0.05, Math.min(4.0, this.viewer.numberOrDefault(level, 1.0)));
     },
 
     applyZoom(level, options = {}) {
@@ -383,11 +383,25 @@ const Viewport = {
     },
 
     baseCanvasSize() {
-        const rect = this.viewer.dom.sizerImg.getBoundingClientRect();
-        const zoom = this.viewer.state.zoom || 1.0;
+        const image = this.viewer.dom.sizerImg;
+        return { width: image.naturalWidth || 0, height: image.naturalHeight || 0 };
+    },
+
+    comparisonTransform(point) {
+        const base = this.baseCanvasSize();
+        const alignment = this.currentAlignment();
+        const right = this.viewer.dom.rightImg;
+        const scale = this.viewer.state.zoom;
         return {
-            width: rect.width / zoom,
-            height: rect.height / zoom
+            width: base.width * scale,
+            comparisonHeight: right.naturalWidth > 0
+                ? base.width * right.naturalHeight / right.naturalWidth * scale : 0,
+            height: base.height * scale,
+            scale,
+            originX: point.u * base.width * scale,
+            originY: point.v * base.height * scale,
+            offsetX: alignment.alignX * scale,
+            offsetY: alignment.alignY * scale,
         };
     },
 

@@ -70,7 +70,10 @@ def _parse_datetime(value: object) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         raise ValueError("stored_at must include a timezone")
-    return parsed.astimezone(UTC)
+    try:
+        return parsed.astimezone(UTC)
+    except OverflowError as error:
+        raise ValueError("stored_at is outside the supported datetime range") from error
 
 
 def _is_non_bool_int(value: object) -> bool:

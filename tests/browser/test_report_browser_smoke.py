@@ -101,6 +101,8 @@ def _run_browser_dump(
     command = [
         browser,
         "--headless=new",
+        # Let our subprocess timeout bound teardown, not Chrome's shorter macOS watchdog.
+        "--test-type",
         "--disable-background-networking",
         "--disable-default-apps",
         "--disable-gpu",
@@ -1131,7 +1133,7 @@ def _append_saved_fit_mode_init_probe(report_path: Path, fit_mode: str) -> None:
 <script>
 const savedFitReportId = JSON.parse(document.getElementById('report-data').textContent).report_id;
 localStorage.setItem(
-    `frame-compare:report-viewer:${{savedFitReportId}}:viewport`,
+    `frame-compare:report-viewer:${{savedFitReportId}}:viewport-v2`,
     JSON.stringify({{ fitMode: '{fit_mode}' }}),
 );
 document.addEventListener('DOMContentLoaded', () => {{
@@ -1400,6 +1402,7 @@ def _run_browser_input(
         [
             browser,
             "--headless=new",
+            "--test-type",
             "--disable-background-networking",
             "--disable-default-apps",
             "--disable-gpu",
@@ -1439,68 +1442,7 @@ def test_review_note_native_insertion_uses_unicode_scalar_limit(tmp_path: Path) 
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable")
     report_path = _generated_report(tmp_path)
-    script = r"""
-const assert = require('node:assert/strict');
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const [report, profile] = process.argv.slice(1);
-let socket;
-let nextId = 0;
-const pending = new Map();
-const pause = () => new Promise(resolve => setTimeout(resolve, 100));
-async function command(method, params = {}) {
-    const id = ++nextId;
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-            pending.delete(id);
-            reject(new Error(`CDP ${method} timed out`));
-        }, 5000);
-        pending.set(id, { resolve, reject, timer });
-        socket.send(JSON.stringify({ id, method, params }));
-    });
-}
-async function evaluate(expression) {
-    const result = await command('Runtime.evaluate', { expression, returnByValue: true });
-    assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
-    return result.result.value;
-}
-(async () => {
-    try {
-        let port;
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-            try {
-                port = (await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
-                break;
-            } catch { await pause(); }
-        }
-        assert.ok(port, 'Chrome did not expose a debugging port');
-        const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`, {
-            signal: AbortSignal.timeout(5000),
-        })).json();
-        const target = targets.find(target => target.type === 'page' && target.url === report);
-        assert.ok(target, 'generated report page is missing');
-        socket = new WebSocket(target.webSocketDebuggerUrl);
-        await new Promise((resolve, reject) => {
-            const timer = setTimeout(() => reject(new Error('CDP socket timed out')), 5000);
-            socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
-            socket.addEventListener('error', error => { clearTimeout(timer); reject(error); }, { once: true });
-        });
-        socket.addEventListener('message', event => {
-            const message = JSON.parse(event.data);
-            const request = pending.get(message.id);
-            if (!request) return;
-            pending.delete(message.id);
-            clearTimeout(request.timer);
-            if (message.error) request.reject(new Error(JSON.stringify(message.error)));
-            else request.resolve(message.result);
-        });
-        let initialized = false;
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-            initialized = await evaluate("typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)");
-            if (initialized) break;
-            await pause();
-        }
-        assert.ok(initialized, 'viewer did not initialize');
+    script = _viewer_input_script(r"""
         await evaluate(`(() => {
             ReportViewer.inspector.setOpen(true, { save: false });
             ReportViewer.inspector.setTab('review', { save: false });
@@ -1540,11 +1482,7 @@ async function evaluate(expression) {
         assert.equal(await evaluate('JSON.parse(localStorage.getItem(ReportViewer.reviewController.model.storageKey)).reviews[0].note'), 'leftéright');
         assert.match(await evaluate("document.querySelector('[data-review-status]').textContent"), /saved in this browser/);
         console.log('Native BMP, supplementary, mixed, bounds, selection, focus and export passed');
-    } finally {
-        socket?.close();
-    }
-})().catch(error => { console.error(error); process.exitCode = 1; });
-"""
+""")
     result = _run_browser_input(browser, report_path, tmp_path / "chrome-input-profile", script)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Native BMP, supplementary, mixed" in result.stdout
@@ -1805,3 +1743,235 @@ async function edit(session, frame, text) {
     result = _run_browser_input(browser, report_path, tmp_path / "chrome-tabs-profile", script)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Real two-tab conflicts" in result.stdout
+
+
+def _viewer_input_script(actions: str) -> str:
+    """Use the trusted-input CDP driver for loaded-viewer assertions."""
+    return (
+        r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const [report, profile] = process.argv.slice(1);
+let socket;
+let nextId = 0;
+const pending = new Map();
+const pause = () => new Promise(resolve => setTimeout(resolve, 100));
+async function command(method, params = {}) {
+    const id = ++nextId;
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            pending.delete(id);
+            reject(new Error(`CDP ${method} timed out`));
+        }, 5000);
+        pending.set(id, { resolve, reject, timer });
+        socket.send(JSON.stringify({ id, method, params }));
+    });
+}
+async function evaluate(expression) {
+    const result = await command('Runtime.evaluate', { expression, returnByValue: true });
+    assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
+    return result.result.value;
+}
+(async () => {
+    try {
+        let port;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            try {
+                port = (await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
+                break;
+            } catch { await pause(); }
+        }
+        assert.ok(port, 'Chrome did not expose a debugging port');
+        const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`, {
+            signal: AbortSignal.timeout(5000),
+        })).json();
+        const target = targets.find(target => target.type === 'page' && target.url === report);
+        assert.ok(target, 'generated report page is missing');
+        socket = new WebSocket(target.webSocketDebuggerUrl);
+        await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('CDP socket timed out')), 5000);
+            socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+            socket.addEventListener('error', error => { clearTimeout(timer); reject(error); }, { once: true });
+        });
+        socket.addEventListener('message', event => {
+            const message = JSON.parse(event.data);
+            const request = pending.get(message.id);
+            if (!request) return;
+            pending.delete(message.id);
+            clearTimeout(request.timer);
+            if (message.error) request.reject(new Error(JSON.stringify(message.error)));
+            else request.resolve(message.result);
+        });
+        let initialized = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            initialized = await evaluate("typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)");
+            if (initialized) break;
+            await pause();
+        }
+        assert.ok(initialized, 'viewer did not initialize');
+
+"""
+        + actions
+        + r"""
+    } finally {
+        socket?.close();
+    }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("source_width", "window_width"), [(1920, 1024), (3840, 640)])
+def test_report_actual_pixels_fit_and_diff_lens_share_coordinates(
+    tmp_path: Path, source_width: int, window_width: int
+) -> None:
+    from PIL import Image, ImageDraw
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    for name, width in [("reference", source_width), ("encode", source_width // 2)]:
+        image = Image.new("RGB", (width, width * 9 // 16), "black")
+        ImageDraw.Draw(image).rectangle((int(width * 0.5125), 0, width, image.height), fill="white")
+        image.save(tmp_path / "screenshots" / name / "10.png")
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: WINDOW_WIDTH, height: 768, deviceScaleFactor: 1, mobile: false,
+        });
+        async function until(expression, message) {
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+                if (await evaluate(expression)) return;
+                await pause();
+            }
+            assert.fail(message);
+        }
+        await until(`(() => {
+            const viewer = ReportViewer;
+            const frame = viewer.currentFrame();
+            const leftSource = new URL(frame.images[viewer.state.leftClipIdx].src, document.baseURI).href;
+            const rightSource = new URL(frame.images[viewer.state.rightClipIdx].src, document.baseURI).href;
+            const loaded = (image, source, width) => image.complete
+                && image.currentSrc === source && image.naturalWidth === width && image.naturalHeight > 0;
+            return loaded(viewer.dom.leftImg, leftSource, SOURCE_WIDTH)
+                && loaded(viewer.dom.sizerImg, leftSource, SOURCE_WIDTH)
+                && loaded(viewer.dom.rightImg, rightSource, SOURCE_WIDTH / 2);
+        })()`, 'main and sizing images did not load their current sources');
+        const proof = await evaluate(`(() => {
+            const viewer = ReportViewer;
+            viewer.viewport.setFitMode('actual');
+            const actualWidth = viewer.dom.leftImg.getBoundingClientRect().width;
+            viewer.viewport.setFitMode('width');
+            const fitZoom = viewer.state.zoom;
+            const fitWidth = viewer.dom.leftImg.getBoundingClientRect().width;
+            viewer.viewport.zoomAtPoint(320, 300, 1.1);
+            const zoomed = viewer.state.zoom;
+            viewer.viewport.setFitMode('actual');
+            viewer.lens.setEnabled(true);
+            return {actualWidth, fitZoom, fitWidth, zoomed, stageWidth: viewer.dom.stage.clientWidth};
+        })()`);
+        proof.cases = [];
+        for (const offset of [0, 1]) {
+            await evaluate(`ReportViewer.viewport.setManualAlignment(${offset}, 0); ReportViewer.lens.refresh()`);
+            await until(`(() => {
+                const loaded = (slot, source) => {
+                    const image = document.querySelector('[data-lens-image="' + slot + '"]');
+                    const rect = image.getBoundingClientRect();
+                    return !image.hidden && image.complete && image.currentSrc === source
+                        && image.naturalWidth > 0 && image.naturalHeight > 0
+                        && rect.width > 0 && rect.height > 0;
+                };
+                return loaded('active', ReportViewer.dom.leftImg.currentSrc)
+                    && loaded('difference', ReportViewer.dom.rightImg.currentSrc);
+            })()`, 'Diff Lens clones did not become visible for their current sources');
+            proof.cases.push(await evaluate(`(() => {
+                const left = ReportViewer.dom.leftImg.getBoundingClientRect();
+                const right = ReportViewer.dom.rightImg.getBoundingClientRect();
+                const active = document.querySelector('[data-lens-image="active"]').getBoundingClientRect();
+                const difference = document.querySelector('[data-lens-image="difference"]').getBoundingClientRect();
+                return {
+                    offset: ${offset},
+                    mainSeparation: right.left + right.width * 0.5125 - left.left - left.width * 0.5125,
+                    lensSeparation: difference.left + difference.width * 0.5125 - active.left - active.width * 0.5125,
+                    lensWidth: active.width,
+                };
+            })()`));
+        }
+        console.log(JSON.stringify(proof));
+""".replace("WINDOW_WIDTH", str(window_width)).replace("SOURCE_WIDTH", str(source_width))
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-coordinates", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    proof = json.loads(completed.stdout)
+    for case in proof["cases"]:
+        assert case["mainSeparation"] == pytest.approx(case["offset"], abs=0.1), case
+        assert case["lensSeparation"] == pytest.approx(case["offset"] * 4, abs=0.1), case
+        assert case["lensWidth"] == source_width * 4, case
+    assert proof["actualWidth"] == source_width, proof
+    assert proof["fitWidth"] == pytest.approx(proof["stageWidth"], abs=1), proof
+    if source_width == 3840:
+        assert proof["fitZoom"] < 0.25, proof
+    assert proof["zoomed"] > proof["fitZoom"], proof
+
+
+@pytest.mark.integration
+def test_fullscreen_help_and_inspector_are_reachable_with_trusted_input(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    script = _viewer_input_script(r"""
+        async function click(selector) {
+            const point = await evaluate(`(() => {
+                const rect = document.querySelector('${selector}').getBoundingClientRect();
+                return {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+            })()`);
+            await command('Input.dispatchMouseEvent', {type: 'mousePressed', button: 'left', clickCount: 1, ...point});
+            await command('Input.dispatchMouseEvent', {type: 'mouseReleased', button: 'left', clickCount: 1, ...point});
+        }
+        async function key(key, code, text = '') {
+            await command('Input.dispatchKeyEvent', {type: 'keyDown', key, code, text});
+            await command('Input.dispatchKeyEvent', {type: 'keyUp', key, code});
+            await pause();
+        }
+        async function until(expression) {
+            for (let attempt = 0; attempt < 30; attempt += 1) {
+                if (await evaluate(expression)) return;
+                await pause();
+            }
+            assert.fail(expression);
+        }
+        const hit = selector => `(() => {
+            const element = document.querySelector('${selector}');
+            const rect = element.getBoundingClientRect();
+            return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === element;
+        })()`;
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1366, height: 1000, deviceScaleFactor: 1, mobile: false,
+        });
+        await click('#btn-fullscreen');
+        await until('Boolean(document.fullscreenElement)');
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-header')).display"), 'none');
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-controls')).display"), 'none');
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-bottom-panel')).display"), 'none');
+        assert.equal(await evaluate('ReportViewer.dom.stage.getBoundingClientRect().height === innerHeight'), true);
+        await key('?', 'Slash', '?');
+        await until("ReportViewer.isHelpModalOpen()");
+        assert.equal(await evaluate(hit('#btn-close-help')), true, 'Help close button is behind fullscreen');
+        await click('#btn-close-help');
+        assert.equal(await evaluate('document.fullscreenElement.contains(document.activeElement)'), true);
+        assert.equal(await evaluate('document.activeElement === ReportViewer.dom.stage'), true);
+        await key('I', 'KeyI', 'I');
+        await until('ReportViewer.inspector.isVisible()');
+        await until(hit('#btn-inspector-close'));
+        await key('Escape', 'Escape');
+        await until('document.fullscreenElement === null');
+        assert.equal(await evaluate("document.querySelector('#btn-fullscreen').getAttribute('aria-pressed')"), 'false');
+        console.log('Fullscreen Help, Inspector, focus and Escape passed');
+""")
+    result = _run_browser_input(browser, report_path, tmp_path / "chrome-fullscreen", script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Fullscreen Help, Inspector, focus and Escape passed" in result.stdout

@@ -11,6 +11,7 @@ from fractions import Fraction
 from pathlib import Path
 from types import GeneratorType, SimpleNamespace
 from typing import TYPE_CHECKING, cast
+from unittest.mock import MagicMock
 
 import numpy as np
 import numpy.typing as npt
@@ -220,7 +221,7 @@ def test_vs_sampler_fetches_frames_lazily_and_releases_source(
             return _letterbox_frame(top=10, bottom=10)
 
     class FakeNode:
-        format = SimpleNamespace(color_family=1, sample_type=2, bits_per_sample=32)
+        format = SimpleNamespace(color_family=2, sample_type=2, bits_per_sample=32)
 
         def get_frame(self, index: int) -> FakeFrame:
             events.append(f"frame:{index}")
@@ -237,7 +238,7 @@ def test_vs_sampler_fetches_frames_lazily_and_releases_source(
             source_references.append(weakref.ref(source))
             return source
 
-    fake_vs = SimpleNamespace(YUV=1, FLOAT=2, YUV420P8=3)
+    fake_vs = SimpleNamespace(YUV=1, GRAY=2, RGB=3, FLOAT=2)
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
     sampler = VSActiveRectFrameSampler(cast("VSLoader", FakeLoader()))
 
@@ -253,6 +254,33 @@ def test_vs_sampler_fetches_frames_lazily_and_releases_source(
     frames.close()
     gc.collect()
     assert source_references[0]() is None
+
+
+@pytest.mark.vs_required
+def test_vs_sampler_converts_odd_rgb_with_bt709_luma() -> None:
+    native_vs = pytest.importorskip("vapoursynth")
+    if isinstance(native_vs, MagicMock):
+        pytest.skip("VapourSynth is not installed")
+
+    class Source:
+        clip = native_vs.core.std.BlankClip(
+            width=17,
+            height=15,
+            length=1,
+            format=native_vs.RGBS,
+            color=[1.0, 0.0, 0.0],
+        )
+
+    class Loader:
+        def load(self, _path: Path) -> Source:
+            return Source()
+
+    frames = VSActiveRectFrameSampler(cast("VSLoader", Loader())).sample_luma_frames(_clip(), (0,))
+    frame = next(frames)
+    assert frame.shape == (15, 17)
+    assert float(frame.mean()) == pytest.approx(0.2126, abs=0.001)
+    if isinstance(frames, GeneratorType):
+        frames.close()
 
 
 def test_sample_indices_use_trimmed_selection_window_source_domain() -> None:

@@ -615,7 +615,7 @@ def _render_viewport_palette() -> str:
 
         <div class="rv-palette-group rv-palette-group--zoom">
             <button id="btn-zoom-out" aria-label="Zoom out" title="Zoom out (−)">{zoom_out_icon}</button>
-            <input type="range" id="zoom-range" min="0.25" max="4.0" step="0.1" value="1.0" aria-label="Zoom level" aria-valuemin="0.25" aria-valuemax="4.0" aria-valuenow="1.0">
+            <input type="range" id="zoom-range" min="0.05" max="4.0" step="0.01" value="1.0" aria-label="Zoom level" aria-valuemin="0.05" aria-valuemax="4.0" aria-valuenow="1.0">
             <button id="btn-zoom-in" aria-label="Zoom in" title="Zoom in (+)">{zoom_in_icon}</button>
             <button id="btn-zoom-reset" aria-label="Reset zoom" title="Reset viewport (R)">{_render_icon("M4 8a6 6 0 1 1 0 5 M4 3v5h5")}</button>
             <span id="zoom-val" class="rv-zoom-value">100%</span>
@@ -684,7 +684,7 @@ def _render_viewport_palette() -> str:
 
 
 def _render_stage() -> str:
-    return f"""    <div class="rv-viewer-stage rv-mode-slider" role="region" aria-label="Comparison viewer">
+    return f"""    <div class="rv-viewer-stage rv-mode-slider" tabindex="0" role="region" aria-label="Comparison viewer">
         <div class="rv-empty-state" data-empty-state hidden></div>
         <div class="rv-canvas" role="img" aria-label="Comparison image canvas">
             <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="" class="rv-sizer" aria-hidden="true">

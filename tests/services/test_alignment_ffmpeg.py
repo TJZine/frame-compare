@@ -16,6 +16,7 @@ from frame_compare.services.alignment_audio import (
     AudioStreamTimeline,
     ProbedStreams,
     VideoStreamStart,
+    _PacketTailParser,
     collection_argv,
     measure_selected_audio_duration,
     probe_streams,
@@ -893,47 +894,46 @@ def test_select_audio_pair_prefers_a_shared_language(
 
 
 @pytest.mark.parametrize(
-    "payload, expected",
+    "chunks, reached_seek, latest_end",
     [
-        (
-            b'{"packets":[{"pts":30000,"duration":1000},{"pts":89900,"duration":100}]}',
-            Fraction(179, 2),
-        ),
-        (b'{"packets":[{"pts":29999,"duration":1000}]}', None),
-        (b'{"packets":[{"pts":30000,"duration":1000},{"pts":"N/A","duration":100}]}', None),
-        (b'{"packets":[{"pts":30000}]}', None),
-        (b'{"packets":[{"pts":true,"duration":100}]}', None),
-        (b'{"packets":[{"pts":30000,"duration":-1}]}', None),
-        (b'{"packets":[]}', None),
-        (
-            b'{"packets":[{"pts":90000,"duration":0},{"pts":30000,"duration":100}]}',
-            Fraction(179, 2),
-        ),
+        ([b"30000,1000\n89900,100\n"], True, Fraction(90)),
+        ([b"300", b"00,100", b"0\n89900,100"], True, Fraction(90)),
+        ([b"29999,1000\n"], False, Fraction(30999, 1000)),
+        ([b"90000,0\r\n30000,100\r\n"], True, Fraction(90)),
+        ([b"30000,1000,\n89900,100", b",\n"], True, Fraction(90)),
+        ([], False, None),
     ],
 )
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_selected_audio_packet_tail(
-    mock_run: MagicMock, payload: bytes, expected: Fraction | None
+def test_selected_audio_packet_tail_parser(
+    chunks: list[bytes], reached_seek: bool, latest_end: Fraction | None
 ) -> None:
-    stream = replace(
-        _test_stream(),
-        timeline=AudioStreamTimeline(
-            start_time=Fraction(1, 2),
-            duration=None,
-            time_base=Fraction(1, 1000),
-            duration_basis="unavailable",
-        ),
-    )
-    mock_run.return_value.stdout = payload
-    measured = measure_selected_audio_duration(
-        Path("movie.mkv"), stream, video_seconds=Fraction(90), cancellation=None
-    )
-    assert measured.timeline.duration == expected
-    assert measured.timeline.duration_basis == ("packet_tail" if expected else "unavailable")
-    argv = mock_run.call_args.args[0]
-    assert argv[argv.index("-select_streams") + 1] == "a:2"
-    assert argv[argv.index("-read_intervals") + 1] == "30.0%"
-    assert mock_run.call_args.kwargs["timeout_seconds"] == 15.0
+    parser = _PacketTailParser(Fraction(1, 1000), Fraction(30))
+    for chunk in chunks:
+        parser.feed(chunk)
+    parser.finish()
+    assert parser.reached_seek == reached_seek
+    assert parser.latest_end == latest_end
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        b"\n",
+        b"30000\n",
+        b"N/A,100\n",
+        b"true,100\n",
+        b"30000,-1\n",
+        b"1_000,10\n",
+        b"30000,,\n",
+        b"N/A,100,\n",
+        b"30000,N/A,\n",
+    ],
+)
+def test_selected_audio_packet_tail_parser_rejects_malformed_rows(row: bytes) -> None:
+    parser = _PacketTailParser(Fraction(1, 1000), Fraction(30))
+    with pytest.raises(ValueError):
+        parser.feed(row)
+        parser.finish()
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")
@@ -988,26 +988,3 @@ def test_selected_audio_tail_skips_known_duration_and_missing_time_base(
         == unknown
     )
     mock_run.assert_not_called()
-
-
-@pytest.mark.parametrize("start, expected", [(0, Fraction(1)), (1, None)])
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_selected_audio_tail_short_video_and_nonpositive_duration(
-    mock_run: MagicMock, start: int, expected: Fraction | None
-) -> None:
-    unknown = replace(
-        _test_stream(),
-        timeline=AudioStreamTimeline(
-            start_time=Fraction(start),
-            duration=None,
-            time_base=Fraction(1, 1000),
-            duration_basis="unavailable",
-        ),
-    )
-    mock_run.return_value.stdout = b'{"packets":[{"pts":0,"duration":1000}]}'
-    measured = measure_selected_audio_duration(
-        Path("movie.mkv"), unknown, video_seconds=Fraction(30), cancellation=None
-    )
-    assert measured.timeline.duration == expected
-    argv = mock_run.call_args.args[0]
-    assert argv[argv.index("-read_intervals") + 1] == "0.0%"

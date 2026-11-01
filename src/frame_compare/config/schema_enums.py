@@ -69,13 +69,10 @@ class TonemapPreset(StrEnum):
     """Named tonemap preset applied when tonemapping HDR to SDR."""
 
     REFERENCE = "reference"
-    FILMIC = "filmic"
     CONTRAST = "contrast"
-    BT2390_SPEC = "bt2390_spec"
     SPLINE = "spline"
     BRIGHT_LIFT = "bright_lift"
     HIGHLIGHT_GUARD = "highlight_guard"
-    HIGHLIGHT_PRESERVE = "highlight_preserve"
 
 
 class TonemapSpeed(StrEnum):

@@ -558,12 +558,14 @@ Tonemap HDR sources to SDR.
 #### `color.preset` { #color.preset .fc-key }
 
 Values
-:   `"reference"`, `"filmic"`, `"contrast"`, `"bt2390_spec"`, `"spline"`, `"bright_lift"`, `"highlight_guard"`, `"highlight_preserve"`
+:   `"reference"`, `"contrast"`, `"spline"`, `"bright_lift"`, `"highlight_guard"`
 
 Default
 :   `"reference"`
 
-Baseline tonemap settings.
+Baseline tonemap settings. `reference` uses BT.2390 at 100 nits with knee 1.0.
+See the [preset table](../guides/hdr-tonemapping.md#configure-the-result) for each
+preset's curve, target, gamma lift, and parameter.
 
 #### `color.tonemap_speed` { #color.tonemap_speed .fc-key }
 
@@ -597,7 +599,9 @@ Values
 Default
 :   from the preset
 
-Tone curve.
+Tone curve. An explicit override that changes the preset curve uses that curve's
+default parameter: BT.2390 1.0, spline 0.5, or Reinhard 0.5. An explicit curve equal
+to the preset curve keeps the preset's parameter.
 
 #### `color.gamma_lift` { #color.gamma_lift .fc-key }
 

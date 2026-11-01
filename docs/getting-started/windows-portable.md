@@ -269,19 +269,31 @@ previous active bundle with same-volume renames. Use `.\install.cmd -UserData Le
 to activate without moving them. Leave keeps data in the previous bundle and may
 select an older AppData fallback config if the new bundle has no `config/config.toml`.
 
-After building, the source installer acquires an exclusive activation lock and
-re-reads the active pointer as one byte snapshot. A source install or current bundle
+Before dependency sync and building, the source installer acquires an exclusive
+activation lock and refuses a pending source-migration marker. It re-reads the active
+pointer as one byte snapshot after the build. A source install or current bundle
 installer already activating causes a refusal with the lock path and retry guidance.
 The lock file may remain after success or a crash; only its open process handle
-prevents another activation. Builds can proceed before this activation boundary.
+prevents another activation.
 
 Junctions, symlinks, and mount points in build or previous-bundle ancestry are refused;
 choose physical paths so containment can be checked. Stored active pointers must use
 fully qualified absolute paths. Drive-relative and root-relative values are malformed.
 
-Move is all-or-nothing. A move or activation failure restores completed moves,
-empty placeholders, the previous pointer, and its shims. If recovery fails, the
-installer stops and reports the pointer and every folder location for manual repair.
+Move is all-or-nothing for failures and Ctrl+C: a move or activation failure restores
+completed moves, empty placeholders, the previous pointer, and its shims. If recovery
+fails, the installer stops and reports the pointer and every folder location for manual
+repair. After an interrupted migration, the next run refuses installation and reports
+the pointer and folder locations; empty candidate placeholders count as unmoved.
+A candidate pointer and moved folders do not prove activation finished: configuration
+and PATH setup follow pointer publication. Leave that data in the candidate bundle
+and retain the marker while checking the candidate's configuration, installed shim,
+and user PATH. In a new terminal, confirm `frame-compare` launches the candidate;
+only after those checks succeed may you remove the marker before retrying.
+When the pointer still names the previous bundle, follow the listed folder-restoration
+steps. Conflicting or unreadable pointer state requires a manual check before moving
+anything or deleting the marker. If activation succeeds but marker cleanup fails,
+the installer reports a cleanup error without reversing data or the pointer.
 Cross-volume moves refuse activation; use Leave and relocate data manually.
 Moving media makes path-keyed caches recompute once. Absolute paths in config are
 not rewritten. Previous bundles are never deleted; remove them manually only once

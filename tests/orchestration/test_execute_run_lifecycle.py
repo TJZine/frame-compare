@@ -719,7 +719,7 @@ enable = false
         skip_analysis=True,
         skip_metadata=True,
         overrides=CLIConfigOverrides(
-            tm_preset=TonemapPreset.FILMIC,
+            tm_preset=TonemapPreset.SPLINE,
             tm_target_nits=203,
             overlay_mode=OverlayMode.DIAGNOSTIC,
             seed=123,
@@ -742,7 +742,7 @@ enable = false
     asyncio.run(execute_run(request, deps=deps))
 
     config = cast(ConfigSchema, captured["config"])
-    assert config.color.preset == TonemapPreset.FILMIC
+    assert config.color.preset == TonemapPreset.SPLINE
     assert config.color.target_nits == 203
     assert config.screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
     assert config.analysis.random_seed == 123

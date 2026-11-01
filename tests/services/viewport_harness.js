@@ -53,6 +53,8 @@ async function viewportContracts() {
         const canvas = element({ left: 0, top: 0, width: 200, height: 100, right: 200 });
         const stage = element({ left: 0, top: 0, width: 100, height: 50, right: 100 });
         const sizer = element({ left: 0, top: 0, width: 200, height: 100, right: 200 });
+        sizer.naturalWidth = 200;
+        sizer.naturalHeight = 100;
         const refresh = { grid: 0, lens: 0 };
         const persistence = { calls: 0 };
         const fitButtons = ['actual', 'height'].map(fit => {
@@ -119,11 +121,11 @@ async function viewportContracts() {
     viewport.setZoom(10);
     assert.equal(viewer.state.zoom, 4);
     viewport.setZoom(0);
-    assert.equal(viewer.state.zoom, 0.25);
+    assert.equal(viewer.state.zoom, 0.05);
     viewer.state.zoom = 2;
     const baseCanvasSize = viewport.baseCanvasSize();
-    assert.equal(baseCanvasSize.width, 100);
-    assert.equal(baseCanvasSize.height, 50);
+    assert.equal(baseCanvasSize.width, 200);
+    assert.equal(baseCanvasSize.height, 100);
 
     viewer.state.zoom = 1;
     viewer.state.panX = 0;
@@ -136,7 +138,7 @@ async function viewportContracts() {
     viewer.state.panX = 999;
     viewer.state.panY = -999;
     viewport.clampPan();
-    assert.deepEqual([viewer.state.panX, viewer.state.panY], [50, -25]);
+    assert.deepEqual([viewer.state.panX, viewer.state.panY], [150, -75]);
 
     viewer.state.zoom = 1;
     viewer.state.fitMode = 'width';
