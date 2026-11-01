@@ -1958,6 +1958,7 @@ def test_fullscreen_help_and_inspector_are_reachable_with_trusted_input(tmp_path
         assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-controls')).display"), 'none');
         assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-bottom-panel')).display"), 'none');
         assert.equal(await evaluate('ReportViewer.dom.stage.getBoundingClientRect().height === innerHeight'), true);
+        await until('document.activeElement === ReportViewer.dom.stage');
         await key('?', 'Slash', '?');
         await until("ReportViewer.isHelpModalOpen()");
         assert.equal(await evaluate(hit('#btn-close-help')), true, 'Help close button is behind fullscreen');
