@@ -124,11 +124,14 @@ const ViewerFormat = {
             return clip?.signal?.is_hdr ? 'HDR' : 'SDR';
         }
         if (presentation.state === 'hdr_tonemapped') {
-            const curve = this.formatToneCurve(presentation.tone_curve);
-            const target = Number.isInteger(presentation.target_nits)
-                ? ` → ${presentation.target_nits} nits`
-                : '';
-            return `Tonemapped${curve ? ` · ${curve}` : ''}${target}`;
+            const tonemap = presentation.tonemap;
+            const algorithm = tonemap?.implementation === 'fallback'
+                ? 'fallback (peak-scaled)' : this.formatToneCurve(tonemap?.algorithm);
+            const target = Number.isInteger(tonemap?.target_nits) ? ` → ${tonemap.target_nits} nits` : '';
+            const peak = Number.isInteger(tonemap?.source_peak_nits)
+                ? ` · source peak ${tonemap.source_peak_nits} nits (${tonemap.source_peak_origin})` : '';
+            const cause = tonemap?.fallback_cause ? ` · ${tonemap.fallback_cause.replaceAll('_', ' ')}` : '';
+            return `Tonemapped${algorithm ? ` · ${algorithm}` : ''}${target}${peak}${cause}`;
         }
         if (presentation.state === 'hdr_tonemap_off') return 'HDR · Tonemap off';
         return 'SDR';
@@ -174,14 +177,13 @@ const ViewerFormat = {
     },
 
     formatTonemapSummary(tonemap) {
-        const settings = tonemap?.settings;
-        if (!tonemap?.applied || !settings) return 'Not applied';
-        const preset = settings.preset
-            ? String(settings.preset).replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase())
-            : '';
-        const curve = this.formatToneCurve(settings.tone_curve) || '';
-        const target = Number.isInteger(settings.target_nits) ? ` · ${settings.target_nits} nits` : '';
-        return [preset, curve].filter(Boolean).join(' · ') + target;
+        if (!tonemap?.ran) return 'Not applied';
+        const shared = tonemap.shared;
+        if (!shared) return 'Applied · varies by source';
+        const algorithm = shared.implementation === 'fallback'
+            ? 'fallback (peak-scaled)' : this.formatToneCurve(shared.algorithm);
+        const target = shared.effective_controls?.target_nits;
+        return `${algorithm}${Number.isInteger(target) ? ` · ${target} nits` : ''}`;
     },
 
     modeLabel(mode) {

@@ -14,7 +14,7 @@ from frame_compare.orchestration import preparation
 from frame_compare.orchestration.errors import (
     MixedSourceFpsError,
 )
-from frame_compare.orchestration.types import RunDependencies, RunRequest
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.vs.types import SourceInfo
 from tests.orchestration.preparation_test_support import (
     METRIC_CONFIG,
@@ -27,6 +27,7 @@ from tests.orchestration.preparation_test_support import (
 from tests.orchestration.preparation_test_support import (
     create_video_files as _create_video_files,
 )
+from tests.run_request_support import make_run_request
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -75,14 +76,13 @@ class FakeVSLoader:
     ("config_content", "fps_by_name", "source_fps", "effective_fps", "reference", "domain_fps"),
     [
         pytest.param(
-            MINIMAL_CONFIG
-            + '\n[sources.overrides."01-encode.mkv"]\neffective_fps = "24000/1001"\n',
-            {"00-reference.mkv": Fraction(24000, 1001), "01-encode.mkv": Fraction(30000, 1001)},
-            [Fraction(24000, 1001), Fraction(30000, 1001)],
-            [Fraction(24000, 1001), Fraction(24000, 1001)],
+            MINIMAL_CONFIG + '\n[sources.overrides."01-encode.mkv"]\neffective_fps = "25/1"\n',
+            {"00-reference.mkv": Fraction(25, 1), "01-encode.mkv": Fraction(27021, 1127)},
+            [Fraction(25, 1), Fraction(24000, 1001)],
+            [Fraction(25, 1), Fraction(25, 1)],
             None,
             None,
-            id="applies_effective_fps_overrides_without_changing_source_fps",
+            id="applies_effective_fps_overrides_after_source_fps_canonicalization",
         ),
         pytest.param(
             MINIMAL_CONFIG
@@ -92,7 +92,7 @@ class FakeVSLoader:
                 "01-source-24.mkv": Fraction(24, 1),
                 "02-source-ntsc-ish.mkv": Fraction(13978, 583),
             },
-            [Fraction(24000, 1001), Fraction(24, 1), Fraction(13978, 583)],
+            [Fraction(24000, 1001), Fraction(24, 1), Fraction(24000, 1001)],
             [Fraction(24000, 1001), Fraction(24000, 1001), Fraction(24000, 1001)],
             None,
             None,
@@ -125,13 +125,13 @@ def test_execute_prep_effective_fps(
     loader = FakeVSLoader(fps_by_name=fps_by_name)
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
+            make_run_request(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
         )
     )
     assert [clip.source_fps for clip in prep.clips] == source_fps
     assert [clip.effective_fps for clip in prep.clips] == effective_fps
     if reference is not None:
-        selection_domain = json.loads(prep.analysis_selection_domain)
+        selection_domain = json.loads(prep.selection_domain.token)
         assert selection_domain["reference_path"] == (input_dir / reference).as_posix()
         assert [clip["effective_fps"] for clip in selection_domain["clips"]] == domain_fps
 
@@ -157,7 +157,7 @@ def test_execute_prep_match_fps_preserves_explicit_comparison_effective_fps(
     with pytest.raises(MixedSourceFpsError) as exc_info:
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, loader)),
             )
         )
@@ -252,7 +252,7 @@ def test_execute_prep_majority_fps(
     loader = FakeVSLoader(fps_by_name=fps_by_name)
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
+            make_run_request(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
         )
     )
     if source_fps is not None:
@@ -291,7 +291,7 @@ def test_execute_prep_match_fps_majority_preserves_explicit_override_and_can_sti
     with pytest.raises(MixedSourceFpsError) as exc_info:
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, loader)),
             )
         )
@@ -314,7 +314,7 @@ def test_execute_prep_rejects_mixed_source_fps_before_downstream_work(tmp_path: 
     with pytest.raises(MixedSourceFpsError) as exc_info:
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, loader)),
             )
         )
@@ -329,3 +329,57 @@ def test_execute_prep_rejects_mixed_source_fps_before_downstream_work(tmp_path: 
         "comparison_path": str(input_dir / "b_comparison.mkv"),
         "comparison_fps": "30000/1001",
     }
+
+
+@pytest.mark.parametrize(
+    ("decoder_fps", "expected_source_fps"),
+    [
+        (Fraction(27021, 1127), Fraction(24000, 1001)),
+        (Fraction(24, 1), Fraction(24, 1)),
+        (Fraction(24000, 1001), Fraction(24000, 1001)),
+        (Fraction(25, 1), Fraction(25, 1)),
+        (
+            Fraction(24000, 1001) * Fraction(1_000_050, 1_000_000),
+            Fraction(24000, 1001) * Fraction(1_000_050, 1_000_000),
+        ),
+        (
+            Fraction(24000, 1001) * Fraction(1_000_010, 1_000_000),
+            Fraction(24000, 1001),
+        ),
+        (
+            Fraction(24000, 1001) * Fraction(999_990, 1_000_000),
+            Fraction(24000, 1001),
+        ),
+        (
+            Fraction(24000, 1001) * Fraction(1_000_011, 1_000_000),
+            Fraction(24000, 1001) * Fraction(1_000_011, 1_000_000),
+        ),
+        (
+            Fraction(24000, 1001) * Fraction(999_989, 1_000_000),
+            Fraction(24000, 1001) * Fraction(999_989, 1_000_000),
+        ),
+    ],
+)
+def test_execute_prep_canonicalizes_only_rates_within_ten_ppm(
+    decoder_fps: Fraction,
+    expected_source_fps: Fraction,
+    tmp_path: Path,
+) -> None:
+    _create_config(tmp_path)
+    _create_video_files(tmp_path / "comparison_videos", "00-reference.mkv", "01-comparison.mkv")
+    loader = FakeVSLoader(
+        fps_by_name={
+            "00-reference.mkv": decoder_fps,
+            "01-comparison.mkv": decoder_fps,
+        }
+    )
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            make_run_request(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
+        )
+    )
+
+    assert [clip.probe.fps for clip in prep.clips] == [decoder_fps] * 2
+    assert [clip.source_fps for clip in prep.clips] == [expected_source_fps] * 2
+    assert [clip.effective_fps for clip in prep.clips] == [expected_source_fps] * 2

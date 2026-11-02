@@ -118,9 +118,11 @@ def test_successful_write_prints_verified_next_steps_with_posix_quoting(
 
         lines = result.stderr.splitlines()
         doctor_line = next(line for line in lines if "frame-compare doctor" in line)
-        assert doctor_line.strip() == "1. Diagnose the runtime: frame-compare doctor"
         preview_line = next(line for line in lines if "Preview this configuration" in line)
         run_line = next(line for line in lines if line.strip().startswith("3. Run it:"))
+        assert doctor_line.strip() == "1. Diagnose the runtime: " + run_line.strip().removeprefix(
+            "3. Run it: "
+        ).replace("frame-compare run ", "frame-compare doctor ", 1)
 
         expected_root = root.resolve()
         expected_config = config_path.resolve()

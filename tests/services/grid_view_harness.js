@@ -1,366 +1,359 @@
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-const { domMechanics } = require('./dom_fixture');
+async function gridContracts() {
+    const assert = require('node:assert/strict');
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const vm = require('node:vm');
+    const { domMechanics } = require('./dom_fixture');
 
-const repoRoot = path.resolve(__dirname, '..', '..');
-const assetsPath = path.join(
-    repoRoot,
-    'src',
-    'frame_compare',
-    'services',
-    'report',
-    'assets',
-);
-const formatPath = path.join(assetsPath, 'viewer_format.js');
-const assetPath = path.join(assetsPath, 'grid_view.js');
-// The common fixture must preserve listener lifecycle and nested focus semantics.
-{
-    const document = { activeElement: null };
-    const parent = domMechanics(() => document);
-    const child = domMechanics(() => document);
-    const grandchild = domMechanics(() => document);
-    parent.append(child);
-    child.append(grandchild);
-    assert.equal(parent.contains(grandchild), true);
-    grandchild.focus();
-    assert.equal(document.activeElement, grandchild);
-    let onceCalls = 0;
-    child.addEventListener('load', () => {
-        onceCalls += 1;
+    const repoRoot = path.resolve(__dirname, '..', '..');
+    const assetsPath = path.join(
+        repoRoot,
+        'src',
+        'frame_compare',
+        'services',
+        'report',
+        'assets',
+    );
+    const formatPath = path.join(assetsPath, 'viewer_format.js');
+    const assetPath = path.join(assetsPath, 'grid_view.js');
+    // The common fixture must preserve listener lifecycle and nested focus semantics.
+    {
+        const document = { activeElement: null };
+        const parent = domMechanics(() => document);
+        const child = domMechanics(() => document);
+        const grandchild = domMechanics(() => document);
+        parent.append(child);
+        child.append(grandchild);
+        assert.equal(parent.contains(grandchild), true);
+        grandchild.focus();
+        assert.equal(document.activeElement, grandchild);
+        let onceCalls = 0;
+        child.addEventListener('load', () => {
+            onceCalls += 1;
+            child.dispatch('load');
+        }, { once: true });
         child.dispatch('load');
-    }, { once: true });
-    child.dispatch('load');
-    assert.equal(onceCalls, 1);
-    assert.equal(child.listenerCount('load'), 0);
-    const removed = () => assert.fail('removed listener ran');
-    child.addEventListener('input', () => child.removeEventListener('input', removed));
-    child.addEventListener('input', removed);
-    child.dispatch('input');
-    child.remove();
-    assert.equal(parent.contains(grandchild), false);
-    assert.equal(child.parentElement, null);
-    assert.equal(document.activeElement, null);
-}
+        assert.equal(onceCalls, 1);
+        assert.equal(child.listenerCount('load'), 0);
+        const removed = () => assert.fail('removed listener ran');
+        child.addEventListener('input', () => child.removeEventListener('input', removed));
+        child.addEventListener('input', removed);
+        child.dispatch('input');
+        child.remove();
+        assert.equal(parent.contains(grandchild), false);
+        assert.equal(child.parentElement, null);
+        assert.equal(document.activeElement, null);
+    }
 
-const context = {};
-const source = `${fs.readFileSync(formatPath, 'utf8')}\n${fs.readFileSync(assetPath, 'utf8')}\nglobalThis.__GridView = GridView;`;
-vm.runInNewContext(source, context, { filename: assetPath });
-const grid = context.__GridView;
+    const context = {};
+    const source = `${fs.readFileSync(formatPath, 'utf8')}\n${fs.readFileSync(assetPath, 'utf8')}\nglobalThis.__GridView = GridView;`;
+    vm.runInNewContext(source, context, { filename: assetPath });
+    const grid = context.__GridView;
 
-assert.equal(grid.layoutName(2, 769, 2), 'two');
-assert.equal(grid.layoutName(3, 1200, 3), 'three-wide');
-assert.equal(grid.layoutName(3, 1199, 3), 'three-wrap');
-assert.equal(grid.layoutName(4, 768, 1), 'mobile');
-assert.equal(grid.layoutName(6, 1600, 4), 'four');
-assert.equal(grid.layoutName(6, 767, 1), 'mobile');
+    assert.equal(grid.layoutName(2, 769, 2), 'two');
+    assert.equal(grid.layoutName(3, 1200, 3), 'three-wide');
+    assert.equal(grid.layoutName(3, 1199, 3), 'three-wrap');
+    assert.equal(grid.layoutName(4, 768, 1), 'mobile');
+    assert.equal(grid.layoutName(6, 1600, 4), 'four');
+    assert.equal(grid.layoutName(6, 767, 1), 'mobile');
 
-assert.deepEqual([...grid.visibleIndexes(0, 6, false)], [0, 1, 2, 3]);
-assert.deepEqual([...grid.visibleIndexes(4, 6, false)], [4, 5]);
-assert.deepEqual([...grid.visibleIndexes(3, 6, true)], [3]);
-assert.equal(grid.visibleIndexes(0, 100, false).length, 4);
-assert.equal(grid.visibleIndexes(0, 100, true).length, 1);
-assert.equal(grid.normalizedStart(5, 6, false), 4);
-assert.equal(grid.normalizedStart(5, 6, true), 5);
-assert.equal(grid.positionText(0, 6, false), 'Clips 1\u20134 of 6');
-assert.equal(grid.positionText(4, 6, false), 'Clips 5\u20136 of 6');
-assert.equal(grid.positionText(3, 6, true), 'Clip 4 of 6');
+    assert.deepEqual([...grid.visibleIndexes(0, 6, false)], [0, 1, 2, 3]);
+    assert.deepEqual([...grid.visibleIndexes(4, 6, false)], [4, 5]);
+    assert.deepEqual([...grid.visibleIndexes(3, 6, true)], [3]);
+    assert.equal(grid.visibleIndexes(0, 100, false).length, 4);
+    assert.equal(grid.visibleIndexes(0, 100, true).length, 1);
+    assert.equal(grid.normalizedStart(5, 6, false), 4);
+    assert.equal(grid.normalizedStart(5, 6, true), 5);
+    assert.equal(grid.positionText(0, 6, false), 'Clips 1\u20134 of 6');
+    assert.equal(grid.positionText(4, 6, false), 'Clips 5\u20136 of 6');
+    assert.equal(grid.positionText(3, 6, true), 'Clip 4 of 6');
 
-function fakeElement(tagName = 'div', rect = { left: 0, top: 0, width: 400, height: 240 }) {
-    const attributes = new Map();
-    const classes = new Set();
-    const element = {
-        ...domMechanics(() => context.document),
-        tagName: tagName.toUpperCase(),
-        rect,
-        dataset: {},
-        hidden: false,
-        disabled: false,
-        textContent: '',
-        className: '',
-        naturalWidth: tagName === 'img' ? 1920 : 0,
-        naturalHeight: tagName === 'img' ? 1080 : 0,
-        style: {
-            values: {},
-            setProperty(name, value) { this.values[name] = value; },
-        },
-        classList: {
-            toggle(name, force) {
-                if (force) classes.add(name);
-                else classes.delete(name);
+    function fakeElement(tagName = 'div', rect = { left: 0, top: 0, width: 400, height: 240 }) {
+        const attributes = new Map();
+        const classes = new Set();
+        const element = {
+            ...domMechanics(() => context.document),
+            tagName: tagName.toUpperCase(),
+            rect,
+            dataset: {},
+            hidden: false,
+            disabled: false,
+            textContent: '',
+            className: '',
+            naturalWidth: tagName === 'img' ? 1920 : 0,
+            naturalHeight: tagName === 'img' ? 1080 : 0,
+            style: {
+                values: {},
+                setProperty(name, value) { this.values[name] = value; },
             },
-        },
-        setAttribute(name, value) { attributes.set(name, String(value)); },
-        getAttribute(name) { return attributes.get(name) ?? null; },
-        removeAttribute(name) {
-            attributes.delete(name);
-            if (name === 'src') this.src = '';
-        },
-        getBoundingClientRect() { return this.rect; },
-        matches(selector) {
-            if (selector.startsWith('.')) {
-                return this.className.split(/\s+/).includes(selector.slice(1));
-            }
-            const dataMatch = selector.match(/^\[data-([a-z-]+)\]$/);
-            if (!dataMatch) return false;
-            const key = dataMatch[1].replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
-            return Object.hasOwn(this.dataset, key);
-        },
-        closest(selector) {
-            let current = this;
-            while (current) {
-                if (current.matches?.(selector)) return current;
-                current = current.parentElement;
-            }
-            return null;
-        },
-        querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
-        querySelectorAll(selector) {
-            const found = [];
-            const visit = node => {
-                node.children.forEach(child => {
-                    if (child.matches?.(selector)) found.push(child);
-                    visit(child);
-                });
-            };
-            visit(this);
-            return found;
+            classList: {
+                toggle(name, force) {
+                    if (force) classes.add(name);
+                    else classes.delete(name);
+                },
+            },
+            setAttribute(name, value) { attributes.set(name, String(value)); },
+            getAttribute(name) { return attributes.get(name) ?? null; },
+            removeAttribute(name) {
+                attributes.delete(name);
+                if (name === 'src') this.src = '';
+            },
+            getBoundingClientRect() { return this.rect; },
+            matches(selector) {
+                if (selector.startsWith('.')) {
+                    return this.className.split(/\s+/).includes(selector.slice(1));
+                }
+                const dataMatch = selector.match(/^\[data-([a-z-]+)\]$/);
+                if (!dataMatch) return false;
+                const key = dataMatch[1].replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+                return Object.hasOwn(this.dataset, key);
+            },
+            closest(selector) {
+                let current = this;
+                while (current) {
+                    if (current.matches?.(selector)) return current;
+                    current = current.parentElement;
+                }
+                return null;
+            },
+            querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
+            querySelectorAll(selector) {
+                const found = [];
+                const visit = node => {
+                    node.children.forEach(child => {
+                        if (child.matches?.(selector)) found.push(child);
+                        visit(child);
+                    });
+                };
+                visit(this);
+                return found;
+            },
+        };
+        return element;
+    }
+
+    const gridRoot = fakeElement('section', { left: 0, top: 0, width: 1300, height: 700 });
+    const cells = fakeElement('div', { left: 0, top: 0, width: 1284, height: 684 });
+    const frameError = fakeElement();
+    const controls = fakeElement();
+    const previous = fakeElement('button');
+    const next = fakeElement('button');
+    const position = fakeElement('span');
+    gridRoot.append(frameError, cells);
+    const mediaQuery = {
+        matches: false,
+        listener: null,
+        addEventListener(type, listener) {
+            if (type === 'change') this.listener = listener;
         },
     };
-    return element;
+    context.document = {
+        activeElement: null,
+        getElementById(id) {
+            return {
+                'rv-grid': gridRoot,
+                'btn-grid-prev': previous,
+                'btn-grid-next': next,
+            }[id] || null;
+        },
+        querySelector(selector) {
+            return {
+                '[data-grid-cells]': cells,
+                '[data-grid-frame-error]': frameError,
+                '[data-control-scope="grid"]': controls,
+                '[data-grid-position]': position,
+            }[selector] || null;
+        },
+        createElement(tagName) { return fakeElement(tagName); },
+    };
+    context.window = {
+        innerWidth: 1300,
+        matchMedia() { return mediaQuery; },
+        addEventListener(type, listener) {
+            if (type === 'resize') this.resizeListener = listener;
+        },
+        requestAnimationFrame(callback) { callback(); },
+    };
+    context.ResizeObserver = undefined;
+
+    const announcements = [];
+    const clips = Array.from({ length: 6 }, (_, index) => ({
+        label: `Clip ${index + 1}`,
+        display: {
+            primary: `Clip ${index + 1}`,
+            release: '',
+            control: `Clip ${index + 1}`,
+            micro: `Clip ${index + 1}`,
+            filename: `clip-${index + 1}.mkv`,
+        },
+        resolution: [1920, 1080],
+        size_bytes: (17 + index) * 1024 ** 3,
+        signal: { is_hdr: false },
+    }));
+    clips[1].resolution = [1080, 1920];
+    clips[2].resolution = [2560, 1080];
+    const frame = {
+        number: 12,
+        images: clips.map((_, index) => ({ src: `clip-${index + 1}.png` })),
+    };
+    const viewer = {
+        state: {
+            data: { clips, default_selection: { left_clip_index: 0 } },
+            currentFrameIdx: 0,
+            zoom: 1,
+            panX: 0,
+            panY: 0,
+            leftClipIdx: 3,
+            activeClipIdx: 1,
+        },
+        dom: { stage: gridRoot },
+        currentFrame() { return frame; },
+        referenceClipIndex() { return 0; },
+        viewport: { clampPan() {} },
+        updateInspectorData() {},
+        updateCurrentFrameMetadata() {},
+        announce(message) { announcements.push(message); },
+        lens: { refresh() {}, sync() {} },
+    };
+    const owner = grid.create(viewer);
+    owner.bind();
+    owner.setActive(true);
+    owner.render();
+    gridRoot.rect.width = 768;
+    context.window.resizeListener();
+    assert.equal(owner.state.mobile, true);
+    gridRoot.rect.width = 1300;
+    context.window.resizeListener();
+    assert.equal(owner.state.mobile, false);
+    assert.equal(cells.children.length, 4);
+    assert.deepEqual([...owner.indexes()], [0, 1, 2, 3]);
+    assert.equal(controls.hidden, false);
+    assert.equal(position.textContent, 'Clips 1–4 of 6');
+    assert.equal(cells.children[0].dataset.reference, 'true');
+    assert.match(cells.children[0].getAttribute('aria-label'), /Reference/);
+    assert.match(cells.children[0].getAttribute('aria-label'), /17\.00 GiB/);
+    assert.match(cells.children[1].getAttribute('aria-label'), /18\.00 GiB/);
+    assert.equal(cells.children[3].dataset.reference, 'false');
+    assert.doesNotMatch(cells.children[3].getAttribute('aria-label'), /Reference/);
+    assert.equal(cells.children[1].dataset.active, 'true');
+    assert.match(cells.children[1].getAttribute('aria-label'), /Active/);
+    assert.equal(
+        cells.children[0].querySelector('.rv-grid-label-text').textContent,
+        'Clip 1 · 1920×1080 · SDR · 17.00 GiB',
+    );
+    assert.equal(
+        cells.children[1].querySelector('.rv-grid-label-text').textContent,
+        'Clip 2 · 1080×1920 · SDR · 18.00 GiB',
+    );
+    assert.ok(cells.children[0].getAttribute('aria-label').startsWith('Clip 1 — clip-1.mkv'));
+    assert.doesNotMatch(cells.children[0].getAttribute('aria-label'), /^Clip \d,/);
+    viewer.state.overlaysHidden = true;
+    owner.updateCellRoles();
+    assert.doesNotMatch(cells.children[0].getAttribute('aria-label'), /17\.00 GiB/);
+    viewer.state.overlaysHidden = false;
+    owner.updateCellRoles();
+
+    const mixedImages = cells.querySelectorAll('.rv-grid-image');
+    mixedImages.forEach((image, index) => {
+        [image.naturalWidth, image.naturalHeight] = clips[index].resolution;
+        image.dispatch('load');
+    });
+    viewer.state.zoom = 2;
+    viewer.state.panX = 0.1;
+    viewer.state.panY = -0.05;
+    owner.syncViewport();
+    const landscapePan = Number.parseFloat(mixedImages[0].style.values['--grid-pan-x']);
+    const portraitPan = Number.parseFloat(mixedImages[1].style.values['--grid-pan-x']);
+    assert.equal(landscapePan / Number.parseFloat(mixedImages[0].style.width), 0.1);
+    assert.equal(portraitPan / Number.parseFloat(mixedImages[1].style.width), 0.1);
+    assert.notEqual(landscapePan, portraitPan);
+    const zoomClient = { x: 300, y: 150 };
+    const zoomAnchor = owner.zoomAnchorForPoint(zoomClient.x, zoomClient.y);
+    const nextZoom = 3;
+    const zoomPan = owner.panForZoomAnchor(
+        zoomAnchor,
+        zoomClient.x,
+        zoomClient.y,
+        nextZoom,
+    );
+    const contentAfterZoom = (
+        zoomClient.x - zoomAnchor.centerX - zoomPan.x * zoomAnchor.width
+    ) / (zoomAnchor.width * nextZoom);
+    assert.ok(Math.abs(contentAfterZoom - zoomAnchor.contentX) < 1e-12);
+    const panBasis = owner.panBasisForPoint(zoomClient.x, zoomClient.y);
+    assert.equal(panBasis.width, Number.parseFloat(mixedImages[0].style.width));
+    assert.equal(panBasis.height, Number.parseFloat(mixedImages[0].style.height));
+
+    const focusedCell = cells.children[2];
+    focusedCell.focus();
+    assert.equal(viewer.state.activeClipIdx, 2);
+    owner.render();
+    assert.equal(context.document.activeElement.dataset.clipIndex, '2');
+    assert.equal(context.document.activeElement.dataset.active, 'true');
+    mediaQuery.matches = true;
+    mediaQuery.listener();
+    assert.deepEqual([...owner.indexes()], [2]);
+    assert.equal(context.document.activeElement.dataset.clipIndex, '2');
+    mediaQuery.matches = false;
+    mediaQuery.listener();
+    assert.deepEqual([...owner.indexes()], [0, 1, 2, 3]);
+    assert.equal(context.document.activeElement.dataset.clipIndex, '2');
+
+    const staleImage = cells.children[0].querySelector('.rv-grid-image');
+    owner.render();
+    const currentCell = cells.children[0];
+    const currentImage = currentCell.querySelector('.rv-grid-image');
+    const currentError = currentCell.querySelector('[data-grid-error]');
+    viewer.state.overlaysHidden = true;
+    owner.updateCellRoles();
+    currentImage.dispatch('error');
+    assert.equal(owner.state.failed.has(0), true);
+    assert.equal(currentError.hidden, false);
+    assert.doesNotMatch(currentCell.getAttribute('aria-label'), /17\.00 GiB/);
+    assert.equal(currentError.children[0].textContent, 'Clip 1 image unavailable');
+    assert.equal(
+        currentCell.querySelector('[data-grid-retry]').getAttribute('aria-label'),
+        'Retry Clip 1 image',
+    );
+    assert.equal(announcements.at(-1), 'Clip 1 image unavailable.');
+    staleImage.dispatch('load');
+    assert.equal(owner.state.failed.has(0), true);
+    currentImage.dispatch('load');
+    assert.equal(owner.state.failed.has(0), false);
+    assert.equal(currentError.hidden, true);
+    viewer.state.overlaysHidden = false;
+    owner.updateCellRoles();
+
+    currentImage.dispatch('error');
+    const retry = currentCell.querySelector('[data-grid-retry]');
+    assert.ok(retry);
+    retry.dispatch('click', { stopPropagation() {} });
+    assert.equal(currentCell.dataset.status, 'loading');
+    assert.equal(currentCell.focused, true);
+
+    owner.render();
+    cells.children.forEach(cell => cell.querySelector('.rv-grid-image').dispatch('error'));
+    assert.equal(frameError.hidden, false);
+    cells.children[0].querySelector('.rv-grid-image').dispatch('load');
+    assert.equal(frameError.hidden, true);
+
+    next.dispatch('click');
+    assert.deepEqual([...owner.indexes()], [4, 5]);
+    assert.equal(cells.children.length, 2);
+    assert.equal(position.textContent, 'Clips 5–6 of 6');
+    assert.equal(announcements.at(-1), 'Clips 5–6 of 6 visible.');
+
+    mediaQuery.matches = true;
+    mediaQuery.listener();
+    assert.deepEqual([...owner.indexes()], [4]);
+    assert.equal(cells.children.length, 1);
+    assert.equal(position.textContent, 'Clip 5 of 6');
+    owner.clear();
+    assert.equal(cells.children.length, 0);
+
+
+
 }
 
-const gridRoot = fakeElement('section', { left: 0, top: 0, width: 1300, height: 700 });
-const cells = fakeElement('div', { left: 0, top: 0, width: 1284, height: 684 });
-const frameError = fakeElement();
-const controls = fakeElement();
-const previous = fakeElement('button');
-const next = fakeElement('button');
-const position = fakeElement('span');
-gridRoot.append(frameError, cells);
-const mediaQuery = {
-    matches: false,
-    listener: null,
-    addEventListener(type, listener) {
-        if (type === 'change') this.listener = listener;
-    },
-};
-context.document = {
-    activeElement: null,
-    getElementById(id) {
-        return {
-            'rv-grid': gridRoot,
-            'btn-grid-prev': previous,
-            'btn-grid-next': next,
-        }[id] || null;
-    },
-    querySelector(selector) {
-        return {
-            '[data-grid-cells]': cells,
-            '[data-grid-frame-error]': frameError,
-            '[data-control-scope="grid"]': controls,
-            '[data-grid-position]': position,
-        }[selector] || null;
-    },
-    createElement(tagName) { return fakeElement(tagName); },
-};
-context.window = {
-    innerWidth: 1300,
-    matchMedia() { return mediaQuery; },
-    addEventListener(type, listener) {
-        if (type === 'resize') this.resizeListener = listener;
-    },
-    requestAnimationFrame(callback) { callback(); },
-};
-context.ResizeObserver = undefined;
-
-const announcements = [];
-const clips = Array.from({ length: 6 }, (_, index) => ({
-    label: `Clip ${index + 1}`,
-    display: {
-        primary: `Clip ${index + 1}`,
-        release: '',
-        control: `Clip ${index + 1}`,
-        micro: `Clip ${index + 1}`,
-        filename: `clip-${index + 1}.mkv`,
-    },
-    resolution: [1920, 1080],
-    size_bytes: (17 + index) * 1024 ** 3,
-    signal: { is_hdr: false },
-}));
-clips[1].resolution = [1080, 1920];
-clips[2].resolution = [2560, 1080];
-const frame = {
-    number: 12,
-    images: clips.map((_, index) => ({ src: `clip-${index + 1}.png` })),
-};
-const viewer = {
-    state: {
-        data: { clips, default_selection: { left_clip_index: 0 } },
-        currentFrameIdx: 0,
-        zoom: 1,
-        panX: 0,
-        panY: 0,
-        leftClipIdx: 3,
-        activeClipIdx: 1,
-    },
-    dom: { stage: gridRoot },
-    currentFrame() { return frame; },
-    referenceClipIndex() { return 0; },
-    viewport: { clampPan() {} },
-    updateInspectorData() {},
-    updateCurrentFrameMetadata() {},
-    announce(message) { announcements.push(message); },
-    lens: { refresh() {}, sync() {} },
-};
-const owner = grid.create(viewer);
-owner.bind();
-owner.setActive(true);
-owner.render();
-gridRoot.rect.width = 768;
-context.window.resizeListener();
-assert.equal(owner.state.mobile, true);
-gridRoot.rect.width = 1300;
-context.window.resizeListener();
-assert.equal(owner.state.mobile, false);
-assert.equal(cells.children.length, 4);
-assert.deepEqual([...owner.indexes()], [0, 1, 2, 3]);
-assert.equal(controls.hidden, false);
-assert.equal(position.textContent, 'Clips 1–4 of 6');
-assert.equal(cells.children[0].dataset.reference, 'true');
-assert.match(cells.children[0].getAttribute('aria-label'), /Reference/);
-assert.match(cells.children[0].getAttribute('aria-label'), /17\.00 GiB/);
-assert.match(cells.children[1].getAttribute('aria-label'), /18\.00 GiB/);
-assert.equal(cells.children[3].dataset.reference, 'false');
-assert.doesNotMatch(cells.children[3].getAttribute('aria-label'), /Reference/);
-assert.equal(cells.children[1].dataset.active, 'true');
-assert.match(cells.children[1].getAttribute('aria-label'), /Active/);
-assert.equal(
-    cells.children[0].querySelector('.rv-grid-label-text').textContent,
-    'Clip 1 · 1920×1080 · SDR · 17.00 GiB',
-);
-assert.equal(
-    cells.children[1].querySelector('.rv-grid-label-text').textContent,
-    'Clip 2 · 1080×1920 · SDR · 18.00 GiB',
-);
-assert.ok(cells.children[0].getAttribute('aria-label').startsWith('Clip 1 — clip-1.mkv'));
-assert.doesNotMatch(cells.children[0].getAttribute('aria-label'), /^Clip \d,/);
-viewer.state.overlaysHidden = true;
-owner.updateCellRoles();
-assert.doesNotMatch(cells.children[0].getAttribute('aria-label'), /17\.00 GiB/);
-viewer.state.overlaysHidden = false;
-owner.updateCellRoles();
-
-const mixedImages = cells.querySelectorAll('.rv-grid-image');
-mixedImages.forEach((image, index) => {
-    [image.naturalWidth, image.naturalHeight] = clips[index].resolution;
-    image.dispatch('load');
-});
-viewer.state.zoom = 2;
-viewer.state.panX = 0.1;
-viewer.state.panY = -0.05;
-owner.syncViewport();
-const landscapePan = Number.parseFloat(mixedImages[0].style.values['--grid-pan-x']);
-const portraitPan = Number.parseFloat(mixedImages[1].style.values['--grid-pan-x']);
-assert.equal(landscapePan / Number.parseFloat(mixedImages[0].style.width), 0.1);
-assert.equal(portraitPan / Number.parseFloat(mixedImages[1].style.width), 0.1);
-assert.notEqual(landscapePan, portraitPan);
-const zoomClient = { x: 300, y: 150 };
-const zoomAnchor = owner.zoomAnchorForPoint(zoomClient.x, zoomClient.y);
-const nextZoom = 3;
-const zoomPan = owner.panForZoomAnchor(
-    zoomAnchor,
-    zoomClient.x,
-    zoomClient.y,
-    nextZoom,
-);
-const contentAfterZoom = (
-    zoomClient.x - zoomAnchor.centerX - zoomPan.x * zoomAnchor.width
-) / (zoomAnchor.width * nextZoom);
-assert.ok(Math.abs(contentAfterZoom - zoomAnchor.contentX) < 1e-12);
-const panBasis = owner.panBasisForPoint(zoomClient.x, zoomClient.y);
-assert.equal(panBasis.width, Number.parseFloat(mixedImages[0].style.width));
-assert.equal(panBasis.height, Number.parseFloat(mixedImages[0].style.height));
-
-const focusedCell = cells.children[2];
-focusedCell.focus();
-assert.equal(viewer.state.activeClipIdx, 2);
-owner.render();
-assert.equal(context.document.activeElement.dataset.clipIndex, '2');
-assert.equal(context.document.activeElement.dataset.active, 'true');
-mediaQuery.matches = true;
-mediaQuery.listener();
-assert.deepEqual([...owner.indexes()], [2]);
-assert.equal(context.document.activeElement.dataset.clipIndex, '2');
-mediaQuery.matches = false;
-mediaQuery.listener();
-assert.deepEqual([...owner.indexes()], [0, 1, 2, 3]);
-assert.equal(context.document.activeElement.dataset.clipIndex, '2');
-
-const staleImage = cells.children[0].querySelector('.rv-grid-image');
-owner.render();
-const currentCell = cells.children[0];
-const currentImage = currentCell.querySelector('.rv-grid-image');
-const currentError = currentCell.querySelector('[data-grid-error]');
-viewer.state.overlaysHidden = true;
-owner.updateCellRoles();
-currentImage.dispatch('error');
-assert.equal(owner.state.failed.has(0), true);
-assert.equal(currentError.hidden, false);
-assert.doesNotMatch(currentCell.getAttribute('aria-label'), /17\.00 GiB/);
-assert.equal(currentError.children[0].textContent, 'Clip 1 image unavailable');
-assert.equal(
-    currentCell.querySelector('[data-grid-retry]').getAttribute('aria-label'),
-    'Retry Clip 1 image',
-);
-assert.equal(announcements.at(-1), 'Clip 1 image unavailable.');
-staleImage.dispatch('load');
-assert.equal(owner.state.failed.has(0), true);
-currentImage.dispatch('load');
-assert.equal(owner.state.failed.has(0), false);
-assert.equal(currentError.hidden, true);
-viewer.state.overlaysHidden = false;
-owner.updateCellRoles();
-
-currentImage.dispatch('error');
-const retry = currentCell.querySelector('[data-grid-retry]');
-assert.ok(retry);
-retry.dispatch('click', { stopPropagation() {} });
-assert.equal(currentCell.dataset.status, 'loading');
-assert.equal(currentCell.focused, true);
-
-owner.render();
-cells.children.forEach(cell => cell.querySelector('.rv-grid-image').dispatch('error'));
-assert.equal(frameError.hidden, false);
-cells.children[0].querySelector('.rv-grid-image').dispatch('load');
-assert.equal(frameError.hidden, true);
-
-next.dispatch('click');
-assert.deepEqual([...owner.indexes()], [4, 5]);
-assert.equal(cells.children.length, 2);
-assert.equal(position.textContent, 'Clips 5–6 of 6');
-assert.equal(announcements.at(-1), 'Clips 5–6 of 6 visible.');
-
-mediaQuery.matches = true;
-mediaQuery.listener();
-assert.deepEqual([...owner.indexes()], [4]);
-assert.equal(cells.children.length, 1);
-assert.equal(position.textContent, 'Clip 5 of 6');
-owner.clear();
-assert.equal(cells.children.length, 0);
-
-console.log(JSON.stringify({
-    layouts: ['two', 'three-wide', 'three-wrap', 'four', 'mobile'],
-    desktopPageLimit: grid.DESKTOP_PAGE_SIZE,
-    desktopPages: [[0, 1, 2, 3], [4, 5]],
-    mobilePageLimit: grid.pageSize(true),
-    payloadOrderPreserved: true,
-    realOwnerLifecycle: true,
-    staleEventsIgnored: true,
-    retryState: true,
-    allFailedRecoverable: true,
-    normalizedMixedAspectViewport: true,
-    focusRetainedAcrossRenderAndReflow: true,
-    referenceAndActiveCues: true,
-}));
+module.exports = { gridContracts };
+if (require.main === module) require('./harness_runner').run(module.exports);

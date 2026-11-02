@@ -101,7 +101,7 @@ def test_write_config_uses_selected_color_authority_despite_ambient_default(
         root = cwd / "workspace"
         selected = root / "configs" / "selected.toml"
         selected.parent.mkdir(parents=True)
-        selected.write_text('[color]\npreset = "filmic"\n')
+        selected.write_text('[color]\npreset = "spline"\n')
         presets = root / "config" / "presets"
         presets.mkdir(parents=True)
         (presets / "partial.toml").write_text("[analysis]\nrandom_frame_count = 23\n")
@@ -119,7 +119,7 @@ def test_write_config_uses_selected_color_authority_despite_ambient_default(
             ],
         )
         assert applied.exit_code == 0, applied.stdout + applied.stderr
-        expected = get_preset_settings(TonemapPreset.FILMIC)
+        expected = get_preset_settings(TonemapPreset.SPLINE)
         assert resolve_tonemap_settings(load_config(selected)) == expected
 
         written = runner.invoke(

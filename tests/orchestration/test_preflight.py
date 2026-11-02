@@ -9,20 +9,23 @@ from typing import Literal
 import pytest
 
 from frame_compare.config.errors import ConfigNotFoundError, ConfigValidationError
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import ConfigSchema, PathsConfig
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration.errors import (
-    DirectoryNotFoundError,
     NoVideosFoundError,
 )
 from frame_compare.orchestration.preflight import (
-    PreflightResult,
     discover_inputs,
-    prepare_preflight,
     resolve_contained_path,
     resolve_paths,
     resolve_selected_config_path,
-    resolve_workspace,
+)
+from frame_compare.orchestration.run_inputs import (
+    AcquiredRunConfig,
+    acquire_run_config,
+    resolve_run_workspace,
+    select_run_config_path,
 )
 
 # Minimal valid TOML config content
@@ -50,31 +53,12 @@ def _create_video_files(input_dir: Path, *filenames: str) -> None:
         (input_dir / name).touch()
 
 
-class TestResolveWorkspace:
-    """Tests for resolve_workspace function."""
-
-    @pytest.mark.parametrize(
-        ("explicit", "has_config", "subdirectory"),
-        [(True, False, False), (False, True, False), (False, True, True), (False, False, False)],
-        ids=["explicit-root", "cwd-config", "upward-config", "cwd-fallback"],
-    )
-    def test_resolve_workspace(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        explicit: bool,
-        has_config: bool,
-        subdirectory: bool,
-    ) -> None:
-        if has_config:
-            _create_config(tmp_path)
-        cwd = tmp_path / "subdir" if subdirectory else tmp_path
-        if subdirectory:
-            cwd.mkdir()
-        if not explicit:
-            monkeypatch.chdir(cwd)
-        result = resolve_workspace(tmp_path if explicit else None)
-        assert result == (tmp_path.resolve() if explicit else tmp_path)
+def test_selection_does_not_search_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _create_config(tmp_path)
+    child = tmp_path / "child"
+    child.mkdir()
+    monkeypatch.chdir(child)
+    assert select_run_config_path(None, None) == (child, child / "config/config.toml")
 
 
 class TestResolvePaths:
@@ -525,90 +509,63 @@ class TestDiscoverInputs:
 
 
 class TestPreparePreflight:
-    """Tests for prepare_preflight function."""
+    """Tests for acquire_run_config function."""
 
-    def test_prepare_preflight_success(self, tmp_path: Path) -> None:
-        """Given valid config dir with video files → returns PreflightResult."""
+    def test_acquire_run_config_success(self, tmp_path: Path) -> None:
+        """Given valid config dir with video files → returns AcquiredRunConfig."""
         _create_config(tmp_path)
         input_dir = tmp_path / "comparison_videos"
         _create_video_files(input_dir, "source.mkv", "encode.mp4")
 
-        result = prepare_preflight(root=tmp_path)
+        result = acquire_run_config(root=tmp_path)
 
-        assert isinstance(result, PreflightResult)
+        assert isinstance(result, AcquiredRunConfig)
         assert result.config is not None
-        assert result.workspace.root == tmp_path.resolve()
-        assert result.workspace.input_dir == input_dir.resolve()
+        assert resolve_run_workspace(result).root == tmp_path.resolve()
+        assert resolve_run_workspace(result).input_dir == input_dir.resolve()
 
-    @pytest.mark.parametrize(
-        ("has_config", "has_input_dir", "error_type"),
-        [
-            (False, False, ConfigNotFoundError),
-            (True, False, DirectoryNotFoundError),
-            (True, True, NoVideosFoundError),
-        ],
-        ids=["missing-config", "missing-input", "empty-input"],
-    )
-    def test_prepare_preflight_missing_inputs(
-        self,
-        tmp_path: Path,
-        has_config: bool,
-        has_input_dir: bool,
-        error_type: type[ConfigNotFoundError]
-        | type[DirectoryNotFoundError]
-        | type[NoVideosFoundError],
-    ) -> None:
-        if has_config:
-            _create_config(tmp_path)
-        input_dir = tmp_path / "comparison_videos"
-        if has_input_dir:
-            input_dir.mkdir(parents=True)
-        with pytest.raises(error_type) as exc_info:
-            prepare_preflight(root=tmp_path)
-        if has_input_dir:
-            error = exc_info.value
-            assert isinstance(error, NoVideosFoundError)
-            assert error.path == input_dir.resolve()
-            assert "*.mkv" in error.patterns
+    def test_acquire_missing_config(self, tmp_path: Path) -> None:
+        with pytest.raises(ConfigNotFoundError):
+            acquire_run_config(root=tmp_path)
 
-    def test_prepare_preflight_with_explicit_config_path(self, tmp_path: Path) -> None:
+    def test_acquire_run_config_with_explicit_config_path(self, tmp_path: Path) -> None:
         """Given explicit config_path → loads that config file."""
         config_file = _create_config(tmp_path)
         input_dir = tmp_path / "comparison_videos"
         _create_video_files(input_dir, "test.mkv")
 
-        result = prepare_preflight(config_path=config_file)
+        result = acquire_run_config(root=tmp_path, config_path=config_file)
 
-        assert result.workspace.config_file == config_file.resolve()
+        assert resolve_run_workspace(result).config_file == config_file.resolve()
 
-    def test_prepare_preflight_overrides_input_dir_before_validation(self, tmp_path: Path) -> None:
+    def test_acquire_run_config_overrides_input_dir_before_validation(self, tmp_path: Path) -> None:
         """Overrides input_dir before validating directory existence."""
         _create_config(tmp_path)
         override_dir = tmp_path / "override_videos"
         _create_video_files(override_dir, "override.mkv")
 
-        result = prepare_preflight(
+        result = acquire_run_config(
             root=tmp_path,
-            overrides={"paths": {"input_dir": "override_videos"}},
+            overrides=CLIConfigOverrides(input_dir=Path("override_videos")),
         )
 
-        assert result.workspace.input_dir == override_dir.resolve()
+        assert resolve_run_workspace(result).input_dir == override_dir.resolve()
 
-    def test_prepare_preflight_allows_external_input_override(self, tmp_path: Path) -> None:
+    def test_acquire_run_config_allows_external_input_override(self, tmp_path: Path) -> None:
         root = tmp_path / "workspace"
         _create_config(root)
         external_input = tmp_path / "media"
         _create_video_files(external_input, "external.mkv")
 
-        result = prepare_preflight(
+        result = acquire_run_config(
             root=root,
-            overrides={"paths": {"input_dir": str(external_input)}},
+            overrides=CLIConfigOverrides(input_dir=external_input),
         )
 
-        assert result.workspace.input_dir == external_input.resolve()
-        assert result.workspace.generated_dir.is_relative_to(root.resolve())
+        assert resolve_run_workspace(result).input_dir == external_input.resolve()
+        assert resolve_run_workspace(result).generated_dir.is_relative_to(root.resolve())
 
-    def test_prepare_preflight_allows_external_generated_root(self, tmp_path: Path) -> None:
+    def test_acquire_run_config_allows_external_generated_root(self, tmp_path: Path) -> None:
         root = tmp_path / "workspace"
         external_generated = tmp_path / "external-generated"
         _create_config(
@@ -620,23 +577,23 @@ class TestPreparePreflight:
         )
         _create_video_files(root / "comparison_videos", "external.mkv")
 
-        result = prepare_preflight(root=root)
+        result = acquire_run_config(root=root)
 
-        assert result.workspace.generated_root == external_generated.resolve()
+        assert resolve_run_workspace(result).generated_root == external_generated.resolve()
         assert not (root / "generated").exists()
 
-    def test_prepare_preflight_allows_symlinked_external_input(self, tmp_path: Path) -> None:
+    def test_acquire_run_config_allows_symlinked_external_input(self, tmp_path: Path) -> None:
         root = tmp_path / "workspace"
         _create_config(root, MINIMAL_CONFIG.replace('"comparison_videos"', '"linked-media"'))
         external_input = tmp_path / "media"
         _create_video_files(external_input, "external.mkv")
         (root / "linked-media").symlink_to(external_input, target_is_directory=True)
 
-        result = prepare_preflight(root=root)
+        result = acquire_run_config(root=root)
 
-        assert result.workspace.input_dir == external_input.resolve()
+        assert resolve_run_workspace(result).input_dir == external_input.resolve()
 
-    def test_prepare_preflight_rejects_external_config_before_exists_or_load(
+    def test_acquire_run_config_rejects_external_config_before_exists_or_load(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -648,11 +605,37 @@ class TestPreparePreflight:
         def _unexpected_load(*_args: object, **_kwargs: object) -> ConfigSchema:
             raise AssertionError("load_config must not run for an external config path")
 
-        monkeypatch.setattr("frame_compare.orchestration.preflight.load_config", _unexpected_load)
-
         with pytest.raises(PathEscapesRootError) as exc_info:
-            prepare_preflight(root=root, config_path=external_config)
+            acquire_run_config(
+                root=root, config_path=external_config, load_config_fn=_unexpected_load
+            )
 
         assert exc_info.value.code == "FC-3009"
         assert exc_info.value.context.details is not None
         assert exc_info.value.context.details["path"] == str(external_config.resolve())
+
+
+def test_workspace_rechecks_containment_after_acquisition(tmp_path: Path) -> None:
+    _create_config(tmp_path)
+    inputs = acquire_run_config(root=tmp_path)
+    cache_parent = tmp_path / "generated/cache"
+    cache_parent.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (cache_parent / "analysis").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(PathEscapesRootError):
+        resolve_run_workspace(inputs)
+
+
+def test_workspace_does_not_expand_an_acquired_config_path_again(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_dir = tmp_path / "$LITERAL"
+    config_dir.mkdir()
+    config_file = config_dir / "selected.toml"
+    config_file.write_text("[paths]\ninput_dir = 'incoming'\n")
+    monkeypatch.delenv("LITERAL", raising=False)
+    inputs = acquire_run_config(root=tmp_path, config_path=config_file)
+    monkeypatch.setenv("LITERAL", "different")
+    assert resolve_run_workspace(inputs).config_file == config_file

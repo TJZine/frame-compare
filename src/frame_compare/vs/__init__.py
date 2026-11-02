@@ -16,7 +16,13 @@ if TYPE_CHECKING:
     from frame_compare.vs.props import detect_hdr
     from frame_compare.vs.source import LWLibavSourceOptions, apply_trim, load_source
     from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings
-    from frame_compare.vs.types import HDRMetadata, SourceInfo, TonemapSettings
+    from frame_compare.vs.types import (
+        AppliedTonemap,
+        HDRMetadata,
+        SourceInfo,
+        TonemapResult,
+        TonemapSettings,
+    )
 
 
 _EXPORTS: dict[str, tuple[str, str]] = {
@@ -40,6 +46,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     # types
     "HDRMetadata": ("frame_compare.vs.types", "HDRMetadata"),
     "SourceInfo": ("frame_compare.vs.types", "SourceInfo"),
+    "AppliedTonemap": ("frame_compare.vs.types", "AppliedTonemap"),
+    "TonemapResult": ("frame_compare.vs.types", "TonemapResult"),
     "TonemapSettings": ("frame_compare.vs.types", "TonemapSettings"),
 }
 
@@ -49,6 +57,8 @@ __all__ = [
     "SourceInfo",
     "HDRMetadata",
     "TonemapSettings",
+    "AppliedTonemap",
+    "TonemapResult",
     "LWLibavSourceOptions",
     "is_vapoursynth_available",
     "ensure_vs_environment",

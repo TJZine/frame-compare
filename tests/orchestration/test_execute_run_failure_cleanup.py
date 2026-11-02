@@ -10,7 +10,8 @@ import pytest
 
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import preparation
-from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.coordinator import RunDependencies, execute_run
+from frame_compare.orchestration.run_inputs import acquire_run_config, resolve_run_workspace
 from frame_compare.services.errors import GeneratedDataReservationError
 from frame_compare.services.run_folder import (
     RunFolderReservation,
@@ -20,6 +21,7 @@ from frame_compare.services.run_folder import (
 )
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.vs.types import SourceInfo
+from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
@@ -44,18 +46,18 @@ def test_execute_run_run_info_write_failure_happens_before_probing_and_cleans_em
     create_config(tmp_path, content=MINIMAL_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
-    generated_dir = preparation.prepare_preflight(root=tmp_path).workspace.generated_dir
+    generated_dir = resolve_run_workspace(acquire_run_config(root=tmp_path)).generated_dir
 
     def _fail_write_run_info(*_args: object, **_kwargs: object) -> None:
         raise OSError("disk full")
 
     monkeypatch.setattr(preparation, "write_run_info", _fail_write_run_info)
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=True,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=NoProbeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
@@ -108,11 +110,11 @@ def test_execute_run_post_reservation_resolution_failure_cleans_run_directory(
     with pytest.raises(GeneratedDataReservationError, match="Unable to reserve"):
         asyncio.run(
             execute_run(
-                RunRequest(
+                make_run_request(
                     root=tmp_path,
                     skip_analysis=True,
                     skip_metadata=True,
-                    config_overrides=CLIConfigOverrides(no_upload=True),
+                    overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 deps=RunDependencies(
                     vs_loader=NoProbeVSLoader(),

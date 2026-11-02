@@ -29,17 +29,17 @@ The expected candidate profile is:
 
 | Component | Expected Windows identity |
 | --- | --- |
-| Python | 3.13.16 |
+| Python | 3.13.17 |
 | VapourSynth | R81, API R4.3 |
 | L-SMASH-Works | `vapoursynth-lsmas` 1310.0.0.0 / native lineage 1310.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
 | vs-placebo | 2.0.4 |
 | BestSource (VSView/UI only) | 22 |
-| VSView / CLI parser | 0.12.0 / Cyclopts 5.2.0 |
+| VSView / CLI parser | 0.13.0 / Cyclopts 5.3.0 |
 | vspackrgb | 2.0.0 (Rust extension) |
-| PySide6 family | 6.11.2 |
+| PySide6 family | 6.12.0; WebEngine/PDF distribution metadata 6.12.0.140 |
 | FFmpeg | `n8.1.3-9-g29e619e767`, BtbN win64 LGPL 8.1 build `autobuild-2026-09-30-13-08` |
-| Full runtime fingerprint | `b47d64de188aab069cf3c3b9d51add6d0b3416c5ee175b4c0646b72436219320` |
+| Full runtime fingerprint | `3ba680493a218e486baabbff812ad5047c50b471be742d420e721579fc8eaad0` |
 | L-SMASH index token | `lsw1310-f125953022b6` |
 
 ## 1. Exact source and repository gates
@@ -319,7 +319,9 @@ Verify with old and newly generated data:
 - Alignment reuse misses when the standalone FFmpeg lineage differs.
 - Render/run metadata records the complete candidate runtime contract.
 - `--from-cache-only` fails closed when only stale cache data exists.
-- `--no-cache` does not read or persist reusable cache data.
+- `--no-cache` removes the matching analysis entry, recomputes, and persists a fresh
+  entry; repeated runs without it then hit. See the
+  [run command contract](current-cli-contract.md#run-command-contract).
 - Repeated candidate runs produce valid cache hits without changing selected frames.
 - Unrelated cache scopes are not invalidated without a documented reason.
 

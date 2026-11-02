@@ -84,7 +84,12 @@ def test_calculate_metrics_uses_cache_on_hit(mock_key, mock_load, tmp_path):
     )
     mock_load.return_value = MagicMock(success=True, metrics=metrics)
 
-    result = calculate_metrics(video_paths, config, tmp_path)
+    result = calculate_metrics(
+        MetricCacheRequest(analysis_source_path=None),
+        video_paths=video_paths,
+        config=config,
+        cache_dir=tmp_path,
+    )
     assert result.disposition == "hit"
     assert result.metrics == metrics
     mock_load.assert_called_once()
@@ -111,10 +116,11 @@ def test_calculate_metrics_records_proven_cache_hit(mock_key, mock_load, tmp_pat
     recorder = AnalysisTimingRecorder()
 
     result = calculate_metrics(
-        [video_path],
-        AnalysisConfig(),
-        tmp_path,
+        MetricCacheRequest(analysis_source_path=None),
         timing_recorder=recorder,
+        video_paths=[video_path],
+        config=AnalysisConfig(),
+        cache_dir=tmp_path,
     )
 
     assert result.disposition == "hit"
@@ -152,12 +158,15 @@ def test_calculate_metrics_recomputes_cache_with_mismatched_active_rect_provenan
     config = AnalysisConfig()
 
     result = calculate_metrics(
-        [video_path],
-        config,
-        tmp_path,
-        metric_active_rect=rect,
-        active_rect_source="explicit",
-        active_rect_detection_mode="provided",
+        MetricCacheRequest(
+            metric_active_rect=rect,
+            active_rect_source="explicit",
+            active_rect_detection_mode="provided",
+            analysis_source_path=None,
+        ),
+        video_paths=[video_path],
+        config=config,
+        cache_dir=tmp_path,
     )
 
     mock_strategy.assert_called_once_with(
@@ -188,7 +197,12 @@ def test_calculate_metrics_empty_video_paths_raises_fc4002(tmp_path: Path) -> No
     from frame_compare.config.schema import AnalysisConfig
 
     with pytest.raises(MetricsCalculationError, match="No input video paths provided"):
-        calculate_metrics([], AnalysisConfig(), tmp_path)
+        calculate_metrics(
+            MetricCacheRequest(analysis_source_path=None),
+            video_paths=[],
+            config=AnalysisConfig(),
+            cache_dir=tmp_path,
+        )
 
 
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
@@ -222,7 +236,12 @@ def test_calculate_metrics_computes_on_cache_miss(
     video_paths[0].write_bytes(b"")
     config = AnalysisConfig()
 
-    result = calculate_metrics(video_paths, config, tmp_path)
+    result = calculate_metrics(
+        MetricCacheRequest(analysis_source_path=None),
+        video_paths=video_paths,
+        config=config,
+        cache_dir=tmp_path,
+    )
 
     assert result.disposition == "computed"
     assert len(result.metrics.luminance) == 10
@@ -242,12 +261,16 @@ def test_calculate_metrics_computes_on_cache_miss(
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
+@pytest.mark.parametrize(
+    "corruption", ["numeric", "enum-list", "enum-dict", "deep", "integer-limit"]
+)
 def test_calculate_metrics_recomputes_after_oversized_cache_entry(
     mock_key,
     mock_loader_cls,
     mock_strategy,
     mock_save,
     tmp_path: Path,
+    corruption: str,
 ) -> None:
     mock_key.return_value = "fp"
     video_path = tmp_path / "v1.mkv"
@@ -267,12 +290,25 @@ def test_calculate_metrics_recomputes_after_oversized_cache_entry(
         ),
         encoding="utf-8",
     )
+    path = cache_file(tmp_path, "fp")
+    if corruption in {"deep", "integer-limit"}:
+        path.write_text("[" * 10000 if corruption == "deep" else "1" * 5000, encoding="utf-8")
+    elif corruption.startswith("enum"):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["luminance"] = [0.5]
+        payload["metadata"]["active_rect_source"] = [] if corruption == "enum-list" else {}
+        path.write_text(json.dumps(payload), encoding="utf-8")
     source = mock_loader_cls.return_value.load.return_value
     source.clip.num_frames = 1
     source.fps = Fraction(24, 1)
     mock_strategy.return_value = _quality_strategy_result(frame_count=1)
 
-    result = calculate_metrics([video_path], config, tmp_path)
+    result = calculate_metrics(
+        MetricCacheRequest(analysis_source_path=None),
+        video_paths=[video_path],
+        config=config,
+        cache_dir=tmp_path,
+    )
 
     assert result.disposition == "computed"
     mock_strategy.assert_called_once()
@@ -303,10 +339,11 @@ def test_calculate_metrics_records_cache_miss_compute_and_write(
     recorder = AnalysisTimingRecorder()
 
     calculate_metrics(
-        [video_path],
-        AnalysisConfig(),
-        tmp_path,
+        MetricCacheRequest(analysis_source_path=None),
         timing_recorder=recorder,
+        video_paths=[video_path],
+        config=AnalysisConfig(),
+        cache_dir=tmp_path,
     )
 
     assert recorder.cache_state == "miss"
@@ -364,11 +401,14 @@ def test_calculate_metrics_forwards_active_rect_with_windowed_source(
     rect = MetricActiveRect(x=10, y=20, width=300, height=200)
 
     calculate_metrics(
-        [video_path],
-        AnalysisConfig(),
-        tmp_path,
-        metric_frame_range=MetricFrameRange(4, 1, 3),
-        metric_active_rect=rect,
+        MetricCacheRequest(
+            metric_frame_range=MetricFrameRange(4, 1, 3),
+            metric_active_rect=rect,
+            analysis_source_path=None,
+        ),
+        video_paths=[video_path],
+        config=AnalysisConfig(),
+        cache_dir=tmp_path,
     )
 
     assert mock_strategy.call_args.args[0].clip.frames == [0, 1, 2, 3]
@@ -399,10 +439,10 @@ def test_calculate_metrics_uses_effective_fps_in_metadata(
     video_paths[0].write_bytes(b"")
 
     result = calculate_metrics(
-        video_paths,
-        AnalysisConfig(),
-        tmp_path,
-        effective_fps=Fraction(24000, 1001),
+        MetricCacheRequest(effective_fps=Fraction(24000, 1001), analysis_source_path=None),
+        video_paths=video_paths,
+        config=AnalysisConfig(),
+        cache_dir=tmp_path,
     )
 
     assert result.metrics.metadata.fps == Fraction(24000, 1001)
@@ -436,10 +476,11 @@ def test_calculate_metrics_cache_save_is_best_effort(
     config = AnalysisConfig()
     recorder = AnalysisTimingRecorder()
     result = calculate_metrics(
-        video_paths,
-        config,
-        tmp_path,
+        MetricCacheRequest(analysis_source_path=None),
         timing_recorder=recorder,
+        video_paths=video_paths,
+        config=config,
+        cache_dir=tmp_path,
     )
 
     assert isinstance(result.metrics, FrameMetrics)
@@ -471,7 +512,12 @@ def test_calculate_metrics_analyzes_reference_by_default(
     for p in video_paths:
         p.write_bytes(b"")
 
-    calculate_metrics(video_paths, AnalysisConfig(), tmp_path)
+    calculate_metrics(
+        MetricCacheRequest(analysis_source_path=None),
+        video_paths=video_paths,
+        config=AnalysisConfig(),
+        cache_dir=tmp_path,
+    )
 
     # loader.load should only be called once with reference path
     mock_loader.load.assert_called_once_with(video_paths[0])
@@ -498,10 +544,10 @@ def test_calculate_metrics_analyzes_selected_analysis_source(
         p.write_bytes(b"")
 
     result = calculate_metrics(
-        video_paths,
-        AnalysisConfig(),
-        tmp_path,
-        analysis_source_path=video_paths[1],
+        MetricCacheRequest(analysis_source_path=video_paths[1]),
+        video_paths=video_paths,
+        config=AnalysisConfig(),
+        cache_dir=tmp_path,
     )
 
     mock_loader.load.assert_called_once_with(video_paths[1])
@@ -528,10 +574,10 @@ def test_calculate_metrics_zero_frame_analysis_source_error_is_not_reference_wor
 
     with pytest.raises(MetricsCalculationError, match="Analysis clip has 0 frames"):
         calculate_metrics(
-            video_paths,
-            AnalysisConfig(),
-            tmp_path,
-            analysis_source_path=video_paths[1],
+            MetricCacheRequest(analysis_source_path=video_paths[1]),
+            video_paths=video_paths,
+            config=AnalysisConfig(),
+            cache_dir=tmp_path,
         )
 
 
@@ -547,7 +593,12 @@ def test_calculate_metrics_propagates_plugin_not_found(mock_load, mock_loader_cl
     video_paths[0].write_bytes(b"")
 
     with pytest.raises(PluginNotFoundError) as exc:
-        calculate_metrics(video_paths, AnalysisConfig(), tmp_path)
+        calculate_metrics(
+            MetricCacheRequest(analysis_source_path=None),
+            video_paths=video_paths,
+            config=AnalysisConfig(),
+            cache_dir=tmp_path,
+        )
     assert exc.value.code == "FC-2003"
 
 
@@ -564,7 +615,12 @@ def test_calculate_metrics_propagates_source_load_error(mock_load, mock_loader_c
     video_paths = [path]
 
     with pytest.raises(SourceLoadError) as exc:
-        calculate_metrics(video_paths, AnalysisConfig(), tmp_path)
+        calculate_metrics(
+            MetricCacheRequest(analysis_source_path=None),
+            video_paths=video_paths,
+            config=AnalysisConfig(),
+            cache_dir=tmp_path,
+        )
     assert exc.value.code == "FC-4015"
 
 
@@ -620,7 +676,10 @@ def test_calculate_metrics_range_cases(
     video_path = tmp_path / "v1.mkv"
     video_path.write_bytes(b"")
     result = calculate_metrics(
-        [video_path], AnalysisConfig(), tmp_path, metric_frame_range=requested_range
+        MetricCacheRequest(metric_frame_range=requested_range, analysis_source_path=None),
+        video_paths=[video_path],
+        config=AnalysisConfig(),
+        cache_dir=tmp_path,
     )
     assert mock_strategy.call_args.args[0].clip.frames == [0, 1, 2, 3, 4, 5]
     assert mock_strategy.call_args.kwargs["metric_frame_range"] == requested_range

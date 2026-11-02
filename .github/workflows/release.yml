@@ -86,6 +86,10 @@ jobs:
             echo "Stable publication must be dispatched from the main branch." >&2
             exit 1
           fi
+          if [[ "$RELEASE_CHANNEL" == "rc" && "$DISPATCH_REF" != "refs/heads/pre-release" ]]; then
+            echo "RC publication must be dispatched from the pre-release branch." >&2
+            exit 1
+          fi
           python scripts/validate_release_contract.py \
             --channel "$RELEASE_CHANNEL" \
             --version "$RELEASE_VERSION" \
@@ -587,3 +591,15 @@ jobs:
             jq -r '.assets[] | [.name, (.size | tostring), (.digest // "")] | @tsv' \
               <<<"$release_json"
           )
+
+  recreate_pre_release:
+    name: Start next integration cycle after stable publication
+    needs: publish
+    if: inputs.channel == 'stable'
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/recreate-pre-release.yml
+    with:
+      expected_sha: ${{ inputs.expected_sha }}
+      release_tag: ${{ inputs.tag }}

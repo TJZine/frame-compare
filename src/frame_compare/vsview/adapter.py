@@ -23,6 +23,7 @@ import structlog
 
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.subproc import prepare_python_child
+from frame_compare.vs.types import TonemapSettings
 from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewContractError,
     AlignmentReviewSession,
@@ -179,6 +180,7 @@ class VSViewSessionRequest:
     presentation_names_by_stem: dict[str, str] | None = None
     short_names_by_stem: dict[str, str] | None = None
     memory_limit_mb: int | None = None
+    preview_tonemap: TonemapSettings | None = None
 
 
 def launch_alignment_verification_session(
@@ -436,6 +438,7 @@ def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:
         presentation_names_by_stem=request.presentation_names_by_stem,
         short_names_by_stem=request.short_names_by_stem,
         memory_limit_mb=request.memory_limit_mb,
+        preview_tonemap=request.preview_tonemap,
     )
 
 

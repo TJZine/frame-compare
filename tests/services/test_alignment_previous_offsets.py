@@ -20,7 +20,6 @@ from frame_compare.services.alignment_reuse_cache import (
 )
 from frame_compare.services.alignment_reuse_cache import (
     comparison_cache_key,
-    save_reusable_offsets,
     source_set_cache_key,
 )
 from frame_compare.services.alignment_reuse_prompt import PreviousOffsetPromptInput
@@ -28,8 +27,8 @@ from frame_compare.services.alignment_vsview import AlignmentVSViewOutcome
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
-    AlignmentProvenance,
     AlignmentResult,
+    ComparisonResolution,
     PreviousOffsetReusePolicy,
     ReusableAlignmentEntry,
 )
@@ -44,6 +43,7 @@ from frame_compare.utils.types import (
     AlignmentRequest,
 )
 from tests.alignment_review_test_support import frame_lag, trusted_audio_attempt
+from tests.services.alignment_resolution_test_support import save_resolutions
 
 
 def align_clips_from_request(
@@ -140,6 +140,12 @@ def _alignment_request(
     )
 
 
+def _persisted_entries(request: AlignmentRequest) -> dict[str, Any]:
+    path = request.shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    return data["source_sets"][source_set_cache_key(request)]["entries"]
+
+
 def test_typed_alignment_passes_presentation_names_without_changing_vsview_keys(
     tmp_path: Path,
 ) -> None:
@@ -214,7 +220,7 @@ def test_align_clips_from_request_disabled_skips_shared_reuse_io(
     )
     monkeypatch.setattr(
         "frame_compare.services.alignment.save_reusable_offsets",
-        lambda _request, _provenances: (_ for _ in ()).throw(AssertionError("shared cache write")),
+        lambda _request, _candidate: (_ for _ in ()).throw(AssertionError("shared cache write")),
     )
 
     with patch("frame_compare.services.alignment_audio.probe_fps", return_value=Fraction(24, 1)):
@@ -224,9 +230,11 @@ def test_align_clips_from_request_disabled_skips_shared_reuse_io(
     assert results[0].frame_offset == 0
 
 
+@pytest.mark.parametrize("review_outcome", ["no_result", "keep_current"])
 def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and_allows_vsview(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    review_outcome: str,
 ) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
@@ -256,27 +264,30 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
         stability=_DEFAULT_STABILITY,
         audio_attempt=trusted_audio_attempt(frame_offset=7),
     )
-    save_reusable_offsets(
+    save_resolutions(
         request,
         [
-            AlignmentProvenance(
+            ComparisonResolution(
                 result=reusable,
                 comparison_cache_key=comparison_cache_key(request.comparisons[0]),
-                provenance="computed_this_run",
+                origin="computed_this_run",
             )
         ],
         accepted_at="2026-06-06T12:00:00Z",
     )
 
+    cache_path = request.shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME
+    before = (cache_path.read_bytes(), cache_path.stat().st_mtime_ns)
+
     with (
         patch("frame_compare.services.alignment_audio.probe_fps"),
         patch("frame_compare.services.alignment._estimate_audio_pair"),
         patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
-        patch("frame_compare.services.alignment.save_reusable_offsets"),
     ):
-        mock_vs.return_value = AlignmentVSViewOutcome(None, "no_result")
+        mock_vs.return_value = AlignmentVSViewOutcome(None, review_outcome)  # type: ignore[arg-type]
         results = align_clips_from_request(request, config)
 
+    assert (cache_path.read_bytes(), cache_path.stat().st_mtime_ns) == before
     assert results[0].source == "cached"
     assert results[0].frame_offset == 7
     assert results[0].algorithm == "cross_correlation"
@@ -288,8 +299,8 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
         "evidence_availability": "historical_details_unavailable",
     }
     terminal = capsys.readouterr().err
-    assert "Accepted audio alignment reused: +7f - APPLIED" in terminal
-    assert "Historical chunk and selected-stream details are unavailable" in terminal
+    assert "+7f · reused from last run" in terminal
+    assert "no audio analysis ran this time" in terminal
 
 
 def test_stale_policy_entry_is_not_replayed_or_applied(
@@ -313,13 +324,13 @@ def test_stale_policy_entry_is_not_replayed_or_applied(
             "frame_compare.services.alignment_reuse_cache.ALIGNMENT_ESTIMATOR_POLICY",
             "stale-alignment-policy",
         )
-        save_reusable_offsets(
+        save_resolutions(
             request,
             [
-                AlignmentProvenance(
+                ComparisonResolution(
                     result=stale_result,
                     comparison_cache_key=comparison_cache_key(request.comparisons[0]),
-                    provenance="computed_this_run",
+                    origin="computed_this_run",
                 )
             ],
         )
@@ -478,8 +489,8 @@ def test_align_clips_from_request_reuses_confirmed_offsets_skips_vsview(
     assert results[0].source == "cached"
     assert results[0].frame_offset == 9
     terminal = capsys.readouterr().err
-    assert "Manually confirmed alignment reused: +9f - APPLIED" in terminal
-    assert "Manually confirmed alignment: +9f - APPLIED" not in terminal
+    assert "+9f · previously confirmed" in terminal
+    assert "+9f · manual offset" not in terminal
 
 
 def test_align_clips_from_request_prompt_no_uses_computed_fallback_for_confirmed_entry(
@@ -557,37 +568,29 @@ def test_align_clips_from_request_mixed_cached_computed_and_new_computed_write_b
         previous_offsets="prompt",
         generated_dir=generated_dir,
     )
-    reusable = {
-        comparison_cache_key(request.comparisons[0]): ReusableAlignmentEntry(
-            result=AlignmentResult(
-                ref.name,
-                comp_confirmed.name,
-                9,
-                0.375,
-                1.0,
-                None,
-                "cached",
+    save_resolutions(
+        request,
+        [
+            ComparisonResolution(
+                AlignmentResult(ref.name, comp_confirmed.name, 9, 0.375, 1.0, None, "manual"),
+                comparison_cache_key(request.comparisons[0]),
+                "interactive_confirmed_this_run",
             ),
-            accepted_at="2026-06-06T12:00:00Z",
-            origin="interactive_confirmed",
-        ),
-        comparison_cache_key(request.comparisons[1]): ReusableAlignmentEntry(
-            result=AlignmentResult(
-                ref.name,
-                comp_computed.name,
-                3,
-                0.125,
-                0.9,
-                "cross_correlation",
-                "cached",
+            ComparisonResolution(
+                _trusted_computed_result(ref, comp_computed, 3),
+                comparison_cache_key(request.comparisons[1]),
+                "computed_this_run",
             ),
-            accepted_at="2026-06-06T12:00:00Z",
-            origin="computed",
-        ),
+        ],
+        accepted_at="2026-06-06T12:00:00Z",
+    )
+    assert {entry["origin"] for entry in _persisted_entries(request).values()} == {
+        "computed",
+        "interactive_confirmed",
     }
     monkeypatch.setattr(
-        "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
-        lambda _request, *, comparisons=None: reusable,
+        "frame_compare.services.alignment_reuse_cache._accepted_at_now",
+        lambda: "2026-06-06T13:00:00Z",
     )
     monkeypatch.setattr(
         "frame_compare.services.alignment_previous_offsets.prompt_for_previous_alignment_offset_reuse",
@@ -600,7 +603,6 @@ def test_align_clips_from_request_mixed_cached_computed_and_new_computed_write_b
             "frame_compare.services.alignment.maybe_launch_alignment_vsview",
             return_value=AlignmentVSViewOutcome(None, "no_result"),
         ),
-        patch("frame_compare.services.alignment.save_reusable_offsets"),
     ):
         results = align_clips_from_request(request, config)
 
@@ -608,6 +610,16 @@ def test_align_clips_from_request_mixed_cached_computed_and_new_computed_write_b
         (comp_confirmed.name, "computed", 0),
         (comp_computed.name, "cached", 3),
     ]
+
+    entries = _persisted_entries(request)
+    assert set(entries) == {comparison_cache_key(comp) for comp in request.comparisons}
+    first, second = (entries[comparison_cache_key(comp)] for comp in request.comparisons)
+    assert [first["frame_offset"], second["frame_offset"]] == [0, 3]
+    assert [first["correlation_score"], second["correlation_score"]] == [0.99, 0.99]
+    for entry in entries.values():
+        assert entry["origin"] == "computed"
+        assert entry["stability"]["classification"] == "insufficient_evidence"
+        assert entry["accepted_at"] == "2026-06-06T13:00:00Z"
 
 
 def test_align_clips_from_request_prompt_passes_real_shared_prompt_metadata(
@@ -699,10 +711,10 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
         shared_cache_dir=shared_cache_dir,
     )
 
-    save_reusable_offsets(
+    save_resolutions(
         request,
         [
-            AlignmentProvenance(
+            ComparisonResolution(
                 result=AlignmentResult(
                     reference_clip=ref.name,
                     comparison_clip=comp_manual.name,
@@ -715,9 +727,9 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     audio_attempt=trusted_audio_attempt(frame_offset=4),
                 ),
                 comparison_cache_key=comparison_cache_key(request.comparisons[0]),
-                provenance="computed_this_run",
+                origin="computed_this_run",
             ),
-            AlignmentProvenance(
+            ComparisonResolution(
                 result=AlignmentResult(
                     reference_clip=ref.name,
                     comparison_clip=comp_shared.name,
@@ -730,7 +742,7 @@ def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_afte
                     audio_attempt=trusted_audio_attempt(frame_offset=7),
                 ),
                 comparison_cache_key=comparison_cache_key(request.comparisons[1]),
-                provenance="computed_this_run",
+                origin="computed_this_run",
             ),
         ],
         accepted_at="2026-06-06T12:00:00Z",
@@ -853,7 +865,6 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
             "frame_compare.services.alignment.maybe_launch_alignment_vsview",
             return_value=AlignmentVSViewOutcome({"ref:comp_manual": 5}, "confirmed"),
         ),
-        patch("frame_compare.services.alignment.save_reusable_offsets") as mock_save_shared,
     ):
         results = align_clips_from_request(
             request,
@@ -865,12 +876,15 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
         ("manual", 5),
         ("computed", 0),
     ]
-    _, provenances = mock_save_shared.call_args.args
-    by_key = {item.result.comparison_clip: item.provenance for item in provenances}
-    assert by_key == {
-        "comp_manual.mkv": "interactive_confirmed_this_run",
-        "comp_computed.mkv": "computed_this_run",
-    }
+    entries = _persisted_entries(request)
+    manual = entries[comparison_cache_key(request.comparisons[0])]
+    computed = entries[comparison_cache_key(request.comparisons[1])]
+    assert manual["origin"] == "interactive_confirmed"
+    assert manual["frame_offset"] == 5
+    assert manual["time_offset_seconds"] == 5 / 24
+    assert "computed_result" not in manual
+    assert computed["origin"] == "computed"
+    assert computed["frame_offset"] == 0
 
 
 @pytest.mark.parametrize(
@@ -929,13 +943,13 @@ def test_confirmed_cache_reuse_rechecks_sources_before_early_return(
         algorithm=None,
         source="manual",
     )
-    save_reusable_offsets(
+    save_resolutions(
         request,
         [
-            AlignmentProvenance(
+            ComparisonResolution(
                 result=accepted,
                 comparison_cache_key=comparison_cache_key(request.comparisons[0]),
-                provenance="interactive_confirmed_this_run",
+                origin="interactive_confirmed_this_run",
             )
         ],
     )

@@ -7,8 +7,6 @@ progress reporter selection.
 
 import sys
 
-from rich.rule import Rule
-
 from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
@@ -17,7 +15,6 @@ from frame_compare.utils.progress import (
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import stream_is_tty
-from frame_compare.utils.terminal_theme import ACCENT, human_console
 
 _PHASE_DISPLAY_LABELS = {
     "frame_plan": "PLAN",
@@ -59,29 +56,6 @@ def uses_rich_progress(reporter: ProgressReporter) -> bool:
     return isinstance(reporter, RichProgressReporter)
 
 
-def emit_execution_section_start(
-    reporter: ProgressReporter,
-    *,
-    no_color: bool,
-) -> None:
-    """Open the interactive runtime section."""
-    if not uses_rich_progress(reporter):
-        return
-    console = human_console(stderr=True, no_color=no_color)
-    console.print(Rule(f"[bold {ACCENT}]Execution[/]", style="dim", align="left"))
-
-
-def emit_execution_section_end(
-    reporter: ProgressReporter,
-    *,
-    no_color: bool,
-) -> None:
-    """Close the interactive runtime section."""
-    if not uses_rich_progress(reporter):
-        return
-    human_console(stderr=True, no_color=no_color).print(Rule(style="dim"))
-
-
 def start_phase_progress(
     reporter: ProgressReporter,
     *,
@@ -103,12 +77,12 @@ def start_phase_progress(
         # used here for every phase.
         rich_label = rich_phase_label(name)
         if name == "align":
-            reporter.start_phase(rich_label, total=1)
+            reporter.start_indeterminate(rich_label)
             return
         reporter.start_phase(rich_label, total=total)
         return
     if name == "align":
-        reporter.start_phase(display_label, total=1)
+        reporter.start_indeterminate(display_label)
         return
     reporter.start_phase(display_label, total=total)
 

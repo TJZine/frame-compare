@@ -46,7 +46,7 @@ def _report_data(image: Path) -> ReportData:
                 size_bytes=1024,
                 signal=SourceSignalFacts(is_hdr=False),
                 presentation_state=PresentationState.SDR,
-                tonemap_settings=None,
+                tonemap=None,
                 active_picture=geometry.active_picture,
                 images=[
                     ReportImageInfo(
@@ -68,13 +68,12 @@ def _report_data(image: Path) -> ReportData:
         rendering=ReportRenderingInfo(
             overlay_mode=OverlayMode.DIAGNOSTIC,
             include_frame_number=True,
-            tonemap_settings=None,
             geometry_by_label={"Reference": geometry},
         ),
     )
 
 
-def test_report_payload_v12_preserves_comparison_and_source_frame_domains(
+def test_report_payload_v13_preserves_comparison_and_source_frame_domains(
     tmp_path: Path,
 ) -> None:
     image = tmp_path / "reference_7.png"
@@ -82,7 +81,7 @@ def test_report_payload_v12_preserves_comparison_and_source_frame_domains(
 
     payload = build_report_payload(_report_data(image), ReportConfig(), report_dir=tmp_path)
 
-    assert payload["version"] == REPORT_VERSION == "1.2"
+    assert payload["version"] == REPORT_VERSION == "1.3"
     assert payload["clips"][0]["display"] == {
         "primary": "Reference Primary",
         "release": "Reference Release",

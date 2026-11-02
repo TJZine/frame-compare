@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -258,3 +259,42 @@ def test_error_formatting_helpers_are_json_safe() -> None:
             "ctx": {"limit": 100, "path": str(Path("/config.toml"))},
         }
     ]
+
+
+@pytest.mark.parametrize("container", ["list", "dict", "tuple"])
+def test_error_normalization_bounds_nested_values_before_serializing(container: str) -> None:
+    value: object = "sentinel-deep-secret"
+    for _ in range(2000):
+        if container == "dict":
+            value = {"nested": value}
+        elif container == "tuple":
+            value = (value,)
+        else:
+            value = [value]
+    normalized = normalize_pydantic_errors(
+        [
+            {
+                "loc": ("tmdb",),
+                "type": "model_type",
+                "msg": "Invalid section",
+                "ctx": {"expected": "dictionary"},
+                "input": value,
+            }
+        ]
+    )
+    assert normalized[0]["loc"] == ["tmdb"]
+    assert normalized[0]["type"] == "model_type"
+    assert normalized[0]["msg"] == "Invalid section"
+    assert normalized[0]["ctx"] == {"expected": "dictionary"}
+    encoded = json.dumps(normalized)
+    assert "sentinel-deep-secret" not in encoded
+    assert "<nested value omitted>" in encoded
+    # Inspect the public output without depending on the internal cutoff value.
+    pending: list[tuple[object, int]] = [(normalized, 0)]
+    while pending:
+        item, depth = pending.pop()
+        assert depth <= 20
+        if isinstance(item, dict):
+            pending.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, list):
+            pending.extend((child, depth + 1) for child in item)

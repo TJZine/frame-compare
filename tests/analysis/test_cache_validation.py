@@ -145,3 +145,35 @@ def test_load_numeric_cache_boolean_is_corrupted(tmp_path: Path, field: str) -> 
 
     assert result.success is False
     assert result.reason == "corrupted"
+
+
+@pytest.mark.parametrize(
+    "content", [pytest.param("[" * 10000, id="deep"), pytest.param("1" * 5000, id="integer-limit")]
+)
+def test_decode_limits_are_corrupted_with_unknown_version(tmp_path: Path, content: str) -> None:
+    path = cache_file(tmp_path, "fp")
+    path.write_text(content, encoding="utf-8")
+    assert load_cached_metrics(tmp_path, "fp").reason == "corrupted"
+    assert read_cache_version(path) is None
+
+
+@pytest.mark.parametrize(
+    "field", ["active_rect_source", "active_rect_detection_mode", "algorithm_identity_json"]
+)
+@pytest.mark.parametrize("value", [[], {}, "[" * 10000, "1" * 5000])
+def test_cache_metadata_corruption_recovers(tmp_path: Path, field: str, value: object) -> None:
+    metadata = valid_cache_metadata_payload(AnalysisConfig(), frame_count=1)
+    payload = {
+        "version": CACHE_VERSION,
+        "fingerprint": "fp",
+        "luminance": [0.5],
+        "motion": [0.0],
+        "sampled_source_frames": None,
+        "metadata": metadata,
+    }
+    path = cache_file(tmp_path, "fp")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert load_cached_metrics(tmp_path, "fp").success
+    metadata[field] = value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert load_cached_metrics(tmp_path, "fp").reason == "corrupted"

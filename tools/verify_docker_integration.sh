@@ -154,6 +154,10 @@ docker_env_args=(
   -e FRAME_COMPARE_E2E_ARTIFACTS=/workspace/generated/e2e/$e2e_artifact_name
   -e FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache
 )
+# A focused path keeps media demand-driven; the complete gate prepares every recipe.
+if [[ "$use_custom_pytest_paths" == "0" ]]; then
+  docker_env_args+=(-e FRAME_COMPARE_U4_MEDIA_FULL=1)
+fi
 if [[ "${FRAME_COMPARE_REQUIRE_LIBPLACEBO:-}" == "1" ]]; then
   docker_env_args+=(-e FRAME_COMPARE_REQUIRE_LIBPLACEBO=1)
 fi
@@ -315,6 +319,12 @@ if python -c 'import pytest' >/dev/null 2>&1; then
   echo "ERROR: pytest test tooling leaked into the production image" >&2
   exit 6
 fi
+for ignored_path in .codex .claude; do
+  if [[ -e "/home/framecompare/frame-compare/$ignored_path" ]]; then
+    echo "ERROR: local agent state leaked into the production image: $ignored_path" >&2
+    exit 6
+  fi
+done
 echo "DOCKER_PROOF production_tooling_absent=ok"
 icd="/usr/share/vulkan/icd.d/lvp_icd.json"
 if [[ -f "$icd" ]]; then

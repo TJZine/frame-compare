@@ -1,5 +1,3 @@
-"""Metric calculation logic for frame analysis."""
-
 from __future__ import annotations
 
 from dataclasses import replace
@@ -11,6 +9,7 @@ import structlog
 from frame_compare.analysis.cache_io import (
     CACHE_VERSION,
     compute_cache_key,
+    keyed_metric_request,
     load_cached_metrics_for_request,
     save_metrics_cache,
 )
@@ -21,12 +20,8 @@ from frame_compare.analysis.metric_strategies import (
 )
 from frame_compare.analysis.timing import AnalysisTimingRecorder, record_span
 from frame_compare.analysis.types import (
-    ActiveRectAlgorithmId,
-    ActiveRectDetectionMode,
-    ActiveRectSource,
     ClipIdentity,
     FrameMetrics,
-    MetricActiveRect,
     MetricCacheRequest,
     MetricFrameRange,
     MetricsAcquisition,
@@ -46,11 +41,6 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
-# Orchestration "analyze" phase progress total.
-# Contract:
-# - `execute_phases()` advances the phase by 1 on successful completion.
-# - `calculate_metrics()` advances the remaining steps (total - 1) on cache hit,
-#   and advances twice (after luminance + after cache-save attempt) on cache miss.
 ANALYZE_PROGRESS_TOTAL = 3
 
 
@@ -105,12 +95,7 @@ def _build_metrics(
     source: SourceInfo,
     fingerprint: str,
     clips: list[ClipIdentity],
-    analysis_source_path: Path,
-    effective_fps: Fraction | None,
-    metric_active_rect: MetricActiveRect | None,
-    active_rect_source: ActiveRectSource,
-    active_rect_detection_mode: ActiveRectDetectionMode,
-    active_rect_algorithm_id: ActiveRectAlgorithmId,
+    request: MetricCacheRequest,
     metric_frame_range: MetricFrameRange,
 ) -> FrameMetrics:
     if (
@@ -132,21 +117,21 @@ def _build_metrics(
         motion=result.motion,
         metadata=MetricsMetadata(
             frame_count=len(result.luminance),
-            fps=effective_fps if effective_fps is not None else source.fps,
+            fps=_resolved_fps(source, request),
             config_fingerprint=fingerprint,
             clips=clips,
             source_frame_count=metric_frame_range.source_frame_count,
             metric_source_start=metric_frame_range.start,
             metric_source_end_exclusive=metric_frame_range.end_exclusive,
-            analysis_source_path=str(analysis_source_path),
+            analysis_source_path=str(request.analysis_source_path),
             performance_mode=result.performance_mode,
             algorithm_id=result.algorithm_id,
             metric_backend=result.metric_backend,
             algorithm_identity_json=result.algorithm_identity_json,
-            metric_active_rect=metric_active_rect,
-            active_rect_source=active_rect_source,
-            active_rect_detection_mode=active_rect_detection_mode,
-            active_rect_algorithm_id=active_rect_algorithm_id,
+            metric_active_rect=request.metric_active_rect,
+            active_rect_source=request.active_rect_source,
+            active_rect_detection_mode=request.active_rect_detection_mode,
+            active_rect_algorithm_id=request.active_rect_algorithm_id,
             version=CACHE_VERSION,
         ),
         sampled_source_frames=result.sampled_source_frames,
@@ -173,88 +158,34 @@ def _save_metrics_cache_best_effort(
 
 
 def calculate_metrics(
+    request: MetricCacheRequest,
+    *,
     video_paths: list[Path],
     config: AnalysisConfig,
     cache_dir: Path,
+    selection_domain: str | None = None,
     reporter: ProgressReporter | None = None,
     vs_loader: VSLoader | None = None,
-    selection_domain: str | None = None,
-    analysis_source_path: Path | None = None,
-    effective_fps: Fraction | None = None,
-    metric_active_rect: MetricActiveRect | None = None,
-    metric_frame_range: MetricFrameRange | None = None,
-    active_rect_source: ActiveRectSource = "full-frame",
-    active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
-    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
     timing_recorder: AnalysisTimingRecorder | None = None,
     memory_limit_mb: int | None = None,
 ) -> MetricsAcquisition:
-    """
-    Acquire frame metrics for the given clips.
-
-    Uses cached values if valid cache exists and config matches.
-    Only the selected analysis source is analyzed.
-
-    Args:
-        video_paths: Ordered video file paths (first entry is the selected reference clip)
-        analysis_source_path: Video path to load for metric analysis. Defaults to
-            the selected reference for compatibility with older callers.
-        config: Analysis configuration
-        cache_dir: Directory for cache files
-        reporter: Optional progress reporter
-        memory_limit_mb: Optional VapourSynth frame-cache cap in MiB for the default loader.
-        vs_loader: Optional VapourSynth clip loader seam
-        selection_domain: Optional selection-domain token included in
-            the analysis cache key when source overrides affect reference
-            selection.
-        effective_fps: Optional FPS value stored in metrics metadata for
-            timing and selection-detail normalization.
-        metric_active_rect: Optional active-picture rectangle applied during
-            metric calculation and included in cache identity. ``None`` uses
-            the full source frame.
-        metric_frame_range: Exact contiguous source-frame domain to analyze.
-            ``None`` analyzes the full source for compatibility with direct callers.
-        active_rect_source: Provenance for ``metric_active_rect`` stored in
-            cache metadata. Defaults to ``"full-frame"``.
-        active_rect_detection_mode: Detection policy that produced the active
-            rectangle. Defaults to ``"aspect_ratio"``.
-        active_rect_algorithm_id: Stable active-rectangle resolver algorithm
-            identity used for cache isolation. Defaults to
-            ``"active_rect_resolution_v2"``.
-
-    Returns:
-        Metrics with the actual cache-hit or computed acquisition disposition
-
-    Raises:
-        MetricsCalculationError (FC-4002): If frame extraction or metric
-            computation fails, OR if analysis clip has 0 frames.
-        PluginNotFoundError (FC-2003): If VapourSynth lsmas plugin unavailable.
-        SourceLoadError (FC-4015): If video file cannot be loaded.
-    """
     if not video_paths:
         raise MetricsCalculationError("No input video paths provided")
-    source_path = video_paths[0] if analysis_source_path is None else analysis_source_path
-    cache_request = MetricCacheRequest(
-        analysis_source_path=source_path,
-        metric_frame_range=metric_frame_range,
-        effective_fps=effective_fps,
-        metric_active_rect=metric_active_rect,
-        active_rect_source=active_rect_source,
-        active_rect_detection_mode=active_rect_detection_mode,
-        active_rect_algorithm_id=active_rect_algorithm_id,
-    )
+    request = keyed_metric_request(request, video_paths)
+    source_path = request.analysis_source_path
+    assert source_path is not None
 
     fingerprint = compute_cache_key(
         video_paths,
         config,
         selection_domain=selection_domain,
-        metric_request=cache_request,
+        metric_request=request,
     )
     cached = _cached_metrics(
         cache_dir,
         fingerprint,
         reporter,
-        cache_request,
+        request,
         timing_recorder,
     )
     if cached:
@@ -262,16 +193,15 @@ def calculate_metrics(
 
     clips = _clip_identities(video_paths)
 
-    # Cache miss or invalid - compute metrics for the selected analysis source only.
     with record_span(timing_recorder, "source_load"):
         source = _load_analysis_source(source_path, vs_loader, memory_limit_mb)
     try:
-        resolved_range = _resolved_metric_frame_range(source, metric_frame_range)
+        resolved_range = _resolved_metric_frame_range(source, request.metric_frame_range)
         strategy_result = calculate_metric_strategy(
             source,
             config,
             reporter,
-            metric_active_rect,
+            request.metric_active_rect,
             metric_frame_range=resolved_range,
             timing_recorder=timing_recorder,
         )
@@ -280,12 +210,7 @@ def calculate_metrics(
             source=source,
             fingerprint=fingerprint,
             clips=clips,
-            analysis_source_path=source_path,
-            effective_fps=effective_fps,
-            metric_active_rect=metric_active_rect,
-            active_rect_source=active_rect_source,
-            active_rect_detection_mode=active_rect_detection_mode,
-            active_rect_algorithm_id=active_rect_algorithm_id,
+            request=request,
             metric_frame_range=resolved_range,
         )
     finally:
@@ -296,6 +221,10 @@ def calculate_metrics(
     if reporter:
         reporter.advance(1)
     return MetricsAcquisition(metrics=metrics, disposition="computed")
+
+
+def _resolved_fps(source: SourceInfo, request: MetricCacheRequest) -> Fraction:
+    return source.fps if request.effective_fps is None else request.effective_fps
 
 
 def _resolved_metric_frame_range(
@@ -326,7 +255,6 @@ def slice_frame_metrics(
     start_index: int,
     frame_count: int,
 ) -> FrameMetrics:
-    """Slice a contiguous metric domain while preserving source-frame metadata."""
     if (
         start_index < 0
         or frame_count < 0

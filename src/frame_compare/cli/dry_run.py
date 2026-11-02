@@ -9,7 +9,6 @@ from typing import Literal
 from rich.console import Console
 from rich.markup import escape
 
-from frame_compare.cli.output import format_display_path
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.errors import (
@@ -21,6 +20,7 @@ from frame_compare.orchestration.source_selection import (
     resolve_source_selection,
     resolve_source_selector,
 )
+from frame_compare.utils.artifact_paths import format_display_path
 
 type RuntimeFactStatus = Literal["known", "unknown"]
 

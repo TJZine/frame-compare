@@ -2,9 +2,11 @@
 
 # pyright: reportPrivateUsage=false
 
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired
+from threading import Event
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,7 +16,9 @@ from frame_compare.services.alignment_audio import (
     AudioStreamTimeline,
     ProbedStreams,
     VideoStreamStart,
+    _PacketTailParser,
     collection_argv,
+    measure_selected_audio_duration,
     probe_streams,
     retime_rates,
     select_audio_pair,
@@ -22,7 +26,7 @@ from frame_compare.services.alignment_audio import (
 from frame_compare.services.alignment_audio import (
     probe_fps as _probe_fps,
 )
-from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.errors import AudioAlignmentCancellationError, AudioAlignmentError
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 
 
@@ -735,7 +739,7 @@ def test_retime_rates_are_exact(scale: Fraction, expected: tuple[int, int] | Non
     if expected == "unsupported":
         with pytest.raises(AudioAlignmentError) as exc_info:
             retime_rates(scale)
-        assert exc_info.value.category == "selected_audio_timeline_unavailable"
+        assert exc_info.value.category == "retime_rate_unsupported"
         return
     assert retime_rates(scale) == expected
 
@@ -887,3 +891,100 @@ def test_select_audio_pair_prefers_a_shared_language(
 
     assert reference_selection.stream.language == expected[0]
     assert comparison_selection.stream.language == expected[1]
+
+
+@pytest.mark.parametrize(
+    "chunks, reached_seek, latest_end",
+    [
+        ([b"30000,1000\n89900,100\n"], True, Fraction(90)),
+        ([b"300", b"00,100", b"0\n89900,100"], True, Fraction(90)),
+        ([b"29999,1000\n"], False, Fraction(30999, 1000)),
+        ([b"90000,0\r\n30000,100\r\n"], True, Fraction(90)),
+        ([b"30000,1000,\n89900,100", b",\n"], True, Fraction(90)),
+        ([], False, None),
+    ],
+)
+def test_selected_audio_packet_tail_parser(
+    chunks: list[bytes], reached_seek: bool, latest_end: Fraction | None
+) -> None:
+    parser = _PacketTailParser(Fraction(1, 1000), Fraction(30))
+    for chunk in chunks:
+        parser.feed(chunk)
+    parser.finish()
+    assert parser.reached_seek == reached_seek
+    assert parser.latest_end == latest_end
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        b"\n",
+        b"30000\n",
+        b"N/A,100\n",
+        b"true,100\n",
+        b"30000,-1\n",
+        b"1_000,10\n",
+        b"30000,,\n",
+        b"N/A,100,\n",
+        b"30000,N/A,\n",
+    ],
+)
+def test_selected_audio_packet_tail_parser_rejects_malformed_rows(row: bytes) -> None:
+    parser = _PacketTailParser(Fraction(1, 1000), Fraction(30))
+    with pytest.raises(ValueError):
+        parser.feed(row)
+        parser.finish()
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_selected_audio_tail_timeout_stays_unavailable(mock_run: MagicMock) -> None:
+    stream = replace(
+        _test_stream(),
+        timeline=AudioStreamTimeline(
+            start_time=Fraction(0),
+            duration=None,
+            time_base=Fraction(1, 1000),
+            duration_basis="unavailable",
+        ),
+    )
+    mock_run.side_effect = TimeoutExpired("ffprobe", 15)
+    assert (
+        measure_selected_audio_duration(
+            Path("movie.mkv"), stream, video_seconds=Fraction(90), cancellation=None
+        )
+        == stream
+    )
+    cancellation = Event()
+    cancellation.set()
+    mock_run.reset_mock()
+    with pytest.raises(AudioAlignmentCancellationError):
+        measure_selected_audio_duration(
+            Path("movie.mkv"), stream, video_seconds=Fraction(90), cancellation=cancellation
+        )
+    mock_run.assert_not_called()
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_selected_audio_tail_skips_known_duration_and_missing_time_base(
+    mock_run: MagicMock,
+) -> None:
+    known = _test_stream()
+    assert (
+        measure_selected_audio_duration(
+            Path("movie.mkv"), known, video_seconds=Fraction(90), cancellation=None
+        )
+        == known
+    )
+    unknown = replace(
+        known,
+        timeline=replace(
+            known.timeline, duration=None, time_base=None, duration_basis="unavailable"
+        ),
+    )
+    assert (
+        measure_selected_audio_duration(
+            Path("movie.mkv"), unknown, video_seconds=Fraction(90), cancellation=None
+        )
+        == unknown
+    )
+    mock_run.assert_not_called()

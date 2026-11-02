@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired
+from threading import Event
 from typing import cast
 
-from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.errors import AudioAlignmentError, raise_if_alignment_cancelled
 from frame_compare.services.types import AlignmentChannelStrategy
 from frame_compare.utils.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
@@ -21,7 +22,7 @@ from frame_compare.utils.alignment_evidence import (
     SelectedAudioStreamEvidence,
 )
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.subproc import SubprocessOutputLimitExceeded, run_subprocess
 
 _FFPROBE_TIMEOUT_SECONDS = 15.0
 
@@ -301,6 +302,98 @@ def _parse_audio_stream(
             start_time_basis="metadata" if parsed_start_time is not None else "default_zero",
             input_start_time_basis=input_start_time_basis,
         ),
+    )
+
+
+_PACKET_TAIL_MAX_BYTES = 32 * 1024 * 1024
+
+
+class _PacketTailParser:
+    """Consume CSV chunks without retaining the packet list."""
+
+    def __init__(self, time_base: Fraction, seek: Fraction) -> None:
+        self.time_base = time_base
+        self.seek = seek
+        self.pending = b""
+        self.reached_seek = False
+        self.latest_end: Fraction | None = None
+
+    def feed(self, chunk: bytes) -> None:
+        rows = (self.pending + chunk).split(b"\n")
+        self.pending = rows.pop()
+        for row in rows:
+            self._row(row)
+
+    def finish(self) -> None:
+        if self.pending:
+            self._row(self.pending)
+            self.pending = b""
+
+    def _row(self, row: bytes) -> None:
+        # ffprobe appends a side-data section after packet fields (for example
+        # Opus discard padding), even when no side-data values were requested.
+        fields = row.rstrip(b"\r").split(b",", 2)[:2]
+        if len(fields) != 2 or any(not field.lstrip(b"+-").isdigit() for field in fields):
+            raise ValueError("invalid packet row")
+        pts, duration = (int(field) for field in fields)
+        if duration < 0:
+            raise ValueError("negative packet duration")
+        self.reached_seek |= pts * self.time_base >= self.seek
+        end = (pts + duration) * self.time_base
+        self.latest_end = end if self.latest_end is None else max(self.latest_end, end)
+
+
+def measure_selected_audio_duration(
+    video_path: Path,
+    stream: AudioStreamInfo,
+    *,
+    video_seconds: Fraction,
+    cancellation: Event | None,
+) -> AudioStreamInfo:
+    """Fill missing selected-stream timing from one bounded packet-tail probe."""
+    timeline = stream.timeline
+    if timeline.duration is not None or timeline.time_base is None:
+        return stream
+    seek = max(Fraction(0), video_seconds - 60)
+    parser = _PacketTailParser(timeline.time_base, seek)
+    raise_if_alignment_cancelled(cancellation)
+
+    def abort() -> bool:
+        raise_if_alignment_cancelled(cancellation)
+        return False
+
+    try:
+        run_subprocess(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                f"a:{stream.audio_stream_index}",
+                "-read_intervals",
+                f"{float(seek)}%",
+                "-show_entries",
+                "packet=pts,duration",
+                "-of",
+                "csv=p=0",
+                str(video_path),
+            ],
+            timeout_seconds=_FFPROBE_TIMEOUT_SECONDS,
+            abort=abort,
+            stdout_consumer=parser.feed,
+            max_stdout_bytes=_PACKET_TAIL_MAX_BYTES,
+        )
+        parser.finish()
+    except (OSError, CalledProcessError, TimeoutExpired, SubprocessOutputLimitExceeded, ValueError):
+        return stream
+    if not parser.reached_seek or parser.latest_end is None:
+        return stream
+    measured_duration = parser.latest_end - timeline.start_time
+    if measured_duration <= 0:
+        return stream
+    return replace(
+        stream,
+        timeline=replace(timeline, duration=measured_duration, duration_basis="packet_tail"),
     )
 
 
@@ -627,7 +720,7 @@ def retime_rates(timeline_scale: Fraction) -> tuple[int, int] | None:
     """Exact resample/relabel rates that stretch audio time by ``timeline_scale``.
 
     Returns ``None`` for a scale of 1. Raises ``AudioAlignmentError`` with
-    category ``selected_audio_timeline_unavailable`` when a rate would exceed
+    category ``retime_rate_unsupported`` when a rate would exceed
     ``MAX_RETIME_RATE``.
     """
     if timeline_scale == 1:
@@ -637,7 +730,7 @@ def retime_rates(timeline_scale: Fraction) -> tuple[int, int] | None:
     if max(p, q) * m > MAX_RETIME_RATE:
         raise AudioAlignmentError(
             "retimed audio rate is not supported",
-            category="selected_audio_timeline_unavailable",
+            category="retime_rate_unsupported",
             stage="planning",
         )
     return p * m, q * m

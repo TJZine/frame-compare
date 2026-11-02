@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 import numpy as np
 from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 
 from frame_compare.config.schema_enums import VsScreenshotWriter
 from frame_compare.errors import ErrorDetails, FrameCompareError
@@ -35,7 +36,7 @@ from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.props import props_indicate_limited_range
 
 if TYPE_CHECKING:
-    import vapoursynth as vs  # type: ignore[import-untyped]
+    import vapoursynth as vs
 
     from frame_compare.render.types import OverlayConfig
 
@@ -346,30 +347,30 @@ def _clip_to_rgb24_for_pillow(clip: vs.VideoNode) -> vs.VideoNode:
     The VS pipeline frequently yields YUV (integer) or RGBS (float) depending on
     source format and tonemapping. Normalizing here keeps the encoder robust.
     """
-    import vapoursynth as vs  # type: ignore[import-untyped]
+    import vapoursynth as vs
 
     fmt = getattr(clip, "format", None)
     if fmt is None:
         matrix_in_s = _resolve_matrix_in_s(clip)
         # Variable format clip: best-effort conversion via resize (will fail if unsupported).
-        return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)  # type: ignore[attr-defined]
+        return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)
 
-    if fmt.id == vs.RGB24:  # type: ignore[attr-defined]
+    if fmt.id == vs.RGB24:
         frame_props = clip.get_frame(0).props
         if _should_expand_tonemapped_limited_rgb(frame_props):
             return clip.std.SetFrameProps(_FrameCompareExpandRange=1)
         return clip
 
-    if fmt.color_family != vs.RGB:  # type: ignore[attr-defined]
+    if fmt.color_family != vs.RGB:
         matrix_in_s = _resolve_matrix_in_s(clip)
-        return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)  # type: ignore[attr-defined]
+        return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)
 
     frame_props = clip.get_frame(0).props
     if _should_expand_tonemapped_limited_rgb(frame_props):
-        rgb = clip.resize.Point(format=vs.RGB24)  # type: ignore[attr-defined]
+        rgb = clip.resize.Point(format=vs.RGB24)
         return rgb.std.SetFrameProps(_FrameCompareExpandRange=1)
 
-    return clip.resize.Point(format=vs.RGB24)  # type: ignore[attr-defined]
+    return clip.resize.Point(format=vs.RGB24)
 
 
 def _expand_video_range_rgb_array(array: np.ndarray) -> np.ndarray:
@@ -476,7 +477,15 @@ def _render_vs_pillow(
             raise OverlayError("rendered frame facts are required for overlay composition")
         image = apply_overlay(image, overlay, frame_facts)
 
-    image.save(output, format="PNG", compress_level=settings.compression)
+    pnginfo = None
+    if (
+        _get_int_frame_prop(vs_frame.props, _VS_TRANSFER_PROP) == 13
+        and _get_int_frame_prop(vs_frame.props, _VS_PRIMARIES_PROP) == 1
+        and props_indicate_limited_range(vs_frame.props) is False
+    ):
+        pnginfo = PngInfo()
+        pnginfo.add(b"sRGB", b"\x00")
+    image.save(output, format="PNG", compress_level=settings.compression, pnginfo=pnginfo)
 
 
 def _render_vs_fpng(
@@ -526,7 +535,7 @@ def _resolve_fpng_writer(
 
 def _detect_fpng_writer() -> _FpngWriter | None:
     try:
-        import vapoursynth as vs_module  # type: ignore[import-untyped]
+        import vapoursynth as vs_module
     except ImportError:
         return None
 

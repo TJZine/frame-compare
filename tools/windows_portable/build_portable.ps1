@@ -20,6 +20,7 @@ Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $true
 
 . (Join-Path $PSScriptRoot "version_utils.ps1")
+. (Join-Path $PSScriptRoot "path_safety.ps1")
 
 $DownloadMaxAttempts = 4
 $DownloadRetryDelaySeconds = 5
@@ -31,6 +32,87 @@ $ManifestPath = [System.IO.Path]::GetFullPath($ManifestPath, $currentLocation)
 $OutDir = [System.IO.Path]::GetFullPath($OutDir, $currentLocation)
 $CacheDir = [System.IO.Path]::GetFullPath($CacheDir, $currentLocation)
 $RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot, $currentLocation)
+
+$OutDir = [System.IO.Path]::TrimEndingDirectorySeparator($OutDir)
+$CacheDir = [System.IO.Path]::TrimEndingDirectorySeparator($CacheDir)
+$RepoRoot = [System.IO.Path]::TrimEndingDirectorySeparator($RepoRoot)
+$currentLocation = [System.IO.Path]::TrimEndingDirectorySeparator($currentLocation)
+
+function Assert-BuildInputs([object]$Manifest) {
+  foreach ($path in @($OutDir, $CacheDir, $RepoRoot, $currentLocation, $PSScriptRoot, (Split-Path -Parent $ManifestPath))) {
+    Assert-NoReparsePointAncestor -Path $path -Label "Build path"
+  }
+  $manifestVersion = Get-RequiredProperty $Manifest "manifest_version" "manifest"
+  if (($manifestVersion -isnot [int] -and $manifestVersion -isnot [long]) -or $manifestVersion -ne 2) {
+    throw "Unsupported portable manifest version (expected 2)."
+  }
+  $bundle = Get-RequiredProperty $Manifest "bundle" "manifest"
+  $fingerprints = Get-RequiredProperty $bundle "runtime_fingerprints" "manifest.bundle"
+  foreach ($scope in @("analysis", "probe", "alignment", "index", "full")) {
+    $value = Get-RequiredStringProperty $fingerprints $scope "manifest.bundle.runtime_fingerprints"
+    if ($value -cnotmatch '^[a-f0-9]{64}$') { throw "Invalid runtime fingerprint: $scope" }
+  }
+  $artifacts = @(Get-RequiredProperty $Manifest "artifacts" "manifest")
+  if ($artifacts.Count -eq 0) { throw "Manifest artifacts must not be empty." }
+  $ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  foreach ($artifact in $artifacts) {
+    foreach ($field in @("id", "url", "sha256")) {
+      $null = Get-RequiredStringProperty $artifact $field "artifact"
+    }
+    if ($artifact.id -cnotmatch '^[a-z0-9][a-z0-9._-]*$' -or !$ids.Add($artifact.id)) {
+      throw "Invalid or duplicate artifact id: $($artifact.id)"
+    }
+    $bytes = Get-RequiredProperty $artifact "bytes" "artifact"
+    if ($artifact.sha256 -notmatch '^[a-fA-F0-9]{64}$' -or
+        ($bytes -isnot [int] -and $bytes -isnot [long]) -or $bytes -le 0) {
+      throw "Invalid artifact hash or byte size: $($artifact.id)"
+    }
+    $uri = $null
+    if (![Uri]::TryCreate($artifact.url, [UriKind]::Absolute, [ref]$uri) -or
+        $uri.Scheme -notin @("https", "http")) {
+      throw "Invalid artifact URL: $($artifact.url)"
+    }
+    $license = Get-RequiredProperty $artifact "license" "artifact"
+    $null = Get-RequiredStringProperty $license "spdx" "artifact.license"
+    $null = Get-RequiredStringProperty $license "url" "artifact.license"
+    $install = Get-RequiredProperty $artifact "install" "artifact"
+    $type = Get-RequiredStringProperty $install "type" "artifact.install"
+    if ($type -notin @("extract", "python_wheel")) { throw "Unknown install.type: $type" }
+    $destination = Get-OptionalStringProperty $install "destination"
+    if ($type -eq "extract" -or $destination -ne "") {
+      if ([string]::IsNullOrWhiteSpace($destination) -or
+          [IO.Path]::IsPathRooted($destination) -or $destination.Contains(":")) {
+        throw "Unsafe artifact destination: $destination"
+      }
+      $resolved = [IO.Path]::GetFullPath((Join-Path $OutDir $destination))
+      if (!(Test-PathWithin $resolved $OutDir)) { throw "Unsafe artifact destination: $destination" }
+      foreach ($segment in ($destination -split '[\\/]')) {
+        if ($segment -in @("", ".", "..") -or $segment.EndsWith(".") -or
+            $segment.EndsWith(" ") -or $segment -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$' -or
+            $segment.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) {
+          throw "Unsafe artifact destination: $destination"
+        }
+      }
+    }
+  }
+  if ($null -ne (Get-Item -LiteralPath $OutDir -Force -ErrorAction SilentlyContinue)) {
+    throw "OutDir must not already exist: $OutDir (CacheDir: $CacheDir)"
+  }
+  if ($OutDir -eq [IO.Path]::GetPathRoot($OutDir)) { throw "Unsafe OutDir: $OutDir" }
+  $manifestDir = [IO.Path]::TrimEndingDirectorySeparator((Split-Path -Parent $ManifestPath))
+  foreach ($protected in @($currentLocation, $RepoRoot, $CacheDir, $PSScriptRoot, $manifestDir)) {
+    if ($OutDir -eq $protected -or (Test-PathWithin $protected $OutDir)) {
+      throw "Unsafe OutDir $OutDir contains protected path $protected"
+    }
+  }
+  foreach ($protected in @($CacheDir, $PSScriptRoot, $manifestDir)) {
+    if (Test-PathWithin $OutDir $protected) { throw "Unsafe OutDir $OutDir inside $protected" }
+  }
+  if ((Test-PathWithin $OutDir $RepoRoot) -and
+      !(Test-PathWithin $OutDir (Join-Path $RepoRoot "dist"))) {
+    throw "OutDir $OutDir inside RepoRoot $RepoRoot must be beneath dist."
+  }
+}
 
 function Ensure-Directory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) {
@@ -690,7 +772,7 @@ function Remove-UnusedQtWebEngineRuntime([string]$BundleRoot) {
       }
   )
   $excludedBytes = [int64](($excludedFiles | Measure-Object -Property Length -Sum).Sum)
-  if ($excludedFiles.Count -ne 123 -or $excludedBytes -ne 359205252) {
+  if ($excludedFiles.Count -ne 125 -or $excludedBytes -ne 359295997) {
     throw "Unexpected Qt WebEngine deployment surface: files=$($excludedFiles.Count) bytes=$excludedBytes"
   }
   foreach ($file in $excludedFiles) {
@@ -1095,6 +1177,8 @@ function Assert-RequiredPySideLicenseMetadata([string]$BundleRoot) {
     "pyside6-*.dist-info",
     "pyside6_addons-*.dist-info",
     "pyside6_essentials-*.dist-info",
+    "pyside6_pdf-*.dist-info",
+    "pyside6_webengine-*.dist-info",
     "shiboken6-*.dist-info"
   )
 
@@ -1111,7 +1195,7 @@ function Assert-RequiredPySideLicenseMetadata([string]$BundleRoot) {
   }
 
   $lgplNotices = @(Get-ChildItem -LiteralPath $licensesDir -File -Filter "*LGPL-3.0*.txt")
-  if ($lgplNotices.Count -lt 4) {
+  if ($lgplNotices.Count -lt 6) {
     throw "Expected manifest-verified LGPL-3.0 notices for every PySide6 wheel."
   }
 }
@@ -1142,58 +1226,63 @@ function Main() {
     Assert-ReleasePublicKey
   }
 
-  Ensure-Directory -Path $CacheDir
-  if (Test-Path -LiteralPath $OutDir) {
-    Remove-Item -Recurse -Force -LiteralPath $OutDir
-  }
-  Ensure-Directory -Path $OutDir
-
   $manifest = Get-Manifest
+  Assert-BuildInputs -Manifest $manifest
   $artifacts = @(Get-RequiredProperty -Object $manifest -Name "artifacts" -Context "manifest")
+  $reservedOutput = $null
+  try {
+    $reservedOutput = New-AtomicallyReservedDirectory -Path $OutDir -Label "OutDir"
+    Ensure-Directory -Path $CacheDir
 
-  $downloaded = @{}
-  foreach ($artifact in $artifacts) {
-    $path = Download-Artifact -Artifact $artifact
-    $downloaded[(Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact")] = $path
+    $downloaded = @{}
+    foreach ($artifact in $artifacts) {
+      $path = Download-Artifact -Artifact $artifact
+      $downloaded[(Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact")] = $path
+    }
+
+    # Copy pin manifest into the bundle root.
+    Copy-Item -Force -LiteralPath $ManifestPath -Destination (Join-Path $OutDir "manifest.json")
+
+    # Install artifacts per manifest mapping.
+    foreach ($artifact in $artifacts) {
+      $id = Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact"
+      $path = $downloaded[$id]
+      Install-Artifact -BundleRoot $OutDir -Artifact $artifact -DownloadedPath $path
+    }
+
+    # Layout: app/
+    Copy-RepoApp -BundleRoot $OutDir
+    Install-PythonDeps -BundleRoot $OutDir -VsCoreRoot (Join-Path $OutDir "vs\\core")
+    Install-PythonWheelArtifacts -BundleRoot $OutDir -Artifacts $artifacts -Downloaded $downloaded
+    Remove-UnusedQtWebEngineRuntime -BundleRoot $OutDir
+    Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app"))
+    Configure-EmbeddedPython -BundleRoot $OutDir
+    Assert-BundleRuntime -BundleRoot $OutDir
+    Remove-PythonBytecodeCaches -BundleRoot $OutDir
+
+    # Launchers
+    Write-LauncherFiles -BundleRoot $OutDir
+    Copy-InstallerFiles -BundleRoot $OutDir
+
+    # Create default workspace directories in the bundle so users can drop in
+    # config and sources without passing explicit paths.
+    $bundleConfigDir = Join-Path $OutDir "config"
+    $bundleInputDir = Join-Path $OutDir "comparison_videos"
+    Ensure-Directory -Path $bundleConfigDir
+    Ensure-Directory -Path $bundleInputDir
+
+    # Licenses
+    Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts
+    Assert-RequiredPySideLicenseMetadata -BundleRoot $OutDir
+    Write-BundleInventory -BundleRoot $OutDir
+
+    Write-Host "OK: portable bundle assembled at $OutDir"
+  } catch {
+    if ($null -ne $reservedOutput) {
+      Remove-Item -Recurse -Force -LiteralPath $reservedOutput
+    }
+    throw
   }
-
-  # Copy pin manifest into the bundle root.
-  Copy-Item -Force -LiteralPath $ManifestPath -Destination (Join-Path $OutDir "manifest.json")
-
-  # Install artifacts per manifest mapping.
-  foreach ($artifact in $artifacts) {
-    $id = Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact"
-    $path = $downloaded[$id]
-    Install-Artifact -BundleRoot $OutDir -Artifact $artifact -DownloadedPath $path
-  }
-
-  # Layout: app/
-  Copy-RepoApp -BundleRoot $OutDir
-  Install-PythonDeps -BundleRoot $OutDir -VsCoreRoot (Join-Path $OutDir "vs\\core")
-  Install-PythonWheelArtifacts -BundleRoot $OutDir -Artifacts $artifacts -Downloaded $downloaded
-  Remove-UnusedQtWebEngineRuntime -BundleRoot $OutDir
-  Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app"))
-  Configure-EmbeddedPython -BundleRoot $OutDir
-  Assert-BundleRuntime -BundleRoot $OutDir
-  Remove-PythonBytecodeCaches -BundleRoot $OutDir
-
-  # Launchers
-  Write-LauncherFiles -BundleRoot $OutDir
-  Copy-InstallerFiles -BundleRoot $OutDir
-
-  # Create default workspace directories in the bundle so users can drop in
-  # config and sources without passing explicit paths.
-  $bundleConfigDir = Join-Path $OutDir "config"
-  $bundleInputDir = Join-Path $OutDir "comparison_videos"
-  Ensure-Directory -Path $bundleConfigDir
-  Ensure-Directory -Path $bundleInputDir
-
-  # Licenses
-  Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts
-  Assert-RequiredPySideLicenseMetadata -BundleRoot $OutDir
-  Write-BundleInventory -BundleRoot $OutDir
-
-  Write-Host "OK: portable bundle assembled at $OutDir"
 }
 
 Main

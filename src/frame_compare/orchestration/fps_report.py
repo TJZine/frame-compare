@@ -10,13 +10,12 @@ from typing import Any
 
 import structlog
 from rich.markup import escape
-from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 
 from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.presentation import clip_role, report_console_width
 from frame_compare.services.release_identity import (
+    ContentIdentity,
     ReleaseIdentity,
     ShortNameSource,
     common_content_identity,
@@ -25,15 +24,8 @@ from frame_compare.services.release_identity import (
     format_release_descriptor,
     short_source_names,
 )
-from frame_compare.utils.terminal_theme import (
-    ACCENT,
-    BORDER_NEUTRAL,
-    OK,
-    WARN,
-    format_duration,
-    glyphs_for_console,
-    human_console,
-)
+from frame_compare.utils.terminal_sections import Section, section_title
+from frame_compare.utils.terminal_theme import format_duration, human_console
 
 _ANALYSIS_SOURCE_PREFIX = "Analysis source: "
 
@@ -76,6 +68,8 @@ class FpsReportClip:
     effective_fps: Fraction
     fps_divergent: bool
     note: str | None
+    raw_fps: Fraction
+    fps_reason: str | None = None
     size_bytes: int = 0
     release_identity: ReleaseIdentity | None = None
     label_is_explicit: bool = False
@@ -103,6 +97,8 @@ def build_consolidated_fps_report(
                 effective_fps=clip.effective_fps,
                 fps_divergent=clip.effective_fps != clip.source_fps,
                 note=None,
+                raw_fps=clip.probe.fps,
+                fps_reason=_source_fps_reason(clip.probe.fps, clip.source_fps),
                 size_bytes=clip.probe.fingerprint.size_bytes,
                 release_identity=clip.release_identity,
                 label_is_explicit=clip.label_is_explicit,
@@ -121,6 +117,12 @@ def _fps_decimal_text(value: Fraction) -> str:
 
 def _format_fps_decimal(value: Fraction) -> str:
     return f"{_fps_decimal_text(value)} fps"
+
+
+def _source_fps_reason(raw_fps: Fraction, source_fps: Fraction) -> str | None:
+    if raw_fps == source_fps:
+        return None
+    return "within 10 ppm of standard"
 
 
 def _format_runtime(num_frames: int, fps: Fraction) -> str:
@@ -151,6 +153,7 @@ def _fraction_parts(value: Fraction) -> tuple[int, int]:
 
 
 def _serialize_clip(clip: FpsReportClip) -> dict[str, Any]:
+    raw_num, raw_den = _fraction_parts(clip.raw_fps)
     source_num, source_den = _fraction_parts(clip.source_fps)
     effective_num, effective_den = _fraction_parts(clip.effective_fps)
     return {
@@ -160,29 +163,25 @@ def _serialize_clip(clip: FpsReportClip) -> dict[str, Any]:
         "height": clip.height,
         "num_frames": clip.num_frames,
         "is_hdr": clip.is_hdr,
+        "raw_fps_num": raw_num,
+        "raw_fps_den": raw_den,
         "source_fps_num": source_num,
         "source_fps_den": source_den,
         "effective_fps_num": effective_num,
         "effective_fps_den": effective_den,
         "fps_divergent": clip.fps_divergent,
         "note": clip.note,
+        "fps_reason": clip.fps_reason,
     }
 
 
-def _stage_label(stage: str) -> str:
-    if stage == "after_load_sources":
-        return "After Load Sources"
-    if stage == "after_align":
-        return "After Alignment"
-    return stage.replace("_", " ").title()
-
-
 def _format_fps_transition(clip: FpsReportClip) -> str:
-    source_fps = _format_fps_value(clip.source_fps)
-    effective_fps = _format_fps_value(clip.effective_fps)
-    if clip.fps_divergent:
-        return f"{escape(source_fps)} -> {escape(effective_fps)}"
-    return escape(effective_fps)
+    fps_values = [clip.raw_fps]
+    if clip.source_fps != fps_values[-1]:
+        fps_values.append(clip.source_fps)
+    if clip.effective_fps != fps_values[-1]:
+        fps_values.append(clip.effective_fps)
+    return " -> ".join(escape(_format_fps_value(value)) for value in fps_values)
 
 
 def _format_file_size(size_bytes: int) -> str:
@@ -200,69 +199,68 @@ def _display_path(path: Path) -> str:
     return str(path.resolve())
 
 
-def _render_clip_overview(
-    clips: Sequence[FpsReportClip],
-    *,
-    verbose: bool,
-) -> Table:
-    table = Table(
-        show_header=False,
-        box=None,
-        pad_edge=False,
-        padding=(0, 2, 0, 0),
-        expand=False,
-    )
-    table.add_column("key", style="dim", no_wrap=True, min_width=14, overflow="fold")
-    table.add_column("value", overflow="fold")
-
+def _common_content_identity(clips: Sequence[FpsReportClip]) -> ContentIdentity | None:
     identities = [clip.release_identity for clip in clips]
-    common_content = (
+    return (
         common_content_identity([identity for identity in identities if identity is not None])
         if all(identity is not None for identity in identities)
         else None
     )
-    if common_content is not None:
-        table.add_row("", f"[bold]{escape(format_content_identity(common_content))}[/]")
-        table.add_row("", "")
 
+
+def _source_display_name(clip: FpsReportClip, *, common_content: ContentIdentity | None) -> str:
+    if clip.label_is_explicit:
+        standard = clip.label
+    elif clip.release_identity is not None:
+        standard = (
+            format_release_descriptor(clip.release_identity, separator=" · ")
+            if common_content is not None
+            else format_compact_identity(clip.release_identity, separator=" · ")
+        )
+    else:
+        standard = ""
+    return standard or clip.path.name
+
+
+def _add_clip_overview(
+    section: Section,
+    clips: Sequence[FpsReportClip],
+    *,
+    verbose: bool,
+) -> None:
+    common_content = _common_content_identity(clips)
     for index, clip in enumerate(clips):
         if index > 0:
-            table.add_row("", "")
+            section.add_line()
 
         filename = clip.path.name
-        if clip.label_is_explicit:
-            standard = clip.label
-        elif clip.release_identity is not None:
-            standard = (
-                format_release_descriptor(clip.release_identity, separator=" · ")
-                if common_content is not None
-                else format_compact_identity(clip.release_identity, separator=" · ")
-            )
-        else:
-            standard = ""
-        name_row = f"[bold]{escape(standard or filename)}[/]"
+        name_row = f"[bold]{escape(_source_display_name(clip, common_content=common_content))}[/]"
         if index == 0:
             name_row += "  [dim]reference[/]"
-        table.add_row("", name_row)
-        table.add_row("", _source_detail_line(clip))
-        table.add_row("", f"[dim]{escape(filename)}[/]")
+        section.add_line(name_row)
+        section.add_line(_source_detail_line(clip))
+        section.add_line(f"[dim]{escape(filename)}[/]")
         if verbose:
-            table.add_row("", f"[dim]{escape(_display_path(clip.path))}[/]")
-
-    return table
+            section.add_line(f"[dim]{escape(_display_path(clip.path))}[/]")
 
 
 def _source_detail_line(clip: FpsReportClip) -> str:
     """Return the `{w}×{h} · {fps} fps · {frames} ({runtime}) · {size}` line."""
+    if clip.fps_reason is None:
+        fps_segment = escape(f"{_fps_decimal_text(clip.effective_fps)} fps")
+    else:
+        fps_segment = f"{_format_fps_transition(clip)} [dim]({escape(clip.fps_reason)})[/]"
     segments = [
-        f"{clip.width}×{clip.height}",
-        f"{_fps_decimal_text(clip.effective_fps)} fps",
-        (f"{clip.num_frames:,} frames ({_format_runtime(clip.num_frames, clip.effective_fps)})"),
+        escape(f"{clip.width}×{clip.height}"),
+        fps_segment,
+        escape(
+            f"{clip.num_frames:,} frames ({_format_runtime(clip.num_frames, clip.effective_fps)})"
+        ),
     ]
     size = _format_file_size(clip.size_bytes)
     if size:
-        segments.append(size)
-    return "[dim] · [/]".join(escape(segment) for segment in segments)
+        segments.append(escape(size))
+    return "[dim] · [/]".join(segments)
 
 
 def _clip_short_names(clips: Sequence[FpsReportClip]) -> list[str]:
@@ -308,9 +306,8 @@ def _length_difference_lines(
             seconds = frames / reference_fps
             gap_text = f" ({seconds:.1f} s)" if seconds < 1.0 else f" ({format_duration(seconds)})"
         lines.append(
-            f"[{WARN}]![/] Lengths differ: {escape(_join_names(names))} {verb} "
-            f"[bold]{frames} {unit}{gap_text}[/] "
-            f"{direction} than {escape(reference_short)}."
+            f"Lengths differ: {_join_names(names)} {verb} {frames} {unit}{gap_text} "
+            f"{direction} than {reference_short}."
         )
     return lines
 
@@ -320,8 +317,18 @@ def _render_load_sources_overview(
     clips: Sequence[FpsReportClip],
     diagnostics: Sequence[str],
     verbose: bool,
-) -> Table:
-    table = _render_clip_overview(clips, verbose=verbose)
+) -> Section:
+    common_content = _common_content_identity(clips)
+    title = (
+        section_title(
+            escape(format_content_identity(common_content)),
+            detail=f"{len(clips)} {'source' if len(clips) == 1 else 'sources'}",
+        )
+        if common_content is not None
+        else section_title("Sources", detail=f"{len(clips)} loaded")
+    )
+    section = Section(title)
+    _add_clip_overview(section, clips, verbose=verbose)
     short_names = _clip_short_names(clips)
     other_diagnostics = [
         diagnostic
@@ -332,24 +339,18 @@ def _render_load_sources_overview(
         diagnostic for diagnostic in diagnostics if diagnostic.startswith(_ANALYSIS_SOURCE_PREFIX)
     ]
     length_lines = _length_difference_lines(clips, short_names)
-    if other_diagnostics or length_lines or analysis_lines:
-        table.add_row("", "")
-        for index, diagnostic in enumerate(other_diagnostics):
-            key = "diagnostic" if index == 0 else ""
-            table.add_row(key, escape(diagnostic))
+    if other_diagnostics or length_lines:
+        section.add_line()
+        for diagnostic in other_diagnostics:
+            section.add_note(diagnostic)
         for line in length_lines:
-            table.add_row("", line)
+            section.add_note(line)
+    if analysis_lines:
+        section.add_line()
         for diagnostic in analysis_lines:
             value = _analysis_source_rich_value(diagnostic, short_names=short_names)
-            short, _, reason = value.partition(" (")
-            if reason:
-                table.add_row(
-                    "analysis source",
-                    f"{escape(short)} [dim]({escape(reason)}[/]",
-                )
-            else:
-                table.add_row("analysis source", escape(value))
-    return table
+            section.add_row("analysis", Text(value))
+    return section
 
 
 def _fps_status(clip: FpsReportClip, *, reference_fps: Fraction) -> str:
@@ -360,32 +361,20 @@ def _fps_status(clip: FpsReportClip, *, reference_fps: Fraction) -> str:
     return "[green]matched[/]"
 
 
-def _render_fps_table(
+def _add_fps_rows(
+    section: Section,
     clips: Sequence[FpsReportClip],
     *,
     verbose: bool,
-) -> Table:
-    table = Table(
-        show_header=True,
-        box=None,
-        pad_edge=False,
-        padding=(0, 2, 0, 0),
-        expand=False,
-    )
-    table.add_column("role", style="dim", no_wrap=True, overflow="fold")
-    table.add_column("clip", overflow="fold")
-    table.add_column("fps", no_wrap=True, overflow="fold")
-    table.add_column("status", no_wrap=True, overflow="fold")
-    if verbose:
-        table.add_column("path", style="dim", overflow="fold")
-
+) -> None:
     if not clips:
-        return table
+        return
     reference_fps = clips[0].effective_fps
     for index, clip in enumerate(clips):
         status_text = _fps_status(clip, reference_fps=reference_fps)
-        if clip.note is not None:
-            status_text = f"{status_text} [dim]({escape(clip.note)})[/]"
+        notes = [note for note in (clip.note, clip.fps_reason) if note is not None]
+        if notes:
+            status_text = f"{status_text} [dim]({escape('; '.join(notes))})[/]"
 
         descriptor = (
             clip.label
@@ -396,21 +385,17 @@ def _render_fps_table(
                 else clip.label
             )
         )
-        cells = [
-            clip_role(index),
-            escape(descriptor or clip.path.name),
-            _format_fps_transition(clip),
-            status_text,
-        ]
+        value = (
+            f"{escape(descriptor or clip.path.name)} · {_format_fps_transition(clip)} · "
+            f"{status_text}"
+        )
         if verbose:
-            cells.append(escape(_display_path(clip.path)))
-        table.add_row(*cells)
-
-    return table
+            value += f" · [dim]{escape(_display_path(clip.path))}[/]"
+        section.add_row("reference" if index == 0 else "comparison", value)
 
 
 def _can_summarize_matching_fps(clips: Sequence[FpsReportClip]) -> bool:
-    if not clips or any(clip.fps_divergent for clip in clips):
+    if not clips or any(clip.fps_divergent or clip.raw_fps != clip.source_fps for clip in clips):
         return False
     effective_fps = clips[0].effective_fps
     return all(clip.effective_fps == effective_fps for clip in clips)
@@ -431,37 +416,18 @@ def _render_human_fps_report(
         height=1000,
     )
     if stage == "after_load_sources":
-        title = f"[bold {ACCENT} not dim]Sources[/] [dim]· {len(clips)} loaded[/]"
-        table = _render_load_sources_overview(
+        section = _render_load_sources_overview(
             clips=clips,
             diagnostics=diagnostics,
             verbose=verbose,
         )
     else:
-        if not verbose and _can_summarize_matching_fps(clips):
-            effective_fps = _format_fps_value(clips[0].effective_fps)
-            glyph = glyphs_for_console(console).ok
-            console.print(
-                Text.assemble(
-                    (glyph, OK),
-                    f"{' ':<11}frame rates match · {effective_fps}",
-                )
-            )
+        if _can_summarize_matching_fps(clips):
             return
-        title = f"[bold {ACCENT} not dim]Frame rates[/] [dim]{escape(_stage_label(stage))}[/]"
-        table = _render_fps_table(
-            clips,
-            verbose=verbose,
-        )
+        section = Section(section_title("Frame rates"))
+        _add_fps_rows(section, clips, verbose=verbose)
 
-    console.print(
-        Panel(
-            table,
-            title=title,
-            title_align="left",
-            border_style=BORDER_NEUTRAL,
-        )
-    )
+    section.print(console)
 
 
 def emit_consolidated_fps_report(

@@ -323,33 +323,6 @@ def v6_failure_reasons(
     return tuple(failures)
 
 
-def is_trusted_automatic(
-    *,
-    authority_recount: AudioAuthorityRecount,
-    video: VideoCheckObservation,
-    competing_runs: Sequence[ChunkRun],
-    credible_disagreements: Sequence[ChunkObservation],
-) -> bool:
-    """The single V6 trusted predicate; every conjunct is independently required."""
-    authority_ok = authority_recount.passed
-    video_ok = video.observation == "observed" and video.confirmed_offset is not None
-    targets = _target_map(video.targets)
-    runs_ok = all(
-        (target := targets.get(("run", run.first_index, run.last_index))) is not None
-        and target.resolution == "resolved"
-        for run in competing_runs
-    )
-    chunks_ok = all(
-        (target := targets.get(("chunk", item.index, item.index))) is not None
-        and target.resolution == "resolved"
-        for item in credible_disagreements
-    )
-    no_alternative_ok = all(
-        target.resolution != "alternative_confirmed" for target in video.targets
-    )
-    return authority_ok and video_ok and runs_ok and chunks_ok and no_alternative_ok
-
-
 def _is_sustained_walk(values: list[int]) -> bool:
     """Return whether run lags walk in one direction across three or more runs.
 
@@ -598,12 +571,7 @@ def decide_after_video(
         competing_runs=classification.competing_runs,
         credible_disagreements=classification.credible_disagreements,
     )
-    trusted = is_trusted_automatic(
-        authority_recount=recount,
-        video=video,
-        competing_runs=classification.competing_runs,
-        credible_disagreements=classification.credible_disagreements,
-    )
+    trusted = not reasons
     candidate = stage.decision.candidate
     if candidate is None and stage.audio.status != "search_edge":
         if stage.audio.subframe_estimate is None or stage.audio.compensation_seconds is None:
@@ -625,12 +593,12 @@ def decide_after_video(
             failed_gates=(),
         )
     else:
-        primary_reason = reasons[0] if reasons else "no_single_offset"
+        primary_reason = reasons[0]
         decision = AudioAlignmentDecision(
             state="provisional" if candidate is not None else "unavailable",
             candidate=candidate,
             primary_reason=primary_reason,
-            failed_gates=reasons or (primary_reason,),
+            failed_gates=reasons,
         )
     return replace(
         stage,
@@ -825,7 +793,6 @@ __all__ = [
     "decide_after_video",
     "decide_rejected_stage",
     "derive_stability",
-    "is_trusted_automatic",
     "recount_audio_authority",
     "v6_failure_reasons",
 ]

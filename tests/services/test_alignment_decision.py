@@ -23,7 +23,6 @@ from frame_compare.services.alignment_decision import (
     decide_completed_stage,
     decide_rejected_stage,
     derive_stability,
-    is_trusted_automatic,
     v6_failure_reasons,
 )
 from frame_compare.utils.alignment_evidence import (
@@ -442,13 +441,16 @@ def test_a4b_boundary_run_drives_trusted_or_provisional_video_outcome() -> None:
         (run.first_index, run.last_index, run.chunk_count) for run in classification.competing_runs
     ] == [(2, 3, 2)]
     assert tuple(item.index for item in classification.credible_disagreements) == ()
-    assert is_trusted_automatic(
-        authority_recount=_authority(),
-        video=_video(_target("run", 2, 3, "resolved", position_index=0)),
-        competing_runs=classification.competing_runs,
-        credible_disagreements=classification.credible_disagreements,
+    assert (
+        v6_failure_reasons(
+            authority_recount=_authority(),
+            video=_video(_target("run", 2, 3, "resolved", position_index=0)),
+            competing_runs=classification.competing_runs,
+            credible_disagreements=classification.credible_disagreements,
+        )
+        == ()
     )
-    assert not is_trusted_automatic(
+    assert v6_failure_reasons(
         authority_recount=_authority(),
         video=_video(
             _target("chunk", 2, 2, "resolved", position_index=0),
@@ -456,53 +458,55 @@ def test_a4b_boundary_run_drives_trusted_or_provisional_video_outcome() -> None:
         ),
         competing_runs=classification.competing_runs,
         credible_disagreements=classification.credible_disagreements,
-    )
+    ) == ("competing_offset",)
 
 
 @pytest.mark.parametrize(
     ("authority", "video", "runs", "credible", "expected"),
     [
-        (True, _video(), (), (), True),
-        (False, _video(), (), (), False),
-        (True, _video(observed=False), (), (), False),
+        (True, _video(), (), (), ()),
+        (False, _video(), (), (), ("no_single_offset",)),
+        (True, _video(observed=False), (), (), ("video_check_unavailable",)),
         (
             True,
             _video(_target("run", 2, 3, "unexamined", position_index=0)),
             (ChunkRun(first_index=2, last_index=3, lag=1600, chunk_count=2),),
             (),
-            False,
+            ("competing_offset",),
         ),
         (
             True,
             _video(),
             (),
             (_observation(5, lag=1600, credible=True, agrees=False),),
-            False,
+            ("unresolved_audio_disagreement",),
         ),
         (
             True,
             _video(_target("chunk", 9, 9, "alternative_confirmed", position_index=0)),
             (),
             (),
-            False,
+            ("competing_offset_confirmed_by_video",),
         ),
     ],
 )
-def test_v6_trusted_predicate_requires_each_conjunct(
+def test_v6_failure_reasons_require_each_gate(
     authority: bool,
     video: VideoCheckObservation,
     runs: tuple[ChunkRun, ...],
     credible: tuple[ChunkObservation, ...],
-    expected: bool,
+    expected: tuple[str, ...],
 ) -> None:
     assert (
-        is_trusted_automatic(
-            authority_recount=_authority(passed=authority),
+        v6_failure_reasons(
+            authority_recount=_authority(
+                passed=authority, status="agreed" if authority else "no_single_offset"
+            ),
             video=video,
             competing_runs=runs,
             credible_disagreements=credible,
         )
-        is expected
+        == expected
     )
 
 

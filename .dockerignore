@@ -37,12 +37,15 @@ htmlcov
 # Agent workflow artifacts
 .agent-workflow
 .agent
+.codex
+.claude
 .handoff
 .codanna
 .desloppify
 .hypothesis
 .tmp
 .uv_cache
+.portable_cache
 site
 tools/old_*.py
 

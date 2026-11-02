@@ -181,7 +181,7 @@ def _paired_kwargs(
     kwargs: dict[str, Any] = {
         "chunks": ((0, 500), (500, 500)),
         "lag_samples": 50,
-        "consumer": accumulator,
+        "consume_borrowed_chunk": accumulator,
         "reference_limit_samples": 100_000,
         "comparison_limit_samples": 100_000,
         "total_timeout_seconds": 20.0,
@@ -1150,7 +1150,7 @@ def test_request_validation_happens_before_spawn(
         )
     bad_requests: list[dict[str, Any]] = [
         {**base, "lag_samples": -1},
-        {**base, "consumer": None},
+        {**base, "consume_borrowed_chunk": None},
         {**base, "reference_limit_samples": 0},
         {**base, "comparison_limit_samples": -5},
         {**base, "total_timeout_seconds": 0.0},
@@ -1235,7 +1235,7 @@ def test_streamed_pairs_feed_chunked_correlation_like_memory(
         _file_writer_argv(comparison_path),
         chunks=plan.chunks,
         lag_samples=plan.lag_samples,
-        consumer=feed,
+        consume_borrowed_chunk=feed,
         reference_limit_samples=reference_limit,
         comparison_limit_samples=comparison_limit,
         total_timeout_seconds=total_timeout,

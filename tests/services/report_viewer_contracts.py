@@ -368,7 +368,7 @@ def script_payload(html: str) -> ReportPayload:
 @pytest.fixture
 def report_payload() -> ReportPayload:
     return {
-        "version": "1.2",
+        "version": "1.3",
         "report_id": "report_0123456789abcdef0123456789abcdef",
         "generated_at": "2026-05-22T12:00:00+00:00",
         "title": "Renderer Contract",
@@ -399,7 +399,7 @@ def report_payload() -> ReportPayload:
                     "dolby_vision_rpu": False,
                     "hdr_static": None,
                 },
-                "presentation": {"state": "sdr", "tone_curve": None, "target_nits": None},
+                "presentation": {"state": "sdr", "tonemap": None},
                 "active_picture": None,
                 "display": {
                     "primary": "Reference primary <unsafe>",
@@ -427,8 +427,7 @@ def report_payload() -> ReportPayload:
                 },
                 "presentation": {
                     "state": "hdr_tonemap_off",
-                    "tone_curve": None,
-                    "target_nits": None,
+                    "tonemap": None,
                 },
                 "active_picture": None,
                 "display": {
@@ -489,7 +488,7 @@ def report_payload() -> ReportPayload:
         "rendering": {
             "overlay_mode": "diagnostic",
             "include_frame_number": True,
-            "tonemap": {"applied": False, "settings": None},
+            "tonemap": {"ran": False, "requested": None, "shared": None},
             "geometry_by_label": {},
         },
     }

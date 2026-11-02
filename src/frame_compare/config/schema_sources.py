@@ -10,6 +10,9 @@ from typing import Any, cast
 from pydantic.fields import FieldInfo
 from pydantic_settings import EnvSettingsSource, TomlConfigSettingsSource
 
+from frame_compare.config.errors import ConfigParseError
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
+
 
 class TomlConfigSettingsSourceNoBOM(TomlConfigSettingsSource):
     """TOML settings source that accepts UTF-8 BOM-prefixed files.
@@ -21,7 +24,14 @@ class TomlConfigSettingsSourceNoBOM(TomlConfigSettingsSource):
     def _read_file(self, file_path: Path | Traversable) -> dict[str, Any]:
         raw = file_path.read_bytes()
         text = raw.decode("utf-8-sig")
-        return tomllib.loads(text)
+        try:
+            return tomllib.loads(text)
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+            raise
+        except SERIALIZED_DECODE_FAILURES:
+            raise ConfigParseError(
+                Path(str(file_path)), "configuration exceeds TOML parser limits"
+            ) from None
 
 
 class EnvironmentSettingsSource(EnvSettingsSource):
@@ -33,6 +43,13 @@ class EnvironmentSettingsSource(EnvSettingsSource):
     decode its environment representation here, at the source boundary, so
     that the strict model still rejects non-integer strings, floats, and bools.
     """
+
+    def decode_complex_value(self, field_name: str, field: FieldInfo, value: Any) -> Any:
+        try:
+            return super().decode_complex_value(field_name, field, value)
+        except RecursionError:
+            # Settings sources translate ValueError into their typed SettingsError.
+            raise ValueError("environment value exceeds JSON parser limits") from None
 
     def prepare_field_value(
         self,

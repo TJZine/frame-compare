@@ -14,9 +14,11 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.vs.types import HDRMetadata
+from tests.render_test_support import paths_by_label
 
 from .execute_run_helpers import clip_state
 from .phase_task_helpers import _workspace
@@ -59,9 +61,12 @@ def test_ffmpeg_extraction_applies_overlay_post_process(
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
         reporter=None,
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )
 
     runner = DefaultFFmpegRunner()
@@ -113,9 +118,9 @@ def test_ffmpeg_extraction_applies_overlay_post_process(
     )
 
     assert output.render.screenshot_dir == workspace.screenshots_dir
-    assert "Reference" in output.render.screenshots_by_label
-    assert len(output.render.screenshots_by_label["Reference"]) == 2
-    assert [path for path, _overlay, _facts in applied] == output.render.screenshots_by_label[
+    assert "Reference" in paths_by_label(output.render.clips)
+    assert len(paths_by_label(output.render.clips)["Reference"]) == 2
+    assert [path for path, _overlay, _facts in applied] == paths_by_label(output.render.clips)[
         "Reference"
     ]
     assert [facts for _path, _overlay, facts in applied] == [

@@ -10,6 +10,7 @@ from frame_compare.analysis.errors import (
     ExclusionRecoverySelectionError,
     MetricsCalculationError,
     SelectionError,
+    SelectionFailureKind,
 )
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
@@ -21,7 +22,7 @@ from frame_compare.orchestration.active_rect_content import (
     refine_auto_content_active_rects_for_clips,
 )
 from frame_compare.orchestration.selection_domain import (
-    build_analysis_selection_domain_token,
+    build_prepared_selection_domain,
     compute_selection_window_for_clips,
 )
 from frame_compare.orchestration.types import FullWindowRetryConfirmationRequest
@@ -44,12 +45,13 @@ _RETRY_FAILED_HINT = (
     "Reduce selector counts, use a longer clip, or use a clip-specific config with "
     "smaller analysis exclusions"
 )
-_ELIGIBLE_REASONS = {
-    "insufficient_candidates",
-    "insufficient random candidates after user frames",
-    "no selectable user or random frames remain after trims/windowing",
-}
-_EMPTY_EXCLUSION_WINDOW_REASON = "analysis ignore windows leave no selectable frames"
+_RECOVERABLE_KINDS = frozenset(
+    {
+        SelectionFailureKind.INSUFFICIENT_METRIC_CANDIDATES,
+        SelectionFailureKind.INSUFFICIENT_RANDOM_CANDIDATES,
+        SelectionFailureKind.NO_INITIAL_FRAMES,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +84,7 @@ def compute_selection_window_with_recovery(
         selection_window = compute_selection_window_for_clips(clips=clips, config=config)
     except SelectionError as error:
         analysis = config.analysis
-        if error.reason != _EMPTY_EXCLUSION_WINDOW_REASON or (
+        if error.kind is not SelectionFailureKind.EMPTY_SELECTION_WINDOW or (
             analysis.ignore_lead_seconds <= 0.0 and analysis.ignore_trail_seconds <= 0.0
         ):
             raise
@@ -125,7 +127,7 @@ def recover_from_exclusion_selection_failure(
     vs_loader: VSLoader | None,
 ) -> list[RunWarning]:
     """Confirm and apply one full-window retry, or raise a fatal typed selection error."""
-    if ctx.full_window_retry_override is not None:
+    if ctx.selection_domain.full_window_retry_override is not None:
         raise _fatal_selection_error(error, retry_failed=True) from error
     if not _eligible_for_recovery(ctx.config, error):
         raise error
@@ -134,7 +136,7 @@ def recover_from_exclusion_selection_failure(
     if ctx.reporter is None:
         _require_confirmation(
             error=error,
-            eligible_frame_count=ctx.selection_window.frame_count,
+            eligible_frame_count=ctx.selection_domain.selection_window.frame_count,
             config=ctx.config,
             confirm=ctx.confirm_full_window_retry,
         )
@@ -146,7 +148,7 @@ def recover_from_exclusion_selection_failure(
         try:
             _require_confirmation(
                 error=error,
-                eligible_frame_count=ctx.selection_window.frame_count,
+                eligible_frame_count=ctx.selection_domain.selection_window.frame_count,
                 config=ctx.config,
                 confirm=ctx.confirm_full_window_retry,
             )
@@ -197,30 +199,26 @@ def _apply_confirmed_override(
         config=effective_config,
         vs_loader=vs_loader,
     )
-    analysis_source_path = None if ctx.analysis_clip is None else ctx.analysis_clip.path
+    analysis_source_path = (
+        None
+        if ctx.selection_domain.analysis_clip is None
+        else ctx.selection_domain.analysis_clip.path
+    )
     analysis_clip = next(
         (clip for clip in clips if clip.path == analysis_source_path),
         None,
     )
     selection_window = compute_selection_window_for_clips(clips=clips, config=effective_config)
-    selection_domain = (
-        build_analysis_selection_domain_token(
-            clips=clips,
-            analysis_clip=analysis_clip,
-            config=effective_config,
-            selection_window=selection_window,
-        )
-        if analysis_clip is not None
-        else ""
+    domain = build_prepared_selection_domain(
+        clips=clips,
+        analysis_clip=analysis_clip,
+        config=effective_config,
+        selection_window=selection_window,
+        override=override,
     )
-
     ctx.config = effective_config
-    ctx.reference = clips[0]
-    ctx.comparisons = clips[1:]
-    ctx.analysis_clip = analysis_clip
-    ctx.selection_window = selection_window
-    ctx.analysis_selection_domain = selection_domain
-    ctx.full_window_retry_override = override
+    ctx.reference, ctx.comparisons = clips[0], clips[1:]
+    ctx.selection_domain = domain
     if ctx.preflight_warnings is not None:
         ctx.preflight_warnings[:] = [
             warning
@@ -232,7 +230,7 @@ def _apply_confirmed_override(
 
 def raise_if_full_window_retry_failed(ctx: RunContext, error: SelectionError) -> None:
     """Prevent an accepted recovery attempt from entering uniform fallback later."""
-    if ctx.full_window_retry_override is not None:
+    if ctx.selection_domain.full_window_retry_override is not None:
         raise _fatal_selection_error(error, retry_failed=True) from error
 
 
@@ -241,7 +239,7 @@ def raise_if_full_window_retry_runtime_failed(
     error: Exception,
 ) -> None:
     """Make any failure after accepted recovery fatal instead of warning-only."""
-    if ctx.full_window_retry_override is None:
+    if ctx.selection_domain.full_window_retry_override is None:
         return
     analysis = ctx.config.analysis
     requested = (
@@ -259,7 +257,7 @@ def _eligible_for_recovery(config: ConfigSchema, error: SelectionError) -> bool:
     analysis = config.analysis
     return (
         analysis.ignore_lead_seconds > 0.0 or analysis.ignore_trail_seconds > 0.0
-    ) and error.reason in _ELIGIBLE_REASONS
+    ) and error.kind in _RECOVERABLE_KINDS
 
 
 def _full_window_config(config: ConfigSchema) -> ConfigSchema:

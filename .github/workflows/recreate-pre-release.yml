@@ -1,0 +1,81 @@
+name: Recreate pre-release after publication
+
+on:
+  workflow_call:
+    inputs:
+      expected_sha:
+        required: true
+        type: string
+      release_tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA of the published squash release
+        required: true
+        type: string
+      release_tag:
+        description: Existing published stable tag (for example v0.7.0)
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  recreate:
+    name: Confirm development freeze and recreate pre-release
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: pre-release-recreation
+      cancel-in-progress: false
+    environment:
+      name: branch-maintenance
+    steps:
+      - name: Bind maintenance to reviewed main head
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$SOURCE_REPOSITORY" != "TJZine/frame-compare" || "$SOURCE_REF" != "refs/heads/main" ]]; then
+            echo "Branch maintenance must run from this repository's main branch." >&2
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ || "$EXPECTED_SHA" != "$SOURCE_SHA" ]]; then
+            echo "Branch maintenance requires the exact reviewed main head SHA." >&2
+            exit 1
+          fi
+
+      - name: Checkout reviewed published commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Mint repository-scoped maintenance token
+        id: maintenance-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.BRANCH_MAINTENANCE_CLIENT_ID }}
+          private-key: ${{ secrets.BRANCH_MAINTENANCE_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-workflows: write
+
+      - name: Preserve accepted history and start next integration cycle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRE_RELEASE_RESET_TOKEN: ${{ steps.maintenance-token.outputs.token }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: python3 scripts/recreate_pre_release.py

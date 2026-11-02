@@ -503,9 +503,19 @@ select optgroup {
     transition: margin-right 0.18s ease;
 }
 
-.rv-viewer-stage:fullscreen {
-    width: 100vw;
-    height: 100vh;
+body:fullscreen .rv-header,
+body:fullscreen .rv-controls,
+body:fullscreen .rv-bottom-panel {
+    display: none;
+}
+
+body:fullscreen .rv-viewer-stage {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+body:fullscreen .rv-inspector {
+    top: 0;
 }
 
 .rv-viewer-stage.is-panning {
@@ -558,14 +568,15 @@ select optgroup {
 .rv-canvas {
     position: relative;
     display: inline-block;
+    flex: 0 0 auto;
     transform-origin: center center;
     transform: translate(var(--pan-x, 0px), var(--pan-y, 0px)) scale(var(--zoom-level, 1));
 }
 
 .rv-sizer {
     display: block;
-    max-width: 96vw;
-    max-height: 100%;
+    max-width: none;
+    max-height: none;
     width: auto;
     height: auto;
     opacity: 0;
@@ -2349,7 +2360,7 @@ body.rv-inspector-open .rv-viewer-stage {
         min-height: 18rem;
     }
 
-    .rv-viewer-stage:fullscreen {
+    body:fullscreen .rv-viewer-stage {
         flex: 1 1 auto;
         min-height: 0;
     }

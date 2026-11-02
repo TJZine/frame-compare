@@ -431,9 +431,12 @@ def test_run_align_phase_does_not_substitute_after_full_window_retry(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
-    ctx.full_window_retry_override = FullWindowRetryOverride(
-        ignore_lead_seconds=2.0,
-        ignore_trail_seconds=2.0,
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        full_window_retry_override=FullWindowRetryOverride(
+            ignore_lead_seconds=2.0,
+            ignore_trail_seconds=2.0,
+        ),
     )
 
     monkeypatch.setattr(
@@ -469,7 +472,10 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
         ctx.reference,
         probe=replace(ctx.reference.probe, num_frames=220),
     )
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=220)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=220),
+    )
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={
             "random_frame_count": 0,
@@ -478,12 +484,15 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
             "dark_quantile": 0.2,
         }
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[float(frame) / 219.0 for frame in range(220)],
-        motion=[0.0 for _ in range(220)],
-        frame_count=220,
-        fps=Fraction(60, 1),
-        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[float(frame) / 219.0 for frame in range(220)],
+            motion=[0.0 for _ in range(220)],
+            frame_count=220,
+            fps=Fraction(60, 1),
+            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+        ),
     )
     selected_frames = [0, 1, 2, 3]
 
@@ -532,16 +541,19 @@ def test_run_align_phase_filters_and_rebases_sparse_metrics_for_overlap(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2}
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[0.9, 0.8, 0.4, 0.1, 0.2],
-        motion=[0.1, 0.1, 0.2, 0.3, 0.4],
-        frame_count=5,
-        fps=Fraction(24),
-        source_frame_count=220,
-        metric_source_start=0,
-        metric_source_end_exclusive=220,
-        performance_mode="performance",
-        sampled_source_frames=(10, 20, 65, 75, 90),
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[0.9, 0.8, 0.4, 0.1, 0.2],
+            motion=[0.1, 0.1, 0.2, 0.3, 0.4],
+            frame_count=5,
+            fps=Fraction(24),
+            source_frame_count=220,
+            metric_source_start=0,
+            metric_source_end_exclusive=220,
+            performance_mode="performance",
+            sampled_source_frames=(10, 20, 65, 75, 90),
+        ),
     )
 
     def _fake_align_clips_from_request(
@@ -584,16 +596,19 @@ def test_run_align_phase_sparse_overlap_reports_metric_candidate_underfill(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2}
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[0.1, 0.2],
-        motion=[0.1, 0.2],
-        frame_count=2,
-        fps=Fraction(24),
-        source_frame_count=220,
-        metric_source_start=0,
-        metric_source_end_exclusive=220,
-        performance_mode="performance",
-        sampled_source_frames=(10, 100),
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[0.1, 0.2],
+            motion=[0.1, 0.2],
+            frame_count=2,
+            fps=Fraction(24),
+            source_frame_count=220,
+            metric_source_start=0,
+            metric_source_end_exclusive=220,
+            performance_mode="performance",
+            sampled_source_frames=(10, 100),
+        ),
     )
 
     def _fake_align_clips_from_request(
@@ -633,12 +648,15 @@ def test_run_align_phase_raises_when_overlap_is_smaller_than_generated_counts(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[float(frame) / 99.0 for frame in range(100)],
-        motion=[0.0 for _ in range(100)],
-        frame_count=100,
-        fps=Fraction(24, 1),
-        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[float(frame) / 99.0 for frame in range(100)],
+            motion=[0.0 for _ in range(100)],
+            frame_count=100,
+            fps=Fraction(24, 1),
+            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+        ),
     )
 
     def _fake_align_clips_from_request(
@@ -678,12 +696,15 @@ def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_sa
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"user_frames": [98], "random_frame_count": 0, "dark_frame_count": 1}
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[float(frame) / 99.0 for frame in range(100)],
-        motion=[0.0 for _ in range(100)],
-        frame_count=100,
-        fps=Fraction(24, 1),
-        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[float(frame) / 99.0 for frame in range(100)],
+            motion=[0.0 for _ in range(100)],
+            frame_count=100,
+            fps=Fraction(24, 1),
+            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+        ),
     )
 
     def _fake_align_clips_from_request(
@@ -726,24 +747,33 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
         tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1", num_frames=220
     )
     ctx = _context(tmp_path, comparisons=[comparison])
-    ctx.selection_window = SelectionWindow(start_frame=80, end_frame_exclusive=140)
-    ctx.analysis_clip = _clip(
-        tmp_path / "comparison_videos" / "analysis.mkv",
-        label="Analysis",
-        num_frames=220,
-    ).with_trim(trim_start_frames=20, trim_end_frame_inclusive=219)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=80, end_frame_exclusive=140),
+    )
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        analysis_clip=_clip(
+            tmp_path / "comparison_videos" / "analysis.mkv",
+            label="Analysis",
+            num_frames=220,
+        ).with_trim(trim_start_frames=20, trim_end_frame_inclusive=219),
+    )
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[float(frame) / 219.0 for frame in range(100, 160)],
-        motion=[0.0 for _ in range(60)],
-        frame_count=60,
-        fps=Fraction(24, 1),
-        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
-        source_frame_count=220,
-        metric_source_start=100,
-        metric_source_end_exclusive=160,
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[float(frame) / 219.0 for frame in range(100, 160)],
+            motion=[0.0 for _ in range(60)],
+            frame_count=60,
+            fps=Fraction(24, 1),
+            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+            source_frame_count=220,
+            metric_source_start=100,
+            metric_source_end_exclusive=160,
+        ),
     )
 
     def _fake_align_clips_from_request(

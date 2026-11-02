@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.coordinator import (
     RunDependencies,
@@ -26,6 +27,7 @@ from frame_compare.render.geometry import RenderGeometryPlan
 from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.types import HDRMetadata
+from tests.run_request_support import make_run_request
 
 from .phase_task_helpers import _workspace
 
@@ -92,7 +94,7 @@ def test_execute_run_initializes_local_dependencies_without_mutating_injected_de
     monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
     monkeypatch.setattr(coordinator, "DefaultFFmpegRunner", fake_default_ffmpeg_runner)
 
-    request = RunRequest(root=tmp_path, quiet=True)
+    request = make_run_request(config=get_default_config(), root=tmp_path, quiet=True)
     deps = RunDependencies()
 
     assert deps.vs_loader is None
@@ -119,7 +121,7 @@ def test_execute_run_preserves_injected_ffmpeg_runner_after_prep(
 
     async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):
         assert local_deps.ffmpeg_runner is injected_runner
-        return SimpleNamespace(config=ConfigSchema(), artifacts=None)
+        return SimpleNamespace(config=get_default_config(), artifacts=None)
 
     def fail_default_ffmpeg_runner(*, extraction_timeout_seconds: float):
         del extraction_timeout_seconds
@@ -135,7 +137,11 @@ def test_execute_run_preserves_injected_ffmpeg_runner_after_prep(
 
     deps = RunDependencies(ffmpeg_runner=injected_runner)
     with pytest.raises(StopAfterDependencyInit):
-        asyncio.run(execute_run(RunRequest(root=tmp_path, quiet=True), deps=deps))
+        asyncio.run(
+            execute_run(
+                make_run_request(config=get_default_config(), root=tmp_path, quiet=True), deps=deps
+            )
+        )
 
     assert deps.ffmpeg_runner is injected_runner
 
@@ -162,7 +168,11 @@ def test_execute_run_preserves_slowpics_confirmation_callback_when_cloning_deps(
     deps = RunDependencies(confirm_slowpics_upload=_confirm)
 
     with pytest.raises(StopAfterDependencyInit):
-        asyncio.run(execute_run(RunRequest(root=tmp_path, quiet=True), deps=deps))
+        asyncio.run(
+            execute_run(
+                make_run_request(config=get_default_config(), root=tmp_path, quiet=True), deps=deps
+            )
+        )
 
     assert captured_local_deps is not None
     assert captured_local_deps.confirm_slowpics_upload is _confirm
@@ -171,10 +181,10 @@ def test_execute_run_preserves_slowpics_confirmation_callback_when_cloning_deps(
 @pytest.mark.parametrize(
     "run_request",
     [
-        RunRequest(root=Path("."), json_output=True),
-        RunRequest(root=Path("."), quiet=True),
-        RunRequest(root=Path("."), from_cache_only=True),
-        RunRequest(root=Path("."), skip_analysis=True),
+        make_run_request(config=get_default_config(), root=Path("."), json_output=True),
+        make_run_request(config=get_default_config(), root=Path("."), quiet=True),
+        make_run_request(config=get_default_config(), root=Path("."), from_cache_only=True),
+        make_run_request(config=get_default_config(), root=Path("."), skip_analysis=True),
     ],
 )
 def test_execute_run_removes_full_window_confirmation_in_unattended_modes(
@@ -200,7 +210,15 @@ def test_execute_run_removes_full_window_confirmation_in_unattended_modes(
     deps = RunDependencies(confirm_full_window_retry=_confirm)
 
     with pytest.raises(StopAfterDependencyInit):
-        asyncio.run(execute_run(replace(run_request, root=tmp_path), deps=deps))
+        asyncio.run(
+            execute_run(
+                replace(
+                    run_request,
+                    inputs=make_run_request(config=get_default_config(), root=tmp_path).inputs,
+                ),
+                deps=deps,
+            )
+        )
 
     assert captured_local_deps is not None
     assert captured_local_deps.confirm_full_window_retry is None
@@ -250,7 +268,11 @@ def test_reserved_warning_sink_survives_prep_failure(
     )
 
     with pytest.raises(StopAfterDependencyInit):
-        asyncio.run(execute_run(RunRequest(root=tmp_path), deps=RunDependencies()))
+        asyncio.run(
+            execute_run(
+                make_run_request(config=get_default_config(), root=tmp_path), deps=RunDependencies()
+            )
+        )
 
     assert captured_artifacts is not None
     assert [warning.text for warning in captured_artifacts.warnings] == [

@@ -7,11 +7,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import frame_compare.analysis.cache_io as cache_io
-from frame_compare.analysis.errors import MetricsCalculationError, SelectionError
+from frame_compare.analysis.errors import (
+    MetricsCalculationError,
+    SelectionError,
+    SelectionFailureKind,
+)
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.selection import select_frames, select_random_frames
 from frame_compare.analysis.types import (
-    CacheLoadResult,
     FrameMetrics,
     FrameSelection,
     SelectionBreakdown,
@@ -19,7 +22,6 @@ from frame_compare.analysis.types import (
     SelectionDetailsByFrame,
 )
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.orchestration.active_rect import metric_cache_request_for_clip
 from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
@@ -29,8 +31,8 @@ from frame_compare.orchestration.full_window_retry import (
     raise_if_full_window_retry_runtime_failed,
     recover_from_exclusion_selection_failure,
 )
+from frame_compare.orchestration.selection_domain import metric_request_for_domain
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
@@ -95,6 +97,7 @@ def _select_initial_frame_plan_once(ctx: RunContext) -> FramePlanPhaseOutput:
             "insufficient random candidates after user frames",
             requested=random_count,
             found=available_random_count,
+            kind=SelectionFailureKind.INSUFFICIENT_RANDOM_CANDIDATES,
         )
     random_frames = [
         frame + window_start
@@ -121,6 +124,7 @@ def _select_initial_frame_plan_once(ctx: RunContext) -> FramePlanPhaseOutput:
             "no selectable user or random frames remain after trims/windowing",
             requested=requested_initial_count,
             found=0,
+            kind=SelectionFailureKind.NO_INITIAL_FRAMES,
         )
     warnings = _dropped_user_frame_warnings(
         config=ctx.config.analysis,
@@ -204,7 +208,7 @@ def _dropped_user_frame_warnings(
 
 
 def _selection_window_for_context(ctx: RunContext) -> tuple[int, int]:
-    window = ctx.selection_window
+    window = ctx.selection_domain.selection_window
     if window.frame_count > 0:
         return window.start_frame, window.frame_count
     return 0, ctx.reference.effective_num_frames()
@@ -274,8 +278,8 @@ def run_analyze_phase(
             *_dropped_user_frame_warnings(
                 config=ctx.config.analysis,
                 reference=ctx.reference,
-                window_start=ctx.selection_window.start_frame,
-                frame_count=ctx.selection_window.frame_count,
+                window_start=ctx.selection_domain.selection_window.start_frame,
+                frame_count=ctx.selection_domain.selection_window.frame_count,
             ),
             *recovery_warnings,
         ],
@@ -292,58 +296,38 @@ def _run_analyze_phase_once(
     require_cache_only: bool = False,
     vs_loader: VSLoader | None = None,
 ) -> AnalyzePhaseOutput:
-    if ctx.analysis_clip is None:
+    if ctx.selection_domain.analysis_clip is None:
         raise MetricsCalculationError("Analysis source was not resolved for metric analysis.")
 
-    selection_domain = ctx.analysis_selection_domain
-    metric_request = metric_cache_request_for_clip(
-        ctx.analysis_clip,
-        selection_window=ctx.selection_window,
-        fallback_detection_mode=ctx.config.screenshots.active_rect_detection.value,
-    )
+    selection_domain = ctx.selection_domain.token
+    metric_request = metric_request_for_domain(ctx.selection_domain, ctx.config)
     if require_cache_only:
-        fingerprint = cache_io.compute_cache_key(
-            input_videos,
-            ctx.config.analysis,
-            selection_domain=selection_domain,
-            metric_request=metric_request,
-        )
-        cache_result = cache_io.load_cached_metrics_for_request(
-            workspace.cache_dir,
-            fingerprint,
-            request=metric_request,
-        )
-        metrics = _require_cached_metrics(
-            cache_result=cache_result,
+        metrics = cache_io.acquire_required_metrics(
+            metric_request,
+            video_paths=input_videos,
+            config=ctx.config.analysis,
             cache_dir=workspace.cache_dir,
-            input_videos=input_videos,
-            fingerprint=fingerprint,
+            selection_domain=selection_domain,
         )
         metrics_cache_hit = True
     else:
         acquisition = calculate_metrics(
+            metric_request,
             video_paths=input_videos,
-            analysis_source_path=ctx.analysis_clip.path,
             config=ctx.config.analysis,
             memory_limit_mb=ctx.config.runtime.memory_limit_mb,
             cache_dir=workspace.cache_dir,
             reporter=ctx.reporter,
             vs_loader=vs_loader,
             selection_domain=selection_domain,
-            effective_fps=ctx.analysis_clip.effective_fps,
-            metric_frame_range=metric_request.metric_frame_range,
-            metric_active_rect=metric_request.metric_active_rect,
-            active_rect_source=metric_request.active_rect_source,
-            active_rect_detection_mode=metric_request.active_rect_detection_mode,
-            active_rect_algorithm_id=metric_request.active_rect_algorithm_id,
         )
         metrics = acquisition.metrics
         metrics_cache_hit = acquisition.disposition == "hit"
     selection = _select_frames_for_selection_domain(
         metrics=metrics,
         reference=ctx.reference,
-        analysis_clip=ctx.analysis_clip,
-        selection_window=ctx.selection_window,
+        analysis_clip=ctx.selection_domain.analysis_clip,
+        selection_window=ctx.selection_domain.selection_window,
         config=ctx.config.analysis,
     )
     return AnalyzePhaseOutput(
@@ -363,28 +347,6 @@ def _selected_frames_summary(count: int) -> str:
     return f"{count} frames selected"
 
 
-def _require_cached_metrics(
-    *,
-    cache_result: CacheLoadResult,
-    cache_dir: Path,
-    input_videos: list[Path],
-    fingerprint: str,
-) -> FrameMetrics:
-    if cache_result.success and cache_result.metrics is not None:
-        return cache_result.metrics
-
-    cache_path = cache_io.find_metrics_cache_file(cache_dir, fingerprint)
-    expected_cache_path = cache_dir / cache_io.metrics_cache_filename(input_videos, fingerprint)
-    error_cache_path = cache_path or expected_cache_path
-    reason = cache_result.reason
-    if reason == "corrupted":
-        raise CacheCorruptionError(error_cache_path)
-    if reason == "version_mismatch":
-        found = cache_io.read_cache_version(error_cache_path) or "unknown"
-        raise CacheVersionMismatchError(found, str(cache_io.CACHE_VERSION))
-    raise MetricsCalculationError(f"Cached metrics missing or mismatched ({reason}).")
-
-
 def _select_frames_for_selection_domain(
     *,
     metrics: FrameMetrics,
@@ -399,7 +361,12 @@ def _select_frames_for_selection_domain(
         else (0, reference.effective_num_frames())
     )
     if frame_count <= 0:
-        raise SelectionError("reference source trims leave no selectable frames", 0, 0)
+        raise SelectionError(
+            "reference source trims leave no selectable frames",
+            0,
+            0,
+            kind=SelectionFailureKind.EMPTY_REFERENCE_DOMAIN,
+        )
     expected_metric_start = analysis_clip.trim.trim_start_frames + window_start
     if (
         metrics.metadata.metric_source_start != expected_metric_start

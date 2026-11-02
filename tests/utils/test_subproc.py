@@ -5,14 +5,17 @@ import sys
 import textwrap
 from pathlib import Path
 from time import monotonic
+from typing import IO
 
 import pytest
 
 import frame_compare.utils.subproc as subproc_module
 from frame_compare.utils.subproc import (
     SubprocessAborted,
+    SubprocessOutputLimitExceeded,
     prepare_python_child,
     resolve_executable,
+    resolve_optional_executable,
     run_subprocess,
 )
 
@@ -173,6 +176,7 @@ def test_run_subprocess_not_found():
     """Assert FileNotFoundError raised when bin missing."""
     with pytest.raises(FileNotFoundError):
         run_subprocess(["non_existent_command_12345"])
+    assert resolve_optional_executable("non_existent_command_12345") is None
 
 
 def test_run_subprocess_inside_running_event_loop() -> None:
@@ -245,6 +249,7 @@ def test_resolve_executable_media_overrides(
     state: str,
     message: str | None,
 ) -> None:
+    monkeypatch.setenv("PATH", "")
     binary = tmp_path / executable
     if state in {"valid", "nonexec"}:
         binary.write_bytes(b"")
@@ -252,9 +257,12 @@ def test_resolve_executable_media_overrides(
     monkeypatch.setenv(environment, "" if state == "empty" else str(binary.resolve()))
     if message is None:
         assert resolve_executable(requested) == str(binary.resolve())
+        assert resolve_optional_executable(requested) == str(binary.resolve())
     else:
         with pytest.raises(FileNotFoundError, match=message):
             resolve_executable(requested)
+        with pytest.raises(FileNotFoundError, match=message):
+            resolve_optional_executable(requested)
 
 
 @pytest.mark.parametrize("stop", ["abort", "timeout", "abort-kill"])
@@ -297,3 +305,104 @@ def test_run_subprocess_abort_path_reaps_real_child(
     assert len(processes) == 1
     assert processes[0].returncode is not None
     assert ready.exists()
+
+
+@pytest.fixture
+def streaming_children(monkeypatch: pytest.MonkeyPatch) -> list[subprocess.Popen[bytes]]:
+    processes: list[subprocess.Popen[bytes]] = []
+    original_popen = subproc_module.Popen
+
+    def popen(
+        argv: list[str], *, cwd: Path | None, stdout: IO[bytes], stderr: IO[bytes], shell: bool
+    ) -> subprocess.Popen[bytes]:
+        process = original_popen(argv, cwd=cwd, stdout=stdout, stderr=stderr, shell=shell)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(subproc_module, "Popen", popen)
+    return processes
+
+
+def _streaming_child_command() -> list[str]:
+    return [
+        sys.executable,
+        "-c",
+        "import sys, time\n"
+        "for index in range(8):\n"
+        "    sys.stdout.buffer.write(bytes([index]) * 65536)\n"
+        "    sys.stdout.buffer.flush()\n"
+        "    time.sleep(0.03)\n",
+    ]
+
+
+def test_run_subprocess_streaming_consumes_all_bytes(
+    streaming_children: list[subprocess.Popen[bytes]],
+) -> None:
+    chunks: list[bytes] = []
+    expected = b"".join(bytes([index]) * 65536 for index in range(8))
+
+    result = run_subprocess(
+        _streaming_child_command(),
+        timeout_seconds=10,
+        stdout_consumer=chunks.append,
+        max_stdout_bytes=len(expected),
+    )
+
+    assert b"".join(chunks) == expected
+    assert result.stdout == b""
+    assert result.returncode == 0
+    assert len(streaming_children) == 1
+    assert streaming_children[0].poll() == 0
+
+
+def test_run_subprocess_streaming_enforces_cap_and_reaps_child(
+    streaming_children: list[subprocess.Popen[bytes]],
+) -> None:
+    chunks: list[bytes] = []
+    cap = 100_000
+
+    with pytest.raises(SubprocessOutputLimitExceeded):
+        run_subprocess(
+            _streaming_child_command(),
+            timeout_seconds=10,
+            stdout_consumer=chunks.append,
+            max_stdout_bytes=cap,
+        )
+
+    assert sum(map(len, chunks)) <= cap
+    assert len(streaming_children) == 1
+    assert streaming_children[0].poll() is not None
+
+
+def test_run_subprocess_streaming_propagates_abort_and_reaps_child(
+    streaming_children: list[subprocess.Popen[bytes]],
+) -> None:
+    chunks: list[bytes] = []
+    interruption = RuntimeError("owner cancelled streaming")
+
+    def abort() -> bool:
+        if chunks:
+            raise interruption
+        return False
+
+    with pytest.raises(RuntimeError, match="owner cancelled streaming") as exc_info:
+        run_subprocess(
+            _streaming_child_command(),
+            timeout_seconds=10,
+            abort=abort,
+            stdout_consumer=chunks.append,
+            max_stdout_bytes=8 * 65536,
+        )
+
+    assert exc_info.value is interruption
+    assert chunks
+    assert len(streaming_children) == 1
+    assert streaming_children[0].poll() is not None
+
+
+@pytest.mark.parametrize("cap", [None, -1])
+def test_run_subprocess_streaming_validates_cap(cap: int | None) -> None:
+    with pytest.raises(ValueError, match="supplied together|nonnegative"):
+        run_subprocess(
+            _streaming_child_command(), stdout_consumer=lambda _chunk: None, max_stdout_bytes=cap
+        )

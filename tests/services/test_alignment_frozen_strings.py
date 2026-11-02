@@ -36,18 +36,13 @@ from frame_compare.services.alignment_decision import (
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_presentation import (
     present_alignment_evidence,
-    print_pre_review_summary,
 )
-from frame_compare.services.alignment_vsview import format_vsview_review_message
 from frame_compare.services.types import (
     AlignmentConfig,
-    AlignmentProvenance,
     AlignmentResult,
-    AlignmentReviewSummary,
-    AlignmentSource,
+    ComparisonResolution,
 )
 from frame_compare.utils.alignment_evidence import (
-    AudioAuthorityRecount,
     AudioChunkRun,
     AudioSameFrameContext,
     VideoCheckObservation,
@@ -61,12 +56,30 @@ from frame_compare.utils.logging import configure_logging
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
-from tests.services.alignment_request_test_support import alignment_request
-from tests.services.test_alignment_evidence import (
+from tests.alignment_review_scenarios import (
+    audio_failed_video_confirmed_attempt as _audio_failed_video_confirmed_attempt,
+)
+from tests.alignment_review_scenarios import (
+    boundary_video_inconclusive_attempt as _boundary_video_inconclusive_attempt,
+)
+from tests.alignment_review_scenarios import (
+    multi_context_attempt as _multi_context_attempt,
+)
+from tests.alignment_review_scenarios import (
+    production_nested_targets_attempt as _production_nested_targets_attempt,
+)
+from tests.alignment_review_scenarios import (
+    review_attempt as _review_attempt,
+)
+from tests.alignment_review_scenarios import (
+    singleton_chunk_target_attempt as _singleton_chunk_target_attempt,
+)
+from tests.services.alignment_evidence_test_support import (
     attempt_with_chunks,
     retimed_comparison_stream,
     stream,
 )
+from tests.services.alignment_request_test_support import alignment_request
 
 
 def _provisional_result(reference: Path, comparison: Path) -> AlignmentResult:
@@ -109,7 +122,7 @@ def _unavailable_result(
         status="complete",
         audio=replace(
             attempt_with_chunks(0).audio,
-            status="no_single_offset",  # type: ignore[arg-type]
+            status="no_single_offset",
         ),
         decision=replace(
             attempt_with_chunks(0).decision,
@@ -146,13 +159,11 @@ def _present(
     key = alignment_key(request.reference.path, request.comparisons[0].path)
     present_alignment_evidence(
         request=request,
-        results_map={key: result},
-        provenances={
-            key: AlignmentProvenance(
+        resolutions={
+            key: ComparisonResolution(
                 result=result,
                 comparison_cache_key="key",
-                provenance="computed_this_run",
-                evidence_availability="current_attempt",
+                origin="computed_this_run",
             )
         },
         config=config,
@@ -162,111 +173,6 @@ def _present(
         json_output=json_output,
         diagnostics_written=False,
     )
-
-
-def _review_attempt(reason: str):
-    base = attempt_with_chunks(4)
-    alternate_lag = 81_000
-    target_resolution = {
-        "competing_offset_confirmed_by_video": "alternative_confirmed",
-        "competing_offset": "unresolved",
-        "unresolved_audio_disagreement": "unresolved",
-    }.get(reason)
-    chunks = replace(
-        base.chunks,
-        lags=(1177, 1177, alternate_lag, alternate_lag),
-        agrees=(True, True, False, False),
-    )
-    runs = (
-        AudioChunkRun(first_index=0, last_index=1, lag=1177, chunk_count=2),
-        AudioChunkRun(first_index=2, last_index=3, lag=alternate_lag, chunk_count=2),
-    )
-    target = (
-        (
-            VideoTargetEvidence(
-                kind="run",
-                first_chunk_index=2,
-                last_chunk_index=3,
-                credible=True,
-                start_sample=(2) * 240_000,
-                end_sample=((3) + 1) * 240_000,
-                target_offset=243,
-                alternative_offsets=(242, 243, 244),
-                resolution=target_resolution,  # type: ignore[arg-type]
-                positions=(
-                    VideoTargetPosition(
-                        position_index=1,
-                        reference_frame=13_123,
-                        confirmed_score=1.0,
-                        alternative_score=0.1,
-                        winner=(
-                            "alternative"
-                            if reason == "competing_offset_confirmed_by_video"
-                            else "neither"
-                        ),
-                        alternative_offset=(
-                            243 if reason == "competing_offset_confirmed_by_video" else None
-                        ),
-                    ),
-                ),
-            ),
-        )
-        if target_resolution is not None
-        else ()
-    )
-    video = (
-        VideoCheckObservation(
-            observation="not_observed",
-            scored_offsets=(),
-            confirmed_offset=None,
-            index_build_seconds=None,
-            positions=(),
-        )
-        if reason == "video_check_unavailable"
-        else VideoCheckObservation(
-            observation="observed",
-            scored_offsets=(144, 145, 146, 147, 148),
-            confirmed_offset=(None if reason == "video_check_inconclusive" else 146),
-            index_build_seconds=0.1,
-            positions=(
-                VideoPositionDifference(
-                    position_index=0,
-                    reference_frame=6_474,
-                    score_by_offset=(2.0, 1.0, 0.1, 1.0, 2.0),
-                ),
-            ),
-            targets=target,
-            check_points=(
-                VideoCheckPoint(3661.0, 13_123, 12_880),
-                VideoCheckPoint(270.0, 6_474, 6_328),
-            ),
-        )
-    )
-    return replace(
-        base,
-        chunks=chunks,
-        runs=runs,
-        video_check=video,
-        decision=replace(
-            base.decision,
-            state="provisional",
-            primary_reason=reason,
-            failed_gates=(reason,),
-        ),
-    )
-
-
-def _boundary_video_inconclusive_attempt(*, position_count: int = 6):
-    attempt = _review_attempt("video_check_inconclusive")
-    positions = tuple(
-        VideoPositionDifference(
-            position_index=index,
-            reference_frame=6_474 + index,
-            score_by_offset=(2.0, 1.8, 1.4, 1.2, 0.1),
-        )
-        for index in range(position_count)
-    )
-    return replace(attempt, video_check=replace(attempt.video_check, positions=positions))
 
 
 def _early_competing_run_attempt():
@@ -445,49 +351,6 @@ def _unexamined_before_unresolved_attempt():
     )
 
 
-def _singleton_chunk_target_attempt():
-    attempt = _review_attempt("unresolved_audio_disagreement")
-    targets = (
-        VideoTargetEvidence(
-            kind="chunk",
-            first_chunk_index=0,
-            last_chunk_index=0,
-            credible=True,
-            start_sample=(0) * 240_000,
-            end_sample=((0) + 1) * 240_000,
-            target_offset=243,
-            alternative_offsets=(242, 243, 244),
-            resolution="unexamined",
-            positions=(),
-        ),
-        VideoTargetEvidence(
-            kind="chunk",
-            first_chunk_index=2,
-            last_chunk_index=2,
-            credible=True,
-            start_sample=(2) * 240_000,
-            end_sample=((2) + 1) * 240_000,
-            target_offset=246,
-            alternative_offsets=(245, 246, 247),
-            resolution="unresolved",
-            positions=(VideoTargetPosition(2, 9_000, 1.0, 1.0, "neither"),),
-        ),
-    )
-    return replace(
-        attempt,
-        chunks=replace(
-            attempt.chunks,
-            lags=(1177, 81_000, 82_000, 1177),
-            agrees=(True, False, False, True),
-        ),
-        runs=tuple(
-            AudioChunkRun(first_index=index, last_index=index, lag=lag, chunk_count=1)
-            for index, lag in enumerate((1177, 81_000, 82_000, 1177))
-        ),
-        video_check=replace(attempt.video_check, targets=targets),
-    )
-
-
 def _nested_alternative_confirmed_chunk_attempt():
     attempt = _review_attempt("competing_offset_confirmed_by_video")
     targets = (
@@ -532,63 +395,6 @@ def _nested_alternative_confirmed_chunk_attempt():
             agreeing_chunks=0,
         ),
         video_check=replace(attempt.video_check, targets=targets),
-    )
-
-
-def _production_nested_targets_attempt():
-    attempt = _review_attempt("competing_offset")
-    targets = (
-        VideoTargetEvidence(
-            kind="run",
-            first_chunk_index=0,
-            last_chunk_index=1,
-            credible=True,
-            start_sample=(0) * 240_000,
-            end_sample=((1) + 1) * 240_000,
-            target_offset=250,
-            alternative_offsets=(249, 250, 251),
-            resolution="unresolved",
-            positions=(VideoTargetPosition(1, 9_000, 1.0, 1.0, "neither"),),
-        ),
-        VideoTargetEvidence(
-            kind="chunk",
-            first_chunk_index=2,
-            last_chunk_index=2,
-            credible=False,
-            start_sample=(2) * 240_000,
-            end_sample=((2) + 1) * 240_000,
-            target_offset=246,
-            alternative_offsets=(245, 246, 247),
-            resolution="unresolved",
-            positions=(VideoTargetPosition(2, 9_001, 1.0, 1.0, "neither"),),
-        ),
-        VideoTargetEvidence(
-            kind="chunk",
-            first_chunk_index=3,
-            last_chunk_index=3,
-            credible=True,
-            start_sample=(3) * 240_000,
-            end_sample=((3) + 1) * 240_000,
-            target_offset=250,
-            alternative_offsets=(249, 250, 251),
-            resolution="alternative_confirmed",
-            positions=(VideoTargetPosition(3, 9_002, 1.0, 0.1, "alternative", 250),),
-        ),
-    )
-    return replace(
-        attempt,
-        chunks=replace(
-            attempt.chunks,
-            lags=(81_000, 81_000, 82_000, 83_333),
-            credible=(True, True, False, True),
-            agrees=(False, False, False, False),
-        ),
-        runs=(AudioChunkRun(first_index=0, last_index=3, lag=81_000, chunk_count=3),),
-        video_check=replace(attempt.video_check, targets=targets),
-        decision=replace(
-            attempt.decision,
-            failed_gates=("competing_offset", "unresolved_audio_disagreement"),
-        ),
     )
 
 
@@ -1085,42 +891,6 @@ def _resolved_before_alternative_confirmed_attempt():
     )
 
 
-def _multi_context_attempt():
-    attempt = _review_attempt("competing_offset_confirmed_by_video")
-    return replace(
-        attempt,
-        audio=replace(attempt.audio, agreeing_chunks=2),
-        authority_recount=AudioAuthorityRecount(
-            raw_status="agreed",
-            raw_agreeing_chunks=2,
-            authority_status="agreed",
-            authority_agreeing_chunks=4,
-            passed=True,
-        ),
-        video_check=replace(
-            attempt.video_check,
-            same_frame_context=(
-                AudioSameFrameContext(0, 1177, 146.23, 146),
-                AudioSameFrameContext(1, 1177, 146.23, 146),
-            ),
-        ),
-    )
-
-
-def _audio_failed_video_confirmed_attempt():
-    attempt = _review_attempt("video_check_inconclusive")
-    return replace(
-        attempt,
-        audio=replace(attempt.audio, status="no_single_offset", agreeing_chunks=2),
-        video_check=replace(attempt.video_check, confirmed_offset=146, targets=()),
-        decision=replace(
-            attempt.decision,
-            primary_reason="no_single_offset",
-            failed_gates=("no_single_offset",),
-        ),
-    )
-
-
 def _strict_video_vote_attempt():
     attempt = _review_attempt("competing_offset_confirmed_by_video")
     positions = tuple(
@@ -1157,96 +927,6 @@ def _applied_result(reference: Path, comparison: Path, attempt) -> AlignmentResu
         stability=attempt.stability,
         audio_attempt=attempt,
     )
-
-
-@pytest.mark.parametrize(
-    ("source", "offset", "reviewed"),
-    [
-        ("manual", 0, False),
-        ("manual", 12, False),
-        ("computed", 0, False),
-        ("cached", 12, False),
-        ("manual", 12, True),
-    ],
-    ids=["manual-zero", "manual-nonzero", "computed", "cached", "reviewed"],
-)
-def test_align_pre_review_summary_uses_frozen_fragments(
-    tmp_path: Path,
-    capsys,
-    source: AlignmentSource,
-    offset: int,
-    reviewed: bool,
-) -> None:
-    from frame_compare.orchestration.phase_alignment import _align_success_summary
-    from frame_compare.utils.progress import RichProgressReporter
-
-    reference, alpha, beta = (tmp_path / name for name in ("ref.mkv", "alpha.mkv", "beta.mkv"))
-    for path in (reference, alpha, beta):
-        path.touch()
-    request = alignment_request(
-        reference=reference,
-        comparisons=[alpha, beta],
-        generated_dir=tmp_path,
-    )
-    request = replace(
-        request,
-        comparisons=[
-            replace(comparison, short_name=short_name)
-            for comparison, short_name in zip(request.comparisons, ("Alpha", "Beta"), strict=True)
-        ],
-    )
-    results_map = {
-        f"{reference.stem}:{comparison.stem}": AlignmentResult(
-            reference.name,
-            comparison.name,
-            offset if applied else None,
-            offset / 24 if applied else None,
-            0.0,
-            None,
-            source,
-            applied=applied,
-        )
-        for comparison, applied in ((alpha, True), (beta, False))
-    }
-
-    print_pre_review_summary(
-        request=request,
-        results_map=results_map,
-        progress=RichProgressReporter(no_color=True),
-        no_color=True,
-    )
-
-    err = capsys.readouterr().err
-    assert "Align" in err
-    assert "Alpha alignment applied · Beta needs visual confirmation" in err
-
-    summary = _align_success_summary(
-        request=request,
-        results=list(results_map.values()),
-        review=AlignmentReviewSummary(
-            review_ran=reviewed,
-            pairs_confirmed=1 if reviewed else 0,
-            comparisons_kept=1 if reviewed else 0,
-        ),
-    )
-    assert summary == (
-        "1 pair confirmed in VSView · 1 kept"
-        if reviewed
-        else "Alpha alignment applied · Beta needs visual confirmation"
-    )
-
-
-@pytest.mark.parametrize(
-    ("pairs_confirmed", "kept_count", "expected"),
-    [
-        (1, 1, "Accepted 1 confirmed pair; 1 comparison kept its current offset."),
-        (2, 1, "Accepted 2 confirmed pairs; 1 comparison kept its current offset."),
-        (2, 3, "Accepted 2 confirmed pairs; 3 comparisons kept their current offset."),
-        (2, 0, "Accepted 2 confirmed pairs."),
-    ],
-)
-def test_vsview_review_message(pairs_confirmed: int, kept_count: int, expected: str) -> None:
-    assert format_vsview_review_message(pairs_confirmed, kept_count) == expected
 
 
 @pytest.mark.parametrize(
@@ -1336,7 +1016,7 @@ def test_normal_provisional_copy_is_frozen(
     _present(request, _provisional_result(reference, comparison), config)
 
     err = capsys.readouterr().err
-    assert "Comparison 1 - Provisional audio candidate: +146f - NOT APPLIED" in err
+    assert "comparison: +146f · not applied" in err
     assert (
         "Visual confirmation required to use this hint. Align manually or keep the current alignment."
         not in err
@@ -1371,6 +1051,7 @@ def test_inconclusive_copy_does_not_report_boundary_hint_with_four_positions() -
         ("search_edge", "best offset at the search edge"),
         ("no_usable_audio", "no usable audio signal"),
         ("selected_audio_timeline_unavailable", "selected audio timeline unavailable"),
+        ("retime_rate_unsupported", "retimed audio rate unsupported"),
         ("analysis_budget_exceeded", "analysis budget exceeded"),
         ("source_identity_changed", "source changed during analysis"),
         ("timeout", "audio collection failed"),
@@ -1387,7 +1068,7 @@ def test_normal_unavailable_copy_is_frozen(
     _present(request, _unavailable_result(reference, comparison, reason=reason), config)
 
     err = capsys.readouterr().err
-    assert f"Comparison 1 - No usable audio candidate ({phrase}) - NOT APPLIED" in err
+    assert f"comparison: no audio match ({phrase})" in err
     assert "Align manually or keep the current alignment." in err
 
 
@@ -1442,7 +1123,7 @@ def test_verbose_unavailable_shows_runs(tmp_path: Path, capsys: pytest.CaptureFi
             AudioChunkRun(first_index=0, last_index=0, lag=100, chunk_count=1),
             AudioChunkRun(first_index=1, last_index=1, lag=-200, chunk_count=1),
         ),
-        audio=replace(base.audio, status="no_single_offset"),  # type: ignore[arg-type]
+        audio=replace(base.audio, status="no_single_offset"),
         decision=replace(
             base.decision,
             state="unavailable",
@@ -1469,7 +1150,7 @@ def test_verbose_unavailable_shows_runs(tmp_path: Path, capsys: pytest.CaptureFi
     err = capsys.readouterr().err
     assert "Run 0-0: lag=+100 x1 chunks" in err
     assert "Run 1-1: lag=-200 x1 chunks" in err
-    assert "No usable audio candidate (no single offset across the track) - NOT APPLIED" in err
+    assert "no audio match (no single offset across the track)" in err
 
 
 def test_verbose_stability_scope_names_unassessed_chunks(
@@ -1521,7 +1202,7 @@ def test_quiet_keeps_only_actionable_notices(
     _present(request, _provisional_result(reference, comparison), config, quiet=True)
 
     err = capsys.readouterr().err
-    assert "Provisional audio candidate" in err
+    assert "· not applied" in err
 
     applied = AlignmentResult(
         reference_clip=reference.name,
@@ -1603,7 +1284,7 @@ def test_p4a_reason_copy_is_plain_and_shows_check_points(
     _present(request, result, config)
 
     err = capsys.readouterr().err
-    assert "Comparison 1 - Provisional audio candidate: +146f - NOT APPLIED" in err
+    assert "comparison: +146f · not applied" in err
     assert expected in err
     if reason != "video_check_unavailable":
         assert "Check 1:01:01  reference 13,123 <-> comparison 12,880 (+243f)" in err
@@ -2138,8 +1819,8 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
     assert capsys.readouterr().err == full_terminal
     assert "Picture differs" not in full_terminal
     assert "the picture differs" not in full_terminal
-    assert (" - APPLIED" in full_terminal) is applied
-    assert (" - NOT APPLIED" in full_terminal) is (not applied)
+    assert (" · applied" in full_terminal) is applied
+    assert (" · not applied" in full_terminal) is (not applied)
 
     _present(request, result, config, verbose=True)
     verbose_terminal = capsys.readouterr().err
@@ -2278,9 +1959,9 @@ def test_resolved_credible_run_context_matches_full_and_compact_terminal(
     _present(request, compact_result, config)
     assert capsys.readouterr().err == full_terminal
     assert full_terminal == (
-        "Comparison 1 - Audio alignment accepted: +0f - APPLIED\n"
-        "No additional confirmation needed.\n"
-        f"{expected_noted}\n"
+        "comparison: +0f · applied\n"
+        "  8 of 10 sections agree · video check +0f · stable\n"
+        f"  {expected_noted}\n"
     )
 
     _present(request, result, config, verbose=True)
@@ -2551,6 +2232,8 @@ def test_confirmed_reason_skips_earlier_resolved_region(
 def test_json_review_diagnostics_stay_on_stderr_and_run_stdout_is_pinned(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    from frame_compare.utils.progress_protocol import AlignmentSummary, AlignmentSummaryEntry
+
     configure_logging("INFO", "json")
     config = AlignmentConfig(cache_results=False, no_color=True)
     reference, comparison, request = _request_for(tmp_path, config)
@@ -2584,7 +2267,12 @@ def test_json_review_diagnostics_stay_on_stderr_and_run_stdout_is_pinned(
         assert reason not in diagnostic.out
 
         handle_json_output(
-            RunResult(success=True, warnings=[RunWarning("alignment", "warning", reason)])
+            RunResult(
+                success=True,
+                alignment_summary=AlignmentSummary((AlignmentSummaryEntry("Encode", 0, "audio"),)),
+                alignment_diagnostics_dir=tmp_path / "diagnostics",
+                warnings=[RunWarning("alignment", "warning", reason)],
+            )
         )
         serialized = capsys.readouterr()
         serialized_outputs.append(serialized.out.encode("utf-8"))
@@ -2790,3 +2478,209 @@ def test_verbose_context_rows_use_one_key_and_continuations(
     assert "         2 sections differ by less than a frame (sub-frame); not a disagreement." in err
     assert err.count("Context:") == 1
     assert ": 2 sections differ by less than a frame" not in err
+
+
+@pytest.mark.parametrize("credible", [True, False])
+@pytest.mark.parametrize(
+    "resolution", ["unresolved", "resolved", "unexamined", "alternative_confirmed"]
+)
+def test_literal_target_scenario_matches_producer(credible: bool, resolution: str) -> None:
+    from tests.alignment_review_scenarios import target_context_attempt
+
+    assert target_context_attempt(
+        credible=credible, resolution=resolution
+    ) == _producer_target_context_attempt(credible=credible, resolution=resolution)
+
+
+@pytest.mark.parametrize("shape", ["run", "run_and_chunk", "two_runs"])
+def test_literal_run_scenario_matches_producer(shape: str) -> None:
+    from tests.alignment_review_scenarios import resolved_run_context_attempt
+
+    resolutions = ("resolved",) if shape == "run" else ("resolved", "resolved")
+    assert resolved_run_context_attempt(
+        shape=shape, resolutions=resolutions
+    ) == _producer_run_context_attempt(shape=shape, resolutions=resolutions)
+
+
+@pytest.mark.parametrize("counts", [(4, 4, 3, 3), (4, 3, 3, 3), (5, 4, 3, 3), (4, 0, 0, 0)])
+def test_literal_count_scenario_matches_producer(counts: tuple[int, int, int, int]) -> None:
+    from tests.alignment_review_scenarios import established_counts_attempt
+
+    kwargs = dict(zip(("planned", "active", "credible", "agreeing"), counts, strict=True))
+    assert established_counts_attempt(**kwargs) == _producer_count_attempt(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("observed", "confirmed", "classification", "video_segment"),
+    [
+        (True, 146, "stable", " · video check +146f"),
+        (True, None, "possible_drift", " · video check inconclusive"),
+        (False, None, "insufficient_evidence", ""),
+        (False, None, "variable", ""),
+    ],
+)
+def test_normal_audio_evidence_reports_observation_and_stability(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    observed: bool,
+    confirmed: int | None,
+    classification: str,
+    video_segment: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import cast
+
+    from frame_compare.utils.alignment_evidence import (
+        AlignmentStabilityClassification,
+        AudioAuthorityRecount,
+    )
+
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    attempt = attempt_with_chunks(2)
+    attempt = replace(
+        attempt,
+        video_check=VideoCheckObservation(
+            observation="observed" if observed else "not_observed",
+            scored_offsets=(144, 145, 146, 147, 148) if observed else (),
+            confirmed_offset=confirmed,
+            index_build_seconds=0.0 if observed else None,
+            positions=(),
+        ),
+        stability=replace(
+            attempt.stability, classification=cast(AlignmentStabilityClassification, classification)
+        ),
+    )
+    if confirmed is not None:
+        attempt = replace(
+            attempt,
+            chunks=replace(attempt.chunks, agrees=(True, False)),
+            audio=replace(attempt.audio, agreeing_chunks=1),
+            authority_recount=AudioAuthorityRecount("agreed", 1, "agreed", 2, True),
+        )
+    result = replace(_provisional_result(reference, comparison), audio_attempt=attempt)
+    _present(request, result, config)
+    output = capsys.readouterr().err
+    assert f"  2 of 2 sections agree{video_segment} · {classification.replace('_', ' ')}" in output
+    if not observed:
+        assert "video check" not in output
+
+    from io import StringIO
+
+    from rich.console import Console
+    from rich.text import Text
+
+    from frame_compare.utils.progress import RichProgressReporter
+
+    rendered = StringIO()
+    console = Console(
+        file=rendered, width=120, force_terminal=True, color_system="standard", no_color=False
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_presentation.human_console", lambda **_kwargs: console
+    )
+    present_alignment_evidence(
+        request=request,
+        resolutions={
+            alignment_key(reference, comparison): ComparisonResolution(
+                result, "key", "computed_this_run"
+            )
+        },
+        config=replace(config, no_color=False),
+        progress=RichProgressReporter(no_color=True),
+        verbose=False,
+        quiet=False,
+        json_output=False,
+        diagnostics_written=False,
+        review_pending=True,
+    )
+    rich_text = rendered.getvalue()
+    plain = Text.from_ansi(rich_text).plain
+    assert "comparison  +146f · not applied · confirm in VSView" in plain
+    assert f"2 of 2 sections agree{video_segment} · {classification.replace('_', ' ')}" in plain
+    assert "Align manually or keep the current alignment." not in plain
+    evidence_style = Text.from_ansi(rich_text).get_style_at_offset(
+        console, plain.index(classification.replace("_", " "))
+    )
+    assert (evidence_style.color is not None and evidence_style.color.number == 3) is (
+        classification in {"possible_drift", "possible_discontinuity", "variable"}
+    )
+
+
+def test_final_summary_shows_changed_audio_offset_and_unapplied_state(tmp_path: Path) -> None:
+    from frame_compare.orchestration.phase_alignment import _align_success_summary
+    from frame_compare.services.alignment_resolution import confirm_manual
+    from frame_compare.utils.progress import alignment_summary_lines
+
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    request = replace(
+        request, comparisons=[replace(request.comparisons[0], short_name="Encode [red]")]
+    )
+    initial = ComparisonResolution(
+        _applied_result(reference, comparison, _producer_run_context_attempt()),
+        "key",
+        "computed_this_run",
+    )
+    confirmed = confirm_manual(
+        initial,
+        frame_offset=2,
+        fps_reference=Fraction(24),
+        reference_clip=reference,
+        comparison_clip=comparison,
+    )
+    summary = _align_success_summary(request=request, resolutions=(confirmed,), review_ran=True)
+    assert (
+        alignment_summary_lines(summary, width=120)[0].plain
+        == "Encode [red] +2f (audio +0f) · confirmed in VSView"
+    )
+    rejected = ComparisonResolution(
+        _provisional_result(reference, comparison), "key", "computed_this_run"
+    )
+    summary = _align_success_summary(request=request, resolutions=(rejected,), review_ran=False)
+    line = alignment_summary_lines(summary, width=120)[0]
+    assert line.plain == "Encode [red] not applied"
+    assert any(
+        span.style == "yellow" and line.plain[span.start : span.end] == "not applied"
+        for span in line.spans
+    )
+
+
+@pytest.mark.parametrize("verbose", [False, True])
+def test_audio_diagnostics_use_workspace_relative_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verbose: bool
+) -> None:
+    from io import StringIO
+
+    from rich.console import Console
+    from rich.text import Text
+
+    from frame_compare.utils.progress import RichProgressReporter
+
+    config = AlignmentConfig(cache_results=False, no_color=True)
+    reference, comparison, request = _request_for(tmp_path, config)
+    diagnostics = tmp_path / "generated" / "run" / "alignment_diagnostics"
+    request = replace(request, workspace_root=tmp_path, alignment_diagnostics_dir=diagnostics)
+    output = StringIO()
+    console = Console(file=output, width=120, record=True, no_color=True)
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_presentation.human_console", lambda **_kwargs: console
+    )
+    present_alignment_evidence(
+        request=request,
+        resolutions={
+            alignment_key(reference, comparison): ComparisonResolution(
+                _provisional_result(reference, comparison), "key", "computed_this_run"
+            )
+        },
+        config=config,
+        progress=RichProgressReporter(no_color=True),
+        verbose=verbose,
+        quiet=False,
+        json_output=False,
+        diagnostics_written=True,
+    )
+    plain = Text.from_ansi(output.getvalue()).plain
+    assert f"diagnostics     {Path('generated') / 'run' / 'alignment_diagnostics'}" in plain
+    assert str(tmp_path) not in plain if not verbose else "(absolute:" in plain
+    assert f'href="{diagnostics.as_uri()}"' in console.export_html(clear=False)

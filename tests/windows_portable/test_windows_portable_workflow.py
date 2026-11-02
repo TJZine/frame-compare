@@ -76,6 +76,7 @@ def test_windows_portable_manual_verify_binds_exact_sha_to_selected_ref(repo_roo
         "DISPATCH_REF_NAME": "${{ github.ref_name }}",
         "DISPATCH_REF_PROTECTED": "${{ github.ref_protected }}",
         "DISPATCH_REF_TYPE": "${{ github.ref_type }}",
+        "VERIFY_CHANNEL": "${{ inputs.channel }}",
         "DISPATCH_SHA": "${{ github.sha }}",
         "EXPECTED_SHA": "${{ inputs.expected_sha || github.sha }}",
     }
@@ -90,17 +91,19 @@ def test_windows_portable_manual_verify_binds_exact_sha_to_selected_ref(repo_roo
 
 
 @pytest.mark.parametrize(
-    ("expected_sha", "dispatch_sha", "ref_type", "ref_name", "protected", "succeeds"),
+    ("expected_sha", "dispatch_sha", "ref_type", "ref_name", "protected", "channel", "succeeds"),
     [
-        ("a" * 40, "a" * 40, "branch", "main", "true", True),
-        ("b" * 40, "b" * 40, "tag", "v0.5.0", "true", True),
-        ("c" * 40, "c" * 40, "tag", "v0.6.0-rc.1", "true", True),
-        ("A" * 40, "A" * 40, "branch", "main", "true", False),
-        ("a" * 40, "b" * 40, "branch", "main", "true", False),
-        ("a" * 40, "a" * 40, "branch", "topic", "false", False),
-        ("a" * 40, "a" * 40, "tag", "v0.5.0", "false", False),
-        ("a" * 40, "a" * 40, "tag", "not-a-release", "true", False),
-        ("a" * 40, "a" * 40, "pull_request", "1/merge", "false", False),
+        ("a" * 40, "a" * 40, "branch", "main", "true", "stable", True),
+        ("a" * 40, "a" * 40, "branch", "pre-release", "true", "rc", True),
+        ("a" * 40, "a" * 40, "branch", "main", "true", "rc", False),
+        ("a" * 40, "a" * 40, "branch", "pre-release", "true", "stable", False),
+        ("b" * 40, "b" * 40, "tag", "v0.5.0", "true", "stable", False),
+        ("c" * 40, "c" * 40, "tag", "v0.6.0-rc.1", "true", "rc", False),
+        ("A" * 40, "A" * 40, "branch", "main", "true", "stable", False),
+        ("a" * 40, "b" * 40, "branch", "main", "true", "stable", False),
+        ("a" * 40, "a" * 40, "branch", "pre-release", "false", "rc", False),
+        ("a" * 40, "a" * 40, "branch", "topic", "false", "rc", False),
+        ("a" * 40, "a" * 40, "pull_request", "1/merge", "false", "rc", False),
     ],
 )
 def test_windows_portable_manual_sha_validation_fails_closed(
@@ -111,6 +114,7 @@ def test_windows_portable_manual_sha_validation_fails_closed(
     ref_type: str,
     ref_name: str,
     protected: str,
+    channel: str,
     succeeds: bool,
 ) -> None:
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "windows-portable.yml")
@@ -130,6 +134,7 @@ def test_windows_portable_manual_sha_validation_fails_closed(
             "DISPATCH_REF_PROTECTED": protected,
             "DISPATCH_REF_TYPE": ref_type,
             "DISPATCH_SHA": dispatch_sha,
+            "VERIFY_CHANNEL": channel,
             "EXPECTED_SHA": expected_sha,
             "GITHUB_OUTPUT": _bash_path_or_skip(bash, output),
         },

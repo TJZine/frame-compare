@@ -39,7 +39,7 @@ function Get-ConfigInjectionIndex([string[]]$ArgsValues) {
   }
 
   $command = $ArgsValues[$commandIndex]
-  if ($command -eq "run" -or $command -eq "wizard") {
+  if ($command -eq "run" -or $command -eq "wizard" -or $command -eq "doctor") {
     return $commandIndex + 1
   }
   if ($command -eq "preset" -or $command -eq "history") {

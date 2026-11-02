@@ -613,3 +613,27 @@ def test_warning_record_bytes_preserve_count_cap_and_sanitization(
     assert record.warning_count == count
     assert len(record.warning_summaries) == summary_count
     assert parse_run_result(tomllib.loads(expected)) == record
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+    ],
+)
+def test_parser_limits_isolate_history_and_refuse_open(tmp_path: Path, content: str) -> None:
+    generated = tmp_path / "generated"
+    valid = generated / "valid"
+    broken = generated / "broken"
+    valid.mkdir(parents=True)
+    broken.mkdir()
+    write_run_result(valid, _record(tmp_path, valid))
+    path = broken / "run_result.toml"
+    path.write_text(content, encoding="utf-8")
+    entries = {entry.name: entry for entry in list_history(generated)}
+    assert entries["valid"].report_available
+    assert entries["broken"].status == "unavailable"
+    with pytest.raises(HistoryOpenError):
+        resolve_history_report(generated, "broken")
+    assert path.read_text(encoding="utf-8") == content

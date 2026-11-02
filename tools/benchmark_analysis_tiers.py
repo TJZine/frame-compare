@@ -390,34 +390,34 @@ def _run_tier(
     tier_config = analysis_config.model_copy(
         update={"performance_mode": AnalysisPerformanceMode(mode)}
     )
+    metric_request = MetricCacheRequest(
+        analysis_source_path=analysis_source_path,
+        metric_frame_range=metric_frame_range,
+        effective_fps=effective_fps,
+        metric_active_rect=active_rect.rect,
+        active_rect_source=active_rect.source,
+        active_rect_detection_mode=active_rect.detection_mode,
+        active_rect_algorithm_id=active_rect.algorithm_id,
+    )
     if metric_cache_policy == "cold":
         _delete_tier_metrics_cache(
+            metric_request,
             video_paths=video_paths,
             config=tier_config,
             cache_dir=cache_dir,
-            analysis_source_path=analysis_source_path,
-            effective_fps=effective_fps,
-            active_rect=active_rect,
             selection_domain=selection_domain,
-            metric_frame_range=metric_frame_range,
         )
     recorder = AnalysisTimingRecorder()
     cpu_started = time.process_time()
     trial_started = time.perf_counter()
     analyze_started = time.perf_counter()
     acquisition = calculate_metrics(
-        list(video_paths),
-        tier_config,
-        cache_dir,
-        analysis_source_path=analysis_source_path,
-        effective_fps=effective_fps,
-        metric_active_rect=active_rect.rect,
-        metric_frame_range=metric_frame_range,
-        active_rect_source=active_rect.source,
-        active_rect_detection_mode=active_rect.detection_mode,
-        active_rect_algorithm_id=active_rect.algorithm_id,
+        metric_request,
         selection_domain=selection_domain,
         timing_recorder=recorder,
+        video_paths=list(video_paths),
+        config=tier_config,
+        cache_dir=cache_dir,
     )
     metrics = acquisition.metrics
     analyze_seconds = time.perf_counter() - analyze_started
@@ -913,29 +913,15 @@ def _selection_with_offset(selection: FrameSelection, offset: int) -> FrameSelec
 
 
 def _delete_tier_metrics_cache(
+    request: MetricCacheRequest,
     *,
     video_paths: Sequence[Path],
     config: AnalysisConfig,
     cache_dir: Path,
-    analysis_source_path: Path,
-    effective_fps: Fraction | None,
-    active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
-    metric_frame_range: MetricFrameRange,
 ) -> None:
     key = compute_cache_key(
-        list(video_paths),
-        config,
-        selection_domain=selection_domain,
-        metric_request=MetricCacheRequest(
-            analysis_source_path=analysis_source_path,
-            metric_frame_range=metric_frame_range,
-            effective_fps=effective_fps,
-            metric_active_rect=active_rect.rect,
-            active_rect_source=active_rect.source,
-            active_rect_detection_mode=active_rect.detection_mode,
-            active_rect_algorithm_id=active_rect.algorithm_id,
-        ),
+        list(video_paths), config, selection_domain=selection_domain, metric_request=request
     )
     delete_metrics_cache_entry(cache_dir, key)
 

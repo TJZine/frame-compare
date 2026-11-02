@@ -9,12 +9,14 @@ A version shown here is supported only as part of the complete profile described
 
 | Component | Previous baseline | Selected component | Upstream date | Selection kind | Why this selection |
 | --- | --- | --- | --- | --- | --- |
-| Python | 3.13.15 | **3.13.16** | 2026-09-30 | Stable maintenance release | Security and maintenance fixes; Docker and Windows retain CPython 3.13. |
+| Python | 3.13.15 | **3.13.17** | 2026-10-21 | Stable security release | Updates bundled pip/certifi for the emSign certificate incident; Docker and Windows retain CPython 3.13. |
 | VapourSynth | R80 | **R81**, commit `dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a` | 2026-10-04 | Formal stable release | Fixes GPU memory sharing, Matroska muxer access violations, logging deadlocks, and frame-request handling. Retains CPython 3.12 ABI3 wheels and API R4.3; Frame Compare keeps its CPU-frame path. |
-| VSView | 0.12.0 | **0.12.1** | 2026-10-09 | Stable Python release | Maintained native viewer; 0.12.1 fixes non-contiguous buffers for clips whose dimensions are not 64-aligned and CLI `--arg`/`--qt-arg` parsing. Frame Compare uses its documented `set_output` API and named outputs plus the packaged native alignment panel; the `recommended`/`full` extras are not part of the supported graph. |
-| PySide6 | Previous Qt binding | **6.11.2** | Resolved 2026-08-30 | Locked Python resolution | VSView's documented Qt backend. The portable bundle pins the matching Qt runtime and requires native startup proof before release. |
-| VSJetEngine | 1.7.0 | **1.8.0** | 2026-09-25 | Stable Python release | Current locked VSView dependency resolution; 1.8.0 fixes frame-index tagging during out-of-order rendering and thread-safety races. |
-| VSView support graph | jetpytools 3.1.1; vspackrgb 1.4.0; vsview-cli 1.2.0 | **Cyclopts 5.2.0; jetpytools 3.1.2; vsjetengine 1.8.0; BestSource 22 (tag `R22`, commit `a0fab5708b28920957679825797692f6e4a23674`); vspackrgb 2.0.0** | BestSource 2026-09-16 | Locked Python resolution | Selected base VSView dependency graph; these packages serve the viewer/UI runtime and are hash-locked on every supported Python platform. BestSource 22 requires VapourSynth R80. |
+| VSView | 0.12.1 | **0.13.0** | 2026-10-14 | Stable Python release | Maintained native viewer. Frame Compare uses its documented `set_output` API and named outputs plus the packaged native alignment panel; the `recommended`/`full` extras are not part of the supported graph. |
+| PySide6 | Previous Qt binding | **6.12.0** | 2026-10-08 | Locked Python resolution | VSView's documented Qt backend. The portable bundle pins the matching Qt runtime and requires native startup proof before release. |
+| Qt PDF (Windows) | Qt 6.11.2 source bundle | **6.140.0**, source commit `d505fc23640d2bd6345e6483eb73daf4e19f5829` | SDK build 2026-09-28 | Paired installer source commit | PySide6-Pdf 6.12.0.140 uses the separately versioned Qt PDF product. PDF remains in the portable profile; WebEngine runtime files remain excluded. |
+| Qt Multimedia FFmpeg (Windows) | 7.1.5 | **9.0.1** | PySide6 6.12.0 build | Wheel-bundled LGPL build | Distinct from the standalone BtbN FFmpeg and the L-SMASH decoder library lineage. |
+| VSJetEngine | 1.8.0 | **1.8.1** | 2026-10-11 | Stable Python release | Required by the VSView 0.13.0 base dependency graph. |
+| VSView support graph | Cyclopts 5.2.0; jetpytools 3.1.2; vsjetengine 1.8.0; BestSource 22; vspackrgb 2.0.0 | **Cyclopts 5.3.0; jetpytools 3.2.0; vsjetengine 1.8.1; BestSource 22 (tag `R22`, commit `a0fab5708b28920957679825797692f6e4a23674`); vspackrgb 2.0.0** | Cyclopts 2026-10-22; BestSource 2026-09-16 | Locked Python resolution | Selected base VSView dependency graph; these packages serve the viewer/UI runtime and are hash-locked on every supported Python platform. BestSource 22 requires VapourSynth R80. |
 | L-SMASH-Works | 1296.0.0.0 | **1310.0.0.0**, commit `7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67` | 2026-08-23 | Formal native release | Latest stable native release. It preserves the API 4 video source surface and adds audio source filters plus audio-gap corrections. |
 | Windows L-SMASH-Works package | 1296.0.0.1 | **vapoursynth-lsmas 1310.0.0.0** | 2026-08-23 | Non-yanked official PyPI wheel | Official wheel for the 1310 native lineage. Its plugin DLL imports only Windows/UCRT system libraries; unlike the release archive DLL, it does not require external MSVCP140 or VCRUNTIME140 DLLs. |
 | L-SMASH | commit `84740c5d960ab622f4c08b971dc59192bc27ef74` | commit **`d186eb95388710a7a91f6fd353169b457ebbb9db`** | 2026-07-28 | Pinned maintainer-fork commit, not a release | Exact L-SMASH revision selected and tested by L-SMASH-Works 1310. No newer appropriate formal stable tag supersedes it. |
@@ -37,8 +39,18 @@ The official L-SMASH-Works, vs-placebo, and PySide6 wheels keep the library
 versions actually used by their upstream builds. New standalone dav1d, libxml2,
 libvpx, xxHash, nv-codec-headers, or libdovi releases do not change those binaries;
 only a new verified upstream wheel can refresh their corresponding-source records.
-Qt 6.12 source availability likewise does not change the selected PySide6 6.11.2
-wheel graph. Physical Windows acceptance for this candidate remains required.
+The selected PySide6 6.12.0 graph includes the separately packaged WebEngine and
+PDF distributions. The portable bundle retains its WebEngine/Chromium payload
+exclusion and keeps PDF support. Physical Windows acceptance for this candidate
+remains required.
+
+Qt PDF's source is pinned to the [official installer source package](https://download.qt.io/online/qtsdkrepository/all_os/extensions/qtwebengine/6120/61400/src_doc_examples/extensions.qtwebengine.6120.61400.src/6.12.0-0-202609281005qtwebengine-everywhere-src-6.140.0.tar.xz)
+paired with [Windows SDK build `6.12.0-0-202609281005`](https://download.qt.io/online/qtsdkrepository/windows_x86/extensions/qtpdf/6120/61400/msvc2022_64/Updates.xml).
+The SDK's source inventory identifies commit `d505fc23640d2bd6345e6483eb73daf4e19f5829`,
+also tagged `v6.140.0-rc`; this selection does not claim a formal final source tag.
+The three PDF DLL images in the SDK and wheel match after excluding Authenticode
+signing metadata. The manifest records the actual source archive's size and SHA-256;
+the main Qt 6.12 source archive alone does not contain these PDF sources.
 
 ## Runtime profiles
 
@@ -55,13 +67,13 @@ and Frame Compare-owned indexes before reuse.
 
 ### Windows x64 portable
 
-- CPython 3.13.16 embeddable runtime.
+- CPython 3.13.17 embeddable runtime.
 - VapourSynth R81 portable runtime and CPython 3.13 wheel layout.
 - L-SMASH-Works 1310 through the official `vapoursynth-lsmas 1310.0.0.0`
   Windows wheel.
 - vs-placebo 2.0.4 Windows wheel with its selected libplacebo and libdovi
   lineages.
-- VSView 0.12.1 with its base dependency graph, PySide6 6.11.2, BestSource,
+- VSView 0.13.0 with its base dependency graph, PySide6 6.12.0, BestSource,
   vspackrgb, and the packaged `frame-compare-alignment-review` panel entry point
   for optional native interactive review. The runtime and panel metadata must come
   from the same environment; a PATH-only VSView executable is unsupported. BestSource
@@ -74,7 +86,7 @@ and Frame Compare-owned indexes before reuse.
 
 ### Debian Trixie / Docker
 
-- CPython 3.13.16 slim-trixie image, with uv 0.13.0 pinned by image digest.
+- CPython 3.13.17 slim-trixie image, with uv 0.13.5 pinned by image digest.
 - VapourSynth R81 manylinux wheel.
 - L-SMASH-Works 1310 built from source against VapourSynth API 4 and the Debian
   FFmpeg development ABI.
@@ -136,16 +148,15 @@ C++20 native-build requirement.
   `VSHelper.h`). The Docker build installs only the API 4 headers, which are the
   only VapourSynth headers the selected L-SMASH-Works and FFMS2 sources include.
 
-### VSView 0.12 and vspackrgb 2.0
+### VSView 0.13 and vspackrgb 2.0
 
-VSView 0.12 replaces the separate `vsview-cli` distribution with Cyclopts. The
-portable inventory follows the resolved graph and verifies its native `vsview.cli`
-entry point. vspackrgb 2.0 replaces its Cython extension with `vspackrgb.rust`;
-packaged native-extension verification must load that module. The public
-Frame Compare launcher still runs VSView inside the managed interpreter.
-The release adds workspace lifecycle hooks and serializes script execution;
-plugin discovery, panel callbacks, frame-0 rendering, and visible Windows review
-require candidate-specific acceptance.
+VSView 0.13 uses the base dependency graph with Cyclopts, jetpytools 3.2.0, and
+VSJetEngine 1.8.1. The portable inventory follows the resolved graph and verifies
+its native `vsview.cli` entry point. vspackrgb 2.0 replaces its Cython extension
+with `vspackrgb.rust`; packaged native-extension verification must load that
+module. The public Frame Compare launcher still runs VSView inside the managed
+interpreter. Plugin discovery, panel callbacks, frame-0 rendering, and visible
+Windows review require candidate-specific acceptance.
 
 ### BestSource R22
 
@@ -180,6 +191,31 @@ source, the C++ callback is named `GetVersion` internally, but its registered
 VapourSynth function is `Version`; the runtime version must report `5.0.0.0`.
 Windows continues to use L-SMASH-Works only; FFMS2 is not added for artificial
 cross-platform symmetry.
+
+### Experimental native still reuse
+
+`FRAME_COMPARE_EXPERIMENTAL_NATIVE_STILLS=1` enables a default-off development
+runtime policy for one reviewed patched UCRT build. Unset the variable to retain
+the normal fresh-per-frame behavior; other nonempty values raise a typed tonemap
+error. This is not a persisted color setting or a supported-runtime upgrade.
+Selection checks the actual canonical loaded plugin's identifier, signature,
+path and code-owned reviewed SHA256. Only fixed integer RGB48 HDR10/PQ-to-SDR
+input without an enhancement layer is admitted. Retained base-layer Dolby Vision
+RPU remains supported; HLG, explicit native DOVI and other unsupported classes
+keep their existing route. Sequence behavior and tone settings stay unchanged.
+
+The ordinary runtime safety child must resolve the same experimental plugin;
+changing only the main process's Python import path is insufficient. Existing
+runtime safety overrides keep their precedence but do not establish this proof.
+Use an owned disposable runtime; do not overwrite installed native files or
+alter registry/user VapourSynth configuration for acceptance.
+
+The reviewed build record in `vs.tonemap_runtime` retains source/dependency
+revisions and native source hashes. It is experimental provenance, not an
+upstream wheel identity or accepted deployment fingerprint. Distribution still
+requires an honestly identified downstream/upstream wheel, matching sources and
+licenses, full runtime identity and artifact/physical-Windows acceptance. A native
+replacement cannot be delivered through an unchanged code-only update identity.
 
 ### vs-placebo 2.0.4
 
@@ -296,7 +332,7 @@ deterministic layout. For generated HDR fixtures, `ffprobe` is the encoded
 stream-signal authority;
 the Docker gate separately proves that both source plugins retain at least 10-bit
 decoded precision because L-SMASH-Works does not expose every stream color tag as a
-frame property. The Linux GUI verifier contract requires the VSView 0.12.1 image to
+frame property. The Linux GUI verifier contract requires the VSView 0.13.0 image to
 discover and load the exact native panel entry point, construct its inactive panel
 offscreen, load a production-generated L-SMASH session, register named
 `Reference`/`Comparison 1` outputs, render frame 0 for both outputs, and round-trip a

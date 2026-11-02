@@ -12,8 +12,10 @@ from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     RunContext,
+    SelectionSnapshot,
 )
 from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.render.types import OverlayConfig
 from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.vs.types import HDRMetadata
@@ -83,10 +85,13 @@ def test_selection_labels_are_looked_up_in_reference_source_frame_domain_after_t
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
         reporter=None,
-        selection_breakdown=SelectionBreakdown(quantile_dark=[10]),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
+            analysis_clip=None,
+        ),
+        selection=SelectionSnapshot(breakdown=SelectionBreakdown(quantile_dark=[10])),
     )
 
     run_render_phase(
@@ -136,19 +141,24 @@ def test_selection_detail_label_is_looked_up_in_reference_source_frame_domain_af
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
         reporter=None,
-        selection_details_by_source_frame={
-            10: SelectionDetail(
-                frame_index=10,
-                label="User",
-                source="analysis",
-                timecode="00:00:00.417",
-                clip_role="analyze",
-                notes="user_override",
-            )
-        },
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
+            analysis_clip=None,
+        ),
+        selection=SelectionSnapshot(
+            details_by_source_frame={
+                10: SelectionDetail(
+                    frame_index=10,
+                    label="User",
+                    source="analysis",
+                    timecode="00:00:00.417",
+                    clip_role="analyze",
+                    notes="user_override",
+                )
+            }
+        ),
     )
 
     run_render_phase(

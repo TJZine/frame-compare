@@ -1,5 +1,3 @@
-"""Bounded paired FFmpeg audio collection for whole-track alignment."""
-
 from __future__ import annotations
 
 import functools
@@ -34,8 +32,6 @@ _MESSAGE_LIMIT = 512
 
 @dataclass(frozen=True, slots=True)
 class CollectionCleanup:
-    """Observed subprocess and reader cleanup state."""
-
     process_exited: bool
     stdout_reader_joined: bool
     stderr_reader_joined: bool
@@ -59,9 +55,6 @@ class CollectionCleanup:
 
 @dataclass(frozen=True, slots=True)
 class CollectionFacts:
-    """Bounded scalar transport facts retained for success or failure."""
-
-    planned_end_sample: int
     emitted_sample_count: int
     emitted_byte_count: int
     retained_sample_count: int
@@ -74,13 +67,6 @@ class CollectionFacts:
 
 @dataclass(frozen=True, slots=True)
 class PairedAudioCollection:
-    """A fully validated paired collection whose delivered pairs are safe to consume.
-
-    ``CollectionFacts.planned_end_sample`` on each side carries that side's output
-    limit (``known duration + 60 s``, in samples), not a planned endpoint: the
-    paired collector reads to EOF on both sides.
-    """
-
     reference_facts: CollectionFacts
     comparison_facts: CollectionFacts
     reference_cleanup: CollectionCleanup
@@ -91,14 +77,6 @@ class PairedAudioCollection:
 
 @dataclass(frozen=True, slots=True)
 class PairedAudioCollectionFailure:
-    """A failed paired collection with no usable PCM.
-
-    ``side`` names the child the failure is attributed to, or ``None`` for
-    side-independent causes (cancellation, the total timeout, consumer failure).
-    Per-side facts and cleanups describe whatever was started; a side that never
-    spawned reports an empty completed cleanup. Holds no PCM or exceptions.
-    """
-
     category: CollectionFailureCategory
     side: AudioPairSide | None
     message: str
@@ -208,7 +186,6 @@ def _read_stderr(
 
 
 def _start_reader(thread: threading.Thread) -> None:
-    """Start one owned reader; kept narrow so startup failure is testable."""
     thread.start()
 
 
@@ -259,7 +236,7 @@ def _spawn_child(argv: Sequence[str]) -> subprocess.Popen[bytes]:
     # Explicit argument array, no shell, unbuffered pipes; the default
     # close_fds=True keeps each child's pipe ends private so one child lingering
     # can never hold the other side's stdout open past EOF.
-    return subprocess.Popen(  # noqa: S603 - validated explicit argument array
+    return subprocess.Popen(
         resolved,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
@@ -281,7 +258,6 @@ def _request_terminate(
     process: subprocess.Popen[bytes],
     cleanup_failures: list[str],
 ) -> bool:
-    """Send terminate to a live child. True when termination was requested."""
     if process.poll() is not None:
         return False
     try:
@@ -295,7 +271,6 @@ def _wait_then_kill(
     process: subprocess.Popen[bytes],
     cleanup_failures: list[str],
 ) -> bool:
-    """Wait the existing terminate bound, then kill after the existing kill bound."""
     if process.poll() is None and not _wait_for_exit(process, _TERMINATE_WAIT_SECONDS):
         try:
             process.kill()
@@ -363,20 +338,6 @@ def _summarize_cleanup(
 
 @dataclass(slots=True)
 class _SampleStore:
-    """Bounded unconsumed-sample buffer over one child's float32 stdout stream.
-
-    ``emitted`` counts every complete sample received (including samples dropped
-    below ``floor`` on arrival); ``front`` is the absolute index of the first
-    buffered sample and ``count`` how many follow it contiguously. ``floor`` is
-    the absolute index below which samples are never needed again: the reference
-    side raises it to each chunk start (gap skip) and the comparison side to each
-    window start (slide). Buffered samples always lie in ``[floor, emitted)``,
-    so the capacity (one read spill for the reference side, which only receives
-    when empty; one window plus one spill for the comparison side) is never
-    exceeded no matter how far one child lags the other, and retained PCM never
-    grows with media duration.
-    """
-
     capacity: int
     store: np.ndarray = field(init=False)
     start: int = field(default=0, init=False)
@@ -390,7 +351,6 @@ class _SampleStore:
         self.store = np.empty(self.capacity, dtype="<f4")
 
     def evict_before(self, position: int) -> None:
-        """Drop buffered samples below ``position`` and raise the floor to it."""
         if position > self.floor:
             self.floor = position
         drop = min(self.count, max(0, self.floor - self.front))
@@ -413,10 +373,6 @@ class _SampleStore:
         if self.start + self.count + int(kept.size) > self.capacity:
             self.store[0 : self.count] = self.store[self.start : self.start + self.count]
             self.start = 0
-        # The fill loops stop pulling once each need is met and the floor keeps
-        # buffered samples within one window plus one read spill, so the store
-        # always fits after compacting; a miscalculation must fail loudly here
-        # rather than silently truncate correlation input.
         if self.start + self.count + int(kept.size) > self.capacity:
             raise RuntimeError("paired sample store overflow")
         self.store[self.start + self.count : self.start + self.count + int(kept.size)] = kept
@@ -435,8 +391,6 @@ class _SampleStore:
 
 @dataclass(frozen=True, slots=True)
 class _RunContext:
-    """Frozen run facts shared by both children of one paired collection."""
-
     shared: _FailureSlot
     deadline: float
     stall_timeout_seconds: float
@@ -445,13 +399,6 @@ class _RunContext:
 
 @dataclass(slots=True)
 class _ChildStream:
-    """Live transport state for one child of a paired collection.
-
-    Built with its name, argv, output limit, sample store and the frozen run
-    context; owns the process, pipes, readers, pending bytes, EOF flag and
-    cleanup state.
-    """
-
     name: AudioPairSide
     argv: Sequence[str]
     limit_samples: int
@@ -472,13 +419,11 @@ class _ChildStream:
     cleanup_failures: list[str] = field(default_factory=list[str])
 
     def spawn(self) -> None:
-        """Start the child and capture its pipes; raises OSError or ValueError."""
         self.process = _spawn_child(self.argv)
         self.stdout = cast(BinaryIO, self.process.stdout)
         self.stderr = cast(BinaryIO, self.process.stderr)
 
     def start_readers(self) -> bool:
-        """Start this side's stdout/stderr readers; False after recording the failure."""
         assert self.stdout is not None and self.stderr is not None
         try:
             self.infrastructure = _create_reader_infrastructure(
@@ -501,13 +446,6 @@ class _ChildStream:
         return True
 
     def receive(self) -> bytes | None:
-        """Wait for one stdout block under the stall/total deadlines.
-
-        Returns the block, or None at EOF (``eof`` set) or after recording a
-        failure (cancelled, timeout, stalled). At EOF the child's exit is awaited
-        right away, so a trailing partial float32 sample or a nonzero exit is
-        recorded at the earliest point it is known, before the other side runs on.
-        """
         infrastructure = self.infrastructure
         assert infrastructure is not None
         context = self.context
@@ -555,11 +493,6 @@ class _ChildStream:
                 continue
 
     def _await_exit(self) -> None:
-        """Wait for the child's exit after its stdout ended, recording the outcome.
-
-        A child that closed stdout but does not exit is the awaited side making no
-        progress, so the stall watchdog applies here too (A8).
-        """
         process = self.process
         assert process is not None
         context = self.context
@@ -591,12 +524,6 @@ class _ChildStream:
             )
 
     def ingest(self, block: bytes, *, retain: bool) -> np.ndarray | None:
-        """Validate one stdout block, count it, and buffer it when retained.
-
-        Every block is checked for finiteness and counted against the side's output
-        limit, whether retained or discarded past the last planned chunk (A7a).
-        Returns the decoded samples, or None after recording a failure.
-        """
         store = self.samples
         self.emitted_bytes += len(block)
         payload = self.pending + block
@@ -628,12 +555,10 @@ class _ChildStream:
         return samples
 
     def request_terminate(self) -> None:
-        """Send terminate to a live child and record whether it was requested."""
         if self.process is not None:
             self.termination_requested = _request_terminate(self.process, self.cleanup_failures)
 
     def reap(self) -> CollectionCleanup:
-        """Join this side's readers and close its pipes after termination."""
         if self.process is None:
             return CollectionCleanup(
                 process_exited=True,
@@ -670,10 +595,8 @@ class _ChildStream:
         )
 
     def facts(self, *, started: float) -> CollectionFacts:
-        """Return bounded scalar transport facts; the output limit stands in for the plan."""
         capture = self.stderr_capture
         return CollectionFacts(
-            planned_end_sample=self.limit_samples,
             emitted_sample_count=self.samples.emitted,
             emitted_byte_count=self.emitted_bytes,
             retained_sample_count=self.samples.peak_count,
@@ -685,12 +608,6 @@ class _ChildStream:
         )
 
     def fill_reference_chunk(self, *, start: int, count: int, out: np.ndarray) -> bool:
-        """Assemble reference ``[start, start + count)`` into zeroed ``out``.
-
-        Samples the reference never produced (early EOF, including a chunk starting
-        at or beyond EOF) stay zero, which the activity gate treats as inactive.
-        Returns False after recording a failure.
-        """
         shared = self.context.shared
         store = self.samples
         store.evict_before(start)
@@ -710,13 +627,12 @@ class _ChildStream:
             if block is None:
                 if shared.read()[0] is not None:
                     return False
-                continue  # EOF newly observed; the loop re-checks and zero-pads.
+                continue
             if self.ingest(block, retain=True) is None:
                 return False
         return True
 
     def fill_comparison_need(self, *, window_start: int, need: int) -> bool:
-        """Pull comparison output until absolute sample ``need`` arrived, or EOF."""
         shared = self.context.shared
         store = self.samples
         store.evict_before(max(window_start, 0))
@@ -729,16 +645,12 @@ class _ChildStream:
             if block is None:
                 if shared.read()[0] is not None:
                     return False
-                continue  # EOF newly observed; the loop re-checks.
+                continue
             if self.ingest(block, retain=True) is None:
                 return False
         return True
 
     def assemble_comparison_window(self, *, window_start: int, out: np.ndarray) -> None:
-        """Copy stream ``[window_start, window_start + out.size)`` into zeroed ``out``.
-
-        Anything outside ``[0, emitted)`` stays zero.
-        """
         store = self.samples
         source_start = max(window_start, store.front, 0)
         source_end = min(window_start + int(out.size), store.emitted)
@@ -749,7 +661,6 @@ class _ChildStream:
 
 
 def drain_tail(reference: _ChildStream, comparison: _ChildStream) -> None:
-    """Read and discard both tails past the last planned chunk, still counted."""
     shared = reference.context.shared
     while not (reference.eof and comparison.eof):
         if shared.read()[0] is not None:
@@ -770,12 +681,6 @@ def _cleanup_paired(
     *,
     failed: bool,
 ) -> tuple[CollectionCleanup, CollectionCleanup]:
-    """Clean both paired children: stops, then terminate-all before any wait/join.
-
-    Terminate reaches every still-running child before any wait or join begins, so
-    one hung child can never hold the other one's reaping hostage. Joining readers
-    still precedes closing pipes.
-    """
     for side in (reference, comparison):
         if side.infrastructure is not None:
             side.infrastructure.stop.set()
@@ -791,7 +696,6 @@ def _cleanup_paired(
 
 
 def _as_usable_duration(value: object) -> float | None:
-    """Normalize a probed duration; unusable values become None (refuse)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     if not math.isfinite(value) or value < 0:
@@ -803,13 +707,6 @@ def paired_collection_timeout_seconds(
     reference_seconds: float | None,
     comparison_seconds: float | None,
 ) -> float | None:
-    """Total-cap seconds for a paired collection: ``120 + 0.1 * max(known)`` (A8).
-
-    Returns None when neither duration is known; the caller maps that to the
-    existing ``selected_audio_timeline_unavailable`` refusal. Unusable durations
-    (None, non-finite, negative) are ignored, so a garbage probe can only cause
-    a refusal, never a shortened or unbounded collection.
-    """
     known = [
         duration
         for duration in (
@@ -827,11 +724,6 @@ def paired_output_limit_samples(
     duration_seconds: float | None,
     sample_rate: int,
 ) -> int | None:
-    """Sanity-limit samples for one paired side: known duration + 60 s (A8).
-
-    Returns None for an unknown or unusable duration; the caller refuses instead
-    of collecting.
-    """
     duration = _as_usable_duration(duration_seconds)
     if duration is None:
         return None
@@ -867,13 +759,12 @@ def _validate_paired_request(
     comparison_argv: Sequence[str],
     chunks: Sequence[tuple[int, int]],
     lag_samples: object,
-    consumer: Callable[[int, np.ndarray, np.ndarray], object],
+    consume_borrowed_chunk: Callable[[int, np.ndarray, np.ndarray], object],
     reference_limit_samples: object,
     comparison_limit_samples: object,
     total_timeout_seconds: object,
     stall_timeout_seconds: object,
 ) -> tuple[tuple[int, int], ...]:
-    """Validate a paired request before spawning anything; raises ValueError."""
     if not reference_argv or not reference_argv[0]:
         raise ValueError("reference_argv must contain a non-empty executable")
     if not comparison_argv or not comparison_argv[0]:
@@ -898,7 +789,7 @@ def _validate_paired_request(
             raise ValueError("chunks must not overlap")
     if isinstance(lag_samples, bool) or not isinstance(lag_samples, int) or lag_samples < 0:
         raise ValueError("lag_samples must be a non-negative integer")
-    if not callable(consumer):
+    if not callable(consume_borrowed_chunk):
         raise ValueError("consumer must be callable")
     _validated_limit(reference_limit_samples, label="reference_limit_samples")
     _validated_limit(comparison_limit_samples, label="comparison_limit_samples")
@@ -935,43 +826,19 @@ def collect_paired_audio_chunks(
     *,
     chunks: Sequence[tuple[int, int]],
     lag_samples: int,
-    consumer: Callable[[int, np.ndarray, np.ndarray], object],
+    consume_borrowed_chunk: Callable[[int, np.ndarray, np.ndarray], object],
     reference_limit_samples: int,
     comparison_limit_samples: int,
     total_timeout_seconds: float,
     stall_timeout_seconds: float = _DEFAULT_STALL_TIMEOUT_SECONDS,
     cancellation: threading.Event | None = None,
 ) -> PairedAudioCollectionResult:
-    """Run two prepared FFmpeg recipes concurrently and deliver aligned pairs.
-
-    For each planned ``(reference_start, reference_count)`` chunk, in order, the
-    consumer receives ``(index, reference, window)``: ``count`` float32 reference
-    samples over ``[start, start + count)`` (zero where the reference produced
-    nothing) and ``count + 2 * lag_samples`` float32 comparison samples over
-    ``[start - lag, start + count + lag)`` (zero outside the comparison stream),
-    with exact sample values. Reference output past the last planned chunk is
-    read, counted and limit-checked, then discarded.
-
-    Lockstep: the loop pulls from whichever side the current chunk still needs
-    while the other side waits in its bounded queue. That cannot deadlock: each
-    child's progress depends only on its own pipe being drained, and the loop
-    always drains the side it waits on. The side held back by back-pressure is
-    never stall-timed for that. Retained PCM stays bounded independent of media
-    duration: per side, one sample store (one read spill for the reference, one
-    window plus one spill for the comparison) and one delivery scratch buffer
-    (one chunk, one window), plus the bounded pipe queues.
-
-    Delivered arrays are read-only views of reused internal buffers; the
-    consumer must not keep them after returning. On a failure result the caller
-    must discard everything the consumer accumulated; deliveries cannot be
-    undone, so an accumulator is only usable after a success result (A7a).
-    """
     planned = _validate_paired_request(
         reference_argv,
         comparison_argv,
         chunks,
         lag_samples,
-        consumer,
+        consume_borrowed_chunk,
         reference_limit_samples,
         comparison_limit_samples,
         total_timeout_seconds,
@@ -987,9 +854,6 @@ def collect_paired_audio_chunks(
     )
     cleanups: tuple[CollectionCleanup, CollectionCleanup] | None = None
 
-    # Allocate before spawning so an allocation error leaves nothing to clean.
-    # The reference store only receives a block once it is empty, so one read
-    # spill bounds it; the comparison store holds one window plus one spill.
     spill = _READ_BYTES // _FLOAT32_BYTES + 1
     max_count = max(count for _, count in planned)
     reference = _ChildStream(
@@ -1070,12 +934,12 @@ def collect_paired_audio_chunks(
 
         delivered = 0
         for index, (start, count) in enumerate(planned):
-            reference_view = reference_scratch[:count]
-            reference_view[:] = 0
+            borrowed_reference = reference_scratch[:count]
+            borrowed_reference[:] = 0
             if not reference.fill_reference_chunk(
                 start=start,
                 count=count,
-                out=reference_view,
+                out=borrowed_reference,
             ):
                 break
             window_start = start - lag_samples
@@ -1084,21 +948,21 @@ def collect_paired_audio_chunks(
                 need=start + count + lag_samples,
             ):
                 break
-            window_view = window_scratch[: count + 2 * lag_samples]
-            window_view[:] = 0
-            comparison.assemble_comparison_window(window_start=window_start, out=window_view)
-            reference_view.flags.writeable = False
-            window_view.flags.writeable = False
+            borrowed_window = window_scratch[: count + 2 * lag_samples]
+            borrowed_window[:] = 0
+            comparison.assemble_comparison_window(window_start=window_start, out=borrowed_window)
+            borrowed_reference.flags.writeable = False
+            borrowed_window.flags.writeable = False
             try:
-                consumer(index, reference_view, window_view)
+                consume_borrowed_chunk(index, borrowed_reference, borrowed_window)
             except Exception as exc:
                 shared.record(
                     "consumer_failed",
                     f"paired audio consumer failed: {type(exc).__name__}: {exc}",
                 )
             finally:
-                reference_view.flags.writeable = True
-                window_view.flags.writeable = True
+                borrowed_reference.flags.writeable = True
+                borrowed_window.flags.writeable = True
             if time.monotonic() > context.deadline:
                 shared.record(
                     "timeout",
@@ -1114,9 +978,6 @@ def collect_paired_audio_chunks(
             drain_tail(reference, comparison)
         cleanups = _cleanup_paired(reference, comparison, failed=shared.read()[0] is not None)
         reference_cleanup, comparison_cleanup = cleanups
-        # Read again after cleanup: a stderr reader can still fail while it is
-        # joined, and that must not turn into a success. Nonzero exits were
-        # already recorded, per side, when each stream reached EOF.
         category, message, failure_side = shared.read()
         if category is None and not (reference_cleanup.completed and comparison_cleanup.completed):
             category = "cleanup_failed"
@@ -1142,8 +1003,6 @@ def collect_paired_audio_chunks(
             elapsed_seconds=time.monotonic() - started,
         )
     except BaseException:
-        # Anything raised in setup, the consumer loop or result building: leave
-        # no child or reader behind (cleaning at most once), then propagate.
         if cleanups is None:
             _cleanup_paired(reference, comparison, failed=True)
         raise

@@ -8,57 +8,20 @@ from __future__ import annotations
 
 import fnmatch
 import os
-from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
-from frame_compare.config.errors import ConfigNotFoundError, ConfigValidationError
-from frame_compare.config.loader import load_config
+from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration.errors import (
-    DirectoryNotFoundError,
     InputDiscoveryError,
     NoVideosFoundError,
 )
 from frame_compare.utils.paths import require_managed_descendant
-from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 # Canonical video patterns
 _VIDEO_PATTERNS: list[str] = ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"]
-
-
-@dataclass(frozen=True, slots=True)
-class PreflightResult:
-    """Result of preflight validation."""
-
-    config: ConfigSchema
-    workspace: WorkspacePaths
-    warnings: list[RunWarning] = field(default_factory=lambda: [])
-
-
-def resolve_workspace(root: Path | None) -> Path:
-    """Resolve workspace root directory."""
-    # Priority 1: explicit root
-    if root is not None:
-        return root.resolve()
-
-    cwd = Path.cwd()
-    sentinel = Path("config") / "config.toml"
-
-    # Priority 2: CWD if sentinel exists
-    if (cwd / sentinel).exists():
-        return cwd
-
-    # Priority 3: search upward
-    current = cwd
-    while current != current.parent:
-        if (current / sentinel).exists():
-            return current
-        current = current.parent
-
-    # Priority 4: fallback to CWD
-    return cwd
 
 
 def _resolve_path(path_str: str, root: Path) -> Path:
@@ -257,10 +220,12 @@ def _windows_portable_state_config_path() -> Path | None:
     return state_dir / "config.toml"
 
 
-def resolve_selected_config_path(path_value: str | Path, root: Path) -> Path:
+def resolve_selected_config_path(
+    path_value: str | Path, root: Path, *, expand_environment: bool = True
+) -> Path:
     """Resolve a selected config, including the one Windows portable exception."""
     resolved_root = root.resolve()
-    expanded = os.path.expandvars(str(path_value))
+    expanded = os.path.expandvars(str(path_value)) if expand_environment else str(path_value)
     _validate_filesystem_path(expanded, field_name="config_path")
     try:
         candidate = Path(expanded)
@@ -314,30 +279,6 @@ def resolve_paths(config: ConfigSchema, root: Path) -> WorkspacePaths:
     )
 
 
-def _resolve_paths_with_config_file(
-    config: ConfigSchema, root: Path, config_file: Path
-) -> WorkspacePaths:
-    """Internal: Resolve paths with explicit config_file (for prepare_preflight)."""
-    resolved_root = root.resolve()
-    validated_config = validate_and_normalize_config_paths(config, resolved_root)
-    paths = validated_config.paths
-    generated_dir = _resolve_generated_root(paths.generated_dir, resolved_root)
-    _validate_generated_descendants(generated_dir)
-
-    return WorkspacePaths(
-        root=resolved_root,
-        input_dir=_resolve_path(paths.input_dir, resolved_root),
-        generated_root=generated_dir,
-        run_dir=None,  # Real runs reserve a child before rendering.
-        screenshots_dir=generated_dir / "screenshots",
-        generated_dir=generated_dir,
-        config_dir=resolve_contained_path(paths.config_dir, resolved_root, field_name="config_dir"),
-        config_file=config_file,
-        analysis_cache_dir=generated_dir / "cache" / "analysis",
-        alignment_cache_dir=generated_dir / "cache" / "alignment",
-    )
-
-
 def discover_inputs(input_dir: Path, patterns: list[str] | None = None) -> list[Path]:
     """Discover video files in input directory."""
     effective_patterns = _VIDEO_PATTERNS if patterns is None else patterns
@@ -377,48 +318,3 @@ def discover_inputs(input_dir: Path, patterns: list[str] | None = None) -> list[
     if not ordered:
         raise NoVideosFoundError(input_dir.resolve(), patterns=effective_patterns)
     return ordered
-
-
-def prepare_preflight(
-    root: Path | None = None,
-    config_path: Path | None = None,
-    overrides: dict[str, object] | None = None,
-) -> PreflightResult:
-    """Validate configuration and resolve workspace paths."""
-    warnings: list[RunWarning] = []
-
-    if config_path is not None:
-        expanded_config_path = Path(os.path.expandvars(str(config_path)))
-        if root is not None and not expanded_config_path.is_absolute():
-            config_candidate = root.resolve() / expanded_config_path
-        else:
-            config_candidate = expanded_config_path
-        resolved_candidate = config_candidate.resolve()
-        resolved_root = root.resolve() if root else resolved_candidate.parent.parent
-        resolved_config_path = resolve_selected_config_path(resolved_candidate, resolved_root)
-        if not resolved_config_path.exists():
-            raise ConfigNotFoundError(resolved_config_path)
-    else:
-        resolved_root = resolve_workspace(root)
-        resolved_config_path = resolve_selected_config_path(
-            resolved_root / "config" / "config.toml",
-            resolved_root,
-        )
-        if not resolved_config_path.exists():
-            raise ConfigNotFoundError(resolved_config_path)
-
-    loaded_config = load_config(resolved_config_path, overrides=overrides)
-    config = validate_and_normalize_config_paths(loaded_config, resolved_root)
-
-    workspace = _resolve_paths_with_config_file(config, resolved_root, resolved_config_path)
-
-    if not workspace.input_dir.exists():
-        raise DirectoryNotFoundError(workspace.input_dir)
-
-    discover_inputs(workspace.input_dir)
-
-    return PreflightResult(
-        config=config,
-        workspace=workspace,
-        warnings=warnings,
-    )

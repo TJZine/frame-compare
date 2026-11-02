@@ -20,16 +20,13 @@ from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.perf import perf_span
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.vs.luma import luma_plane
 
 if TYPE_CHECKING:
     import vapoursynth as vs
 
     from frame_compare.config.schema import AnalysisConfig
     from frame_compare.vs.types import SourceInfo
-
-
-class _ShufflePlanesFn(Protocol):
-    def __call__(self, *, clips: object, planes: int, colorfamily: int) -> object: ...
 
 
 class _SpliceFn(Protocol):
@@ -253,20 +250,11 @@ def _planestats_luma_clip(
     active_rect: MetricActiveRect | None,
     mode_name: str,
 ) -> vs.VideoNode:
-    import vapoursynth as vs
-
     if clip.num_frames == 0:
         raise MetricsCalculationError("Analysis clip has 0 frames")
 
     try:
-        if clip.format.color_family != vs.YUV:
-            clip = clip.resize.Bicubic(format=vs.YUV420P8)
-
-        core = _dynamic_attr(vs, "core")
-        std = _dynamic_attr(core, "std")
-        shuffle_planes = cast(_ShufflePlanesFn, _dynamic_attr(std, "ShufflePlanes"))
-        gray = cast(int, _dynamic_attr(vs, "GRAY"))
-        luma = cast("vs.VideoNode", shuffle_planes(clips=clip, planes=0, colorfamily=gray))
+        luma = luma_plane(clip)
         if active_rect is not None:
             crop_abs = cast(_CropAbsFn, _dynamic_attr(luma.std, "CropAbs"))
             luma = cast(

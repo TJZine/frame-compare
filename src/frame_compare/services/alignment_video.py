@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -43,6 +43,7 @@ from frame_compare.utils.alignment_policy import (
 )
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.loader import VSLoader
+from frame_compare.vs.luma import luma_plane
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -110,6 +111,7 @@ def check_video_alignment(
     fps_reference: Fraction,
     loader: VSLoader | None,
     cancellation: Event | None = None,
+    on_stage: Callable[[str], None] | None = None,
 ) -> VideoCheckObservation:
     """Run V1-V5 and return bounded W0 evidence without throwing runtime failures."""
     global_lag = attempt.audio.global_lag
@@ -123,6 +125,8 @@ def check_video_alignment(
     if not _identities_match(reference) or not _identities_match(comparison):
         return _failed()
 
+    if on_stage is not None:
+        on_stage("indexing video")
     try:
         load_started = time.monotonic()
         reference_source = _load_source(loader, reference.path)
@@ -140,6 +144,8 @@ def check_video_alignment(
     except RuntimeError:
         return _failed()
 
+    if on_stage is not None:
+        on_stage("checking video")
     try:
         reference_node = _prepare_luma(reference_source.clip, reference.active_rect)
         comparison_node = _prepare_luma(comparison_source.clip, comparison.active_rect)
@@ -368,16 +374,7 @@ def _prepare_luma(clip: vs.VideoNode, active_rect: ActiveRect | None) -> vs.Vide
         x, y, width, height = active_rect
         crop = (x, y, width, height)
     try:
-        import vapoursynth as vs
-
-        runtime_vs = cast(Any, vs)
-        runtime_clip = cast(Any, clip)
-        if clip.format.color_family != vs.YUV:
-            runtime_clip = runtime_clip.resize.Bicubic(format=runtime_vs.YUV444P8)
-        luma = cast(
-            "vs.VideoNode",
-            runtime_clip.std.ShufflePlanes(planes=0, colorfamily=runtime_vs.GRAY),
-        )
+        luma = luma_plane(clip)
         if crop is not None:
             x, y, width, height = crop
             luma = cast(Any, luma).std.CropAbs(width=width, height=height, left=x, top=y)

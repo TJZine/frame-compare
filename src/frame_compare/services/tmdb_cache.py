@@ -26,6 +26,7 @@ import tomli_w
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.file_lock import exclusive_file_lock
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
 log = structlog.get_logger()
 
@@ -69,7 +70,10 @@ def _parse_datetime(value: object) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         raise ValueError("stored_at must include a timezone")
-    return parsed.astimezone(UTC)
+    try:
+        return parsed.astimezone(UTC)
+    except OverflowError as error:
+        raise ValueError("stored_at is outside the supported datetime range") from error
 
 
 def _is_non_bool_int(value: object) -> bool:
@@ -275,7 +279,7 @@ class TmdbCache:
                 data = tomllib.load(handle)
         except FileNotFoundError:
             return {}
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        except (OSError, *SERIALIZED_DECODE_FAILURES):
             log.warning(
                 "tmdb_cache_read_failed",
                 cache_path=str(self.path),

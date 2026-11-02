@@ -37,6 +37,7 @@ from frame_compare.orchestration.probing.probe_cache import (
     save_clip_probe_cache,
 )
 from frame_compare.orchestration.selection_domain import (
+    PreparedSelectionDomain,
     build_analysis_selection_domain_token,
     build_selection_domain_clips_with_diagnostics,
     compute_selection_window_for_clips,
@@ -405,6 +406,9 @@ def execution_context(
         workspace=workspace,
         reference=reference,
         comparisons=comparisons,
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )

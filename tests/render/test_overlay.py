@@ -32,7 +32,7 @@ def _config(mode: OverlayMode) -> OverlayConfig:
         source_resolution=(1920, 1080),
         signal=SourceSignalFacts(is_hdr=False),
         presentation_state=PresentationState.SDR,
-        tonemap_settings=None,
+        tonemap=None,
         geometry=RenderedGeometryFacts(
             source_size=(1920, 1080),
             active_picture=ActivePictureFacts(0, 0, 1920, 1080, "full_frame", True),

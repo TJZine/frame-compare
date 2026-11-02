@@ -8,6 +8,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 from frame_compare.error_context import JSONValue
 
+# Diagnostic values need little nesting. Leave ample recursion headroom for
+# owner-specific redaction and the final JSON encoder, regardless of input depth.
+_MAX_ERROR_VALUE_DEPTH = 16
+
 
 def redact_url_for_error(url: str) -> str:
     """Remove sensitive URL components before exposing them in public errors."""
@@ -36,18 +40,20 @@ def normalize_pydantic_errors(
     return result
 
 
-def _to_json_value(value: object) -> JSONValue:
-    """Recursively convert a value to JSONValue."""
+def _to_json_value(value: object, *, depth: int = 0) -> JSONValue:
+    """Convert a diagnostic value, omitting contents beyond a bounded depth."""
+    if depth >= _MAX_ERROR_VALUE_DEPTH:
+        return "<nested value omitted>"
     if value is None:
         return None
     if isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, list | tuple):
         val_list = cast("list[object]", value)
-        return [_to_json_value(v) for v in val_list]
+        return [_to_json_value(v, depth=depth + 1) for v in val_list]
     if isinstance(value, dict):
         val_dict = cast("dict[object, object]", value)
-        return {str(k): _to_json_value(v) for k, v in val_dict.items()}
+        return {str(k): _to_json_value(v, depth=depth + 1) for k, v in val_dict.items()}
     return str(value)
 
 

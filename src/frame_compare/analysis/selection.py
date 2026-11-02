@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from fractions import Fraction
 from math import ceil
 
-from frame_compare.analysis.errors import SelectionError
+from frame_compare.analysis.errors import SelectionError, SelectionFailureKind
 from frame_compare.analysis.types import (
     FrameMetrics,
     FrameSelection,
@@ -61,7 +61,12 @@ def select_frames(
 
     total_frames = metrics.eligible_frame_count
     if total_frames == 0:
-        raise SelectionError(reason="empty_metrics", requested=_requested_count(config), found=0)
+        raise SelectionError(
+            reason="empty_metrics",
+            requested=_requested_count(config),
+            found=0,
+            kind=SelectionFailureKind.EMPTY_METRICS,
+        )
 
     seed = config.random_seed
     effective_selection_fps = metrics.metadata.fps if selection_fps is None else selection_fps
@@ -132,6 +137,7 @@ def select_frames(
             reason="insufficient_candidates",
             requested=requested_count,
             found=len(selected_list),
+            kind=SelectionFailureKind.INSUFFICIENT_METRIC_CANDIDATES,
         )
 
     return FrameSelection(

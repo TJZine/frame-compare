@@ -34,6 +34,8 @@ def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
         "ffmpeg",
         "-i",
         "clip.mkv",
+        "-map",
+        "0:V:0",
         "-vf",
         "select=eq(n\\,100),showinfo=checksum=0",
         "-frames:v",
@@ -61,12 +63,14 @@ def test_build_extract_frame_argv_rejects_negative_frame_numbers() -> None:
 
 
 def test_build_extract_frame_argv_places_geometry_filters_after_exact_frame_select() -> None:
-    source = SourceGeometry(width=1920, height=1080)
+    source = SourceGeometry(
+        width=1920, height=1080, active_rect=GeometryRect(0, 0, 1920, 1080), provenance="full_frame"
+    )
     plan = RenderGeometryPlan(
         source=source,
         source_rect=GeometryRect(0, 0, 1920, 1080),
         active_rect=GeometryRect(240, 0, 1440, 1080),
-        active_rect_source="metadata",
+        provenance="dolby_vision_l5",
         crop_rect=GeometryRect(240, 0, 1440, 1080),
         crop=GeometryMargins(left=240, right=240),
         cropped_size=(1440, 1080),
@@ -75,7 +79,6 @@ def test_build_extract_frame_argv_places_geometry_filters_after_exact_frame_sele
         final_canvas_size=(1280, 1080),
         content_origin=(0, 60),
         overlay_origin=(10, 70),
-        source_overlay_origin=(250, 10),
     )
 
     argv = build_extract_frame_argv(
@@ -87,17 +90,19 @@ def test_build_extract_frame_argv_places_geometry_filters_after_exact_frame_sele
     )
 
     assert argv[argv.index("-vf") + 1] == (
-        "select=eq(n\\,100),showinfo=checksum=0,crop=1440:1080:240:0,scale=1280:960,pad=1280:1080:0:60:color=black"
+        "select=eq(n\\,100),showinfo=checksum=0,crop=1440:1080:240:0:exact=1,scale=1280:960,format=pix_fmts=yuv444p|yuv444p16le,pad=1280:1080:0:60:color=black"
     )
 
 
 def test_build_extract_frame_argv_rejects_unrepresentable_geometry_plan() -> None:
-    source = SourceGeometry(width=1920, height=1080)
+    source = SourceGeometry(
+        width=1920, height=1080, active_rect=GeometryRect(0, 0, 1920, 1080), provenance="full_frame"
+    )
     plan = RenderGeometryPlan(
         source=source,
         source_rect=GeometryRect(0, 0, 1920, 1080),
         active_rect=GeometryRect(0, 0, 1920, 1080),
-        active_rect_source="full-frame",
+        provenance="full_frame",
         crop_rect=GeometryRect(0, 0, 1920, 1080),
         crop=GeometryMargins(),
         cropped_size=(1920, 1080),
@@ -106,7 +111,6 @@ def test_build_extract_frame_argv_rejects_unrepresentable_geometry_plan() -> Non
         final_canvas_size=(1920, 1080),
         content_origin=(0, 0),
         overlay_origin=(10, 10),
-        source_overlay_origin=(10, 10),
     )
 
     with pytest.raises(ValueError, match="scale dimensions must be positive"):
@@ -130,6 +134,8 @@ def test_build_extract_frames_argv_selects_ordered_frames_in_one_pass() -> None:
         "-y",
         "-i",
         "clip.mkv",
+        "-map",
+        "0:V:0",
         "-vf",
         "select=eq(n\\,10)+eq(n\\,20)+eq(n\\,42),showinfo=checksum=0",
         "-fps_mode",
@@ -175,6 +181,8 @@ def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
             "-y",
             "-i",
             "clip.mkv",
+            "-map",
+            "0:V:0",
             "-vf",
             "select=eq(n\\,100),showinfo=checksum=0",
             "-frames:v",

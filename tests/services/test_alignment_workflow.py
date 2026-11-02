@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -302,7 +303,6 @@ def test_planning_budget_rejects_before_decode(
 def _failure_facts() -> tuple[CollectionFacts, CollectionFacts]:
     def facts(role: str) -> CollectionFacts:
         return CollectionFacts(
-            planned_end_sample=100,
             emitted_sample_count=10,
             emitted_byte_count=40,
             retained_sample_count=10,
@@ -606,3 +606,42 @@ def test_cancelled_collection_raises(tmp_path: Path, monkeypatch: pytest.MonkeyP
             reference_request=request.reference,
             comparison_request=request.comparisons[0],
         )
+
+
+def test_unsupported_retime_rejected_before_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reference, comparison = _media(tmp_path)
+    monkeypatch.setattr(alignment_audio, "probe_streams", lambda path: _probe())
+
+    def exploding_collect(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("decode must not run for unsupported retime")
+
+    monkeypatch.setattr(alignment, "collect_paired_audio_chunks", exploding_collect)
+    request = alignment_request(
+        reference=reference, comparisons=[comparison], generated_dir=tmp_path / "generated"
+    )
+    request = replace(
+        request,
+        comparisons=[
+            replace(
+                request.comparisons[0],
+                source_fps_num=1288001,
+                source_fps_den=53667,
+                effective_fps_num=1288000,
+                effective_fps_den=53667,
+            )
+        ],
+    )
+    (result,) = run_request(request, _config(), reference_fps=FPS)
+    assert result.applied is False
+    assert result.frame_offset is None
+    assert result.diagnostic == "retime_rate_unsupported"
+    attempt = result.audio_attempt
+    assert attempt is not None
+    assert attempt.status == "preanalysis_rejection"
+    assert attempt.collection_observation == "not_observed"
+    assert attempt.decision.state == "unavailable"
+    assert attempt.decision.primary_reason == "retime_rate_unsupported"
+    assert attempt.decision.failed_gates == ("retime_rate_unsupported",)
+    assert attempt.decision.candidate is None

@@ -24,13 +24,13 @@ classifiers = [
 dependencies = [
     "typer>=0.27.3",
     "rich>=15.0.0",
-    "numpy>=2.5.3",
+    "numpy>=2.5.4",
     "httpx>=0.28.1",
-    "pydantic>=2.14.0",
-    "pydantic-settings>=2.15.0",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.0",
     "structlog>=26.1.0",
     "tomli-w>=1.2.0",
-    "pillow>=12.3.0",
+    "pillow==13.0.0",
     "guessit>=4.4.0",
     "anitopy>=2.1.1",
     "pyperclip>=1.11.0",
@@ -41,11 +41,13 @@ vsview = [
     "vapoursynth==81",
     "vapoursynth-lsmas==1310.0.0.0; sys_platform == 'win32'",
     "vs-placebo==2.0.4; sys_platform == 'win32'",
-    "vsview==0.12.1",
+    "vsview==0.13.0",
+    # Keep installed viewer environments aligned with the selected Qt runtime.
+    "pyside6==6.12.0",
 ]
 
 [project.scripts]
-frame-compare = "frame_compare.cli.entry:app"
+frame-compare = "frame_compare.cli.entry:console_main"
 
 [project.entry-points.vsview]
 frame-compare-alignment-review = "frame_compare.vsview.alignment_review_panel"
@@ -60,11 +62,11 @@ packages = ["src/frame_compare"]
 # ─── Dependency Groups (PEP 735) ───────────────────────────────────────────────
 [dependency-groups]
 docs = [
-    "zensical==0.0.69",
+    "zensical==0.0.71",
 ]
 docker-test = [
     "pytest==9.1.1",
-    "pytest-mock==3.16.0",
+    "pytest-mock==3.17.0",
     "pytest-xdist==3.8.0",
 ]
 dev = [
@@ -72,12 +74,12 @@ dev = [
     "bandit[toml]>=1.9.4",
     "import-linter>=2.15",
     "pytest>=9.1.1",
-    "pytest-mock>=3.15.1",
+    "pytest-mock>=3.17.0",
     "pytest-cov>=7.1.0",
     "pyyaml>=6.0.3",
     "pyright>=1.1.414",
     "nodejs-wheel-binaries>=24.19.0",
-    "ruff>=0.17.0",
+    "ruff>=0.17.1",
     "respx>=0.23.1",
     "pip-audit==2.10.1",
     "pytest-xdist>=3.8.0",
@@ -98,6 +100,7 @@ reportMissingModuleSource = false
 reportUnusedImport = true
 reportUnusedVariable = true
 reportPrivateUsage = true
+reportUnnecessaryTypeIgnoreComment = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "src"
@@ -122,7 +125,7 @@ src = ["src", "tests"]
 extend-exclude = [".tmp", "docs/plans", "docs/prompts", "docs/reviews"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W", "UP", "B", "SIM", "C4"]
+select = ["E", "F", "I", "W", "UP", "B", "SIM", "C4", "RUF100", "PGH003", "PGH004"]
 ignore = ["E501"]  # Line length handled by formatter
 
 [tool.ruff.lint.isort]

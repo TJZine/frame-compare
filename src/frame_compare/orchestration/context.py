@@ -1,9 +1,3 @@
-"""Canonical orchestration context types for Frame Compare.
-
-This module defines the immutable per-clip state (ClipState) and the shared
-execution context (RunContext) used across all orchestration phases.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
@@ -11,7 +5,6 @@ from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from frame_compare.analysis.window import SelectionWindow
 from frame_compare.services.types import AlignmentSource
 from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
@@ -23,7 +16,7 @@ from frame_compare.vs.types import HDRMetadata
 if TYPE_CHECKING:
     from frame_compare.analysis.types import FrameMetrics, SelectionBreakdown, SelectionDetail
     from frame_compare.config.schema import ConfigSchema
-    from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
+    from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
     from frame_compare.orchestration.types import FullWindowRetryConfirmationFn
     from frame_compare.services.release_identity import ReleaseIdentity
     from frame_compare.utils.progress_protocol import ProgressReporter
@@ -45,13 +38,6 @@ ACTIVE_RECT_RESOLUTION_ALGORITHM: ClipActiveRectAlgorithmId = "active_rect_resol
 
 @dataclass(frozen=True)
 class ClipFingerprint:
-    """Stable fingerprint for cache invalidation.
-
-    This is intentionally simple to compute without opening VS or hashing media
-    contents. Same-path, same-size, same-mtime replacements retain identity by the
-    repository's performance-first cache policy.
-    """
-
     path: Path
     size_bytes: int
     mtime_ns: int
@@ -59,15 +45,6 @@ class ClipFingerprint:
 
 @dataclass(frozen=True)
 class ClipProbeSnapshot:
-    """Cached, expensive-to-derive metadata about a clip (pre-trim).
-
-    Invariants:
-    - `num_frames` and `fps` refer to the untrimmed source.
-    - HDR detection uses *untrimmed* frame props (frame 0 snapshot).
-    - Persisted props are a *filtered subset* needed for downstream correctness.
-      Do not attempt to persist arbitrary VapourSynth prop types.
-    """
-
     fingerprint: ClipFingerprint
     width: int
     height: int
@@ -76,27 +53,18 @@ class ClipProbeSnapshot:
     is_hdr: bool
     hdr_metadata: HDRMetadata | None = None
 
-    # Minimal, portable prop snapshot for HDR/tonemap/Dolby Vision parity.
-    # Keys SHOULD include mastering display / content light level / HDR colorspace values if present.
     preserved_frame_props: dict[str, str | int | float] = field(default_factory=lambda: {})
     tonemap_prop_keys: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
 class ClipTrimState:
-    """Effective temporal window for a clip in frames (applied trims only).
-
-    `trim_start_frames` MUST be non-negative (trim-first invariant).
-    """
-
     trim_start_frames: int = 0
     trim_end_frame_inclusive: int | None = None
 
 
 @dataclass(frozen=True)
 class ClipAlignmentState:
-    """Alignment state expressed in signed, comparison-relative-to-reference offsets."""
-
     reference_stem: str
     comparison_stem: str
     relative_offset_frames: int
@@ -106,8 +74,6 @@ class ClipAlignmentState:
 
 @dataclass(frozen=True)
 class ClipActiveRect:
-    """Resolved active picture rectangle in source-frame coordinates."""
-
     x: int
     y: int
     width: int
@@ -119,15 +85,10 @@ class ClipActiveRect:
 
 @dataclass(frozen=True)
 class ClipState:
-    """Canonical per-clip state across orchestration phases (legacy ClipPlan analogue)."""
-
     path: Path
     label: str
     probe: ClipProbeSnapshot
 
-    # FPS hierarchy:
-    # - source_fps: from probe
-    # - effective_fps: configured override when present, otherwise source_fps
     source_fps: Fraction
     effective_fps: Fraction
 
@@ -139,10 +100,6 @@ class ClipState:
     label_is_explicit: bool = False
 
     def effective_num_frames(self) -> int:
-        """Return effective frame count after applied trims.
-
-        This MUST be used as the frame domain for selection and rendering decisions.
-        """
         end_inclusive = (
             self.trim.trim_end_frame_inclusive
             if self.trim.trim_end_frame_inclusive is not None
@@ -157,7 +114,6 @@ class ClipState:
     def with_trim(
         self, *, trim_start_frames: int, trim_end_frame_inclusive: int | None
     ) -> ClipState:
-        """Return a new ClipState with updated trim window (never mutates in place)."""
         if trim_start_frames < 0:
             raise ValueError("trim_start_frames must be >= 0 (trim-first invariant)")
         return replace(
@@ -169,27 +125,26 @@ class ClipState:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SelectionSnapshot:
+    """Selected comparison frames and their source-coordinate evidence."""
+
+    frames: tuple[int, ...] = ()
+    breakdown: SelectionBreakdown | None = None
+    details_by_source_frame: dict[int, SelectionDetail] | None = None
+    analysis_metrics: FrameMetrics | None = None
+
+
 @dataclass
 class RunContext:
-    """Runtime context shared across phases.
-
-    Note: This object may carry non-deterministic resources (http clients, VS core),
-    but per-clip state SHOULD remain immutable (`ClipState`).
-    """
-
     config: ConfigSchema
     workspace: WorkspacePaths
     reference: ClipState
     comparisons: list[ClipState]
-    analysis_selection_domain: str
-    selection_window: SelectionWindow
-    analysis_clip: ClipState | None = None
+    selection_domain: PreparedSelectionDomain
+    selection: SelectionSnapshot = field(default_factory=SelectionSnapshot)
     reporter: ProgressReporter | None = None
-    selection_breakdown: SelectionBreakdown | None = None
-    selection_details_by_source_frame: dict[int, SelectionDetail] | None = None
-    analysis_metrics: FrameMetrics | None = None
     confirm_full_window_retry: FullWindowRetryConfirmationFn | None = None
-    full_window_retry_override: FullWindowRetryOverride | None = None
     run_warnings: list[RunWarning] | None = None
     preflight_warnings: list[RunWarning] | None = None
     no_color: bool = False

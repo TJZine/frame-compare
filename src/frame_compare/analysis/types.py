@@ -1,5 +1,3 @@
-"""Analysis module data types."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -45,8 +43,6 @@ class ClipIdentity:
 
 @dataclass(frozen=True, slots=True)
 class MetricActiveRect:
-    """Analysis-owned active image rectangle in source-frame coordinates."""
-
     x: int
     y: int
     width: int
@@ -55,8 +51,6 @@ class MetricActiveRect:
 
 @dataclass(frozen=True, slots=True)
 class MetricFrameRange:
-    """Contiguous eligible source-frame domain represented by a metric set."""
-
     source_frame_count: int
     start: int
     end_exclusive: int
@@ -76,8 +70,6 @@ class MetricFrameRange:
 
 @dataclass(frozen=True, slots=True)
 class MetricCacheRequest:
-    """Complete requested identity for metric-array cache lookup and validation."""
-
     analysis_source_path: Path | None
     metric_frame_range: MetricFrameRange | None = None
     effective_fps: Fraction | None = None
@@ -93,7 +85,7 @@ class MetricsMetadata:
 
     Fields:
         frame_count: Number of stored metric samples
-        fps: Source video framerate
+        fps: Effective framerate (configured override when present, otherwise source FPS)
         config_fingerprint: Hash of analysis configuration
         clips: List of clip identities involved (usually just one)
         source_frame_count: Original analysis source frame count
@@ -130,7 +122,6 @@ class MetricsMetadata:
     version: int = 8
 
     def __post_init__(self) -> None:
-        """Normalize legacy in-memory constructors to a full-source metric domain."""
         if self.source_frame_count == -1:
             object.__setattr__(self, "source_frame_count", self.frame_count)
         if self.metric_source_end_exclusive == -1:
@@ -163,7 +154,6 @@ class FrameMetrics:
     sampled_source_frames: Sequence[int] | None = None
 
     def __post_init__(self) -> None:
-        """Validate dense and sparse metric domains at their shared boundary."""
         if (
             len(self.luminance) != self.metadata.frame_count
             or len(self.motion) != self.metadata.frame_count
@@ -196,11 +186,9 @@ class FrameMetrics:
 
     @property
     def eligible_frame_count(self) -> int:
-        """Return the complete contiguous selection domain represented by the metrics."""
         return self.metadata.metric_source_end_exclusive - self.metadata.metric_source_start
 
     def source_frames(self) -> range | Sequence[int]:
-        """Map each metric entry to its absolute analysis-source frame."""
         if self.sampled_source_frames is not None:
             return self.sampled_source_frames
         return range(
@@ -211,24 +199,12 @@ class FrameMetrics:
 
 @dataclass(frozen=True, slots=True)
 class MetricsAcquisition:
-    """Metrics and the disposition of the acquisition that supplied them."""
-
     metrics: FrameMetrics
     disposition: Literal["hit", "computed"]
 
 
 @dataclass(frozen=True, slots=True)
 class SelectionBreakdown:
-    """Breakdown of which frames were selected by which criteria.
-
-    Fields:
-        user: Explicit user-selected frames
-        quantile_dark: Frames selected for lowest luminance
-        quantile_bright: Frames selected for highest luminance
-        motion: Frames selected for scene changes/motion
-        random: Frames selected for uniform distribution
-    """
-
     user: Sequence[int] = field(default_factory=list[int])
     quantile_dark: Sequence[int] = field(default_factory=list[int])
     quantile_bright: Sequence[int] = field(default_factory=list[int])
@@ -238,8 +214,6 @@ class SelectionBreakdown:
 
 @dataclass(frozen=True, slots=True)
 class SelectionDetail:
-    """Typed per-frame selection metadata in the reference source-frame domain."""
-
     frame_index: int
     label: str
     source: str
@@ -251,15 +225,6 @@ class SelectionDetail:
 
 @dataclass(frozen=True, slots=True)
 class FrameSelection:
-    """Final list of selected frame numbers and metadata.
-
-    Fields:
-        frames: Sorted list of unique frame numbers
-        seed: Random seed used
-        breakdown: Details of selection sources
-        selection_details: Source-frame keyed typed metadata
-    """
-
     frames: Sequence[int]
     seed: int
     breakdown: SelectionBreakdown
@@ -268,14 +233,6 @@ class FrameSelection:
 
 @dataclass(frozen=True, slots=True)
 class CacheLoadResult:
-    """Result of attempting to load metrics from cache.
-
-    Fields:
-        success: Whether load was successful
-        metrics: The loaded metrics if success=True
-        reason: Why load failed (miss, invalid, stale) if success=False
-    """
-
     success: bool
     metrics: FrameMetrics | None = None
     reason: CacheLoadReason | None = None

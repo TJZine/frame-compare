@@ -88,7 +88,7 @@ def maybe_open_report(report_path: Path) -> bool:
     """Best-effort open of a generated HTML report in the default browser."""
     if os.name == "nt" and hasattr(os, "startfile"):
         try:
-            os.startfile(str(report_path))  # type: ignore[attr-defined]  # nosec B606
+            os.startfile(str(report_path))  # nosec B606
             return True
         except OSError:
             try:
