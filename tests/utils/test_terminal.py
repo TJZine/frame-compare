@@ -45,6 +45,7 @@ def test_first_sigint_interrupts_real_pty_prompt_and_restores_runner(
     import signal
     import subprocess
     import sys
+    import time
 
     code = """
 import faulthandler, sys
@@ -73,7 +74,12 @@ class Input:
         return getattr(original_input, name)
     def readline(self, *args):
         faulthandler.dump_traceback_later(2, file=trace_file)
-        print("READY", flush=True)
+        print("READY " + json.dumps({
+            "ready": True,
+            "handler": repr(signal.getsignal(signal.SIGINT)),
+            "cancelling": asyncio.current_task().cancelling(),
+            "sigint_blocked": signal.SIGINT in signal.pthread_sigmask(signal.SIG_BLOCK, []),
+        }), flush=True)
         return original_input.readline(*args)
 original_input = sys.stdin
 sys.stdin = Input()
@@ -138,18 +144,40 @@ finally:
             captured.extend(chunk)
         return bytes(captured)
 
+    readiness_line = ""
+    syscall_state = "not checked"
     try:
         assert process.stdout is not None
+        deadline = time.monotonic() + 3
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
             assert selector.select(timeout=3), "prompt did not start"
-        assert process.stdout.readline().strip().endswith("READY")
+        readiness_line = process.stdout.readline()
+        _, marker, payload = readiness_line.rpartition("READY ")
+        assert marker, f"prompt did not report readiness: {readiness_line!r}"
+        readiness: dict[str, object] = json.loads(payload)
+        assert readiness["ready"] is True
+        assert readiness["cancelling"] == 0
+        assert readiness["sigint_blocked"] is False
+        if sys.platform == "linux":
+            # READY precedes the native read. A signal in CPython's GIL-free
+            # gap before read(0) can remain pending while the read blocks.
+            # After READY, readline is the child's only blocking fd-0 call.
+            waiting_on_stdin = False
+            while process.poll() is None and time.monotonic() < deadline:
+                syscall_state = Path(f"/proc/{process.pid}/syscall").read_text().strip()
+                fields = syscall_state.split()
+                if len(fields) == 9 and int(fields[1], 0) == 0:
+                    waiting_on_stdin = True
+                    break
+                time.sleep(0.005)
+            assert waiting_on_stdin, f"child did not block on stdin: {syscall_state}"
         os.kill(process.pid, signal.SIGINT)
         stdout, _ = process.communicate(timeout=3)
         assert process.returncode == 130, stdout
         observed = json.loads(stdout)
         assert observed == {"restored": True, "count": 1}
-    except (subprocess.TimeoutExpired, AssertionError, ValueError) as error:
+    except (subprocess.TimeoutExpired, AssertionError, ValueError, OSError) as error:
         # Closing the last slave can discard queued PTY output on macOS, so
         # capture it before killing. Both drains are bounded and nonblocking;
         # the watchdog writes independently to a regular file.
@@ -166,7 +194,8 @@ finally:
             else str(error)
         )
         pytest.fail(
-            f"PTY {prompt} child {reason}; stdout={stdout!r}; PTY stderr={stderr!r}; "
+            f"PTY {prompt} child {reason}; readiness={readiness_line!r}; syscall={syscall_state!r}; "
+            f"stdout={stdout!r}; PTY stderr={stderr!r}; "
             f"child stack ({stack_path}):\n{stack}"
         )
     finally:
