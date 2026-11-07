@@ -34,6 +34,9 @@ CONTENT_MIN_MARGIN_PX = 8
 CONTENT_MIN_MARGIN_FRACTION = 0.01
 CONTENT_MAX_AXIS_REMOVAL_FRACTION = 0.35
 _EDGE_BASELINE_SAMPLE_PX = 4
+# Luma samples retain their original range. Nominal black is 0 in full range
+# and about 0.063 in limited-range integer samples. Allow modest lift above it.
+_MAX_BLACK_BASELINE = 0.10
 _BASELINE_NEAR_DELTA = 0.040
 _BORDER_MEAN_DELTA = 0.030
 _BORDER_MAX_STDDEV = 0.018
@@ -347,6 +350,9 @@ def _candidate_margins_for_frame(frame: npt.NDArray[np.float32]) -> _Margins | N
         return None
 
     baseline = _edge_black_baseline(frame)
+    if not 0.0 <= baseline <= _MAX_BLACK_BASELINE:
+        return None
+
     max_vertical_scan = int(height * CONTENT_MAX_AXIS_REMOVAL_FRACTION)
     max_horizontal_scan = int(width * CONTENT_MAX_AXIS_REMOVAL_FRACTION)
     top = _scan_top(frame, baseline, max_vertical_scan)

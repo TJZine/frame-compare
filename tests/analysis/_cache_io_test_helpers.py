@@ -30,7 +30,7 @@ def valid_cache_metadata_payload(
     metric_active_rect: dict[str, int] | None = None,
     active_rect_source: ActiveRectSource = "full-frame",
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
-    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v3",
 ) -> dict[str, object]:
     return {
         "frame_count": frame_count,
@@ -76,7 +76,7 @@ def metrics_metadata(
     metric_active_rect: MetricActiveRect | None = None,
     active_rect_source: ActiveRectSource = "full-frame",
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
-    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v3",
 ) -> MetricsMetadata:
     return MetricsMetadata(
         frame_count=frame_count,

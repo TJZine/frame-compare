@@ -12,14 +12,13 @@ if TYPE_CHECKING:
 CacheLoadReason = Literal["not_found", "corrupted", "version_mismatch", "mismatched_inputs"]
 ActiveRectSource = Literal[
     "explicit",
-    "metadata",
     "dimension-derived",
     "aspect-ratio-derived",
     "content-derived",
     "full-frame",
 ]
 ActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio", "auto"]
-ActiveRectAlgorithmId = Literal["active_rect_resolution_v2"]
+ActiveRectAlgorithmId = Literal["active_rect_resolution_v3"]
 type SelectionDetailsByFrame = dict[int, SelectionDetail]
 
 
@@ -76,7 +75,7 @@ class MetricCacheRequest:
     metric_active_rect: MetricActiveRect | None = None
     active_rect_source: ActiveRectSource = "full-frame"
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio"
-    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2"
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +117,7 @@ class MetricsMetadata:
     metric_active_rect: MetricActiveRect | None = None
     active_rect_source: ActiveRectSource = "full-frame"
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio"
-    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2"
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v3"
     version: int = 8
 
     def __post_init__(self) -> None:

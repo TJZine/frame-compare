@@ -42,12 +42,10 @@ class FakeVSLoader:
         *,
         fps_by_name: dict[str, Fraction] | None = None,
         dimensions_by_name: dict[str, tuple[int, int]] | None = None,
-        frame_props_by_name: dict[str, dict[str, object]] | None = None,
     ) -> None:
         self.loaded: list[Path] = []
         self._fps_by_name = fps_by_name or {}
         self._dimensions_by_name = dimensions_by_name or {}
-        self._frame_props_by_name = frame_props_by_name or {}
 
     def load(self, path: Path) -> SourceInfo:
         self.loaded.append(path)
@@ -59,14 +57,11 @@ class FakeVSLoader:
             num_frames=100,
             fps=self._fps_by_name.get(path.name, Fraction(24000, 1001)),
             format=cast(Any, object()),
-            frame_props=self._frame_props_by_name.get(
-                path.name,
-                {
-                    "_Transfer": 16,
-                    "DolbyVisionRPU": b"opaque-rpu",
-                    "Ignored": {"not": "toml-safe"},
-                },
-            ),
+            frame_props={
+                "_Transfer": 16,
+                "DolbyVisionRPU": b"opaque-rpu",
+                "Ignored": {"not": "toml-safe"},
+            },
             is_hdr=False,
             hdr_metadata=None,
         )
@@ -130,40 +125,6 @@ def test_execute_prep_resolves_dimension_active_rects_during_preparation(
     )
 
 
-def test_execute_prep_resolves_metadata_active_rect_from_preserved_probe_props(
-    tmp_path: Path,
-) -> None:
-    _create_config(tmp_path)
-    input_dir = tmp_path / "comparison_videos"
-    _create_video_files(input_dir, "00-reference.mkv")
-    loader = FakeVSLoader(
-        frame_props_by_name={
-            "00-reference.mkv": {
-                "DolbyVision_L5_Left": 100,
-                "DolbyVision_L5_Right": 120,
-                "DolbyVision_L5_Top": 40,
-                "DolbyVision_L5_Bottom": 60,
-            }
-        }
-    )
-
-    prep = asyncio.run(
-        preparation.execute_prep(
-            make_run_request(root=tmp_path),
-            RunDependencies(vs_loader=cast(Any, loader)),
-        )
-    )
-
-    assert prep.clips[0].active_rect == ClipActiveRect(
-        100,
-        40,
-        1700,
-        980,
-        "metadata",
-        "aspect_ratio",
-    )
-
-
 def test_execute_prep_selection_domain_includes_resolved_active_rect_identity(
     tmp_path: Path,
 ) -> None:
@@ -188,7 +149,7 @@ def test_execute_prep_selection_domain_includes_resolved_active_rect_identity(
     selection_domain = json.loads(prep.selection_domain.token)
     assert selection_domain["active_rect_policy"] == {
         "detection_mode": "aspect_ratio",
-        "algorithm_id": "active_rect_resolution_v2",
+        "algorithm_id": "active_rect_resolution_v3",
     }
     assert selection_domain["clips"][0]["active_rect"] == {
         "x": 0,
@@ -197,7 +158,7 @@ def test_execute_prep_selection_domain_includes_resolved_active_rect_identity(
         "height": 1600,
         "source": "aspect-ratio-derived",
         "detection_mode": "aspect_ratio",
-        "algorithm_id": "active_rect_resolution_v2",
+        "algorithm_id": "active_rect_resolution_v3",
     }
 
 
@@ -252,7 +213,7 @@ def test_execute_prep_auto_content_refinement_updates_selection_domain_after_win
     selection_domain = json.loads(prep.selection_domain.token)
     assert selection_domain["active_rect_policy"] == {
         "detection_mode": "auto",
-        "algorithm_id": "active_rect_resolution_v2",
+        "algorithm_id": "active_rect_resolution_v3",
     }
     assert selection_domain["clips"][0]["active_rect"] == {
         "x": 0,
@@ -261,7 +222,7 @@ def test_execute_prep_auto_content_refinement_updates_selection_domain_after_win
         "height": 60,
         "source": "content-derived",
         "detection_mode": "auto",
-        "algorithm_id": "active_rect_resolution_v2",
+        "algorithm_id": "active_rect_resolution_v3",
     }
 
 
@@ -321,7 +282,7 @@ def test_execute_prep_auto_propagates_supported_content_ratio_to_unresolved_clip
         "height": 60,
         "source": "aspect-ratio-derived",
         "detection_mode": "auto",
-        "algorithm_id": "active_rect_resolution_v2",
+        "algorithm_id": "active_rect_resolution_v3",
     }
 
 

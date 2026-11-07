@@ -194,6 +194,14 @@ def test_detect_content_active_rect(
         assert detect_content_active_rect(frames) == expected
 
 
+def test_bright_smooth_edge_is_not_a_black_bar() -> None:
+    frame = np.empty((80, 100), dtype=np.float32)
+    frame[:16, :] = np.linspace(0.40, 0.42, 16, dtype=np.float32)[:, None]
+    frame[16:, :] = 0.45 + 0.5 * _content_pattern(64, 100)
+
+    assert detect_content_active_rect([frame] * 16) is None
+
+
 def test_detector_streams_frames_without_retaining_previous_arrays() -> None:
     def stream_frames() -> Iterator[npt.NDArray[np.float32]]:
         for _index in range(8):
@@ -298,22 +306,11 @@ def test_sample_indices_use_trimmed_selection_window_source_domain() -> None:
 
 def test_auto_refinement_does_not_sample_static_non_full_frame_rects() -> None:
     clips = [
-        _clip(num_frames=100),
-        _clip(num_frames=100),
-        _clip(num_frames=100),
-        _clip(num_frames=100),
-    ]
-    clips = [
-        replace(clips[0], active_rect=ClipActiveRect(0, 10, 100, 60, "explicit", "auto")),
-        replace(clips[1], active_rect=ClipActiveRect(0, 10, 100, 60, "metadata", "auto")),
         replace(
-            clips[2],
-            active_rect=ClipActiveRect(0, 10, 100, 60, "dimension-derived", "auto"),
-        ),
-        replace(
-            clips[3],
-            active_rect=ClipActiveRect(0, 10, 100, 60, "aspect-ratio-derived", "auto"),
-        ),
+            _clip(name=f"{source}.mkv"),
+            active_rect=ClipActiveRect(0, 10, 100, 60, source, "auto"),
+        )
+        for source in ("explicit", "dimension-derived", "aspect-ratio-derived")
     ]
 
     class FailingSampler:

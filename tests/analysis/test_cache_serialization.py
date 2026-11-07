@@ -78,7 +78,7 @@ def test_request_aware_cache_load_rejects_mismatched_provenance(tmp_path: Path) 
         effective_fps=Fraction(24, 1),
         metric_active_rect=rect,
         active_rect_source="explicit",
-        active_rect_detection_mode="provided",
+        active_rect_detection_mode="aspect_ratio",
     )
     fingerprint = compute_cache_key([video], config, metric_request=request)
     clips = [ClipIdentity(path=str(video), size=video.stat().st_size, mtime=video.stat().st_mtime)]
@@ -96,7 +96,7 @@ def test_request_aware_cache_load_rejects_mismatched_provenance(tmp_path: Path) 
             metric_backend=metric_backend(config),
             algorithm_identity_json=stable_metric_algorithm_identity_json(config),
             metric_active_rect=rect,
-            active_rect_source="metadata",
+            active_rect_source="dimension-derived",
             active_rect_detection_mode="aspect_ratio",
         ),
     )
@@ -157,7 +157,21 @@ def test_windowed_cache_request_rejects_different_range(tmp_path: Path) -> None:
     assert result.reason == "mismatched_inputs"
 
 
-def test_load_cache_accepts_content_derived_auto_active_rect_metadata(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("overrides", "accepted"),
+    [
+        pytest.param({}, True, id="current_content_derived"),
+        pytest.param({"active_rect_source": "metadata"}, False, id="removed_provenance"),
+        pytest.param(
+            {"active_rect_algorithm_id": "active_rect_resolution_v2"},
+            False,
+            id="superseded_algorithm",
+        ),
+    ],
+)
+def test_load_cache_validates_active_rect_identity(
+    tmp_path: Path, overrides: dict[str, str], accepted: bool
+) -> None:
     config = AnalysisConfig()
     metadata = valid_cache_metadata_payload(
         config,
@@ -166,6 +180,8 @@ def test_load_cache_accepts_content_derived_auto_active_rect_metadata(tmp_path: 
         active_rect_source="content-derived",
         active_rect_detection_mode="auto",
     )
+    metadata["active_rect_algorithm_id"] = MetricCacheRequest(None).active_rect_algorithm_id
+    metadata.update(overrides)
     cache_file(tmp_path, "fp").write_text(
         json.dumps(
             {
@@ -181,6 +197,11 @@ def test_load_cache_accepts_content_derived_auto_active_rect_metadata(tmp_path: 
     )
 
     result = load_cached_metrics(tmp_path, "fp")
+
+    if not accepted:
+        assert result.success is False
+        assert result.reason == "corrupted"
+        return
 
     assert result.success is True
     assert result.metrics is not None
@@ -228,7 +249,7 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     assert data["metadata"]["metric_active_rect"] is None
     assert data["metadata"]["active_rect_source"] == "full-frame"
     assert data["metadata"]["active_rect_detection_mode"] == "aspect_ratio"
-    assert data["metadata"]["active_rect_algorithm_id"] == "active_rect_resolution_v2"
+    assert data["metadata"]["active_rect_algorithm_id"] == "active_rect_resolution_v3"
 
 
 @pytest.mark.parametrize("case", ["basic", "active_rect", "window", "sparse"])
@@ -328,12 +349,12 @@ def test_metrics_cache_roundtrip_cases(tmp_path: Path, case: str) -> None:
         assert result.metrics.metadata.metric_active_rect is None
         assert result.metrics.metadata.active_rect_source == "full-frame"
         assert result.metrics.metadata.active_rect_detection_mode == "aspect_ratio"
-        assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
+        assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v3"
     elif case == "active_rect":
         assert result.metrics.metadata.metric_active_rect == rect
         assert result.metrics.metadata.active_rect_source == "explicit"
         assert result.metrics.metadata.active_rect_detection_mode == "provided"
-        assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
+        assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v3"
     elif case == "window":
         assert result.metrics.motion[0] == 0.4
         assert result.metrics.metadata.metric_source_start == 20

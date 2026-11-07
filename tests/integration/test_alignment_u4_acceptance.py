@@ -149,7 +149,7 @@ def _real_clip(
             y=18,
             width=64,
             height=36,
-            source="metadata",
+            source="explicit",
             detection_mode="provided",
         )
         if crop

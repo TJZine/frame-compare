@@ -227,8 +227,8 @@ trims compose on top of those base trims rather than replacing them. Explicit
 config `active_rect` values are validated against the probed source dimensions
 and invalid explicit rectangles fail instead of falling back silently. Explicit
 active rectangles are the highest-precedence active-picture evidence during
-preparation; when omitted, preparation may use trusted static metadata,
-dimension/aspect-ratio inference, or a full-frame fallback according to
+preparation. When omitted, preparation may use dimension/aspect-ratio inference,
+sampled content detection, or a full-frame fallback according to
 `screenshots.active_rect_detection`.
 `effective_fps` is an explicit AssumeFPS-style timing override applied after
 source-rate canonicalization: it changes timing/FPS interpretation without
@@ -1137,6 +1137,7 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
   `minimal` carries source identity plus compact frame/type/size context; `standard`
   adds selection and source/output context; `diagnostic` adds only observed signal,
   applied tonemap, HDR static, exceptional geometry, and proven exact-frame facts.
+  Mastering display luminance from the decoder is expressed in nits.
 - When vs-placebo is unavailable, unusable, or fails at runtime, Frame Compare keeps
   its existing fallback policy and discloses `frame_compare_peak_scaled_rational_v1`
   per clip, rather than the requested curve. Diagnostic overlays say
@@ -1146,9 +1147,10 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 - Picture type is collected from the exact selected original source frame. Its absence
   is nonfatal and is omitted from baked text rather than inferred from keyframe status.
 - Selected-frame Dolby Vision RPU presence is collected from that same original
-  VapourSynth frame and shown in the Frame inspector. It is omitted when the active
-  renderer cannot prove it; decoded L1/L2/L6 values are not inferred from clip-level or
-  frame-0 metadata.
+  VapourSynth frame and shown in the Frame inspector. Diagnostic overlays label
+  source-level evidence as `DV RPU (clip)` and add `DV RPU (frame)` only when
+  the selected frame has proven RPU presence. Decoded L1/L2/L6 values are not
+  inferred from clip-level or frame-0 metadata.
 - Displayed file size is the complete container storage cost in IEC units. It is not a
   bitrate, quality, efficiency, or winner metric. The existing value appears in visible
   Single, Slider, Diff, Blink, and Grid source labels when positive and available;
@@ -1402,9 +1404,8 @@ Both stay inside the prepared shared selectable window, and `performance` is
 cache-isolated from `quality` through its mode and algorithm identity. Cache schema v8 records
 that window and, for performance, the explicit source-frame map for every stored
 metric value. The prepared rectangle can come from an explicit
-`sources.overrides.<selector>.active_rect`, trusted static metadata, configured
-dimension/aspect-ratio detection, opt-in sampled content detection, or full-frame
-fallback. There are no new analysis performance modes or aliases for active-rect
+`sources.overrides.<selector>.active_rect`, configured dimension/aspect-ratio
+detection, sampled content detection, or full-frame fallback. There are no new analysis performance modes or aliases for active-rect
 detection; `quality` and `performance` consume the same prepared rectangle.
 The 25% fraction and burst count are internal mode contracts, not user-facing
 knobs. There is no dedicated `run` flag for analysis performance mode in v1.
@@ -1687,16 +1688,15 @@ dedicated `run` flags for them:
   the config schema still validates their enum values and target field types.
 - `active_rect_detection = "provided" | "dimension" | "aspect_ratio" | "auto"`
   selects the shared active-picture evidence used during preparation.
-  `provided` uses only explicit per-source `active_rect` overrides and trusted
-  static metadata active rectangles. `dimension` also allows same-height or
-  same-width centered crop inference. `aspect_ratio` additionally allows
-  conservative centered vertical letterbox inference when a target content
-  aspect ratio has at least two matching sources or one explicit/trusted
-  metadata source. `auto` is the default; it first applies the same static
-  evidence as `aspect_ratio`, then conservatively samples luma frames after the
-  shared selectable window is known and only refines clips that still have
-  unresolved full-frame static rectangles. It returns full frame when uncertain
-  and is not ML, OCR, perceptual HDR analysis, or exhaustive scanning.
+  `provided` uses only explicit per-source `active_rect` overrides.
+  `dimension` also allows same-height or same-width centered crop inference.
+  `aspect_ratio` additionally allows conservative centered vertical letterbox
+  inference when a target content aspect ratio has at least two matching sources
+  or one explicit source rectangle. `auto` is the default. It first applies the
+  same static evidence as `aspect_ratio`, then samples luma within the shared
+  selectable window for clips with unresolved full-frame rectangles. Content
+  crops require a plausible black level at the sampled edge. Auto detection
+  returns full frame when uncertain.
   Metric analysis uses the resolved active picture. Aligned screenshot render
   uses the same resolved active picture for crop/scale/pad planning. Native
   screenshot render remains native/full-frame output. Analysis cache identity

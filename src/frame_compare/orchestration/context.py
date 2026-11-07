@@ -25,15 +25,14 @@ if TYPE_CHECKING:
 
 ClipActiveRectSource = Literal[
     "explicit",
-    "metadata",
     "dimension-derived",
     "aspect-ratio-derived",
     "content-derived",
     "full-frame",
 ]
 ClipActiveRectDetectionMode = Literal["provided", "dimension", "aspect_ratio", "auto"]
-ClipActiveRectAlgorithmId = Literal["active_rect_resolution_v2"]
-ACTIVE_RECT_RESOLUTION_ALGORITHM: ClipActiveRectAlgorithmId = "active_rect_resolution_v2"
+ClipActiveRectAlgorithmId = Literal["active_rect_resolution_v3"]
+ACTIVE_RECT_RESOLUTION_ALGORITHM: ClipActiveRectAlgorithmId = "active_rect_resolution_v3"
 
 
 @dataclass(frozen=True)
