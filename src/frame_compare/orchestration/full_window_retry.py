@@ -88,9 +88,17 @@ def compute_selection_window_with_recovery(
             analysis.ignore_lead_seconds <= 0.0 and analysis.ignore_trail_seconds <= 0.0
         ):
             raise
+        effective_config = _full_window_config(config)
+        try:
+            selection_window = compute_selection_window_for_clips(
+                clips=clips,
+                config=effective_config,
+            )
+        except SelectionError:
+            raise error from None
         _require_confirmation(
             error=error,
-            eligible_frame_count=0,
+            requested_frame_count=_requested_frame_count(config),
             config=config,
             confirm=confirm,
         )
@@ -100,14 +108,6 @@ def compute_selection_window_with_recovery(
         )
         if warning_sink is not None:
             warning_sink.append(override_warning)
-        effective_config = _full_window_config(config)
-        try:
-            selection_window = compute_selection_window_for_clips(
-                clips=clips,
-                config=effective_config,
-            )
-        except SelectionError as retry_error:
-            raise _fatal_selection_error(retry_error, retry_failed=True) from retry_error
         return FullWindowSelectionState(
             config=effective_config,
             selection_window=selection_window,
@@ -129,14 +129,25 @@ def recover_from_exclusion_selection_failure(
     """Confirm and apply one full-window retry, or raise a fatal typed selection error."""
     if ctx.selection_domain.full_window_retry_override is not None:
         raise _fatal_selection_error(error, retry_failed=True) from error
-    if not _eligible_for_recovery(ctx.config, error):
+    analysis = ctx.config.analysis
+    if error.kind not in _RECOVERABLE_KINDS or (
+        analysis.ignore_lead_seconds <= 0.0 and analysis.ignore_trail_seconds <= 0.0
+    ):
         raise error
 
-    analysis = ctx.config.analysis
+    clips = [ctx.reference, *ctx.comparisons]
+    effective_config = _full_window_config(ctx.config)
+    try:
+        selection_window = compute_selection_window_for_clips(clips=clips, config=effective_config)
+    except SelectionError:
+        raise error from None
+    if selection_window.frame_count <= ctx.selection_domain.selection_window.frame_count:
+        raise error
+
     if ctx.reporter is None:
         _require_confirmation(
             error=error,
-            eligible_frame_count=ctx.selection_domain.selection_window.frame_count,
+            requested_frame_count=error.requested,
             config=ctx.config,
             confirm=ctx.confirm_full_window_retry,
         )
@@ -148,7 +159,7 @@ def recover_from_exclusion_selection_failure(
         try:
             _require_confirmation(
                 error=error,
-                eligible_frame_count=ctx.selection_domain.selection_window.frame_count,
+                requested_frame_count=error.requested,
                 config=ctx.config,
                 confirm=ctx.confirm_full_window_retry,
             )
@@ -174,6 +185,8 @@ def recover_from_exclusion_selection_failure(
     try:
         active_rect_warnings = _apply_confirmed_override(
             ctx,
+            effective_config=effective_config,
+            selection_window=selection_window,
             override=override,
             vs_loader=vs_loader,
         )
@@ -190,13 +203,15 @@ def recover_from_exclusion_selection_failure(
 def _apply_confirmed_override(
     ctx: RunContext,
     *,
+    effective_config: ConfigSchema,
+    selection_window: SelectionWindow,
     override: FullWindowRetryOverride,
     vs_loader: VSLoader | None,
 ) -> list[RunWarning]:
-    effective_config = _full_window_config(ctx.config)
     clips, active_rect_warnings = _refine_active_rects_for_full_window(
         clips=[ctx.reference, *ctx.comparisons],
         config=effective_config,
+        selection_window=selection_window,
         vs_loader=vs_loader,
     )
     analysis_source_path = (
@@ -208,7 +223,6 @@ def _apply_confirmed_override(
         (clip for clip in clips if clip.path == analysis_source_path),
         None,
     )
-    selection_window = compute_selection_window_for_clips(clips=clips, config=effective_config)
     domain = build_prepared_selection_domain(
         clips=clips,
         analysis_clip=analysis_clip,
@@ -241,23 +255,21 @@ def raise_if_full_window_retry_runtime_failed(
     """Make any failure after accepted recovery fatal instead of warning-only."""
     if ctx.selection_domain.full_window_retry_override is None:
         return
-    analysis = ctx.config.analysis
-    requested = (
+    selection_error = SelectionError(
+        type(error).__name__, requested=_requested_frame_count(ctx.config), found=0
+    )
+    raise _fatal_selection_error(selection_error, retry_failed=True) from error
+
+
+def _requested_frame_count(config: ConfigSchema) -> int:
+    analysis = config.analysis
+    return (
         len(analysis.user_frames)
         + analysis.random_frame_count
         + analysis.dark_frame_count
         + analysis.bright_frame_count
         + analysis.motion_frame_count
     )
-    selection_error = SelectionError(type(error).__name__, requested=requested, found=0)
-    raise _fatal_selection_error(selection_error, retry_failed=True) from error
-
-
-def _eligible_for_recovery(config: ConfigSchema, error: SelectionError) -> bool:
-    analysis = config.analysis
-    return (
-        analysis.ignore_lead_seconds > 0.0 or analysis.ignore_trail_seconds > 0.0
-    ) and error.kind in _RECOVERABLE_KINDS
 
 
 def _full_window_config(config: ConfigSchema) -> ConfigSchema:
@@ -288,14 +300,14 @@ def _override_warning(ignore_lead_seconds: float, ignore_trail_seconds: float) -
 def _require_confirmation(
     *,
     error: SelectionError,
-    eligible_frame_count: int,
+    requested_frame_count: int,
     config: ConfigSchema,
     confirm: FullWindowRetryConfirmationFn | None,
 ) -> None:
     analysis = config.analysis
     request = FullWindowRetryConfirmationRequest(
-        requested_frame_count=error.requested,
-        eligible_frame_count=eligible_frame_count,
+        requested_frame_count=requested_frame_count,
+        eligible_frame_count=error.found,
         ignore_lead_seconds=analysis.ignore_lead_seconds,
         ignore_trail_seconds=analysis.ignore_trail_seconds,
     )
@@ -313,9 +325,9 @@ def _refine_active_rects_for_full_window(
     *,
     clips: list[ClipState],
     config: ConfigSchema,
+    selection_window: SelectionWindow,
     vs_loader: VSLoader | None,
 ) -> tuple[list[ClipState], list[RunWarning]]:
-    selection_window = compute_selection_window_for_clips(clips=clips, config=config)
     if config.screenshots.active_rect_detection != ScreenshotActiveRectDetection.AUTO:
         return clips, []
     sampler = VSActiveRectFrameSampler(vs_loader) if vs_loader is not None else None

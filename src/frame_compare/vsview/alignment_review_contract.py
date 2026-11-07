@@ -503,13 +503,17 @@ def _parse_audio_attempt(
     authority_origin: _AuthorityOrigin,
     comparison_ordinal: int,
 ) -> AudioAlignmentAttempt:
-    """Parse the embedded v4 attempt through the shared evidence parser."""
+    """Parse v4 evidence and enforce the native metadata v5 projection."""
     try:
         attempt = evidence_from_payload(AudioAlignmentAttempt, raw)
     except ValueError as exc:
         raise AlignmentReviewContractError(
             f"alignment review audio attempt is invalid: {exc}"
         ) from exc
+    if not attempt.chunks.rows_omitted:
+        raise AlignmentReviewContractError(
+            "alignment review audio attempt must omit per-chunk rows"
+        )
     if attempt.comparison_ordinal != comparison_ordinal:
         raise AlignmentReviewContractError("alignment review attempt ordinal is inconsistent")
     state = attempt.decision.state

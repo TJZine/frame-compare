@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
@@ -11,7 +13,11 @@ from subprocess import CalledProcessError, TimeoutExpired
 from threading import Event
 from typing import cast
 
-from frame_compare.services.errors import AudioAlignmentError, raise_if_alignment_cancelled
+from frame_compare.services.errors import (
+    AudioAlignmentCleanupError,
+    AudioAlignmentError,
+    raise_if_alignment_cancelled,
+)
 from frame_compare.services.types import AlignmentChannelStrategy
 from frame_compare.utils.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
@@ -22,9 +28,22 @@ from frame_compare.utils.alignment_evidence import (
     SelectedAudioStreamEvidence,
 )
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.subproc import SubprocessOutputLimitExceeded, run_subprocess
+from frame_compare.utils.subproc import (
+    SubprocessCleanupError,
+    SubprocessOutputLimitExceeded,
+    run_subprocess,
+)
 
 _FFPROBE_TIMEOUT_SECONDS = 15.0
+_DURATION_CLOCK = re.compile(r"([0-9]{1,12}):([0-9]{1,2}):([0-9]{1,2}(?:\.[0-9]{1,9})?)")
+_LAVF_MUXER = re.compile(r"lavf(?:[0-9]+\.[0-9]+\.[0-9]+)?")
+_LANGUAGE_TAG = re.compile(
+    r"[a-z]{2,3}(?:-[a-z]{3}){0,3}"
+    r"(?:-[a-z]{4})?(?:-(?:[a-z]{2}|[0-9]{3}))?"
+    r"(?:-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*"
+    r"(?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*"
+    r"(?:-x(?:-[a-z0-9]{1,8})+)?"
+)
 
 MAX_RETIME_RATE = 384_000
 
@@ -40,6 +59,7 @@ class AudioStreamTimeline:
     input_start_time: Fraction = Fraction(0)
     start_time_basis: AudioStartBasis = "default_zero"
     input_start_time_basis: AudioStartBasis = "default_zero"
+    verify_start: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,6 +119,18 @@ def _normalize_optional_text(value: object) -> str | None:
     return normalized or None
 
 
+def _normalize_language(value: object) -> str | None:
+    language = _normalize_optional_text(value)
+    if (
+        language is None
+        or len(language) > 63
+        or language.split("-", 1)[0] == "und"
+        or not _LANGUAGE_TAG.fullmatch(language)
+    ):
+        return None
+    return language
+
+
 def _parse_optional_int(value: object) -> int | None:
     if isinstance(value, bool):
         return None
@@ -143,14 +175,12 @@ def _parse_time_base(value: object) -> Fraction | None:
 def _parse_duration_tag(value: object) -> Fraction | None:
     if not isinstance(value, str):
         return None
-    parts = value.strip().split(":")
-    if len(parts) != 3:
+    clock = _DURATION_CLOCK.fullmatch(value.strip())
+    if clock is None:
         return None
-    try:
-        hours = int(parts[0])
-        minutes = int(parts[1])
-        seconds = Fraction(Decimal(parts[2]))
-    except (InvalidOperation, OverflowError, ValueError, ZeroDivisionError):
+    hours, minutes = (int(part) for part in clock.groups()[:2])
+    seconds = Fraction(clock[3])
+    if minutes >= 60 or seconds >= 60:
         return None
     duration = hours * 3600 + minutes * 60 + seconds
     return duration if duration > 0 else None
@@ -198,6 +228,8 @@ def _parse_audio_stream(
     video_path: Path,
     input_start_time: Fraction,
     input_start_time_basis: AudioStartBasis,
+    matroska_duration: Fraction | None,
+    ffmpeg_duration_tags: bool,
 ) -> AudioStreamInfo:
     if not isinstance(stream_obj, dict):
         raise FFmpegError(f"ffprobe returned invalid audio stream data for {video_path.name}", 0)
@@ -219,20 +251,50 @@ def _parse_audio_stream(
     start_time = parsed_start_time if parsed_start_time is not None else Fraction(0)
     time_base = _parse_time_base(stream.get("time_base"))
     duration_ts = _parse_optional_int(stream.get("duration_ts"))
+    # FFmpeg can copy both container values into a stream it hasn't seen a packet for.
+    verify_start = (
+        matroska_duration is not None
+        and parsed_start_time is not None
+        and input_start_time_basis == "metadata"
+        and time_base is not None
+        and duration_ts is not None
+        and abs(start_time - input_start_time) <= time_base / 2
+        and abs(duration_ts * time_base - matroska_duration) <= time_base / 2
+    )
     duration: Fraction | None = None
     duration_basis: AudioDurationBasis = "unavailable"
-    if duration_ts is not None and duration_ts > 0 and time_base is not None:
-        duration = duration_ts * time_base
-        duration_basis = "duration_ts"
-    if duration is None:
-        duration = _parse_optional_duration(stream.get("duration"))
-        if duration is not None:
-            duration_basis = "stream_duration"
-    if duration is None:
-        duration = _parse_duration_tag(tags_dict.get("DURATION") or tags_dict.get("duration"))
-        if duration is not None:
-            duration = max(Fraction(0), duration - start_time)
-            duration_basis = "stream_tag"
+    if not verify_start:
+        if duration_ts is not None and duration_ts > 0 and time_base is not None:
+            duration = duration_ts * time_base
+            duration_basis = "duration_ts"
+        else:
+            duration = _parse_optional_duration(stream.get("duration"))
+            if duration is not None:
+                duration_basis = "stream_duration"
+        if duration is None:
+            duration = _parse_duration_tag(tags_dict.get("DURATION") or tags_dict.get("duration"))
+            statistics_writer = _normalize_optional_text(tags_dict.get("_STATISTICS_WRITING_APP"))
+            statistics_tags = _normalize_optional_text(tags_dict.get("_STATISTICS_TAGS"))
+            if duration is not None:
+                mkvmerge_statistics = (
+                    statistics_writer is not None
+                    and statistics_writer.startswith("mkvmerge ")
+                    and statistics_tags is not None
+                    and "duration" in statistics_tags.split()
+                )
+                # Lavf can copy mkvmerge's markers when rewriting DURATION.
+                # A tag-only writer such as mkvpropedit can also edit DURATION
+                # after muxing, leaving the Lavf muxer identifier in place.
+                ffmpeg_endpoint = ffmpeg_duration_tags and (
+                    mkvmerge_statistics or (statistics_writer is None and statistics_tags is None)
+                )
+                if ffmpeg_endpoint:
+                    duration -= start_time
+                    duration_basis = "stream_tag"
+                elif start_time == 0 or mkvmerge_statistics:
+                    duration_basis = "stream_tag"
+                else:
+                    duration = None
     if duration is not None and duration <= 0:
         duration = None
         duration_basis = "unavailable"
@@ -244,7 +306,7 @@ def _parse_audio_stream(
         channels=_parse_optional_int(stream.get("channels")),
         channel_layout=_normalize_optional_text(stream.get("channel_layout")),
         sample_rate=_parse_optional_int(stream.get("sample_rate")),
-        language=_normalize_optional_text(tags_dict.get("language")),
+        language=_normalize_language(tags_dict.get("language")),
         is_default=_parse_flag(disposition_dict.get("default")),
         is_original=_parse_flag(disposition_dict.get("original")),
         is_commentary=_is_commentary_tag(disposition_dict.get("comment"))
@@ -257,6 +319,7 @@ def _parse_audio_stream(
             input_start_time=input_start_time,
             start_time_basis="metadata" if parsed_start_time is not None else "default_zero",
             input_start_time_basis=input_start_time_basis,
+            verify_start=verify_start,
         ),
     )
 
@@ -304,21 +367,21 @@ def measure_selected_audio_duration(
     stream: AudioStreamInfo,
     *,
     video_seconds: Fraction,
+    video_start: Fraction,
     cancellation: Event | None,
 ) -> AudioStreamInfo:
-    """Fill missing selected-stream timing from one bounded packet-tail probe."""
+    """Fill missing duration from a bounded tail probe, verifying the start when needed."""
     timeline = stream.timeline
-    if timeline.duration is not None or timeline.time_base is None:
+    time_base = timeline.time_base
+    if timeline.duration is not None or time_base is None:
         return stream
-    seek = max(Fraction(0), video_seconds - 60)
-    parser = _PacketTailParser(timeline.time_base, seek)
     raise_if_alignment_cancelled(cancellation)
 
     def abort() -> bool:
         raise_if_alignment_cancelled(cancellation)
         return False
 
-    try:
+    def read_packets(interval: str, consumer: Callable[[bytes], None], limit: int) -> None:
         run_subprocess(
             [
                 "ffprobe",
@@ -327,7 +390,7 @@ def measure_selected_audio_duration(
                 "-select_streams",
                 f"a:{stream.audio_stream_index}",
                 "-read_intervals",
-                f"{float(seek)}%",
+                interval,
                 "-show_entries",
                 "packet=pts,duration",
                 "-of",
@@ -336,10 +399,29 @@ def measure_selected_audio_duration(
             ],
             timeout_seconds=_FFPROBE_TIMEOUT_SECONDS,
             abort=abort,
-            stdout_consumer=parser.feed,
-            max_stdout_bytes=_PACKET_TAIL_MAX_BYTES,
+            stdout_consumer=consumer,
+            max_stdout_bytes=limit,
         )
+
+    try:
+        if timeline.verify_start:
+            head = bytearray()
+            read_packets("%+#1", head.extend, 4096)
+            pts, _, _ = head.partition(b",")
+            start = int(pts) * time_base
+            timeline = replace(timeline, start_time=start, verify_start=False)
+            stream = replace(stream, timeline=timeline)
+
+        seek = video_start + max(Fraction(0), video_seconds - 60)
+        parser = _PacketTailParser(time_base, seek)
+        read_packets(f"{float(seek):.6f}%", parser.feed, _PACKET_TAIL_MAX_BYTES)
         parser.finish()
+    except SubprocessCleanupError as exc:
+        raise AudioAlignmentCleanupError(
+            "could not reap the selected audio packet probe",
+            category="cleanup_failed",
+            stage="audio_probe",
+        ) from exc
     except (OSError, CalledProcessError, TimeoutExpired, SubprocessOutputLimitExceeded, ValueError):
         return stream
     if not parser.reached_seek or parser.latest_end is None:
@@ -381,7 +463,8 @@ def probe_streams(video_path: Path) -> ProbedStreams:
                 "stream=index,codec_type,codec_name,channels,channel_layout,sample_rate,"
                 "start_time,duration,duration_ts,time_base:"
                 "stream_disposition=default,original,comment,attached_pic:"
-                "stream_tags=language,comment,DURATION:format=start_time"
+                "stream_tags=language,comment,DURATION,_STATISTICS_WRITING_APP,_STATISTICS_TAGS:"
+                "format=start_time,duration,format_name:format_tags=ENCODER"
             ),
             "-of",
             "json",
@@ -399,6 +482,18 @@ def probe_streams(video_path: Path) -> ProbedStreams:
     parsed_input_start_time = _parse_optional_fraction(format_dict.get("start_time"))
     input_start_time = (
         parsed_input_start_time if parsed_input_start_time is not None else Fraction(0)
+    )
+    is_matroska = format_dict.get("format_name") == "matroska,webm"
+    matroska_duration = (
+        _parse_optional_duration(format_dict.get("duration")) if is_matroska else None
+    )
+    format_tags_obj = format_dict.get("tags")
+    format_tags = (
+        cast(dict[str, object], format_tags_obj) if isinstance(format_tags_obj, dict) else {}
+    )
+    encoder = _normalize_optional_text(format_tags.get("ENCODER") or format_tags.get("encoder"))
+    ffmpeg_duration_tags = (
+        is_matroska and encoder is not None and _LAVF_MUXER.fullmatch(encoder) is not None
     )
 
     audio: list[AudioStreamInfo] = []
@@ -418,6 +513,8 @@ def probe_streams(video_path: Path) -> ProbedStreams:
                     input_start_time_basis=(
                         "metadata" if parsed_input_start_time is not None else "default_zero"
                     ),
+                    matroska_duration=matroska_duration,
+                    ffmpeg_duration_tags=ffmpeg_duration_tags,
                 )
             )
         elif not video_found:

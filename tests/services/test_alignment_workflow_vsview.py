@@ -12,12 +12,18 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import tomli_w
 
 import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
+from frame_compare.services.alignment_reuse_cache import (
+    CACHE_FILE_NAME,
+    comparison_cache_key,
+    source_set_cache_key,
+)
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.services.types import AlignmentConfig, AlignmentResult, ComparisonResolution
 from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from frame_compare.vsview.alignment_review_contract import (
@@ -33,6 +39,7 @@ from tests.services.alignment_request_test_support import (
 from tests.services.alignment_request_test_support import (
     vsview_session as _session,
 )
+from tests.services.alignment_resolution_test_support import save_resolutions
 from tests.services.test_alignment_diagnostics import audio_attempt
 
 
@@ -381,3 +388,78 @@ def test_trusted_manual_confirmation_keeps_original_computed_fallback_on_disk(
     assert entry["frame_offset"] == 47
     assert entry["computed_result"]["frame_offset"] == 42
     assert entry["computed_result"]["time_offset_seconds"] == original.time_offset_seconds
+
+
+@pytest.mark.parametrize("existing_alias_set", [False, True], ids=["publish", "lookup"])
+def test_aliased_comparisons_keep_distinct_run_local_confirmations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing_alias_set: bool
+) -> None:
+    reference = tmp_path / "ref.mkv"
+    target = tmp_path / "encode.mkv"
+    first, second = tmp_path / "first.mkv", tmp_path / "second.mkv"
+    reference.touch()
+    target.touch()
+    first.symlink_to(target)
+    second.symlink_to(target)
+    _configure_computed_alignment(monkeypatch)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[first, second],
+        generated_dir=tmp_path,
+        previous_offsets="always",
+    )
+    key = comparison_cache_key(request.comparisons[0])
+    assert key == comparison_cache_key(request.comparisons[1])
+    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    existing_bytes = None
+    if existing_alias_set:
+        # A prior writer collapsed both confirmations onto the same cache entry.
+        single = replace(request, comparisons=[request.comparisons[1]])
+        save_resolutions(
+            single,
+            [
+                ComparisonResolution(
+                    AlignmentResult(reference.name, second.name, 4, 4 / 24, 1.0, None, "manual"),
+                    key,
+                    "interactive_confirmed_this_run",
+                )
+            ],
+        )
+        data = tomllib.loads(cache_file.read_text(encoding="utf-8"))
+        source_sets = data["source_sets"]
+        alias_set = source_sets.pop(source_set_cache_key(single))
+        identity = alias_set["identity"]
+        identity["comparisons"] *= 2
+        source_sets[source_set_cache_key(request)] = alias_set
+        existing_bytes = tomli_w.dumps(data).encode()
+        cache_file.write_bytes(existing_bytes)
+
+    def launch(*_args: object, **_kwargs: object):
+        session = _session(tmp_path)
+        write_alignment_review_result(
+            session,
+            AlignmentReviewResult(
+                session_id=session.session_id,
+                decisions=(
+                    ConfirmedAlignmentReviewDecision("ref:first", 80, 80),
+                    ConfirmedAlignmentReviewDecision("ref:second", 80, 76),
+                ),
+            ),
+        )
+        return session, 0.0
+
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
+    results = align_clips_from_request(request, AlignmentConfig(use_vsview=True))
+    assert [(item.comparison_clip, item.frame_offset) for item in results] == [
+        (first.name, 0),
+        (second.name, 4),
+    ]
+    assert {key: row.frame_offset for key, row in load_manual_overrides(tmp_path).items()} == {
+        "ref:first": 0,
+        "ref:second": 4,
+    }
+    if existing_bytes is None:
+        assert not cache_file.exists()
+        assert not cache_file.with_suffix(".toml.lock").exists()
+    else:
+        assert cache_file.read_bytes() == existing_bytes

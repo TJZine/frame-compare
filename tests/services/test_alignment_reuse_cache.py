@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import tomllib
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
+from typing import IO, Any
+from unittest.mock import Mock, patch
 
 import pytest
 import tomli_w
@@ -26,6 +30,7 @@ from frame_compare.services.types import (
     AlignmentResult,
     ComparisonResolution,
 )
+from frame_compare.utils import file_lock
 from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
 )
@@ -566,7 +571,7 @@ def test_shared_reuse_cache_settings_key_uses_estimator_recipe_identity(
     settings = _first_entry(data)["settings"]
     assert isinstance(settings, dict)
     assert settings == {
-        "estimator_policy": "whole-track-chunked-phat-video-check-motion-20260929",
+        "estimator_policy": "whole-track-chunked-phat-video-check-score-floor-20261107",
         "max_offset_seconds": 30.0,
         "channel_strategy": "mono_downmix",
     }
@@ -1032,47 +1037,148 @@ def test_repeated_accepted_cache_writes_have_identical_bytes(
     assert first == second
 
 
-def test_shared_reuse_cache_locks_entire_read_modify_write(
+def test_shared_reuse_cache_merges_overlapping_writers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    request = _request(tmp_path)
-    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
-    events: list[str] = []
+    first = _request(tmp_path)
+    second = replace(
+        first,
+        comparisons=[_clip(_touch_clip(tmp_path / "other.mkv", b"second"), label="Other")],
+    )
+    first_fsynced = Event()
+    second_contended = Event()
+    release_first = Event()
+    real_fsync = os.fsync
+    real_acquire = file_lock._acquire_platform_lock
 
-    @contextmanager
-    def _fake_lock(path: Path, *, abort_check: Callable[[], None]) -> Generator[None]:
-        abort_check()
-        assert path == cache_file.with_name(f"{cache_file.name}.lock")
-        events.append("lock_enter")
+    def pause_first_publication(fd: int) -> None:
+        real_fsync(fd)
+        if not first_fsynced.is_set():
+            first_fsynced.set()
+            assert release_first.wait(10), "first writer was not released"
+
+    def observe_contention(fd: int) -> None:
         try:
-            yield
+            real_acquire(fd)
+        except OSError as exc:
+            if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}:
+                second_contended.set()
+            raise
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", pause_first_publication)
+    monkeypatch.setattr(file_lock, "_acquire_platform_lock", observe_contention)
+    with ThreadPoolExecutor(max_workers=2) as writers:
+        first_write = writers.submit(_write_computed, first)
+        try:
+            assert first_fsynced.wait(5), "first writer did not stage its update"
+            second_write = writers.submit(_write_computed, second)
+            assert second_contended.wait(5), "second writer did not contend on the real lock"
         finally:
-            events.append("lock_exit")
+            release_first.set()
+        first_write.result(timeout=5)
+        second_write.result(timeout=5)
 
-    def _fake_initial_write_data(path: Path) -> dict[str, object]:
-        assert path == cache_file
-        assert events == ["lock_enter"]
-        events.append("read")
-        return {"version": CACHE_VERSION, "source_sets": {}}
+    source_sets = _cache_data(first)["source_sets"]
+    assert isinstance(source_sets, dict)
+    assert set(source_sets) == {
+        source_set_cache_key(first),
+        source_set_cache_key(second),
+    }
+    assert load_reusable_offset_entries(first) is not None
+    assert load_reusable_offset_entries(second) is not None
 
-    def _fake_write(path: Path, content: bytes, *, publish_guard: Callable[[], None]) -> None:
-        publish_guard()
-        assert path == cache_file
-        assert events == ["lock_enter", "read"]
-        parsed = tomllib.loads(content.decode("utf-8"))
-        assert parsed["version"] == CACHE_VERSION
-        assert isinstance(parsed["source_sets"], dict)
-        assert parsed["source_sets"]
-        events.append("write")
 
-    monkeypatch.setattr(reuse_cache, "exclusive_file_lock", _fake_lock)
-    monkeypatch.setattr(reuse_cache, "_initial_write_data", _fake_initial_write_data)
-    monkeypatch.setattr(reuse_cache, "write_bytes_atomic", _fake_write)
+@pytest.mark.parametrize("during_read", [False, True], ids=["open-estale", "read-enoent"])
+def test_shared_reuse_cache_read_error_preserves_existing_source_set(
+    tmp_path: Path, during_read: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    existing = _request(tmp_path)
+    _write_computed(existing)
+    cache_file = existing.shared_alignment_cache_dir / CACHE_FILE_NAME
+    original = cache_file.read_bytes()
+    new = replace(
+        existing,
+        comparisons=[_clip(_touch_clip(tmp_path / "other.mkv", b"other"), label="Other")],
+    )
 
+    real_open = Path.open
+
+    def fail_cache_read(path: Path, *args: Any, **kwargs: Any) -> IO[Any]:
+        if path != cache_file:
+            return real_open(path, *args, **kwargs)
+        if not during_read:
+            raise OSError(errno.ESTALE, "stale handle")
+        handle = real_open(path, *args, **kwargs)
+        monkeypatch.setattr(
+            handle, "read", Mock(side_effect=FileNotFoundError(errno.ENOENT, "lost handle"))
+        )
+        return handle
+
+    with (
+        patch.object(Path, "open", fail_cache_read),
+        patch.object(reuse_cache.log, "warning") as warn,
+    ):
+        _write_computed(new)
+    assert cache_file.read_bytes() == original
+    assert warn.call_args.kwargs["exc_info"].errno == (
+        errno.ENOENT if during_read else errno.ESTALE
+    )
+    assert load_reusable_offset_entries(existing) is not None
+    assert load_reusable_offset_entries(new) is None
+
+
+@pytest.mark.parametrize("damage", ["identity", "source_set", "entry"])
+def test_shared_reuse_cache_rejects_cross_wired_identity_or_warns_on_scalar(
+    tmp_path: Path, damage: str
+) -> None:
+    request = _request(tmp_path)
     _write_computed(request)
+    assert load_reusable_offset_entries(request) is not None
+    data = _cache_data(request)
+    source_sets = data["source_sets"]
+    assert isinstance(source_sets, dict)
+    source_set_key = source_set_cache_key(request)
+    source_set = source_sets[source_set_key]
+    if damage == "identity":
+        # The outer key and the per-entry clip facts still match the current request.
+        source_set["identity"]["media_runtime_fingerprint"] = "older-runtime"
+    elif damage == "source_set":
+        source_sets[source_set_key] = 7
+    else:
+        source_set["entries"][comparison_cache_key(request.comparisons[0])] = 7
+    _persist_cache_data(request, data)
 
-    assert events == ["lock_enter", "read", "write", "lock_exit"]
+    with patch.object(reuse_cache.log, "warning") as warn:
+        assert load_reusable_offset_entries(request) is None
+    warn.assert_called_once()
+    expected = (
+        "alignment_reuse_cache_invalid_entry"
+        if damage == "entry"
+        else "alignment_reuse_cache_corrupt_source_set"
+    )
+    assert warn.call_args.args[0] == expected
+
+
+def test_source_change_during_atomic_write_preserves_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _request(tmp_path)
+    _write_computed(request)
+    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    original = cache_file.read_bytes()
+    real_fsync = os.fsync
+
+    def change_source_at_fsync(fd: int) -> None:
+        real_fsync(fd)
+        request.comparisons[0].path.write_bytes(b"new source with a different size")
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", change_source_at_fsync)
+    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
+        save_resolutions(request, [_resolution(request, result=_result(request, frame_offset=8))])
+
+    assert cache_file.read_bytes() == original
+    assert list(cache_file.parent.glob(f".{cache_file.name}.*")) == []
 
 
 @pytest.mark.parametrize(

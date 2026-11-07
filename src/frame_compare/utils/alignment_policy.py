@@ -7,43 +7,66 @@ from collections.abc import Sequence
 from fractions import Fraction
 from statistics import median
 
-from frame_compare.utils.alignment_evidence import AUDIO_ANALYSIS_SAMPLE_RATE
+from frame_compare.utils.alignment_evidence import (
+    AUDIO_ANALYSIS_SAMPLE_RATE,
+    SelectedAudioStreamEvidence,
+)
 
 MIN_INFORMATIVE_POSITIONS = 6
+# On 320×180 rank-normalized luma, a one-pixel change is about 0.000017.
+# A relative margin alone can turn such a change into an infinite-margin vote.
+MIN_VIDEO_SCORE_SEPARATION = 0.0001
 INFORMATIVE_MARGIN = 1.1
 CONFIRMATION_MARGIN = 1.5
 CONFIRMATION_FRACTION = 0.75
 
 
-def compensated_offset_seconds(
+def start_compensation_seconds(
     *,
-    global_lag: int | float,
     reference_audio_start: Fraction,
     reference_video_start: Fraction,
     comparison_audio_start: Fraction,
     comparison_video_start: Fraction,
-) -> float:
-    """Apply container-start compensation to an 8 kHz lag."""
-    compensation = (reference_audio_start - reference_video_start) - (
+) -> Fraction:
+    """Return the difference in audio-to-video starts between the two sources."""
+    return (reference_audio_start - reference_video_start) - (
         comparison_audio_start - comparison_video_start
     )
-    return global_lag / AUDIO_ANALYSIS_SAMPLE_RATE + float(compensation)
 
 
-def rounded_frame(offset_seconds: float, fps_reference: Fraction) -> int:
-    """Round a compensated time offset to the neighbouring frame."""
-    return math.floor(offset_seconds * float(fps_reference) + 0.5)
+def selected_start_compensation_seconds(
+    streams: Sequence[SelectedAudioStreamEvidence],
+) -> Fraction:
+    """Recover exact start compensation from a completed attempt's stream facts."""
+    reference = next(stream for stream in streams if stream.role == "reference")
+    comparison = next(stream for stream in streams if stream.role == "comparison")
+    return start_compensation_seconds(
+        reference_audio_start=reference.analysis_audio_start,
+        reference_video_start=reference.analysis_video_start,
+        comparison_audio_start=comparison.analysis_audio_start,
+        comparison_video_start=comparison.analysis_video_start,
+    )
+
+
+def compensated_offset_seconds(lag: int | float, *, compensation_seconds: Fraction) -> Fraction:
+    """Apply container-start compensation to an integral or half-sample 8 kHz lag."""
+    return Fraction(lag) / AUDIO_ANALYSIS_SAMPLE_RATE + compensation_seconds
+
+
+def rounded_frame(offset_seconds: Fraction | float, fps_reference: Fraction) -> int:
+    """Round a compensated time offset to the nearest frame, with ties upward."""
+    return math.floor(Fraction(offset_seconds) * fps_reference + Fraction(1, 2))
 
 
 def compensated_lag_to_frame(
     lag: int | float,
     *,
-    compensation_seconds: float,
+    compensation_seconds: Fraction,
     fps_reference: Fraction,
 ) -> int:
     """Project a possibly half-sample lag through compensation and frame rounding."""
     return rounded_frame(
-        lag / AUDIO_ANALYSIS_SAMPLE_RATE + compensation_seconds,
+        compensated_offset_seconds(lag, compensation_seconds=compensation_seconds),
         fps_reference,
     )
 
@@ -85,8 +108,10 @@ def sample_to_reference_frame(
 def _margin(scores: Sequence[float], best_index: int) -> float:
     best = scores[best_index]
     runner_up = min(score for index, score in enumerate(scores) if index != best_index)
+    if runner_up - best < MIN_VIDEO_SCORE_SEPARATION:
+        return 0.0
     if best == 0.0:
-        return math.inf if runner_up > 0.0 else 0.0
+        return math.inf
     return runner_up / best
 
 
@@ -159,6 +184,8 @@ __all__ = [
     "edge_consensus_offset",
     "position_winner",
     "rounded_frame",
+    "selected_start_compensation_seconds",
+    "start_compensation_seconds",
     "sample_to_reference_frame",
     "sample_to_reference_video_time",
 ]

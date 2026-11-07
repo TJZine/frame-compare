@@ -36,17 +36,52 @@ if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
     pytest.skip("ffmpeg/ffprobe not available", allow_module_level=True)
 
 
-@pytest.mark.parametrize("early_end", [False, True], ids=["known-offset", "audio-before-tail"])
-def test_live_matroska_packet_tail(tmp_path: Path, early_end: bool) -> None:
+@pytest.mark.parametrize(
+    ("recipe", "early_end", "comparison_origin"),
+    [
+        ("packet-tail", False, 0),
+        ("packet-tail-early-end", True, 0),
+        ("packet-tail-early-end", True, 120),
+    ],
+    ids=["known-offset", "audio-before-tail", "audio-before-tail-shifted"],
+)
+def test_live_matroska_packet_tail(
+    tmp_path: Path, recipe: str, early_end: bool, comparison_origin: int
+) -> None:
     vs_mod = pytest.importorskip("vapoursynth")
     if isinstance(vs_mod, MagicMock):
         pytest.skip("vapoursynth is mocked")
     if not detect_plugins(ensure_vs_environment()).get("lsmas", False):
         pytest.skip("lsmas plugin not available")
     with open_u4_media(tmp_path / "media", cache_root=None, full_matrix=False) as media:
-        reference, comparison = media.pair("packet-tail-early-end" if early_end else "packet-tail")
+        reference, comparison = media.pair(recipe)
+        if comparison_origin:
+            shifted = tmp_path / "shifted.mkv"
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    "-i",
+                    comparison,
+                    "-c",
+                    "copy",
+                    "-output_ts_offset",
+                    str(comparison_origin),
+                    "-live",
+                    "1",
+                    shifted,
+                ],
+                check=True,
+                capture_output=True,
+                timeout=15,
+            )
+            comparison = shifted
         for path in (reference, comparison):
-            assert probe_streams(path).audio[0].timeline.duration is None
+            probed = probe_streams(path)
+            assert probed.audio[0].timeline.duration is None
+            origin = comparison_origin if path == comparison else 0
+            assert probed.audio[0].timeline.start_time == probed.video_start.start_time == origin
         request = alignment_request(
             reference=reference, comparisons=[comparison], generated_dir=tmp_path / "generated"
         )
@@ -91,6 +126,211 @@ def test_live_matroska_packet_tail(tmp_path: Path, early_end: bool) -> None:
             )
 
 
+def test_ffmpeg_remux_rewrites_duration_and_keeps_statistics_markers(tmp_path: Path) -> None:
+    original = tmp_path / "statistics.mkv"
+    remuxed = tmp_path / "remuxed.mkv"
+    markers = {
+        "_STATISTICS_WRITING_APP": "mkvmerge v90.0",
+        "_STATISTICS_TAGS": "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES",
+    }
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=32x24:rate=24:duration=120",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=8000:cl=mono:d=35",
+            "-c:v",
+            "ffv1",
+            "-c:a",
+            "pcm_s16le",
+            "-metadata:s:a:0",
+            f"_STATISTICS_WRITING_APP={markers['_STATISTICS_WRITING_APP']}",
+            "-metadata:s:a:0",
+            f"_STATISTICS_TAGS={markers['_STATISTICS_TAGS']}",
+            str(original),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=15,
+    )
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(original),
+            "-itsoffset",
+            "2",
+            "-i",
+            str(original),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c",
+            "copy",
+            str(remuxed),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=15,
+    )
+    for path, end in ((original, 35), (remuxed, 37)):
+        probe = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream_tags:format_tags=ENCODER",
+                "-of",
+                "json",
+                str(path),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=15,
+        )
+        facts = json.loads(probe.stdout)
+        tags = facts["streams"][0]["tags"]
+        assert {key: tags[key] for key in markers} == markers
+        assert tags["DURATION"] == f"00:00:{end}.000000000"
+        format_tags = {key.lower(): value for key, value in facts["format"]["tags"].items()}
+        assert format_tags["encoder"].startswith("Lavf")
+
+    probed = probe_streams(remuxed)
+    stream = probed.audio[0]
+    if stream.timeline.duration is None:
+        stream = measure_selected_audio_duration(
+            remuxed,
+            stream,
+            video_seconds=Fraction(120),
+            video_start=probed.video_start.start_time,
+            cancellation=None,
+        )
+    assert stream.timeline.start_time == 2
+    assert stream.timeline.duration == 35
+    assert stream.timeline.duration_basis == "stream_tag"
+
+
+def test_lavf_with_tag_only_statistics_measures_audio_packets(tmp_path: Path) -> None:
+    path = tmp_path / "tag-edited.mkv"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=32x24:rate=1:duration=320",
+            "-itsoffset",
+            "2",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=8000:cl=mono:d=300",
+            "-c:v",
+            "ffv1",
+            "-c:a",
+            "pcm_s16le",
+            "-output_ts_offset",
+            "120",
+            # Under CPU load FFmpeg can write several video packets before the
+            # delayed audio. The probe then copies container values into the
+            # audio stream and takes the start-verification path instead of
+            # the tag path this test covers. Strict interleaving fixes the layout.
+            "-max_interleave_delta",
+            "0",
+            "-write_crc32",
+            "0",
+            "-metadata:s:a:0",
+            "_STATISTICS_WRITING_APP=mkvpropedit v90.0",
+            "-metadata:s:a:0",
+            "_STATISTICS_TAGS=BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=15,
+    )
+    # Model mkvpropedit's tag-only edit on real packets. Replace the audio
+    # endpoint with the elapsed value without changing EBML sizes or muxer.
+    data = path.read_bytes()
+    endpoint = b"00:07:02.000000000"
+    assert data.count(endpoint) == 1
+    path.write_bytes(data.replace(endpoint, b"00:05:00.000000000"))
+
+    probed = probe_streams(path)
+    assert probed.video_start.start_time == 120
+    stream = probed.audio[0]
+    assert stream.timeline.start_time == 122
+    if stream.timeline.duration is None:
+        stream = measure_selected_audio_duration(
+            path,
+            stream,
+            video_seconds=Fraction(320),
+            video_start=probed.video_start.start_time,
+            cancellation=None,
+        )
+    assert stream.timeline.duration == 300
+    assert stream.timeline.duration_basis == "packet_tail"
+
+
+def test_late_matroska_track_uses_packet_start_and_duration(tmp_path: Path) -> None:
+    path = tmp_path / "late-audio.mkv"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=32x24:rate=24:duration=60",
+            "-itsoffset",
+            "15",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=8000:cl=mono:d=45",
+            "-c:v",
+            "ffv1",
+            "-c:a",
+            "pcm_s16le",
+            str(path),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=15,
+    )
+    probed = probe_streams(path)
+    stream = probed.audio[0]
+    # The normal probe either sees the real start (version dependent) or must
+    # withhold the apparent container duration before collection can use it.
+    if stream.timeline.start_time != 15:
+        assert stream.timeline.duration is None
+    measured = measure_selected_audio_duration(
+        path,
+        stream,
+        video_seconds=Fraction(60),
+        video_start=probed.video_start.start_time,
+        cancellation=None,
+    )
+    assert measured.timeline.start_time == 15
+    assert measured.timeline.duration == 45
+
+
 @pytest.fixture
 def packet_tail_media(tmp_path: Path, audio_codec: str) -> Path:
     path = tmp_path / "live.mkv"
@@ -129,7 +369,8 @@ def packet_tail_media(tmp_path: Path, audio_codec: str) -> Path:
 def test_packet_tail_probe_lifecycle(
     packet_tail_media: Path, monkeypatch: pytest.MonkeyPatch, stop: str, audio_codec: str
 ) -> None:
-    stream = probe_streams(packet_tail_media).audio[0]
+    probed = probe_streams(packet_tail_media)
+    stream = probed.audio[0]
     # Read independent timestamp facts from this small fixture. FFmpeg versions
     # differ in Opus priming/padding and stream start; CSV must agree with JSON.
     packet_probe = subprocess.run(
@@ -163,6 +404,7 @@ def test_packet_tail_probe_lifecycle(
             stream.timeline,
             duration=None,
             duration_basis="unavailable",
+            verify_start=False,
             start_time=latest_end if stop == "nonpositive" else stream.timeline.start_time,
         ),
     )
@@ -190,6 +432,7 @@ def test_packet_tail_probe_lifecycle(
                 packet_tail_media,
                 stream,
                 video_seconds=Fraction(2),
+                video_start=probed.video_start.start_time,
                 cancellation=cancellation,
             )
     else:
@@ -197,6 +440,7 @@ def test_packet_tail_probe_lifecycle(
             packet_tail_media,
             stream,
             video_seconds=Fraction(90 if stop == "before-seek" else 2),
+            video_start=probed.video_start.start_time,
             cancellation=cancellation,
         )
         if stop in {"cap", "timeout", "before-seek", "nonpositive"}:

@@ -31,9 +31,10 @@ from frame_compare.utils.alignment_evidence import (
 )
 from frame_compare.utils.alignment_policy import (
     CONFIRMATION_MARGIN,
-    compensated_offset_seconds,
-    rounded_frame,
+    MIN_VIDEO_SCORE_SEPARATION,
+    compensated_lag_to_frame,
     sample_to_reference_frame,
+    selected_start_compensation_seconds,
 )
 from frame_compare.utils.alignment_policy import (
     confirmed_offset as _confirmed_offset,
@@ -208,9 +209,9 @@ def check_video_alignment(
                 ),
             )
 
-        starts = _stream_start(attempt, role="reference", video=False)
-        video_starts = _stream_start(attempt, role="reference", video=True)
-        reference_audio_start, reference_video_start = starts, video_starts
+        reference_stream = attempt.selected_streams[0]
+        reference_audio_start = reference_stream.analysis_audio_start
+        reference_video_start = reference_stream.analysis_video_start
         chunks = _chunks(attempt)
         targets, same_frame = _build_targets(
             attempt,
@@ -411,7 +412,7 @@ def _motion_positions(
     cancellation: Event | None,
     retained_frames: dict[int, FloatFrame] | None = None,
 ) -> tuple[int, ...] | None:
-    """One reference frame per equal slot of [start, end]: the candidate with the most motion.
+    """Select the highest-motion measurable candidate in each slot of [start, end].
 
     Motion is the mean absolute luma difference between frames ``n`` and
     ``n + _MOTION_STEP``. Retains only selected luma when requested.
@@ -425,9 +426,8 @@ def _motion_positions(
         if _is_cancelled(cancellation):
             return None
         slot_start = start + slot * index
-        best_frame = round(slot_start + slot / 2)
         best_motion = -1.0
-        best_image: FloatFrame | None = None
+        best_candidate: tuple[int, FloatFrame] | None = None
         for candidate_index in range(_MOTION_CANDIDATES):
             frame = round(slot_start + slot * (candidate_index + 0.5) / _MOTION_CANDIDATES)
             if frame < 0 or frame + _MOTION_STEP >= node.num_frames:
@@ -439,8 +439,12 @@ def _motion_positions(
                 return None
             motion = float(np.mean(np.abs(image - next_image)))
             if motion > best_motion:
-                best_frame, best_motion, best_image = frame, motion, image
-        if retained_frames is not None and best_image is not None:
+                best_motion = motion
+                best_candidate = (frame, image)
+        if best_candidate is None:
+            continue
+        best_frame, best_image = best_candidate
+        if retained_frames is not None:
             retained_frames[best_frame] = best_image
         chosen.append(best_frame)
     return tuple(dict.fromkeys(chosen))
@@ -538,18 +542,6 @@ def _average_ranks(values: FloatFrame) -> FloatFrame:
     return np.asarray((ranks[inverse] / flat.size).reshape(values.shape), dtype=np.float32)
 
 
-def _stream_start(
-    attempt: AudioAlignmentAttempt,
-    *,
-    role: Literal["reference", "comparison"],
-    video: bool,
-) -> Fraction:
-    stream = next(item for item in attempt.selected_streams if item.role == role)
-    if video:
-        return stream.analysis_video_start
-    return stream.analysis_audio_start
-
-
 def _chunks(attempt: AudioAlignmentAttempt) -> tuple[ChunkObservation, ...]:
     columns = attempt.chunks
     return tuple(
@@ -571,15 +563,10 @@ def _chunks(attempt: AudioAlignmentAttempt) -> tuple[ChunkObservation, ...]:
 def _lag_to_frame(
     lag: int | float, *, attempt: AudioAlignmentAttempt, fps_reference: Fraction
 ) -> int:
-    return rounded_frame(
-        compensated_offset_seconds(
-            global_lag=lag,
-            reference_audio_start=_stream_start(attempt, role="reference", video=False),
-            reference_video_start=_stream_start(attempt, role="reference", video=True),
-            comparison_audio_start=_stream_start(attempt, role="comparison", video=False),
-            comparison_video_start=_stream_start(attempt, role="comparison", video=True),
-        ),
-        fps_reference,
+    return compensated_lag_to_frame(
+        lag,
+        compensation_seconds=selected_start_compensation_seconds(attempt.selected_streams),
+        fps_reference=fps_reference,
     )
 
 
@@ -599,13 +586,7 @@ def _build_targets(
         global_lag=attempt.audio.global_lag,
         confirmed_offset=confirmed,
         fps_reference=fps_reference,
-        compensation_seconds=compensated_offset_seconds(
-            global_lag=0,
-            reference_audio_start=_stream_start(attempt, role="reference", video=False),
-            reference_video_start=_stream_start(attempt, role="reference", video=True),
-            comparison_audio_start=_stream_start(attempt, role="comparison", video=False),
-            comparison_video_start=_stream_start(attempt, role="comparison", video=True),
-        ),
+        compensation_seconds=selected_start_compensation_seconds(attempt.selected_streams),
     )
     run_targets: list[_Target] = []
     for run in classification.competing_runs:
@@ -758,12 +739,12 @@ def _hypothesis_winner(
     confirmed_score: float,
     alternative_score: float,
 ) -> Literal["confirmed", "alternative", "neither"]:
-    if confirmed_score == alternative_score:
+    if abs(confirmed_score - alternative_score) < MIN_VIDEO_SCORE_SEPARATION:
         return "neither"
     if confirmed_score == 0.0:
-        return "confirmed" if alternative_score > 0.0 else "neither"
+        return "confirmed"
     if alternative_score == 0.0:
-        return "alternative" if confirmed_score > 0.0 else "neither"
+        return "alternative"
     if (
         confirmed_score < alternative_score
         and alternative_score / confirmed_score >= CONFIRMATION_MARGIN

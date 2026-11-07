@@ -17,6 +17,7 @@ from frame_compare.config.schema import AnalysisConfig
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.orchestration import phase_alignment, phase_selection
 from frame_compare.orchestration.full_window_retry import recover_from_exclusion_selection_failure
+from frame_compare.orchestration.selection_domain import compute_selection_window_for_clips
 from tests.orchestration.phase_task_helpers import _clip, _context, _frame_metrics
 
 
@@ -183,6 +184,13 @@ def test_recovery_uses_kind_and_keeps_unclassified_errors_fatal(
     ctx = _context(tmp_path)
     ctx.config.analysis = ctx.config.analysis.model_copy(update={"ignore_lead_seconds": 1.0})
     ctx.config.screenshots.active_rect_detection = ScreenshotActiveRectDetection.ASPECT_RATIO
+    ctx.config.analysis.min_window_seconds = 0.0
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=compute_selection_window_for_clips(
+            clips=[ctx.reference], config=ctx.config
+        ),
+    )
     authored = ctx.config
     offers = []
 

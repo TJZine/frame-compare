@@ -574,6 +574,7 @@ def _plan_audio_pair(
         stream=alignment_audio.measure_selected_audio_duration(
             reference,
             reference_selection.stream,
+            video_start=reference_selection.video_start.start_time,
             video_seconds=Fraction(
                 reference_request.source_frame_count * reference_request.source_fps_den,
                 reference_request.source_fps_num,
@@ -586,6 +587,7 @@ def _plan_audio_pair(
         stream=alignment_audio.measure_selected_audio_duration(
             comparison,
             comparison_selection.stream,
+            video_start=comparison_selection.video_start.start_time,
             video_seconds=Fraction(
                 comparison_request.source_frame_count * comparison_request.source_fps_den,
                 comparison_request.source_fps_num,
@@ -1019,7 +1021,7 @@ async def _await_audio_computation(
     )
     try:
         return await asyncio.shield(worker)
-    except asyncio.CancelledError as cancelled:
+    except asyncio.CancelledError:
         cancellation.set()
         while not worker.done():
             with suppress(asyncio.CancelledError):
@@ -1028,7 +1030,7 @@ async def _await_audio_computation(
         # release of an owned child, reader, pipe, or handle.
         error = None if worker.cancelled() else worker.exception()
         if isinstance(error, AudioAlignmentCleanupError):
-            raise error from cancelled
+            worker.result()
         raise
     finally:
         if stage_active and progress is not None:
@@ -1350,6 +1352,7 @@ async def align_clips_from_request(
             candidate = prepare_reusable_source_set(request, resolutions)
             if candidate is not None:
                 save_reusable_offsets(request, candidate)
+                require_current_alignment_sources(request)
 
         return AlignmentOperationOutcome(
             ordered_results(request, resolutions),

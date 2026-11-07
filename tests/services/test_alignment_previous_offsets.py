@@ -3,11 +3,14 @@
 # pyright: reportPrivateUsage=false
 
 import asyncio
+import errno
 import json
+import multiprocessing
 import tomllib
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from unittest.mock import Mock, patch
 
 import pytest
@@ -19,11 +22,12 @@ from frame_compare.services.alignment_reuse_cache import (
 )
 from frame_compare.services.alignment_reuse_cache import (
     comparison_cache_key,
+    load_reusable_offset_entries,
     source_set_cache_key,
 )
 from frame_compare.services.alignment_reuse_prompt import PreviousOffsetPromptInput
 from frame_compare.services.alignment_vsview import AlignmentVSViewOutcome
-from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.errors import AlignmentSourceIdentityError, AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentResult,
@@ -31,6 +35,7 @@ from frame_compare.services.types import (
     PreviousOffsetReusePolicy,
     ReusableAlignmentEntry,
 )
+from frame_compare.utils import file_lock
 from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
 )
@@ -908,6 +913,151 @@ def test_align_clips_from_request_rejects_invalid_previous_offset_policy_combina
 
     with pytest.raises(AudioAlignmentError, match=error_match):
         align_clips_from_request(request, config)
+
+
+class _ProcessEvent(Protocol):
+    def set(self) -> None: ...
+
+    def wait(self, timeout: float | None = None) -> bool: ...
+
+
+def _hold_shared_cache_lock(lock: Path, acquired: _ProcessEvent, release: _ProcessEvent) -> None:
+    with file_lock.exclusive_file_lock(lock):
+        acquired.set()
+        assert release.wait(10), "parent did not release the lock holder"
+
+
+def test_cache_lock_timeout_after_source_change_rejects_live_offsets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    request = _alignment_request(tmp_path, reference=ref, comparisons=[comp])
+    cache_file = request.shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME
+    context = multiprocessing.get_context("spawn")
+    acquired = context.Event()
+    release = context.Event()
+    holder = context.Process(
+        target=_hold_shared_cache_lock,
+        args=(cache_file.with_suffix(".toml.lock"), acquired, release),
+    )
+    real_acquire = file_lock._acquire_platform_lock
+
+    def change_source_on_contention(fd: int) -> None:
+        try:
+            real_acquire(fd)
+        except OSError as exc:
+            if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}:
+                comp.write_bytes(b"source changed during the contended cache write")
+            raise
+
+    monkeypatch.setattr(file_lock, "_acquire_platform_lock", change_source_on_contention)
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_reuse_cache.exclusive_file_lock",
+        partial(file_lock.exclusive_file_lock, timeout_seconds=0),
+    )
+    holder.start()
+    try:
+        assert acquired.wait(5), "child did not acquire the shared cache lock"
+        with patch("frame_compare.services.alignment_reuse_cache.log.warning") as warn:
+            with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
+                align_clips_from_request(request, AlignmentConfig())
+            assert warn.call_args.args[0] == "alignment_reuse_cache_write_failed"
+            assert isinstance(warn.call_args.kwargs["exc_info"], file_lock.FileLockTimeoutError)
+        assert comp.stat().st_size > 0
+        assert not cache_file.exists()
+    finally:
+        release.set()
+        holder.join(timeout=5)
+        if holder.is_alive():
+            holder.kill()
+            holder.join(timeout=5)
+        assert holder.exitcode == 0
+
+
+def test_serialization_failure_preserves_cache_and_returns_live_alignment(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    request = _alignment_request(tmp_path, reference=ref, comparisons=[comp])
+    cache_file = request.shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME
+    cache_file.parent.mkdir(parents=True)
+    original = (
+        'version = "2"\n[source_sets.unrelated]\nnested = ' + "[" * 400 + "0" + "]" * 400
+    ).encode()
+    tomllib.loads(original.decode())  # Decoding succeeds. Re-encoding the sibling fails.
+    cache_file.write_bytes(original)
+
+    with patch("frame_compare.services.alignment_reuse_cache.log.warning") as warn:
+        (result,) = align_clips_from_request(request, AlignmentConfig())
+    assert result.applied and result.source == "computed" and result.frame_offset == 0
+    assert warn.call_args.args[0] == "alignment_reuse_cache_serialization_failed"
+    assert cache_file.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("accepted_at", "expected_utc"),
+    [
+        pytest.param("0001-01-01T00:00:00+01:00", None, id="utc-overflow"),
+        pytest.param("2026-06-06T13:34:56+01:00", "2026-06-06T12:34:56Z", id="utc-normalized"),
+    ],
+)
+def test_prompt_mode_admits_only_normalizable_confirmation_timestamps(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    accepted_at: str,
+    expected_utc: str | None,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    request = _alignment_request(
+        tmp_path, reference=ref, comparisons=[comp], previous_offsets="prompt"
+    )
+    key = comparison_cache_key(request.comparisons[0])
+    save_resolutions(
+        request,
+        [
+            ComparisonResolution(
+                AlignmentResult(ref.name, comp.name, 4, 4 / 24, 1.0, None, "manual"),
+                key,
+                "interactive_confirmed_this_run",
+            )
+        ],
+        accepted_at=accepted_at,
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_reuse_prompt._stderr_is_visible", lambda: True
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_reuse_prompt._stdin_is_interactive", lambda: True
+    )
+    monkeypatch.setattr(
+        "frame_compare.services.alignment_reuse_prompt._read_reuse_response",
+        lambda *_args, **_kwargs: "yes",
+    )
+    with patch("frame_compare.services.alignment_reuse_cache.log.warning") as warn:
+        (result,) = align_clips_from_request(request, AlignmentConfig())
+
+    stderr = capsys.readouterr().err
+    if expected_utc is None:
+        assert "Reuse previous offsets?" not in stderr
+        assert result.source == "computed" and result.frame_offset == 0
+        warn.assert_called_once()
+        assert warn.call_args.args[0] == "alignment_reuse_cache_invalid_entry"
+        assert isinstance(warn.call_args.kwargs["exc_info"], OverflowError)
+    else:
+        assert "Reuse previous offsets?" in stderr
+        assert "2026-06-06 12:34:56 UTC" in stderr
+        assert result.frame_offset == 4
+        entries = load_reusable_offset_entries(request)
+        assert entries is not None and entries[key].accepted_at == expected_utc
+        warn.assert_not_called()
 
 
 def test_confirmed_cache_reuse_rechecks_sources_before_early_return(

@@ -2,6 +2,7 @@
 
 # pyright: reportPrivateUsage=false
 
+import json
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -14,8 +15,6 @@ import pytest
 from frame_compare.services.alignment_audio import (
     AudioStreamInfo,
     AudioStreamTimeline,
-    ProbedStreams,
-    VideoStreamStart,
     _PacketTailParser,
     collection_argv,
     measure_selected_audio_duration,
@@ -567,6 +566,59 @@ def test_probe_stream_timing(
     assert {key: actual[key] for key in expected} == expected
 
 
+@pytest.mark.parametrize(
+    ("tag", "start", "encoder", "statistics", "duration"),
+    [
+        pytest.param(
+            "00:05:00.000000000", "90", None, True, 300, id="mkvmerge-duration-is-elapsed"
+        ),
+        pytest.param("00:06:30.000000000", "90", "Lavf", False, 300, id="ffmpeg-tag-is-endpoint"),
+        pytest.param(
+            "00:06:30.000000000", "90", "Lavf61.7.100", True, 300, id="ffmpeg-keeps-stats-markers"
+        ),
+        pytest.param(
+            "00:05:00.000000000", "90", "Lavf-compatible", False, None, id="unrecognized-muxer"
+        ),
+        pytest.param(
+            "00:05:00.000000000", "90", None, False, None, id="ambiguous-tag-needs-packets"
+        ),
+        pytest.param("00:00:1e309", "0", None, False, None, id="exponent"),
+        pytest.param("00:60:01", "0", None, False, None, id="minutes-out-of-range"),
+        pytest.param("00:01:60.1", "0", None, False, None, id="seconds-out-of-range"),
+        pytest.param("01:-1:01", "0", None, False, None, id="signed-minutes"),
+        pytest.param("01:02:-1", "0", None, False, None, id="signed-seconds"),
+        pytest.param("1234567890123:02:01", "0", None, False, None, id="overlong-hours"),
+    ],
+)
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_probe_duration_tag_clock_and_provenance(
+    mock_run: MagicMock,
+    tag: str,
+    start: str,
+    encoder: str | None,
+    statistics: bool,
+    duration: int | None,
+) -> None:
+    tags = {"DURATION": tag}
+    if statistics:
+        tags.update(
+            _STATISTICS_WRITING_APP="mkvmerge v90.0",
+            _STATISTICS_TAGS="BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES",
+        )
+    mock_run.return_value.stdout = json.dumps(
+        {
+            "streams": [{"index": 1, "codec_type": "audio", "start_time": start, "tags": tags}],
+            "format": {
+                "format_name": "matroska,webm",
+                "tags": {"encoder": encoder} if encoder else {},
+            },
+        }
+    ).encode()
+    timeline = probe_streams(Path("tagged.mkv")).audio[0].timeline
+    assert timeline.duration == duration
+    assert timeline.duration_basis == ("stream_tag" if duration is not None else "unavailable")
+
+
 def test_probe_with_no_audio_streams_is_alignment_error() -> None:
     with patch("frame_compare.services.alignment_audio.run_subprocess") as mock_run:
         mock_run.return_value.stdout = b'{"streams": [{}]}'
@@ -650,37 +702,6 @@ def _test_stream() -> AudioStreamInfo:
     )
 
 
-def _pair_stream(
-    index: int,
-    language: str | None,
-    *,
-    default: bool = False,
-    commentary: bool = False,
-) -> AudioStreamInfo:
-    return AudioStreamInfo(
-        audio_stream_index=index,
-        absolute_stream_index=index + 1,
-        codec_name="aac",
-        channels=2,
-        channel_layout="stereo",
-        sample_rate=48000,
-        language=language,
-        is_default=default,
-        is_original=False,
-        is_commentary=commentary,
-    )
-
-
-def _pair_probe(*languages: tuple[str | None, bool, bool]) -> ProbedStreams:
-    return ProbedStreams(
-        audio=tuple(
-            _pair_stream(index, language, default=default, commentary=commentary)
-            for index, (language, default, commentary) in enumerate(languages)
-        ),
-        video_start=VideoStreamStart(start_time=Fraction(0), basis="default_zero"),
-    )
-
-
 @pytest.mark.parametrize(
     (
         "reference",
@@ -713,6 +734,38 @@ def _pair_probe(*languages: tuple[str | None, bool, bool]) -> ProbedStreams:
             None,
             (None, "eng"),
             id="unknown-default-language-keeps-default",
+        ),
+        pytest.param(
+            (("und", True, False), ("eng", False, False)),
+            (("eng", False, False),),
+            None,
+            None,
+            (None, "eng"),
+            id="ffprobe-und-default-keeps-ordinal-zero",
+        ),
+        pytest.param(
+            (("und", True, False),),
+            (("und", False, False),),
+            None,
+            None,
+            (None, None),
+            id="two-und-tags-are-unknown",
+        ),
+        pytest.param(
+            (("/private/generated/cut.mkv", True, False),),
+            (("ZH-hant-TW", False, False),),
+            None,
+            None,
+            (None, "zh-hant-tw"),
+            id="path-like-language-is-unknown",
+        ),
+        pytest.param(
+            (("en" + "-abcdefgh" * 7, True, False),),
+            (("en", False, False),),
+            None,
+            None,
+            (None, "en"),
+            id="overlong-language-is-unknown",
         ),
         pytest.param(
             (("jpn", True, False),),
@@ -748,18 +801,39 @@ def _pair_probe(*languages: tuple[str | None, bool, bool]) -> ProbedStreams:
         ),
     ],
 )
+@patch("frame_compare.services.alignment_audio.run_subprocess")
 def test_select_audio_pair_prefers_a_shared_language(
+    mock_run: MagicMock,
     reference: tuple[tuple[str | None, bool, bool], ...],
     comparison: tuple[tuple[str | None, bool, bool], ...],
     reference_override: int | None,
     comparison_override: int | None,
     expected: tuple[str | None, str | None],
 ) -> None:
+    reference_path = Path("reference.mkv")
+    comparison_path = Path("comparison.mkv")
+
+    def probe(path: Path, tracks: tuple[tuple[str | None, bool, bool], ...]):
+        mock_run.return_value.stdout = json.dumps(
+            {
+                "streams": [
+                    {
+                        "index": index + 1,
+                        "codec_type": "audio",
+                        "disposition": {"default": int(default), "comment": int(commentary)},
+                        "tags": {"language": language} if language is not None else {},
+                    }
+                    for index, (language, default, commentary) in enumerate(tracks)
+                ]
+            }
+        ).encode()
+        return probe_streams(path)
+
     reference_selection, comparison_selection = select_audio_pair(
-        _pair_probe(*reference),
-        _pair_probe(*comparison),
-        reference_path=Path("reference.mkv"),
-        comparison_path=Path("comparison.mkv"),
+        probe(reference_path, reference),
+        probe(comparison_path, comparison),
+        reference_path=reference_path,
+        comparison_path=comparison_path,
         reference_override=reference_override,
         comparison_override=comparison_override,
     )
@@ -825,7 +899,11 @@ def test_selected_audio_tail_timeout_stays_unavailable(mock_run: MagicMock) -> N
     mock_run.side_effect = TimeoutExpired("ffprobe", 15)
     assert (
         measure_selected_audio_duration(
-            Path("movie.mkv"), stream, video_seconds=Fraction(90), cancellation=None
+            Path("movie.mkv"),
+            stream,
+            video_seconds=Fraction(90),
+            video_start=Fraction(0),
+            cancellation=None,
         )
         == stream
     )
@@ -834,7 +912,11 @@ def test_selected_audio_tail_timeout_stays_unavailable(mock_run: MagicMock) -> N
     mock_run.reset_mock()
     with pytest.raises(AudioAlignmentCancellationError):
         measure_selected_audio_duration(
-            Path("movie.mkv"), stream, video_seconds=Fraction(90), cancellation=cancellation
+            Path("movie.mkv"),
+            stream,
+            video_seconds=Fraction(90),
+            video_start=Fraction(0),
+            cancellation=cancellation,
         )
     mock_run.assert_not_called()
 
@@ -846,7 +928,11 @@ def test_selected_audio_tail_skips_known_duration_and_missing_time_base(
     known = _test_stream()
     assert (
         measure_selected_audio_duration(
-            Path("movie.mkv"), known, video_seconds=Fraction(90), cancellation=None
+            Path("movie.mkv"),
+            known,
+            video_seconds=Fraction(90),
+            video_start=Fraction(0),
+            cancellation=None,
         )
         == known
     )
@@ -858,7 +944,11 @@ def test_selected_audio_tail_skips_known_duration_and_missing_time_base(
     )
     assert (
         measure_selected_audio_duration(
-            Path("movie.mkv"), unknown, video_seconds=Fraction(90), cancellation=None
+            Path("movie.mkv"),
+            unknown,
+            video_seconds=Fraction(90),
+            video_start=Fraction(0),
+            cancellation=None,
         )
         == unknown
     )

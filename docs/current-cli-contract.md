@@ -791,6 +791,12 @@ uses knee 1.0. Existing explicit color overrides retain precedence. The field na
   states that configured frame selection still applies; it does not claim
   `--frames` disables `--random-frame-count` or the metric-count options.
 
+When a metric selector is pending, FramePlan can pass an empty provisional plan
+to Analyze. User frames outside the selection window still produce a drop warning.
+If Analyze fails, an ordinary run continues with a warning only when usable User
+or Random frames remain. Otherwise it exits with the typed analysis or selection
+error before rendering.
+
 ### Run Interruption
 
 After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. In-flight FFmpeg batch extraction is stopped and reaped with bounded cleanup; frame extraction keeps its existing timeout. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
@@ -812,11 +818,11 @@ CLI drains the executor before exit. No new TMDB request starts after the interr
 
 ### Run-Only Full-Window Selection Recovery
 
-- Recovery is eligible only when effective `analysis.ignore_lead_seconds` or
-  `analysis.ignore_trail_seconds` is nonzero and the existing frame-selection owner
-  raises its typed insufficient-candidates outcome from the exclusion-constrained
-  shared domain. Valid selection windows, zero-margin configurations, skipped
-  analysis, and unrelated metric/runtime failures retain their existing behavior.
+- Recovery is eligible when removing configured lead or trail exclusions expands
+  the shared selection window and either preflight finds an empty window or frame
+  selection raises a recoverable insufficient-candidates error in the constrained
+  window. A minimum window that already covers the full shared clip gives no
+  recovery offer. Unrelated metric or runtime failures give no recovery offer.
 - In an interactive human run, the CLI asks exactly once on stderr through the
   accent-rail `› Analyze the full clip?` section, defaulting to No:
 
@@ -832,9 +838,10 @@ CLI drains the executor before exit. No new TMDB request starts after the interr
   ╰─
   ```
 
-  The `requested`, `available`, and `skip` values come from the selection
-  confirmation request; the displayed numbers above are illustrative of the
-  documented layout.
+  After a selector fails, the prompt shows its requested count and available
+  candidates. For a performance-mode metric-only request, availability is the
+  sampled candidate capacity. At empty-window preflight the prompt shows the
+  total configured frame count and zero available frames.
 
 - Yes creates a run-scoped effective config copy with only the effective lead and
   trail exclusions set to `0.0`. It recomputes the normal shared selection window,
@@ -856,8 +863,8 @@ CLI drains the executor before exit. No new TMDB request starts after the interr
   to reduce `analysis.ignore_lead_seconds` / `analysis.ignore_trail_seconds` or use a
   clip-specific config.
 - `--json`, `--quiet`, redirected/non-TTY stdin, `--from-cache-only`, and
-  `--skip-analysis` never receive this confirmation callback. If the constrained
-  selection fails, they fail closed through the same typed error: no automatic
+  `--skip-analysis` never receive this confirmation callback. An otherwise eligible
+  recovery in these modes fails closed through the same typed error: no automatic
   relaxation, no retry, and no uniform substitution. JSON stdout remains the single
   standard structured error object; human diagnostics remain on stderr.
 - Persistent short-clip behavior requires a separate config with
@@ -922,18 +929,22 @@ recovery requirement.
   rather than silently validating a full-frame cache identity.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
-- Probe-cache files remain on-disk format version 1, but key schema 2 includes the
+- Probe-cache files remain on-disk format version 1, but key schema 3 includes the
   scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint. In the managed
   Windows portable and Debian/Docker profiles, a cache created by another selected
   decoder or FFmpeg/ffprobe lineage is a normal miss, including under
-  `--from-cache-only` validation.
+  `--from-cache-only` validation. Entries keyed by a discovered symlink miss
+  and require a normal run to cold-probe the resolved target before cache-only reuse.
 - Shared alignment reuse source-set identity includes the scoped alignment runtime
   fingerprint: the selected standalone FFmpeg/ffprobe lineage and the selected
   VapourSynth and L-SMASH-Works decoder identity. In the managed Windows portable and
   Debian/Docker profiles, a selected supported FFmpeg or decoder lineage change cannot
   reuse an offset computed under the previous build.
-- Alignment cache acceptance and offset persistence recheck prepared source path,
-  size, and mtime. A source change after preparation cannot authorize cached trims
+- Preparation freezes each source's resolved path, size, and mtime. Alignment
+  rechecks these facts at cache acceptance, immediately before publishing shared
+  offsets, and after attempting to save them. Retargeting a source symlink
+  invalidates the prepared identity even if the replacement has the same size and
+  mtime. A source change after preparation cannot authorize cached trims
   or newly saved offsets; the typed alignment failure requires a fresh run rather
   than silently replacing the prepared fingerprint. This failure stops downstream
   rendering and publishing even when alignment is optional or audio is unavailable;
@@ -1010,8 +1021,9 @@ recovery requirement.
   or fragment data.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
   inputs, selected reference, all-source selection domain, performance mode,
-  metric algorithm identity, and analysis settings before continuing. It does
-  not clear unrelated shared analysis entries and does not delete shared
+  metric algorithm identity, and analysis settings before continuing. Analyze
+  recomputes metrics for every attempted window, including an accepted full-window
+  retry. It does not clear unrelated shared analysis entries and does not delete shared
   previous-offset reuse entries under
   `<resolved paths.generated_dir>/cache/alignment/` or the shared TMDB response file.
 - `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates
@@ -1630,7 +1642,8 @@ The generated session carries an explicit UUID session identity, one reference r
 ordered comparison roles/keys/ordinals, presentation names, S1 short names for the
 hint rows, the authoritative integer
 or null offset, and one bounded primitive audio-evidence projection in strict metadata
-schema v5. The native projection omits per-chunk rows but retains
+schema v5. The reader requires `chunks.rows_omitted` to be true and each recorded
+alternative offset to belong to its target's alternatives. The projection retains
 `chunks.total_samples`, aggregate chunk counts, runs, the authority recount, base
 video checks, check points, and each target's authoritative `target_offset`,
 `credible`, `start_sample`, `end_sample`, alternatives, resolution, and sampled
@@ -1914,24 +1927,27 @@ Video confirmation divides the usable base range and each examined disagreement
 target into equal slots, then chooses the highest-motion reference frame from four
 deterministic candidates in each slot. Motion is the mean absolute luma difference
 over a two-frame step on the prepared active picture; `auto` is the default prepared-
-rectangle policy. Unexamined targets retain evenly spaced planned review frames, which
-are not scored.
+rectangle policy. Slots without a measurable candidate are omitted. Unexamined
+targets retain evenly spaced planned review frames for display.
 
 Video confirmation runs whenever audio produces a global lag and uses the run's
-L-SMASH loader; there is no FFMS2 fallback. It scores 12 base positions across the
-middle 90% of the raw-frame overlap at offsets `r-2` through `r+2`. A strict local
-minimum must have a runner-up/best margin of at least 1.1. The exact frame is
+L-SMASH loader; there is no FFMS2 fallback. It scores up to 12 distinct base
+positions across the middle 90% of the raw-frame overlap at offsets `r-2`
+through `r+2`. A strict local minimum must be at least 0.0001 below the runner-up
+in mean absolute rank difference, with a runner-up/best margin of at least 1.1. The exact frame is
 confirmed only within `r-1..r+1`, with at least 6 informative positions, at least
 75% wins, and a median winning margin of at least 1.5. Static, tied, repeated, or
 aliased frames are uninformative rather than false confirmation.
 
-After global confirmation, V5a checks frame-distinct disagreement regions with 12
-targeted positions in total: competing runs receive four positions first, single
-credible chunks receive four each in descending PSR order, and active non-credible
-chunks receive two each. At each position it compares the confirmed frame with the
-target's own compensated audio-frame neighbourhood, excluding the confirmed frame.
-Exact ties and two zero scores mean neither hypothesis wins. A non-credible
-neither-win is weak evidence and does not block. A credible chunk needs at least one
+After global confirmation, V5a checks frame-distinct disagreement regions at up
+to 12 targeted positions in total, taking up to four per competing run first,
+then up to four per credible singleton chunk in descending PSR order, and up to
+two per active non-credible chunk. At each position it compares the confirmed
+frame with the target's own compensated audio-frame neighbourhood, excluding the
+confirmed frame.
+A targeted position needs the same absolute score gap of 0.0001 and a
+runner-up/best margin of at least 1.5 to vote. A non-credible neither-win is weak
+evidence and does not block. A credible chunk needs at least one
 confirmed-frame win and no alternative win; a run needs at least two confirmed-frame
 wins and no alternative win. Unexamined or unresolved credible evidence blocks.
 
@@ -1960,7 +1976,7 @@ flag, configuration field, signal-handler framework, or successful JSON field.
 Every fresh completed attempt retains immutable selected-stream facts, per-chunk
 columnar evidence, chunk runs, the global lag, start compensation, sub-frame
 estimate, A4b authority recount, bounded video evidence, and one of three final
-states under `whole-track-chunked-phat-video-check-motion-20260929`:
+states under `whole-track-chunked-phat-video-check-score-floor-20261107`:
 
 - `trusted_automatic` / `audio_video_confirmed`: the A4b authority gate passes,
   V5 confirms the exact frame, every frame-distinct credible disagreement/run is
@@ -2004,11 +2020,15 @@ resolved geometry remains reusable regardless of detector provenance.
 
 ## Persistence Rules
 
-Fresh runs write one pathless diagnostic artifact per comparison at
+Fresh runs write one diagnostic artifact per comparison at
 `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v4 is marked
-`diagnostic_only`, is limited to 2 MiB per comparison, and contains no media path,
-PCM, raw command line, full subprocess stderr, environment value, or credential. It
-is atomically snapshotted before optional review and may be atomically replaced once
+`diagnostic_only` and is limited to 2 MiB per comparison. The diagnostic omits
+automatically collected media paths, PCM, raw command lines, full subprocess
+stderr, environment values, and credentials. Explicit source labels retain
+authored text subject to whitespace normalization and length limits, so they
+can contain paths or other user-supplied text. Track languages are limited to
+bounded language identifiers. The diagnostic is atomically snapshotted before
+optional review and may be atomically replaced once
 with the final human outcome. Current attempts retain bounded observed paired-collection
 summaries, per-chunk evidence, chunk runs, the authority recount, five-offset video
 table, same-frame context, targeted evidence, and P4a check points; preanalysis

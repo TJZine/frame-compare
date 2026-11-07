@@ -12,6 +12,7 @@ import threading
 import time
 from fractions import Fraction
 from pathlib import Path
+from traceback import extract_tb
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -39,6 +40,7 @@ from frame_compare.services.errors import (
 )
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.alignment_evidence import CollectionFailureCategory
+from frame_compare.utils.subproc import SubprocessCleanupError
 from tests.services.alignment_request_test_support import alignment_request
 
 
@@ -258,6 +260,7 @@ async def test_cleanup_failure_after_cancellation_replaces_cancellation(
     )
     started = threading.Event()
     cleanup_release = threading.Event()
+    subprocess_error = SubprocessCleanupError("child wait failed")
 
     def fail_cleanup_after_cancel(
         *_args: Any, cancellation: threading.Event, **_kwargs: Any
@@ -266,11 +269,14 @@ async def test_cleanup_failure_after_cancellation_replaces_cancellation(
         while not cancellation.is_set():
             time.sleep(0.001)
         cleanup_release.wait(timeout=2)
-        raise AudioAlignmentCleanupError(
-            "collector child was not reaped",
-            category="cancelled",
-            stage="collection",
-        )
+        try:
+            raise subprocess_error
+        except SubprocessCleanupError as cause:
+            raise AudioAlignmentCleanupError(
+                "packet probe child was not reaped",
+                category="cleanup_failed",
+                stage="audio_probe",
+            ) from cause
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", fail_cleanup_after_cancel)
     diagnostics = MagicMock()
@@ -291,8 +297,13 @@ async def test_cleanup_failure_after_cancellation_replaces_cancellation(
     with pytest.raises(AudioAlignmentCleanupError) as caught:
         await task
 
-    assert caught.value.category == "cancelled"
-    assert isinstance(caught.value.__cause__, asyncio.CancelledError)
+    assert caught.value.category == "cleanup_failed"
+    assert caught.value.__cause__ is subprocess_error
+    assert any(
+        frame.name == "fail_cleanup_after_cancel"
+        for frame in extract_tb(caught.value.__traceback__)
+    )
+    assert extract_tb(subprocess_error.__traceback__)[-1].name == "fail_cleanup_after_cancel"
     diagnostics.assert_not_called()
     review.assert_not_called()
     cache_write.assert_not_called()
