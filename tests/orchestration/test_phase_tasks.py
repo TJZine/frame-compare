@@ -26,6 +26,7 @@ from frame_compare.analysis.metric_identity import (
     stable_metric_algorithm_identity_json,
 )
 from frame_compare.analysis.metric_strategies import MetricComputationResult
+from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
@@ -39,13 +40,17 @@ from frame_compare.analysis.types import (
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.config.schema_enums import AnalysisPerformanceMode, ScreenshotActiveRectDetection
+from frame_compare.config.schema_enums import (
+    AnalysisPerformanceMode,
+    ScreenshotActiveRectDetection,
+)
 from frame_compare.orchestration import phase_post_render, phase_selection
 from frame_compare.orchestration.context import ClipActiveRect, ClipState
 from frame_compare.orchestration.full_window_retry import (
     compute_selection_window_with_recovery,
     recover_from_exclusion_selection_failure,
 )
+from frame_compare.orchestration.selection_domain import compute_selection_window_for_clips
 from frame_compare.orchestration.types import (
     FullWindowRetryConfirmationDecision,
     FullWindowRetryConfirmationRequest,
@@ -193,6 +198,73 @@ def test_run_analyze_phase_confirmed_full_window_retry_recomputes_cache_domain(
         )
     ]
     assert output.replaces_frame_plan_selection is True
+
+
+@pytest.mark.parametrize("narrowed", [False, True], ids=["unchanged-window", "sample-budget"])
+def test_run_analyze_phase_offers_recovery_only_for_larger_shared_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, narrowed: bool
+) -> None:
+    ctx = _context(tmp_path)
+    ctx.reference = _clip(ctx.reference.path, label="Reference", num_frames=100 if narrowed else 8)
+    window = SelectionWindow(32, 68) if narrowed else SelectionWindow(0, 8)
+    ctx.config = _config_with_analysis(
+        config=ctx.config,
+        analysis={
+            "random_frame_count": 0,
+            "dark_frame_count": 12 if narrowed else 3,
+            "performance_mode": AnalysisPerformanceMode.PERFORMANCE,
+            "ignore_lead_seconds": 32 / 24 if narrowed else 1.0,
+            "ignore_trail_seconds": 32 / 24 if narrowed else 0.0,
+            "min_window_seconds": 0.0 if narrowed else 5.0,
+        },
+    )
+    ctx.selection_domain = replace(
+        ctx.selection_domain, analysis_clip=ctx.reference, selection_window=window
+    )
+    sampled_frames = tuple(
+        frame
+        for burst in plan_performance_bursts(
+            window_start=window.start_frame, window_end_exclusive=window.end_frame_exclusive
+        )
+        for frame in range(burst.start, burst.end_exclusive)
+    )
+    dense = _metrics_for_range(
+        start=window.start_frame,
+        end=window.end_frame_exclusive,
+        source_frame_count=ctx.reference.probe.num_frames,
+    )
+    metrics = FrameMetrics(
+        luminance=[0.1] * len(sampled_frames),
+        motion=[0.0] * len(sampled_frames),
+        metadata=replace(
+            dense.metadata, frame_count=len(sampled_frames), performance_mode="performance"
+        ),
+        sampled_source_frames=sampled_frames,
+    )
+    monkeypatch.setattr(
+        phase_selection,
+        "calculate_metrics",
+        lambda *_args, **_kwargs: MetricsAcquisition(metrics=metrics, disposition="computed"),
+    )
+    requests: list[FullWindowRetryConfirmationRequest] = []
+
+    def confirm(request: FullWindowRetryConfirmationRequest) -> FullWindowRetryConfirmationDecision:
+        requests.append(request)
+        return "declined"
+
+    ctx.confirm_full_window_retry = confirm
+    with pytest.raises(SelectionError) as caught:
+        phase_selection.run_analyze_phase(
+            ctx, input_videos=[ctx.reference.path], workspace=ctx.workspace
+        )
+
+    if narrowed:
+        assert len(requests) == 1
+        assert requests[0].requested_frame_count == 12
+        assert requests[0].eligible_frame_count == 9
+    else:
+        assert requests == []
+        assert caught.value.kind is SelectionFailureKind.INSUFFICIENT_METRIC_CANDIDATES
 
 
 @pytest.mark.parametrize("margin_seconds", [0.0, 40 / 24])
@@ -382,6 +454,13 @@ def test_full_window_retry_progress_failure_is_fatal_before_override(
         config=ctx.config, analysis={"ignore_lead_seconds": 1.0, "ignore_trail_seconds": 1.0}
     )
     progress = ConfirmationProgressSpy(fail_at=fail_at)
+    ctx.config.analysis.min_window_seconds = 0.0
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=compute_selection_window_for_clips(
+            clips=[ctx.reference], config=ctx.config
+        ),
+    )
     prompt_calls = 0
 
     def _confirm(
@@ -427,6 +506,13 @@ def test_full_window_retry_active_rect_sampling_failure_is_fatal(
                 update={"active_rect_detection": ScreenshotActiveRectDetection.AUTO}
             ),
         }
+    )
+    ctx.config.analysis.min_window_seconds = 0.0
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=compute_selection_window_for_clips(
+            clips=[ctx.reference], config=ctx.config
+        ),
     )
     prompt_calls = 0
 
@@ -510,6 +596,8 @@ def test_empty_exclusion_window_uses_authoritative_window_recovery_once(tmp_path
     config = _config_with_analysis(
         config=ctx.config,
         analysis={
+            "random_frame_count": 0,
+            "dark_frame_count": 3,
             "ignore_lead_seconds": 1.0,
             "ignore_trail_seconds": 1.0,
             "min_window_seconds": 0.0,
@@ -530,6 +618,8 @@ def test_empty_exclusion_window_uses_authoritative_window_recovery_once(tmp_path
     )
 
     assert len(requests) == 1
+    assert requests[0].requested_frame_count == 3
+    assert requests[0].eligible_frame_count == 0
     assert state.selection_window == SelectionWindow(start_frame=0, end_frame_exclusive=10)
     assert state.config is not config
     assert state.config.analysis.ignore_lead_seconds == 0.0
