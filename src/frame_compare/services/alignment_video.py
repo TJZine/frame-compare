@@ -31,9 +31,9 @@ from frame_compare.utils.alignment_evidence import (
 )
 from frame_compare.utils.alignment_policy import (
     CONFIRMATION_MARGIN,
-    compensated_offset_seconds,
-    rounded_frame,
+    compensated_lag_to_frame,
     sample_to_reference_frame,
+    selected_start_compensation_seconds,
 )
 from frame_compare.utils.alignment_policy import (
     confirmed_offset as _confirmed_offset,
@@ -208,9 +208,9 @@ def check_video_alignment(
                 ),
             )
 
-        starts = _stream_start(attempt, role="reference", video=False)
-        video_starts = _stream_start(attempt, role="reference", video=True)
-        reference_audio_start, reference_video_start = starts, video_starts
+        reference_stream = attempt.selected_streams[0]
+        reference_audio_start = reference_stream.analysis_audio_start
+        reference_video_start = reference_stream.analysis_video_start
         chunks = _chunks(attempt)
         targets, same_frame = _build_targets(
             attempt,
@@ -538,18 +538,6 @@ def _average_ranks(values: FloatFrame) -> FloatFrame:
     return np.asarray((ranks[inverse] / flat.size).reshape(values.shape), dtype=np.float32)
 
 
-def _stream_start(
-    attempt: AudioAlignmentAttempt,
-    *,
-    role: Literal["reference", "comparison"],
-    video: bool,
-) -> Fraction:
-    stream = next(item for item in attempt.selected_streams if item.role == role)
-    if video:
-        return stream.analysis_video_start
-    return stream.analysis_audio_start
-
-
 def _chunks(attempt: AudioAlignmentAttempt) -> tuple[ChunkObservation, ...]:
     columns = attempt.chunks
     return tuple(
@@ -571,15 +559,10 @@ def _chunks(attempt: AudioAlignmentAttempt) -> tuple[ChunkObservation, ...]:
 def _lag_to_frame(
     lag: int | float, *, attempt: AudioAlignmentAttempt, fps_reference: Fraction
 ) -> int:
-    return rounded_frame(
-        compensated_offset_seconds(
-            global_lag=lag,
-            reference_audio_start=_stream_start(attempt, role="reference", video=False),
-            reference_video_start=_stream_start(attempt, role="reference", video=True),
-            comparison_audio_start=_stream_start(attempt, role="comparison", video=False),
-            comparison_video_start=_stream_start(attempt, role="comparison", video=True),
-        ),
-        fps_reference,
+    return compensated_lag_to_frame(
+        lag,
+        compensation_seconds=selected_start_compensation_seconds(attempt.selected_streams),
+        fps_reference=fps_reference,
     )
 
 
@@ -599,13 +582,7 @@ def _build_targets(
         global_lag=attempt.audio.global_lag,
         confirmed_offset=confirmed,
         fps_reference=fps_reference,
-        compensation_seconds=compensated_offset_seconds(
-            global_lag=0,
-            reference_audio_start=_stream_start(attempt, role="reference", video=False),
-            reference_video_start=_stream_start(attempt, role="reference", video=True),
-            comparison_audio_start=_stream_start(attempt, role="comparison", video=False),
-            comparison_video_start=_stream_start(attempt, role="comparison", video=True),
-        ),
+        compensation_seconds=selected_start_compensation_seconds(attempt.selected_streams),
     )
     run_targets: list[_Target] = []
     for run in classification.competing_runs:

@@ -11,9 +11,9 @@ from frame_compare.services.alignment_decision import (
     competing_run_center,
 )
 from frame_compare.utils.alignment_policy import (
-    compensated_offset_seconds,
     confirmed_offset,
     edge_consensus_offset,
+    start_compensation_seconds,
 )
 from tests.services.alignment_evidence_test_support import stream
 
@@ -36,7 +36,7 @@ def test_a4a_run_span_never_exceeds_two_milliseconds() -> None:
         global_lag=0,
         confirmed_offset=0,
         fps_reference=Fraction(24),
-        compensation_seconds=0.0,
+        compensation_seconds=Fraction(0),
     )
 
     assert [(run.first_index, run.last_index) for run in classified.competing_runs] == [(0, 1)]
@@ -105,8 +105,7 @@ def test_retimed_start_uses_the_analysis_timeline() -> None:
     assert reference.analysis_video_start == Fraction(1001, 20000)
     assert comparison.analysis_audio_start == Fraction(5, 32)
     assert comparison.analysis_video_start == Fraction(1, 24)
-    assert compensated_offset_seconds(
-        global_lag=0,
+    assert start_compensation_seconds(
         reference_audio_start=reference.analysis_audio_start,
         reference_video_start=reference.analysis_video_start,
         comparison_audio_start=comparison.analysis_audio_start,

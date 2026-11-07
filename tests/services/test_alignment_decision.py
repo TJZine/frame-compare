@@ -1,7 +1,10 @@
 """Tests for the whole-track audio stage decision (A5/A6, U3 table, P2a)."""
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
+from dataclasses import replace
 from fractions import Fraction
 
 import numpy as np
@@ -25,6 +28,7 @@ from frame_compare.services.alignment_decision import (
     derive_stability,
     v6_failure_reasons,
 )
+from frame_compare.services.alignment_video import _lag_to_frame
 from frame_compare.utils.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
     AudioAuthorityRecount,
@@ -36,6 +40,7 @@ from frame_compare.utils.alignment_evidence import (
     VideoTargetResolution,
 )
 from frame_compare.utils.alignment_policy import rounded_frame
+from tests.services.alignment_evidence_test_support import attempt_with_chunks
 from tests.services.alignment_synthetic_audio import (
     insert_program,
     make_program,
@@ -97,6 +102,52 @@ def test_literal_rounding_boundaries() -> None:
     assert rounded_frame(-2.0, Fraction(1)) == -2
     assert rounded_frame(-2.5, Fraction(1)) == -2
     assert rounded_frame(-2.51, Fraction(1)) == -3
+
+
+@pytest.mark.parametrize(
+    ("lag", "fps", "start", "frame"),
+    [
+        (4640, Fraction(25), Fraction(0), 15),
+        (2002, Fraction(30000, 1001), Fraction(0), 8),
+        (-1120, Fraction(25), Fraction(0), -3),
+        (-1501.5, Fraction(24000, 1001), Fraction(0), -4),
+        (0, Fraction(30000, 1001), Fraction(1001, 4000), 8),
+    ],
+)
+def test_literal_rounding_boundaries_from_lag(
+    lag: int | float, fps: Fraction, start: Fraction, frame: int
+) -> None:
+    attempt = attempt_with_chunks(1)
+    reference, comparison = attempt.selected_streams
+    attempt = replace(
+        attempt,
+        selected_streams=(
+            replace(
+                reference,
+                stream_start_num=start.numerator,
+                stream_start_den=start.denominator,
+                stream_start_basis="metadata",
+            ),
+            comparison,
+        ),
+    )
+    video_frame = _lag_to_frame(lag, attempt=attempt, fps_reference=fps)
+    if isinstance(lag, int):
+        stage = decide_completed_stage(
+            estimate=_estimate((), global_lag=lag),
+            plan=_plan_for(),
+            max_offset_seconds=1,
+            reference_audio_start=start,
+            reference_video_start=Fraction(0),
+            comparison_audio_start=Fraction(0),
+            comparison_video_start=Fraction(0),
+            fps_reference=fps,
+        )
+        candidate = stage.decision.candidate
+        assert candidate is not None
+        assert (candidate.frame_offset, video_frame) == (frame, frame)
+    else:
+        assert video_frame == frame
 
 
 @pytest.mark.parametrize(
@@ -414,7 +465,7 @@ def test_a4a_requires_index_adjacency_for_competing_runs() -> None:
         global_lag=estimate.global_lag,
         confirmed_offset=0,
         fps_reference=Fraction(24),
-        compensation_seconds=0.0,
+        compensation_seconds=Fraction(0),
     )
 
     assert classification.competing_runs == ()
@@ -434,7 +485,7 @@ def test_a4b_boundary_run_drives_trusted_or_provisional_video_outcome() -> None:
         global_lag=estimate.global_lag,
         confirmed_offset=0,
         fps_reference=Fraction(24),
-        compensation_seconds=0.0,
+        compensation_seconds=Fraction(0),
     )
 
     assert [
@@ -569,7 +620,10 @@ def test_stability_insufficient_evidence_below_three_credible() -> None:
         agreeing_count=1,
     )
     summary = derive_stability(
-        estimate=estimate, outcome="no_single_offset", fps_reference=FPS, compensation_seconds=0.0
+        estimate=estimate,
+        outcome="no_single_offset",
+        fps_reference=FPS,
+        compensation_seconds=Fraction(0),
     )
     assert summary.classification == "insufficient_evidence"
     assert summary.valid_windows == 2
@@ -596,7 +650,10 @@ def test_stability_drift_from_sustained_walk() -> None:
         agreeing_count=1,
     )
     summary = derive_stability(
-        estimate=estimate, outcome="no_single_offset", fps_reference=FPS, compensation_seconds=0.0
+        estimate=estimate,
+        outcome="no_single_offset",
+        fps_reference=FPS,
+        compensation_seconds=Fraction(0),
     )
     assert summary.classification == "possible_drift"
     assert summary.valid_windows == 3
@@ -617,7 +674,10 @@ def test_stability_variable_for_single_run() -> None:
         agreeing_count=3,
     )
     summary = derive_stability(
-        estimate=estimate, outcome="no_single_offset", fps_reference=FPS, compensation_seconds=0.0
+        estimate=estimate,
+        outcome="no_single_offset",
+        fps_reference=FPS,
+        compensation_seconds=Fraction(0),
     )
     assert summary.classification == "variable"
 

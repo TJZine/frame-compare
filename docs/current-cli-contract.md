@@ -2009,11 +2009,15 @@ resolved geometry remains reusable regardless of detector provenance.
 
 ## Persistence Rules
 
-Fresh runs write one pathless diagnostic artifact per comparison at
+Fresh runs write one diagnostic artifact per comparison at
 `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v4 is marked
-`diagnostic_only`, is limited to 2 MiB per comparison, and contains no media path,
-PCM, raw command line, full subprocess stderr, environment value, or credential. It
-is atomically snapshotted before optional review and may be atomically replaced once
+`diagnostic_only` and is limited to 2 MiB per comparison. The diagnostic omits
+automatically collected media paths, PCM, raw command lines, full subprocess
+stderr, environment values, and credentials. Explicit source labels retain
+authored text subject to whitespace normalization and length limits, so they
+can contain paths or other user-supplied text. Track languages are limited to
+bounded language identifiers. The diagnostic is atomically snapshotted before
+optional review and may be atomically replaced once
 with the final human outcome. Current attempts retain bounded observed paired-collection
 summaries, per-chunk evidence, chunk runs, the authority recount, five-offset video
 table, same-frame context, targeted evidence, and P4a check points; preanalysis

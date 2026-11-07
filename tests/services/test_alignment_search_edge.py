@@ -66,7 +66,7 @@ def test_consistent_search_edge_is_stable_but_not_authoritative(lag: int, chunk_
         plan=plan,
         confirmed_offset=expected_frame,
         fps_reference=fps,
-        compensation_seconds=0.0,
+        compensation_seconds=Fraction(0),
     )
 
     assert stage.audio.status == "search_edge"
