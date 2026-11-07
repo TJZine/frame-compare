@@ -8,14 +8,20 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from PIL import Image, ImageDraw
 
-from frame_compare.config.schema import OverlayMode, ReportConfig
+from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode, ReportConfig
+from frame_compare.render.batch.orchestrator import render_screenshots_from_batch_detailed
 from frame_compare.render.encoders import render_frame_detailed
+from frame_compare.render.errors import FrameExtractionError
 from frame_compare.render.types import (
+    BatchRenderOptions,
     EncoderSettings,
     OverlayConfig,
     RenderedFrameResult,
     RenderRequest,
+    ScreenshotBatchRequest,
+    SelectedScreenshot,
 )
 from frame_compare.services.report.payload import (
     ClipInfo,
@@ -59,14 +65,21 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
     # a fixture invariant, so missing B after a successful libx264 encode is a
     # test failure rather than an environment skip.
     fixture = tmp_path / "gop.mkv"
+    for ordinal in range(8):
+        image = Image.new("RGB", (64, 64), "gray")
+        draw = ImageDraw.Draw(image)
+        for bit in range(3):
+            level = "white" if ordinal & (1 << bit) else "black"
+            draw.rectangle((bit * 16, 48, bit * 16 + 15, 63), fill=level)
+        image.save(tmp_path / f"source-{ordinal}.png")
     run_subprocess(
         [
             "ffmpeg",
             "-y",
-            "-f",
-            "lavfi",
+            "-framerate",
+            "24",
             "-i",
-            "testsrc2=size=64x64:rate=24",
+            str(tmp_path / "source-%d.png"),
             "-frames:v",
             "8",
             "-c:v",
@@ -142,6 +155,7 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
             tonemap=None,
             geometry=geometry,
             font_path=None,
+            font_size=12,  # Keep the overlay above the ordinal strip.
         )
         vs_result = render_frame_detailed(
             RenderRequest(
@@ -167,8 +181,13 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
         )
         assert vs_result.facts.picture_type == expected[index]
         assert ffmpeg_result.facts.picture_type == expected[index]
-        assert vs_result.path.exists()
-        assert ffmpeg_result.path.exists()
+        for result in (vs_result, ffmpeg_result):
+            with Image.open(result.path) as image:
+                luma = image.convert("L").tobytes()
+                ordinal = sum(
+                    1 << bit for bit in range(3) if luma[56 * image.width + 8 + 16 * bit] > 128
+                )
+            assert ordinal == index, result.path.name
         results_by_backend["VapourSynth"].append(vs_result)
         results_by_backend["FFmpeg"].append(ffmpeg_result)
 
@@ -217,3 +236,71 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
             expected[selected[frame_index]],
             expected[selected[frame_index]],
         ]
+
+
+@pytest.mark.integration
+@pytest.mark.vs_required
+def test_ffmpeg_refuses_repeat_flagged_mpeg2_on_lsmash_timeline(
+    tmp_path: Path, require_ffmpeg: None
+) -> None:
+    video = tmp_path / "repeat-first-field.m2v"
+    run_subprocess(
+        [
+            "ffmpeg",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=96x64:rate=25",
+            "-frames:v",
+            "4",
+            "-c:v",
+            "mpeg2video",
+            "-g",
+            "1",
+            "-f",
+            "mpeg2video",
+            str(video),
+        ],
+        timeout_seconds=10,
+    )
+
+    stream = video.read_bytes()
+    extension = b"\x00\x00\x01\xb5"
+    # Extension id 8 identifies a picture coding extension. Set repeat_first_field
+    # on only the first progressive picture, where it requests one extra display.
+    first_picture_extension = next(
+        offset
+        for offset in range(len(stream) - 7)
+        if stream.startswith(extension, offset) and stream[offset + 4] >> 4 == 8
+    )
+    data = bytearray(stream)
+    data[first_picture_extension + 7] |= 0b10
+    video.write_bytes(data)
+
+    source = DefaultVSLoader().load(video)
+    assert source.num_frames == 5
+    request = ScreenshotBatchRequest(
+        clip_path=video,
+        label="Repeated picture",
+        frames=(SelectedScreenshot(1, 1, None),),
+        size_bytes=video.stat().st_size,
+        source_resolution=(source.width, source.height),
+        source_total_frames=source.num_frames,
+        signal=SourceSignalFacts(is_hdr=False),
+        active_picture=ActivePictureFacts(0, 0, source.width, source.height, "full_frame", True),
+    )
+    output_dir = tmp_path / "screenshots"
+    with pytest.raises(
+        FrameExtractionError,
+        match="FFmpeg decoded 4 frames but the prepared L-SMASH timeline has 5",
+    ) as exc:
+        render_screenshots_from_batch_detailed(
+            [request],
+            output_dir,
+            ConfigSchema(color=ColorConfig(enable_tonemap=False)),
+            BatchRenderOptions(renderer="ffmpeg", overlay_mode=OverlayMode.NONE),
+        )
+
+    assert video.name in exc.value.context.message
+    assert exc.value.context.hint == "Use the VapourSynth renderer"
+    assert not list(output_dir.glob("*.png"))

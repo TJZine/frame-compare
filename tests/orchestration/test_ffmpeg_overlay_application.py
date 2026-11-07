@@ -107,6 +107,8 @@ def test_ffmpeg_extraction_applies_overlay_post_process(
             matrix=1,
         )
 
+    # This fixture substitutes media operations on a synthetic source path.
+    monkeypatch.setattr(runner, "validate_source_frame_count", lambda *_: None)
     monkeypatch.setattr(runner, "extract_frame", _extract_frame)
     monkeypatch.setattr(runner, "extract_frames", _extract_frames)
     monkeypatch.setattr(runner, "probe_hdr", _probe_hdr)
