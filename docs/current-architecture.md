@@ -1425,7 +1425,7 @@ checks containment against the prepared dimensions before planning. `SourceGeome
 requires a rectangle and canonical provenance; render has no inference mode, candidate
 ranking, or provenance translation. Orchestration projects its cache-stable
 `ClipActiveRectSource` vocabulary to canonical provenance at the render boundary. Native screenshot
-render remains full-frame. The FFmpeg backend applies geometry filters after
+render remains full-frame. FFmpeg extraction uses coded orientation and applies geometry filters after
 exact frame selection, preserves exact crop origins, and converts to full-chroma
 YUV without reducing source precision before odd-origin crops and padding. The
 VapourSynth path chooses between the Pillow writer
@@ -1438,9 +1438,16 @@ and source-frame identity. The scheduler returns ordered `RenderedClip` records;
 each `RenderedScreenshot` checks that its result facts identify the selected source
 frame. There are no flattened request ranges or label-map reconstruction steps.
 
-The scheduler runs at most two clip jobs at once. A clip uses one FFmpeg decode pass
-only when every request is compatible and source frames are ordered; otherwise all
-its frames render sequentially while another clip may overlap. Screenshot progress
+Before FFmpeg extraction, batch expansion compares the decoded video frame count
+with the prepared L-SMASH count. The count scan observes run cancellation. Its
+deadline is the greater of the configured extraction timeout and 30 seconds plus
+one second per four prepared frames. A mismatch fails extraction and directs the
+caller to the VapourSynth renderer. The scheduler runs at most two clip jobs at once. A clip
+uses one FFmpeg extraction pass when every request is compatible and source frames
+are ordered. Otherwise its frames render sequentially while another clip may overlap.
+FFmpeg refuses a filter graph reset before promoting staged images to their literal
+output paths. Singleton extraction also requires a fresh, nonempty staging image.
+Screenshot progress
 is count-only and locked across workers: each serialized frame advances the count,
 or a completed FFmpeg batch advances it together. Parallel cancellation polls every
 50 ms, closes admission, signals FFmpeg abort, cancels unstarted work, and drains

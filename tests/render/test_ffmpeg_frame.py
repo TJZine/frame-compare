@@ -14,6 +14,7 @@ from frame_compare.render.backend.ffmpeg import (
     parse_showinfo_picture_type,
     parse_showinfo_picture_types,
 )
+from frame_compare.render.errors import FrameExtractionError
 from frame_compare.render.geometry import (
     GeometryMargins,
     GeometryRect,
@@ -32,6 +33,7 @@ def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
         overwrite=False,
     ) == [
         "ffmpeg",
+        "-noautorotate",
         "-i",
         "clip.mkv",
         "-map",
@@ -41,6 +43,8 @@ def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
         "-frames:v",
         "1",
         "-q:v",
+        "1",
+        "-update",
         "1",
         "frame.png",
     ]
@@ -132,6 +136,7 @@ def test_build_extract_frames_argv_selects_ordered_frames_in_one_pass() -> None:
     ) == [
         "ffmpeg",
         "-y",
+        "-noautorotate",
         "-i",
         "clip.mkv",
         "-map",
@@ -163,39 +168,6 @@ def test_build_extract_frames_argv_rejects_unsafe_frame_sequences(
         )
 
 
-def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    run_subprocess = MagicMock(
-        return_value=subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
-    )
-    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
-
-    runner = DefaultFFmpegRunner()
-    output = tmp_path / "shots" / "frame.png"
-    runner.extract_frame(Path("clip.mkv"), 100, output)
-
-    run_subprocess.assert_called_once_with(
-        [
-            "ffmpeg",
-            "-y",
-            "-i",
-            "clip.mkv",
-            "-map",
-            "0:V:0",
-            "-vf",
-            "select=eq(n\\,100),showinfo=checksum=0",
-            "-frames:v",
-            "1",
-            "-q:v",
-            "1",
-            str(output),
-        ],
-        timeout_seconds=30.0,
-    )
-    assert output.parent.is_dir()
-
-
 def test_default_ffmpeg_runner_extract_frames_preserves_indexed_picture_types(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -213,6 +185,10 @@ def test_default_ffmpeg_runner_extract_frames_preserves_indexed_picture_types(
     )
     monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
 
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.resolve_executable", lambda _: str(tmp_path / "ffmpeg")
+    )
+
     output_dir = tmp_path / "staging"
     facts = DefaultFFmpegRunner().extract_frames(Path("clip.mkv"), [10, 20, 42], output_dir)
 
@@ -221,7 +197,8 @@ def test_default_ffmpeg_runner_extract_frames_preserves_indexed_picture_types(
         (20, "B"),
         (42, "P"),
     ]
-    assert run_subprocess.call_args.args[0][-1] == str(output_dir / "%09d.png")
+    assert run_subprocess.call_args.args[0][-1] == "%09d.png"
+    assert run_subprocess.call_args.kwargs["cwd"] == output_dir
     assert run_subprocess.call_args.kwargs["timeout_seconds"] == 30.0
 
 
@@ -267,16 +244,51 @@ def test_parse_showinfo_picture_types_isolates_missing_and_conflicting_records()
     assert parse_showinfo_picture_types(stderr, 4) == ["I", None, None, None]
 
 
-def test_default_ffmpeg_runner_extract_frame_uses_configured_timeout(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize(
+    ("count", "configured", "budget"),
+    [
+        pytest.param(4, 5.0, 31.0, id="small_count"),
+        pytest.param(86_400, 30.0, 21_630.0, id="long_count"),
+        pytest.param(4, 100.0, 100.0, id="configured_override"),
+    ],
+)
+def test_ffmpeg_count_uses_scaled_budget_and_reports_it_on_timeout(
+    monkeypatch: pytest.MonkeyPatch, count: int, configured: float, budget: float
 ) -> None:
-    run_subprocess = MagicMock(
-        return_value=subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
-    )
+    def timeout(argv: list[str], *, timeout_seconds: float, abort: object) -> None:
+        raise subprocess.TimeoutExpired(argv, timeout_seconds)
+
+    run_subprocess = MagicMock(side_effect=timeout)
     monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
 
+    runner = DefaultFFmpegRunner(extraction_timeout_seconds=configured)
+    with pytest.raises(FrameExtractionError) as exc:
+        runner.validate_source_frame_count(Path("clip.mkv"), count, 0)
+
+    assert run_subprocess.call_args.kwargs["timeout_seconds"] == budget
+    assert f"timed out after {budget} seconds" in exc.value.context.message
+    assert exc.value.context.hint == (
+        "Use the VapourSynth renderer or raise screenshots.ffmpeg_timeout_seconds"
+    )
+
+
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_default_ffmpeg_runner_extraction_uses_configured_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, batch: bool
+) -> None:
+    run_subprocess = MagicMock(side_effect=subprocess.TimeoutExpired(["ffmpeg"], 47))
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
+
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.resolve_executable", lambda _: str(tmp_path / "ffmpeg")
+    )
+
     runner = DefaultFFmpegRunner(extraction_timeout_seconds=47.0)
-    runner.extract_frame(Path("clip.mkv"), 1, tmp_path / "frame.png")
+    with pytest.raises(FFmpegError):
+        if batch:
+            runner.extract_frames(Path("clip.mkv"), [1, 2], tmp_path)
+        else:
+            runner.extract_frame(Path("clip.mkv"), 1, tmp_path / "frame.png")
 
     assert run_subprocess.call_args.kwargs["timeout_seconds"] == 47.0
 

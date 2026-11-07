@@ -1,10 +1,16 @@
+import asyncio
+import os
+import signal
+import subprocess
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
+from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.orchestrator import render_clip_jobs
-from frame_compare.render.encoders import render_frame_detailed
+from frame_compare.render.encoders import render_ffmpeg_batch_detailed, render_frame_detailed
+from frame_compare.render.errors import FrameExtractionError
 from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import (
     EncoderSettings,
@@ -12,6 +18,8 @@ from frame_compare.render.types import (
     OverlayMode,
     RenderRequest,
 )
+from frame_compare.utils import subproc
+from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     PresentationState,
@@ -19,6 +27,7 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
     SourceSignalFacts,
 )
+from frame_compare.utils.subproc import resolve_executable, run_subprocess
 from tests.render_test_support import frame_results, prepared_jobs
 
 
@@ -48,6 +57,242 @@ def _overlay_config() -> OverlayConfig:
         font_path=None,
         font_size=24,
     )
+
+
+@pytest.mark.integration
+def test_default_ffmpeg_runner_extract_frame_preserves_literal_output_name(
+    mock_video_path: Path, tmp_path: Path
+) -> None:
+    output = tmp_path / "shots" / "source%03d.png"
+    output.parent.mkdir()
+    sentinel = output.with_name("source001.png")
+    sentinel.write_bytes(b"sentinel")
+
+    DefaultFFmpegRunner().extract_frame(mock_video_path, 1, output)
+
+    assert sentinel.read_bytes() == b"sentinel"
+    with Image.open(output) as image:
+        assert image.size == (100, 100)
+
+
+@pytest.mark.integration
+def test_default_ffmpeg_runner_rejects_zero_output(mock_video_path: Path, tmp_path: Path) -> None:
+    output = tmp_path / "existing.png"
+    output.write_bytes(b"existing image")
+
+    with pytest.raises(FrameExtractionError, match="produced no image"):
+        DefaultFFmpegRunner().extract_frame(mock_video_path, 99, output)
+
+    assert output.read_bytes() == b"existing image"
+    assert not list(tmp_path.glob(".frame-compare-ffmpeg-*"))
+
+
+@pytest.mark.integration
+def test_ffmpeg_batch_treats_output_ancestor_as_literal(
+    mock_video_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    source = Path(mock_video_path.name)
+    output_dir = Path("shots%03d")
+    runner = DefaultFFmpegRunner()
+    requests = [
+        RenderRequest(
+            source, source, frame, output_dir / f"{frame}.png", None, EncoderSettings(), runner
+        )
+        for frame in (0, 1)
+    ]
+
+    results = render_ffmpeg_batch_detailed(requests)
+
+    for result in results:
+        with Image.open(result.path) as image:
+            assert image.size == (100, 100)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name == "nt", reason="POSIX relative PATH and executable symlink")
+def test_ffmpeg_batch_resolves_relative_path_from_caller(
+    mock_video_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ffmpeg = Path(resolve_executable("ffmpeg")).absolute()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "ffmpeg").symlink_to(ffmpeg)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", raising=False)
+    monkeypatch.setenv("PATH", "bin")
+
+    staging = Path("staging")
+    frames = DefaultFFmpegRunner().extract_frames(mock_video_path, [0, 1], staging)
+
+    assert [frame.source_frame for frame in frames] == [0, 1]
+    for index in range(2):
+        with Image.open(staging / f"{index:09d}.png") as image:
+            assert image.size == (100, 100)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ffprobe SIGINT exit status")
+@pytest.mark.parametrize("interrupt", [True, False], ids=["interrupt", "unrelated_failure"])
+def test_ffprobe_count_handles_child_exit_with_cancellation_pending(
+    tmp_path: Path, require_ffmpeg: None, monkeypatch: pytest.MonkeyPatch, interrupt: bool
+) -> None:
+    returncodes: list[int] = []
+
+    class CountProcess(subprocess.Popen[bytes]):
+        def wait(self, timeout: float | None = None) -> int:
+            if self.returncode is not None:
+                return super().wait(timeout)
+            if interrupt:
+                self.send_signal(signal.SIGINT)
+            # Queue cancellation before the real wait result reaches run_subprocess.
+            # This forces the race without relying on the scheduler or polling interval.
+            try:
+                code = super().wait(timeout=5)
+            finally:
+                if self.stdin is not None:
+                    self.stdin.close()
+            returncodes.append(code)
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            return code
+
+    def start_count(
+        argv: list[str], *, cwd: Path | None, stdout: int, stderr: int, shell: bool
+    ) -> subprocess.Popen[bytes]:
+        return CountProcess(
+            argv,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL if not interrupt else subprocess.PIPE,
+            stdout=stdout,
+            stderr=stderr,
+            shell=shell,
+        )
+
+    monkeypatch.setattr(subproc, "Popen", start_count)
+    runner = DefaultFFmpegRunner()
+    source = Path("pipe:0") if interrupt else tmp_path / "absent.mkv"
+
+    async def run_count() -> None:
+        if interrupt:
+            with pytest.raises(_RunInterrupt):
+                runner.validate_source_frame_count(source, 4, 1)
+        else:
+            with pytest.raises(FrameExtractionError, match="Could not count") as exc:
+                runner.validate_source_frame_count(source, 4, 1)
+            assert isinstance(exc.value.__cause__, subprocess.CalledProcessError)
+        await cancellation_checkpoint()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run_count())
+    assert returncodes == [-signal.SIGINT if interrupt else 1]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_ffmpeg_render_preserves_coded_orientation(
+    tmp_path: Path, require_ffmpeg: None, batch: bool
+) -> None:
+    coded = tmp_path / "coded.mp4"
+    run_subprocess(
+        [
+            "ffmpeg",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=96x64:r=5,drawbox=x=0:y=0:w=28:h=20:color=red:t=fill",
+            "-frames:v",
+            "2",
+            "-c:v",
+            "libx264",
+            str(coded),
+        ],
+        timeout_seconds=10,
+    )
+    tagged = tmp_path / "rotated.mp4"
+    run_subprocess(
+        [
+            "ffmpeg",
+            "-display_rotation",
+            "90",
+            "-i",
+            str(coded),
+            "-c",
+            "copy",
+            str(tagged),
+        ],
+        timeout_seconds=10,
+    )
+    runner = DefaultFFmpegRunner()
+    requests = [
+        RenderRequest(
+            tagged, tagged, frame, tmp_path / f"{frame}.png", None, EncoderSettings(), runner
+        )
+        for frame in (0, 1)
+    ]
+    results = (
+        render_ffmpeg_batch_detailed(requests) if batch else [render_frame_detailed(requests[0])]
+    )
+
+    for result in results:
+        with Image.open(result.path) as image:
+            assert image.size == (96, 64)
+            rgb = image.convert("RGB")
+            landmark = rgb.getpixel((10, 10))
+            background = rgb.getpixel((85, 54))
+            assert isinstance(landmark, tuple) and isinstance(background, tuple)
+            red, green, blue = landmark
+            assert red > 220 and green < 30 and blue < 30
+            assert max(background) < 30
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("frame_nums", [(5,), (1, 5)], ids=["single", "batch"])
+def test_ffmpeg_render_refuses_filtergraph_reconfiguration(
+    tmp_path: Path, require_ffmpeg: None, frame_nums: tuple[int, ...]
+) -> None:
+    for index, (size, frame_count) in enumerate((("96x64", 3), ("128x80", 7))):
+        run_subprocess(
+            [
+                "ffmpeg",
+                "-f",
+                "lavfi",
+                "-i",
+                f"testsrc2=size={size}:rate=5",
+                "-frames:v",
+                str(frame_count),
+                "-c:v",
+                "libx264",
+                "-bf",
+                "0",
+                str(tmp_path / f"segment{index}.mkv"),
+            ],
+            timeout_seconds=10,
+        )
+    playlist = tmp_path / "concat.txt"
+    playlist.write_text("file segment0.mkv\nfile segment1.mkv\n", encoding="utf-8")
+    source = tmp_path / "resized.mkv"
+    run_subprocess(
+        ["ffmpeg", "-f", "concat", "-i", str(playlist), "-c", "copy", str(source)],
+        timeout_seconds=10,
+    )
+    runner = DefaultFFmpegRunner()
+    requests = [
+        RenderRequest(
+            source, source, frame, tmp_path / f"{frame}.png", None, EncoderSettings(), runner
+        )
+        for frame in frame_nums
+    ]
+
+    with pytest.raises(FrameExtractionError, match="reconfigured its filter graph") as exc:
+        if len(requests) == 1:
+            render_frame_detailed(requests[0])
+        else:
+            render_ffmpeg_batch_detailed(requests)
+
+    assert exc.value.context.hint == "Use the VapourSynth renderer"
+    assert not any(request.output_path.exists() for request in requests)
 
 
 @pytest.mark.integration
@@ -131,7 +376,6 @@ def test_ffmpeg_geometry_preserves_exact_pixels(
     crop_origin: tuple[int, int],
     pad_origin: tuple[int, int],
 ) -> None:
-    from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
     from frame_compare.render.geometry import (
         GeometryMargins,
         GeometryRect,
