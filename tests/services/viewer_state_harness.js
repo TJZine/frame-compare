@@ -472,6 +472,49 @@ function keyboardEvent(key) {
     };
 }
 
+async function assertCachedFitGeometryPreservesPan(mode) {
+    const { viewer, window, deferredImages } = loadViewer({ clipCount: 2 });
+    const { stage, sizerImg, leftImg, rightImg } = viewer.dom;
+    stage.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600 });
+    const firstSrc = viewer.state.data.frames[0].images[0].src;
+    const secondSrc = viewer.state.data.frames[1].images[0].src;
+    for (const image of [sizerImg, leftImg, rightImg]) {
+        image.complete = true;
+        image.naturalWidth = image.naturalHeight = 2000;
+    }
+    let sizerSrc = firstSrc;
+    Object.defineProperty(sizerImg, 'src', {
+        get: () => sizerSrc,
+        set: src => {
+            sizerSrc = src;
+            // A cached sizing image can expose the new dimensions synchronously.
+            sizerImg.naturalWidth = sizerImg.naturalHeight = src === secondSrc ? 1000 : 2000;
+        },
+    });
+
+    viewer.state.mode = 'slider';
+    viewer.updateImages();
+    viewer.viewport.setFitMode('height');
+    assert.equal(viewer.state.zoom, 0.3);
+    viewer.viewport.setPan(-100, 0);
+    assert.equal(viewer.state.panX, -100);
+
+    viewer.state.mode = mode;
+    viewer.state.currentFrameIdx = 1;
+    viewer.updateImages();
+    if (mode === 'diff') {
+        assert.equal(sizerImg.src, firstSrc);
+        assert.equal(viewer.state.panX, -100);
+        deferredImages.forEach(image => image.trigger('load'));
+        await new Promise(resolve => setImmediate(resolve));
+        window.rafQueue.splice(0).forEach(callback => callback?.());
+    }
+
+    assert.equal(sizerImg.src, secondSrc);
+    assert.equal(viewer.state.panX, -100, `${mode}: pan still fits the new geometry`);
+    assert.equal(viewer.state.zoom, 0.6);
+}
+
 async function assertDeferredDiffCannotCommitAfterGridNavigation() {
     const { element: makeElement, viewer, window, deferredImages } = loadViewer({ clipCount: 2 });
     viewer.dom.currentFrameLabel = makeElement();
@@ -660,7 +703,7 @@ async function assertMainImageUnavailableState() {
 
     {
         const { viewer } = loadViewer({ clipCount: 2 });
-        viewer.gridView = { render() {} };
+        viewer.gridView = { render() {}, syncViewport() {} };
         viewer.state.mode = 'slider';
         viewer.updateImages();
         const staleError = viewer.dom.leftImg.listenerCallbacks('error')[0];
@@ -674,7 +717,7 @@ async function assertMainImageUnavailableState() {
 
     {
         const { viewer, deferredImages, window } = loadViewer({ clipCount: 2 });
-        viewer.gridView = { render() {} };
+        viewer.gridView = { render() {}, syncViewport() {} };
         viewer.state.mode = 'slider';
         viewer.updateImages();
         const staleError = viewer.dom.leftImg.listenerCallbacks('error')[0];
@@ -737,8 +780,11 @@ for (const fixture of [loadViewer({clipCount: 2}), loadViewer({clipCount: 2})]) 
 function blinkGesturePause() {
 // Exercise the production pointer handlers and interval callback, including cancellation.
 for (const pauseCause of ['running', 'explicit', 'reduced-motion']) {
-    for (const gesture of ['pan', 'pinch', 'lens', 'lens-pan', 'lens-pinch']) {
-        for (const ending of ['pointerup', 'pointercancel']) {
+    for (const gesture of ['pan', 'pinch', 'lens', 'lens-pan', 'lens-pinch', 'lens-grip']) {
+        const endings = gesture === 'lens-grip'
+            ? ['pointerup', 'pointercancel', 'lostpointercapture', 'disable']
+            : ['pointerup', 'pointercancel'];
+        for (const ending of endings) {
             const fixture = loadViewer({ clipCount: 2 });
             const { viewer } = fixture;
             fixture.window.addEventListener = () => {};
@@ -750,12 +796,19 @@ for (const pauseCause of ['running', 'explicit', 'reduced-motion']) {
             if (pauseCause === 'reduced-motion') viewer.reducedMotionActive = () => true;
             viewer.setMode('blink');
             if (pauseCause === 'explicit') viewer.setBlinkPaused(true);
+            const grip = fixture.element();
             if (gesture.startsWith('lens')) {
-                const lensElement = { ...fixture.element(), style: { setProperty() {} } };
+                const lensElement = {
+                    ...fixture.element(),
+                    getBoundingClientRect: () => ({ left: 0, top: 0, width: 240, height: 240 }),
+                };
                 fixture.document.getElementById = id => id === 'rv-lens' ? lensElement : null;
-                fixture.document.querySelector = () => null;
+                fixture.document.querySelector = selector => (
+                    selector === '[data-lens-drag-handle]' ? grip : null
+                );
                 fixture.document.querySelectorAll = () => [];
                 viewer.lens = fixture.lensFactory.create(viewer);
+                viewer.lens.bind();
                 viewer.lens.state.report.enabled = true;
                 for (const image of [viewer.dom.leftImg, viewer.dom.rightImg]) {
                     image.getBoundingClientRect = viewer.dom.stage.getBoundingClientRect;
@@ -763,20 +816,22 @@ for (const pauseCause of ['running', 'explicit', 'reduced-motion']) {
             }
             const event = {
                 pointerId: 1, pointerType: gesture === 'pan' ? 'mouse' : 'touch',
-                button: 0, clientX: 100, clientY: 100, preventDefault() {},
+                button: 0, clientX: 100, clientY: 100, preventDefault() {}, stopPropagation() {},
             };
-            viewer.dom.stage.dispatch('pointerdown', { ...event });
+            const target = gesture === 'lens-grip' ? grip : viewer.dom.stage;
+            target.dispatch('pointerdown', { ...event });
             if (gesture.endsWith('pinch')) viewer.dom.stage.dispatch('pointerdown', { ...event, pointerId: 2, clientX: 200 });
             if (gesture === 'lens-pan') viewer.dom.stage.dispatch('pointermove', { ...event, clientX: 120 });
             if (gesture.endsWith('pinch')) assert.equal(viewer.pointerInteraction.pinchActive, true);
             else if (gesture === 'lens') assert.equal(viewer.pointerInteraction.lensPointHandled, true);
-            else assert.equal(viewer.pointerInteraction.isPanning, true);
+            else if (gesture !== 'lens-grip') assert.equal(viewer.pointerInteraction.isPanning, true);
             const during = viewer.state.activeClipIdx;
             viewer.state.blinkInterval.callback();
             assert.equal(viewer.state.activeClipIdx, during, `${pauseCause}/${gesture}: suspended timer`);
             assert.equal(viewer.dom.blinkStatus.textContent, 'Blink paused');
             assert.equal(viewer.dom.btnBlinkPause.disabled, true);
-            viewer.dom.stage.dispatch(ending, { ...event });
+            if (ending === 'disable') viewer.lens.setEnabled(false);
+            else target.dispatch(ending, { ...event });
             if (gesture.endsWith('pinch')) viewer.dom.stage.dispatch(ending, { ...event, pointerId: 2, clientX: 200 });
             if (gesture.startsWith('lens')) assert.equal(viewer.lens.state.touchPending, null);
             const before = viewer.state.activeClipIdx;
@@ -815,6 +870,12 @@ function viewerStorageKey() {
     assert.equal(
         format.clipAccessibleName(clip),
         'Primary release identity — Exact.File.Name.mkv',
+    );
+    clip.display.filename = 'SRC \u202eCBA\u202c.mkv';
+    assert.equal(format.clipFilename(clip), 'SRC [U+202E]CBA[U+202C].mkv');
+    assert.equal(
+        format.clipAccessibleName(clip),
+        'Primary release identity — SRC [U+202E]CBA[U+202C].mkv',
     );
     assert.equal(format.stableClipRole(0, viewer.referenceClipIndex()), 'Reference');
     assert.equal(format.stableClipRole(1, viewer.referenceClipIndex()), 'Comparison');
@@ -902,6 +963,30 @@ function malformedAlignmentRestore() {
     assert.equal(malformedStorage.viewer.viewport.currentAlignment().alignmentPreset, 'custom');
     assert.equal(malformedStorage.viewer.viewport.currentAlignment().alignX, 6);
     assert.equal(malformedStorage.viewer.viewport.currentAlignment().alignY, -7);
+
+    const invalidNumbers = loadViewer({
+        clipCount: 4,
+        savedState: {
+            fitMode: 'custom',
+            zoom: { toString: 0 },
+            panX: [50],
+            panY: '75',
+            revealPercent: null,
+            leftClipIdx: { toString: 0 },
+            rightClipIdx: '2',
+            activeClipIdx: [3],
+            pairAlignments: {
+                '0:1': { alignmentPreset: 'custom', alignX: { toString: 0 }, alignY: true },
+            },
+        },
+    }).viewer;
+    const state = invalidNumbers.state;
+    assert.deepEqual([state.zoom, state.panX, state.panY, state.revealPercent], [1, 0, 0, 50]);
+    assert.deepEqual([state.leftClipIdx, state.rightClipIdx, state.activeClipIdx], [0, 1, 0]);
+    assert.deepEqual(
+        [invalidNumbers.viewport.currentAlignment().alignX, invalidNumbers.viewport.currentAlignment().alignY],
+        [0, 0],
+    );
 }
 
 function invalidSelectionRestore() {
@@ -910,7 +995,7 @@ function invalidSelectionRestore() {
         savedState: {
             mode: 'diff',
             currentFrameIdx: 99,
-            leftClipIdx: 3,
+            leftClipIdx: 1e21,
             rightClipIdx: 9,
             activeClipIdx: 9,
             pairAlignments: {
@@ -1486,15 +1571,25 @@ function pairSwitchFourClip() {
 }
 
 function alignmentStatus() {
-    const { viewer } = loadViewer({ clipCount: 4 });
+    const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
+    viewer.bindAlignmentEvents();
+    viewer.inspector.bind();
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
+    viewer.swapPairClips();
+    viewer.viewport.setManualAlignment(5, -2);
+    viewer.swapPairClips();
 
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
-    viewer.viewport.setAlignmentPreset('left-1');
-    assert.equal(viewer.viewport.currentAlignment().alignX, -1);
-    assert.equal(viewer.viewport.currentAlignment().alignY, 0);
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: preset left 1px');
-    viewer.viewport.setAlignmentPreset('none');
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
+    for (const reset of [viewer.dom.btnAlignmentReset, viewer.dom.btnInspectorResetCurrentAlign]) {
+        viewer.viewport.setAlignmentPreset('left-1');
+        assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: preset left 1px');
+        viewer.viewport.setRawAlignmentInput('x', '3.');
+        reset.dispatch('click');
+        assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
+        assert.equal(viewer.state.rawAlignX, null);
+        assert.deepEqual(JSON.parse(storage.get(storageKey)).pairAlignments, {
+            '1:0': { alignmentPreset: 'custom', alignX: 5, alignY: -2 },
+        });
+    }
 }
 
 function singleModeAlignment() {
@@ -1607,6 +1702,8 @@ function lensPanIndependence() {
     viewer.pointerInteraction = {
         isPanning: true,
         activePointerId: 7,
+        panStartX: 10,
+        panStartY: 20,
         lastPanX: 10,
         lastPanY: 20,
         panMoved: false,
@@ -1646,6 +1743,14 @@ function lensPanIndependence() {
     };
     viewer.viewport.stopPointerInteraction({ pointerId: 8, clientX: 20, clientY: 30 });
     assert.equal(cycleCount, 0);
+
+    viewer.viewport.startPanFromPointer({ pointerId: 9, clientX: 20, clientY: 30 });
+    for (let x = 21; x <= 30; x += 1) {
+        viewer.viewport.updatePanFromPointer({ pointerId: 9, clientX: x, clientY: 30 });
+    }
+    assert.equal(viewer.state.panX, 19);
+    viewer.viewport.stopPointerInteraction({ pointerId: 9, clientX: 30, clientY: 30 });
+    assert.equal(cycleCount, 0, 'a slow drag must not switch the Single source');
 }
 
 function lensLayoutRefresh() {
@@ -2072,6 +2177,8 @@ module.exports = {
     gridShortcut,
     proximityStateMachine,
     paletteProximityWiring,
+    cachedSliderFitGeometryPreservesPan: () => assertCachedFitGeometryPreservesPan('slider'),
+    cachedDiffFitGeometryPreservesPan: () => assertCachedFitGeometryPreservesPan('diff'),
     deferredDiffGridNavigation: assertDeferredDiffCannotCommitAfterGridNavigation,
     mainImageUnavailable: assertMainImageUnavailableState,
 };

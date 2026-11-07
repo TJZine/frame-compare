@@ -1184,7 +1184,7 @@ provenance, shared formatters, stable roles, and set-level collision handling on
 report, joining profile segments with `·` (slow.pics image names keep the `|`
 separator; burned-in screenshot text is the clip label and does not use release
 descriptors). Report controls consume control or micro names,
-while Inspector/info and ARIA surfaces consume primary identity and exact filename.
+while Inspector/info and ARIA surfaces use the primary identity and the displayed basename.
 Per-clip presentation contains applied tonemap facts; the rendering summary derives a
 shared implementation/algorithm/control projection, excluding clip-specific peaks and
 causes. Identity includes applied output facts and excludes requested settings and
@@ -1193,14 +1193,18 @@ tonemap speed, and frame policy participate in applied report identity; reports 
 when fast mode uses the default peak because no HDR peak metadata was available.
 Stage labels show the control name plus muted resolution and size, adding an
 HDR/SDR word only when the name has none; toolbar selects cap at `20rem` with an
-end ellipsis and carry the full name on each option. Canonical clip labels continue
-to own image mappings, geometry, browser state, and review JSON; payload identity
-shaping explicitly omits display profiles.
+end ellipsis and carry the full name on each option. Canonical clip labels key
+geometry and contribute to report identity. Frame image slots are ordered by clip
+index, viewport offsets are keyed by directional index pairs, and review records
+use report-scoped `clip:<ordinal>` IDs. Report display names show filename-derived
+bidirectional formatting controls as code points before resolving display-name
+collisions. The payload stores the exact basename, and the viewer displays any
+formatting controls in it as code points. Report identity omits the display profiles.
 
 The Clips inspector and Report Information share one clip-card design built from
 those profiles: stable Reference/Comparison role headers (plus shown left/right/shown/not
 shown placement in the Clips tab), a DV HDR/HDR/SDR signal badge, the standard name,
-the exact filename, and Picture/Length/Size rows (plus Signal in the Clips tab, plus
+the basename, and Picture/Length/Size rows (plus Signal in the Clips tab, plus
 FPS/Presentation rows in the Clips tab only for values that differ between clips,
 plus an FPS row in Report Information only when fps differs). An `All sources:`
 line states the fps and presentation values identical across every clip — fps only in
@@ -1208,13 +1212,13 @@ Report Information. The Frame tab shows a `number · category` identity (or the 
 own label), a `position / count in filter` row, a Detail row only for non-default
 notes, and an all-sources table (compact name, own frame number, picture type, shown
 marks for visible sources). Primary and informative release identities wrap normally,
-exact filenames and long technical values may wrap anywhere, and drawer/panel overflow
+basenames and long technical values may wrap anywhere, and drawer/panel overflow
 is constrained locally rather than masked at the document boundary.
 Visible Single, Slider, Diff, Blink, and Grid source labels reuse the payload's canonical
 container byte size through the shared IEC formatter; hiding source labels hides that
 size too, and no report payload or probing owner is duplicated.
 Stage labels participate directly in accessible text, while Grid cell names retain
-primary identity and exact filename and append the same size only while source labels
+primary identity and displayed basename and append the same size only while source labels
 are shown.
 
 The ordinary report artifact does not claim presentation blindness. Source identity
@@ -1246,9 +1250,10 @@ double-click input cannot mutate the viewport. Activation seeds a transient
 center point and retains the stable palette Lens group, which owns zoom and
 stage-clamped settings. The display-only lens body has no titlebar or controls.
 It carries a single caption row under the magnified image showing the compact
-source name in the UI face, wrapping within the lens width while the lens
-window grows to fit (two lines in Diff mode: the left source name, then `↔`
-and the right source name; the cell source under the pointer in Grid mode); the
+source name in the UI face, wrapping within the lens width. On short stages the
+image area shrinks to leave room for the border and caption. Longer captions
+scroll within the space set aside for them, including with the arrow keys when
+focused. Diff mode shows the left source name, then `↔` and the right source name. Grid mode shows the cell source under the pointer. The
 caption stays hidden until the Caption preference is turned on, while a
 loading/unavailable status notice covers the lens image when it cannot be
 shown. The lens keeps its full-name accessible description, without a source
@@ -1299,8 +1304,12 @@ before focus moves into the drawer.
 normalization, fit/reset/reveal math, transient pointer/pinch mechanics, directional
 pair-alignment normalization and offsets, and Lens/Grid viewport refreshes.
 Outside Grid, actual size is the loaded base image's natural dimensions in CSS
-pixels, independent of DPR; fit zoom and pair offsets use that baseline. Diff lens
-images share the stage comparison transform and offset, while Single and Slider
+pixels, independent of DPR. Fit zoom and pair offsets use that baseline, while pan
+bounds account for both images and the right image's offset in pair modes. Fit
+recalculates when image geometry commits or the stage resizes, including after
+filmstrip or Inspector changes.
+Restored custom zoom applies to the canvas and controls, and pan is clamped once
+image geometry is available. Diff lens images share the stage comparison transform and offset, while Single and Slider
 magnify each native source. Viewport preferences use the report-scoped
 `viewport-v2` key; older viewport state is ignored.
 `currentAlignment()` derives a normalized copy from the selected directional pair's

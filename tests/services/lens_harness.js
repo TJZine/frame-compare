@@ -343,11 +343,11 @@ async function lensContracts() {
     );
     assert.deepEqual(JSON.parse(JSON.stringify(mapped)), { u: 0.5, v: 0.25 });
     assert.equal(Lens.normalizedPoint(geometryElement({ left: 0, top: 0, width: 0, height: 0 }), 0, 0), null);
-    const splitGeometry = Lens.lensImageGeometry(mapped, 200, 100, 4, 240, 120);
-    assert.deepEqual(JSON.parse(JSON.stringify(splitGeometry)), {
+    const fullWindowGeometry = Lens.lensImageGeometry(mapped, 200, 100, 4, 240);
+    assert.deepEqual(JSON.parse(JSON.stringify(fullWindowGeometry)), {
         width: 800,
         height: 400,
-        left: -340,
+        left: -280,
         top: 20,
     });
     assert.equal(Lens.captionCharacterCapacity, undefined);
@@ -568,7 +568,7 @@ async function lensContracts() {
         JSON.parse(JSON.stringify(controller.state.report.parkedPosition)),
         normalizedPositionBeforeResize,
     );
-    assert.equal(environment.elements['rv-lens'].style.values['--lens-size'], '204px');
+    assert.equal(environment.elements['rv-lens'].style.values['--lens-size'], '202px');
     assert.equal(
         environment.selectors['[data-lens-identity="active"]'].textContent,
         'Active_camera_color_managed_comparison_002_master.exr',

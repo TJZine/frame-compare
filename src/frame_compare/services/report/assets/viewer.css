@@ -927,7 +927,7 @@ body:fullscreen .rv-inspector {
     --lens-size: 240px;
     position: absolute;
     z-index: 17;
-    width: var(--lens-size);
+    width: var(--lens-window-width, 242px);
     overflow: visible;
     border: 1px solid var(--border-hover);
     border-radius: 4px;
@@ -942,6 +942,7 @@ body:fullscreen .rv-inspector {
     position: relative;
     width: var(--lens-size);
     height: var(--lens-size);
+    margin-inline: auto;
     overflow: hidden;
     background: #000;
     cursor: default;
@@ -1008,7 +1009,8 @@ body:fullscreen .rv-inspector {
 }
 
 .rv-lens-caption {
-    max-width: var(--lens-size);
+    max-height: var(--lens-caption-max-height, none);
+    overflow: auto;
     padding: 3px 5px;
     border-top: 1px solid var(--border);
     background: var(--bg-floating);
@@ -1016,6 +1018,16 @@ body:fullscreen .rv-inspector {
     font-family: var(--font-sans);
     font-size: var(--text-xs);
     overflow-wrap: anywhere;
+}
+
+.rv-lens-caption--scrollable {
+    pointer-events: auto;
+    touch-action: pan-y;
+}
+
+.rv-lens-caption--scrollable:focus-visible {
+    outline: 2px solid var(--text-primary);
+    outline-offset: -2px;
 }
 
 .rv-lens-caption[hidden] {
