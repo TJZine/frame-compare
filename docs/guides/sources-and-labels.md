@@ -97,8 +97,9 @@ collisions deterministically.
 
 The report derives collision-safe control and compact labels from the
 prepared release identity while retaining the canonical label for keys and mappings.
-The report **Clips** inspector keeps the exact filename available, and an explicit source
-label remains the primary report presentation name.
+The report keeps the exact basename in its embedded metadata. The **Clips** inspector
+shows that basename with any bidirectional formatting controls rendered as code points,
+such as `[U+202E]`. An explicit source label remains the primary report presentation name.
 
 None of these presentation choices changes baked overlays, local screenshot names,
 report mappings, or the slow.pics collection title.

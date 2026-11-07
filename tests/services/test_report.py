@@ -39,6 +39,7 @@ from frame_compare.utils.media_facts import (
     SourceSignalFacts,
 )
 from frame_compare.vs.types import AppliedTonemap, TonemapSettings
+from tests.services.report_viewer_contracts import SelectParser
 from tests.tonemap_test_support import libplacebo_tonemap
 
 
@@ -279,6 +280,47 @@ def test_payload_rejects_frame_detail_cardinality(report_data: ReportData, tmp_p
             ReportConfig(),
             report_dir=tmp_path,
         )
+
+
+def test_report_shows_bidi_formatting_in_filename_without_changing_identity(
+    tmp_path: Path, report_data: ReportData
+) -> None:
+    filename = "מקור \u202eCBA\u202c.mkv"
+    visible_filename = "מקור [U+202E]CBA[U+202C].mkv"
+    original = report_data.clips[0]
+    assert original.label is not None
+    clip = replace(original, name=filename, label=filename, path=tmp_path / filename)
+    geometry_by_label = dict(report_data.rendering.geometry_by_label)
+    geometry_by_label[filename] = geometry_by_label.pop(original.label)
+    report = replace(
+        report_data,
+        clips=[clip, report_data.clips[1]],
+        rendering=replace(report_data.rendering, geometry_by_label=geometry_by_label),
+        metadata=None,
+    )
+    baseline = build_report_payload(report, ReportConfig(), report_dir=tmp_path)
+    report.clips[0] = replace(
+        clip,
+        display=ReportClipDisplayInfo(
+            primary=filename, release=filename, control=filename, micro=filename, filename=filename
+        ),
+    )
+    output = generate_report(report, ReportConfig(), output_path=tmp_path / "report.html")
+    payload = _json_payload_from_report(output)
+    assert payload["clips"][0]["display"]["filename"] == filename
+    assert payload["title"] == visible_filename
+    for profile in ("primary", "release", "control", "micro"):
+        assert payload["clips"][0]["display"][profile] == visible_filename
+    assert payload["clips"][0]["name"] == payload["clips"][0]["label"] == filename
+    assert payload["frames"][0]["images"][0]["clip"] == filename
+    assert payload["report_id"] == baseline["report_id"]
+    html = output.read_text(encoding="utf-8")
+    assert f"<title>{visible_filename} - Frame Compare Report</title>" in html
+    selects = SelectParser()
+    selects.feed(html)
+    assert selects.selects["left-select"].options[0].attrs["title"] == (
+        f"{visible_filename} — {visible_filename}"
+    )
 
 
 def test_report_id_identity_excludes_paths_and_timestamps(

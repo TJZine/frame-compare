@@ -238,7 +238,8 @@ validation compares effective FPS values after explicit overrides and after
 `match_fps = "majority"` matching. Explicit per-source `effective_fps` values
 take precedence over `match_fps`.
 
-Explicit labels are trimmed and control-free. Derived labels replace control
+Explicit labels are trimmed. They reject control characters and bidirectional
+formatting controls U+202A–U+202E and U+2066–U+2069. Derived labels replace control
 characters with spaces and collapse whitespace. Duplicate explicit labels fail
 before probing, metadata prefetch, run-folder reservation, rendering, or HTTP
 work. Derived collisions are qualified deterministically with source stems and
@@ -1090,10 +1091,12 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 
 - Newly generated standalone reports use payload version `1.3`. Each clip carries a
   presentation-only `display` object with full primary identity, release descriptor,
-  ordinary-control label, constrained micro label, and exact filename. These strings
-  are assembled once from prepared release identity and explicit-label state. They do
-  not change canonical clip labels, report image/geometry mappings, review JSON keys,
-  or semantic report identity. The top-level frame
+  ordinary-control label, constrained micro label, and the exact basename. Display
+  names are assembled from prepared release identity and explicit-label state.
+  Filename-derived bidirectional formatting controls appear as code points such as
+  `[U+202E]` in the UI. Frame Compare qualifies collisions between the resulting
+  display names while preserving explicit labels, canonical clip labels, report
+  image and geometry mappings, review JSON keys, and semantic report identity. The top-level frame
   number is the common comparison-domain frame; every image separately records its
   mapped untrimmed source frame, exact-frame picture type, and selected-frame Dolby
   Vision RPU presence when available.

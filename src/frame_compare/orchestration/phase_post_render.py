@@ -12,6 +12,7 @@ import structlog
 from frame_compare.analysis.types import SelectionDetail
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.text_validation import show_bidi_formatting_controls
 from frame_compare.errors import JSONValue
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.execution_types import (
@@ -290,31 +291,35 @@ def run_report_phase(
     clips = [ctx.reference, *ctx.comparisons]
     roles = [clip_role(index) for index in range(len(clips))]
     protected = [clip.label_is_explicit for clip in clips]
+
+    def distinct_report_names(names: list[str]) -> list[str]:
+        return unique_presentation_names(
+            [show_bidi_formatting_controls(name) for name in names],
+            roles=roles,
+            protected=protected,
+        )
+
     releases = [
         format_release_descriptor(clip.release_identity, separator=" · ")
         if clip.release_identity
         else ""
         for clip in clips
     ]
-    primaries = unique_presentation_names(
+    primaries = distinct_report_names(
         [
             clip.label
             if clip.label_is_explicit or clip.release_identity is None
             else format_compact_identity(clip.release_identity, separator=" · ") or clip.label
             for clip in clips
-        ],
-        roles=roles,
-        protected=protected,
+        ]
     )
-    controls = unique_presentation_names(
+    controls = distinct_report_names(
         [
             clip.label if clip.label_is_explicit else releases[index] or primaries[index]
             for index, clip in enumerate(clips)
-        ],
-        roles=roles,
-        protected=protected,
+        ]
     )
-    micros = unique_presentation_names(
+    micros = distinct_report_names(
         [
             clip.label
             if clip.label_is_explicit
@@ -325,9 +330,7 @@ def run_report_phase(
             )
             or controls[index]
             for index, clip in enumerate(clips)
-        ],
-        roles=roles,
-        protected=protected,
+        ]
     )
     clip_info: list[ClipInfo] = []
     for clip_index, (clip, rendered_clip) in enumerate(zip(clips, render.clips, strict=True)):

@@ -34,7 +34,7 @@ from frame_compare.config.schema_enums import (
     VsScreenshotWriter,
 )
 from frame_compare.config.slowpics import validate_slowpics_title_template
-from frame_compare.config.text_validation import reject_control_characters
+from frame_compare.config.text_validation import reject_control_characters, reject_label_controls
 
 _EFFECTIVE_FPS_PATTERN = re.compile(r"^[0-9]+/[0-9]+$")
 
@@ -153,7 +153,7 @@ class SourceOverrideConfig(BaseModel):
     def validate_label(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        reject_control_characters(value, field_name="label")
+        reject_label_controls(value, field_name="label")
         normalized = value.strip()
         if not normalized:
             raise ValueError("label must not be empty")

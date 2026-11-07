@@ -13,6 +13,7 @@ from frame_compare.analysis.types import (
     SelectionBreakdown,
     SelectionDetail,
 )
+from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration import phase_post_render
 from frame_compare.orchestration.execution import build_phases_after_align
 from frame_compare.orchestration.execution_types import (
@@ -23,6 +24,7 @@ from frame_compare.orchestration.execution_types import (
     RunArtifacts,
 )
 from frame_compare.orchestration.phases import execute_phases
+from frame_compare.orchestration.source_labels import resolve_source_label_details
 from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
@@ -52,6 +54,7 @@ from tests.orchestration.phase_task_helpers import (
 )
 from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
+from tests.services.report_viewer_contracts import SelectParser, script_payload
 from tests.tonemap_test_support import libplacebo_tonemap
 
 
@@ -341,6 +344,56 @@ def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
     ]
     for upload_clip in upload_clips:
         assert " · " not in upload_clip.image_name
+
+
+def test_report_resolves_visible_bidi_collisions_in_stem_mode(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    source = ctx.workspace.input_dir / "SRC \u202eABC.mkv"
+    explicit = "SRC [U+202E]ABC"
+    labels = resolve_source_label_details(
+        ordered_paths=[ctx.reference.path, source],
+        overrides_by_path={ctx.reference.path: SourceOverrideConfig(label=explicit)},
+        label_mode=ctx.config.sources.label_mode,
+        label_parser=ctx.config.sources.label_parser,
+    )
+    assert ctx.config.sources.label_mode == "stem"
+    derived = labels[source]
+    assert derived.value == source.stem
+    ctx.reference = replace(
+        ctx.reference,
+        label=labels[ctx.reference.path].value,
+        label_is_explicit=labels[ctx.reference.path].explicit,
+    )
+    ctx.comparisons = [_clip(source, label=derived.value, label_is_explicit=derived.explicit)]
+    assert ctx.workspace.run_dir is not None
+    screenshot_dir = ctx.workspace.run_dir / "screenshots"
+    screenshots = {
+        explicit: [screenshot_dir / "left.png"],
+        derived.value: [screenshot_dir / "right.png"],
+    }
+    for clip in [ctx.reference, *ctx.comparisons]:
+        _RenderRunner().extract_frame(clip.path, 5, screenshots[clip.label][0])
+    render = _render_artifacts(screenshots_by_label=screenshots, screenshot_dir=screenshot_dir)
+    output = phase_post_render.run_report_phase(
+        ctx, frames=[5], render=render, metadata=None, slowpics_url=None
+    )
+    assert output.report_path is not None
+    html = output.report_path.read_text(encoding="utf-8")
+    payload = script_payload(html)
+    reference, comparison = payload["clips"]
+    for profile in ("primary", "control", "micro"):
+        assert reference["display"][profile] == explicit
+        assert comparison["display"][profile] == f"Comparison 1 | {explicit}"
+
+    assert reference["label"] == explicit
+    assert comparison["label"] == source.stem
+    assert set(payload["rendering"]["geometry_by_label"]) == {explicit, source.stem}
+    assert comparison["display"]["filename"] == source.name
+    selects = SelectParser()
+    selects.feed(html)
+    comparison_option = selects.selects["right-select"].options[1]
+    assert comparison_option.text == f"Comparison 1 | {explicit}"
+    assert comparison_option.attrs["title"] == f"Comparison 1 | {explicit} — {explicit}.mkv"
 
 
 def test_run_report_phase_rejects_short_artifacts_before_indexing(tmp_path: Path) -> None:

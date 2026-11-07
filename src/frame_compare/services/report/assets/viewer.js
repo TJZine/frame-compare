@@ -591,6 +591,8 @@ const ReportViewer = {
             isDragging: false,
             isPanning: false,
             activePointerId: null,
+            panStartX: 0,
+            panStartY: 0,
             lastPanX: 0,
             lastPanY: 0,
             panMoved: false,
@@ -617,7 +619,9 @@ const ReportViewer = {
         });
         this.bindRadioGroup(this.dom.fitBtns, btn => this.viewport.setFitMode(btn.dataset.fit));
         this.dom.sizerImg.addEventListener('load', () => this.viewport.applyFitMode());
-        window.addEventListener('resize', () => this.viewport.applyFitMode());
+        if (typeof ResizeObserver === 'function') {
+            new ResizeObserver(() => this.viewport.applyFitMode()).observe(this.dom.stage);
+        }
         document.addEventListener('fullscreenchange', () => {
             this.viewport.applyFitMode();
             this.updateFullscreenButton();
@@ -778,7 +782,7 @@ const ReportViewer = {
             e.preventDefault();
             this.viewport.commitRawAlignmentInput('y');
         });
-        this.dom.btnAlignmentReset.addEventListener('click', () => this.viewport.setAlignmentPreset('none'));
+        this.dom.btnAlignmentReset.addEventListener('click', () => this.resetCurrentPairAlignment());
 
         this.dom.btnAlignToggle.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -937,7 +941,7 @@ const ReportViewer = {
         const count = this.clipCount();
         if (count <= 0) return 0;
 
-        const idx = parseInt(value);
+        const idx = typeof value === 'number' ? value : parseInt(value);
         const fallbackIdx = Number.isInteger(fallback) ? fallback : 0;
         if (Number.isInteger(idx) && idx >= 0 && idx < count) return idx;
         if (fallbackIdx >= 0 && fallbackIdx < count) return fallbackIdx;
@@ -1033,7 +1037,10 @@ const ReportViewer = {
         if (['actual', 'width', 'height', 'custom'].includes(saved.fitMode)) {
             this.state.fitMode = saved.fitMode;
         }
-        this.state.activeClipIdx = this.clipIndexOrDefault(saved.activeClipIdx, this.state.activeClipIdx);
+        this.state.activeClipIdx = this.clipIndexOrDefault(
+            Number.isInteger(saved.activeClipIdx) ? saved.activeClipIdx : undefined,
+            this.state.activeClipIdx,
+        );
         this.state.zoom = this.viewport.clampZoom(saved.zoom);
         this.state.panX = this.numberOrDefault(saved.panX, 0);
         this.state.panY = this.numberOrDefault(saved.panY, 0);
@@ -1066,7 +1073,11 @@ const ReportViewer = {
         ) {
             this.state.currentFrameIdx = saved.currentFrameIdx;
         }
-        this.selectPair({ mode, left: saved.leftClipIdx, right: saved.rightClipIdx }, { render: false });
+        this.selectPair({
+            mode,
+            left: Number.isInteger(saved.leftClipIdx) ? saved.leftClipIdx : undefined,
+            right: Number.isInteger(saved.rightClipIdx) ? saved.rightClipIdx : undefined,
+        }, { render: false });
         this.state.pairAlignments = this.viewport.normalizedPairAlignments(saved.pairAlignments);
         this.viewport.clearRawAlignmentInputs();
         this.normalizeCurrentFrameForFilter();
@@ -1114,8 +1125,7 @@ const ReportViewer = {
     },
 
     numberOrDefault(value, fallback) {
-        const numberValue = Number(value);
-        return Number.isFinite(numberValue) ? numberValue : fallback;
+        return Number.isFinite(value) ? value : fallback;
     },
 
     hasFilmstripThumbnails() {
@@ -1314,9 +1324,10 @@ const ReportViewer = {
 
     blinkGestureActive() {
         const pointer = this.pointerInteraction;
-        return Boolean(pointer && (
-            pointer.isPanning || pointer.pinchActive || pointer.lensPointHandled
-        ));
+        return Boolean(
+            pointer?.isPanning || pointer?.pinchActive || pointer?.lensPointHandled
+            || this.lens?.isDraggingGrip?.()
+        );
     },
 
     isBlinkPaused() {
@@ -1804,7 +1815,7 @@ const ReportViewer = {
         if (['INPUT', 'SELECT', 'BUTTON', 'TEXTAREA'].includes(tagName)) return true;
 
         const closestEditable = target.closest?.(
-            'input, select, button, textarea, [contenteditable=""], [contenteditable="true"]'
+            'input, select, button, textarea, [contenteditable=""], [contenteditable="true"], .rv-lens-caption--scrollable'
         );
         return Boolean(closestEditable);
     },
@@ -1967,6 +1978,7 @@ const ReportViewer = {
             isBlink && this.state.activeClipIdx === this.state.rightClipIdx
         );
         this.refreshMainImageAvailability();
+        this.viewport.applyFitMode();
         this.lens?.sync();
     },
 
@@ -2065,7 +2077,7 @@ const ReportViewer = {
         });
         this.gridView?.clear();
         this.lens?.clearTransient?.();
-        if (this.dom.sizerImg) this.dom.sizerImg.src = EMPTY_IMAGE_SRC;
+        this.dom.sizerImg?.removeAttribute('src');
         if (this.dom.leftImg) {
             this.dom.leftImg.src = EMPTY_IMAGE_SRC;
             this.dom.leftImg.alt = '';
@@ -2106,11 +2118,10 @@ const ReportViewer = {
         this.updatePaletteOrientation();
         this.updateBlinkControls();
         this.updateInspectorData();
-        this.updateImages();
         this.viewport.updateSlider();
-        this.viewport.applyFitMode();
-        this.viewport.applyAlignment();
-        this.viewport.applyPan();
+        this.viewport.applyAlignment({ updateViewport: false });
+        this.updateImages();
+        if (this.state.mode === 'grid') this.viewport.applyFitMode();
 
         Array.from(this.dom.filmstrip.children).forEach((el, idx) => {
             const frameIdx = parseInt(el.dataset.idx);
@@ -2264,7 +2275,10 @@ const ReportViewer = {
         request.status = succeeded ? 'ready' : 'error';
         request.image.hidden = !succeeded;
         request.layer.dataset.status = request.status;
-        if (refreshAvailability) this.refreshMainImageAvailability();
+        if (refreshAvailability) {
+            this.refreshMainImageAvailability();
+            if (side === 'right' && request.required) this.viewport.applyFitMode();
+        }
         if (succeeded) this.lens?.sync?.();
     },
 
