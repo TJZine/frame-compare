@@ -31,6 +31,7 @@ from frame_compare.utils.alignment_evidence import (
 )
 from frame_compare.utils.alignment_policy import (
     CONFIRMATION_MARGIN,
+    MIN_VIDEO_SCORE_SEPARATION,
     compensated_offset_seconds,
     rounded_frame,
     sample_to_reference_frame,
@@ -411,7 +412,7 @@ def _motion_positions(
     cancellation: Event | None,
     retained_frames: dict[int, FloatFrame] | None = None,
 ) -> tuple[int, ...] | None:
-    """One reference frame per equal slot of [start, end]: the candidate with the most motion.
+    """Select the highest-motion measurable candidate in each slot of [start, end].
 
     Motion is the mean absolute luma difference between frames ``n`` and
     ``n + _MOTION_STEP``. Retains only selected luma when requested.
@@ -425,9 +426,8 @@ def _motion_positions(
         if _is_cancelled(cancellation):
             return None
         slot_start = start + slot * index
-        best_frame = round(slot_start + slot / 2)
         best_motion = -1.0
-        best_image: FloatFrame | None = None
+        best_candidate: tuple[int, FloatFrame] | None = None
         for candidate_index in range(_MOTION_CANDIDATES):
             frame = round(slot_start + slot * (candidate_index + 0.5) / _MOTION_CANDIDATES)
             if frame < 0 or frame + _MOTION_STEP >= node.num_frames:
@@ -439,8 +439,12 @@ def _motion_positions(
                 return None
             motion = float(np.mean(np.abs(image - next_image)))
             if motion > best_motion:
-                best_frame, best_motion, best_image = frame, motion, image
-        if retained_frames is not None and best_image is not None:
+                best_motion = motion
+                best_candidate = (frame, image)
+        if best_candidate is None:
+            continue
+        best_frame, best_image = best_candidate
+        if retained_frames is not None:
             retained_frames[best_frame] = best_image
         chosen.append(best_frame)
     return tuple(dict.fromkeys(chosen))
@@ -758,12 +762,12 @@ def _hypothesis_winner(
     confirmed_score: float,
     alternative_score: float,
 ) -> Literal["confirmed", "alternative", "neither"]:
-    if confirmed_score == alternative_score:
+    if abs(confirmed_score - alternative_score) < MIN_VIDEO_SCORE_SEPARATION:
         return "neither"
     if confirmed_score == 0.0:
-        return "confirmed" if alternative_score > 0.0 else "neither"
+        return "confirmed"
     if alternative_score == 0.0:
-        return "alternative" if confirmed_score > 0.0 else "neither"
+        return "alternative"
     if (
         confirmed_score < alternative_score
         and alternative_score / confirmed_score >= CONFIRMATION_MARGIN

@@ -63,6 +63,7 @@ from tests.alignment_review_test_support import (
 from tests.alignment_review_test_support import (
     frame_lag as _frame_lag,
 )
+from tests.alignment_review_test_support import native_attempt_payload
 from tests.alignment_review_test_support import (
     stable_summary as _stable_summary,
 )
@@ -274,7 +275,7 @@ def _collection_facts(role: str) -> AudioCollectionFacts:
 
 def _mutable_attempt_dict(attempt: AudioAlignmentAttempt) -> dict[str, object]:
     """Return the JSON-shape payload the contract parses (tuples become arrays)."""
-    return cast(dict[str, object], json.loads(json.dumps(asdict(attempt))))
+    return cast(dict[str, object], json.loads(json.dumps(native_attempt_payload(attempt))))
 
 
 def _observed_attempt_dict() -> dict[str, object]:
@@ -292,7 +293,7 @@ def _provisional_review(*, ordinal: int = 1, frame_offset: int = 0) -> str:
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
-            "audio_attempt": asdict(
+            "audio_attempt": native_attempt_payload(
                 provisional_audio_attempt(ordinal=ordinal, frame_offset=frame_offset)
             ),
         },
@@ -418,12 +419,12 @@ def test_workspace_metadata_accepts_observed_collection_facts() -> None:
     assert parsed.stability.classification == "stable"
 
 
-def test_workspace_metadata_accepts_signed_chunk_evidence() -> None:
+def test_workspace_metadata_accepts_signed_run_evidence() -> None:
     review = json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
-            "audio_attempt": asdict(provisional_audio_attempt(frame_offset=-12)),
+            "audio_attempt": native_attempt_payload(provisional_audio_attempt(frame_offset=-12)),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -435,12 +436,23 @@ def test_workspace_metadata_accepts_signed_chunk_evidence() -> None:
 
     parsed = workspace.comparisons[0].audio_review.audio_attempt
     assert parsed is not None
-    assert parsed.chunks.lags == (_frame_lag(-12),) * 4
+    assert parsed.chunks.rows_omitted
+    assert parsed.runs[0].lag == _frame_lag(-12)
     assert parsed.decision.candidate is not None
     assert parsed.decision.candidate.frame_offset == -12
 
 
-def test_workspace_metadata_retains_authoritative_target_offset() -> None:
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("target_offset", 999999, "ordered target-offset neighbourhood"),
+        ("end_sample", 1, "end does not match its last chunk"),
+        ("alternative_offset", 99999, "recorded alternative offset must belong to its target"),
+    ],
+)
+def test_workspace_metadata_rejects_contradictory_target_evidence(
+    field: str, value: int, message: str
+) -> None:
     target = VideoTargetEvidence(
         kind="chunk",
         first_chunk_index=0,
@@ -450,8 +462,8 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
         end_sample=_CHUNK_SAMPLES,
         target_offset=246,
         alternative_offsets=(245, 246, 247),
-        resolution="unresolved",
-        positions=(VideoTargetPosition(0, 500, 1.0, 1.0, "neither"),),
+        resolution="alternative_confirmed",
+        positions=(VideoTargetPosition(0, 500, 1.0, 0.0, "alternative", 246),),
     )
     attempt = replace(
         provisional_audio_attempt(chunk_count=2),
@@ -468,7 +480,7 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
-            "audio_attempt": asdict(attempt),
+            "audio_attempt": native_attempt_payload(attempt),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -479,33 +491,17 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
     )
 
     contradictory = json.loads(review)
-    contradictory["audio_attempt"]["video_check"]["targets"][0]["target_offset"] = 999999
+    target_payload = contradictory["audio_attempt"]["video_check"]["targets"][0]
+    if field == "alternative_offset":
+        target_payload["positions"][0][field] = value
+    else:
+        target_payload[field] = value
 
-    with pytest.raises(AlignmentReviewContractError, match="ordered target-offset neighbourhood"):
+    with pytest.raises(AlignmentReviewContractError, match=message):
         parse_alignment_review_workspace_metadata(
             (
                 _reference_output(0),
-                _comparison_output(
-                    1,
-                    1,
-                    suggestion=None,
-                    audio_review=json.dumps(contradictory),
-                ),
-            )
-        )
-
-    contradictory["audio_attempt"]["video_check"]["targets"][0]["target_offset"] = 246
-    contradictory["audio_attempt"]["video_check"]["targets"][0]["end_sample"] = 1
-    with pytest.raises(AlignmentReviewContractError, match="end does not match its last chunk"):
-        parse_alignment_review_workspace_metadata(
-            (
-                _reference_output(0),
-                _comparison_output(
-                    1,
-                    1,
-                    suggestion=None,
-                    audio_review=json.dumps(contradictory),
-                ),
+                _comparison_output(1, 1, suggestion=None, audio_review=json.dumps(contradictory)),
             )
         )
 
@@ -514,7 +510,7 @@ def test_workspace_metadata_retains_authoritative_target_offset() -> None:
 def test_workspace_metadata_rejects_available_and_accepts_unavailable_noncomplete_decision(
     status: str,
 ) -> None:
-    attempt = cast(dict[str, object], asdict(provisional_audio_attempt()))
+    attempt = _mutable_attempt_dict(provisional_audio_attempt())
     attempt["status"] = status
     available_review = json.dumps(
         {
@@ -640,7 +636,7 @@ def test_build_audio_review_map_bounds_native_projection_for_many_chunks() -> No
     assert parsed.audio.subframe_estimate == attempt.audio.subframe_estimate
 
 
-def test_workspace_metadata_accepts_maximum_bounded_audio_projection() -> None:
+def test_workspace_metadata_rejects_full_audio_rows_even_within_byte_limit() -> None:
     attempt = asdict(provisional_audio_attempt(chunk_count=512))
     review = json.dumps(
         {
@@ -655,14 +651,10 @@ def test_workspace_metadata_accepts_maximum_bounded_audio_projection() -> None:
     )
     assert len(review.encode("utf-8")) < MAX_ALIGNMENT_EVIDENCE_BYTES
 
-    workspace = parse_alignment_review_workspace_metadata(
-        (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
-    )
-
-    parsed = workspace.comparisons[0].audio_review.audio_attempt
-    assert parsed is not None
-    assert len(parsed.chunks.starts) == 512
-    assert parsed.audio.credible_chunks == 512
+    with pytest.raises(AlignmentReviewContractError, match="must omit per-chunk rows"):
+        parse_alignment_review_workspace_metadata(
+            (_reference_output(0), _comparison_output(1, 1, suggestion=None, audio_review=review))
+        )
 
 
 @pytest.mark.parametrize(

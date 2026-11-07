@@ -10,6 +10,9 @@ from statistics import median
 from frame_compare.utils.alignment_evidence import AUDIO_ANALYSIS_SAMPLE_RATE
 
 MIN_INFORMATIVE_POSITIONS = 6
+# On 320×180 rank-normalized luma, a one-pixel change is about 0.000017.
+# A relative margin alone can turn such a change into an infinite-margin vote.
+MIN_VIDEO_SCORE_SEPARATION = 0.0001
 INFORMATIVE_MARGIN = 1.1
 CONFIRMATION_MARGIN = 1.5
 CONFIRMATION_FRACTION = 0.75
@@ -85,8 +88,10 @@ def sample_to_reference_frame(
 def _margin(scores: Sequence[float], best_index: int) -> float:
     best = scores[best_index]
     runner_up = min(score for index, score in enumerate(scores) if index != best_index)
+    if runner_up - best < MIN_VIDEO_SCORE_SEPARATION:
+        return 0.0
     if best == 0.0:
-        return math.inf if runner_up > 0.0 else 0.0
+        return math.inf
     return runner_up / best
 
 

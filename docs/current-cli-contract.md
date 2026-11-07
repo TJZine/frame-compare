@@ -1628,7 +1628,8 @@ The generated session carries an explicit UUID session identity, one reference r
 ordered comparison roles/keys/ordinals, presentation names, S1 short names for the
 hint rows, the authoritative integer
 or null offset, and one bounded primitive audio-evidence projection in strict metadata
-schema v5. The native projection omits per-chunk rows but retains
+schema v5. The reader requires `chunks.rows_omitted` to be true and each recorded
+alternative offset to belong to its target's alternatives. The projection retains
 `chunks.total_samples`, aggregate chunk counts, runs, the authority recount, base
 video checks, check points, and each target's authoritative `target_offset`,
 `credible`, `start_sample`, `end_sample`, alternatives, resolution, and sampled
@@ -1907,24 +1908,27 @@ Video confirmation divides the usable base range and each examined disagreement
 target into equal slots, then chooses the highest-motion reference frame from four
 deterministic candidates in each slot. Motion is the mean absolute luma difference
 over a two-frame step on the prepared active picture; `auto` is the default prepared-
-rectangle policy. Unexamined targets retain evenly spaced planned review frames, which
-are not scored.
+rectangle policy. Slots without a measurable candidate are omitted. Unexamined
+targets retain evenly spaced planned review frames for display.
 
 Video confirmation runs whenever audio produces a global lag and uses the run's
-L-SMASH loader; there is no FFMS2 fallback. It scores 12 base positions across the
-middle 90% of the raw-frame overlap at offsets `r-2` through `r+2`. A strict local
-minimum must have a runner-up/best margin of at least 1.1. The exact frame is
+L-SMASH loader; there is no FFMS2 fallback. It scores up to 12 distinct base
+positions across the middle 90% of the raw-frame overlap at offsets `r-2`
+through `r+2`. A strict local minimum must be at least 0.0001 below the runner-up
+in mean absolute rank difference, with a runner-up/best margin of at least 1.1. The exact frame is
 confirmed only within `r-1..r+1`, with at least 6 informative positions, at least
 75% wins, and a median winning margin of at least 1.5. Static, tied, repeated, or
 aliased frames are uninformative rather than false confirmation.
 
-After global confirmation, V5a checks frame-distinct disagreement regions with 12
-targeted positions in total: competing runs receive four positions first, single
-credible chunks receive four each in descending PSR order, and active non-credible
-chunks receive two each. At each position it compares the confirmed frame with the
-target's own compensated audio-frame neighbourhood, excluding the confirmed frame.
-Exact ties and two zero scores mean neither hypothesis wins. A non-credible
-neither-win is weak evidence and does not block. A credible chunk needs at least one
+After global confirmation, V5a checks frame-distinct disagreement regions at up
+to 12 targeted positions in total, taking up to four per competing run first,
+then up to four per credible singleton chunk in descending PSR order, and up to
+two per active non-credible chunk. At each position it compares the confirmed
+frame with the target's own compensated audio-frame neighbourhood, excluding the
+confirmed frame.
+A targeted position needs the same absolute score gap of 0.0001 and a
+runner-up/best margin of at least 1.5 to vote. A non-credible neither-win is weak
+evidence and does not block. A credible chunk needs at least one
 confirmed-frame win and no alternative win; a run needs at least two confirmed-frame
 wins and no alternative win. Unexamined or unresolved credible evidence blocks.
 
@@ -1953,7 +1957,7 @@ flag, configuration field, signal-handler framework, or successful JSON field.
 Every fresh completed attempt retains immutable selected-stream facts, per-chunk
 columnar evidence, chunk runs, the global lag, start compensation, sub-frame
 estimate, A4b authority recount, bounded video evidence, and one of three final
-states under `whole-track-chunked-phat-video-check-motion-20260929`:
+states under `whole-track-chunked-phat-video-check-score-floor-20261107`:
 
 - `trusted_automatic` / `audio_video_confirmed`: the A4b authority gate passes,
   V5 confirms the exact frame, every frame-distinct credible disagreement/run is
