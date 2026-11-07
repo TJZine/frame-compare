@@ -246,6 +246,12 @@ def test_lavf_with_tag_only_statistics_measures_audio_packets(tmp_path: Path) ->
             "pcm_s16le",
             "-output_ts_offset",
             "120",
+            # Under CPU load FFmpeg can write several video packets before the
+            # delayed audio. The probe then copies container values into the
+            # audio stream and takes the start-verification path instead of
+            # the tag path this test covers. Strict interleaving fixes the layout.
+            "-max_interleave_delta",
+            "0",
             "-write_crc32",
             "0",
             "-metadata:s:a:0",
