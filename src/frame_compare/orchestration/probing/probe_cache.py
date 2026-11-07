@@ -26,6 +26,16 @@ log = structlog.get_logger()
 
 type PrimitiveFrameProp = str | int | float
 
+_MAX_PROBE_SIZE_BYTES = 2**63 - 1
+_MAX_PROBE_MTIME_NS = 2**63 - 1
+_MIN_PROBE_MTIME_NS = -(2**63)
+_MAX_PROBE_DIMENSION = 2**31 - 1
+# R81's VSVideoInfo stores numFrames as a signed 32-bit decoder field.
+_MAX_PROBE_FRAME_COUNT = 2**31 - 1
+# R81's VSVideoInfo stores fpsNum/fpsDen as int64_t; the persisted snapshot
+# stores their positive Fraction representation.
+_MAX_PROBE_FPS_COMPONENT = 2**63 - 1
+
 
 @dataclass(frozen=True)
 class _CacheEntryLoadOutcome:
@@ -128,14 +138,9 @@ def _require_bool(entry: Mapping[str, object], field: str) -> bool:
 
 
 def _load_fps(entry: Mapping[str, object]) -> Fraction:
-    fps_num = _require_int(entry, "fps_num")
-    fps_den = _require_int(entry, "fps_den")
-    if fps_den == 0:
-        raise ValueError("fps_den must be non-zero")
-    fps = Fraction(fps_num, fps_den)
-    if fps <= 0:
-        raise ValueError("fps must be positive")
-    return fps
+    fps_num = _bounded_int(entry, "fps_num", minimum=1, maximum=_MAX_PROBE_FPS_COMPONENT)
+    fps_den = _bounded_int(entry, "fps_den", minimum=1, maximum=_MAX_PROBE_FPS_COMPONENT)
+    return Fraction(fps_num, fps_den)
 
 
 def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
@@ -150,13 +155,16 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
         path = entry["path"]
         if not isinstance(path, str):
             raise TypeError("path must be a string")
-        size_bytes = _require_int(entry, "size_bytes")
-        if size_bytes < 0:
-            raise ValueError("size_bytes must be non-negative")
+        size_bytes = _bounded_int(entry, "size_bytes", minimum=0, maximum=_MAX_PROBE_SIZE_BYTES)
         fingerprint = ClipFingerprint(
             path=Path(path),
             size_bytes=size_bytes,
-            mtime_ns=_require_int(entry, "mtime_ns"),
+            mtime_ns=_bounded_int(
+                entry,
+                "mtime_ns",
+                minimum=_MIN_PROBE_MTIME_NS,
+                maximum=_MAX_PROBE_MTIME_NS,
+            ),
         )
 
         is_hdr = _require_bool(entry, "is_hdr")
@@ -172,9 +180,11 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
         return _CacheEntryLoadOutcome(
             snapshot=ClipProbeSnapshot(
                 fingerprint=fingerprint,
-                width=_positive_int(entry, "width"),
-                height=_positive_int(entry, "height"),
-                num_frames=_positive_int(entry, "num_frames"),
+                width=_bounded_int(entry, "width", minimum=1, maximum=_MAX_PROBE_DIMENSION),
+                height=_bounded_int(entry, "height", minimum=1, maximum=_MAX_PROBE_DIMENSION),
+                num_frames=_bounded_int(
+                    entry, "num_frames", minimum=1, maximum=_MAX_PROBE_FRAME_COUNT
+                ),
                 fps=_load_fps(entry),
                 is_hdr=is_hdr,
                 hdr_metadata=hdr_metadata,
@@ -188,10 +198,18 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
         return _CacheEntryLoadOutcome(snapshot=None, warning=str(e))
 
 
-def _positive_int(entry: Mapping[str, object], field: str) -> int:
+def _bounded_int(
+    entry: Mapping[str, object],
+    field: str,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
     value = _require_int(entry, field)
-    if value <= 0:
-        raise ValueError(f"{field} must be positive")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{field} is below the supported bound")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{field} exceeds the supported bound")
     return value
 
 

@@ -39,7 +39,7 @@ from frame_compare.analysis.types import (
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
+from frame_compare.config.schema_enums import AnalysisPerformanceMode, ScreenshotActiveRectDetection
 from frame_compare.orchestration import phase_post_render, phase_selection
 from frame_compare.orchestration.context import ClipActiveRect, ClipState
 from frame_compare.orchestration.full_window_retry import (
@@ -479,12 +479,19 @@ def test_run_analyze_phase_cache_only_exclusion_failure_does_not_offer_retry(
         ctx.selection_domain,
         selection_window=SelectionWindow(start_frame=40, end_frame_exclusive=60),
     )
-    cache_calls = 0
 
     def _load_cache(*_args: object, **_kwargs: object) -> CacheLoadResult:
-        nonlocal cache_calls
-        cache_calls += 1
-        return CacheLoadResult(success=True, metrics=_metrics_for_range(start=40, end=60))
+        metrics = _metrics_for_range(start=40, end=60)
+        metrics = replace(
+            metrics,
+            metadata=replace(
+                metrics.metadata,
+                algorithm_id=metric_algorithm_id(ctx.config.analysis),
+                metric_backend=metric_backend(ctx.config.analysis),
+                algorithm_identity_json=stable_metric_algorithm_identity_json(ctx.config.analysis),
+            ),
+        )
+        return CacheLoadResult(success=True, metrics=metrics)
 
     monkeypatch.setattr(phase_selection.cache_io, "load_cached_metrics_for_request", _load_cache)
 
@@ -758,6 +765,16 @@ def test_run_analyze_phase_maps_analysis_metrics_into_reference_domain(
 ) -> None:
     selection_inputs: dict[str, object] = {}
     ctx = _context(tmp_path)
+    if domain == "sparse":
+        ctx.config.analysis = ctx.config.analysis.model_copy(
+            update={
+                "random_frame_count": 0,
+                "dark_frame_count": 1,
+                "bright_frame_count": 0,
+                "motion_frame_count": 0,
+                "performance_mode": AnalysisPerformanceMode.PERFORMANCE,
+            }
+        )
     if domain in {"analysis-source", "sparse"}:
         ctx.selection_domain = replace(
             ctx.selection_domain,
@@ -803,21 +820,21 @@ def test_run_analyze_phase_maps_analysis_metrics_into_reference_domain(
     if domain in {"analysis-source", "untrimmed-analysis"}:
         input_videos.append(cast(ClipState, ctx.selection_domain.analysis_clip).path)
 
+    metrics = replace(
+        metrics,
+        metadata=replace(
+            metrics.metadata,
+            algorithm_id=metric_algorithm_id(ctx.config.analysis),
+            metric_backend=metric_backend(ctx.config.analysis),
+            algorithm_identity_json=stable_metric_algorithm_identity_json(ctx.config.analysis),
+        ),
+    )
     monkeypatch.setattr(
         phase_selection.cache_io,
         "load_cached_metrics_for_request",
         lambda *_args, **_kwargs: CacheLoadResult(success=True, metrics=metrics),
     )
-    if domain == "sparse":
-        ctx.config.analysis = ctx.config.analysis.model_copy(
-            update={
-                "random_frame_count": 0,
-                "dark_frame_count": 1,
-                "bright_frame_count": 0,
-                "motion_frame_count": 0,
-            }
-        )
-    else:
+    if domain != "sparse":
         local_frames = (
             [0] if domain == "analysis-source" else [0, 47 if domain == "global-window" else 4]
         )
