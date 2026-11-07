@@ -94,7 +94,7 @@ analysis clip, cache-domain token, and accepted full-window retry override. Prep
 and recovery build and replace that value together. It carries no effective config or
 second live clip collection. `metric_request_for_domain` constructs a request only at
 Analyze and the existing cache-only/no-cache preparation boundaries, preserving
-warn-only Analyze validation timing for ordinary runs.
+Analyze validation timing for ordinary runs.
 
 `RunDependencies` supplies aware UTC wall time for persisted start/completion
 timestamps and a separate monotonic timer for preflight, source loading, phases,
@@ -185,8 +185,10 @@ predictive cache read. `cache_io.acquire_required_metrics` owns required-cache
 classification and reading at two distinct lifecycle points: cache-only preparation
 validates before reserving output, and cache-only Analyze reacquires without permission
 to compute. The first read is not memoized.
-Analyze is required for cache-only execution: a failed second acquisition aborts
-the run before rendering or publishing rather than using the initial frame plan.
+Analyze is required for cache-only execution and for runs with an empty provisional
+frame plan. In ordinary runs with usable provisional frames, Analyze failure leaves
+the FramePlan snapshot available to Align. With `--no-cache`, each Analyze
+attempt bypasses shared metric cache reads, including an accepted full-window retry.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
 `quality` is the default full-resolution VapourSynth PlaneStats behavior, while
 `performance` is an approximate temporal-sampling strategy over the same

@@ -22,6 +22,7 @@ from frame_compare.analysis.types import (
     SelectionDetailsByFrame,
 )
 from frame_compare.analysis.window import SelectionWindow
+from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
@@ -119,7 +120,11 @@ def _select_initial_frame_plan_once(ctx: RunContext) -> FramePlanPhaseOutput:
     requested_initial_count = len(ctx.config.analysis.user_frames) + (
         ctx.config.analysis.random_frame_count
     )
-    if requested_initial_count > 0 and not selected_frames:
+    if (
+        requested_initial_count > 0
+        and not selected_frames
+        and not needs_analysis(ctx.config.analysis)
+    ):
         raise SelectionError(
             "no selectable user or random frames remain after trims/windowing",
             requested=requested_initial_count,
@@ -233,6 +238,7 @@ def run_analyze_phase(
     input_videos: list[Path],
     workspace: WorkspacePaths,
     require_cache_only: bool = False,
+    force_recompute: bool = False,
     vs_loader: VSLoader | None = None,
 ) -> AnalyzePhaseOutput:
     """Analyze and select, with one consent-gated exclusion recovery attempt."""
@@ -242,6 +248,7 @@ def run_analyze_phase(
             input_videos=input_videos,
             workspace=workspace,
             require_cache_only=require_cache_only,
+            force_recompute=force_recompute,
             vs_loader=vs_loader,
         )
     except SelectionError as error:
@@ -259,6 +266,7 @@ def run_analyze_phase(
             input_videos=input_videos,
             workspace=workspace,
             require_cache_only=require_cache_only,
+            force_recompute=force_recompute,
             vs_loader=vs_loader,
         )
     except SelectionError as error:
@@ -294,6 +302,7 @@ def _run_analyze_phase_once(
     input_videos: list[Path],
     workspace: WorkspacePaths,
     require_cache_only: bool = False,
+    force_recompute: bool = False,
     vs_loader: VSLoader | None = None,
 ) -> AnalyzePhaseOutput:
     if ctx.selection_domain.analysis_clip is None:
@@ -320,6 +329,7 @@ def _run_analyze_phase_once(
             reporter=ctx.reporter,
             vs_loader=vs_loader,
             selection_domain=selection_domain,
+            force_recompute=force_recompute,
         )
         metrics = acquisition.metrics
         metrics_cache_hit = acquisition.disposition == "hit"

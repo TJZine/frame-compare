@@ -46,7 +46,7 @@ from frame_compare.orchestration.phase_selection import (
     select_initial_frame_plan,
     selection_label_for_frame,
 )
-from frame_compare.orchestration.phases import Phase, PhaseSkipDetail
+from frame_compare.orchestration.phases import Phase, PhaseSkipDetail, PhaseWarnOnly
 from frame_compare.orchestration.types import (
     RunDependencies,
     RunRequest,
@@ -95,7 +95,7 @@ def _create_timed_phase(
     phase_timings: dict[str, float],
     warnings: list[RunWarning],
     *,
-    warn_only: bool = False,
+    warn_only: PhaseWarnOnly = False,
     fatal_exceptions: tuple[type[BaseException], ...] = (),
     progress_total: int = 1,
     retain_on_success: bool | None = None,
@@ -136,11 +136,10 @@ def _create_timed_phase(
             await cancellation_checkpoint()
             raise asyncio.CancelledError() from None
         except Exception as exc:
-            if warn_only:
+            if phase is not None and phase.warns_on_error(ctx):
                 warnings.append(
                     RunWarning(_PHASE_WARNING_SOURCES[name], "warning", f"{name}: {exc}")
                 )
-                raise
             raise
         finally:
             phase_timings[timing_key] = max(0.0, monotonic_timer() - start)
@@ -207,13 +206,14 @@ def build_phases_before_align(
                 input_videos=input_videos,
                 workspace=workspace,
                 require_cache_only=request.from_cache_only,
+                force_recompute=request.no_cache,
                 vs_loader=vs_loader,
             ),
             state=state,
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
-            warn_only=not request.from_cache_only,
+            warn_only=lambda ctx: not request.from_cache_only and bool(ctx.selection.frames),
             fatal_exceptions=(ExclusionRecoverySelectionError,),
             progress_total=ANALYZE_PROGRESS_TOTAL,
             skip_detail="Disabled" if request.skip_analysis else "Not required",
