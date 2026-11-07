@@ -249,6 +249,7 @@ def test_native_srgb_encoding_patches_and_png(tmp_path: Path) -> None:
             length=1,color=[v/255 for v in patch]) for patch in patches])
         source = source.std.SetFrameProps(_Matrix=0,_Range=1,_Transfer=16,_Primaries=9,
             DolbyVisionRPU=b'original-source-evidence',ContentLightLevelMax=448.0,
+            MasteringDisplayPrimaries='source-mastering-primaries',
             MasteringDisplayMaxLuminance=1000.0,PLSceneMax=[285.0],PLSceneAvg=25.0)
         output = libplacebo_output_to_srgb(source,black_nits=.18,white_nits=100)
         for n,expected in enumerate(goldens):
@@ -259,7 +260,7 @@ def test_native_srgb_encoding_patches_and_png(tmp_path: Path) -> None:
             assert frame.props['_Matrix'] == 0 and frame.props['_Range'] == 1
             assert frame.props.get('_FrameCompareExpandRange') == 0
             assert not any(k in frame.props for k in ['DolbyVisionRPU','ContentLightLevelMax',
-                'MasteringDisplayMaxLuminance','PLSceneMax','PLSceneAvg'])
+                'MasteringDisplayPrimaries','MasteringDisplayMaxLuminance','PLSceneMax','PLSceneAvg'])
             path = Path({str(tmp_path)!r}) / (str(n)+'.png')
             _render_vs_pillow(output,n,path,settings=EncoderSettings(),overlay=None,
                 frame_facts=None,geometry_plan=None)
@@ -270,6 +271,57 @@ def test_native_srgb_encoding_patches_and_png(tmp_path: Path) -> None:
         assert source.get_frame(0).props['_Transfer'] == 16
         assert source.get_frame(0).props['DolbyVisionRPU'] == b'original-source-evidence'
         print('OK')
+        """
+    )
+    _assert_vs_process_ok(result)
+
+
+@pytest.mark.vs_required
+def test_native_tonemap_rejects_limited_rgb_before_backend() -> None:
+    """Both backends reject native limited-range RGB before conversion or execution."""
+    result = _run_vs_script(
+        """
+        import vapoursynth as vs
+
+        from frame_compare.vs.env import ensure_vs_environment
+        from frame_compare.vs.errors import TonemapError
+        from frame_compare.vs.tonemap_conversion import resolve_hdr_tonemap_inputs
+        from frame_compare.vs.tonemap_fallback import fallback_tonemap
+        from frame_compare.vs.tonemap_libplacebo import convert_for_libplacebo
+        from frame_compare.vs.types import TonemapFallbackCause, TonemapSettings
+
+        core = ensure_vs_environment()
+        rgb48 = core.std.BlankClip(width=8, height=8, format=vs.RGB48, length=1).std.SetFrameProps(
+            _Range=0, _Matrix=0, _Transfer=16, _Primaries=9
+        )
+        rgbs = core.std.BlankClip(width=8, height=8, format=vs.RGBS, length=1).std.SetFrameProps(
+            _Range=0, _Matrix=0, _Transfer=16, _Primaries=9
+        )
+        assert int(rgb48.get_frame(0).props["_Range"]) == 0
+        assert int(rgbs.get_frame(0).props["_Range"]) == 0
+        rgb48_inputs = resolve_hdr_tonemap_inputs(rgb48, None)
+
+        checks = [
+            lambda: convert_for_libplacebo(rgb48, rgb48_inputs),
+            lambda: fallback_tonemap(
+                rgb48,
+                TonemapSettings(),
+                cause=TonemapFallbackCause.PLUGIN_UNAVAILABLE,
+            ),
+            lambda: fallback_tonemap(
+                rgbs,
+                TonemapSettings(),
+                cause=TonemapFallbackCause.PLUGIN_UNAVAILABLE,
+            ),
+        ]
+        for check in checks:
+            try:
+                check()
+            except TonemapError as error:
+                assert "Limited-range RGB" in str(error)
+            else:
+                raise AssertionError("limited-range RGB was not rejected")
+        print("OK")
         """
     )
     _assert_vs_process_ok(result)

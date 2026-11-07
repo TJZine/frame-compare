@@ -397,7 +397,7 @@ def test_apply_libplacebo_runtime_failure_reports_cause_after_rgb_prop_normaliza
 
 
 def test_convert_non_rgb_matrix_presence_uses_frame_prop_boundary() -> None:
-    clip = _Clip(format_id=999, color_family=999, props={"_Matrix": b"9"})
+    clip = _Clip(format_id=999, color_family=999, props={"_Matrix": 9})
 
     result = convert_non_rgb_with_matrix_hint(cast("VideoNode", clip), target_format=vs.RGBS)
 

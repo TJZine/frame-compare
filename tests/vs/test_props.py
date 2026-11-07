@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, IntEnum
 
 import pytest
+import vapoursynth as vs
 
 from frame_compare.vs.props import (
     detect_hdr,
@@ -22,6 +23,10 @@ class _ExampleEnum(Enum):
     VALUE = 9
 
 
+class _ExampleIntEnum(IntEnum):
+    VALUE = 9
+
+
 def test_get_optional_int_prop():
     """Verify get_optional_int_prop behaves correctly with different types."""
     props = {
@@ -33,12 +38,15 @@ def test_get_optional_int_prop():
     }
 
     assert get_optional_int_prop(props, "int_val") == 42
-    assert get_optional_int_prop(props, "float_val") == 42
-    assert get_optional_int_prop(props, "str_val") == 100
-    assert get_optional_int_prop(props, "bytes_val") == 200
+    assert get_optional_int_prop(props, "float_val") is None
+    assert get_optional_int_prop({"integral_float": 42.0}, "integral_float") == 42
+    assert get_optional_int_prop({"bool_val": True}, "bool_val") is None
+    assert get_optional_int_prop(props, "str_val") is None
+    assert get_optional_int_prop(props, "bytes_val") is None
     assert get_optional_int_prop(props, "invalid_str") is None
     assert get_optional_int_prop(props, "missing") is None
-    assert get_optional_int_prop({"enum_val": _ExampleEnum.VALUE}, "enum_val") == 9
+    assert get_optional_int_prop({"enum_val": _ExampleEnum.VALUE}, "enum_val") is None
+    assert get_optional_int_prop({"int_enum_val": _ExampleIntEnum.VALUE}, "int_enum_val") == 9
 
 
 def test_get_optional_int_prop_treats_non_finite_numbers_as_unavailable() -> None:
@@ -63,7 +71,7 @@ def test_get_str_prop():
 def test_get_optional_range_prop_prefers_modern_range_key():
     props = {
         "_ColorRange": 1,
-        "_Range": 0,
+        "_Range": vs.RANGE_LIMITED,
     }
 
     assert get_optional_range_prop(props) == 0
@@ -123,6 +131,9 @@ def test_range_helpers_ignore_unrecognized_range_values():
         ),
         pytest.param({"_Transfer": 1, "_Primaries": 1}, False, None, id="sdr"),
         pytest.param({"_Transfer": 16, "_Primaries": 1}, False, None, id="pq_bt709"),
+        pytest.param({"_Transfer": 16.9, "_Primaries": 9}, False, None, id="non_integral_transfer"),
+        pytest.param({"_Transfer": "16", "_Primaries": 9}, False, None, id="text_transfer"),
+        pytest.param({"_Transfer": b"16", "_Primaries": 9}, False, None, id="bytes_transfer"),
     ],
 )
 def test_detect_hdr_signal_cases(
@@ -138,12 +149,12 @@ def test_detect_hdr_signal_cases(
     [
         pytest.param(
             {
-                "_Transfer": b"16",
+                "_Transfer": 16,
                 "_Primaries": 2,
-                "_Matrix": _ExampleEnum.VALUE,
+                "_Matrix": _ExampleIntEnum.VALUE,
                 "MasteringDisplayPrimaries": "frame mastering",
-                "ContentLightLevelMax": "1000",
-                "ContentLightLevelAverage": b"400",
+                "ContentLightLevelMax": 1000,
+                "ContentLightLevelAverage": 400,
             },
             HDRMetadata("probe mastering", 900, 350, 9, 1, 1),
             HDRMetadata("frame mastering", 1000, 400, 9, 16, 9),
@@ -152,7 +163,7 @@ def test_detect_hdr_signal_cases(
         pytest.param(
             {"_Transfer": "malformed", "_Primaries": "1", "_Matrix": b"malformed"},
             HDRMetadata(None, None, None, 9, 18, 9),
-            HDRMetadata(None, None, None, 1, 18, 9),
+            HDRMetadata(None, None, None, 9, 18, 9),
             id="backfill_unusable",
         ),
         pytest.param(

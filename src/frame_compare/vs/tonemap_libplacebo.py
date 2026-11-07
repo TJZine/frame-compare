@@ -18,6 +18,7 @@ from frame_compare.vs.tonemap_conversion import (
     deduce_src_csp_hint,
     libplacebo_output_to_srgb,
     normalize_rgb_props,
+    reject_limited_rgb,
     resolve_hdr_tonemap_inputs,
     resolve_source_peak,
     validate_target_nits,
@@ -47,6 +48,7 @@ def convert_for_libplacebo(clip: vs.VideoNode, inputs: HdrTonemapInputs) -> vs.V
     import vapoursynth as vs
 
     try:
+        reject_limited_rgb(clip, inputs.props)
         if clip.format.bits_per_sample == 16 and clip.format.color_family == vs.RGB:
             return clip
         if clip.format.color_family == vs.RGB:
@@ -64,6 +66,8 @@ def convert_for_libplacebo(clip: vs.VideoNode, inputs: HdrTonemapInputs) -> vs.V
             props=props,
             detected_is_hdr=detected_is_hdr,
         )
+    except TonemapError:
+        raise
     except Exception as e:
         raise TonemapError(reason=f"Failed to convert to RGB48: {e}") from e
 
