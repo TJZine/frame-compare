@@ -13,6 +13,7 @@ from typing import Protocol, TypedDict, cast
 from urllib.parse import quote
 
 from frame_compare.config.schema import OverlayMode, ReportConfig
+from frame_compare.config.text_validation import show_bidi_formatting_controls
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services.errors import ReportError
 from frame_compare.services.types import TmdbMetadata
@@ -334,7 +335,7 @@ def build_report_payload(
             rendering=rendering,
         ),
         "generated_at": datetime.now(UTC).isoformat(),
-        "title": title,
+        "title": show_bidi_formatting_controls(title),
         "slowpics_url": data.slowpics_url,
         "default_mode": default_mode,
         "default_selection": default_selection,
@@ -386,10 +387,10 @@ def build_clip_payloads(clips: list[ClipInfo]) -> list[ReportClipPayload]:
                     else _active_picture_payload(clip.active_picture)
                 ),
                 "display": {
-                    "primary": display.primary,
-                    "release": display.release,
-                    "control": display.control,
-                    "micro": display.micro,
+                    "primary": show_bidi_formatting_controls(display.primary),
+                    "release": show_bidi_formatting_controls(display.release),
+                    "control": show_bidi_formatting_controls(display.control),
+                    "micro": show_bidi_formatting_controls(display.micro),
                     "filename": display.filename,
                 },
             }

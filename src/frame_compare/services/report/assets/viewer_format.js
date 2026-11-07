@@ -4,7 +4,10 @@ const ViewerFormat = {
     },
 
     clipFilename(clip) {
-        return clip.display.filename;
+        return clip.display.filename.replace(
+            /[\u202A-\u202E\u2066-\u2069]/g,
+            character => `[U+${character.codePointAt(0).toString(16).toUpperCase()}]`,
+        );
     },
 
     clipAccessibleName(clip) {

@@ -214,6 +214,7 @@ def _generated_report(
     tonemapped: bool = False,
     encoded_image_paths: bool = False,
     frames: tuple[int, ...] = (10,),
+    comparison_micro: str = "ATV HDR10",
 ) -> Path:
     clips: list[ClipInfo] = []
     geometry_by_name = {
@@ -239,13 +240,17 @@ def _generated_report(
         ("encode", _COMPARISON_LABEL),
     ):
         geometry = geometry_by_name[name]
-        screenshot = (
-            tmp_path / "screenshots # %20 Ü" / f"{name} # %20 Ü.png"
-            if encoded_image_paths
-            else tmp_path / "screenshots" / name / "10.png"
-        )
-        screenshot.parent.mkdir(parents=True, exist_ok=True)
-        screenshot.write_bytes(_ONE_PIXEL_PNG)
+        screenshots = [
+            (
+                tmp_path / "screenshots # %20 Ü" / f"{name} {frame} # %20 Ü.png"
+                if encoded_image_paths
+                else tmp_path / "screenshots" / name / "10.png"
+            )
+            for frame in frames
+        ]
+        for screenshot in screenshots:
+            screenshot.parent.mkdir(parents=True, exist_ok=True)
+            screenshot.write_bytes(_ONE_PIXEL_PNG)
         clips.append(
             ClipInfo(
                 name=name,
@@ -273,13 +278,13 @@ def _generated_report(
                         frame if name == "reference" else frame + 2,
                         RenderedFrameFacts(frame if name == "reference" else frame + 2, "B"),
                     )
-                    for frame in frames
+                    for frame, screenshot in zip(frames, screenshots, strict=True)
                 ],
                 display=ReportClipDisplayInfo(
                     primary=(_REFERENCE_PRIMARY if name == "reference" else _COMPARISON_PRIMARY),
                     release=(_REFERENCE_RELEASE if name == "reference" else _COMPARISON_RELEASE),
                     control=(_REFERENCE_RELEASE if name == "reference" else _COMPARISON_RELEASE),
-                    micro="PMTP DV" if name == "reference" else "ATV HDR10",
+                    micro="PMTP DV" if name == "reference" else comparison_micro,
                     filename=f"{label}.mkv",
                 ),
             )
@@ -306,42 +311,48 @@ def _generated_report(
     )
 
 
-def _append_encoded_image_load_probe(report_path: Path) -> None:
-    html = report_path.read_text(encoding="utf-8")
-    probe = """
-<img id="encoded-screenshot-probe" src="screenshots%20%23%20%2520%20%C3%9C/reference%20%23%20%2520%20%C3%9C.png" alt="" hidden>
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    const image = document.getElementById('encoded-screenshot-probe');
-    const mark = () => {
-        document.documentElement.dataset.encodedImagesLoaded = String(
-            image.complete && image.naturalWidth > 0
-        );
-    };
-    image.addEventListener('load', mark, { once: true });
-    image.addEventListener('error', mark, { once: true });
-    mark();
-});
-</script>
-"""
-    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
-
-
 @pytest.mark.integration
 def test_generated_report_loads_percent_encoded_screenshot_paths(tmp_path: Path) -> None:
+    from PIL import Image
+
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
 
-    report_path = _generated_report(tmp_path, encoded_image_paths=True)
-    _append_encoded_image_load_probe(report_path)
-    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
-    parser = _InitializedViewerParser()
-    parser.feed(completed.stdout)
+    report_path = _generated_report(tmp_path, encoded_image_paths=True, frames=(10, 11))
+    expected_frames: list[list[dict[str, str | int]]] = []
+    for index, frame in enumerate((10, 11)):
+        expected = []
+        for side, source in enumerate(("reference", "encode")):
+            image_path = tmp_path / "screenshots # %20 Ü" / f"{source} {frame} # %20 Ü.png"
+            width = 2 * index + side + 1
+            Image.new("RGB", (width, 1)).save(image_path)
+            expected.append({"url": image_path.as_uri(), "width": width})
+        expected_frames.append(expected)
 
-    assert "screenshots%20%23%20%2520%20%C3%9C" in completed.stdout
-    assert parser.document_attributes is not None
-    assert parser.document_attributes["data-encoded-images-loaded"] == "true"
+    script = _viewer_input_script(
+        r"""
+        const expectedFrames = EXPECTED_FRAMES;
+        for (const [index, expected] of expectedFrames.entries()) {
+            if (index) {
+                await evaluate(`(() => {
+                    const select = document.getElementById('frame-select');
+                    select.value = '${index}';
+                    select.dispatchEvent(new Event('change'));
+                })()`);
+            }
+            await waitFor(`(() => {
+                const expected = ${JSON.stringify(expected)};
+                return [ReportViewer.dom.leftImg, ReportViewer.dom.rightImg]
+                    .every((image, i) => image.complete && !image.hidden
+                        && image.currentSrc === expected[i].url
+                        && image.naturalWidth === expected[i].width);
+            })()`, `stage images did not decode their encoded URLs for frame index ${index}`);
+        }
+""".replace("EXPECTED_FRAMES", json.dumps(expected_frames))
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-encoded", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def _append_screenshot_load_probe(report_path: Path) -> None:
@@ -1803,13 +1814,17 @@ async function evaluate(expression) {
             if (message.error) request.reject(new Error(JSON.stringify(message.error)));
             else request.resolve(message.result);
         });
-        let initialized = false;
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-            initialized = await evaluate("typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)");
-            if (initialized) break;
-            await pause();
+        async function waitFor(expression, message) {
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+                if (await evaluate(expression)) return;
+                await pause();
+            }
+            assert.fail(message);
         }
-        assert.ok(initialized, 'viewer did not initialize');
+        await waitFor(
+            "typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)",
+            'viewer did not initialize',
+        );
 
 """
         + actions
@@ -1915,6 +1930,208 @@ def test_report_actual_pixels_fit_and_diff_lens_share_coordinates(
     if source_width == 3840:
         assert proof["fitZoom"] < 0.25, proof
     assert proof["zoomed"] > proof["fitZoom"], proof
+
+
+@pytest.mark.integration
+def test_report_restores_custom_zoom_and_pan_after_reload(tmp_path: Path) -> None:
+    from PIL import Image
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    for name in ("reference", "encode"):
+        Image.new("RGB", (960, 540)).save(tmp_path / "screenshots" / name / "10.png")
+    script = _viewer_input_script(
+        r"""
+        const ready = `typeof ReportViewer !== 'undefined' && ReportViewer.dom?.leftImg?.naturalWidth === 960
+            && ReportViewer.dom.rightImg.naturalWidth === 960 && ReportViewer.dom.sizerImg.naturalWidth === 960`;
+        await waitFor(ready, 'report images did not load');
+        await evaluate(`(() => {
+            const range = ReportViewer.dom.zoomRange;
+            range.value = '2';
+            range.dispatchEvent(new Event('input'));
+            ReportViewer.viewport.setPan(-173, -125);
+        })()`);
+        await command('Page.reload');
+        await waitFor(ready, 'report images did not load after reloading');
+        const restored = await evaluate(`(() => {
+            const {dom, state} = ReportViewer;
+            const stage = dom.stage.getBoundingClientRect();
+            const image = dom.leftImg.getBoundingClientRect();
+            return {
+                fitMode: state.fitMode,
+                width: image.width,
+                range: dom.zoomRange.value,
+                readout: dom.zoomVal.textContent,
+                panX: image.left + image.width / 2 - stage.left - stage.width / 2,
+                panY: image.top + image.height / 2 - stage.top - stage.height / 2,
+            };
+        })()`);
+        assert.deepEqual(restored, {
+            fitMode: 'custom', width: 1920, range: '2', readout: '200%', panX: -173, panY: -125,
+        });
+"""
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-reload", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.integration
+def test_report_can_pan_to_bottom_of_taller_right_image_at_actual_size(tmp_path: Path) -> None:
+    from PIL import Image
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    left = Image.new("RGB", (1920, 800))
+    right = Image.new("RGB", (1920, 1080))
+    left.save(tmp_path / "screenshots/reference/10.png")
+    right.save(tmp_path / "screenshots/encode/10.png")
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1024, height: 768, deviceScaleFactor: 2, mobile: false,
+        });
+        await waitFor(`ReportViewer.dom.leftImg.naturalHeight === 800
+            && ReportViewer.dom.sizerImg.naturalHeight === 800
+            && ReportViewer.dom.rightImg.naturalHeight === 1080`, 'unequal images did not load');
+        const geometry = await evaluate(`(() => {
+            const {dom, viewport} = ReportViewer;
+            viewport.setFitMode('actual');
+            viewport.setManualAlignment(0, 45);
+            viewport.setPan(0, -10000);
+            const stage = dom.stage.getBoundingClientRect();
+            const left = dom.leftImg.getBoundingClientRect();
+            const right = dom.rightImg.getBoundingClientRect();
+            viewport.setManualAlignment(0, 0);
+            const resetBottom = dom.rightImg.getBoundingClientRect().bottom;
+            return {
+                width: left.width, height: right.height, stageBottom: stage.bottom,
+                rightBottom: right.bottom, resetBottom,
+            };
+        })()`);
+        assert.equal(geometry.width, 1920, 'actual size uses the base CSS width');
+        assert.equal(geometry.height, 1080);
+        assert.ok(Math.abs(geometry.rightBottom - geometry.stageBottom) < 1, JSON.stringify(geometry));
+        assert.ok(Math.abs(geometry.resetBottom - geometry.stageBottom) < 1, JSON.stringify(geometry));
+"""
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-pan", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.integration
+def test_report_fit_recalculates_for_filmstrip_and_inspector(tmp_path: Path) -> None:
+    from PIL import Image
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    for name in ("reference", "encode"):
+        Image.new("RGB", (960, 540)).save(tmp_path / "screenshots" / name / "10.png")
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1280, height: 768, deviceScaleFactor: 1, mobile: false,
+        });
+        await waitFor(`ReportViewer.dom.leftImg.naturalWidth === 960
+            && ReportViewer.dom.sizerImg.naturalWidth === 960`, 'base images did not load');
+        const height = await evaluate(`(() => {
+            document.querySelector('[data-fit="height"]').click();
+            const height = ReportViewer.dom.stage.getBoundingClientRect().height;
+            document.getElementById('btn-filmstrip-toggle').click();
+            return height;
+        })()`);
+        await waitFor(`(() => {
+            const {stage, leftImg} = ReportViewer.dom;
+            const height = stage.getBoundingClientRect().height;
+            return height > ${height} && Math.abs(leftImg.getBoundingClientRect().height - height) < 1;
+        })()`, 'fit height did not follow the stage after collapsing the filmstrip');
+        const width = await evaluate(`(() => {
+            ReportViewer.viewport.setFitMode('width');
+            const width = ReportViewer.dom.stage.getBoundingClientRect().width;
+            document.getElementById('btn-inspector').click();
+            return width;
+        })()`);
+        await waitFor(`(() => {
+            const {stage, leftImg} = ReportViewer.dom;
+            const width = stage.getBoundingClientRect().width;
+            return width < ${width} - 10 && Math.abs(leftImg.getBoundingClientRect().width - width) < 1;
+        })()`, 'fit width did not follow the stage after opening the Inspector');
+"""
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-stage-size", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("long_caption", [False, True], ids=["short", "long"])
+def test_report_lens_keeps_diff_caption_inside_short_stage(
+    tmp_path: Path, long_caption: bool
+) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(
+        tmp_path,
+        comparison_micro="ATV " + "Long source name " * 40 if long_caption else "ATV HDR10",
+    )
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1024, height: 440, deviceScaleFactor: 1, mobile: false,
+        });
+        await waitFor(`ReportViewer.dom.leftImg.naturalWidth > 0
+            && ReportViewer.dom.rightImg.naturalWidth > 0`, 'Diff images did not load');
+        const bounds = await evaluate(`(() => {
+            document.getElementById('btn-lens').click();
+            document.querySelector('[data-lens-size="large"]').click();
+            document.querySelector('[data-lens-caption="on"]').click();
+            const lens = document.getElementById('rv-lens');
+            const caption = lens.querySelector('[data-lens-caption-row]');
+            const second = lens.querySelector('[data-lens-identity="second"]');
+            const stage = ReportViewer.dom.stage.getBoundingClientRect();
+            return {
+                stageBottom: stage.bottom,
+                stageHeight: stage.height,
+                lensBottom: lens.getBoundingClientRect().bottom,
+                imageHeight: lens.querySelector('.rv-lens-view').getBoundingClientRect().height,
+                captionBottom: second.getBoundingClientRect().bottom,
+                caption: second.textContent,
+                scrollable: caption.scrollHeight > caption.clientHeight,
+                tabIndex: caption.tabIndex,
+                rightIndex: ReportViewer.state.rightClipIdx,
+            };
+        })()`);
+        assert.match(bounds.caption, /ATV/, 'second Diff source caption is present');
+        assert.ok(bounds.imageHeight >= bounds.stageHeight / 2, 'the magnified image remains usable');
+        assert.ok(bounds.lensBottom <= bounds.stageBottom - 7, 'the Lens fits inside the stage');
+        if (LONG_CAPTION) {
+            assert.equal(bounds.scrollable, true);
+            assert.equal(bounds.tabIndex, 0);
+            assert.equal(await evaluate(`(() => {
+                const caption = document.querySelector('[data-lens-caption-row]');
+                caption.focus();
+                return document.activeElement === caption;
+            })()`), true);
+            await command('Input.dispatchKeyEvent', {type: 'rawKeyDown', key: 'ArrowDown',
+                code: 'ArrowDown', windowsVirtualKeyCode: 40});
+            await command('Input.dispatchKeyEvent', {type: 'keyUp', key: 'ArrowDown',
+                code: 'ArrowDown', windowsVirtualKeyCode: 40});
+            await waitFor(`document.querySelector('[data-lens-caption-row]').scrollTop > 0`,
+                'focused caption did not scroll with ArrowDown');
+            assert.equal(await evaluate('ReportViewer.state.rightClipIdx'), bounds.rightIndex);
+        } else {
+            assert.equal(bounds.scrollable, false);
+            assert.ok(bounds.captionBottom <= bounds.stageBottom, 'the last caption line fits');
+        }
+""".replace("LONG_CAPTION", json.dumps(long_caption))
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-lens-caption", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 @pytest.mark.integration

@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
+from frame_compare.config.text_validation import show_bidi_formatting_controls
 from frame_compare.services.report.category_display import (
     humanize_category,
     label_repeats_category,
@@ -117,7 +118,7 @@ def _clip_display(
 
 def _clip_accessible_name(clip: ReportClipPayload) -> str:
     primary = _clip_display(clip, "primary")
-    filename = clip["display"]["filename"]
+    filename = show_bidi_formatting_controls(clip["display"]["filename"])
     return f"{primary} — {filename}" if filename else primary
 
 
@@ -687,7 +688,7 @@ def _render_stage() -> str:
     return f"""    <div class="rv-viewer-stage rv-mode-slider" tabindex="0" role="region" aria-label="Comparison viewer">
         <div class="rv-empty-state" data-empty-state hidden></div>
         <div class="rv-canvas" role="img" aria-label="Comparison image canvas">
-            <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="" class="rv-sizer" aria-hidden="true">
+            <img alt="" class="rv-sizer" aria-hidden="true">
             <div class="rv-layer rv-left">
                 <img src="" alt="" class="rv-image">
             </div>
