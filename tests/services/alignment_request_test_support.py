@@ -36,7 +36,7 @@ def alignment_request(
             path=path,
             label=path.stem,
             identity=AlignmentClipIdentity(
-                path=path,
+                path=path.resolve(),
                 size_bytes=stat.st_size,
                 mtime_ns=stat.st_mtime_ns,
             ),

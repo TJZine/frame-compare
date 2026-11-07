@@ -146,32 +146,27 @@ def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
 
     data: dict[str, object] = {"version": MANUAL_OVERRIDES_VERSION}
     try:
-        cache_exists = cache_path.exists()
+        try:
+            handle = cache_path.open("rb")
+        except FileNotFoundError:
+            handle = None
+        if handle is not None:
+            with handle:
+                existing = tomllib.load(handle)
+            if existing.get("version") == MANUAL_OVERRIDES_VERSION:
+                data.update(existing)
     except OSError as e:
         log.warning(
             "manual_overrides_read_existing_error",
             path=str(cache_path),
             error=str(e),
         )
-        cache_exists = False
-    if cache_exists:
-        try:
-            with cache_path.open("rb") as f:
-                existing = tomllib.load(f)
-        except OSError as e:
-            log.warning(
-                "manual_overrides_read_existing_error",
-                path=str(cache_path),
-                error=str(e),
-            )
-        except SERIALIZED_DECODE_FAILURES:
-            log.warning(
-                "manual_overrides_corrupt_on_write",
-                path=str(cache_path),
-            )
-        else:
-            if existing.get("version") == MANUAL_OVERRIDES_VERSION:
-                data.update(existing)
+        return
+    except SERIALIZED_DECODE_FAILURES:
+        log.warning(
+            "manual_overrides_corrupt_on_write",
+            path=str(cache_path),
+        )
 
     key = f"{override.reference_clip}:{override.comparison_clip}"
     entry = {
@@ -187,10 +182,9 @@ def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
         ordered[k] = data[k]
 
     try:
-        write_bytes_atomic(
-            cache_path, tomli_w.dumps(ordered).encode("utf-8"), publish_guard=raise_if_cancelling
-        )
-    except OSError as e:
+        content = tomli_w.dumps(ordered).encode("utf-8")
+        write_bytes_atomic(cache_path, content, publish_guard=raise_if_cancelling)
+    except (OSError, RecursionError, TypeError, ValueError) as e:
         log.warning(
             "manual_overrides_write_error",
             path=str(cache_path),

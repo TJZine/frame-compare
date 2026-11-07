@@ -404,11 +404,16 @@ never searches parent directories.
   when current entries are saved, but require fresh computation or confirmation
   before reuse. Detector provenance is not part of the key when the resolved
   geometry is unchanged.
-  Unreadable, corrupt, unsupported-version, malformed source-table, or
-  invalid-entry shared reuse data degrades to the normal alignment path with a
-  warning log event. Ordinary no-match, incomplete, or stale source-set misses
-  can silently return no reusable set and continue through the normal alignment
-  path.
+  Lookup verifies that the stored source-set identity matches its key before
+  admitting entries. Entry timestamps must convert to UTC. Unreadable, corrupt,
+  unsupported-version, malformed source-table, or invalid-entry shared reuse data
+  degrades to the normal alignment path with a warning log event. Ordinary
+  no-match, incomplete, or stale source-set misses can continue silently.
+  A source set with duplicate comparison cache keys is ineligible for both
+  shared lookup and publication. Its individual alignment pairs retain their
+  run-local results. A read I/O error during a locked update or a serialization
+  failure warns and leaves the existing file intact. A missing, corrupt, or
+  unsupported-version document can be replaced.
 - `<resolved paths.generated_dir>/cache/tmdb.toml`: shared low-level TMDB response
   cache owned by `frame_compare.services.tmdb_cache`. It stores ordered normalized
   search results and alternative-title lists, never the resolver's selected match or
@@ -423,7 +428,11 @@ never searches parent directories.
   uses key schema 3 and includes the scoped media-runtime probe fingerprint so a
   selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
   portable or Debian/Docker profiles misses without invalidating unrelated file-format
-  data. Older probe keys miss so source stream admission runs again. Persisted probe
+  data. Probe keys use the resolved media path. Entries keyed by a discovered
+  symlink miss and require a normal cold probe before cache-only reuse. Cold
+  probing opens the resolved target, so the probe's decoder index is adjacent
+  to that target. Pair names and report identity still use the discovered path.
+  Older probe keys miss so source stream admission runs again. Persisted probe
   dimensions and frame counts use bounded positive signed-32-bit decoder fields, while
   FPS numerator and denominator use positive signed-64-bit components matching R81's
   `VSVideoInfo` representation. Filesystem size/mtime and cache-safety bounds remain
@@ -483,7 +492,9 @@ identity is not persisted.
   `reference_clip`, `comparison_clip`, `frame_offset`, and `timestamp` under
   reference:comparison keys. Record presence represents confirmed manual authority;
   there is no separate confirmation flag. Unsupported versions are recoverable
-  cache misses and are replaced on the next save without migration.
+  cache misses and are replaced on the next save without migration. A read I/O
+  error or serialization failure during a save warns and preserves the existing
+  manual overrides.
 - `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v4,
   diagnostic-only audio evidence owned by
   `frame_compare.services.alignment_diagnostics` and defined once in

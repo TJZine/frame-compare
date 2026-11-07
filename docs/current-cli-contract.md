@@ -931,14 +931,18 @@ recovery requirement.
   scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint. In the managed
   Windows portable and Debian/Docker profiles, a cache created by another selected
   decoder or FFmpeg/ffprobe lineage is a normal miss, including under
-  `--from-cache-only` validation.
+  `--from-cache-only` validation. Entries keyed by a discovered symlink miss
+  and require a normal run to cold-probe the resolved target before cache-only reuse.
 - Shared alignment reuse source-set identity includes the scoped alignment runtime
   fingerprint: the selected standalone FFmpeg/ffprobe lineage and the selected
   VapourSynth and L-SMASH-Works decoder identity. In the managed Windows portable and
   Debian/Docker profiles, a selected supported FFmpeg or decoder lineage change cannot
   reuse an offset computed under the previous build.
-- Alignment cache acceptance and offset persistence recheck prepared source path,
-  size, and mtime. A source change after preparation cannot authorize cached trims
+- Preparation freezes each source's resolved path, size, and mtime. Alignment
+  rechecks these facts at cache acceptance, immediately before publishing shared
+  offsets, and after attempting to save them. Retargeting a source symlink
+  invalidates the prepared identity even if the replacement has the same size and
+  mtime. A source change after preparation cannot authorize cached trims
   or newly saved offsets; the typed alignment failure requires a fresh run rather
   than silently replacing the prepared fingerprint. This failure stops downstream
   rendering and publishing even when alignment is optional or audio is unavailable;
