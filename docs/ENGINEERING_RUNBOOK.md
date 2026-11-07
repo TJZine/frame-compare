@@ -435,8 +435,12 @@ visible-GUI behavior remains unavailable/unverified until a compatible host runs
 file through the production alignment path (result cache disabled, per-pair
 diagnostics) and classifies each pair as `correct_applied`, `wrong_applied`,
 `provisional`, `unavailable`, or `correctly_withheld` for pairs that must never
-apply. It prints a sanitized summary (pair ids and categories only) and writes
-the full per-pair JSON plus diagnostics to the output directory. Run it in the Docker test service:
+apply. Before measuring, it verifies that the prepared clip order resolves to the
+labelled reference/comparison paths. Aborted or operationally failed attempts are
+`unavailable`; completed no-signal and inconclusive negative controls remain
+`correctly_withheld`. It prints a sanitized summary (pair ids and categories only)
+and writes the full per-pair JSON plus diagnostics to the output directory. Run it
+in the Docker test service:
 
 ```bash
 mkdir -p /tmp/u5-real-media

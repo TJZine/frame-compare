@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import statistics
@@ -116,6 +117,9 @@ class BenchmarkAnalysisSource:
     path: Path
     ordered_paths: tuple[Path, ...]
     effective_fps: Fraction | None
+    reference_fps: Fraction | None
+    effective_frame_count: int | None
+    trim_start_frames: int
     active_rect: BenchmarkActiveRect
     overrides_by_path: Mapping[Path, SourceOverrideConfig]
     source_frame_count: int | None = None
@@ -133,6 +137,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_path = args.output if args.output.is_absolute() else root / args.output
     input_paths = tuple(
         path if path.is_absolute() else root / path for path in cast(Sequence[Path], args.inputs)
+    )
+    _reject_output_collisions(
+        output_path=output_path,
+        input_paths=input_paths,
+        config_path=config_path,
     )
     config = load_config(config_path)
     input_dir = _resolve_config_path(root, config.paths.input_dir)
@@ -153,10 +162,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             "An explicit production benchmark requires the selected source frame count "
             "from generated/clip_probe.toml. Run the normal preparation path first."
         )
-    if args.window_end_exclusive > analysis_source.source_frame_count:
+    if (
+        analysis_source.effective_fps is None
+        or analysis_source.reference_fps is None
+        or analysis_source.effective_frame_count is None
+    ):
         raise SystemExit(
-            "--window-end-exclusive exceeds the selected analysis source frame count "
-            f"({analysis_source.source_frame_count})."
+            "An explicit production benchmark requires prepared FPS and trim facts. "
+            "Run the normal preparation path first."
+        )
+    if args.window_end_exclusive > analysis_source.effective_frame_count:
+        raise SystemExit(
+            "--window-end-exclusive exceeds the selected prepared analysis frame count "
+            f"({analysis_source.effective_frame_count})."
         )
     _require_selection_coordinate_compatibility(analysis_source)
     _require_selection_domain_for_analysis_cache_identity(
@@ -182,8 +200,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     metric_range = MetricFrameRange(
         source_frame_count=analysis_source.source_frame_count,
-        start=args.window_start,
-        end_exclusive=args.window_end_exclusive,
+        start=analysis_source.trim_start_frames + args.window_start,
+        end_exclusive=analysis_source.trim_start_frames + args.window_end_exclusive,
     )
     quality, performance = _run_benchmark(
         video_paths=analysis_source.ordered_paths,
@@ -191,6 +209,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         cache_dir=cache_dir,
         analysis_source_path=analysis_source.path,
         effective_fps=analysis_source.effective_fps,
+        reference_fps=analysis_source.reference_fps,
         active_rect=analysis_source.active_rect,
         selection_domain=args.selection_domain,
         metric_frame_range=metric_range,
@@ -294,8 +313,21 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Optional prepared orchestration selection-domain token for cache identity.",
     )
-    parser.add_argument("--window-start", type=int, default=0)
-    parser.add_argument("--window-end-exclusive", type=int, required=True)
+    parser.add_argument(
+        "--window-start",
+        type=int,
+        default=0,
+        help="Inclusive start in the prepared analysis clip after source trims.",
+    )
+    parser.add_argument(
+        "--window-end-exclusive",
+        type=int,
+        required=True,
+        help=(
+            "Exclusive end in the prepared analysis clip after source trims; "
+            "reported ranges remain source-frame coordinates."
+        ),
+    )
     parser.add_argument("--no-progress", action="store_true")
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--metric-cache-policy", choices=["cold", "reuse"], default="cold")
@@ -315,6 +347,34 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def _reject_output_collisions(
+    *, output_path: Path, input_paths: Sequence[Path], config_path: Path
+) -> None:
+    """Reject destructive report destinations before preparation or trials."""
+    collisions = [
+        path for path in (*input_paths, config_path) if _paths_identify_same_file(output_path, path)
+    ]
+    if collisions:
+        output_resolved = output_path.resolve()
+        names = ", ".join(path.as_posix() for path in collisions)
+        raise SystemExit(
+            "--output must not resolve to an input or the selected config: "
+            f"{output_resolved.as_posix()} ({names})"
+        )
+
+
+def _paths_identify_same_file(left: Path, right: Path) -> bool:
+    """Match lexical aliases and existing-file identities without hiding I/O errors."""
+    if left.resolve() == right.resolve():
+        return True
+    try:
+        left_stat = left.stat()
+        right_stat = right.stat()
+    except FileNotFoundError:
+        return False
+    return os.path.samestat(left_stat, right_stat)
+
+
 def _run_benchmark(
     *,
     video_paths: Sequence[Path],
@@ -322,6 +382,7 @@ def _run_benchmark(
     cache_dir: Path,
     analysis_source_path: Path,
     effective_fps: Fraction | None,
+    reference_fps: Fraction,
     active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
     metric_frame_range: MetricFrameRange,
@@ -355,6 +416,7 @@ def _run_benchmark(
                         cache_dir=cache_dir,
                         analysis_source_path=analysis_source_path,
                         effective_fps=effective_fps,
+                        reference_fps=reference_fps,
                         active_rect=active_rect,
                         selection_domain=selection_domain,
                         metric_frame_range=metric_frame_range,
@@ -380,6 +442,7 @@ def _run_tier(
     cache_dir: Path,
     analysis_source_path: Path,
     effective_fps: Fraction | None,
+    reference_fps: Fraction,
     active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
     metric_frame_range: MetricFrameRange,
@@ -436,6 +499,7 @@ def _run_tier(
             window_start=metric_frame_range.start,
             window_end=metric_frame_range.end_exclusive,
         ),
+        selection_fps=reference_fps,
     )
     selection = _selection_with_offset(selection, metric_frame_range.start)
     selection_seconds = time.perf_counter() - selection_started
@@ -1093,7 +1157,8 @@ def _frame_type_probe_options(
         interval = f"{float(start):.6f}%+{float(duration):.6f}"
         options.extend(["-read_intervals", interval])
         scope: JsonObject = {
-            "kind": "benchmark-window",
+            "kind": "approximate-benchmark-window",
+            "approximate": True,
             "start_frame": window_start,
             "end_frame_exclusive": window_end_exclusive,
             "source_fps": str(source_fps),
@@ -1106,7 +1171,9 @@ def _frame_type_probe_options(
             "requested_start_frame": window_start,
             "requested_end_frame_exclusive": window_end_exclusive,
         }
-    options.extend(["-show_frames", "-show_entries", "frame=key_frame,pict_type"])
+    options.extend(
+        ["-show_frames", "-show_entries", "frame=key_frame,pict_type,best_effort_timestamp_time"]
+    )
     return options, scope
 
 
@@ -1150,6 +1217,7 @@ def _frame_type_summary(result: JsonObject) -> JsonObject:
     frames = cast(list[object], raw_frames)
     counts: dict[str, int] = {}
     keyframes: list[int] = []
+    observed_timestamps: list[float] = []
     for index, value in enumerate(frames):
         if not isinstance(value, Mapping):
             continue
@@ -1159,6 +1227,19 @@ def _frame_type_summary(result: JsonObject) -> JsonObject:
             counts[pict_type] = counts.get(pict_type, 0) + 1
         if frame.get("key_frame") == 1:
             keyframes.append(index)
+        timestamp = frame.get("best_effort_timestamp_time")
+        if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool):
+            parsed_timestamp = float(timestamp)
+            if math.isfinite(parsed_timestamp):
+                observed_timestamps.append(parsed_timestamp)
+        elif isinstance(timestamp, str):
+            try:
+                parsed_timestamp = float(timestamp)
+            except ValueError:
+                pass
+            else:
+                if math.isfinite(parsed_timestamp):
+                    observed_timestamps.append(parsed_timestamp)
     gaps = [right - left for left, right in zip(keyframes, keyframes[1:], strict=False)]
     return {
         "available": True,
@@ -1166,6 +1247,7 @@ def _frame_type_summary(result: JsonObject) -> JsonObject:
         "type_counts": counts,
         "keyframe_count": len(keyframes),
         "keyframe_gap_frames": _distribution([float(gap) for gap in gaps]),
+        "observed_timestamps_seconds": observed_timestamps,
     }
 
 
@@ -1223,34 +1305,49 @@ def _resolve_benchmark_analysis_source(
         input_dir=input_dir, discovered_paths=list(input_paths), config=config.sources
     )
     override = selection.overrides_by_path.get(path)
-    prepared = _prepared_benchmark_clip(
+    prepared_clips = _prepared_benchmark_clips(
         root=root,
         input_paths=selection.ordered_paths,
         config=config,
-        source_path=path,
         overrides_by_path=selection.overrides_by_path,
     )
+    prepared_analysis = None
+    reference_fps = None
+    if prepared_clips is not None:
+        prepared_analysis = next(clip for clip in prepared_clips if clip.path == path)
+        reference_fps = prepared_clips[0].effective_fps
     return BenchmarkAnalysisSource(
         path=path,
         ordered_paths=tuple(selection.ordered_paths),
-        effective_fps=None if override is None else override.effective_fps,
+        effective_fps=None if prepared_analysis is None else prepared_analysis.effective_fps,
+        reference_fps=reference_fps,
+        effective_frame_count=(
+            None if prepared_analysis is None else prepared_analysis.effective_num_frames()
+        ),
+        trim_start_frames=(
+            0 if prepared_analysis is None else prepared_analysis.trim.trim_start_frames
+        ),
         active_rect=_benchmark_active_rect_from_prepared_clip(
-            source_path=path, override=override, prepared_clip=prepared, config=config
+            source_path=path,
+            override=override,
+            prepared_clip=prepared_analysis,
+            config=config,
         ),
         overrides_by_path=selection.overrides_by_path,
-        source_frame_count=None if prepared is None else prepared.probe.num_frames,
-        source_fps=None if prepared is None else prepared.probe.fps,
+        source_frame_count=(
+            None if prepared_analysis is None else prepared_analysis.probe.num_frames
+        ),
+        source_fps=(None if prepared_analysis is None else prepared_analysis.probe.fps),
     )
 
 
-def _prepared_benchmark_clip(
+def _prepared_benchmark_clips(
     *,
     root: Path,
     input_paths: Sequence[Path],
     config: ConfigSchema,
-    source_path: Path,
     overrides_by_path: dict[Path, SourceOverrideConfig],
-) -> ClipState | None:
+) -> list[ClipState] | None:
     cache = _resolve_config_path(root, config.paths.generated_dir) / "clip_probe.toml"
     entries = dict(load_clip_probe_cache(cache))
     snapshots: dict[Path, ClipProbeSnapshot] = {}
@@ -1271,7 +1368,7 @@ def _prepared_benchmark_clip(
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
     )
-    return next(clip for clip in result.clips if clip.path == source_path)
+    return result.clips
 
 
 def _benchmark_active_rect_from_prepared_clip(
@@ -1324,7 +1421,6 @@ def _require_selection_domain_for_analysis_cache_identity(
         bool(video_paths)
         and analysis_source.reference_path == video_paths[0]
         and analysis_source.path == video_paths[0]
-        and analysis_source.effective_fps is None
         and active_rect_detection == ScreenshotActiveRectDetection.ASPECT_RATIO
         and not any(
             _source_override_affects_selection_domain(value)

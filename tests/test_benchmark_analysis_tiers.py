@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from fractions import Fraction
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ from frame_compare.analysis.types import (
     CacheLoadResult,
     FrameMetrics,
     FrameSelection,
+    MetricCacheRequest,
     MetricFrameRange,
     MetricsMetadata,
     SelectionBreakdown,
@@ -26,6 +28,13 @@ from frame_compare.analysis.types import (
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
+from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.orchestration.context import (
+    ClipActiveRect,
+    ClipFingerprint,
+    ClipProbeSnapshot,
+    ClipState,
+)
 
 
 def test_help_exposes_only_production_benchmark_options() -> None:
@@ -43,6 +52,9 @@ def test_help_exposes_only_production_benchmark_options() -> None:
     assert "--window-end-exclusive" in result.stdout
     assert "--metric-cache-policy" in result.stdout
     assert "--inspect-frame-types" in result.stdout
+    assert "prepared analysis clip after" in result.stdout
+    assert "source trims" in result.stdout
+    assert "source-frame" in result.stdout
     assert "--mode" not in result.stdout
     assert "candidate" not in result.stdout.lower()
 
@@ -180,6 +192,93 @@ def test_cache_policy_accepts_observed_trial_state(
     )
 
 
+@pytest.mark.parametrize("collision", ["input", "config"])
+def test_output_collision_is_rejected_before_preparation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, collision: str
+) -> None:
+    script = _load_script()
+    input_path = tmp_path / "clip.mkv"
+    config_path = tmp_path / "config.toml"
+    input_path.write_bytes(b"video")
+    config_path.write_bytes(b"config bytes")
+    output = input_path if collision == "input" else config_path
+
+    def unexpected_load(_path: Path) -> object:
+        pytest.fail("output collision must be rejected before configuration loading")
+
+    monkeypatch.setattr(script, "load_config", unexpected_load)
+
+    def unexpected_preparation(**_kwargs: object) -> object:
+        pytest.fail("output collision must be rejected before preparation")
+
+    monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", unexpected_preparation)
+
+    with pytest.raises(SystemExit, match="must not resolve to an input or the selected config"):
+        script.main(
+            [
+                "--root",
+                str(tmp_path),
+                "--config",
+                str(config_path),
+                "--output",
+                str(output),
+                "--window-end-exclusive",
+                "1",
+                str(input_path),
+            ]
+        )
+
+    assert input_path.read_bytes() == b"video"
+    assert config_path.read_bytes() == b"config bytes"
+
+
+def test_output_case_alias_collision_preserves_input_when_supported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = _load_script()
+    input_path = tmp_path / "Clip.mkv"
+    case_alias = tmp_path / "clip.mkv"
+    input_path.write_bytes(b"case-sensitive source")
+    try:
+        same_file = os.path.samefile(input_path, case_alias)
+    except FileNotFoundError:
+        pytest.skip("filesystem is case-sensitive")
+    except OSError as exc:
+        pytest.skip(f"filesystem cannot compare case aliases: {exc}")
+    if not same_file:
+        pytest.skip("filesystem is case-sensitive")
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_bytes(b"config bytes")
+
+    def unexpected_load(_path: Path) -> object:
+        pytest.fail("case-alias collision must be rejected before configuration loading")
+
+    monkeypatch.setattr(script, "load_config", unexpected_load)
+    monkeypatch.setattr(
+        script,
+        "_resolve_benchmark_analysis_source",
+        lambda **_kwargs: pytest.fail("case-alias collision must be rejected before preparation"),
+    )
+
+    with pytest.raises(SystemExit, match="must not resolve to an input or the selected config"):
+        script.main(
+            [
+                "--root",
+                str(tmp_path),
+                "--config",
+                str(config_path),
+                "--output",
+                str(case_alias),
+                "--window-end-exclusive",
+                "1",
+                str(input_path),
+            ]
+        )
+
+    assert input_path.read_bytes() == b"case-sensitive source"
+
+
 def test_run_tier_unwraps_the_production_metrics_acquisition(tmp_path: Path) -> None:
     script = _load_script()
     video = tmp_path / "clip.mkv"
@@ -203,6 +302,7 @@ def test_run_tier_unwraps_the_production_metrics_acquisition(tmp_path: Path) -> 
             cache_dir=tmp_path / "cache",
             analysis_source_path=video,
             effective_fps=Fraction(24),
+            reference_fps=Fraction(25),
             active_rect=active_rect,
             selection_domain=None,
             metric_frame_range=frame_range,
@@ -217,6 +317,105 @@ def test_run_tier_unwraps_the_production_metrics_acquisition(tmp_path: Path) -> 
     assert result["cache_state"] == "hit"
     assert result["cache_write_state"] == "not_attempted"
     assert "cache_lookup" in result["phase_timings_seconds"]
+
+
+def test_run_tier_uses_prepared_reference_fps_for_selection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = _load_script()
+    video = tmp_path / "clip.mkv"
+    video.write_bytes(b"fixture")
+    frame_range = MetricFrameRange(source_frame_count=40, start=7, end_exclusive=27)
+    metrics = _metrics(mode="quality", start=7, end=27, source_frame_count=40)
+    active_rect = script.BenchmarkActiveRect(
+        rect=None,
+        source="full-frame",
+        detection_mode="aspect_ratio",
+    )
+    captured: dict[str, object] = {}
+
+    def calculate(request: object, **kwargs: object) -> object:
+        captured["request"] = request
+        recorder = cast(Any, kwargs["timing_recorder"])
+        recorder.cache_write_state = "written"
+        return SimpleNamespace(metrics=metrics)
+
+    monkeypatch.setattr(script, "calculate_metrics", calculate)
+    monkeypatch.setattr(script, "_delete_tier_metrics_cache", lambda *_args, **_kwargs: None)
+
+    def select(_metrics: object, _config: object, *, selection_fps: Fraction) -> FrameSelection:
+        captured["selection_fps"] = selection_fps
+        return _selection(dark=[0])
+
+    monkeypatch.setattr(script, "select_frames", select)
+
+    result = script._run_tier(
+        mode="quality",
+        video_paths=[video],
+        analysis_config=AnalysisConfig(random_frame_count=1),
+        cache_dir=tmp_path / "cache",
+        analysis_source_path=video,
+        effective_fps=Fraction(25),
+        reference_fps=Fraction(25),
+        active_rect=active_rect,
+        selection_domain=None,
+        metric_frame_range=frame_range,
+        metric_cache_policy="cold",
+        repetition=0,
+        order_index=0,
+    )
+
+    request = captured["request"]
+    assert isinstance(request, MetricCacheRequest)
+    assert request.effective_fps == Fraction(25)
+    assert request.metric_frame_range == frame_range
+    assert captured["selection_fps"] == Fraction(25)
+    assert cast(FrameSelection, result["selection"]).frames == [7]
+
+
+def test_resolved_benchmark_source_preserves_prepared_fps_and_trim_facts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = _load_script()
+    video = tmp_path / "clip.mkv"
+    video.write_bytes(b"video")
+    snapshot = ClipProbeSnapshot(
+        fingerprint=ClipFingerprint(path=video, size_bytes=5, mtime_ns=1),
+        width=1920,
+        height=1080,
+        num_frames=100,
+        fps=Fraction(24001, 1000),
+        is_hdr=False,
+    )
+    prepared = ClipState(
+        path=video,
+        label="clip",
+        probe=snapshot,
+        source_fps=Fraction(24),
+        effective_fps=Fraction(24),
+        active_rect=ClipActiveRect(
+            x=0,
+            y=0,
+            width=1920,
+            height=1080,
+            source="aspect-ratio-derived",
+            detection_mode="aspect_ratio",
+        ),
+    ).with_trim(trim_start_frames=7, trim_end_frame_inclusive=92)
+    monkeypatch.setattr(script, "_prepared_benchmark_clips", lambda **_kwargs: [prepared])
+
+    resolved = script._resolve_benchmark_analysis_source(
+        root=tmp_path,
+        input_dir=tmp_path,
+        input_paths=(video,),
+        config=get_default_config(),
+    )
+
+    assert resolved.effective_fps == Fraction(24)
+    assert resolved.reference_fps == Fraction(24)
+    assert resolved.trim_start_frames == 7
+    assert resolved.effective_frame_count == 86
+    assert resolved.source_frame_count == 100
 
 
 def test_sampling_json_records_exact_budget_and_bursts() -> None:
@@ -301,9 +500,21 @@ def test_frame_type_summary_records_distribution() -> None:
             "success": True,
             "payload": {
                 "frames": [
-                    {"key_frame": 1, "pict_type": "I"},
-                    {"key_frame": 0, "pict_type": "B"},
-                    {"key_frame": 1, "pict_type": "P"},
+                    {
+                        "key_frame": 1,
+                        "pict_type": "I",
+                        "best_effort_timestamp_time": "0.000",
+                    },
+                    {
+                        "key_frame": 0,
+                        "pict_type": "B",
+                        "best_effort_timestamp_time": "0.042",
+                    },
+                    {
+                        "key_frame": 1,
+                        "pict_type": "P",
+                        "best_effort_timestamp_time": "0.083",
+                    },
                 ]
             },
         }
@@ -312,6 +523,7 @@ def test_frame_type_summary_records_distribution() -> None:
     assert result["available"] is True
     assert result["type_counts"] == {"I": 1, "B": 1, "P": 1}
     assert result["keyframe_count"] == 2
+    assert result["observed_timestamps_seconds"] == [0.0, 0.042, 0.083]
 
 
 def test_frame_type_probe_bounds_window_when_fps_is_known() -> None:
@@ -324,7 +536,8 @@ def test_frame_type_probe_bounds_window_when_fps_is_known() -> None:
     )
 
     assert "-read_intervals" in options
-    assert scope["kind"] == "benchmark-window"
+    assert scope["kind"] == "approximate-benchmark-window"
+    assert scope["approximate"] is True
     assert scope["start_frame"] == 240
     assert scope["end_frame_exclusive"] == 2640
 
@@ -346,7 +559,10 @@ def test_main_rejects_legacy_indexes_for_warm_requirement(
     source = script.BenchmarkAnalysisSource(
         path=video,
         ordered_paths=(video,),
-        effective_fps=None,
+        effective_fps=Fraction(24),
+        reference_fps=Fraction(24),
+        effective_frame_count=20,
+        trim_start_frames=0,
         active_rect=script.BenchmarkActiveRect(
             rect=None,
             source="full-frame",
@@ -391,7 +607,10 @@ def test_main_rejects_unusable_owned_index(
     source = script.BenchmarkAnalysisSource(
         path=video,
         ordered_paths=(video,),
-        effective_fps=None,
+        effective_fps=Fraction(24),
+        reference_fps=Fraction(24),
+        effective_frame_count=20,
+        trim_start_frames=0,
         active_rect=script.BenchmarkActiveRect(
             rect=None,
             source="full-frame",
@@ -435,12 +654,15 @@ def test_nondefault_domain_requires_explicit_selection_token(tmp_path: Path) -> 
         path=video,
         ordered_paths=(video,),
         effective_fps=Fraction(24),
+        reference_fps=Fraction(24),
+        effective_frame_count=20,
+        trim_start_frames=0,
         active_rect=script.BenchmarkActiveRect(
             rect=None,
             source="full-frame",
             detection_mode="aspect_ratio",
         ),
-        overrides_by_path={},
+        overrides_by_path={video: SourceOverrideConfig(effective_fps=Fraction(25))},
     )
 
     with pytest.raises(SystemExit, match="selection-domain"):
@@ -450,6 +672,32 @@ def test_nondefault_domain_requires_explicit_selection_token(tmp_path: Path) -> 
             analysis_source=source,
             active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
         )
+
+
+def test_default_prepared_domain_accepts_prepared_effective_fps(tmp_path: Path) -> None:
+    script = _load_script()
+    video = tmp_path / "clip.mkv"
+    source = script.BenchmarkAnalysisSource(
+        path=video,
+        ordered_paths=(video,),
+        effective_fps=Fraction(24),
+        reference_fps=Fraction(24),
+        effective_frame_count=20,
+        trim_start_frames=0,
+        active_rect=script.BenchmarkActiveRect(
+            rect=None,
+            source="full-frame",
+            detection_mode="aspect_ratio",
+        ),
+        overrides_by_path={},
+    )
+
+    script._require_selection_domain_for_analysis_cache_identity(
+        selection_domain=None,
+        video_paths=(video,),
+        analysis_source=source,
+        active_rect_detection=ScreenshotActiveRectDetection.ASPECT_RATIO,
+    )
 
 
 def test_main_writes_expected_production_report(
@@ -470,27 +718,30 @@ def test_main_writes_expected_production_report(
     source = script.BenchmarkAnalysisSource(
         path=reference,
         ordered_paths=(reference,),
-        effective_fps=None,
+        effective_fps=Fraction(24),
+        reference_fps=Fraction(24),
+        effective_frame_count=86,
+        trim_start_frames=7,
         active_rect=script.BenchmarkActiveRect(
             rect=None,
             source="full-frame",
             detection_mode="aspect_ratio",
         ),
         overrides_by_path={},
-        source_frame_count=20,
+        source_frame_count=100,
         source_fps=Fraction(24),
     )
-    quality_metrics = _metrics(mode="quality", start=0, end=20, source_frame_count=20)
+    quality_metrics = _metrics(mode="quality", start=9, end=29, source_frame_count=100)
     sampled = tuple(
         frame
-        for burst in plan_performance_bursts(window_start=0, window_end_exclusive=20)
+        for burst in plan_performance_bursts(window_start=9, window_end_exclusive=29)
         for frame in range(burst.start, burst.end_exclusive)
     )
     performance_metrics = _metrics(
         mode="performance",
-        start=0,
-        end=20,
-        source_frame_count=20,
+        start=9,
+        end=29,
+        source_frame_count=100,
         sampled=sampled,
     )
     config = get_default_config().model_copy(
@@ -505,20 +756,26 @@ def test_main_writes_expected_production_report(
             )
         }
     )
-    quality_selection = _selection(dark=[0], bright=[19], motion=[18])
-    performance_selection = _selection(dark=[1], bright=[11], motion=[11])
+    quality_selection = _selection(dark=[9], bright=[28], motion=[27])
+    performance_selection = _selection(dark=[10], bright=[20], motion=[20])
+    captured: dict[str, object] = {}
     monkeypatch.setattr(script, "load_config", lambda _path: config)
     monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
     monkeypatch.setattr(script, "validate_source_index", lambda _path: None)
-    monkeypatch.setattr(
-        script,
-        "_run_benchmark",
-        lambda **_kwargs: (
+
+    def run_benchmark(**kwargs: object) -> tuple[dict[str, object], dict[str, object]]:
+        captured.update(kwargs)
+        return (
             _aggregate(script, quality_metrics, quality_selection, "quality", 2.0),
             _aggregate(script, performance_metrics, performance_selection, "performance", 1.0),
-        ),
-    )
-    monkeypatch.setattr(script, "_probe_source_facts", lambda *_args, **_kwargs: {})
+        )
+
+    def probe_source_facts(*_args: object, **kwargs: object) -> dict[str, object]:
+        captured["probe_window"] = kwargs
+        return {}
+
+    monkeypatch.setattr(script, "_run_benchmark", run_benchmark)
+    monkeypatch.setattr(script, "_probe_source_facts", probe_source_facts)
     monkeypatch.setattr(script, "_git_provenance", lambda _root: {"available": True})
 
     result = script.main(
@@ -530,7 +787,9 @@ def test_main_writes_expected_production_report(
             "--output",
             str(output),
             "--window-end-exclusive",
-            "20",
+            "22",
+            "--window-start",
+            "2",
             "--selection-domain",
             "test-selection-domain",
             "--require-warm-source-index",
@@ -540,8 +799,16 @@ def test_main_writes_expected_production_report(
     )
 
     assert result == 0
+    assert captured["reference_fps"] == Fraction(24)
+    assert captured["metric_frame_range"] == MetricFrameRange(100, 9, 29)
+    assert cast(dict[str, object], captured["probe_window"])["window_start"] == 9
+    assert cast(dict[str, object], captured["probe_window"])["window_end_exclusive"] == 29
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["schema_version"] == 2
+    assert report["config"]["selection_window"] == {
+        "start_frame": 9,
+        "end_frame_exclusive": 29,
+    }
     index_facts = report["source"]["indexes"][reference.as_posix()]
     assert index_facts == {
         "detected": True,
@@ -552,6 +819,7 @@ def test_main_writes_expected_production_report(
     }
     assert set(report["comparisons"]) == {"performance"}
     comparison = report["comparisons"]["performance"]
+    assert comparison["selected"]["frames"] == [10, 20]
     assert comparison["sampling"]["sample_count"] == 5
     assert comparison["comparisons"]["dark"]["overlap_count"] == 0
     assert comparison["exact_selected_equality"]["dark"] is False
