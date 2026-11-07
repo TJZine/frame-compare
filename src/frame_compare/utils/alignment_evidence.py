@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, dataclass, fields, is_dataclass
 from fractions import Fraction
+from functools import cache
 from types import UnionType
 from typing import (
     Any,
@@ -196,8 +197,13 @@ def _walk_value(annotation: object, value: Any, what: str, *, parse: bool) -> An
     raise TypeError(f"unsupported evidence type for {what}: {annotation!r}")
 
 
+@cache
+def _schema_type_hints(cls: type) -> dict[str, Any]:
+    return get_type_hints(cls)
+
+
 def _check_shallow(obj: object) -> None:
-    hints: dict[str, Any] = get_type_hints(type(obj))
+    hints = _schema_type_hints(type(obj))
     for field in fields(cast(Any, obj)):
         _walk_value(hints[field.name], getattr(obj, field.name), field.name, parse=False)
 
@@ -243,7 +249,7 @@ def evidence_from_payload[T](cls: type[T], data: object) -> T:
     missing = sorted(names - {key for key in raw if isinstance(key, str)})
     if missing:
         raise ValueError(f"{what} is missing keys: {missing}")
-    hints: dict[str, Any] = get_type_hints(cls)
+    hints = _schema_type_hints(cls)
     parsed: dict[str, Any] = {
         name: _walk_value(hints[name], raw[name], f"{what}.{name}", parse=True) for name in names
     }
@@ -578,6 +584,12 @@ class VideoTargetEvidence:
             return
         if not self.positions:
             raise ValueError("examined video targets need a position")
+        if any(
+            position.alternative_offset is not None
+            and position.alternative_offset not in self.alternative_offsets
+            for position in self.positions
+        ):
+            raise ValueError("recorded alternative offset must belong to its target")
         winners = [position.winner for position in self.positions]
         if self.resolution == "alternative_confirmed":
             if "alternative" not in winners:

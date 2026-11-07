@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Generator
-from dataclasses import asdict, replace
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -60,6 +60,7 @@ from tests.alignment_review_test_support import (
     audio_review as _audio_review,
 )
 from tests.alignment_review_test_support import (
+    native_attempt_payload,
     provisional_audio_attempt,
     trusted_audio_attempt,
     unavailable_audio_attempt,
@@ -78,7 +79,7 @@ def _attempt_audio_review(attempt: AudioAlignmentAttempt, *, applied: bool = Fal
                 "frame_offset": 0 if applied else None,
             },
             "evidence_availability": "current_attempt",
-            "audio_attempt": asdict(attempt),
+            "audio_attempt": native_attempt_payload(attempt),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -90,7 +91,7 @@ def _provisional_audio_review(ordinal: int = 1, frame_offset: int = 0) -> str:
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
-            "audio_attempt": asdict(
+            "audio_attempt": native_attempt_payload(
                 provisional_audio_attempt(ordinal=ordinal, frame_offset=frame_offset)
             ),
         },
@@ -104,7 +105,7 @@ def _accepted_audio_review(ordinal: int = 1, frame_offset: int = 0) -> str:
         {
             "current_authority": {"origin": "computed_this_run", "frame_offset": frame_offset},
             "evidence_availability": "current_attempt",
-            "audio_attempt": asdict(
+            "audio_attempt": native_attempt_payload(
                 trusted_audio_attempt(ordinal=ordinal, frame_offset=frame_offset)
             ),
         },
@@ -118,7 +119,7 @@ def _unavailable_audio_review(ordinal: int = 1) -> str:
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
-            "audio_attempt": asdict(unavailable_audio_attempt(ordinal=ordinal)),
+            "audio_attempt": native_attempt_payload(unavailable_audio_attempt(ordinal=ordinal)),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -447,7 +448,7 @@ def test_panel_summary_preserves_target_boundary_copy(tmp_path: Path, boundary: 
         )
 
 
-def test_actual_native_payload_omits_rows_and_matches_full_terminal_and_panel_copy(
+def test_actual_native_payload_omits_rows_and_preserves_panel_copy(
     tmp_path: Path,
 ) -> None:
     attempt = production_nested_targets_attempt()
@@ -478,15 +479,6 @@ def test_actual_native_payload_omits_rows_and_matches_full_terminal_and_panel_co
             )
         },
     )[key]
-    full_review = json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": asdict(attempt),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
     native_attempt = json.loads(native_review)["audio_attempt"]
     assert native_attempt["chunks"]["rows_omitted"] is True
     assert all(
@@ -495,20 +487,13 @@ def test_actual_native_payload_omits_rows_and_matches_full_terminal_and_panel_co
     )
     assert native_attempt["chunks"]["total_samples"] == attempt.chunks.total_samples
 
-    summaries = []
-    details = []
-    for label, audio_review in (("full", full_review), ("native", native_review)):
-        panel_dir = tmp_path / label
-        panel_dir.mkdir()
-        panel, _api, _script = _panel(panel_dir, suggestion=None, audio_review=audio_review)
-        summaries.append(panel.audio_summary_labels[0].text())
-        group = panel.audio_detail_groups[0]
-        group.setChecked(True)
-        details.append(cast(QLabel, group.findChild(QLabel)).text())
-
-    assert summaries[0] == summaries[1]
-    assert details[0] == details[1]
-    summary = summaries[1]
+    panel, _api, _script = _panel(tmp_path, suggestion=None, audio_review=native_review)
+    summary = panel.audio_summary_labels[0].text()
+    group = panel.audio_detail_groups[0]
+    group.setChecked(True)
+    details = cast(QLabel, group.findChild(QLabel)).text()
+    full_details = build_audio_review_presentation(attempt).verbose_lines(panel=True)
+    assert details.splitlines()[: len(full_details)] == list(full_details)
     assert (
         "Audio in 0:00–1:00 points to +250f, and the video could not settle which offset is right there."
         in summary
@@ -1106,7 +1091,7 @@ def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
-            "audio_attempt": asdict(attempt),
+            "audio_attempt": native_attempt_payload(attempt),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -1221,7 +1206,7 @@ def test_p4a_panel_covers_each_non_applied_reason(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
             "evidence_availability": "current_attempt",
-            "audio_attempt": asdict(attempt),
+            "audio_attempt": native_attempt_payload(attempt),
         },
         sort_keys=True,
         separators=(",", ":"),

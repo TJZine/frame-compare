@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import replace
+from dataclasses import asdict, replace
 from fractions import Fraction
+from typing import Any
 
+from frame_compare.services.alignment import _project_audio_attempt_for_review
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
 from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
@@ -47,6 +49,10 @@ def audio_review(suggestion: int | None) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def native_attempt_payload(attempt: AudioAlignmentAttempt) -> dict[str, Any]:
+    return asdict(_project_audio_attempt_for_review(attempt))
 
 
 def frame_lag(frame_offset: int) -> int:

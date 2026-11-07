@@ -10,7 +10,6 @@ import subprocess
 import sys
 import types
 from contextlib import suppress
-from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -38,6 +37,7 @@ from frame_compare.vsview.session_script import (
     write_vsview_session_script,
 )
 from tests.alignment_review_test_support import (
+    native_attempt_payload,
     provisional_audio_attempt,
     trusted_audio_attempt,
     unavailable_audio_attempt,
@@ -789,7 +789,7 @@ def test_generated_session_keeps_accepted_provisional_and_unavailable_copy_disti
                     "frame_offset": 0 if ordinal == 1 else None,
                 },
                 "evidence_availability": "current_attempt",
-                "audio_attempt": asdict(attempt),
+                "audio_attempt": native_attempt_payload(attempt),
             }
         )
 
