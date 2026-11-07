@@ -6,13 +6,15 @@ import os
 import site
 import sys
 from collections.abc import Callable, Sequence
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from pathlib import Path
 from shutil import which
-from subprocess import CompletedProcess, Popen, TimeoutExpired, run
+from subprocess import PIPE, CompletedProcess, Popen, TimeoutExpired, run
 from tempfile import NamedTemporaryFile, TemporaryFile
 from time import monotonic
 from typing import IO
+
+_STDERR_TAIL_BYTES = 64 * 1024
 
 _MEDIA_EXECUTABLE_ENV = {
     "ffmpeg": "FRAME_COMPARE_FFMPEG_EXECUTABLE",
@@ -193,8 +195,12 @@ class SubprocessOutputLimitExceeded(Exception):
     """Captured stdout exceeded the owner's byte limit; the child was reaped."""
 
 
+class SubprocessCleanupError(Exception):
+    """The child could not be reaped after escalation."""
+
+
 def _reap_stopped_process(process: Popen[bytes]) -> None:
-    # Keep the original failure, including a repeated interrupt, during cleanup.
+    # Escalate even if terminate or the first wait is interrupted.
     with suppress(BaseException):
         process.terminate()
     try:
@@ -204,8 +210,10 @@ def _reap_stopped_process(process: Popen[bytes]) -> None:
         pass
     with suppress(BaseException):
         process.kill()
-    with suppress(BaseException):
+    try:
         process.wait(timeout=2.0)
+    except BaseException as exc:
+        raise SubprocessCleanupError("could not reap child after killing it") from exc
 
 
 def _read_captured_output(stream: IO[bytes]) -> bytes:
@@ -226,16 +234,45 @@ def _run_abortable(
     if abort():
         raise SubprocessAborted()
 
-    # Files avoid Windows pipe-reader threads, whose read/close can outlive a
-    # drain deadline when a descendant retains an inherited write handle.
     # Reopen stdout so reading never changes the child's write offset.
-    with (
-        NamedTemporaryFile(delete_on_close=False) as stdout_file,
-        TemporaryFile() as stderr_file,
-        open(stdout_file.name, "rb") as stdout_reader,
-    ):
-        process = Popen(argv, cwd=cwd, stdout=stdout_file, stderr=stderr_file, shell=False)
+    with ExitStack() as stack:
+        stdout_file = stack.enter_context(NamedTemporaryFile(delete_on_close=False))
+        stdout_reader = stack.enter_context(open(stdout_file.name, "rb"))
+        # Non-streaming callers can use stderr as result data (FFmpeg showinfo).
+        stderr_file = stack.enter_context(TemporaryFile()) if stdout_consumer is None else None
+        process = Popen(argv, cwd=cwd, stdout=stdout_file, stderr=stderr_file or PIPE, shell=False)
+        stderr_tail = bytearray()
+        stderr_fd: int | None = None
+
+        def consume_stderr() -> bool:
+            if stderr_fd is None:
+                return False
+            received = False
+            # Cap work between deadline checks even if a descendant keeps writing.
+            for _ in range(16):
+                try:
+                    chunk = os.read(stderr_fd, _STDERR_TAIL_BYTES)
+                except BlockingIOError:
+                    break
+                if not chunk:
+                    break
+                received = True
+                stderr_tail.extend(chunk)
+                del stderr_tail[:-_STDERR_TAIL_BYTES]
+            return received
+
+        def captured_stderr() -> bytes:
+            if stderr_file is not None:
+                return _read_captured_output(stderr_file)
+            consume_stderr()
+            return bytes(stderr_tail)
+
         try:
+            if process.stderr is not None:
+                stderr_pipe = stack.enter_context(process.stderr)
+                # Non-blocking pipes avoid reader threads and EOF waits on Windows too.
+                os.set_blocking(stderr_pipe.fileno(), False)
+                stderr_fd = stderr_pipe.fileno()
             deadline = None if timeout_seconds is None else monotonic() + timeout_seconds
             stdout_bytes = 0
 
@@ -264,23 +301,40 @@ def _run_abortable(
                 if timeout_seconds is not None and remaining is not None and remaining <= 0:
                     raise TimeoutExpired(argv, timeout_seconds)
                 consume_stdout()
+                drained_stderr = consume_stderr()
+                wait_interval = 0.1 if stderr_fd is None else (0.0 if drained_stderr else 0.01)
                 try:
-                    process.wait(timeout=0.1 if remaining is None else min(0.1, remaining))
+                    process.wait(
+                        timeout=wait_interval
+                        if remaining is None
+                        else min(wait_interval, remaining)
+                    )
                 except TimeoutExpired:
                     continue
                 consume_stdout()
                 break
         except BaseException as exc:
-            _reap_stopped_process(process)
+            try:
+                _reap_stopped_process(process)
+            except SubprocessCleanupError as cleanup_error:
+                # A live child can still hold the temporary stdout file open.
+                # Close the capture resources without masking the failed reap.
+                try:
+                    stack.close()
+                except OSError as teardown_error:
+                    cleanup_error.add_note(
+                        f"Capture teardown also failed ({type(teardown_error).__name__})."
+                    )
+                raise
             if isinstance(exc, TimeoutExpired):
                 with suppress(BaseException):
                     exc.stdout = (
                         _read_captured_output(stdout_file) if stdout_consumer is None else b""
                     )
-                    exc.stderr = _read_captured_output(stderr_file)
+                    exc.stderr = captured_stderr()
             raise
         stdout = _read_captured_output(stdout_file) if stdout_consumer is None else b""
-        stderr = _read_captured_output(stderr_file)
+        stderr = captured_stderr()
     result = CompletedProcess(argv, process.returncode, stdout, stderr)
     if check:
         result.check_returncode()
@@ -289,6 +343,7 @@ def _run_abortable(
 
 __all__ = [
     "SubprocessAborted",
+    "SubprocessCleanupError",
     "SubprocessOutputLimitExceeded",
     "prepare_python_child",
     "resolve_executable",

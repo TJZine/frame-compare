@@ -670,12 +670,28 @@ Computed alignment work runs whole-track chunked correlation over each selected 
 stream. `alignment_audio` owns stream probing and deterministic selection, audio and
 video start-time probing with container-start compensation, and the canonical
 whole-track 8 kHz mono FFmpeg recipe. Selected audio duration comes from stream
-`duration_ts`, stream duration, or a `DURATION` tag. When those are absent, one
-15-second-bounded ffprobe call reads selected-stream packets starting at
-`max(0, source_frame_count / source_fps - 60)` seconds. A `packet_tail` duration
-is the latest packet end minus the stream start, accepted only if every packet
-value parses, a packet reaches the seek point, and the duration is positive.
-Container duration is never substituted. Missing tail evidence remains
+`duration_ts`, stream duration, or a `DURATION` tag. Duration tags use bounded
+`hours:minutes:seconds[.fraction]` syntax. Recognized `mkvmerge` statistics
+measure elapsed track time. When ffprobe identifies the Matroska muxer as `Lavf`
+or `Lavf` followed by its version, its `DURATION` is an endpoint if statistics
+markers are absent or identify `mkvmerge`. A Lavf remux rewrites the endpoint
+even when it retains those markers. A retained `mkvpropedit` marker is
+ambiguous because that tool can rewrite the tag in place after muxing, and a
+later remux can retain its marker. For nonzero starts, ambiguous or unknown
+provenance requires packet evidence. In Matroska, an audio start and
+duration that both match the container timing can be inherited from ffprobe's
+analysis window. The selected stream then requires its first packet timestamp
+and measured duration before collection. Without that timing signature the
+probe relies on ffprobe's stream start.
+
+When the duration needs packet evidence, a 15-second-bounded ffprobe call
+reads selected-stream packets starting at
+`video_start + max(0, source_frame_count / source_fps - 60)` seconds. A
+`packet_tail` duration is the latest packet end minus the stream start, accepted
+only if every packet value parses, a packet reaches the absolute seek point,
+and the duration is positive. Packet probes bound stdout and retain a 64 KiB
+stderr tail. Failed child reaping is a fatal alignment cleanup error.
+Missing packet evidence remains
 `selected_audio_timeline_unavailable`; exact retime rates above the supported
 bound produce the distinct `retime_rate_unsupported` rejection. These durations
 only bound planning and collection; audio/video authority remains unchanged.
@@ -695,6 +711,8 @@ decode. The compensated offset is
 `lag / 8000 + (audio_start_ref - video_start_ref) - (audio_start_cmp - video_start_cmp)`,
 using ffprobe start times of the selected audio stream and the first non-`attached_pic`
 video stream; a missing start time counts as 0 and is recorded as `default_zero`.
+Lag, start compensation, and reference FPS stay rational through rounding with
+`floor(frames + 1/2)`.
 `alignment_streaming` is the adjacent, independently exercisable paired-collection
 owner. It decodes reference and comparison concurrently through one `_ChildStream`
 per side read in lockstep, with bounded memory (one reference chunk, one
