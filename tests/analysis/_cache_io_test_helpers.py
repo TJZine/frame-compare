@@ -37,7 +37,7 @@ def valid_cache_metadata_payload(
         "source_frame_count": frame_count,
         "metric_source_start": 0,
         "metric_source_end_exclusive": frame_count,
-        "fps": "24/1",
+        "fps": "24",
         "config_fingerprint": "fp",
         "analysis_source_path": "",
         "clips": [],

@@ -920,7 +920,7 @@ recovery requirement.
   rather than silently validating a full-frame cache identity.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
-- Probe-cache files remain on-disk format version 1, but key schema 2 includes the
+- Probe-cache files remain on-disk format version 1, but key schema 3 includes the
   scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint. In the managed
   Windows portable and Debian/Docker profiles, a cache created by another selected
   decoder or FFmpeg/ffprobe lineage is a normal miss, including under
