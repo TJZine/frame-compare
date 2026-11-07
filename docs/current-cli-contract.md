@@ -1733,14 +1733,21 @@ dedicated `run` flags for them:
   `fpng` is the explicit VapourSynth `core.fpng.Write` writer selection for the
   screenshot runtime path. When `use_ffmpeg = false` and renderer selection is `auto`,
   explicit `fpng` requires successful VapourSynth loading and does not silently fall
-  back to FFmpeg; `use_ffmpeg = true` still forces the FFmpeg path.
+  back to FFmpeg. `use_ffmpeg = true` still forces the FFmpeg path. FFmpeg extracts
+  screenshots in coded orientation and fails with a VapourSynth hint when its
+  decoded frame count differs from the prepared L-SMASH count or its filter graph
+  reconfigures during extraction.
 - `png_compression` remains an integer from `0` through `9`. It is the public
   compression input for Pillow and VapourSynth fpng. Pillow receives the value
   directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;
   unsupported values fail config validation rather than being silently clamped.
 - `ffmpeg_timeout_seconds` defaults to `30.0` and must be finite and at least `5.0`. It
-  controls only FFmpeg frame extraction. The separate ffprobe HDR metadata
-  probe keeps its fixed `15.0` second timeout.
+  sets the deadline for each FFmpeg extraction, whether singleton or batch. The
+  decoded frame count check uses the greater of this setting and 30 seconds plus
+  one second per four prepared frames. If the count check times out, the error
+  reports its budget and suggests using the VapourSynth renderer or raising this
+  setting. The separate ffprobe HDR metadata probe keeps its fixed `15.0` second
+  timeout.
 
 ## Config Validation, Logging, And Migration
 

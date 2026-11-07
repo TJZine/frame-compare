@@ -479,7 +479,9 @@ Values
 Default
 :   `30.0`
 
-Timeout for FFmpeg frame extraction.
+Timeout in seconds for each FFmpeg extraction, whether singleton or batch. The
+preceding decoded frame count check uses the greater of this value and 30 seconds
+plus one second per four prepared frames.
 
 #### `screenshots.geometry_mode` { #screenshots.geometry_mode .fc-key }
 

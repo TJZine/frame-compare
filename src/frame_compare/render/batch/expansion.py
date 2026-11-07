@@ -129,6 +129,15 @@ def expand_batch_render_requests(
             if source.source_total_frames is not None
             else batch.source_total_frames
         )
+        if (
+            isinstance(source.prepared_clip, Path)
+            and isinstance(ffmpeg_runner, DefaultFFmpegRunner)
+            and source_total_frames is not None
+            and batch.frames
+        ):
+            ffmpeg_runner.validate_source_frame_count(
+                source.prepared_clip, source_total_frames, batch.frames[0].source_frame
+            )
         # Preparation owns this state: it reflects the actual source and whether
         # the resolved tonemap was applied, rather than re-deriving it from the
         # request's clip-level signal snapshot.

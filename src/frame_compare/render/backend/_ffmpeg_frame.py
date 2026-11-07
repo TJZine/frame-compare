@@ -84,6 +84,7 @@ def build_extract_frame_argv(
         argv.append("-y")
     argv.extend(
         [
+            "-noautorotate",
             "-i",
             str(video),
             "-map",
@@ -93,6 +94,8 @@ def build_extract_frame_argv(
             "-frames:v",
             "1",
             "-q:v",
+            "1",
+            "-update",
             "1",
             str(output),
         ]
@@ -130,6 +133,7 @@ def build_extract_frames_argv(
         argv.append("-y")
     argv.extend(
         [
+            "-noautorotate",
             "-i",
             str(video),
             "-map",
