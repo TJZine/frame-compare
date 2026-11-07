@@ -6,7 +6,6 @@ import asyncio
 import json
 import tomllib
 from dataclasses import replace
-from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -62,9 +61,6 @@ def _trusted_computed_result(
 
 
 def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, frame_offset: int = 3) -> None:
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_audio.probe_fps", lambda _path: Fraction(24, 1)
-    )
     monkeypatch.setattr(
         "frame_compare.services.alignment._estimate_audio_pair",
         lambda reference, comparison, **_kwargs: _trusted_computed_result(
@@ -152,10 +148,6 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
         audio_attempt=attempt,
     )
     initial_snapshot: dict[str, object] = {}
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_audio.probe_fps",
-        lambda _path: Fraction(24, 1),
-    )
     monkeypatch.setattr(
         "frame_compare.services.alignment._estimate_audio_pair",
         lambda *_args, **_kwargs: unapplied,

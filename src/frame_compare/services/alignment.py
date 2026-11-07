@@ -238,8 +238,8 @@ def _apply_manual_overrides(
     comparisons: list[AlignmentClipRequest],
     cache_dir: Path,
     resolutions: dict[str, ComparisonResolution],
-    fps_reference: Fraction | None,
-) -> Fraction | None:
+    fps_reference: Fraction,
+) -> None:
     manual_overrides = load_manual_overrides(cache_dir)
 
     for comp in comparisons:
@@ -247,8 +247,6 @@ def _apply_manual_overrides(
         if key not in manual_overrides:
             continue
         override = manual_overrides[key]
-        if fps_reference is None:
-            fps_reference = alignment_audio.probe_fps(reference)
         result = AlignmentResult(
             reference_clip=reference.name,
             comparison_clip=comp.path.name,
@@ -261,7 +259,6 @@ def _apply_manual_overrides(
         resolutions[key] = resolution_from_override(
             result, comparison_cache_key=comparison_cache_key(comp)
         )
-    return fps_reference
 
 
 def _clip_identity_digest(clip: AlignmentClipRequest) -> str:
@@ -901,16 +898,15 @@ def _compute_requested_alignments(
     *,
     request: AlignmentRequest,
     requested_comparisons: list[AlignmentClipRequest],
-    fps_reference: Fraction | None,
+    fps_reference: Fraction,
     on_stage: Callable[[AlignmentClipRequest, str, int | None], None],
     on_chunk: Callable[[], None],
     cancellation: threading.Event,
     vs_loader: VSLoader | None,
-) -> tuple[Fraction, dict[str, ComparisonResolution]]:
+) -> dict[str, ComparisonResolution]:
     """Run only blocking probe, collection, and numeric work in the owned worker."""
     resolutions: dict[str, ComparisonResolution] = {}
     raise_if_alignment_cancelled(cancellation)
-    resolved_fps = fps_reference or alignment_audio.probe_fps(request.reference.path)
     reference = request.reference
     comparison_ordinals = {
         comparison.path: ordinal for ordinal, comparison in enumerate(request.comparisons, start=1)
@@ -929,7 +925,7 @@ def _compute_requested_alignments(
             reference.path,
             comp.path,
             cache_settings=request.settings,
-            fps_reference=resolved_fps,
+            fps_reference=fps_reference,
             reference_probe_loader=load_reference_probe,
             reference_request=reference,
             comparison_request=comp,
@@ -944,17 +940,17 @@ def _compute_requested_alignments(
             res, comparison_cache_key=comparison_cache_key(comp)
         )
     raise_if_alignment_cancelled(cancellation)
-    return resolved_fps, resolutions
+    return resolutions
 
 
 async def _await_audio_computation(
     *,
     request: AlignmentRequest,
     requested_comparisons: list[AlignmentClipRequest],
-    fps_reference: Fraction | None,
+    fps_reference: Fraction,
     progress: ProgressReporter | None,
     vs_loader: VSLoader | None,
-) -> tuple[Fraction, dict[str, ComparisonResolution]]:
+) -> dict[str, ComparisonResolution]:
     await cancellation_checkpoint()
     cancellation = threading.Event()
     loop = asyncio.get_running_loop()
@@ -1002,7 +998,7 @@ async def _await_audio_computation(
         if monotonic() - last_tick >= 0.25:
             flush_chunks()
 
-    def compute() -> tuple[Fraction, dict[str, ComparisonResolution]]:
+    def compute() -> dict[str, ComparisonResolution]:
         try:
             return _compute_requested_alignments(
                 request=request,
@@ -1178,7 +1174,6 @@ async def align_clips_from_request(
     request: AlignmentRequest,
     config: AlignmentConfig,
     progress: ProgressReporter | None = None,
-    reference_fps: Fraction | None = None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     verbose: bool = False,
     quiet: bool = False,
@@ -1197,12 +1192,16 @@ async def align_clips_from_request(
             progress.set_description("Align · checking saved offsets")
 
         resolutions: dict[str, ComparisonResolution] = {}
-        fps_reference = _apply_manual_overrides(
+        fps_reference = Fraction(
+            request.reference.effective_fps_num,
+            request.reference.effective_fps_den,
+        )
+        _apply_manual_overrides(
             reference=reference,
             comparisons=request.comparisons,
             cache_dir=request.generated_dir,
             resolutions=resolutions,
-            fps_reference=reference_fps,
+            fps_reference=fps_reference,
         )
         if resolutions:
             require_current_alignment_sources(request)
@@ -1234,7 +1233,7 @@ async def align_clips_from_request(
                 request=request,
                 resolutions=resolutions,
             )
-            fps_reference, computed = await _await_audio_computation(
+            computed = await _await_audio_computation(
                 request=request,
                 requested_comparisons=requested_comparisons,
                 fps_reference=fps_reference,
@@ -1298,10 +1297,14 @@ async def align_clips_from_request(
             comparisons=comparisons,
             resolutions=resolutions,
         )
-        audio_review_by_key = _build_audio_review_map(
-            reference=reference,
-            comparisons=comparisons,
-            resolutions=resolutions,
+        audio_review_by_key = (
+            _build_audio_review_map(
+                reference=reference,
+                comparisons=comparisons,
+                resolutions=resolutions,
+            )
+            if initial_outcome == "pending"
+            else {}
         )
         review = maybe_launch_alignment_vsview(
             reference=request.reference,
@@ -1318,8 +1321,6 @@ async def align_clips_from_request(
         if confirmed_offsets:
             require_current_alignment_sources(request)
         if confirmed_offsets:
-            if fps_reference is None:
-                fps_reference = alignment_audio.probe_fps(reference)
             for comparison in request.comparisons:
                 key = alignment_key(reference, comparison.path)
                 if key in confirmed_offsets:

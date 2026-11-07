@@ -247,7 +247,6 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
         config: AlignmentConfig,
         *,
         progress: ProgressReporter | None = None,
-        reference_fps: Fraction | None = None,
         frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
         verbose: bool = False,
         quiet: bool = False,
@@ -258,7 +257,6 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
             request,
             config,
             progress=progress,
-            reference_fps=reference_fps,
             frame_props_by_stem=frame_props_by_stem,
             verbose=verbose,
             quiet=quiet,
@@ -664,7 +662,7 @@ def test_extra_footage_describes_final_shared_range(
     assert result.alignment_diagnostics_dir == output.alignment_diagnostics_dir
 
 
-@pytest.mark.parametrize("review_kind", ["none", "kept", "unresolved"])
+@pytest.mark.parametrize("review_kind", ["none", "kept", "unresolved", "mixed"])
 def test_unapplied_and_unresolved_review_warn_only_the_align_phase(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -686,28 +684,36 @@ def test_unapplied_and_unresolved_review_warn_only_the_align_phase(
     from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 
     comparison = _clip(tmp_path / "encode.mkv", label="Encode [red]", label_is_explicit=True)
-    ctx = _context(tmp_path, comparisons=[comparison])
-    unapplied = review_kind != "unresolved"
-    original_result = AlignmentResult(
-        ctx.reference.path.name,
-        comparison.path.name,
-        None if unapplied else 0,
-        None if unapplied else 0.0,
-        0.0,
-        None,
-        "computed",
-        applied=not unapplied,
-        diagnostic="no_single_offset" if unapplied else None,
+    mixed_comparison = _clip(tmp_path / "encode-2.mkv", label="Second", label_is_explicit=True)
+    comparisons = [comparison, mixed_comparison] if review_kind == "mixed" else [comparison]
+    ctx = _context(tmp_path, comparisons=comparisons)
+    unapplied = review_kind in {"none", "kept", "mixed"}
+    original_results = tuple(
+        AlignmentResult(
+            ctx.reference.path.name,
+            current.path.name,
+            None if index == 0 and unapplied else 0,
+            None if index == 0 and unapplied else 0.0,
+            0.0,
+            None,
+            "computed",
+            applied=not (index == 0 and unapplied),
+            diagnostic="no_single_offset" if index == 0 and unapplied else None,
+        )
+        for index, current in enumerate(comparisons)
     )
-    resolution = ComparisonResolution(original_result, "key", "computed_this_run")
+    resolutions = tuple(
+        ComparisonResolution(result, f"key-{index}", "computed_this_run")
+        for index, result in enumerate(original_results)
+    )
     outcome = AlignmentOperationOutcome(
-        (original_result,),
+        original_results,
         AlignmentReviewSummary(
             review_ran=review_kind == "kept",
             comparisons_kept=int(review_kind == "kept"),
             review_unresolved=review_kind == "unresolved",
         ),
-        resolutions=(resolution,),
+        resolutions=resolutions,
     )
     monkeypatch.setattr(
         phase_alignment, "align_clips_from_request", lambda *_args, **_kwargs: outcome
@@ -716,7 +722,7 @@ def test_unapplied_and_unresolved_review_warn_only_the_align_phase(
     assert output.has_unapplied_offsets is unapplied
     assert output.review_unresolved is (review_kind == "unresolved")
     expected_warnings = (
-        [format_rejected_alignment_warning(original_result, comparison_label=comparison.label)]
+        [format_rejected_alignment_warning(original_results[0], comparison_label=comparison.label)]
         if unapplied
         else []
     )
@@ -725,10 +731,19 @@ def test_unapplied_and_unresolved_review_warn_only_the_align_phase(
         assert output.comparisons[0].alignment is None
     else:
         assert output.comparisons[0].alignment is not None
+    if review_kind == "mixed":
+        assert output.comparisons[1].alignment is not None
     assert output.reference.trim.trim_start_frames == ctx.reference.trim.trim_start_frames
     assert output.reference.effective_num_frames() == ctx.reference.effective_num_frames()
     assert output.comparisons[0].trim.trim_start_frames == comparison.trim.trim_start_frames
     assert output.comparisons[0].effective_num_frames() == comparison.effective_num_frames()
+    if review_kind == "mixed":
+        assert (
+            output.comparisons[1].trim.trim_start_frames == mixed_comparison.trim.trim_start_frames
+        )
+        assert (
+            output.comparisons[1].effective_num_frames() == mixed_comparison.effective_num_frames()
+        )
     assert output.alignment_summary is not None
     expected_value = (
         "not applied (kept)"
@@ -738,9 +753,22 @@ def test_unapplied_and_unresolved_review_warn_only_the_align_phase(
         else "+0f · audio"
     )
     inline = alignment_summary_lines(output.alignment_summary, width=200)
-    assert inline[0].plain == "Encode [red] " + expected_value
+    if review_kind == "mixed":
+        assert inline[0].plain == "Encode [red] not applied · Second +0f audio"
+    else:
+        assert inline[0].plain == "Encode [red] " + expected_value
     rows = alignment_summary_lines(output.alignment_summary, width=10)
+    expected_header = (
+        "1 of 2 comparisons aligned"
+        if review_kind == "mixed"
+        else "0 of 1 comparisons aligned"
+        if unapplied
+        else "1 of 1 comparisons aligned · audio"
+    )
+    assert rows[0].plain == expected_header
     assert rows[1].plain == "Encode [red]  " + ("+0f" if not unapplied else expected_value)
+    if review_kind == "mixed":
+        assert rows[2].plain == "Second        +0f audio"
 
     stream = StringIO()
     console = Console(file=stream, no_color=True, width=120)

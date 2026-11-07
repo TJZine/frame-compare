@@ -553,9 +553,11 @@ unchanged.
   final offset is shown as `{short} +2f (audio +0f)`. A comparison without an
   applied offset is `{short} not applied`, or `{short} not applied (kept)` after
   a keep-current review; `not applied` is yellow. If the value wraps, the rows
-  form is `{N} sources aligned · {origin}` followed by one row per comparison at
-  column 18. Length differences add the dim extra-footage line. Review duration
-  is `· {machine} + {review} review`. The Align phase is warned whenever any
+  form is `{accepted} of {N} comparisons aligned · {origin}` followed by one row per
+  comparison at column 18; the wrapped `{origin}` appears only when every comparison
+  has an applied offset and all those applied comparisons share that origin. Length
+  differences add the dim extra-footage line.
+  Review duration is `· {machine} + {review} review`. The Align phase is warned whenever any
   comparison ends without an applied offset, whether or not review ran; this
   changes only the phase glyph and colour and does not change authority, trims,
   persistence, the warnings list, or the completion title.
@@ -1810,7 +1812,9 @@ it, orchestration passes `raw offset - reference base trim + comparison base tri
 the relative-trim calculator, then composes its output onto each base domain. The final
 reference raw-source start minus the comparison raw-source start therefore equals the
 public offset, including zero for unequal base trims. Correlation lag is converted to
-this sign convention before decision evidence, hints, caching, and trim application.
+this sign convention before decision evidence, hints, caching, and trim application. An
+unapplied comparison keeps its base-relative placement as closely as possible in the
+shared reference-frame domain and is rendered best-effort, not as an aligned source.
 
 - `use_vsview` is a boolean, defaulting to `false`, that enables optional native VSView
   panel review after computed alignment. `force_interactive` is a boolean, defaulting
@@ -1824,9 +1828,10 @@ this sign convention before decision evidence, hints, caching, and trim applicat
   authority of a fresh computed attempt: only a `trusted_automatic` /
   `audio_video_confirmed` result applies trims, and every other fresh result stays
   a provisional, unapplied candidate.
-  `disabled` is the default and
-  does not read or reuse shared interactively confirmed offsets. Newly validated manual
-  results may still write to the shared reuse cache when `cache_results = true`.
+  `disabled` is the default. When shared lookup runs, it parses stored interactively
+  confirmed entries but never admits their confirmed offsets for reuse; if shared lookup
+  is skipped, it does not read those entries. Newly validated manual results may still
+  write to the shared reuse cache when `cache_results = true`.
   `prompt` shows an accent-rail `› Reuse previous offsets?` section for a complete
   valid interactively confirmed offset set. Each row uses the source short name,
   signed frame offset, origin, and accepted time; `--verbose` may add seconds,
@@ -1858,6 +1863,8 @@ this sign convention before decision evidence, hints, caching, and trim applicat
 - `force_interactive = true` is incompatible with `previous_offsets = "prompt"`
   and `previous_offsets = "always"` because reuse can skip VSView.
 - Successful `run --json` output remains unchanged by previous-offset reuse.
+- Shared publication is a whole-set snapshot, so a newly published set can replace an
+  earlier confirmation for a comparison that was not freshly reviewed in that run.
 - Cached stability summaries are diagnostic-only scalar evidence. The current
   alignment reuse cache schema is v2. It stores neutral `computed` and
   `interactive_confirmed` origins and requires summaries for computed entries and

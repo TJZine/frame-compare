@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from fractions import Fraction
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -136,7 +135,6 @@ def test_staged_progress_excludes_cache_and_counts_streamed_chunks(
         alignment.align_clips_from_request(
             request,
             AlignmentConfig(cache_results=False),
-            reference_fps=Fraction(24),
             progress=reporter,
             vs_loader=cast(VSLoader, SimpleNamespace(load=load)) if video else None,
         )

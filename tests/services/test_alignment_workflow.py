@@ -155,7 +155,7 @@ def _align(
         fps_num=FPS.numerator,
         fps_den=FPS.denominator,
     )
-    return run_request(request, config, reference_fps=FPS)
+    return run_request(request, config)
 
 
 def test_shifted_pair_candidate_matches_frame_truth(
@@ -462,7 +462,7 @@ def test_pre_collection_identity_change_is_aborted_per_comparison(
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
     with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
-        run_request(request, config, reference_fps=FPS)
+        run_request(request, config)
     by_name = {result.comparison_clip: result for result in computed_results}
 
     changed = by_name[mutated.name]
@@ -497,7 +497,7 @@ def test_no_computed_cache_write_without_video_loader(
         fps_num=FPS.numerator,
         fps_den=FPS.denominator,
     )
-    (result,) = run_request(request, config, reference_fps=FPS)
+    (result,) = run_request(request, config)
 
     assert result.applied is False
     assert result.diagnostic == "video_check_unavailable"
@@ -524,21 +524,34 @@ def test_manual_override_wins_without_decoding(
         "collect_paired_audio_chunks",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("manual wins; no decode")),
     )
+    monkeypatch.setattr(
+        alignment_audio,
+        "probe_streams",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("manual wins; no probe")),
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "run_subprocess",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("manual wins; no fallback transport probe")
+        ),
+    )
     config = _config()
+    request_fps = Fraction(25, 1)
 
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
         generated_dir=generated,
-        fps_num=FPS.numerator,
-        fps_den=FPS.denominator,
+        fps_num=request_fps.numerator,
+        fps_den=request_fps.denominator,
     )
-    (result,) = run_request(request, config, reference_fps=FPS)
+    (result,) = run_request(request, config)
 
     assert result.applied is True
     assert result.source == "manual"
     assert result.frame_offset == 3
-    assert result.time_offset_seconds == pytest.approx(3 / float(FPS))
+    assert result.time_offset_seconds == pytest.approx(3 / float(request_fps))
 
 
 def test_entry_identity_mismatch_has_no_attempt(
@@ -566,7 +579,7 @@ def test_entry_identity_mismatch_has_no_attempt(
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
     with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
-        run_request(request, config, reference_fps=FPS)
+        run_request(request, config)
 
     (result,) = computed_results
     assert result.applied is False
@@ -633,7 +646,7 @@ def test_unsupported_retime_rejected_before_decode(
             )
         ],
     )
-    (result,) = run_request(request, _config(), reference_fps=FPS)
+    (result,) = run_request(request, _config())
     assert result.applied is False
     assert result.frame_offset is None
     assert result.diagnostic == "retime_rate_unsupported"

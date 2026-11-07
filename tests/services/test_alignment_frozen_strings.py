@@ -984,7 +984,6 @@ def test_opening_vsview_review_lines_frozen_verbatim(
         _align_async(
             request,
             config,
-            reference_fps=Fraction(24),
         )
     )
 
