@@ -789,6 +789,12 @@ uses knee 1.0. Existing explicit color overrides retain precedence. The field na
   states that configured frame selection still applies; it does not claim
   `--frames` disables `--random-frame-count` or the metric-count options.
 
+When a metric selector is pending, FramePlan can pass an empty provisional plan
+to Analyze. User frames outside the selection window still produce a drop warning.
+If Analyze fails, an ordinary run continues with a warning only when usable User
+or Random frames remain. Otherwise it exits with the typed analysis or selection
+error before rendering.
+
 ### Run Interruption
 
 After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. In-flight FFmpeg batch extraction is stopped and reaped with bounded cleanup; frame extraction keeps its existing timeout. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
@@ -810,11 +816,11 @@ CLI drains the executor before exit. No new TMDB request starts after the interr
 
 ### Run-Only Full-Window Selection Recovery
 
-- Recovery is eligible only when effective `analysis.ignore_lead_seconds` or
-  `analysis.ignore_trail_seconds` is nonzero and the existing frame-selection owner
-  raises its typed insufficient-candidates outcome from the exclusion-constrained
-  shared domain. Valid selection windows, zero-margin configurations, skipped
-  analysis, and unrelated metric/runtime failures retain their existing behavior.
+- Recovery is eligible when removing configured lead or trail exclusions expands
+  the shared selection window and either preflight finds an empty window or frame
+  selection raises a recoverable insufficient-candidates error in the constrained
+  window. A minimum window that already covers the full shared clip gives no
+  recovery offer. Unrelated metric or runtime failures give no recovery offer.
 - In an interactive human run, the CLI asks exactly once on stderr through the
   accent-rail `› Analyze the full clip?` section, defaulting to No:
 
@@ -830,9 +836,10 @@ CLI drains the executor before exit. No new TMDB request starts after the interr
   ╰─
   ```
 
-  The `requested`, `available`, and `skip` values come from the selection
-  confirmation request; the displayed numbers above are illustrative of the
-  documented layout.
+  After a selector fails, the prompt shows its requested count and available
+  candidates. For a performance-mode metric-only request, availability is the
+  sampled candidate capacity. At empty-window preflight the prompt shows the
+  total configured frame count and zero available frames.
 
 - Yes creates a run-scoped effective config copy with only the effective lead and
   trail exclusions set to `0.0`. It recomputes the normal shared selection window,
@@ -854,8 +861,8 @@ CLI drains the executor before exit. No new TMDB request starts after the interr
   to reduce `analysis.ignore_lead_seconds` / `analysis.ignore_trail_seconds` or use a
   clip-specific config.
 - `--json`, `--quiet`, redirected/non-TTY stdin, `--from-cache-only`, and
-  `--skip-analysis` never receive this confirmation callback. If the constrained
-  selection fails, they fail closed through the same typed error: no automatic
+  `--skip-analysis` never receive this confirmation callback. An otherwise eligible
+  recovery in these modes fails closed through the same typed error: no automatic
   relaxation, no retry, and no uniform substitution. JSON stdout remains the single
   standard structured error object; human diagnostics remain on stderr.
 - Persistent short-clip behavior requires a separate config with
@@ -920,7 +927,7 @@ recovery requirement.
   rather than silently validating a full-frame cache identity.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
-- Probe-cache files remain on-disk format version 1, but key schema 2 includes the
+- Probe-cache files remain on-disk format version 1, but key schema 3 includes the
   scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint. In the managed
   Windows portable and Debian/Docker profiles, a cache created by another selected
   decoder or FFmpeg/ffprobe lineage is a normal miss, including under
@@ -1012,8 +1019,9 @@ recovery requirement.
   or fragment data.
 - `--no-cache` deletes only the matching shared analysis cache entry for the current
   inputs, selected reference, all-source selection domain, performance mode,
-  metric algorithm identity, and analysis settings before continuing. It does
-  not clear unrelated shared analysis entries and does not delete shared
+  metric algorithm identity, and analysis settings before continuing. Analyze
+  recomputes metrics for every attempted window, including an accepted full-window
+  retry. It does not clear unrelated shared analysis entries and does not delete shared
   previous-offset reuse entries under
   `<resolved paths.generated_dir>/cache/alignment/` or the shared TMDB response file.
 - `--from-cache-only` is analysis-cache-only. When analysis is not skipped, it validates

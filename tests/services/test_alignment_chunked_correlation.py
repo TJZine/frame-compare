@@ -296,12 +296,27 @@ def test_admission_budget() -> None:
     """Chunk FFTs past 2**22 points refuse before any analysis; just inside plans."""
     samples = 180 * AUDIO_ANALYSIS_SAMPLE_RATE
     with pytest.raises(AudioAlignmentError) as exc_info:
-        plan_audio_chunks(samples, samples, 248.0)
+        plan_audio_chunks(samples, samples, 1e305)
     assert exc_info.value.category == "analysis_budget_exceeded"
     assert exc_info.value.stage == "planning"
 
-    plan = plan_audio_chunks(samples, samples, 247.0)
+    plan = plan_audio_chunks(samples, samples, 247.144)
     assert len(plan.chunks) == 6
+
+    # Preserve the ceil-based boundary decision despite the float value being
+    # one representational ulp above the exact sample ratio.
+    boundary_plan = plan_audio_chunks(295227, 295227, 255.99337500000001)
+    assert boundary_plan.lag_samples == 2_047_947
+
+    with pytest.raises(AudioAlignmentError) as exc_info:
+        plan_audio_chunks(samples, samples, 262.145)
+    assert exc_info.value.category == "analysis_budget_exceeded"
+    assert exc_info.value.stage == "planning"
+
+    short_plan = plan_audio_chunks(
+        3 * AUDIO_ANALYSIS_SAMPLE_RATE, 3 * AUDIO_ANALYSIS_SAMPLE_RATE, 260.0
+    )
+    assert len(short_plan.chunks) == 1
 
     with pytest.raises(AudioAlignmentError) as exc_info:
         plan_audio_chunks(0, samples, 30.0)

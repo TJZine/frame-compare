@@ -94,7 +94,7 @@ analysis clip, cache-domain token, and accepted full-window retry override. Prep
 and recovery build and replace that value together. It carries no effective config or
 second live clip collection. `metric_request_for_domain` constructs a request only at
 Analyze and the existing cache-only/no-cache preparation boundaries, preserving
-warn-only Analyze validation timing for ordinary runs.
+Analyze validation timing for ordinary runs.
 
 `RunDependencies` supplies aware UTC wall time for persisted start/completion
 timestamps and a separate monotonic timer for preflight, source loading, phases,
@@ -185,8 +185,10 @@ predictive cache read. `cache_io.acquire_required_metrics` owns required-cache
 classification and reading at two distinct lifecycle points: cache-only preparation
 validates before reserving output, and cache-only Analyze reacquires without permission
 to compute. The first read is not memoized.
-Analyze is required for cache-only execution: a failed second acquisition aborts
-the run before rendering or publishing rather than using the initial frame plan.
+Analyze is required for cache-only execution and for runs with an empty provisional
+frame plan. In ordinary runs with usable provisional frames, Analyze failure leaves
+the FramePlan snapshot available to Align. With `--no-cache`, each Analyze
+attempt bypasses shared metric cache reads, including an accepted full-window retry.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
 `quality` is the default full-resolution VapourSynth PlaneStats behavior, while
 `performance` is an approximate temporal-sampling strategy over the same
@@ -430,7 +432,12 @@ never searches parent directories.
   symlink miss and require a normal cold probe before cache-only reuse. Cold
   probing opens the resolved target, so the probe's decoder index is adjacent
   to that target. Pair names and report identity still use the discovered path.
-  Older probe keys miss so source stream admission runs again.
+  Older probe keys miss so source stream admission runs again. Persisted probe
+  dimensions and frame counts use bounded positive signed-32-bit decoder fields, while
+  FPS numerator and denominator use positive signed-64-bit components matching R81's
+  `VSVideoInfo` representation. Filesystem size/mtime and cache-safety bounds remain
+  deliberate signed-64-bit limits rather than claims about decoder field widths;
+  malformed entries are skipped individually.
 - `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
   `lsw1310-f125953022b6` on managed/portable Windows,

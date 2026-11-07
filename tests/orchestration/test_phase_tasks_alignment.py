@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
+from time import monotonic
 from typing import Any, cast
 
 import pytest
@@ -17,17 +19,29 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_alignment, phase_selection
-from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
+from frame_compare.orchestration.execution import (
+    build_phases_after_align,
+    build_phases_before_align,
+)
+from frame_compare.orchestration.execution_types import ExecutionState, MetadataPrefetch
+from frame_compare.orchestration.full_window_retry import (
+    FullWindowRetryOverride,
+    compute_selection_window_with_recovery,
+)
+from frame_compare.orchestration.phases import PhaseStatus, execute_phases
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentOperationOutcome, AlignmentResult
 from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
+from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.types import AlignmentRequest
+from tests.orchestration.execute_run_helpers import FakeFFmpegRunner
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
     _frame_metrics,
     _run_align_phase,
 )
+from tests.run_request_support import make_run_request
 
 
 def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
@@ -807,8 +821,16 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
     assert all(80 <= frame < 140 for frame in selected_source_frames)
 
 
+@pytest.mark.parametrize(
+    ("offset", "accepted_retry"),
+    [
+        pytest.param(100, False, id="ordinary-empty-overlap"),
+        pytest.param(100, True, id="retry-empty-overlap"),
+        pytest.param(10, True, id="retry-empty-window-intersection"),
+    ],
+)
 def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offset: int, accepted_retry: bool
 ) -> None:
     comparison = _clip(
         tmp_path / "comparison_videos" / "encode.mkv",
@@ -816,9 +838,9 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
         num_frames=2,
     )
     ctx = _context(tmp_path, comparisons=[comparison])
-    selected_frames = [0, 1]
+    comparison.path.touch()
 
-    def _fake_align_clips_from_request(
+    async def _fake_align_clips_from_request(
         *_args: object, **_kwargs: object
     ) -> AlignmentOperationOutcome:
         return AlignmentOperationOutcome(
@@ -826,8 +848,8 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
                 AlignmentResult(
                     reference_clip="reference.mkv",
                     comparison_clip="encode.mkv",
-                    frame_offset=100,
-                    time_offset_seconds=4.0,
+                    frame_offset=offset,
+                    time_offset_seconds=offset / 24,
                     correlation_score=0.9,
                     algorithm="cross_correlation",
                     source="computed",
@@ -837,8 +859,52 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    with pytest.raises(AudioAlignmentError, match="No overlapping frames"):
-        _run_align_phase(ctx, selected_frames=selected_frames)
+    if not accepted_retry:
+        with pytest.raises(AudioAlignmentError, match="No overlapping frames"):
+            _run_align_phase(ctx, selected_frames=[0, 1])
+        return
+
+    ctx.config.analysis.random_frame_count = 1
+    ctx.config.analysis.ignore_lead_seconds = 1.0
+    ctx.config.analysis.min_window_seconds = 0.0
+    selection_state = compute_selection_window_with_recovery(
+        clips=[ctx.reference, comparison], config=ctx.config, confirm=lambda request: "confirmed"
+    )
+    assert selection_state.override is not None
+    ctx.config = selection_state.config
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=selection_state.selection_window,
+        full_window_retry_override=selection_state.override,
+    )
+    request = make_run_request(root=tmp_path, skip_metadata=True)
+    state = ExecutionState()
+    runner = FakeFFmpegRunner()
+    before_align = build_phases_before_align(
+        request=request,
+        config=ctx.config,
+        monotonic_timer=monotonic,
+        state=state,
+        input_videos=[ctx.reference.path, comparison.path],
+        workspace=ctx.workspace,
+    )
+    render, *_ = build_phases_after_align(
+        request=request,
+        monotonic_timer=monotonic,
+        ffmpeg_runner=runner,
+        http_client=None,
+        state=state,
+        metadata_prefetch=MetadataPrefetch(None, False),
+        config=ctx.config,
+    )
+
+    with pytest.raises(ExclusionRecoverySelectionError, match="full-window retry") as caught:
+        asyncio.run(execute_phases([*before_align, render], ctx, NullProgressReporter()))
+
+    assert caught.value.context.code == "FC-4012"
+    assert isinstance(caught.value.__cause__, AudioAlignmentError)
+    assert render.status is PhaseStatus.PENDING
+    assert runner.calls == []
 
 
 def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rejected(
