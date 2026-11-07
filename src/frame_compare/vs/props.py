@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from enum import Enum
-from typing import cast
+from math import isfinite
 
 from frame_compare.vs.types import HDRMetadata
 
@@ -20,18 +19,10 @@ def get_optional_int_prop(props: Mapping[str, object], key: str) -> int | None:
     val = props.get(key)
     if val is None:
         return None
-    if isinstance(val, Enum):
-        val = cast(object, val.value)
-    if isinstance(val, (int, float)):
-        try:
-            return int(val)
-        except (ValueError, OverflowError):
-            return None
-    if isinstance(val, (bytes, str)):
-        try:
-            return int(val)
-        except ValueError:
-            return None
+    if isinstance(val, int) and not isinstance(val, bool):
+        return int(val)
+    if isinstance(val, float):
+        return int(val) if isfinite(val) and val.is_integer() else None
     return None
 
 

@@ -485,6 +485,33 @@ def test_load_source_falls_back_to_ffprobe_for_unspecified_hdr_props(
     assert source.hdr_metadata.transfer == 18
 
 
+@pytest.mark.parametrize(
+    "invalid_transfer",
+    [
+        pytest.param(1.9, id="non_integral_float"),
+        pytest.param(True, id="boolean"),
+        pytest.param(b"1", id="bytes"),
+        pytest.param("1", id="text"),
+    ],
+)
+def test_load_source_probes_when_color_signal_type_is_unusable(
+    monkeypatch: pytest.MonkeyPatch, invalid_transfer: object
+) -> None:
+    from frame_compare.vs.types import HDRMetadata
+
+    props = {"_Transfer": invalid_transfer, "_Primaries": 9}
+    core = SimpleNamespace(
+        lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
+    )
+    probe = MagicMock(return_value=HDRMetadata(None, None, None, 9, 16, 9))
+    monkeypatch.setattr(source_module, "probe_hdr_metadata", probe)
+
+    source = load_source(Path("video.mkv"), cast(Core, core))
+
+    assert source.is_hdr is True
+    probe.assert_called_once_with(Path("video.mkv"), streams=[])
+
+
 def test_load_source_merges_partial_frame_signal_before_hdr_classification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -554,7 +581,7 @@ def test_load_source_backfills_malformed_matrix_without_overriding_explicit_sign
 ) -> None:
     from frame_compare.vs.types import HDRMetadata
 
-    props = {"_Transfer": b"16", "_Primaries": "9", "_Matrix": "malformed"}
+    props = {"_Transfer": 16, "_Primaries": 9, "_Matrix": "malformed"}
     core = SimpleNamespace(
         lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
     )

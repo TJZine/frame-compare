@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING
 
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.vs.errors import TonemapError
-from frame_compare.vs.props import detect_hdr, get_optional_int_prop, get_optional_range_prop
+from frame_compare.vs.props import (
+    detect_hdr,
+    get_optional_int_prop,
+    get_optional_range_prop,
+    props_indicate_limited_range,
+)
 from frame_compare.vs.types import HDRMetadata, ResolvedSourcePeak, TonemapSettings
 
 if TYPE_CHECKING:
@@ -122,6 +127,17 @@ def _conversion_kwargs(
     return kwargs
 
 
+def reject_limited_rgb(clip: vs.VideoNode, props: Mapping[str, object]) -> None:
+    """Reject RGB input whose samples are explicitly marked limited-range."""
+    import vapoursynth as vs
+
+    if clip.format.color_family == vs.RGB and props_indicate_limited_range(props) is True:
+        raise TonemapError(
+            reason="Limited-range RGB input is unsupported for tonemapping",
+            hint="Convert the source to full-range RGB before tonemapping",
+        )
+
+
 def convert_non_rgb_with_matrix_hint(
     clip: vs.VideoNode,
     *,
@@ -153,6 +169,11 @@ def to_rgbs(
     import vapoursynth as vs
 
     try:
+        if clip.format.color_family == vs.RGB:
+            if props is None:
+                raise_if_cancelling()
+                props = dict(clip.get_frame(0).props)
+            reject_limited_rgb(clip, props)
         if clip.format.id != vs.RGBS:
             if clip.format.color_family == vs.RGB:
                 raise_if_cancelling()
@@ -165,6 +186,8 @@ def to_rgbs(
                 detected_is_hdr=detected_is_hdr,
             )
         return clip
+    except TonemapError:
+        raise
     except Exception as e:
         raise TonemapError(
             reason=f"Failed to convert to RGBS: {e}",
@@ -173,7 +196,7 @@ def to_rgbs(
 
 
 def apply_post_processing(clip: vs.VideoNode, settings: TonemapSettings) -> vs.VideoNode:
-    """Apply unified post-processing (contrast recovery and gamma lift)."""
+    """Apply the optional gamma lift after tonemapping."""
     try:
         if settings.gamma_lift:
             raise_if_cancelling()
@@ -226,6 +249,7 @@ def libplacebo_output_to_srgb(
             "MasteringDisplayMinLuminance",
             "MasteringDisplayPrimariesX",
             "MasteringDisplayPrimariesY",
+            "MasteringDisplayPrimaries",
             "MasteringDisplayWhitePointX",
             "MasteringDisplayWhitePointY",
             "_ChromaLocation",
