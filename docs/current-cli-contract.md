@@ -2120,7 +2120,9 @@ identity. Its BT.1886 SDR output is converted once to endpoint-relative sRGB bef
 RGB8 quantization, using the configured destination black and target white. The
 converted frames carry truthful full-range RGB, sRGB transfer and BT.709 primaries
 and no stale source HDR metadata. PNG encoding preserves those samples; the existing
-limited-to-full guard remains for other clips whose props indicate limited RGB.
+PNG output guard remains separate from tonemap input admission: both tonemapping
+backends reject an inspected input frame explicitly tagged as limited-range RGB
+instead of relabeling its samples as full-range.
 SDR sources and the degraded fallback do not inherit this libplacebo-specific
 conversion or destination-black assumption.
 

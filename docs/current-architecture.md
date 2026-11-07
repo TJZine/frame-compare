@@ -1212,7 +1212,9 @@ and encodes sRGB in RGBS before RGB8 quantization. The resulting props specify
 RGB/full-range/sRGB/BT.709 and remove stale source HDR metadata. Source diagnostics
 read the original node. Pillow declares sRGB without changing supplied samples;
 fpng writes the same sRGB samples with its existing metadata behavior. This boundary
-does not convert arbitrary SDR or fallback output. Applied report controls and
+does not convert arbitrary SDR or fallback output. Both tonemapping backends reject
+an inspected input frame explicitly tagged as limited-range RGB before conversion,
+rather than relabeling those samples as full-range. Applied report controls and
 report identity include output encoding and frame policy separately from requested
 settings.
 
