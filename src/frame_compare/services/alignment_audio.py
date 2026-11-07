@@ -191,50 +191,6 @@ def _load_ffprobe_json(argv: list[str], *, operation: str) -> dict[str, object]:
     return cast(dict[str, object], payload)
 
 
-def probe_fps(video_path: Path) -> Fraction:
-    """Probe video FPS using FFprobe."""
-    argv = [
-        "ffprobe",
-        "-v",
-        "quiet",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=avg_frame_rate",
-        "-of",
-        "csv=p=0",
-        str(video_path),
-    ]
-    try:
-        proc = run_subprocess(argv, timeout_seconds=_FFPROBE_TIMEOUT_SECONDS)
-    except FileNotFoundError:
-        raise FFmpegNotFoundError() from None
-    except TimeoutExpired as e:
-        raise FFmpegError("ffprobe timed out", 124) from e
-    except CalledProcessError as e:
-        raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
-    except OSError as e:
-        raise FFmpegError(f"ffprobe could not start: {e}", 1) from e
-
-    output = proc.stdout.decode("utf-8").strip()
-    normalized_output = output.removesuffix(",")
-    if not normalized_output:
-        raise AudioAlignmentError(
-            f"unable to parse ffprobe FPS output for {video_path.name}: empty"
-        )
-    if "," in normalized_output:
-        raise AudioAlignmentError(
-            f"unable to parse ffprobe FPS output for {video_path.name}: {output!r}"
-        )
-
-    try:
-        return Fraction(normalized_output)
-    except (ValueError, ZeroDivisionError) as e:
-        raise AudioAlignmentError(
-            f"unable to parse ffprobe FPS output for {video_path.name}: {output!r}"
-        ) from e
-
-
 def _parse_audio_stream(
     stream_obj: object,
     *,

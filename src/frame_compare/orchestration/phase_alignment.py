@@ -106,7 +106,6 @@ async def run_align_phase(
         alignment_request,
         alignment_config,
         progress=ctx.reporter,
-        reference_fps=ctx.reference.effective_fps,
         frame_props_by_stem={
             ctx.reference.path.stem: dict(ctx.reference.probe.preserved_frame_props),
             **{comp.path.stem: dict(comp.probe.preserved_frame_props) for comp in ctx.comparisons},

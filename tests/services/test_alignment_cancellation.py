@@ -158,9 +158,7 @@ def test_outer_cancellation_reaches_collection_and_blocks_post_work(
     monkeypatch.setattr(alignment, "save_reusable_offsets", cache_write)
 
     async def run() -> None:
-        task = asyncio.create_task(
-            alignment.align_clips_from_request(request, config, reference_fps=Fraction(24))
-        )
+        task = asyncio.create_task(alignment.align_clips_from_request(request, config))
         await _wait_until(pair_reached)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -200,9 +198,7 @@ async def test_repeated_cancellation_waits_for_worker_cleanup_and_preserves_canc
         raise_if_alignment_cancelled(cancellation)
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", delayed_cleanup)
-    task = asyncio.create_task(
-        alignment.align_clips_from_request(request, config, reference_fps=Fraction(24))
-    )
+    task = asyncio.create_task(alignment.align_clips_from_request(request, config))
     await _wait_until(started)
     task.cancel()
     await asyncio.sleep(0.01)
@@ -238,9 +234,7 @@ async def test_worker_error_racing_outer_cancellation_does_not_replace_cancellat
         raise RuntimeError("worker failed during cancellation")
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", fail_after_cancel)
-    task = asyncio.create_task(
-        alignment.align_clips_from_request(request, config, reference_fps=Fraction(24))
-    )
+    task = asyncio.create_task(alignment.align_clips_from_request(request, config))
     await _wait_until(started)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -285,9 +279,7 @@ async def test_cleanup_failure_after_cancellation_replaces_cancellation(
     monkeypatch.setattr(alignment, "_write_run_diagnostics", diagnostics)
     monkeypatch.setattr(alignment, "maybe_launch_alignment_vsview", review)
     monkeypatch.setattr(alignment, "save_reusable_offsets", cache_write)
-    task = asyncio.create_task(
-        alignment.align_clips_from_request(request, config, reference_fps=Fraction(24))
-    )
+    task = asyncio.create_task(alignment.align_clips_from_request(request, config))
     await _wait_until(started)
     task.cancel()
     await asyncio.sleep(0.01)

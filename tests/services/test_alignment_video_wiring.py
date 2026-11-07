@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -33,7 +32,6 @@ def _run(
             align_clips_from_request(
                 request,
                 config,
-                reference_fps=Fraction(24, 1),
                 vs_loader=loader,
             )
         ).results

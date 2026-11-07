@@ -341,7 +341,7 @@ def test_alignment_rows_follow_header_duration_and_precede_footage_note(
         retain=True, duration_text="2m 09s + 4m 41s review", alignment_summary=summary
     )
     lines = Text.from_ansi(output.getvalue()).plain.splitlines()
-    header = next(index for index, line in enumerate(lines) if "sources aligned" in line)
+    header = next(index for index, line in enumerate(lines) if "comparisons aligned" in line)
     phase_value = " ".join(line[18:].strip() for line in lines[header:] if line.strip())
     assert "2m 09s + 4m 41s review" in phase_value
     assert all(len(line) <= width for line in lines)
