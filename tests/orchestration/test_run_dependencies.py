@@ -44,6 +44,7 @@ class DummyFFmpegRunner:
         output: Path,
         *,
         geometry_plan: RenderGeometryPlan | None = None,
+        **_kwargs: object,
     ) -> RenderedFrameFacts:
         raise RuntimeError("Not used in tests.")
 

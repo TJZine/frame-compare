@@ -15,6 +15,7 @@ from PIL.PngImagePlugin import PngInfo
 from frame_compare.config.schema_enums import VsScreenshotWriter
 from frame_compare.errors import ErrorDetails, FrameCompareError
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
+from frame_compare.render.color import BT2020_CL_TRANSFER, MATRIX_TO_ZIMG, untagged_matrix
 from frame_compare.render.errors import (
     EncodingError,
     FrameExtractionError,
@@ -30,7 +31,11 @@ from frame_compare.render.types import (
     Renderer,
     RenderRequest,
 )
-from frame_compare.utils.media_facts import RenderedFrameFacts, normalize_picture_type
+from frame_compare.utils.media_facts import (
+    RenderedFrameFacts,
+    SourceSignalFacts,
+    normalize_picture_type,
+)
 from frame_compare.utils.subproc import SubprocessAborted
 from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.props import props_indicate_limited_range
@@ -61,17 +66,6 @@ class _FpngWriter(Protocol):
 _VS_MATRIX_PROP: _ColorFramePropKey = "_Matrix"
 _VS_TRANSFER_PROP: _ColorFramePropKey = "_Transfer"
 _VS_PRIMARIES_PROP: _ColorFramePropKey = "_Primaries"
-
-_MATRIX_TO_ZIMG: dict[int, str] = {
-    1: "709",
-    4: "fcc",
-    5: "470bg",
-    6: "170m",
-    7: "240m",
-    8: "ycgco",
-    9: "2020ncl",
-    10: "2020cl",
-}
 
 
 def _get_int_frame_prop(frame_props: Mapping[str, object], key: _ColorFramePropKey) -> int | None:
@@ -120,6 +114,7 @@ def is_ffmpeg_batch_compatible(
         and candidate.clip == first.clip
         and candidate.ffmpeg_runner is runner
         and candidate.geometry_plan is first.geometry_plan
+        and candidate.source_signal == first.source_signal
         and candidate.output_path.parent == first.output_path.parent
         and candidate.output_path.suffix.casefold() == ".png"
         and candidate.frame_number > previous_frame
@@ -158,6 +153,7 @@ def render_ffmpeg_batch_detailed(
                 [request.frame_number for request in requests],
                 staging_dir,
                 geometry_plan=first.geometry_plan,
+                source_signal=first.source_signal,
                 abort=abort,
             )
             if len(facts) != len(requests):
@@ -228,6 +224,7 @@ def _execute_vapoursynth_render(
         overlay=request.overlay,
         frame_facts=facts,
         geometry_plan=request.geometry_plan,
+        source_signal=request.source_signal,
     )
     return facts
 
@@ -235,15 +232,13 @@ def _execute_vapoursynth_render(
 def _execute_ffmpeg_render(request: RenderRequest) -> RenderedFrameFacts:
     path = cast(Path, request.clip)
     runner = request.ffmpeg_runner or DefaultFFmpegRunner()
-    if request.geometry_plan is None:
-        extracted_facts = runner.extract_frame(path, request.frame_number, request.output_path)
-    else:
-        extracted_facts = runner.extract_frame(
-            path,
-            request.frame_number,
-            request.output_path,
-            geometry_plan=request.geometry_plan,
-        )
+    extracted_facts = runner.extract_frame(
+        path,
+        request.frame_number,
+        request.output_path,
+        geometry_plan=request.geometry_plan,
+        source_signal=request.source_signal,
+    )
 
     if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:
         apply_overlay_to_file(request.output_path, request.overlay, extracted_facts)
@@ -312,35 +307,42 @@ def _vapoursynth_format_details(clip: vs.VideoNode) -> ErrorDetails:
     }
 
 
-def _resolve_matrix_in_s(clip: vs.VideoNode) -> str:
-    """Resolve matrix_in_s for YUV->RGB conversion with robust fallbacks.
-
-    Priority:
-    1. _Matrix frame prop mapping when recognized
-    2. HDR heuristic (_Transfer in {16,18} and _Primaries == 9) -> 2020ncl
-    3. SDR default -> 709
-    """
-    # Read canonical color props from frame 0. VapourSynth usually caches hot frames,
-    # so this metadata probe is typically low overhead relative to full rendering.
-    frame_props = dict(clip.get_frame(0).props)
+def _resolve_matrix_in_s(
+    clip: vs.VideoNode,
+    source_signal: SourceSignalFacts | None = None,
+    source_size: tuple[int, int] | None = None,
+) -> str:
+    """Prefer native matrix tags, then prepared tags, HDR evidence and coded size."""
+    # VapourSynth usually caches frame 0, which supplies the clip's native signal.
+    frame_props = clip.get_frame(0).props
     matrix_prop = _get_int_frame_prop(frame_props, _VS_MATRIX_PROP)
-    if matrix_prop is not None:
-        mapped = _MATRIX_TO_ZIMG.get(matrix_prop)
-        if mapped is not None:
-            return mapped
+    if matrix_prop is not None and matrix_prop in MATRIX_TO_ZIMG:
+        return MATRIX_TO_ZIMG[matrix_prop]
 
-    transfer_prop = _get_int_frame_prop(frame_props, _VS_TRANSFER_PROP)
-    primaries_prop = _get_int_frame_prop(frame_props, _VS_PRIMARIES_PROP)
-    is_hdr = (
-        transfer_prop is not None
-        and transfer_prop in {16, 18}
-        and primaries_prop is not None
-        and primaries_prop == 9
+    transfer = _get_int_frame_prop(frame_props, _VS_TRANSFER_PROP)
+    primaries = _get_int_frame_prop(frame_props, _VS_PRIMARIES_PROP)
+    prepared_hdr = False
+    if source_signal is not None:
+        if source_signal.matrix is not None and source_signal.matrix in MATRIX_TO_ZIMG:
+            return MATRIX_TO_ZIMG[source_signal.matrix]
+        if transfer in (None, 2):
+            transfer = source_signal.transfer
+        if primaries in (None, 2):
+            primaries = source_signal.primaries
+        prepared_hdr = source_signal.is_hdr
+
+    is_hdr = (transfer in {16, 18} or (transfer in (None, 2) and prepared_hdr)) and (
+        primaries == 9 or (primaries in (None, 2) and prepared_hdr)
     )
-    return "2020ncl" if is_hdr else "709"
+    width, height = source_size or (clip.width, clip.height)
+    return untagged_matrix(width, height, is_hdr=is_hdr)
 
 
-def _clip_to_rgb24_for_pillow(clip: vs.VideoNode) -> vs.VideoNode:
+def _clip_to_rgb24_for_pillow(
+    clip: vs.VideoNode,
+    source_signal: SourceSignalFacts | None = None,
+    geometry_plan: RenderGeometryPlan | None = None,
+) -> vs.VideoNode:
     """Convert a VapourSynth clip to RGB24 for Pillow encoding.
 
     Pillow's `Image.fromarray()` expects an integer pixel format for RGB/RGBA images.
@@ -350,26 +352,23 @@ def _clip_to_rgb24_for_pillow(clip: vs.VideoNode) -> vs.VideoNode:
     import vapoursynth as vs
 
     fmt = getattr(clip, "format", None)
-    if fmt is None:
-        matrix_in_s = _resolve_matrix_in_s(clip)
-        # Variable format clip: best-effort conversion via resize (will fail if unsupported).
-        return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)
+    if fmt is None or fmt.color_family != vs.RGB:
+        source_size = (
+            (geometry_plan.source.width, geometry_plan.source.height) if geometry_plan else None
+        )
+        matrix = _resolve_matrix_in_s(clip, source_signal, source_size)
+        if matrix == "2020cl":
+            # The input hint fills a missing tag. Native frame tags keep priority.
+            transfer = source_signal.transfer if source_signal is not None else None
+            return clip.resize.Bicubic(
+                format=vs.RGB24,
+                matrix_in_s=matrix,
+                transfer_in=BT2020_CL_TRANSFER if transfer in (None, 2) else transfer,
+            )
+        return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix)
 
     if fmt.id == vs.RGB24:
-        frame_props = clip.get_frame(0).props
-        if _should_expand_tonemapped_limited_rgb(frame_props):
-            return clip.std.SetFrameProps(_FrameCompareExpandRange=1)
         return clip
-
-    if fmt.color_family != vs.RGB:
-        matrix_in_s = _resolve_matrix_in_s(clip)
-        return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)
-
-    frame_props = clip.get_frame(0).props
-    if _should_expand_tonemapped_limited_rgb(frame_props):
-        rgb = clip.resize.Point(format=vs.RGB24)
-        return rgb.std.SetFrameProps(_FrameCompareExpandRange=1)
-
     return clip.resize.Point(format=vs.RGB24)
 
 
@@ -399,6 +398,7 @@ def _render_vs(
     overlay: OverlayConfig | None = None,
     frame_facts: RenderedFrameFacts | None = None,
     geometry_plan: RenderGeometryPlan | None = None,
+    source_signal: SourceSignalFacts | None = None,
 ) -> None:
     """Render frame via VapourSynth."""
     try:
@@ -409,7 +409,7 @@ def _render_vs(
             geometry_plan=geometry_plan,
         )
         if fpng_writer is not None:
-            fpng_clip = _clip_to_rgb24_for_pillow(clip)
+            fpng_clip = _clip_to_rgb24_for_pillow(clip, source_signal, geometry_plan)
             fpng_frame_props = dict(fpng_clip.get_frame(frame).props)
             if _should_expand_tonemapped_limited_rgb(fpng_frame_props):
                 if settings.vs_writer == VsScreenshotWriter.FPNG:
@@ -437,6 +437,7 @@ def _render_vs(
             overlay=overlay,
             frame_facts=frame_facts,
             geometry_plan=geometry_plan,
+            source_signal=source_signal,
         )
 
     except (EncodingError, OverlayError):
@@ -454,8 +455,9 @@ def _render_vs_pillow(
     overlay: OverlayConfig | None,
     frame_facts: RenderedFrameFacts | None,
     geometry_plan: RenderGeometryPlan | None,
+    source_signal: SourceSignalFacts | None = None,
 ) -> None:
-    clip = _clip_to_rgb24_for_pillow(clip)
+    clip = _clip_to_rgb24_for_pillow(clip, source_signal, geometry_plan)
 
     vs_frame = clip.get_frame(frame)
 

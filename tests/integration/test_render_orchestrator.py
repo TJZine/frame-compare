@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from frame_compare.config.schema import ColorConfig, ConfigSchema
+from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.orchestrator import (
     render_screenshots_from_batch_detailed,
@@ -32,13 +32,14 @@ def _request(
     frames: list[int],
     *,
     is_hdr: bool = False,
+    size: tuple[int, int] = (100, 100),
 ) -> ScreenshotBatchRequest:
     return ScreenshotBatchRequest(
         clip_path=clip_path,
         label=label,
         frames=selections(frames, frames, [None] * len(frames)),
         size_bytes=clip_path.stat().st_size,
-        source_resolution=(100, 100),
+        source_resolution=size,
         source_total_frames=3,
         signal=SourceSignalFacts(
             is_hdr=is_hdr,
@@ -46,7 +47,7 @@ def _request(
             transfer=16 if is_hdr else 1,
             matrix=9 if is_hdr else 1,
         ),
-        active_picture=ActivePictureFacts(0, 0, 100, 100, "full_frame", True),
+        active_picture=ActivePictureFacts(0, 0, *size, "full_frame", True),
         filename_label=clip_path.stem,
     )
 
@@ -122,7 +123,7 @@ def test_ffmpeg_one_pass_batch_matches_per_frame_hdr_pixels_and_facts(
             "-f",
             "lavfi",
             "-i",
-            "testsrc2=size=100x100:rate=10",
+            "testsrc2=size=320x240:rate=10",
             "-frames:v",
             "3",
             "-c:v",
@@ -139,7 +140,7 @@ def test_ffmpeg_one_pass_batch_matches_per_frame_hdr_pixels_and_facts(
         ],
         timeout_seconds=20,
     )
-    request = _request(fixture, "HDR", [0, 1, 2], is_hdr=True)
+    request = _request(fixture, "HDR", [0, 1, 2], is_hdr=True, size=(320, 240))
     batched = render_screenshots_from_batch_detailed(
         [request],
         tmp_path / "hdr-batched",
@@ -161,6 +162,19 @@ def test_ffmpeg_one_pass_batch_matches_per_frame_hdr_pixels_and_facts(
         path.read_bytes() for path in per_frame_paths
     ]
     assert facts_by_label(batched) == facts_by_label(per_frame)
+
+    clean = render_screenshots_from_batch_detailed(
+        [request],
+        tmp_path / "hdr-clean",
+        integration_config,
+        BatchRenderOptions(renderer="ffmpeg", overlay_mode=OverlayMode.NONE),
+    )
+    for baked_path, clean_path in zip(batched_paths, paths_by_label(clean)["HDR"], strict=True):
+        assert clean_path.read_bytes()[24:26] == baked_path.read_bytes()[24:26] == bytes((8, 2))
+        with Image.open(baked_path) as baked, Image.open(clean_path) as plain:
+            bottom_row = (0, plain.height - 1, plain.width, plain.height)
+            assert baked.crop(bottom_row).tobytes() == plain.crop(bottom_row).tobytes()
+            assert baked.tobytes() != plain.tobytes()
 
 
 @pytest.mark.integration

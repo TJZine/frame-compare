@@ -1,4 +1,4 @@
-"""Report v1.3 input validation, wire shaping, and stable identity."""
+"""Report v1.4 input validation, wire shaping, and stable identity."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from frame_compare.utils.media_facts import (
 from frame_compare.utils.paths import require_managed_descendant
 from frame_compare.vs.types import AppliedTonemap, FallbackTonemap, TonemapSettings
 
-REPORT_VERSION = "1.3"
+REPORT_VERSION = "1.4"
 
 
 class ClipFingerprintProtocol(Protocol):
@@ -311,7 +311,7 @@ class ReportData:
 def build_report_payload(
     data: ReportData, config: ReportConfig, *, report_dir: Path
 ) -> ReportPayload:
-    """Shape validated report data into the embedded v1.3 JSON payload."""
+    """Shape validated report data into the embedded v1.4 JSON payload."""
     _validate_report_cardinality(data)
     title = data.metadata.title if data.metadata else data.clips[0].name
     clips = build_clip_payloads(data.clips)

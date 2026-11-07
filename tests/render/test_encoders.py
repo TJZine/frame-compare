@@ -13,10 +13,12 @@ from vapoursynth import VideoNode
 
 from frame_compare.config.schema_enums import VsScreenshotWriter
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
+from frame_compare.render.color import untagged_matrix
 from frame_compare.render.encoders import (
     _clip_to_rgb24_for_pillow,
     _map_fpng_compression,
     _maybe_expand_tonemapped_video_range,
+    _resolve_matrix_in_s,
     apply_overlay_to_file,
     render_ffmpeg_batch_detailed,
     render_frame_detailed,
@@ -325,7 +327,7 @@ def test_render_frame_vs_auto_uses_fpng_for_geometry_without_overlay(
     assert written_clip.ops[-1][1]["left"] == 1
     assert written_clip.ops[-1][1]["right"] == 1
     assert job.frames == [3]
-    assert clip.frame_reads == [3, 0, 3]
+    assert clip.frame_reads == [3, 3]
 
 
 def test_render_frame_vs_auto_preserves_pillow_for_native_geometry_without_overlay(
@@ -574,6 +576,7 @@ def test_render_frame_ffmpeg_passes_geometry_plan_to_runner() -> None:
         100,
         Path("out.png"),
         geometry_plan=plan,
+        source_signal=None,
     )
 
 
@@ -636,9 +639,10 @@ def test_render_ffmpeg_batch_wraps_output_failure_with_active_request(
         output_dir: Path,
         *,
         geometry_plan: RenderGeometryPlan | None = None,
+        source_signal: SourceSignalFacts | None = None,
         abort: object = None,
     ) -> list[RenderedFrameFacts]:
-        _ = geometry_plan
+        _ = geometry_plan, source_signal
         for index in range(len(frame_nums)):
             (output_dir / f"{index:09d}.png").touch()
         return [RenderedFrameFacts(source_frame=frame) for frame in frame_nums]
@@ -746,42 +750,72 @@ class _FakeFrame:
 
 
 class _FakeClip:
-    def __init__(self, *, fmt: object | None, props: dict[str, object]) -> None:
+    def __init__(
+        self, *, fmt: object | None, props: dict[str, object], size: tuple[int, int] = (1920, 1080)
+    ) -> None:
         self.format = fmt
+        self.width, self.height = size
         self.resize = _FakeResize()
         self.std = MagicMock()
-        self.std.SetFrameProps = MagicMock(return_value="props")
-        self._frame = _FakeFrame(props)
+        self.get_frame = MagicMock(return_value=_FakeFrame(props))
 
-    def get_frame(self, _index: int) -> _FakeFrame:
-        return self._frame
+
+def test_untagged_matrix_uses_both_coded_dimension_boundaries() -> None:
+    cases = [
+        ((720, 480), "170m"),
+        ((720, 576), "170m"),
+        ((704, 576), "170m"),
+        ((1024, 576), "170m"),
+        ((1025, 576), "709"),
+        ((1024, 577), "709"),
+        ((1280, 536), "709"),
+        ((1920, 540), "709"),
+    ]
+    assert [untagged_matrix(*size, is_hdr=False) for size, _ in cases] == [
+        expected for _, expected in cases
+    ]
+    for size, expected in cases:
+        # The writer must use the same coded-size policy.
+        clip = _FakeClip(fmt=None, props={}, size=size)
+        assert _resolve_matrix_in_s(cast(VideoNode, clip)) == expected
+    assert untagged_matrix(720, 480, is_hdr=True) == "2020ncl"
 
 
 @pytest.mark.parametrize(
-    ("fmt", "props", "expected_matrix"),
+    ("fmt", "size", "props", "source_signal", "expected_matrix"),
     [
-        (SimpleNamespace(id=999, color_family=3), {}, "709"),
-        (SimpleNamespace(id=999, color_family=3), {"_Transfer": 16, "_Primaries": 9}, "2020ncl"),
-        (SimpleNamespace(id=999, color_family=3), {"_Matrix": 5}, "470bg"),
-        (None, {}, "709"),
+        (SimpleNamespace(id=999, color_family=3), (1024, 576), {}, None, "170m"),
+        (
+            SimpleNamespace(id=999, color_family=3),
+            (720, 480),
+            {"_Transfer": 16, "_Primaries": 9},
+            None,
+            "2020ncl",
+        ),
+        (
+            SimpleNamespace(id=999, color_family=3),
+            (720, 480),
+            {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
+            SourceSignalFacts(is_hdr=True, matrix=6),
+            "709",
+        ),
+        (None, (1025, 576), {"_Matrix": 2}, None, "709"),
     ],
 )
 def test_clip_to_rgb24_for_pillow_maps_yuv_matrix_for_pillow(
     monkeypatch,
     fmt: object | None,
+    size: tuple[int, int],
     props: dict[str, object],
+    source_signal: SourceSignalFacts | None,
     expected_matrix: str,
 ) -> None:
     fake_vs = SimpleNamespace(RGB24=1, RGB=2)
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+    clip = _FakeClip(fmt=fmt, size=size, props=props)
 
-    clip = _FakeClip(fmt=fmt, props=props)
-
-    result = _clip_to_rgb24_for_pillow(cast(VideoNode, clip))
-
-    assert result == "bicubic"
-    assert clip.resize.calls[0][0] == "Bicubic"
-    assert clip.resize.calls[0][1]["matrix_in_s"] == expected_matrix
+    assert _clip_to_rgb24_for_pillow(cast(VideoNode, clip), source_signal) == "bicubic"
+    assert clip.resize.calls[0] == ("Bicubic", {"format": 1, "matrix_in_s": expected_matrix})
 
 
 def test_clip_to_rgb24_for_pillow_already_rgb24_passthrough(monkeypatch) -> None:
@@ -794,6 +828,7 @@ def test_clip_to_rgb24_for_pillow_already_rgb24_passthrough(monkeypatch) -> None
 
     assert result is clip
     assert clip.resize.calls == []
+    clip.get_frame.assert_not_called()
 
 
 def test_clip_to_rgb24_for_pillow_rgb_non_24_uses_point(monkeypatch) -> None:
@@ -815,7 +850,7 @@ def test_clip_to_rgb24_for_pillow_rgb_non_24_uses_point(monkeypatch) -> None:
         {"_ColorRange": 1},
     ],
 )
-def test_clip_to_rgb24_for_pillow_expands_marked_limited_tonemap(
+def test_clip_to_rgb24_for_pillow_leaves_range_guard_to_selected_frame(
     monkeypatch,
     range_props: dict[str, object],
 ) -> None:
@@ -831,9 +866,10 @@ def test_clip_to_rgb24_for_pillow_expands_marked_limited_tonemap(
 
     result = _clip_to_rgb24_for_pillow(cast(VideoNode, clip))
 
-    assert result == "props"
+    assert result is clip
     clip.resize.Point.assert_called_once_with(format=1)
-    clip.std.SetFrameProps.assert_called_once_with(_FrameCompareExpandRange=1)
+    clip.get_frame.assert_not_called()
+    clip.std.SetFrameProps.assert_not_called()
 
 
 @pytest.mark.parametrize(

@@ -24,6 +24,7 @@ from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
     from frame_compare.render.geometry import RenderGeometryPlan
+    from frame_compare.utils.media_facts import SourceSignalFacts
 
 
 _H273_UNSPECIFIED = 2
@@ -40,6 +41,7 @@ class FFmpegRunner(Protocol):
         output: Path,
         *,
         geometry_plan: RenderGeometryPlan | None = None,
+        source_signal: SourceSignalFacts | None = None,
     ) -> RenderedFrameFacts:
         """Extract a frame and return facts from that same exact-frame process."""
         ...
@@ -71,6 +73,7 @@ class DefaultFFmpegRunner:
         output: Path,
         *,
         geometry_plan: RenderGeometryPlan | None = None,
+        source_signal: SourceSignalFacts | None = None,
     ) -> RenderedFrameFacts:
         output.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix=".frame-compare-ffmpeg-", dir=output.parent) as temp_dir:
@@ -81,6 +84,7 @@ class DefaultFFmpegRunner:
                 output=staged_path,
                 overwrite=True,
                 geometry_plan=geometry_plan,
+                source_signal=source_signal,
             )
             completed = self._run_extraction(
                 argv,
@@ -102,6 +106,7 @@ class DefaultFFmpegRunner:
         output_dir: Path,
         *,
         geometry_plan: RenderGeometryPlan | None = None,
+        source_signal: SourceSignalFacts | None = None,
         abort: Callable[[], bool] | None = None,
     ) -> list[RenderedFrameFacts]:
         """Extract ordered frames in one decode pass into numbered staging files."""
@@ -112,6 +117,7 @@ class DefaultFFmpegRunner:
             output_pattern=Path("%09d.png"),
             overwrite=True,
             geometry_plan=geometry_plan,
+            source_signal=source_signal,
         )
         completed = self._run_extraction(
             argv,

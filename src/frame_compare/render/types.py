@@ -106,6 +106,7 @@ class RenderRequest:
     encoder_settings: EncoderSettings
     ffmpeg_runner: FFmpegRunner | None = None
     geometry_plan: RenderGeometryPlan | None = None
+    source_signal: SourceSignalFacts | None = None
 
 
 @dataclass(frozen=True)

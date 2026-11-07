@@ -39,7 +39,7 @@ def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
         "-map",
         "0:V:0",
         "-vf",
-        "select=eq(n\\,100),showinfo=checksum=0",
+        "select=eq(n\\,100),showinfo=checksum=0,format=rgb24",
         "-frames:v",
         "1",
         "-q:v",
@@ -73,10 +73,10 @@ def test_build_extract_frame_argv_places_geometry_filters_after_exact_frame_sele
     plan = RenderGeometryPlan(
         source=source,
         source_rect=GeometryRect(0, 0, 1920, 1080),
-        active_rect=GeometryRect(240, 0, 1440, 1080),
+        active_rect=GeometryRect(241, 0, 1440, 1080),
         provenance="explicit",
-        crop_rect=GeometryRect(240, 0, 1440, 1080),
-        crop=GeometryMargins(left=240, right=240),
+        crop_rect=GeometryRect(241, 0, 1440, 1080),
+        crop=GeometryMargins(left=241, right=239),
         cropped_size=(1440, 1080),
         scaled_size=(1280, 960),
         pad=GeometryMargins(top=60, bottom=60),
@@ -93,9 +93,17 @@ def test_build_extract_frame_argv_places_geometry_filters_after_exact_frame_sele
         geometry_plan=plan,
     )
 
-    assert argv[argv.index("-vf") + 1] == (
-        "select=eq(n\\,100),showinfo=checksum=0,crop=1440:1080:240:0:exact=1,scale=1280:960,format=pix_fmts=yuv444p|yuv444p16le,pad=1280:1080:0:60:color=black"
-    )
+    chain = argv[argv.index("-vf") + 1]
+    prefix = "select=eq(n\\,100),"
+    assert chain.startswith(prefix)
+    filters = chain.removeprefix(prefix).split(",")
+    assert filters[0] == "showinfo=checksum=0"
+    # A pre-crop format constraint cannot constrain the later scale output.
+    assert filters[3] == "scale=1280:960"
+    assert filters[4].startswith("format=pix_fmts=")
+    assert filters[1] == filters[4]
+    assert filters[2] == "crop=1440:1080:241:0:exact=1"
+    assert filters[5:] == ["pad=1280:1080:0:60:color=black", "format=rgb24"]
 
 
 def test_build_extract_frame_argv_rejects_unrepresentable_geometry_plan() -> None:
@@ -142,7 +150,7 @@ def test_build_extract_frames_argv_selects_ordered_frames_in_one_pass() -> None:
         "-map",
         "0:V:0",
         "-vf",
-        "select=eq(n\\,10)+eq(n\\,20)+eq(n\\,42),showinfo=checksum=0",
+        "select=eq(n\\,10)+eq(n\\,20)+eq(n\\,42),showinfo=checksum=0,format=rgb24",
         "-fps_mode",
         "passthrough",
         "-frames:v",

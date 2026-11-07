@@ -58,6 +58,7 @@ class FakeFFmpegRunner:
         output: Path,
         *,
         geometry_plan: RenderGeometryPlan | None = None,
+        **_kwargs: object,
     ) -> RenderedFrameFacts:
         _, _, _ = video, frame_num, output
         raise AssertionError("FFmpeg extraction path is not exercised in this test")
