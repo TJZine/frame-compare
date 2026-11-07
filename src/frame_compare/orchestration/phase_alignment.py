@@ -22,7 +22,10 @@ from frame_compare.analysis.types import (
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.orchestration.context import ClipAlignmentState, ClipState, RunContext
 from frame_compare.orchestration.execution_types import AlignPhaseOutput
-from frame_compare.orchestration.full_window_retry import raise_if_full_window_retry_failed
+from frame_compare.orchestration.full_window_retry import (
+    raise_if_full_window_retry_failed,
+    raise_if_full_window_retry_runtime_failed,
+)
 from frame_compare.orchestration.phase_selection import (
     build_initial_selection_details_by_source_frame,
     generated_frame_count,
@@ -158,22 +161,22 @@ async def run_align_phase(
         )
         for comp in updated_comparisons
     ]
-    ref_trim, comp_trims = calculate_alignment_trims(
-        ref_num_frames=ctx.reference.effective_num_frames(),
-        comp_offsets=calculator_offsets,
-        comp_num_frames=[comp.effective_num_frames() for comp in updated_comparisons],
-    )
-    reference = _compose_alignment_trim(ctx.reference, ref_trim)
-    comparisons = [
-        _compose_alignment_trim(comp, comp_trim)
-        for comp, comp_trim in zip(updated_comparisons, comp_trims, strict=True)
-    ]
-    selection_source_window = _selection_source_window_for_alignment(ctx)
-    selected_source_frames = source_frames_for_reference_base_domain(
-        reference=ctx.reference,
-        selected_frames=selected_frames,
-    )
     try:
+        ref_trim, comp_trims = calculate_alignment_trims(
+            ref_num_frames=ctx.reference.effective_num_frames(),
+            comp_offsets=calculator_offsets,
+            comp_num_frames=[comp.effective_num_frames() for comp in updated_comparisons],
+        )
+        reference = _compose_alignment_trim(ctx.reference, ref_trim)
+        comparisons = [
+            _compose_alignment_trim(comp, comp_trim)
+            for comp, comp_trim in zip(updated_comparisons, comp_trims, strict=True)
+        ]
+        selection_source_window = _selection_source_window_for_alignment(ctx)
+        selected_source_frames = source_frames_for_reference_base_domain(
+            reference=ctx.reference,
+            selected_frames=selected_frames,
+        )
         normalized_selection = _normalize_selected_frames_for_trimmed_domain(
             selected_frames=selected_source_frames,
             user_source_frames=set(ctx.config.analysis.user_frames),
@@ -191,6 +194,9 @@ async def run_align_phase(
         )
     except SelectionError as error:
         raise_if_full_window_retry_failed(ctx, error)
+        raise
+    except AudioAlignmentError as error:
+        raise_if_full_window_retry_runtime_failed(ctx, error)
         raise
     normalized_selected_frames = normalized_selection.selected_frames
     if normalized_selection.dropped_user_source_frames:

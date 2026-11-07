@@ -168,6 +168,7 @@ def calculate_metrics(
     vs_loader: VSLoader | None = None,
     timing_recorder: AnalysisTimingRecorder | None = None,
     memory_limit_mb: int | None = None,
+    force_recompute: bool = False,
 ) -> MetricsAcquisition:
     if not video_paths:
         raise MetricsCalculationError("No input video paths provided")
@@ -181,15 +182,16 @@ def calculate_metrics(
         selection_domain=selection_domain,
         metric_request=request,
     )
-    cached = _cached_metrics(
-        cache_dir,
-        fingerprint,
-        reporter,
-        request,
-        timing_recorder,
-    )
-    if cached:
-        return MetricsAcquisition(metrics=cached, disposition="hit")
+    if not force_recompute:
+        cached = _cached_metrics(
+            cache_dir,
+            fingerprint,
+            reporter,
+            request,
+            timing_recorder,
+        )
+        if cached:
+            return MetricsAcquisition(metrics=cached, disposition="hit")
 
     clips = _clip_identities(video_paths)
 

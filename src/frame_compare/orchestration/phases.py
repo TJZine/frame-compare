@@ -46,6 +46,7 @@ class PhaseStatus(StrEnum):
 
 
 PhaseExecute = Callable[[RunContext], Awaitable[None]]
+PhaseWarnOnly = bool | Callable[[RunContext], bool]
 PhaseSkipCondition = Callable[[ConfigSchema], bool]
 PhaseSkipDetail = str | Callable[[ConfigSchema], str | None]
 
@@ -60,7 +61,7 @@ class Phase:
     progress_total: int = 1
     display_label: str | None = None
     status: PhaseStatus = PhaseStatus.PENDING
-    warn_only: bool = False
+    warn_only: PhaseWarnOnly = False
     fatal_exceptions: tuple[type[BaseException], ...] = ()
     retain_on_success: bool | None = None
     skip_detail: PhaseSkipDetail | None = None
@@ -70,6 +71,9 @@ class Phase:
     # Overrides the completion status only on the success path (for example an
     # Align phase whose review never ran completes as WARNED, not COMPLETED).
     success_status: ProgressPhaseStatus | None = None
+
+    def warns_on_error(self, context: RunContext) -> bool:
+        return self.warn_only(context) if callable(self.warn_only) else self.warn_only
 
     @property
     def progress_label(self) -> str:
@@ -137,7 +141,7 @@ async def execute_phases(
                 raise asyncio.CancelledError() from None
             await cancellation_checkpoint()
         except Exception as exc:
-            if not phase.warn_only or isinstance(exc, phase.fatal_exceptions):
+            if not phase.warns_on_error(context) or isinstance(exc, phase.fatal_exceptions):
                 phase.status = PhaseStatus.FAILED
                 phase_progress_status = ProgressPhaseStatus.FAILED
                 raise
