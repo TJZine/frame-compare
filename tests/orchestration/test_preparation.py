@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from frame_compare.orchestration import preparation
+from frame_compare.orchestration import phase_alignment, preparation
 from frame_compare.orchestration.types import RunDependencies
 from frame_compare.vs.types import SourceInfo
 from tests.orchestration.preparation_test_support import (
@@ -93,6 +95,70 @@ def test_execute_prep_reuses_probe_cache_without_vs_loader(tmp_path: Path) -> No
 
     assert second.clips[0].label == "source"
     assert second.clips[0].probe == first.clips[0].probe
+
+
+def _symlinked_input(tmp_path: Path) -> tuple[Path, Path, Path]:
+    _create_config(tmp_path)
+    input_dir = tmp_path / "comparison_videos"
+    input_dir.mkdir()
+    original_target = tmp_path / "first.mkv"
+    replacement_target = tmp_path / "second.mkv"
+    original_target.write_bytes(b"first")
+    replacement_target.write_bytes(b"other")
+    original_stat = original_target.stat()
+    os.utime(replacement_target, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    alias = input_dir / "comparison.mkv"
+    alias.symlink_to(original_target)
+    return alias, original_target, replacement_target
+
+
+def test_cold_probe_caches_facts_from_the_frozen_symlink_target(tmp_path: Path) -> None:
+    alias, original_target, replacement_target = _symlinked_input(tmp_path)
+
+    class RetargetingVSLoader(FakeVSLoader):
+        def load(self, path: Path) -> SourceInfo:
+            # Retarget after fingerprinting and restore before preparation can recheck the alias.
+            alias.unlink()
+            alias.symlink_to(replacement_target)
+            try:
+                info = super().load(path)
+                if path.read_bytes() == b"other":
+                    return replace(info, width=1280, fps=Fraction(25))
+                return info
+            finally:
+                alias.unlink()
+                alias.symlink_to(original_target)
+
+    run = make_run_request(root=tmp_path)
+    cold = asyncio.run(
+        preparation.execute_prep(run, RunDependencies(vs_loader=RetargetingVSLoader()))
+    )
+    warm = asyncio.run(preparation.execute_prep(run, RunDependencies()))
+
+    (cold_clip,) = cold.clips
+    (warm_clip,) = warm.clips
+    assert warm_clip.path == cold_clip.path == alias
+    assert (warm_clip.probe.width, warm_clip.probe.fps) == (1920, Fraction(24000, 1001))
+    assert warm_clip.probe == cold_clip.probe
+    assert warm_clip.probe.fingerprint.path == original_target
+
+
+def test_prepared_alignment_rejects_retargeted_symlink_with_matching_stat(tmp_path: Path) -> None:
+    alias, _, replacement_target = _symlinked_input(tmp_path)
+
+    run = make_run_request(root=tmp_path)
+    cold = asyncio.run(preparation.execute_prep(run, RunDependencies(vs_loader=FakeVSLoader())))
+    warm = asyncio.run(preparation.execute_prep(run, RunDependencies()))
+    clips = [
+        phase_alignment._alignment_clip_request(prep.clips[0], selected_audio_stream=None)
+        for prep in (cold, warm)
+    ]
+    assert all(clip.path == alias and clip.identity_is_current() for clip in clips)
+
+    alias.unlink()
+    alias.symlink_to(replacement_target)
+
+    assert all(not clip.identity_is_current() for clip in clips)
 
 
 def test_execute_prep_uses_one_acquisition_and_discovers_sources_at_use(tmp_path: Path) -> None:

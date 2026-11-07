@@ -140,7 +140,7 @@ class WorkspacePaths:
 
 @dataclass(frozen=True, slots=True)
 class AlignmentClipIdentity:
-    """Layer-neutral stat identity for performance-first cache validation.
+    """Resolved path and stat facts frozen at preparation.
 
     Media contents are intentionally not hashed, so a same-path, same-size,
     same-mtime replacement retains identity.
@@ -202,9 +202,10 @@ class AlignmentClipRequest:
     def identity_is_current(self) -> bool:
         """Check prepared path/size/mtime without refreshing the frozen identity."""
         try:
-            stat = self.path.stat()
+            resolved_path = self.path.resolve(strict=True)
+            stat = resolved_path.stat()
             return (
-                self.path.resolve() == self.identity.path.resolve()
+                resolved_path == self.identity.path
                 and stat.st_size == self.identity.size_bytes
                 and stat.st_mtime_ns == self.identity.mtime_ns
             )

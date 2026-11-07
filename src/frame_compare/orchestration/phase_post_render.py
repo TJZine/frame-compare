@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -353,7 +354,9 @@ def run_report_phase(
                 active_picture=clip_facts.geometry.active_picture,
                 images=images,
                 label=clip.label,
-                source_identity=source_identity_from_fingerprint(clip.probe.fingerprint),
+                source_identity=source_identity_from_fingerprint(
+                    replace(clip.probe.fingerprint, path=clip.path)
+                ),
                 display=ReportClipDisplayInfo(
                     primary=primaries[clip_index],
                     release=releases[clip_index],

@@ -1349,6 +1349,7 @@ async def align_clips_from_request(
             candidate = prepare_reusable_source_set(request, resolutions)
             if candidate is not None:
                 save_reusable_offsets(request, candidate)
+                require_current_alignment_sources(request)
 
         return AlignmentOperationOutcome(
             ordered_results(request, resolutions),
