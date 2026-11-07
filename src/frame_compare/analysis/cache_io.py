@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import re
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from fractions import Fraction
@@ -40,6 +41,15 @@ CACHE_LABEL_MAX_LENGTH: int = 80
 CACHE_VERSION: int = 8
 _SAFE_LABEL_CHARS = re.compile(r"[^a-z0-9._-]+")
 _MULTI_SEPARATOR = re.compile(r"[-_.]{2,}")
+_FPS_COMPONENT = r"[1-9][0-9]*"
+_WRITER_FPS_PATTERN = re.compile(rf"^{_FPS_COMPONENT}(?:/{_FPS_COMPONENT})?$", re.ASCII)
+_DEFAULT_MAX_FPS_COMPONENT_DIGITS = sys.int_info.default_max_str_digits
+
+
+def _max_fps_component_digits() -> int:
+    """Return the active finite bound for decimal FPS components."""
+    runtime_limit = sys.get_int_max_str_digits()
+    return runtime_limit if runtime_limit > 0 else _DEFAULT_MAX_FPS_COMPONENT_DIGITS
 
 
 class _CacheParseError(ValueError):
@@ -86,7 +96,11 @@ def acquire_required_metrics(
     )
     result = load_cached_metrics_for_request(cache_dir, fingerprint, request)
     if result.success and result.metrics is not None:
-        return result.metrics
+        if result.metrics.metadata.algorithm_identity_json == stable_metric_algorithm_identity_json(
+            config
+        ):
+            return result.metrics
+        result = CacheLoadResult(success=False, reason="mismatched_inputs")
     error_path = find_metrics_cache_file(cache_dir, fingerprint) or (
         cache_dir / metrics_cache_filename(video_paths, fingerprint)
     )
@@ -342,13 +356,18 @@ def _validate_cache_identity(data: Mapping[str, object], fingerprint: str) -> No
         raise _CacheVersionMismatch
     if data["fingerprint"] != fingerprint:
         raise _CacheFingerprintMismatch
+    metadata = data.get("metadata")
+    if isinstance(metadata, Mapping):
+        nested_fingerprint = cast(Mapping[str, object], metadata).get("config_fingerprint")
+        if isinstance(nested_fingerprint, str) and nested_fingerprint != fingerprint:
+            raise _CacheFingerprintMismatch
     _require_keys(data, {"luminance", "motion", "sampled_source_frames", "metadata"})
 
 
 def _parse_cache_payload(data: Mapping[str, object]) -> _ValidatedCachePayload:
     metadata = _parse_metrics_metadata(_as_mapping(data["metadata"]))
-    luminance = _parse_numeric_series(data["luminance"])
-    motion = _parse_numeric_series(data["motion"])
+    luminance = _parse_metric_series(data["luminance"])
+    motion = _parse_metric_series(data["motion"])
     sampled_source_frames = _parse_sampled_source_frames(data["sampled_source_frames"])
     _validate_metric_arrays(
         luminance=luminance,
@@ -378,7 +397,7 @@ def _parse_sampled_source_frames(value: object) -> tuple[int, ...] | None:
     return frames
 
 
-def _parse_numeric_series(value: object) -> list[float]:
+def _parse_metric_series(value: object) -> list[float]:
     if not isinstance(value, list):
         raise _CacheParseError
 
@@ -400,6 +419,11 @@ def _parse_finite_float(value: object) -> float:
     return result
 
 
+def _validate_metric_scores(values: list[float]) -> None:
+    if any(not 0.0 <= value <= 1.0 for value in values):
+        raise _CacheParseError
+
+
 def _validate_metric_arrays(
     *,
     luminance: list[float],
@@ -410,8 +434,12 @@ def _validate_metric_arrays(
     performance_mode: str,
     sampled_source_frames: tuple[int, ...] | None,
 ) -> None:
+    if frame_count <= 0 or metric_source_end_exclusive <= metric_source_start:
+        raise _CacheParseError
     if len(luminance) != frame_count or len(motion) != frame_count:
         raise _CacheParseError
+    _validate_metric_scores(luminance)
+    _validate_metric_scores(motion)
     if performance_mode == "quality" and sampled_source_frames is not None:
         raise _CacheParseError
     if performance_mode == "performance" and sampled_source_frames is None:
@@ -429,19 +457,49 @@ def _validate_metric_arrays(
             for frame in sampled_source_frames
         ):
             raise _CacheParseError
-        expected_source_frames = tuple(
-            frame
-            for burst in plan_performance_bursts(
-                window_start=metric_source_start,
-                window_end_exclusive=metric_source_end_exclusive,
-            )
-            for frame in range(burst.start, burst.end_exclusive)
+        bursts = plan_performance_bursts(
+            window_start=metric_source_start,
+            window_end_exclusive=metric_source_end_exclusive,
         )
-        if sampled_source_frames != expected_source_frames:
+        expected_sample_count = sum(burst.frame_count for burst in bursts)
+        if len(sampled_source_frames) != expected_sample_count:
+            raise _CacheParseError
+        expected_source_frames = (
+            frame for burst in bursts for frame in range(burst.start, burst.end_exclusive)
+        )
+        if any(
+            actual != expected
+            for actual, expected in zip(sampled_source_frames, expected_source_frames, strict=True)
+        ):
             raise _CacheParseError
         source_frames = sampled_source_frames
     if motion and 0 in source_frames and motion[source_frames.index(0)] != 0.0:
         raise _CacheParseError
+
+
+def _parse_writer_fps(value: object) -> Fraction:
+    if not isinstance(value, str) or _WRITER_FPS_PATTERN.fullmatch(value) is None:
+        raise _CacheParseError
+    components = value.split("/")
+    if any(len(component) > _max_fps_component_digits() for component in components):
+        raise _CacheParseError
+    try:
+        parsed = Fraction(value)
+    except (ValueError, ZeroDivisionError) as exc:
+        raise _CacheParseError from exc
+    if str(parsed) != value:
+        raise _CacheParseError
+    return parsed
+
+
+def _serialize_writer_fps(value: Fraction) -> str:
+    try:
+        serialized = str(value)
+    except ValueError as exc:
+        raise ValueError("FPS components exceed the active integer conversion limit") from exc
+    if any(len(component) > _max_fps_component_digits() for component in serialized.split("/")):
+        raise ValueError("FPS components exceed the supported cache bound")
+    return serialized
 
 
 def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
@@ -483,9 +541,7 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
         )
     except ValueError as exc:
         raise _CacheParseError from exc
-    fps = data["fps"]
-    if not isinstance(fps, str):
-        raise _CacheParseError
+    fps = _parse_writer_fps(data["fps"])
 
     config_fingerprint = data["config_fingerprint"]
     if not isinstance(config_fingerprint, str):
@@ -531,7 +587,7 @@ def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
     try:
         return MetricsMetadata(
             frame_count=frame_count,
-            fps=Fraction(fps),
+            fps=fps,
             config_fingerprint=config_fingerprint,
             clips=_parse_clip_identities(data["clips"]),
             source_frame_count=source_frame_count,
@@ -623,7 +679,10 @@ def _validate_algorithm_metadata_fields(
     algorithm_identity_json: str,
     algorithm_identity: Mapping[str, object],
 ) -> None:
-    expected_algorithm_id = hashlib.sha256(algorithm_identity_json.encode("utf-8")).hexdigest()
+    try:
+        expected_algorithm_id = hashlib.sha256(algorithm_identity_json.encode("utf-8")).hexdigest()
+    except UnicodeEncodeError as exc:
+        raise _CacheParseError from exc
     if algorithm_id != expected_algorithm_id:
         raise _CacheParseError
 
@@ -677,10 +736,12 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
     """Persist analysis metrics to cache file."""
     if metrics.metadata.version != CACHE_VERSION:
         raise ValueError("Metrics metadata cache version does not match the current cache schema")
+    luminance = list(metrics.luminance)
+    motion = list(metrics.motion)
     try:
         _validate_metric_arrays(
-            luminance=list(metrics.luminance),
-            motion=list(metrics.motion),
+            luminance=luminance,
+            motion=motion,
             frame_count=metrics.metadata.frame_count,
             metric_source_start=metrics.metadata.metric_source_start,
             metric_source_end_exclusive=metrics.metadata.metric_source_end_exclusive,
@@ -702,8 +763,8 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
     data: dict[str, object] = {
         "version": CACHE_VERSION,
         "fingerprint": metrics.metadata.config_fingerprint,
-        "luminance": list(metrics.luminance),
-        "motion": list(metrics.motion),
+        "luminance": luminance,
+        "motion": motion,
         "sampled_source_frames": (
             None if metrics.sampled_source_frames is None else list(metrics.sampled_source_frames)
         ),
@@ -712,7 +773,7 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
             "source_frame_count": metrics.metadata.source_frame_count,
             "metric_source_start": metrics.metadata.metric_source_start,
             "metric_source_end_exclusive": metrics.metadata.metric_source_end_exclusive,
-            "fps": str(metrics.metadata.fps),
+            "fps": _serialize_writer_fps(metrics.metadata.fps),
             "config_fingerprint": metrics.metadata.config_fingerprint,
             "analysis_source_path": metrics.metadata.analysis_source_path,
             "performance_mode": metrics.metadata.performance_mode,

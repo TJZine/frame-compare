@@ -21,6 +21,7 @@ from frame_compare.utils.alignment_policy import (
     edge_consensus_offset,
     position_winner,
     sample_to_reference_video_time,
+    selected_start_compensation_seconds,
 )
 
 type EvidenceRowStyle = Literal["value", "warn", "muted"]
@@ -561,7 +562,7 @@ def _review_region_text(region: AudioReviewRegion, *, panel: bool) -> str:
 def _review_frame_for_lag(attempt: AudioAlignmentAttempt, lag: int) -> int:
     return compensated_lag_to_frame(
         lag,
-        compensation_seconds=attempt.audio.compensation_seconds or 0.0,
+        compensation_seconds=selected_start_compensation_seconds(attempt.selected_streams),
         fps_reference=Fraction(attempt.fps_num, attempt.fps_den),
     )
 

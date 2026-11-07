@@ -53,13 +53,13 @@ def test_save_creates_directory(tmp_path: Path) -> None:
     """Non-existent dir → created."""
     sub_dir = tmp_path / "new_dir"
     metadata = metrics_metadata(
-        frame_count=0,
+        frame_count=1,
         fps=Fraction(24, 1),
         config_fingerprint="fp",
         clips=[],
         config=AnalysisConfig(),
     )
-    metrics = FrameMetrics(luminance=[], motion=[], metadata=metadata)
+    metrics = FrameMetrics(luminance=[0.0], motion=[0.0], metadata=metadata)
     save_metrics_cache(metrics, sub_dir)
     assert sub_dir.exists()
     assert (sub_dir / "analysis__fp.compframes").exists()

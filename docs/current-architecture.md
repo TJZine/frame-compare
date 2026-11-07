@@ -94,7 +94,7 @@ analysis clip, cache-domain token, and accepted full-window retry override. Prep
 and recovery build and replace that value together. It carries no effective config or
 second live clip collection. `metric_request_for_domain` constructs a request only at
 Analyze and the existing cache-only/no-cache preparation boundaries, preserving
-warn-only Analyze validation timing for ordinary runs.
+Analyze validation timing for ordinary runs.
 
 `RunDependencies` supplies aware UTC wall time for persisted start/completion
 timestamps and a separate monotonic timer for preflight, source loading, phases,
@@ -185,8 +185,10 @@ predictive cache read. `cache_io.acquire_required_metrics` owns required-cache
 classification and reading at two distinct lifecycle points: cache-only preparation
 validates before reserving output, and cache-only Analyze reacquires without permission
 to compute. The first read is not memoized.
-Analyze is required for cache-only execution: a failed second acquisition aborts
-the run before rendering or publishing rather than using the initial frame plan.
+Analyze is required for cache-only execution and for runs with an empty provisional
+frame plan. In ordinary runs with usable provisional frames, Analyze failure leaves
+the FramePlan snapshot available to Align. With `--no-cache`, each Analyze
+attempt bypasses shared metric cache reads, including an accepted full-window retry.
 `frame_compare.analysis.metric_strategies` owns the metric implementations:
 `quality` is the default full-resolution VapourSynth PlaneStats behavior, while
 `performance` is an approximate temporal-sampling strategy over the same
@@ -402,11 +404,16 @@ never searches parent directories.
   when current entries are saved, but require fresh computation or confirmation
   before reuse. Detector provenance is not part of the key when the resolved
   geometry is unchanged.
-  Unreadable, corrupt, unsupported-version, malformed source-table, or
-  invalid-entry shared reuse data degrades to the normal alignment path with a
-  warning log event. Ordinary no-match, incomplete, or stale source-set misses
-  can silently return no reusable set and continue through the normal alignment
-  path.
+  Lookup verifies that the stored source-set identity matches its key before
+  admitting entries. Entry timestamps must convert to UTC. Unreadable, corrupt,
+  unsupported-version, malformed source-table, or invalid-entry shared reuse data
+  degrades to the normal alignment path with a warning log event. Ordinary
+  no-match, incomplete, or stale source-set misses can continue silently.
+  A source set with duplicate comparison cache keys is ineligible for both
+  shared lookup and publication. Its individual alignment pairs retain their
+  run-local results. A read I/O error during a locked update or a serialization
+  failure warns and leaves the existing file intact. A missing, corrupt, or
+  unsupported-version document can be replaced.
 - `<resolved paths.generated_dir>/cache/tmdb.toml`: shared low-level TMDB response
   cache owned by `frame_compare.services.tmdb_cache`. It stores ordered normalized
   search results and alternative-title lists, never the resolver's selected match or
@@ -421,7 +428,16 @@ never searches parent directories.
   uses key schema 3 and includes the scoped media-runtime probe fingerprint so a
   selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
   portable or Debian/Docker profiles misses without invalidating unrelated file-format
-  data. Older probe keys miss so source stream admission runs again.
+  data. Probe keys use the resolved media path. Entries keyed by a discovered
+  symlink miss and require a normal cold probe before cache-only reuse. Cold
+  probing opens the resolved target, so the probe's decoder index is adjacent
+  to that target. Pair names and report identity still use the discovered path.
+  Older probe keys miss so source stream admission runs again. Persisted probe
+  dimensions and frame counts use bounded positive signed-32-bit decoder fields, while
+  FPS numerator and denominator use positive signed-64-bit components matching R81's
+  `VSVideoInfo` representation. Filesystem size/mtime and cache-safety bounds remain
+  deliberate signed-64-bit limits rather than claims about decoder field widths;
+  malformed entries are skipped individually.
 - `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
   `lsw1310-f125953022b6` on managed/portable Windows,
@@ -476,7 +492,9 @@ identity is not persisted.
   `reference_clip`, `comparison_clip`, `frame_offset`, and `timestamp` under
   reference:comparison keys. Record presence represents confirmed manual authority;
   there is no separate confirmation flag. Unsupported versions are recoverable
-  cache misses and are replaced on the next save without migration.
+  cache misses and are replaced on the next save without migration. A read I/O
+  error or serialization failure during a save warns and preserves the existing
+  manual overrides.
 - `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v4,
   diagnostic-only audio evidence owned by
   `frame_compare.services.alignment_diagnostics` and defined once in
@@ -670,12 +688,28 @@ Computed alignment work runs whole-track chunked correlation over each selected 
 stream. `alignment_audio` owns stream probing and deterministic selection, audio and
 video start-time probing with container-start compensation, and the canonical
 whole-track 8 kHz mono FFmpeg recipe. Selected audio duration comes from stream
-`duration_ts`, stream duration, or a `DURATION` tag. When those are absent, one
-15-second-bounded ffprobe call reads selected-stream packets starting at
-`max(0, source_frame_count / source_fps - 60)` seconds. A `packet_tail` duration
-is the latest packet end minus the stream start, accepted only if every packet
-value parses, a packet reaches the seek point, and the duration is positive.
-Container duration is never substituted. Missing tail evidence remains
+`duration_ts`, stream duration, or a `DURATION` tag. Duration tags use bounded
+`hours:minutes:seconds[.fraction]` syntax. Recognized `mkvmerge` statistics
+measure elapsed track time. When ffprobe identifies the Matroska muxer as `Lavf`
+or `Lavf` followed by its version, its `DURATION` is an endpoint if statistics
+markers are absent or identify `mkvmerge`. A Lavf remux rewrites the endpoint
+even when it retains those markers. A retained `mkvpropedit` marker is
+ambiguous because that tool can rewrite the tag in place after muxing, and a
+later remux can retain its marker. For nonzero starts, ambiguous or unknown
+provenance requires packet evidence. In Matroska, an audio start and
+duration that both match the container timing can be inherited from ffprobe's
+analysis window. The selected stream then requires its first packet timestamp
+and measured duration before collection. Without that timing signature the
+probe relies on ffprobe's stream start.
+
+When the duration needs packet evidence, a 15-second-bounded ffprobe call
+reads selected-stream packets starting at
+`video_start + max(0, source_frame_count / source_fps - 60)` seconds. A
+`packet_tail` duration is the latest packet end minus the stream start, accepted
+only if every packet value parses, a packet reaches the absolute seek point,
+and the duration is positive. Packet probes bound stdout and retain a 64 KiB
+stderr tail. Failed child reaping is a fatal alignment cleanup error.
+Missing packet evidence remains
 `selected_audio_timeline_unavailable`; exact retime rates above the supported
 bound produce the distinct `retime_rate_unsupported` rejection. These durations
 only bound planning and collection; audio/video authority remains unchanged.
@@ -695,6 +729,8 @@ decode. The compensated offset is
 `lag / 8000 + (audio_start_ref - video_start_ref) - (audio_start_cmp - video_start_cmp)`,
 using ffprobe start times of the selected audio stream and the first non-`attached_pic`
 video stream; a missing start time counts as 0 and is recorded as `default_zero`.
+Lag, start compensation, and reference FPS stay rational through rounding with
+`floor(frames + 1/2)`.
 `alignment_streaming` is the adjacent, independently exercisable paired-collection
 owner. It decodes reference and comparison concurrently through one `_ChildStream`
 per side read in lockstep, with bounded memory (one reference chunk, one

@@ -10,6 +10,7 @@ import pytest
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.fps_report import (
     FpsReportClip,
+    _format_runtime,
     _length_difference_lines,
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
@@ -265,6 +266,10 @@ def test_build_consolidated_fps_report_with_empty_comparisons_returns_reference_
     assert len(report) == 1
     assert report[0].label == "Reference"
     assert report[0].path == reference.path
+
+
+def test_format_runtime_floors_fractional_fps_exactly() -> None:
+    assert _format_runtime(24_000, Fraction(24_000, 1001)) == "16:41"
 
 
 def test_build_consolidated_fps_report_flags_divergence_when_effective_fps_differs() -> None:

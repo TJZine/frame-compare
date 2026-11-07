@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 from pathlib import Path
 from typing import IO, Any
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -122,7 +123,10 @@ def test_save_manual_override_merges_overwrites_and_orders_keys(tmp_path: Path) 
     assert content.index('["ref:alpha"]') < content.index('["ref:zeta"]')
 
 
-def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> None:
+@pytest.mark.parametrize("during_read", [False, True], ids=["open-estale", "read-enoent"])
+def test_save_manual_override_read_error_preserves_existing_file(
+    tmp_path: Path, during_read: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = tmp_path / MANUAL_OVERRIDES_FILE
     path.write_text(
         'version = "2"\n["old:entry"]\nreference_clip = "old"\n'
@@ -130,6 +134,8 @@ def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> 
         'timestamp = "2026-01-03T12:00:00Z"\n',
         encoding="utf-8",
     )
+    original_bytes = path.read_bytes()
+    original_overrides = load_manual_overrides(tmp_path)
     override = _override("comp", 99)
     original_open = Path.open
 
@@ -141,9 +147,15 @@ def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> 
         errors: str | None = None,
         newline: str | None = None,
     ) -> IO[Any]:
-        if open_path == path and "r" in mode:
-            raise OSError("stale handle")
-        return original_open(open_path, mode, buffering, encoding, errors, newline)
+        if open_path != path or mode != "rb":
+            return original_open(open_path, mode, buffering, encoding, errors, newline)
+        if not during_read:
+            raise OSError(errno.ESTALE, "stale handle")
+        handle = original_open(open_path, mode, buffering, encoding, errors, newline)
+        monkeypatch.setattr(
+            handle, "read", Mock(side_effect=FileNotFoundError(errno.ENOENT, "lost handle"))
+        )
+        return handle
 
     with (
         patch("pathlib.Path.open", _open_with_read_failure),
@@ -151,8 +163,9 @@ def test_save_manual_override_read_error_replaces_stale_file(tmp_path: Path) -> 
     ):
         save_manual_override(tmp_path, override)
 
+    assert path.read_bytes() == original_bytes
     assert warning.call_args.args[0] == "manual_overrides_read_existing_error"
-    assert load_manual_overrides(tmp_path) == {"ref:comp": override}
+    assert load_manual_overrides(tmp_path) == original_overrides
 
 
 def test_save_manual_override_invalid_utf8_replaces_stale_file(tmp_path: Path) -> None:

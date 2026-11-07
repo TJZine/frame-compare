@@ -1,6 +1,7 @@
 """Unit tests for probe cache keying logic and I/O."""
 
 import tomllib
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
@@ -123,6 +124,20 @@ def test_probe_cache_round_trip_toml(
     assert hdr_snapshot.hdr_metadata is not None
     assert hdr.hdr_metadata.max_cll == 1000
     assert hdr.hdr_metadata.mastering_display == hdr_snapshot.hdr_metadata.mastering_display
+
+
+def test_probe_cache_round_trip_preserves_int64_fps_components(
+    tmp_path: Path, sample_snapshot: ClipProbeSnapshot
+) -> None:
+    """Probe writer/read accepts an R81-sized FPS numerator."""
+    fps = Fraction(2_147_483_651, 90_000_000)
+    snapshot = replace(sample_snapshot, fps=fps)
+    path = tmp_path / "int64_fps.toml"
+    key = compute_probe_cache_key(snapshot.fingerprint)
+
+    save_clip_probe_cache(path, {key: snapshot})
+
+    assert load_clip_probe_cache(path)[key].fps == fps
 
 
 def test_hdr_metadata_with_optional_fields_none_is_toml_serializable(tmp_path: Path):

@@ -3,6 +3,8 @@ import os
 import subprocess
 import sys
 import textwrap
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from time import monotonic
 from typing import IO
@@ -313,7 +315,12 @@ def streaming_children(monkeypatch: pytest.MonkeyPatch) -> list[subprocess.Popen
     original_popen = subproc_module.Popen
 
     def popen(
-        argv: list[str], *, cwd: Path | None, stdout: IO[bytes], stderr: IO[bytes], shell: bool
+        argv: list[str],
+        *,
+        cwd: Path | None,
+        stdout: IO[bytes],
+        stderr: IO[bytes] | int,
+        shell: bool,
     ) -> subprocess.Popen[bytes]:
         process = original_popen(argv, cwd=cwd, stdout=stdout, stderr=stderr, shell=shell)
         processes.append(process)
@@ -353,6 +360,77 @@ def test_run_subprocess_streaming_consumes_all_bytes(
     assert result.returncode == 0
     assert len(streaming_children) == 1
     assert streaming_children[0].poll() == 0
+
+
+def test_run_subprocess_streaming_keeps_only_stderr_tail() -> None:
+    result = run_subprocess(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.stderr.buffer.write(b'x' * (4 * 1024 * 1024) + b'y' * 65536)",
+        ],
+        timeout_seconds=15,
+        stdout_consumer=lambda _chunk: None,
+        max_stdout_bytes=1,
+    )
+    assert result.returncode == 0
+    assert result.stderr == b"y" * 65536
+
+
+@pytest.mark.parametrize("teardown_fails", [False, True], ids=["reap", "reap-and-teardown"])
+def test_run_subprocess_reports_failed_final_wait(
+    streaming_children: list[subprocess.Popen[bytes]],
+    monkeypatch: pytest.MonkeyPatch,
+    teardown_fails: bool,
+) -> None:
+    reap_attempts = 0
+    original_wait = subprocess.Popen.wait
+    final_wait_error = OSError("injected final wait failure")
+    stop_error = RuntimeError("stop the child")
+    teardown_error = PermissionError("injected stdout capture unlink failure")
+    original_tempfile = subproc_module.NamedTemporaryFile
+
+    @contextmanager
+    def stdout_capture(*, delete_on_close: bool) -> Generator[IO[bytes]]:
+        try:
+            with original_tempfile(delete_on_close=delete_on_close) as capture:
+                yield capture
+        finally:
+            # Stand in for Windows rejecting deletion while the child still
+            # holds the file. The real temporary file is removed on this host.
+            raise teardown_error
+
+    def wait(process: subprocess.Popen[bytes], timeout: float | None = None) -> int:
+        nonlocal reap_attempts
+        if timeout == 2.0:
+            reap_attempts += 1
+            if reap_attempts == 1:
+                raise subprocess.TimeoutExpired(process.args, 2.0)
+            raise final_wait_error
+        return original_wait(process, timeout)
+
+    def abort() -> bool:
+        if streaming_children:
+            raise stop_error
+        return False
+
+    monkeypatch.setattr(subprocess.Popen, "wait", wait)
+    if teardown_fails:
+        monkeypatch.setattr(subproc_module, "NamedTemporaryFile", stdout_capture)
+    try:
+        with pytest.raises(Exception) as error:
+            run_subprocess(_streaming_child_command(), timeout_seconds=10, abort=abort)
+    finally:
+        for process in streaming_children:
+            if process.poll() is None:
+                process.kill()
+            original_wait(process, timeout=5)
+    assert reap_attempts == 2
+    assert type(error.value).__name__ == "SubprocessCleanupError"
+    assert error.value.__cause__ is final_wait_error
+    assert final_wait_error.__context__ is stop_error
+    if teardown_fails:
+        assert any("PermissionError" in note for note in getattr(error.value, "__notes__", ()))
 
 
 def test_run_subprocess_streaming_enforces_cap_and_reaps_child(

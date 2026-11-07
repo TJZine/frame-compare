@@ -142,7 +142,9 @@ def _real_clip(
     fps: Fraction = Fraction(_FPS),
     num_frames: int = _DURATION * _FPS,
 ) -> ClipState:
-    stat = path.stat()
+    # Preparation freezes the resolved target; the media store links session paths.
+    resolved_path = path.resolve(strict=True)
+    stat = resolved_path.stat()
     active_rect = (
         ClipActiveRect(
             x=32,
@@ -156,7 +158,9 @@ def _real_clip(
         else None
     )
     probe = ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(path=path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns),
+        fingerprint=ClipFingerprint(
+            path=resolved_path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns
+        ),
         width=128,
         height=72,
         num_frames=num_frames,
@@ -617,10 +621,11 @@ def test_configured_match_fps_retimed_insert_still_refuses(
 
 
 def _video_request(path: Path) -> VideoClipRequest:
-    stat = path.stat()
+    resolved_path = path.resolve(strict=True)
+    stat = resolved_path.stat()
     return VideoClipRequest(
         path=path,
-        identity=AlignmentClipIdentity(path, stat.st_size, stat.st_mtime_ns),
+        identity=AlignmentClipIdentity(resolved_path, stat.st_size, stat.st_mtime_ns),
     )
 
 
