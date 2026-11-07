@@ -115,13 +115,23 @@ def _source_set_identity(request: AlignmentRequest) -> dict[str, object]:
 
 def source_set_cache_key(request: AlignmentRequest) -> str:
     """Return the deterministic shared-cache key for an alignment source set."""
-    payload = tomli_w.dumps(_source_set_identity(request)).encode("utf-8")
+    return _source_set_identity_key(_source_set_identity(request))
+
+
+def _source_set_identity_key(identity: dict[str, object]) -> str:
+    payload = tomli_w.dumps(identity).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
 def comparison_cache_key(clip: AlignmentClipRequest) -> str:
     payload = tomli_w.dumps(_clip_identity_dict(clip)).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _has_duplicate_comparison_keys(request: AlignmentRequest) -> bool:
+    return len({comparison_cache_key(clip) for clip in request.comparisons}) != len(
+        request.comparisons
+    )
 
 
 def _cache_path(request: AlignmentRequest) -> Path:
@@ -133,12 +143,14 @@ def _cache_lock_path(cache_path: Path) -> Path:
 
 
 def _load_cache_data(cache_path: Path) -> dict[str, object] | None:
-    if not cache_path.exists():
+    try:
+        handle = cache_path.open("rb")
+    except FileNotFoundError:
         return None
     try:
-        with cache_path.open("rb") as handle:
+        with handle:
             data = cast(dict[str, object], tomllib.load(handle))
-    except (OSError, *SERIALIZED_DECODE_FAILURES) as exc:
+    except SERIALIZED_DECODE_FAILURES as exc:
         log.warning(
             "alignment_reuse_cache_unreadable",
             path=str(cache_path),
@@ -270,6 +282,10 @@ def _parse_entry(
         raise TypeError("time_offset_seconds must be finite number")
     if not isinstance(accepted_at, str) or not accepted_at:
         raise TypeError("accepted_at must be non-empty str")
+    accepted_time = datetime.fromisoformat(accepted_at)
+    if accepted_time.tzinfo is None:
+        raise ValueError("accepted_at must include a timezone")
+    accepted_at_utc = accepted_time.astimezone(UTC).isoformat().replace("+00:00", "Z")
     if origin == "computed":
         if not _is_finite_number(correlation_score):
             raise TypeError("computed correlation_score must be finite number")
@@ -299,7 +315,7 @@ def _parse_entry(
     )
     return ReusableAlignmentEntry(
         result=result,
-        accepted_at=accepted_at,
+        accepted_at=accepted_at_utc,
         origin=origin,
         computed_result=result if origin == "computed" else computed_result,
     )
@@ -424,8 +440,20 @@ def load_reusable_offset_entries(
 ) -> dict[str, ReusableAlignmentEntry] | None:
     """Load complete reusable previous-offset entries, or return ``None``."""
     require_current_alignment_sources(request)
+    if _has_duplicate_comparison_keys(request):
+        return None
     cache_path = _cache_path(request)
-    data = _load_cache_data(cache_path)
+    try:
+        data = _load_cache_data(cache_path)
+    except OSError as exc:
+        log.warning(
+            "alignment_reuse_cache_unreadable",
+            path=str(cache_path),
+            action="ignore_shared_alignment_cache",
+            error=str(exc),
+            exc_info=exc,
+        )
+        return None
     if data is None:
         return None
 
@@ -433,17 +461,28 @@ def load_reusable_offset_entries(
     source_sets = _source_sets_table(data, cache_path=cache_path)
     if source_sets is None:
         return None
-    source_set = source_sets.get(source_set_key)
-    if not isinstance(source_set, dict):
+    if source_set_key not in source_sets:
         return None
-    source_set_dict = cast(dict[str, object], source_set)
-    entries = source_set_dict.get("entries")
-    if not isinstance(entries, dict):
+    source_set = source_sets[source_set_key]
+    try:
+        if not isinstance(source_set, dict):
+            raise TypeError("source set must be a table")
+        source_set_dict = cast(dict[str, object], source_set)
+        identity = source_set_dict.get("identity")
+        if not isinstance(identity, dict):
+            raise TypeError("source set identity must be a table")
+        if _source_set_identity_key(cast(dict[str, object], identity)) != source_set_key:
+            raise ValueError("shared alignment cache source set identity mismatch")
+        entries = source_set_dict.get("entries")
+        if not isinstance(entries, dict):
+            raise TypeError("source set entries must be a table")
+    except (RecursionError, TypeError, ValueError) as exc:
         log.warning(
             "alignment_reuse_cache_corrupt_source_set",
             path=str(cache_path),
             source_set_key=source_set_key,
             action="ignore_shared_alignment_cache",
+            error=str(exc),
         )
         return None
     entry_table = cast(dict[str, object], entries)
@@ -453,16 +492,18 @@ def load_reusable_offset_entries(
     results: dict[str, ReusableAlignmentEntry] = {}
     for comparison in requested_comparisons:
         comparison_key = comparison_cache_key(comparison)
-        entry = entry_table.get(comparison_key)
-        if not isinstance(entry, dict):
+        if comparison_key not in entry_table:
             return None
         try:
+            entry = entry_table[comparison_key]
+            if not isinstance(entry, dict):
+                raise TypeError("entry must be a table")
             results[comparison_key] = _parse_entry(
                 cast(dict[str, object], entry),
                 request=request,
                 comparison=comparison,
             )
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, OverflowError, TypeError, ValueError) as exc:
             log.warning(
                 "alignment_reuse_cache_invalid_entry",
                 path=str(cache_path),
@@ -496,7 +537,7 @@ class ReusableSourceSetCandidate:
 def prepare_reusable_source_set(
     request: AlignmentRequest, resolutions: Mapping[str, ComparisonResolution]
 ) -> ReusableSourceSetCandidate | None:
-    if not request.comparisons:
+    if not request.comparisons or _has_duplicate_comparison_keys(request):
         return None
     prepared: list[ComparisonResolution] = []
     for comparison in request.comparisons:
@@ -612,15 +653,27 @@ def save_reusable_offsets(
         "entries": entries,
     }
 
+    def guard_publication() -> None:
+        raise_if_cancelling()
+        require_current_alignment_sources(request)
+
     try:
         with exclusive_file_lock(_cache_lock_path(cache_path), abort_check=raise_if_cancelling):
             data = _initial_write_data(cache_path)
             source_sets = cast(dict[str, object], data["source_sets"])
             source_sets[source_set_key] = source_set
             require_current_alignment_sources(request)
-            write_bytes_atomic(
-                cache_path, tomli_w.dumps(data).encode("utf-8"), publish_guard=raise_if_cancelling
-            )
+            try:
+                content = tomli_w.dumps(data).encode("utf-8")
+            except (RecursionError, TypeError, ValueError) as exc:
+                log.warning(
+                    "alignment_reuse_cache_serialization_failed",
+                    path=str(cache_path),
+                    action="shared_alignment_offsets_not_cached",
+                    error=str(exc),
+                )
+                return
+            write_bytes_atomic(cache_path, content, publish_guard=guard_publication)
     except OSError as exc:
         log.warning(
             "alignment_reuse_cache_write_failed",

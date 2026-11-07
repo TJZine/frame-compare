@@ -312,9 +312,10 @@ def _cached_probe_snapshots_for_cache_only(
     snapshots: dict[Path, ClipProbeSnapshot] = {}
     for path in input_videos:
         raise_if_cancelling()
-        stats = path.stat()
+        resolved_path = path.resolve(strict=True)
+        stats = resolved_path.stat()
         fingerprint = ClipFingerprint(
-            path=path,
+            path=resolved_path,
             size_bytes=stats.st_size,
             mtime_ns=stats.st_mtime_ns,
         )
@@ -386,9 +387,10 @@ def _probe_input_videos(
 
     for path in input_videos:
         raise_if_cancelling()
-        stats = path.stat()
+        resolved_path = path.resolve(strict=True)
+        stats = resolved_path.stat()
         fingerprint = ClipFingerprint(
-            path=path,
+            path=resolved_path,
             size_bytes=stats.st_size,
             mtime_ns=stats.st_mtime_ns,
         )
@@ -397,7 +399,7 @@ def _probe_input_videos(
         if snapshot is None:
             if deps.vs_loader is None:
                 raise RuntimeError("VS loader must be initialized before probing clips.")
-            source_info = deps.vs_loader.load(path)
+            source_info = deps.vs_loader.load(resolved_path)
             tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
             preserved_props = compute_preserved_frame_props(source_info.frame_props)
             snapshot = ClipProbeSnapshot(
