@@ -103,7 +103,6 @@ def _diagnostic_lines(config: OverlayConfig, facts: RenderedFrameFacts) -> list[
         active = geometry.active_picture
         provenance = {
             "explicit": "explicit",
-            "dolby_vision_l5": "DV L5",
             "dimension_derived": "dimension-derived",
             "aspect_ratio_derived": "aspect-ratio-derived",
             "content_derived": "content-derived",
@@ -129,7 +128,9 @@ def _diagnostic_lines(config: OverlayConfig, facts: RenderedFrameFacts) -> list[
     if signal.color_range in ("limited", "full"):
         signal_parts.append(signal.color_range.title())
     if signal.dolby_vision_rpu:
-        signal_parts.append("DV RPU")
+        signal_parts.append("DV RPU (clip)")
+    if facts.dolby_vision_rpu is True:
+        signal_parts.append("DV RPU (frame)")
     if config.presentation_state == PresentationState.HDR_TONEMAP_OFF:
         signal_parts.append("tonemap off")
     lines.append(f"Signal: {' • '.join(signal_parts)}")

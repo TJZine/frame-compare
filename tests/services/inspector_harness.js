@@ -118,8 +118,8 @@ async function inspectorContracts() {
     assert.equal(format.formatTonemapSummary({ran: true, shared: null}), 'Applied · varies by source');
     assert.equal(format.formatActivePicture(null, [1920, 1080]), '1920×1080 · full frame');
     assert.equal(
-        format.formatActivePicture({ width: 1920, height: 800, x: 0, y: 140, provenance: 'dolby_vision_l5' }, [3840, 2160]),
-        '3840×2160 · active 1920×800, 140 px top · DV L5',
+        format.formatActivePicture({ width: 1920, height: 800, x: 0, y: 140, provenance: 'explicit' }, [3840, 2160]),
+        '3840×2160 · active 1920×800, 140 px top',
     );
     assert.equal(format.clipBadge({ is_hdr: true, dolby_vision_rpu: true }), 'DV HDR');
     assert.equal(format.clipBadge({ is_hdr: true, dolby_vision_rpu: false }), 'HDR');
@@ -302,7 +302,7 @@ async function inspectorContracts() {
             y: 0,
             width: 3840,
             height: 1600,
-            provenance: 'dolby_vision_l5',
+            provenance: 'explicit',
             is_full_frame: false,
         },
         presentation: { state: 'hdr_tonemapped', tonemap: {implementation: 'libplacebo', algorithm: 'bt2390', target_nits: 100, source_peak_nits: 1000, source_peak_origin: 'default', effective_controls: {}, fallback_cause: null} },
@@ -429,7 +429,7 @@ async function inspectorContracts() {
             row.children[1].textContent,
         ]));
         assert.deepEqual(cardRows, [
-            ['Picture', '3840×2160 · active 3840×1600, 0 px top · DV L5'],
+            ['Picture', '3840×2160 · active 3840×1600, 0 px top'],
             ['Length', '143,487 frames · 1:39:44'],
             ['Size', '17.00 GiB'],
             ['FPS', '23.976 fps'],
@@ -535,7 +535,7 @@ async function inspectorContracts() {
         ]));
         assert.equal(
             offsetRows[0][1],
-            '3840×2160 · active 3840×1600, 0 px top, 10 px left · DV L5',
+            '3840×2160 · active 3840×1600, 0 px top, 10 px left',
         );
         assert.equal(cards[1].children[0].children[1].textContent, 'HDR');
     }
@@ -564,7 +564,7 @@ async function inspectorContracts() {
             row.children[1].textContent,
         ]));
         assert.deepEqual(cardRows, [
-            ['Picture', '3840×2160 · active 3840×1600, 0 px top · DV L5'],
+            ['Picture', '3840×2160 · active 3840×1600, 0 px top'],
             ['Length', '143,487 frames · 1:39:44'],
             ['Size', '17.00 GiB'],
             ['FPS', '23.976 fps'],

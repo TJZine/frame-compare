@@ -70,7 +70,7 @@ def test_build_extract_frame_argv_places_geometry_filters_after_exact_frame_sele
         source=source,
         source_rect=GeometryRect(0, 0, 1920, 1080),
         active_rect=GeometryRect(240, 0, 1440, 1080),
-        provenance="dolby_vision_l5",
+        provenance="explicit",
         crop_rect=GeometryRect(240, 0, 1440, 1080),
         crop=GeometryMargins(left=240, right=240),
         cropped_size=(1440, 1080),

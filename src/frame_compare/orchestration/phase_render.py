@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from math import inf
 
 from frame_compare.orchestration.active_rect import active_picture_provenance_from_rect_source
 from frame_compare.orchestration.context import ClipProbeSnapshot, ClipState, RunContext
@@ -152,18 +153,19 @@ def _source_signal_facts(probe: ClipProbeSnapshot) -> SourceSignalFacts:
     matrix = _observed_int(props.get("matrix"))
     if matrix is None and hdr is not None:
         matrix = _observed_int(hdr.matrix)
-    static = None
-    if hdr is not None:
+    mastering_min, mastering_max = _mastering_luminance_from_props(props)
+    if mastering_min is None and hdr is not None:
         mastering_min, mastering_max = _mastering_luminance(hdr.mastering_display)
-        if any(
-            value is not None for value in (mastering_min, mastering_max, hdr.max_cll, hdr.max_fall)
-        ):
-            static = HDRStaticFacts(
-                mastering_min_nits=mastering_min,
-                mastering_max_nits=mastering_max,
-                max_cll=hdr.max_cll,
-                max_fall=hdr.max_fall,
-            )
+    max_cll = hdr.max_cll if hdr is not None else None
+    max_fall = hdr.max_fall if hdr is not None else None
+    static = None
+    if any(value is not None for value in (mastering_min, mastering_max, max_cll, max_fall)):
+        static = HDRStaticFacts(
+            mastering_min_nits=mastering_min,
+            mastering_max_nits=mastering_max,
+            max_cll=max_cll,
+            max_fall=max_fall,
+        )
     return SourceSignalFacts(
         is_hdr=probe.is_hdr,
         primaries=primaries,
@@ -177,6 +179,29 @@ def _source_signal_facts(probe: ClipProbeSnapshot) -> SourceSignalFacts:
 
 def _observed_int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value != 2 else None
+
+
+def _mastering_luminance_from_props(
+    props: dict[str, str | int | float],
+) -> tuple[float | None, float | None]:
+    # The decoder exports luminance directly in cd/m² (nits).
+    minimum = props.get("masteringdisplayminluminance")
+    maximum = props.get("masteringdisplaymaxluminance")
+    if (
+        not isinstance(minimum, (int, float))
+        or isinstance(minimum, bool)
+        or not isinstance(maximum, (int, float))
+        or isinstance(maximum, bool)
+    ):
+        return None, None
+    try:
+        minimum_nits = float(minimum)
+        maximum_nits = float(maximum)
+    except OverflowError:
+        return None, None
+    if not 0 <= minimum_nits < maximum_nits < inf:
+        return None, None
+    return minimum_nits, maximum_nits
 
 
 def _mastering_luminance(value: str | None) -> tuple[float | None, float | None]:

@@ -585,7 +585,6 @@ def _parse_metric_active_rect(value: object) -> MetricActiveRect | None:
 def _parse_active_rect_source(value: object) -> ActiveRectSource:
     if not isinstance(value, str) or value not in {
         "explicit",
-        "metadata",
         "dimension-derived",
         "aspect-ratio-derived",
         "content-derived",
@@ -602,7 +601,7 @@ def _parse_active_rect_detection_mode(value: object) -> ActiveRectDetectionMode:
 
 
 def _parse_active_rect_algorithm_id(value: object) -> ActiveRectAlgorithmId:
-    if value != "active_rect_resolution_v2":
+    if value != "active_rect_resolution_v3":
         raise _CacheParseError
     return cast(ActiveRectAlgorithmId, value)
 

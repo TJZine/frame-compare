@@ -156,9 +156,9 @@ Frame Compare's report presents SDR screenshots for browser review.
 
 ## Dolby Vision considerations
 
-Frame Compare records source-level DV RPU presence on the **Signal** line. The **Frame**
-tab in the **Inspector** records exact selected-frame RPU presence when the VapourSynth
-source exposes it. Geometry shows a DV L5-derived active picture as `DV L5`.
+The diagnostic **Signal** line labels source-level RPU presence as `DV RPU (clip)`.
+When VapourSynth confirms RPU presence on the selected frame, the overlay adds
+`DV RPU (frame)` and the **Frame** tab in the **Inspector** also records it.
 Frame Compare does not present L1, L2, or L6 values from a frame-0 probe snapshot as
 though they came from the selected frame.
 
@@ -188,10 +188,8 @@ controls. Configuration and signature errors still fail the run.
 ## Overlays and measurements
 
 `diagnostic` overlays can include observed mastering metadata, MaxCLL/MaxFALL, source
-color evidence, source-level RPU presence, DV L5 geometry provenance, applied tonemap
-settings, and selection context. Exact-frame RPU presence stays in the **Frame** tab of
-the
-**Inspector** to keep baked overlays concise.
+color evidence, labeled RPU presence, active-picture geometry, applied tonemap
+settings, and selection context.
 
 Dynamic Dolby Vision values require exact selected-frame provenance. Frame Compare omits
 missing values without placeholders or fabricated defaults.
