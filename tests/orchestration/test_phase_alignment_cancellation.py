@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from fractions import Fraction
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -59,7 +58,6 @@ async def test_cancelled_alignment_never_applies_phase_output(
         await alignment.align_clips_from_request(
             request,
             config,
-            reference_fps=Fraction(24),
         )
         return AlignPhaseOutput(
             reference=ctx.reference, comparisons=ctx.comparisons, selected_frames=[]

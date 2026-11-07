@@ -102,7 +102,9 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert alignment_request.shared_alignment_cache_dir == ctx.workspace.shared_alignment_cache_dir
     assert alignment_request.reference.identity.path == ctx.reference.probe.fingerprint.path
     assert alignment_request.comparisons[0].identity.path == comparison.probe.fingerprint.path
-    assert captured["reference_fps"] == ctx.reference.effective_fps
+    assert "reference_fps" not in captured
+    assert alignment_request.reference.effective_fps_num == ctx.reference.effective_fps.numerator
+    assert alignment_request.reference.effective_fps_den == ctx.reference.effective_fps.denominator
     assert captured["frame_props_by_stem"] == {
         "reference": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
         "encode": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},

@@ -68,7 +68,6 @@ enable = false
         request,
         config,
         progress=None,
-        reference_fps=None,
         frame_props_by_stem=None,
         verbose=False,
         quiet=False,

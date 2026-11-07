@@ -6,7 +6,7 @@ import json
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
-from subprocess import CalledProcessError, TimeoutExpired
+from subprocess import TimeoutExpired
 from threading import Event
 from unittest.mock import MagicMock, patch
 
@@ -22,133 +22,8 @@ from frame_compare.services.alignment_audio import (
     retime_rates,
     select_audio_pair,
 )
-from frame_compare.services.alignment_audio import (
-    probe_fps as _probe_fps,
-)
 from frame_compare.services.errors import AudioAlignmentCancellationError, AudioAlignmentError
-from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-
-
-@pytest.mark.parametrize(
-    "stdout, expected",
-    [
-        pytest.param(b"24000/1001\n", Fraction(24000, 1001), id="probe_fps_fraction"),
-        pytest.param(
-            b"24000/1001,\r\n", Fraction(24000, 1001), id="probe_fps_accepts_single_trailing_comma"
-        ),
-        pytest.param(b"24\n", Fraction(24, 1), id="probe_fps_integer"),
-    ],
-)
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_success(mock_run: MagicMock, stdout: bytes, expected: Fraction) -> None:
-    mock_run.return_value.stdout = stdout
-    assert _probe_fps(Path("test.mkv")) == expected
-    assert mock_run.call_args.args[0] == [
-        "ffprobe",
-        "-v",
-        "quiet",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=avg_frame_rate",
-        "-of",
-        "csv=p=0",
-        "test.mkv",
-    ]
-    assert mock_run.call_args.kwargs["timeout_seconds"] == 15.0
-
-
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_empty_output_is_alignment_parse_error(mock_run: MagicMock) -> None:
-    mock_run.return_value.stdout = b""
-
-    with pytest.raises(AudioAlignmentError) as exc_info:
-        _probe_fps(Path("test.mkv"))
-
-    assert "empty" in str(exc_info.value)
-
-
-@pytest.mark.parametrize("stdout", [b"not-a-rate\n", b"24000/1001,extra\n", b"24000/0\n"])
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_malformed_output_is_alignment_parse_error(
-    mock_run: MagicMock, stdout: bytes
-) -> None:
-    mock_run.return_value.stdout = stdout
-
-    with pytest.raises(AudioAlignmentError) as exc_info:
-        _probe_fps(Path("test.mkv"))
-
-    assert "ffprobe FPS output" in str(exc_info.value)
-    assert stdout.decode("utf-8").strip() in str(exc_info.value.context.details)
-
-
-@pytest.mark.parametrize(
-    "failure, expected_error, details, no_traceback, returncode",
-    [
-        pytest.param(
-            FileNotFoundError(),
-            FFmpegNotFoundError,
-            (),
-            False,
-            None,
-            id="probe_fps_not_found_raises",
-        ),
-        pytest.param(
-            CalledProcessError(1, ["ffprobe"], stderr=b"error"),
-            FFmpegError,
-            (),
-            False,
-            None,
-            id="probe_fps_nonzero_exit_raises",
-        ),
-        pytest.param(
-            OSError("permission denied"),
-            FFmpegError,
-            ("ffprobe", "could not start", "permission denied"),
-            True,
-            None,
-            id="probe_fps_oserror_raises_ffmpeg_error",
-        ),
-        pytest.param(
-            CalledProcessError(1, ["ffprobe"], stderr=b"\xfferror"),
-            FFmpegError,
-            ("\ufffderror",),
-            False,
-            None,
-            id="probe_fps_non_utf8_stderr_is_replaced",
-        ),
-        pytest.param(
-            TimeoutExpired(cmd=["ffprobe"], timeout=15.0),
-            FFmpegError,
-            ("timed out",),
-            False,
-            124,
-            id="probe_fps_timeout_raises",
-        ),
-    ],
-)
-@patch("frame_compare.services.alignment_audio.run_subprocess")
-def test_probe_fps_failure(
-    mock_run: MagicMock,
-    failure: Exception,
-    expected_error: type[FFmpegError],
-    details: tuple[str, ...],
-    no_traceback: bool,
-    returncode: int | None,
-) -> None:
-    mock_run.side_effect = failure
-    with pytest.raises(expected_error) as exc_info:
-        _probe_fps(Path("test.mkv"))
-    if no_traceback:
-        assert "traceback" not in str(exc_info.value).lower()
-    if details:
-        assert exc_info.value.context.details is not None
-        for detail in details:
-            assert detail in str(exc_info.value.context.details).lower()
-    if returncode is not None:
-        assert exc_info.value.context.details is not None
-        assert exc_info.value.context.details.get("returncode") == returncode
-        assert "timed out" in str(exc_info.value.context.details.get("stderr", ""))
+from frame_compare.utils.ffmpeg_errors import FFmpegError
 
 
 @patch("frame_compare.services.alignment_audio.run_subprocess")

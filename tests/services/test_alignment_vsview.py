@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import asdict
-from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -335,7 +334,6 @@ def test_pending_review_without_launch_marks_review_unresolved(
         align_clips_from_request(
             request,
             config,
-            reference_fps=Fraction(24),
         )
     )
 

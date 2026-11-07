@@ -122,7 +122,11 @@ def alignment_summary_lines(summary: AlignmentSummary, *, width: int) -> tuple[T
         inline.append(" · " + common)
     if inline.cell_len <= width:
         return (inline,)
-    header = Text(f"{len(summary.entries)} sources aligned" + (f" · {common}" if common else ""))
+    accepted = sum(entry.offset is not None for entry in summary.entries)
+    header = Text(
+        f"{accepted} of {len(summary.entries)} comparisons aligned"
+        + (f" · {common}" if common else "")
+    )
     name_width = max((cell_len(entry.name) for entry in summary.entries), default=0)
     rows: list[Text] = [header]
     for entry in summary.entries:
