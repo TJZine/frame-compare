@@ -647,7 +647,7 @@ The attempt retains resolved pathless stream
 facts, per-chunk columnar evidence, contiguous chunk runs, the global lag, start
 compensation, the sub-frame estimate, the A4b authority recount, the video
 observation, and the final decision. Under the shipped
-`whole-track-chunked-phat-video-check-motion-20260929` policy, the audio-only decision is an
+`whole-track-chunked-phat-video-check-score-floor-20261107` policy, the audio-only decision is an
 internal `audio_only` seam. When a global lag exists, `alignment_video`
 checks the run's own L-SMASH sources in the same worker thread and
 `alignment_decision` combines the result. Only `trusted_automatic` with reason
@@ -739,13 +739,15 @@ reasons. Stability is derived from chunk runs (`stable` on agreement,
 `possible_drift` for a sustained walk across three or more runs, `variable`
 otherwise, `insufficient_evidence` below three credible chunks), and the
 correlation score is the agreeing-over-credible fraction. The estimator-policy
-token is part of the shared source-set identity so older computed cache entries
-are not reused.
+token is part of the shared source-set identity. The new policy makes prior
+whole-set shared cache entries miss, including their interactive confirmations.
 `alignment_video` owns V1-V5a: bounded five-offset base scoring, targeted run/chunk
 hypothesis checks, L-SMASH loading through the injected run `VSLoader`, active-rect
 crop/downscale/rank scoring, cancellation and source-identity checks, and bounded
 review check-point construction. Base and examined-target positions are motion-selected
-from the reference alone (the highest-motion candidate per slot), never evenly spaced.
+from the reference alone, selecting the highest-motion measurable candidate in each
+slot and omitting slots without a measurable candidate. Both checks require an
+absolute rank-difference score gap of at least 0.0001 before a position can vote.
 It never falls back to FFMS2. A missing or failing loader becomes
 `video_check_unavailable`, not a run failure.
 ### Alignment evidence, reuse, and native review

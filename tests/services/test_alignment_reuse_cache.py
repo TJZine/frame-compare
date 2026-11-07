@@ -566,7 +566,7 @@ def test_shared_reuse_cache_settings_key_uses_estimator_recipe_identity(
     settings = _first_entry(data)["settings"]
     assert isinstance(settings, dict)
     assert settings == {
-        "estimator_policy": "whole-track-chunked-phat-video-check-motion-20260929",
+        "estimator_policy": "whole-track-chunked-phat-video-check-score-floor-20261107",
         "max_offset_seconds": 30.0,
         "channel_strategy": "mono_downmix",
     }

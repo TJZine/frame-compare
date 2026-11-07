@@ -8,7 +8,6 @@ import threading
 import time
 import types
 import weakref
-from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -25,7 +24,11 @@ from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewReferenceMetadata,
     AlignmentReviewWorkspaceMetadata,
 )
-from tests.alignment_review_test_support import audio_review, provisional_audio_attempt
+from tests.alignment_review_test_support import (
+    audio_review,
+    native_attempt_payload,
+    provisional_audio_attempt,
+)
 
 
 def model(*, offset: int | None = 504, role: overlay.Role = "CMP", count: int = 8):
@@ -465,7 +468,9 @@ def test_runtime_wires_native_previews_using_strict_launch_workspace(tmp_path, m
                 {
                     "current_authority": {"origin": "none", "frame_offset": None},
                     "evidence_availability": "current_attempt",
-                    "audio_attempt": asdict(provisional_audio_attempt(ordinal=2, frame_offset=504)),
+                    "audio_attempt": native_attempt_payload(
+                        provisional_audio_attempt(ordinal=2, frame_offset=504)
+                    ),
                 }
             )
         )
