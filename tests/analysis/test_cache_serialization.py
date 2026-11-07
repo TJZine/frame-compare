@@ -1,6 +1,9 @@
 """Cache serialization and round-trip contract tests."""
 
 import json
+import sys
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -36,6 +39,16 @@ from tests.analysis._cache_io_test_helpers import (
     metrics_metadata,
     valid_cache_metadata_payload,
 )
+
+
+@contextmanager
+def _int_conversion_limit(limit: int) -> Generator[None]:
+    original = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(limit)
+        yield
+    finally:
+        sys.set_int_max_str_digits(original)
 
 
 def test_analysis_cache_key_intentionally_reuses_same_stat_identity(tmp_path: Path) -> None:
@@ -229,6 +242,94 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     assert data["metadata"]["active_rect_source"] == "full-frame"
     assert data["metadata"]["active_rect_detection_mode"] == "aspect_ratio"
     assert data["metadata"]["active_rect_algorithm_id"] == "active_rect_resolution_v2"
+
+
+def test_cache_roundtrip_accepts_long_canonical_fps_ratio(tmp_path: Path) -> None:
+    config = AnalysisConfig()
+    fps = Fraction(2400000000000000001, 100000000000000000)
+    metadata = metrics_metadata(
+        frame_count=1,
+        fps=fps,
+        config_fingerprint="long-fps",
+        clips=[],
+        config=config,
+    )
+
+    save_metrics_cache(
+        FrameMetrics(luminance=[0.5], motion=[0.0], metadata=metadata),
+        tmp_path,
+    )
+    payload = json.loads((tmp_path / "analysis__long-fps.compframes").read_text())
+    assert payload["metadata"]["fps"] == str(fps)
+
+    result = load_cached_metrics(tmp_path, "long-fps")
+
+    assert result.success is True
+    assert result.metrics is not None
+    assert result.metrics.metadata.fps == fps
+
+
+def test_cache_roundtrip_uses_raised_runtime_integer_limit(tmp_path: Path) -> None:
+    config = AnalysisConfig()
+    default_digits = sys.int_info.default_max_str_digits
+    runtime_limit = max(5000, default_digits + 100)
+    fps = Fraction(10**default_digits, 1)
+    metadata = metrics_metadata(
+        frame_count=1,
+        fps=fps,
+        config_fingerprint="raised-limit-fps",
+        clips=[],
+        config=config,
+    )
+
+    with _int_conversion_limit(runtime_limit):
+        save_metrics_cache(
+            FrameMetrics(luminance=[0.5], motion=[0.0], metadata=metadata),
+            tmp_path,
+        )
+        result = load_cached_metrics(tmp_path, "raised-limit-fps")
+
+    assert result.success is True
+    assert result.metrics is not None
+    assert result.metrics.metadata.fps == fps
+
+
+def test_cache_fps_bound_remains_finite_when_integer_guard_disabled(tmp_path: Path) -> None:
+    config = AnalysisConfig()
+    too_long_digits = sys.int_info.default_max_str_digits + 1
+    fps = Fraction(10 ** (too_long_digits - 1), 1)
+    metadata = metrics_metadata(
+        frame_count=1,
+        fps=fps,
+        config_fingerprint="disabled-limit-fps",
+        clips=[],
+        config=config,
+    )
+
+    with _int_conversion_limit(0):
+        with pytest.raises(ValueError, match="FPS components"):
+            save_metrics_cache(
+                FrameMetrics(luminance=[0.5], motion=[0.0], metadata=metadata),
+                tmp_path,
+            )
+
+        payload_metadata = valid_cache_metadata_payload(config, frame_count=1)
+        payload_metadata["config_fingerprint"] = "disabled-limit-fps"
+        payload_metadata["fps"] = "1" * too_long_digits
+        cache_file(tmp_path, "disabled-limit-fps").write_text(
+            json.dumps(
+                {
+                    "version": CACHE_VERSION,
+                    "fingerprint": "disabled-limit-fps",
+                    "luminance": [0.5],
+                    "motion": [0.0],
+                    "sampled_source_frames": None,
+                    "metadata": payload_metadata,
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert load_cached_metrics(tmp_path, "disabled-limit-fps").reason == "corrupted"
 
 
 @pytest.mark.parametrize("case", ["basic", "active_rect", "window", "sparse"])

@@ -113,11 +113,23 @@ def plan_audio_chunks(
             start += chunk_samples
         chunks = tuple(kept)
 
-    lag_samples = int(math.ceil(max_offset_seconds * AUDIO_ANALYSIS_SAMPLE_RATE))
-    largest_fft = max(_next_pow2(count + 2 * lag_samples) for _, count in chunks)
-    if largest_fft > _MAX_CHUNK_FFT_POINTS:
+    largest_chunk_samples = max(count for _, count in chunks)
+    maximum_lag_samples = (_MAX_CHUNK_FFT_POINTS - largest_chunk_samples) // 2
+    # Leave one sample of slack in the float-domain guard so the existing
+    # ceil-based integer admission remains authoritative at the boundary.
+    conservative_maximum_offset_seconds = (maximum_lag_samples + 1) / AUDIO_ANALYSIS_SAMPLE_RATE
+    if max_offset_seconds > conservative_maximum_offset_seconds:
         raise AudioAlignmentError(
-            f"chunk FFT of {largest_fft} points exceeds the {_MAX_CHUNK_FFT_POINTS} budget",
+            f"max_offset_seconds of {max_offset_seconds} exceeds the "
+            f"FFT-admissible radius of {maximum_lag_samples / AUDIO_ANALYSIS_SAMPLE_RATE:g} seconds",
+            category="analysis_budget_exceeded",
+            stage="planning",
+        )
+    lag_samples = int(math.ceil(max_offset_seconds * AUDIO_ANALYSIS_SAMPLE_RATE))
+    if lag_samples > maximum_lag_samples:
+        raise AudioAlignmentError(
+            f"max_offset_seconds of {max_offset_seconds} exceeds the "
+            f"FFT-admissible radius of {maximum_lag_samples / AUDIO_ANALYSIS_SAMPLE_RATE:g} seconds",
             category="analysis_budget_exceeded",
             stage="planning",
         )

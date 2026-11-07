@@ -127,8 +127,7 @@ def _source_fps_reason(raw_fps: Fraction, source_fps: Fraction) -> str | None:
 
 def _format_runtime(num_frames: int, fps: Fraction) -> str:
     """Format H:MM:SS from a frame count and rate, floored."""
-    fps_value = float(fps)
-    total_seconds = int(num_frames / fps_value) if fps_value > 0 else 0
+    total_seconds = num_frames * fps.denominator // fps.numerator if fps > 0 else 0
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     if hours:

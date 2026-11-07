@@ -82,7 +82,10 @@ def test_load_clip_probe_cache_ignores_unknown_fields_and_skips_invalid_entries(
         ("num_frames", 0),
         ("fps_num", 0),
         ("fps_num", -24),
+        ("fps_num", 2**63),
         ("fps_den", -1),
+        ("fps_den", 2**63),
+        ("num_frames", 2**31),
         ("path", 42),
         ("size_bytes", -1),
     ],
@@ -99,6 +102,15 @@ def test_load_clip_probe_cache_skips_invalid_probe_facts(
     assert load_clip_probe_cache(path) == {}
 
 
+def test_load_clip_probe_cache_rejects_negative_fps_components(tmp_path: Path) -> None:
+    key, entry = _entry(fps_num=-1, fps_den=-1)
+    path = tmp_path / "negative_fps_pair.toml"
+    with path.open("wb") as output:
+        tomli_w.dump({"version": "1", key: entry}, output)
+
+    assert load_clip_probe_cache(path) == {}
+
+
 def test_load_clip_probe_cache_allows_pre_epoch_mtime(tmp_path: Path) -> None:
     key, entry = _entry(mtime_ns=-1)
     path = tmp_path / "pre_epoch.toml"
@@ -108,6 +120,35 @@ def test_load_clip_probe_cache_allows_pre_epoch_mtime(tmp_path: Path) -> None:
     loaded = load_clip_probe_cache(path)
 
     assert loaded[key].fingerprint.mtime_ns == -1
+
+
+def test_load_clip_probe_cache_skips_oversized_entry_and_keeps_valid_sibling(
+    tmp_path: Path,
+) -> None:
+    valid_key, valid_entry = _entry(path="valid.mkv", mtime_ns=-1)
+    invalid_fps_key, invalid_fps_entry = _entry(path="negative-fps.mkv", fps_num=-1, fps_den=-1)
+    overflowing_frame_key, overflowing_frame_entry = _entry(
+        path="overflowing-frame-count.mkv", num_frames=10**350
+    )
+    huge_hex = "f" * 4000
+    path = tmp_path / "oversized_sibling.toml"
+    path.write_text(
+        tomli_w.dumps(
+            {
+                "version": "1",
+                valid_key: valid_entry,
+                invalid_fps_key: invalid_fps_entry,
+                overflowing_frame_key: overflowing_frame_entry,
+            }
+        )
+        + f"""\n["oversized"]\npath = "oversized.mkv"\nsize_bytes = 0x{huge_hex}\nmtime_ns = 100\nwidth = 1920\nheight = 1080\nnum_frames = 100\nfps_num = 24\nfps_den = 1\nis_hdr = false\n""",
+        encoding="utf-8",
+    )
+
+    loaded = load_clip_probe_cache(path)
+
+    assert set(loaded) == {valid_key}
+    assert loaded[valid_key].fingerprint.mtime_ns == -1
 
 
 def test_load_clip_probe_cache_rejects_key_for_different_fingerprint(tmp_path: Path) -> None:

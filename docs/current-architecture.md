@@ -423,7 +423,12 @@ never searches parent directories.
   uses key schema 3 and includes the scoped media-runtime probe fingerprint so a
   selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
   portable or Debian/Docker profiles misses without invalidating unrelated file-format
-  data. Older probe keys miss so source stream admission runs again.
+  data. Older probe keys miss so source stream admission runs again. Persisted probe
+  dimensions and frame counts use bounded positive signed-32-bit decoder fields, while
+  FPS numerator and denominator use positive signed-64-bit components matching R81's
+  `VSVideoInfo` representation. Filesystem size/mtime and cache-safety bounds remain
+  deliberate signed-64-bit limits rather than claims about decoder field widths;
+  malformed entries are skipped individually.
 - `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
   Compare-owned L-SMASH-Works index. The token is profile scoped (currently
   `lsw1310-f125953022b6` on managed/portable Windows,

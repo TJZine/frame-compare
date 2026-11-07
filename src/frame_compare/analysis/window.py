@@ -86,8 +86,10 @@ def _clip_selection_window(
     if min_window_seconds >= duration_seconds:
         return SelectionWindow(start_frame=0, end_frame_exclusive=clip.frame_count)
 
-    start_frame = _seconds_to_start_frame(ignore_lead_seconds, clip.fps)
-    end_frame = _seconds_to_end_frame(duration_seconds - ignore_trail_seconds, clip.fps)
+    bounded_lead_seconds = min(ignore_lead_seconds, duration_seconds)
+    bounded_trail_seconds = min(ignore_trail_seconds, duration_seconds)
+    start_frame = _seconds_to_start_frame(bounded_lead_seconds, clip.fps)
+    end_frame = _seconds_to_end_frame(duration_seconds - bounded_trail_seconds, clip.fps)
     start_frame = _clamp_frame(start_frame, 0, clip.frame_count)
     end_frame = _clamp_frame(end_frame, 0, clip.frame_count)
 
