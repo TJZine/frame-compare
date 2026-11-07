@@ -1219,7 +1219,7 @@ rather than relabeling those samples as full-range. Applied report controls and
 report identity include output encoding and frame policy separately from requested
 settings.
 
-Report payload v1.3 carries one orchestration-built, presentation-only display profile
+Report payload v1.4 carries one orchestration-built, presentation-only display profile
 per clip. `phase_post_render` reuses prepared release identities, explicit-label
 provenance, shared formatters, stable roles, and set-level collision handling once per
 report, joining profile segments with `·` (slow.pics image names keep the `|`
@@ -1436,9 +1436,17 @@ requires a rectangle and canonical provenance; render has no inference mode, can
 ranking, or provenance translation. Orchestration projects its cache-stable
 `ClipActiveRectSource` vocabulary to canonical provenance at the render boundary. Native screenshot
 render remains full-frame. FFmpeg extraction uses coded orientation and applies geometry filters after
-exact frame selection, preserves exact crop origins, and converts to full-chroma
-YUV without reducing source precision before odd-origin crops and padding. The
-VapourSynth path chooses between the Pillow writer
+exact frame selection. FFmpeg negotiates full chroma before odd-origin crops and
+padding, retains high-depth samples through geometry, and can pad RGB in its
+original color family. Both renderers emit 8-bit RGB PNGs, with FFmpeg selecting
+RGB24 at the end of its filter chain. The render color policy uses a recognized
+source matrix first, then BT.2020 non-constant luminance for HDR, then BT.601 for
+untagged SDR at or below 1024×576 on both coded axes and BT.709 otherwise. Batch
+expansion carries prepared signal facts and coded dimensions into both FFmpeg
+extraction paths. FFmpeg applies prepared matrix authority at RGB conversion,
+using its `zscale` filter for YCgCo and BT.2020 constant luminance. VapourSynth
+prefers recognized native frame matrix tags and uses prepared facts to fill gaps.
+The VapourSynth path chooses between the Pillow writer
 and eligible `core.fpng.Write` output without changing CLI import-time behavior.
 Render selection crosses the batch boundary as `SelectedScreenshot` records containing
 comparison frame, source frame, and selection label. Expansion validates all physical

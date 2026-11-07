@@ -625,6 +625,57 @@ def test_render_batch_parallel_overlaps_ffmpeg_groups_and_preserves_order_and_pr
     assert sorted(call.args[0] for call in reporter.advance.call_args_list) == [2, 3]
 
 
+def test_render_clip_jobs_admits_at_most_two_blocked_clips(
+    mock_render_request: RenderRequest,
+) -> None:
+    requests = [
+        replace(
+            mock_render_request,
+            frame_number=index,
+            output_path=mock_render_request.output_path.with_name(f"{index}.png"),
+        )
+        for index in range(3)
+    ]
+    release = Event()
+    first_two_started = Event()
+    start_lock = Lock()
+    started: list[int] = []
+
+    def render_single(request: RenderRequest) -> RenderedFrameResult:
+        with start_lock:
+            started.append(request.frame_number)
+            if len(started) == 2:
+                first_two_started.set()
+        assert release.wait(timeout=5)
+        return _rendered(request)
+
+    def check_initial_admission(
+        futures: Iterable[Future[list[RenderedFrameResult]]], *, timeout: float, return_when: str
+    ) -> object:
+        if not release.is_set():
+            try:
+                assert first_two_started.wait(timeout=5)
+                assert len(tuple(futures)) == 2
+            finally:
+                release.set()
+        return real_wait(futures, timeout=timeout, return_when=return_when)
+
+    with (
+        patch(
+            "frame_compare.render.batch.orchestrator.render_frame_detailed",
+            side_effect=render_single,
+        ),
+        patch(
+            "frame_compare.render.batch.orchestrator.wait",
+            side_effect=check_initial_admission,
+        ),
+    ):
+        results = frame_results(
+            render_clip_jobs(prepared_jobs(*[(request,) for request in requests]), parallelism=3)
+        )
+    assert [result.facts.source_frame for result in results] == [0, 1, 2]
+
+
 def test_render_batch_parallelizes_clip_units_but_serializes_each_clip(
     tmp_path: Path,
 ) -> None:

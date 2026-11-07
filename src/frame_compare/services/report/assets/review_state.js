@@ -180,7 +180,7 @@ const ReviewState = (() => {
             frameCount: options.frameCount,
             clipCount: options.clipCount,
         };
-        if (!/^report_[0-9a-f]{32}$/.test(context.reportId) || context.payloadVersion !== '1.3') {
+        if (!/^report_[0-9a-f]{32}$/.test(context.reportId) || context.payloadVersion !== '1.4') {
             throw new ReviewStateError('Current report identity is invalid.');
         }
         const storageKey = `frame-compare:report-review:v1:${context.reportId}`;

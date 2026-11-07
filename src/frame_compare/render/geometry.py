@@ -276,9 +276,14 @@ def _fit_to_target(
     target_width, target_height = target
     scaled_sizes: list[tuple[int, int]] = []
     for rect in rects:
-        scale = min(target_width / rect.width, target_height / rect.height)
-        scaled_width = min(target_width, _mod_safe_size(max(1, int(rect.width * scale))))
-        scaled_height = min(target_height, _mod_safe_size(max(1, int(rect.height * scale))))
+        if target_width * rect.height <= target_height * rect.width:
+            width = target_width
+            height = rect.height * target_width // rect.width
+        else:
+            width = rect.width * target_height // rect.height
+            height = target_height
+        scaled_width = _mod_safe_size(max(1, width))
+        scaled_height = _mod_safe_size(max(1, height))
         if scaled_width <= 0 or scaled_height <= 0:
             raise ValueError("scaled dimensions must be positive")
         scaled_sizes.append((scaled_width, scaled_height))

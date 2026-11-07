@@ -1,4 +1,4 @@
-"""Tests for the v1.3 report generation service."""
+"""Tests for the v1.4 report generation service."""
 
 from __future__ import annotations
 
@@ -220,11 +220,11 @@ def test_generate_report_embed_images_and_relative_paths(
     assert 'src="clip1/0.png"' in relative.read_text(encoding="utf-8")
 
 
-def test_report_payload_v13_raw_values_and_comparison_semantics(
+def test_report_payload_v14_raw_values_and_comparison_semantics(
     report_data: ReportData, tmp_path: Path
 ) -> None:
     payload = build_report_payload(report_data, ReportConfig(), report_dir=tmp_path)
-    assert payload["version"] == "1.3"
+    assert payload["version"] == "1.4"
     assert payload["clips"][0]["size_bytes"] == 17 * 1024**3
     assert payload["clips"][1]["signal"]["primaries"] == 9
     assert payload["clips"][1]["signal"]["dolby_vision_rpu"] is True
@@ -510,12 +510,12 @@ def test_image_src_for_report_encodes_url_path_characters(
     assert image_src_for_report(screenshot, report_dir=report_dir, embed_images=False) == expected
 
 
-def test_generate_report_json_contains_v13_rendering(
+def test_generate_report_json_contains_v14_rendering(
     report_data: ReportData, tmp_path: Path
 ) -> None:
     output = generate_report(report_data, ReportConfig(), output_path=tmp_path / "report.html")
     payload = _json_payload_from_report(output)
-    assert payload["version"] == "1.3"
+    assert payload["version"] == "1.4"
     assert payload["rendering"]["overlay_mode"] == "diagnostic"
     assert payload["frames"][0]["detail"] == "Selected comparison frame"
     geometry = payload["rendering"]["geometry_by_label"]["CLIP2"]
@@ -565,7 +565,7 @@ def test_applied_tonemap_identity_and_shared_projection(
         )
 
     mixed = payload(placebo, fallback)
-    assert mixed["version"] == "1.3"
+    assert mixed["version"] == "1.4"
     assert mixed["rendering"]["tonemap"]["shared"] is None
     requested = mixed["rendering"]["tonemap"]["requested"]
     assert requested is not None

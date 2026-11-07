@@ -11,7 +11,7 @@ async function reviewStateContracts() {
     const R = globalThis.__ReviewState;
     const reportId = `report_${'a'.repeat(32)}`;
     const locks = { request: async (_name, _options, operation) => operation() };
-    const context = { locks, reportId, payloadVersion: '1.3', frameCount: 1001, clipCount: 3 };
+    const context = { locks, reportId, payloadVersion: '1.4', frameCount: 1001, clipCount: 3 };
 
     class Storage {
         constructor(initial = null) { this.value = initial; this.failRead = false; this.failWrite = false; this.writes = 0; }
@@ -22,7 +22,7 @@ async function reviewStateContracts() {
     const bytes = (text) => new TextEncoder().encode(text);
     const exported = (reviews, overrides = {}) => JSON.stringify({
         format: 'frame-compare-review', schema_version: 1,
-        report: { id: reportId, payload_version: '1.3' }, reviews,
+        report: { id: reportId, payload_version: '1.4' }, reviews,
         exported_at: '2026-07-14T16:30:00.000Z', ...overrides,
     });
 
@@ -31,7 +31,7 @@ async function reviewStateContracts() {
     const state = R.create({ ...context, storage });
     assert.deepEqual(state.parseImport(bytes(exported([]))), []);
     assert.throws(() => state.parseImport(bytes(exported([], {
-        report: { id: reportId, payload_version: '1.2' },
+        report: { id: reportId, payload_version: '1.3' },
     }))), /report|version/i);
     assert.equal(state.storageKey, `frame-compare:report-review:v1:${reportId}`);
     await state.mutate(2, { bookmark: true, tag: 'artifact', note: 'line\r\n😀', preferred_clip_id: 'clip:1' });
@@ -73,7 +73,7 @@ async function reviewStateContracts() {
         exported([{ ...record(1), extra: true }]),
         exported([], { extra: true }),
         exported([]).replace('"reviews":[]', '"reviews":[],"__proto__":{}'),
-        exported([]).replace('"payload_version":"1.3"', '"payload_version":"1.3","constructor":{}'),
+        exported([]).replace('"payload_version":"1.4"', '"payload_version":"1.4","constructor":{}'),
         exported([record(1)]).replace('"bookmark":true', '"bookmark":true,"prototype":{}'),
         exported([]).replace('"schema_version":1', '"schema_version":0'),
         exported([]).replace('"schema_version":1', '"schema_version":2'),

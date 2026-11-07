@@ -500,6 +500,20 @@ def test_geometry_geometry_mod(
         ),
         pytest.param(
             (
+                SourceGeometry(704, 396, GeometryRect(0, 0, 704, 396), "full_frame"),
+                SourceGeometry(1920, 1080, GeometryRect(0, 0, 1920, 1080), "full_frame"),
+            ),
+            "aligned",
+            RenderGeometryOptions(aligned_scale_policy="largest_active"),
+            (
+                {"scaled_size": (1920, 1080), "pad": GeometryMargins()},
+                {"scaled_size": (1920, 1080), "pad": GeometryMargins()},
+            ),
+            True,
+            id="aligned_exact_proportional_fit_fills_target",
+        ),
+        pytest.param(
+            (
                 SourceGeometry(
                     active_rect=GeometryRect(0, 0, 2000, 500),
                     provenance="full_frame",

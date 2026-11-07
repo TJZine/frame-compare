@@ -1089,7 +1089,7 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 
 ### Report And Overlay Metadata Contract
 
-- Newly generated standalone reports use payload version `1.3`. Each clip carries a
+- Newly generated standalone reports use payload version `1.4`. Each clip carries a
   presentation-only `display` object with full primary identity, release descriptor,
   ordinary-control label, constrained micro label, and the exact basename. Display
   names are assembled from prepared release identity and explicit-label state.
@@ -1100,11 +1100,8 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
   number is the common comparison-domain frame; every image separately records its
   mapped untrimmed source frame, exact-frame picture type, and selected-frame Dolby
   Vision RPU presence when available.
-- Existing payload v1.1/v1.2 HTML reports remain self-contained and viewable as generated;
-  Frame Compare does not rewrite or migrate them. Because the payload version
-  participates in report ID generation, a newly generated v1.3 report may use a new
-  browser-local viewer/review storage key. Review JSON is valid only for the exact report
-  ID and payload version; there is no cross-version review-state migration or import.
+- Existing HTML reports remain self-contained and viewable as generated. Review JSON
+  is valid only for the exact report ID and payload version.
 - The existing Frame inspector follows the images visible in Single, Slider, Diff,
   Blink, and Grid modes. The serialized/config viewer-mode value `overlay` is presented
   as the user-facing `Single` mode and shows only the active source. The existing Clips
@@ -1148,8 +1145,9 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
   `src` values, timestamps, transient browser state, clip display strings, requested
   tonemap settings, and fallback causes. Applied implementation, algorithm, effective
   controls and resolved per-clip peaks participate in identity. Identical output via
-  different fallback causes shares identity; regenerated 1.3 reports start fresh
-  browser-local state and reject 1.2 review imports.
+  different fallback causes shares identity. Payload 1.4 changes report IDs because
+  screenshot depth and untagged matrix interpretation changed. Regenerated reports
+  start with fresh browser-local state and reject payload 1.3 review imports.
 - `screenshots.overlay_mode` has four exact presentation levels: `none` bakes no text;
   `minimal` carries source identity plus compact frame/type/size context; `standard`
   adds selection and source/output context; `diagnostic` adds only observed signal,
@@ -1171,7 +1169,7 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 - Displayed file size is the complete container storage cost in IEC units. It is not a
   bitrate, quality, efficiency, or winner metric. The existing value appears in visible
   Single, Slider, Diff, Blink, and Grid source labels when positive and available;
-  hiding source labels hides the size, and the report payload is version `1.3`.
+  hiding source labels hides the size, and the report payload is version `1.4`.
 
 ### slow.pics Upload Behavior
 
@@ -1755,6 +1753,15 @@ dedicated `run` flags for them:
   screenshots in coded orientation and fails with a VapourSynth hint when its
   decoded frame count differs from the prepared L-SMASH count or its filter graph
   reconfigures during extraction.
+- Screenshots use 8-bit RGB PNG with or without baked overlays. This depth applies to
+  the final PNG. FFmpeg applies a recognized prepared matrix at RGB conversion.
+  FFmpeg rendering of YCgCo and BT.2020 constant-luminance sources requires the
+  `zscale` filter. VapourSynth prefers recognized native frame matrix tags and
+  fills missing matrix and HDR evidence from the prepared source. Both renderers
+  use BT.2020 non-constant luminance for HDR without a recognized tag. Untagged SDR
+  uses BT.601 when the coded source is at most 1024 pixels wide and 576 pixels high,
+  and BT.709 otherwise. The decision uses the prepared source dimensions before any
+  crop, resize, padding, or display-aspect expansion.
 - `png_compression` remains an integer from `0` through `9`. It is the public
   compression input for Pillow and VapourSynth fpng. Pillow receives the value
   directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;

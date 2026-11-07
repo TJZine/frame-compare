@@ -368,7 +368,7 @@ def script_payload(html: str) -> ReportPayload:
 @pytest.fixture
 def report_payload() -> ReportPayload:
     return {
-        "version": "1.3",
+        "version": "1.4",
         "report_id": "report_0123456789abcdef0123456789abcdef",
         "generated_at": "2026-05-22T12:00:00+00:00",
         "title": "Renderer Contract",

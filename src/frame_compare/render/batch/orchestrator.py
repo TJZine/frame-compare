@@ -177,6 +177,7 @@ def render_clip_jobs(
     """Render indivisible per-clip jobs in stable clip and screenshot order."""
     if not jobs:
         return ()
+    parallelism = min(parallelism, 2)
     results: list[RenderedClip | None] = [None] * len(jobs)
     on_progress: Callable[[int], None] | None = None
     if reporter is not None:

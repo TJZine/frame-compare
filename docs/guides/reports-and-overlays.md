@@ -110,7 +110,7 @@ states
 whether tonemapping ran and the shared applied transform and controls, or that the
 transform varies by source. The Clips inspector shows each source's actual transform,
 resolved source peak and origin, and any fallback cause. Requested settings remain
-separate in the report payload. New reports use payload 1.3 and new report identities;
+separate in the report payload. New reports use payload 1.4 and new report identities;
 existing saved reports stay viewable, and review imports require an exact report ID
 and payload version.
 

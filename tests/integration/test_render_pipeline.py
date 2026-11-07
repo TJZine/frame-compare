@@ -361,7 +361,7 @@ def test_render_batch_empty_requests_returns_empty() -> None:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
-@pytest.mark.parametrize("pixel_format, png_depth", [("yuv420p", 8), ("yuv420p10le", 16)])
+@pytest.mark.parametrize("pixel_format", ["yuv420p", "yuv420p10le"])
 @pytest.mark.parametrize(
     "crop_origin, pad_origin",
     [((0, 0), (1, 0)), ((0, 0), (0, 1)), ((1, 1), (0, 0)), ((2, 2), (2, 2))],
@@ -372,7 +372,6 @@ def test_ffmpeg_geometry_preserves_exact_pixels(
     require_ffmpeg: None,
     batch: bool,
     pixel_format: str,
-    png_depth: int,
     crop_origin: tuple[int, int],
     pad_origin: tuple[int, int],
 ) -> None:
@@ -439,7 +438,7 @@ def test_ffmpeg_geometry_preserves_exact_pixels(
         runner.extract_frame(video, 0, output, geometry_plan=plan)
         outputs = [output]
     for output in outputs:
-        assert output.read_bytes()[24] == png_depth
+        assert output.read_bytes()[24:26] == bytes((8, 2))
         with Image.open(output) as image:
             assert image.size == canvas
             pixels = image.convert("RGB")
@@ -449,3 +448,43 @@ def test_ffmpeg_geometry_preserves_exact_pixels(
                     pixel = pixels.getpixel((column, row))
                     assert isinstance(pixel, tuple)
                     assert all(abs(channel - expected) <= 3 for channel in pixel)
+
+
+@pytest.mark.integration
+def test_ffmpeg_padding_preserves_lossless_rgb_samples(
+    tmp_path: Path, require_ffmpeg: None
+) -> None:
+    from frame_compare.render.geometry import GeometryRect, SourceGeometry, plan_render_geometry
+
+    video = tmp_path / "rgb.mkv"
+    source = Image.new("RGB", (64, 96))
+    source.putdata([(x * 4, y * 2, (3 * x + 5 * y) % 256) for y in range(96) for x in range(64)])
+    source.save(tmp_path / "rgb.png")
+    run_subprocess(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(tmp_path / "rgb.png"),
+            "-c:v",
+            "ffv1",
+            "-pix_fmt",
+            "bgr0",
+            str(video),
+        ],
+        timeout_seconds=10,
+    )
+    plan, _ = plan_render_geometry(
+        (
+            SourceGeometry(64, 96, GeometryRect(0, 0, 64, 96), "full_frame"),
+            SourceGeometry(96, 96, GeometryRect(0, 0, 96, 96), "full_frame"),
+        ),
+        mode="aligned",
+    )
+    output = tmp_path / "padded.png"
+    DefaultFFmpegRunner().extract_frame(video, 0, output, geometry_plan=plan)
+    with Image.open(output) as image:
+        assert image.size == (96, 96)
+        assert image.crop((0, 0, 16, 96)).getbbox() is None
+        assert image.crop((16, 0, 80, 96)).tobytes() == source.tobytes()
+        assert image.crop((80, 0, 96, 96)).getbbox() is None

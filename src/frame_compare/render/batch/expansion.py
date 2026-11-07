@@ -192,6 +192,7 @@ def expand_batch_render_requests(
                     ),
                     ffmpeg_runner=ffmpeg_runner,
                     geometry_plan=plan,
+                    source_signal=batch.signal,
                 )
             )
         jobs.append(PreparedClipRender(batch.label, clip_facts, batch.frames, tuple(requests)))
