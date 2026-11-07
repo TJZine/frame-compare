@@ -183,7 +183,7 @@ Choose a baked screenshot overlay with the `--overlay` run option or
 | `none` | No baked text; exact-frame facts remain available to the report |
 | `minimal` | Source identity, then available comparison frame, picture type, and file size |
 | `standard` | Minimal provenance plus one selection line, source resolution/size, and transformed output size when relevant |
-| `diagnostic` | Standard context plus only observed signal, applied tonemap, HDR static, exceptional geometry, and proven exact-frame DV facts |
+| `diagnostic` | Standard context plus only observed signal, applied tonemap, HDR static, exceptional geometry, and labeled Dolby Vision RPU presence |
 
 Bake the extra evidence into every screenshot:
 
@@ -197,7 +197,9 @@ overlay_mode = "diagnostic"
 Frame numbering distinguishes the comparison frame from each mapped source frame when
 they differ. The denominator, when shown, is the untrimmed source total. Picture type is
 read from the exact selected original source frame; unknown values are omitted,
-and screenshot generation still succeeds.
+and screenshot generation still succeeds. The diagnostic **Signal** line labels
+source-level Dolby Vision RPU presence as `DV RPU (clip)`. It adds
+`DV RPU (frame)` only when the selected original frame supplies RPU evidence.
 
 File size is the complete container storage cost, formatted with binary MiB/GiB/TiB
 units. It does not rank quality, bitrate efficiency, or a comparison winner. Tonemap

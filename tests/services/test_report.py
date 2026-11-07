@@ -67,7 +67,7 @@ def _clip(
     source_frame_offset: int = 0,
 ) -> ClipInfo:
     images: list[ReportImageInfo] = []
-    active = ActivePictureFacts(0, 276, 1920, 804, "dolby_vision_l5", False)
+    active = ActivePictureFacts(0, 276, 1920, 804, "explicit", False)
     for index in range(image_count):
         path = tmp_path / "screens" / name / f"{index}.png"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -243,7 +243,7 @@ def test_report_payload_v13_raw_values_and_comparison_semantics(
             "y": 276,
             "width": 1920,
             "height": 804,
-            "provenance": "dolby_vision_l5",
+            "provenance": "explicit",
             "is_full_frame": False,
         },
         "cropped_size": (1920, 804),
@@ -477,7 +477,7 @@ def test_generate_report_json_contains_v13_rendering(
     assert payload["rendering"]["overlay_mode"] == "diagnostic"
     assert payload["frames"][0]["detail"] == "Selected comparison frame"
     geometry = payload["rendering"]["geometry_by_label"]["CLIP2"]
-    assert geometry["active_picture"]["provenance"] == "dolby_vision_l5"
+    assert geometry["active_picture"]["provenance"] == "explicit"
     assert geometry["active_picture"]["width"] == 1920
     assert geometry["active_picture"]["height"] == 804
 

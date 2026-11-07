@@ -205,14 +205,15 @@ frames in both modes stay inside the prepared selectable source-frame window and
 apply the prepared active picture rectangle for the analysis source before metric
 calculation. Preparation resolves that rectangle through
 `frame_compare.orchestration.active_rect` for static evidence, using explicit
-source overrides, trusted static metadata, configured dimension/aspect-ratio
-detection, or a full-frame fallback. When
-`screenshots.active_rect_detection = "auto"`, preparation then runs optional
+source overrides, configured dimension/aspect-ratio detection, or a full-frame
+fallback. When `screenshots.active_rect_detection = "auto"`, preparation runs optional
 post-selection-window content refinement through
 `frame_compare.orchestration.active_rect_content` before analysis-source
-resolution and analysis-cache validation. Quality returns a contiguous metric
-series. Performance returns a sampled metric series with an explicit source-frame
-map; metric-based dark, bright, and motion selection is limited to those samples.
+resolution and analysis-cache validation. Content refinement requires an edge
+baseline near black in normalized source luma before considering a crop. Quality
+returns a contiguous metric series. Performance returns a sampled metric series
+with an explicit source-frame map. Metric-based dark, bright, and motion selection
+is limited to those samples.
 Configured user and random frames remain eligible across the whole selectable
 window and are not restricted to sampled metric frames.
 Automatic selection divides that whole window into deterministic integer-coordinate
@@ -1327,8 +1328,8 @@ one normalized viewport center without changing pair-mode persistence semantics.
 
 `assets/viewer_format.js` is the dependency-free owner for clip display profiles,
 exact and accessible names, FPS and IEC sizes, signal/presentation/tonemap and
-active-picture labels (including ` · DV L5` provenance), mode names, stable clip
-roles, signal badges, clip length text, and shared fps/presentation values. It does
+active-picture labels, mode names, stable clip roles, signal badges, clip length
+text, and shared fps/presentation values. It does
 not read the DOM, storage, or viewer state. `assets/inspector.js` owns Inspector DOM references,
 open/close focus and inert policy, tab selection and roving keyboard behavior, Frame,
 Clips, and Image offset rendering, and lazy Review activation through the root viewer. Hidden

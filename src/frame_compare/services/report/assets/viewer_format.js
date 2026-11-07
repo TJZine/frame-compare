@@ -142,8 +142,7 @@ const ViewerFormat = {
         if (!frame) return '';
         if (!active) return `${frame} · full frame`;
         const left = Number(active.x) ? `, ${active.x} px left` : '';
-        const provenance = active.provenance === 'dolby_vision_l5' ? ' · DV L5' : '';
-        return `${frame} · active ${active.width}×${active.height}, ${active.y} px top${left}${provenance}`;
+        return `${frame} · active ${active.width}×${active.height}, ${active.y} px top${left}`;
     },
 
     clipBadge(signal) {

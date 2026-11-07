@@ -10,7 +10,6 @@ type PictureType = Literal["I", "P", "B", "S", "SI", "SP", "BI"]
 type ColorRange = Literal["limited", "full"]
 type ActivePictureProvenance = Literal[
     "explicit",
-    "dolby_vision_l5",
     "dimension_derived",
     "aspect_ratio_derived",
     "content_derived",

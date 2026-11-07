@@ -12,7 +12,14 @@ from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.config.schema import OverlayMode
 from frame_compare.orchestration import phase_render
 from frame_compare.orchestration.context import ClipActiveRect
+from frame_compare.orchestration.probing.probe_cache import (
+    compute_probe_cache_key,
+    load_clip_probe_cache,
+    save_clip_probe_cache,
+)
+from frame_compare.render.overlay_text import compose_overlay_text_lines
 from frame_compare.render.types import (
+    OverlayConfig,
     RenderedClip,
     RenderedClipFacts,
     ScreenshotBatchRequest,
@@ -160,42 +167,97 @@ def test_run_render_phase_maps_multiple_clips_in_stable_order(
     ] == [[1, 2], [1, 2], [1, 2]]
 
 
-def test_run_render_phase_maps_canonical_clip_facts_without_io(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("mastering_props", "expected_nits", "expected_mdl"),
+    [
+        pytest.param(
+            {"MasteringDisplayMinLuminance": 0.005, "MasteringDisplayMaxLuminance": 1000.0},
+            (0.005, 1000.0),
+            "0.005–1000",
+            id="numeric-precedence",
+        ),
+        pytest.param(
+            {"MasteringDisplayMinLuminance": 0, "MasteringDisplayMaxLuminance": 1000},
+            (0.0, 1000.0),
+            "0–1000",
+            id="zero-minimum",
+        ),
+        pytest.param(
+            {"MasteringDisplayMinLuminance": 0, "MasteringDisplayMaxLuminance": 10**400},
+            (0.01, 600.0),
+            "0.01–600",
+            id="oversized-cached-integer",
+        ),
+        pytest.param({}, (0.01, 600.0), "0.01–600", id="text-fallback"),
+    ],
+)
+def test_run_render_phase_maps_canonical_clip_facts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mastering_props: dict[str, int | float],
+    expected_nits: tuple[float, float],
+    expected_mdl: str,
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode")
     ctx = _context(tmp_path, comparisons=[comparison])
+    probe = replace(
+        ctx.reference.probe,
+        fingerprint=replace(ctx.reference.probe.fingerprint, size_bytes=5_368_709_120),
+        is_hdr=True,
+        hdr_metadata=HDRMetadata(
+            mastering_display="G(13250,34500)L(6000000,100)",
+            max_cll=982,
+            max_fall=244,
+            color_primaries=9,
+            transfer=16,
+            matrix=9,
+        ),
+        preserved_frame_props={
+            "_Primaries": 9,
+            "_Transfer": 16,
+            "_Matrix": 9,
+            "_Range": 0,
+            "DolbyVisionRPU": 1,
+            "DolbyVision_L1_Maximum": 450.0,
+            **mastering_props,
+        },
+    )
+    cache_path = tmp_path / "probe-cache.toml"
+    cache_key = compute_probe_cache_key(probe.fingerprint)
+    save_clip_probe_cache(cache_path, {cache_key: probe})
+    cached_probe = load_clip_probe_cache(cache_path)[cache_key]
+    assert cached_probe.preserved_frame_props == probe.preserved_frame_props
     ctx.reference = replace(
         ctx.reference,
-        active_rect=ClipActiveRect(0, 140, 1920, 800, "metadata", "provided"),
-        probe=replace(
-            ctx.reference.probe,
-            fingerprint=replace(ctx.reference.probe.fingerprint, size_bytes=5_368_709_120),
-            is_hdr=True,
-            hdr_metadata=HDRMetadata(
-                mastering_display="G(13250,34500)B(7500,3000)R(34000,16000)"
-                "WP(15635,16450)L(10000000,50)",
-                max_cll=982,
-                max_fall=244,
-                color_primaries=9,
-                transfer=16,
-                matrix=9,
-            ),
-            preserved_frame_props={
-                "_Primaries": 9,
-                "_Transfer": 16,
-                "_Matrix": 9,
-                "_Range": 0,
-                "DolbyVisionRPU": 1,
-                "DolbyVision_L1_Maximum": 450.0,
-            },
-        ),
+        active_rect=ClipActiveRect(0, 140, 1920, 800, "explicit", "provided"),
+        probe=cached_probe,
     )
     captured = _capture_detailed_render(monkeypatch, tmp_path)
 
-    phase_render.run_render_phase(ctx, frames=[2], runner=cast(Any, _RenderRunner()))
+    output = phase_render.run_render_phase(ctx, frames=[2], runner=cast(Any, _RenderRunner()))
 
     request = captured["batch_requests"][0]
+    rendered = output.render.clips[0]
+    lines = compose_overlay_text_lines(
+        OverlayConfig(
+            mode=OverlayMode.DIAGNOSTIC,
+            label=request.label,
+            comparison_frame=2,
+            source_frame=2,
+            source_total_frames=request.source_total_frames,
+            include_frame_number=True,
+            selection_label=None,
+            file_size_bytes=request.size_bytes,
+            source_resolution=request.source_resolution,
+            signal=request.signal,
+            presentation_state=PresentationState.HDR_TONEMAP_OFF,
+            tonemap=None,
+            geometry=rendered.clip_facts.geometry,
+            font_path=None,
+        ),
+        rendered.screenshots[0].result.facts,
+    )
+    assert f"HDR static: MDL {expected_mdl} nits • MaxCLL/FALL 982/244" in lines
     assert request.size_bytes == 5_368_709_120
     assert request.source_resolution == (1920, 1080)
     assert request.source_total_frames == 100
@@ -204,9 +266,13 @@ def test_run_render_phase_maps_canonical_clip_facts_without_io(
     assert request.signal.color_range == "limited"
     assert request.signal.dolby_vision_rpu is True
     assert request.signal.hdr_static is not None
-    assert request.signal.hdr_static.mastering_min_nits == pytest.approx(0.005)
-    assert request.signal.hdr_static.mastering_max_nits == pytest.approx(1000)
-    assert request.active_picture.provenance == "dolby_vision_l5"
+    assert (
+        request.signal.hdr_static.mastering_min_nits,
+        request.signal.hdr_static.mastering_max_nits,
+    ) == pytest.approx(expected_nits)
+    assert request.signal.hdr_static.max_cll == 982
+    assert request.signal.hdr_static.max_fall == 244
+    assert request.active_picture.provenance == "explicit"
     assert request.active_picture.is_full_frame is False
 
 

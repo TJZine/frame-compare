@@ -183,13 +183,13 @@ def test_calculate_metrics_recomputes_cache_with_mismatched_active_rect_provenan
         metric_active_rect=rect,
         active_rect_source="explicit",
         active_rect_detection_mode="provided",
-        active_rect_algorithm_id="active_rect_resolution_v2",
+        active_rect_algorithm_id="active_rect_resolution_v3",
     )
     mock_save.assert_called_once()
     assert result.metrics.metadata.metric_active_rect == rect
     assert result.metrics.metadata.active_rect_source == "explicit"
     assert result.metrics.metadata.active_rect_detection_mode == "provided"
-    assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
+    assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v3"
 
 
 def test_calculate_metrics_empty_video_paths_raises_fc4002(tmp_path: Path) -> None:

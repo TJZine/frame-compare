@@ -160,10 +160,9 @@ invalid explicit values without falling back.
 The active-picture resolver uses this precedence:
 
 1. explicit source configuration;
-2. trusted static metadata;
-3. dimension and aspect-ratio evidence;
-4. optional content sampling when auto detection is enabled;
-5. a full-frame fallback.
+2. dimension and aspect-ratio evidence;
+3. optional content sampling when auto detection is enabled;
+4. a full-frame fallback.
 
 Frame Compare includes the resolved rectangle in analysis and cache identity because
 changing the metric crop can change selected frames.
