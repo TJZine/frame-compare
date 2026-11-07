@@ -100,6 +100,16 @@ The benchmark JSON records the Git commit, dirty state, and porcelain status
 under `provenance`. Preserve the separate `git rev-parse HEAD` output as an
 independent check when a run will support a product decision.
 
+The tier benchmark refuses an output path that resolves to an input video or the
+selected config file. It also uses the prepared reference and analysis FPS and
+trim facts for cache identity and frame selection; keep those preparation facts
+stable across comparable runs.
+
+`--window-start` and `--window-end-exclusive` are offsets in the prepared
+analysis clip after source trims. The benchmark maps those offsets back to
+source-frame coordinates for the metric request, JSON `selection_window`, and
+selected frame numbers; those reported values remain source coordinates.
+
 ## Prepare the fixed corpus
 
 Use the same ordered reference/comparison pair for every rerun. The examples
@@ -178,8 +188,11 @@ uv run --no-sync python tools/benchmark_analysis_tiers.py `
 
 Cold runs are the primary algorithm-performance evidence. Confirm every quality
 and performance trial reports a cache miss and a successful cache write. Frame
-type inspection runs after timed trials and is diagnostic only. The benchmark
-fails closed if a cold trial does not observe both the miss and successful write.
+type inspection runs after timed trials and is diagnostic only. When FPS is
+available, its `read_interval` is a seek hint and the resulting frame-type scope
+is marked approximate; the report records the observed frame timestamps. The
+benchmark fails closed if a cold trial does not observe both the miss and
+successful cache write.
 
 ## Shipped-default quantile control
 
