@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 import math
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -267,8 +266,8 @@ def _request_terminate(
     cleanup_failures: list[str],
 ) -> bool:
     try:
-        process_tree.signal(process, force=sys.platform == "win32")
-    except (OSError, ProcessLookupError) as exc:
+        process_tree.signal(process, force=False)
+    except OSError as exc:
         cleanup_failures.append(f"terminate failed: {exc}")
     return True
 
@@ -279,17 +278,18 @@ def _wait_then_kill(
     cleanup_failures: list[str],
 ) -> bool:
     exited = process.poll() is not None or _wait_for_exit(process, _TERMINATE_WAIT_SECONDS)
-    if not exited or sys.platform != "win32":
+    try:
+        # A leader may exit on TERM while a pipe-owning descendant ignores it.
+        process_tree.signal(process, force=True)
+    except OSError as exc:
+        cleanup_failures.append(f"kill failed: {exc}")
         try:
-            # On POSIX the leader can exit on TERM while a pipe-owning
-            # descendant ignores it. Escalate the group even in that case.
-            process_tree.signal(process, force=True)
-        except (OSError, ProcessLookupError) as exc:
-            cleanup_failures.append(f"kill failed: {exc}")
-        if process.poll() is None and not _wait_for_exit(process, _KILL_WAIT_SECONDS):
-            cleanup_failures.append("process remained live after kill")
-        return not exited
-    return False
+            process.kill()
+        except OSError as fallback_error:
+            cleanup_failures.append(f"direct child kill failed: {fallback_error}")
+    if process.poll() is None and not _wait_for_exit(process, _KILL_WAIT_SECONDS):
+        cleanup_failures.append("process remained live after kill")
+    return not exited
 
 
 def _join_started_readers(
@@ -465,8 +465,8 @@ class _ChildStream:
     def receive(self) -> bytes | None:
         infrastructure = self.infrastructure
         assert infrastructure is not None
-        process, process_tree = self.process, self.process_tree
-        assert process is not None and process_tree is not None
+        process = self.process
+        assert process is not None
         context = self.context
         shared = context.shared
         last_progress = time.monotonic()
@@ -476,8 +476,8 @@ class _ChildStream:
             if context.cancellation is not None and context.cancellation.is_set():
                 shared.record("cancelled", "paired audio collection was cancelled")
                 return None
-            if sys.platform == "win32" and process.poll() is not None:
-                process_tree.close_windows_job()
+            if process.poll() is not None and not self._stop_descendants():
+                return None
             now = time.monotonic()
             remaining = context.deadline - now
             if remaining <= 0:
@@ -514,8 +514,8 @@ class _ChildStream:
                 continue
 
     def _await_exit(self) -> None:
-        process, process_tree = self.process, self.process_tree
-        assert process is not None and process_tree is not None
+        process = self.process
+        assert process is not None
         context = self.context
         shared = context.shared
         wait_started = time.monotonic()
@@ -537,13 +537,25 @@ class _ChildStream:
                 shared.record("timeout", "paired audio collection exceeded its total timeout")
                 return
             _wait_for_exit(process, min(_QUEUE_WAIT_SECONDS, remaining))
-        process_tree.close_windows_job()
         if process.returncode != 0:
             shared.record(
                 "nonzero_exit",
                 f"paired audio {self.name} child exited with status {process.returncode}",
                 side=self.name,
             )
+        self._stop_descendants()
+
+    def _stop_descendants(self) -> bool:
+        assert self.process is not None and self.process_tree is not None
+        try:
+            self.process_tree.signal(self.process, force=True)
+        except OSError as exc:
+            self.cleanup_failures.append(f"could not stop descendants: {exc}")
+            self.context.shared.record(
+                "cleanup_failed", "paired audio child tree cleanup failed", side=self.name
+            )
+            return False
+        return True
 
     def ingest(self, block: bytes, *, retain: bool) -> np.ndarray | None:
         store = self.samples
@@ -587,11 +599,6 @@ class _ChildStream:
                 kill_requested=False,
                 failure=None,
             )
-        assert self.process_tree is not None
-        try:
-            self.process_tree.close_windows_job()
-        except OSError as exc:
-            self.cleanup_failures.append(f"job close failed: {exc}")
         infrastructure = self.infrastructure
         stdout_joined, stderr_joined = _join_started_readers(
             infrastructure.stdout_thread if infrastructure is not None else None,

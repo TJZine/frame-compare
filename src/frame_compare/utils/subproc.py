@@ -7,17 +7,16 @@ import signal
 import site
 import subprocess
 import sys
-from collections.abc import Callable, Generator, Mapping, Sequence
-from contextlib import contextmanager, nullcontext, suppress
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from shutil import which
 from subprocess import DEVNULL, PIPE, CompletedProcess, Popen, SubprocessError, TimeoutExpired
-from threading import current_thread, main_thread
 from time import monotonic, sleep
-from types import FrameType
 from typing import Literal
 
+from frame_compare.utils._windows_job import WindowsJob
 from frame_compare.utils.child_environment import (
     child_environment,
     diagnostic_secrets,
@@ -29,7 +28,6 @@ PROBE_STDERR_BYTES = 64 * 1024
 _DIAGNOSTIC_EDGE_BYTES = 4096
 _READ_BYTES = 64 * 1024
 _POLL_SECONDS = 0.005
-_CREATE_SUSPENDED = 0x00000004
 
 _MEDIA_EXECUTABLE_ENV = {
     "ffmpeg": "FRAME_COMPARE_FFMPEG_EXECUTABLE",
@@ -180,7 +178,7 @@ class SubprocessOutputLimitExceeded(SubprocessError):
 
 
 class SubprocessCleanupError(Exception):
-    """The child could not be reaped after escalation."""
+    """The child or its process tree could not be cleaned up after escalation."""
 
 
 @dataclass(slots=True)
@@ -220,219 +218,35 @@ class OutputBudget:
         return self.observed > len(self._head) + len(self._tail)
 
 
-class _WindowsJob:
-    """Own a Windows process tree even after its original leader exits."""
-
-    def __init__(self) -> None:
-        import ctypes
-        from ctypes import wintypes
-
-        class _BasicLimitInformation(ctypes.Structure):
-            _fields_ = [
-                ("per_process_user_time_limit", ctypes.c_longlong),
-                ("per_job_user_time_limit", ctypes.c_longlong),
-                ("limit_flags", wintypes.DWORD),
-                ("minimum_working_set_size", ctypes.c_size_t),
-                ("maximum_working_set_size", ctypes.c_size_t),
-                ("active_process_limit", wintypes.DWORD),
-                ("affinity", ctypes.c_size_t),
-                ("priority_class", wintypes.DWORD),
-                ("scheduling_class", wintypes.DWORD),
-            ]
-
-        class _IoCounters(ctypes.Structure):
-            _fields_ = [
-                ("read_operation_count", ctypes.c_ulonglong),
-                ("write_operation_count", ctypes.c_ulonglong),
-                ("other_operation_count", ctypes.c_ulonglong),
-                ("read_transfer_count", ctypes.c_ulonglong),
-                ("write_transfer_count", ctypes.c_ulonglong),
-                ("other_transfer_count", ctypes.c_ulonglong),
-            ]
-
-        class _ExtendedLimitInformation(ctypes.Structure):
-            _fields_ = [
-                ("basic_limit_information", _BasicLimitInformation),
-                ("io_info", _IoCounters),
-                ("process_memory_limit", ctypes.c_size_t),
-                ("job_memory_limit", ctypes.c_size_t),
-                ("peak_process_memory_used", ctypes.c_size_t),
-                ("peak_job_memory_used", ctypes.c_size_t),
-            ]
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
-        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
-        kernel32.SetInformationJobObject.argtypes = [
-            wintypes.HANDLE,
-            ctypes.c_int,
-            ctypes.c_void_p,
-            wintypes.DWORD,
-        ]
-        kernel32.SetInformationJobObject.restype = wintypes.BOOL
-        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
-        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
-        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        kernel32.CloseHandle.restype = wintypes.BOOL
-
-        handle = kernel32.CreateJobObjectW(None, None)
-        if not handle:
-            raise ctypes.WinError(ctypes.get_last_error())
-        self._kernel32 = kernel32
-        self._handle = handle
-        try:
-            limits = _ExtendedLimitInformation()
-            limits.basic_limit_information.limit_flags = 0x00002000  # KILL_ON_JOB_CLOSE
-            if not kernel32.SetInformationJobObject(
-                handle,
-                9,
-                ctypes.byref(limits),
-                ctypes.sizeof(limits),  # ExtendedLimitInformation
-            ):
-                raise ctypes.WinError(ctypes.get_last_error())
-        except BaseException:
-            kernel32.CloseHandle(handle)
-            self._handle = None
-            raise
-
-    def assign_and_resume(self, pid: int) -> None:
-        import ctypes
-
-        kernel32 = self._kernel32
-        # AssignProcessToJobObject needs PROCESS_TERMINATE | PROCESS_SET_QUOTA.
-        process_handle = kernel32.OpenProcess(0x0001 | 0x0100, False, pid)
-        if not process_handle:
-            raise ctypes.WinError(ctypes.get_last_error())
-        try:
-            if not kernel32.AssignProcessToJobObject(self._handle, process_handle):
-                raise ctypes.WinError(ctypes.get_last_error())
-            self._resume_primary_thread(pid)
-        finally:
-            kernel32.CloseHandle(process_handle)
-
-    def _resume_primary_thread(self, pid: int) -> None:
-        import ctypes
-        from ctypes import wintypes
-
-        class _ThreadEntry(ctypes.Structure):
-            _fields_ = [
-                ("size", wintypes.DWORD),
-                ("usage", wintypes.DWORD),
-                ("thread_id", wintypes.DWORD),
-                ("owner_pid", wintypes.DWORD),
-                ("base_priority", wintypes.LONG),
-                ("delta_priority", wintypes.LONG),
-                ("flags", wintypes.DWORD),
-            ]
-
-        kernel32 = self._kernel32
-        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
-        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-        kernel32.Thread32First.argtypes = [wintypes.HANDLE, ctypes.POINTER(_ThreadEntry)]
-        kernel32.Thread32First.restype = wintypes.BOOL
-        kernel32.Thread32Next.argtypes = kernel32.Thread32First.argtypes
-        kernel32.Thread32Next.restype = wintypes.BOOL
-        kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        kernel32.OpenThread.restype = wintypes.HANDLE
-        kernel32.GetProcessIdOfThread.argtypes = [wintypes.HANDLE]
-        kernel32.GetProcessIdOfThread.restype = wintypes.DWORD
-        kernel32.ResumeThread.argtypes = [wintypes.HANDLE]
-        kernel32.ResumeThread.restype = wintypes.DWORD
-
-        # Popen closes the primary thread handle. A CREATE_SUSPENDED child
-        # has one thread, which we reopen with the documented Toolhelp API.
-        snapshot = kernel32.CreateToolhelp32Snapshot(0x00000004, 0)  # TH32CS_SNAPTHREAD
-        if snapshot == ctypes.c_void_p(-1).value:
-            raise ctypes.WinError(ctypes.get_last_error())
-        try:
-            entry = _ThreadEntry()
-            entry.size = ctypes.sizeof(entry)
-            found = kernel32.Thread32First(snapshot, ctypes.byref(entry))
-            thread_id = None
-            while found:
-                if entry.owner_pid == pid:
-                    if thread_id is not None:
-                        raise OSError("Suspended child has multiple threads")
-                    thread_id = entry.thread_id
-                entry.size = ctypes.sizeof(entry)
-                found = kernel32.Thread32Next(snapshot, ctypes.byref(entry))
-            if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
-                raise ctypes.WinError(ctypes.get_last_error())
-        finally:
-            kernel32.CloseHandle(snapshot)
-        if thread_id is None:
-            raise OSError("Could not locate the suspended child's primary thread")
-
-        # THREAD_SUSPEND_RESUME | THREAD_QUERY_LIMITED_INFORMATION
-        thread = kernel32.OpenThread(0x0002 | 0x0800, False, thread_id)
-        if not thread:
-            raise ctypes.WinError(ctypes.get_last_error())
-        try:
-            if kernel32.GetProcessIdOfThread(thread) != pid:
-                raise OSError("Suspended child's primary thread changed")
-            previous_count = kernel32.ResumeThread(thread)
-            if previous_count == 0xFFFFFFFF:
-                raise ctypes.WinError(ctypes.get_last_error())
-            if previous_count != 1:
-                raise OSError("Unexpected suspend count for child process")
-        finally:
-            kernel32.CloseHandle(thread)
-
-    def close(self) -> None:
-        if self._handle is None:
-            return
-        if not self._kernel32.CloseHandle(self._handle):
-            import ctypes
-
-            raise ctypes.WinError(ctypes.get_last_error())
-        self._handle = None
-
-
 class OwnedProcessTree:
-    """Retain cross-platform ownership of a child's complete process tree."""
+    """Own the tree until a forced stop, including after the leader exits."""
 
-    def __init__(self, windows_job: _WindowsJob | None) -> None:
+    def __init__(self, windows_job: WindowsJob | None) -> None:
         self._windows_job = windows_job
-
-    def close_windows_job(self) -> None:
-        """Stop remaining Windows descendants before waiting for their pipes."""
-        if self._windows_job is not None:
-            self._windows_job.close()
+        self._stopped = False
 
     def signal(self, process: Popen[bytes], *, force: bool) -> None:
-        signal_child_tree(process, force=force, windows_job=self._windows_job)
+        if not self._stopped:
+            signal_child_tree(process, force=force, windows_job=self._windows_job)
+            # Closing a Windows job always stops it. On POSIX a TERM request
+            # may still need escalation, even after the leader exits.
+            self._stopped = force or self._windows_job is not None
 
     def reap(self, process: Popen[bytes]) -> None:
         try:
-            reap_stopped_process(process, self._windows_job)
+            self.signal(process, force=True)
+        except BaseException:
+            with suppress(BaseException):
+                process.kill()
+        try:
+            _wait_for_stopped_process(process)
         finally:
-            with suppress(OSError):
-                self.close_windows_job()
-
-
-@contextmanager
-def _defer_windows_spawn_sigint() -> Generator[None]:
-    # A Python SIGINT in Popen could unwind after CreateProcess but before the
-    # suspended PID reaches its owner. Replay the caller's handler once owned.
-    previous = signal.getsignal(signal.SIGINT)
-    if current_thread() is not main_thread() or not callable(previous):
-        yield
-        return
-
-    pending: list[tuple[int, FrameType | None]] = []
-
-    def defer(signum: int, frame: FrameType | None) -> None:
-        pending.append((signum, frame))
-
-    try:
-        signal.signal(signal.SIGINT, defer)
-        yield
-    finally:
-        signal.signal(signal.SIGINT, previous)
-        for signum, frame in pending:
-            previous(signum, frame)
+            if self._windows_job is not None and not self._stopped:
+                # Retry a failed job close even if the leader was reaped.
+                try:
+                    self._windows_job.close()
+                except OSError as exc:
+                    raise SubprocessCleanupError("could not close child process job") from exc
 
 
 def spawn_owned_process(
@@ -442,77 +256,69 @@ def spawn_owned_process(
     cwd: Path | None = None,
     capture_output: bool = False,
 ) -> tuple[Popen[bytes], OwnedProcessTree]:
-    """Start an already resolved command inside its owned process tree."""
-    windows_job = None
-    process = None
+    """Start an already resolved command and acquire ownership of its tree.
+
+    Windows starts trusted tools normally and assigns their job as soon as Popen
+    returns. A descendant created in that brief interval may escape the job.
+    An interrupt inside Popen can also prevent it from handing back the child.
+    """
     windows = sys.platform == "win32"
+    job = WindowsJob() if windows else None
+    process_tree = OwnedProcessTree(job)
+    process = None
     try:
-        with _defer_windows_spawn_sigint() if windows else nullcontext():
-            if windows:
-                windows_job = _WindowsJob()
-            process = subprocess.Popen(  # nosec B603
-                command,
-                cwd=cwd,
-                env=env,
-                stdin=DEVNULL if capture_output else None,
-                stdout=PIPE if capture_output else None,
-                stderr=PIPE if capture_output else None,
-                bufsize=0,
-                shell=False,
-                close_fds=True,
-                start_new_session=not windows,
-                creationflags=_CREATE_SUSPENDED if windows else 0,
-            )
-        if windows_job is not None:
-            windows_job.assign_and_resume(process.pid)
-        return process, OwnedProcessTree(windows_job)
+        process = subprocess.Popen(  # nosec B603
+            command,
+            cwd=cwd,
+            env=env,
+            stdin=DEVNULL if capture_output else None,
+            stdout=PIPE if capture_output else None,
+            stderr=PIPE if capture_output else None,
+            bufsize=0,
+            shell=False,
+            close_fds=True,
+            start_new_session=not windows,
+        )
+        if job is not None:
+            job.assign(process.pid)
+        return process, process_tree
     except BaseException:
-        if windows_job is not None:
-            with suppress(BaseException):
-                windows_job.close()
         if process is not None:
-            # Assignment may have failed before the job owned the suspended
-            # child. Explicitly terminate it and release both pipe endpoints.
             try:
-                reap_stopped_process(process)
+                if job is not None:
+                    # Assignment can fail before the job owns the leader.
+                    with suppress(BaseException):
+                        process.kill()
+                process_tree.reap(process)
             finally:
                 for stream in (process.stdout, process.stderr):
                     if stream is not None:
                         with suppress(BaseException):
                             stream.close()
+        elif job is not None:
+            job.close()
         raise
 
 
 def signal_child_tree(
-    process: Popen[bytes] | Popen[str], *, force: bool, windows_job: _WindowsJob | None = None
+    process: Popen[bytes], *, force: bool, windows_job: WindowsJob | None
 ) -> None:
     """Signal an owned process group or close its kill-on-close job."""
-    if sys.platform == "win32":
-        if windows_job is not None:
-            windows_job.close()
-        elif process.poll() is None:
-            process.kill() if force else process.terminate()
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        except PermissionError:
-            # Some POSIX hosts deny signals to an exiting process group.
-            if process.poll() is None:
-                process.kill() if force else process.terminate()
-
-
-def reap_stopped_process(
-    process: Popen[bytes] | Popen[str], windows_job: _WindowsJob | None = None
-) -> None:
-    """Stop the owned tree and report failure to reap the child."""
-    # Kill the group even if its leader already exited and left writers behind.
+    if windows_job is not None:
+        windows_job.close()
+        return
     try:
-        signal_child_tree(process, force=True, windows_job=windows_job)
-    except BaseException:
-        with suppress(BaseException):
-            process.kill()
+        os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        # Some POSIX hosts deny signals to an exiting process group.
+        if process.poll() is None:
+            process.kill() if force else process.terminate()
+
+
+def _wait_for_stopped_process(process: Popen[bytes]) -> None:
+    """Reap the leader after signaling, with a bounded direct-kill fallback."""
     try:
         process.wait(timeout=1.0)
         return
@@ -566,7 +372,6 @@ def run_subprocess(
         env=child_environment(env),
         capture_output=True,
     )
-    descendants_stopped = False
     try:
         assert process.stdout is not None and process.stderr is not None
         readers = {
@@ -579,12 +384,9 @@ def run_subprocess(
             os.set_blocking(fd, False)
         while readers or process.poll() is None:
             returncode = process.poll()
-            if returncode is not None and not descendants_stopped:
-                if sys.platform == "win32":
-                    process_tree.close_windows_job()
-                else:
-                    process_tree.signal(process, force=True)
-                descendants_stopped = True
+            if returncode is not None:
+                # A descendant may still hold an output pipe after the leader exits.
+                process_tree.signal(process, force=True)
             # Keep a known child failure so the caller can distinguish a signal
             # exit from an unrelated failure racing with cancellation.
             if returncode in (None, 0) and abort is not None and abort():

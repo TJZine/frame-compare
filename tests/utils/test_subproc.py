@@ -1,4 +1,5 @@
 import asyncio
+import ctypes
 import os
 import signal
 import subprocess
@@ -9,7 +10,7 @@ from pathlib import Path
 from time import monotonic, sleep
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -639,162 +640,153 @@ def test_nonzero_leader_cannot_leave_devnull_descendant_alive(tmp_path: Path) ->
     pytest.fail(f"grandchild {pid} survived its process-tree owner")
 
 
-@pytest.mark.skipif(os.name != "posix", reason="Requires a POSIX process group")
-def test_successful_leader_cannot_leave_a_capture_pipe_open(tmp_path: Path) -> None:
+def test_successful_leader_cannot_leave_a_capture_pipe_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ready = tmp_path / "grandchild-pid"
+    owned = tmp_path / "tree-owned"
+    spawn = subproc_module.spawn_owned_process
+
+    def spawn_and_release(*args: Any, **kwargs: Any) -> Any:
+        child_and_tree = spawn(*args, **kwargs)
+        owned.touch()
+        return child_and_tree
+
+    # Exercise descendants created after ownership, including on Windows where
+    # the leader runs briefly before job assignment.
+    monkeypatch.setattr(subproc_module, "spawn_owned_process", spawn_and_release)
     grandchild = (
         "import os,pathlib,sys,time; "
-        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
-        "print('descendant ready', flush=True); time.sleep(30)"
+        "print('descendant ready', flush=True); "
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
     )
     leader = (
         "import pathlib,subprocess,sys,time\n"
-        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]])\n"
+        "while not pathlib.Path(sys.argv[2]).exists(): time.sleep(0.01)\n"
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]], "
+        "stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr)\n"
         "while not pathlib.Path(sys.argv[1]).exists(): time.sleep(0.01)\n"
         "print('leader done', flush=True)"
     )
 
-    result = run_subprocess(
-        [sys.executable, "-c", leader, str(ready)],
-        timeout_seconds=3,
-    )
-
-    assert result.returncode == 0
-    assert b"leader done" in result.stdout
-    pid = int(ready.read_text())
-    deadline = monotonic() + 2
-    while monotonic() < deadline:
-        status = subprocess.run(
-            ["ps", "-o", "stat=", "-p", str(pid)],
-            capture_output=True,
-            check=False,
-            timeout=1,
+    try:
+        result = run_subprocess(
+            [sys.executable, "-c", leader, str(ready), str(owned)],
+            timeout_seconds=5,
         )
-        state = status.stdout.decode().strip()
-        if status.returncode or state.startswith("Z"):
-            return
-        sleep(0.02)
-    pytest.fail(f"grandchild {pid} retained the completed leader's capture pipe")
+        assert result.returncode == 0
+        assert b"leader done" in result.stdout
+        assert b"descendant ready" in result.stdout
+        pid = int(ready.read_text())
+        deadline = monotonic() + 2
+        while monotonic() < deadline:
+            if sys.platform == "win32":
+                status = subprocess.run(
+                    ["tasklist.exe", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
+                    capture_output=True,
+                    check=True,
+                    timeout=2,
+                )
+                exited = f'"{pid}"'.encode() not in status.stdout
+            else:
+                status = subprocess.run(
+                    ["ps", "-o", "stat=", "-p", str(pid)],
+                    capture_output=True,
+                    check=False,
+                    timeout=1,
+                )
+                exited = bool(status.returncode or status.stdout.strip().startswith(b"Z"))
+            if exited:
+                return
+            sleep(0.02)
+        pytest.fail(f"grandchild {pid} retained the completed leader's capture pipe")
+    except BaseException:
+        if ready.exists():
+            with suppress(OSError):
+                os.kill(int(ready.read_text()), signal.SIGTERM)
+        raise
 
 
-@pytest.mark.parametrize("failure", [None, "assign", "sigint"])
-def test_windows_launch_orders_suspend_assignment_and_resume(
-    monkeypatch: pytest.MonkeyPatch, failure: str | None
-) -> None:
-    """Exercise the Windows launch control flow without a Windows kernel."""
-    events: list[str] = []
-    process = MagicMock(pid=123)
-    process.poll.return_value = None
+@pytest.fixture
+def windows_kernel(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Exercise the Job Object boundary with a simulated Windows kernel."""
     kernel = MagicMock()
+    kernel.CreateJobObjectW.return_value = 789
+    kernel.SetInformationJobObject.return_value = True
     kernel.OpenProcess.return_value = 456
-    job = object.__new__(subproc_module._WindowsJob)
-    job._kernel32 = kernel
-    job._handle = 789
+    kernel.AssignProcessToJobObject.return_value = True
+    kernel.CloseHandle.return_value = True
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kwargs: kernel, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(ctypes, "WinError", lambda code: OSError(code, "job error"), raising=False)
+    monkeypatch.setattr(subproc_module, "sys", SimpleNamespace(platform="win32"))
+    return kernel
 
-    def create(*_args: object, **kwargs: object) -> object:
-        assert kwargs["creationflags"] == 0x00000004  # CREATE_SUSPENDED
+
+def test_windows_child_uses_kill_on_close_job(
+    monkeypatch: pytest.MonkeyPatch, windows_kernel: MagicMock
+) -> None:
+    process = MagicMock(pid=123)
+
+    def launch(*_args: object, **kwargs: Any) -> object:
+        assert kwargs.get("creationflags", 0) == 0
         assert kwargs["close_fds"] is True
-        events.append("create suspended")
-        if failure == "sigint":
-            signal.raise_signal(signal.SIGINT)
+        assert kwargs["start_new_session"] is False
+        windows_kernel.AssignProcessToJobObject.assert_not_called()
         return process
 
-    def assign(job_handle: int, process_handle: int) -> bool:
-        assert (job_handle, process_handle) == (789, 456)
-        events.append("assign")
-        if failure == "assign":
-            raise OSError("injected job assignment failure")
-        return True
+    monkeypatch.setattr(subprocess, "Popen", launch)
+    child, tree = subproc_module.spawn_owned_process(["example.exe"], env={})
+    assert child is process
+    windows_kernel.AssignProcessToJobObject.assert_called_once_with(789, 456)
+    _, info_class, limits, _ = windows_kernel.SetInformationJobObject.call_args.args
+    assert info_class == 9
+    assert limits._obj.basic_limit_information.limit_flags == 0x00002000
+    windows_kernel.CloseHandle.assert_called_once_with(456)
 
-    def resume(pid: int) -> None:
-        assert pid == 123
-        events.append("resume")
-
-    kernel.AssignProcessToJobObject.side_effect = assign
-    monkeypatch.setattr(job, "_resume_primary_thread", resume)
-    monkeypatch.setattr(subproc_module, "sys", SimpleNamespace(platform="win32"))
-    monkeypatch.setattr(subproc_module, "_WindowsJob", lambda: job)
-    monkeypatch.setattr(subprocess, "Popen", create)
-    previous_sigint = signal.getsignal(signal.SIGINT)
-    if failure is not None:
-        expected = OSError if failure == "assign" else KeyboardInterrupt
-        with pytest.raises(expected):
-            subproc_module.spawn_owned_process(["example.exe"], env={}, capture_output=True)
-        assert events == (
-            ["create suspended", "assign"] if failure == "assign" else ["create suspended"]
-        )
-        process.kill.assert_called_once_with()
-        process.stdout.close.assert_called_once_with()
-        process.stderr.close.assert_called_once_with()
-    else:
-        child, tree = subproc_module.spawn_owned_process(["example.exe"], env={})
-        assert child is process
-        assert events == ["create suspended", "assign", "resume"]
-        tree.reap(child)
-        process.kill.assert_not_called()
-    assert signal.getsignal(signal.SIGINT) is previous_sigint
-    expected_closed = [(789,)] if failure == "sigint" else [(456,), (789,)]
-    assert [call.args for call in kernel.CloseHandle.call_args_list] == expected_closed
+    process.poll.return_value = 0
+    tree.signal(child, force=True)
+    assert windows_kernel.CloseHandle.call_args_list == [call(456), call(789)]
+    tree.reap(child)
+    assert windows_kernel.CloseHandle.call_args_list == [call(456), call(789)]
+    process.kill.assert_not_called()
     process.wait.assert_called_once_with(timeout=1.0)
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Requires a Windows Job Object")
-@pytest.mark.parametrize("hold_capture", [False, True], ids=["immediate-spawn", "inherited-pipe"])
-def test_windows_job_owns_immediate_descendant_after_leader_exit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hold_capture: bool
+@pytest.mark.parametrize("interrupt", [False, True], ids=["assignment-failure", "interrupt"])
+def test_windows_failed_assignment_stops_and_reaps_child(
+    monkeypatch: pytest.MonkeyPatch, windows_kernel: MagicMock, interrupt: bool
 ) -> None:
-    attempted = tmp_path / "leader-started"
-    ready = tmp_path / "descendant-pid"
-    original_assign = subproc_module._WindowsJob.assign_and_resume
+    process = MagicMock(pid=123)
+    monkeypatch.setattr(subprocess, "Popen", MagicMock(return_value=process))
+    windows_kernel.AssignProcessToJobObject.return_value = False
+    if interrupt:
+        windows_kernel.AssignProcessToJobObject.side_effect = KeyboardInterrupt
 
-    def observe_suspended(job: subproc_module._WindowsJob, pid: int) -> None:
-        # Widen the pre-assignment window. A runnable leader can immediately
-        # start its descendant and escape assignment of the leader alone.
-        sleep(0.25)
-        assert not attempted.exists()
-        original_assign(job, pid)
+    with pytest.raises(KeyboardInterrupt if interrupt else OSError):
+        subproc_module.spawn_owned_process(["example.exe"], env={}, capture_output=True)
 
-    monkeypatch.setattr(subproc_module._WindowsJob, "assign_and_resume", observe_suspended)
-    inherited = "sys.stdout" if hold_capture else "subprocess.DEVNULL"
-    grandchild = (
-        "import pathlib,sys,time; "
-        "print('descendant ready', flush=True); "
-        "pathlib.Path(sys.argv[1]).touch(); time.sleep(30)"
-    )
-    leader = (
-        "import pathlib,subprocess,sys,time\n"
-        "pathlib.Path(sys.argv[1]).touch()\n"
-        f"child = subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[3]], "
-        f"stdin=subprocess.DEVNULL, stdout={inherited}, stderr=subprocess.DEVNULL)\n"
-        "pathlib.Path(sys.argv[2]).write_text(str(child.pid), encoding='ascii')\n"
-        "while not pathlib.Path(sys.argv[3]).exists(): time.sleep(0.01)\n"
-        "print('leader exiting', flush=True)\n"
-    )
-    try:
-        result = run_subprocess(
-            [sys.executable, "-c", leader, str(attempted), str(ready), str(tmp_path / "started")],
-            timeout_seconds=6,
-        )
-        assert b"leader exiting" in result.stdout
-        assert (b"descendant ready" in result.stdout) == hold_capture
-        pid = int(ready.read_text(encoding="ascii"))
-        deadline = monotonic() + 3
-        while monotonic() < deadline:
-            status = subprocess.run(
-                ["tasklist.exe", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
-                capture_output=True,
-                check=True,
-                timeout=2,
-            )
-            if f'"{pid}"'.encode() not in status.stdout:
-                ready.unlink()
-                return
-            sleep(0.02)
-        pytest.fail(f"descendant {pid} outlived the Windows job")
-    finally:
-        if ready.exists():
-            with suppress(OSError):
-                os.kill(int(ready.read_text(encoding="ascii")), signal.SIGTERM)
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=1.0)
+    process.stdout.close.assert_called_once_with()
+    process.stderr.close.assert_called_once_with()
+    assert windows_kernel.CloseHandle.call_args_list == [call(456), call(789)]
+
+
+def test_windows_reports_job_close_failure_after_reaping_leader(
+    monkeypatch: pytest.MonkeyPatch, windows_kernel: MagicMock
+) -> None:
+    process = MagicMock(pid=123)
+    monkeypatch.setattr(subprocess, "Popen", MagicMock(return_value=process))
+    child, tree = subproc_module.spawn_owned_process(["example.exe"], env={})
+    windows_kernel.CloseHandle.return_value = False
+
+    with pytest.raises(SubprocessCleanupError, match="could not close child process job"):
+        tree.reap(child)
+
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=1.0)
+    assert windows_kernel.CloseHandle.call_args_list == [call(456), call(789), call(789)]
 
 
 def test_child_environment_filters_app_credentials_after_override(

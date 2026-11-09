@@ -14,7 +14,7 @@ import struct
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -625,13 +625,25 @@ def test_second_child_spawn_failure_still_cleans_the_first() -> None:
     assert failed.comparison_cleanup.completed
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Requires a Windows Job Object")
-def test_windows_paired_collection_finishes_when_descendant_inherits_pipe(tmp_path: Path) -> None:
+def test_paired_collection_finishes_when_descendant_inherits_pipe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     ready = tmp_path / "descendant-holds-pipe"
+    owned = tmp_path / "tree-owned"
+    spawn = alignment_streaming.spawn_owned_process
+
+    def spawn_and_release(command: Sequence[str], **kwargs: Any) -> Any:
+        child_and_tree = spawn(command, **kwargs)
+        if str(owned) in command:
+            owned.touch()
+        return child_and_tree
+
+    monkeypatch.setattr(alignment_streaming, "spawn_owned_process", spawn_and_release)
     sample = _payload([1.0] * 64)
     descendant = "import pathlib,sys,time; pathlib.Path(sys.argv[1]).touch(); time.sleep(12)"
     leader = (
         "import os,pathlib,subprocess,sys,time\n"
+        "while not pathlib.Path(sys.argv[2]).exists(): time.sleep(0.01)\n"
         f"subprocess.Popen([sys.executable, '-c', {descendant!r}, sys.argv[1]], "
         "stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr)\n"
         "while not pathlib.Path(sys.argv[1]).exists(): time.sleep(0.01)\n"
@@ -639,7 +651,7 @@ def test_windows_paired_collection_finishes_when_descendant_inherits_pipe(tmp_pa
     )
     accumulator = _StrictAccumulator()
     result = collect_paired_audio_chunks(
-        [sys.executable, "-c", leader, str(ready)],
+        [sys.executable, "-c", leader, str(ready), str(owned)],
         _child_argv(sample),
         **_paired_kwargs(
             accumulator,
