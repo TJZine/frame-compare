@@ -21,7 +21,7 @@ from frame_compare.config.persistence import dump_config_for_persistence
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import FrameCompareError
 from frame_compare.services.slowpics_url import require_comparison_url
-from frame_compare.utils.subproc import prepare_python_child, run_subprocess
+from frame_compare.utils.subproc import prepare_python_child
 from frame_compare.utils.terminal import no_color_requested
 from frame_compare.utils.terminal_theme import human_console
 
@@ -89,14 +89,11 @@ class FrameCompareTyperGroup(TyperGroup):
 
 # Desktop libraries may launch a browser, shell association, or clipboard
 # utility internally, without an environment argument. Isolate that boundary
-# in a child. A long-lived desktop app must not hold the capture pipes open.
+# in a child with filtered credentials and no capture pipes.
+_DESKTOP_ACTION_TIMEOUT_SECONDS = 10.0
 _DESKTOP_ACTION_CODE = """
 import os
 import sys
-
-with open(os.devnull, "wb") as sink:
-    os.dup2(sink.fileno(), 1)
-    os.dup2(sink.fileno(), 2)
 
 action, value, *fallback = sys.argv[1:]
 if action == "clipboard":
@@ -121,18 +118,26 @@ def _run_desktop_action(action: str, value: str, *extra: str) -> bool:
     command, env = prepare_python_child(
         [sys.executable, "-c", _DESKTOP_ACTION_CODE, action, value, *extra]
     )
+    # Own only the broker. Desktop handlers and clipboard selection owners may
+    # outlive it, including if the broker later fails or times out.
     try:
-        return (
-            run_subprocess(
-                command,
-                env=env,
-                check=False,
-                timeout_seconds=10.0,
-                max_stdout_bytes=4096,
-                max_stderr_bytes=4096,
-            ).returncode
-            == 0
+        process = subprocess.Popen(
+            command,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            shell=False,
+            close_fds=True,
+            start_new_session=os.name == "posix",
         )
+        try:
+            return process.wait(timeout=_DESKTOP_ACTION_TIMEOUT_SECONDS) == 0
+        finally:
+            if process.returncode is None:
+                with contextlib.suppress(OSError, subprocess.SubprocessError):
+                    process.kill()
+                    process.wait(timeout=2.0)
     except (OSError, subprocess.SubprocessError):
         return False
 

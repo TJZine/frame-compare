@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
+from time import monotonic, sleep
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -138,7 +140,7 @@ def test_desktop_opener_preserves_default_browser_and_filters_credentials(
         encoding="utf-8",
     )
     browser.chmod(0o700)
-    monkeypatch.setenv("BROWSER", f"{browser} %s")
+    monkeypatch.setenv("BROWSER", f"{shlex.quote(str(browser))} %s")
     monkeypatch.setenv("FRAME_COMPARE_TEST_BROWSER_RESULT", str(marker))
     monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "synthetic-browser-secret")
     monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "synthetic-plugin-path")
@@ -149,6 +151,65 @@ def test_desktop_opener_preserves_default_browser_and_filters_credentials(
         "",
         "synthetic-plugin-path",
     ]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Uses a local POSIX browser command")
+def test_browser_handler_can_finish_after_desktop_broker_exits(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    release = tmp_path / "release"
+    marker = tmp_path / "completed"
+    browser = tmp_path / "background-browser"
+    browser.write_text(
+        "#!/bin/sh\n"
+        "(\n"
+        "    attempts=0\n"
+        '    until [ -e "$2" ]; do\n'
+        '        [ "$attempts" -lt 100 ] || exit 1\n'
+        "        attempts=$((attempts + 1))\n"
+        "        sleep 0.05\n"
+        "    done\n"
+        '    touch "$3"\n'
+        ") &\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    browser.chmod(0o700)
+    monkeypatch.setenv("BROWSER", shlex.join([str(browser), "%s", str(release), str(marker)]))
+
+    assert open_url_in_browser("https://slow.pics/c/example")
+    assert not marker.exists()
+    release.touch()
+    deadline = monotonic() + 3.0
+    while not marker.exists() and monotonic() < deadline:
+        sleep(0.01)
+    assert marker.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Uses a local POSIX browser command")
+def test_browser_action_times_out_and_reaps_broker(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    marker = tmp_path / "broker-pid"
+    browser = tmp_path / "blocking-browser"
+    browser.write_text(
+        "#!/bin/sh\n"
+        'broker_pid="$PPID"\n'
+        'printf "%s\\n" "$broker_pid" > "$2"\n'
+        "attempts=0\n"
+        'while kill -0 "$broker_pid" 2>/dev/null && [ "$attempts" -lt 100 ]; do\n'
+        "    attempts=$((attempts + 1))\n"
+        "    sleep 0.05\n"
+        "done\n",
+        encoding="utf-8",
+    )
+    browser.chmod(0o700)
+    monkeypatch.setenv("BROWSER", shlex.join([str(browser), "%s", str(marker)]))
+    monkeypatch.setattr("frame_compare.cli.cli_helpers._DESKTOP_ACTION_TIMEOUT_SECONDS", 1.0)
+
+    assert not open_url_in_browser("https://slow.pics/c/example")
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(marker.read_text()), 0)
 
 
 def test_browser_and_clipboard_reject_unsafe_publication_urls(monkeypatch: MonkeyPatch) -> None:

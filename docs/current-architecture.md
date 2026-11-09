@@ -969,6 +969,11 @@ Keep these integrations at their current owners:
   and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
 
+The CLI desktop adapters launch a credential-filtered Python broker with standard
+streams directed to the null device. The CLI waits up to 10 seconds for the broker
+and kills and reaps it on timeout. Desktop handlers and clipboard selection owners
+can outlive the broker, including after a broker failure or timeout.
+
 The default Docker behavior is intentionally narrower than the native Windows
 portable runtime: it preserves deterministic headless software Vulkan for backend
 rendering and report generation. Optional Docker GPU or GUI profiles are
