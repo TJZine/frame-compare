@@ -260,9 +260,12 @@ PowerShell 5.1/7 update journeys, GPU Vulkan/HDR and real-media acceptance.
 ## Completion and ready signal
 
 The [final integration record](REPORT.md#final-integration-and-review) records
-the defensive review, the fixes for both P2 findings and the verification
-results. The known headless Chrome fullscreen refusal is present on the baseline.
-The remaining PR handoff is the orchestrator's update of PR #173 to the verified
+the defensive review, the original remediation and its verification results.
+Follow-up review findings on persisted probe authority, referenced-media admission,
+Windows executable resolution, hosted Windows fixtures, and source-interpreter
+provisioning are tracked in the PR's subsequent implementation and review evidence.
+The known headless Chrome fullscreen refusal is present on the baseline. The
+remaining PR handoff is the orchestrator's update of PR #173 to the verified
 candidate.
 
 The [residual release gates](REPORT.md#residual-release-gates) require separate

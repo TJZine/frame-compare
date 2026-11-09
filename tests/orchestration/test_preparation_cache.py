@@ -38,6 +38,7 @@ from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapsh
 from frame_compare.orchestration.execution_types import PrepState
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
+    live_probe_fingerprint,
     save_clip_probe_cache,
 )
 from frame_compare.services.alignment_manual_overrides import MANUAL_OVERRIDES_FILE
@@ -271,11 +272,14 @@ def test_execute_prep_reprobes_snapshot_with_mismatched_persisted_identity(
     _create_config(tmp_path, content=METRIC_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     source_path = _create_video_files(input_dir, "source.mkv")[0]
-    stats = source_path.stat()
-    current_fingerprint = ClipFingerprint(source_path, stats.st_size, stats.st_mtime_ns)
+    current_fingerprint = live_probe_fingerprint(source_path).fingerprint
+    assert current_fingerprint.source_token is not None
     stale_snapshot = ClipProbeSnapshot(
         fingerprint=ClipFingerprint(
-            source_path.with_name("different.mkv"), stats.st_size, stats.st_mtime_ns
+            source_path.with_name("different.mkv"),
+            current_fingerprint.size_bytes,
+            current_fingerprint.mtime_ns,
+            source_token=current_fingerprint.source_token,
         ),
         width=1920,
         height=1080,
@@ -283,10 +287,13 @@ def test_execute_prep_reprobes_snapshot_with_mismatched_persisted_identity(
         fps=Fraction(24, 1),
         is_hdr=False,
     )
+    cache_key = compute_probe_cache_key(current_fingerprint)
+    cache_path = tmp_path / "generated" / "clip_probe.toml"
     save_clip_probe_cache(
-        tmp_path / "generated" / "clip_probe.toml",
-        {compute_probe_cache_key(current_fingerprint): stale_snapshot},
+        cache_path,
+        {cache_key: stale_snapshot},
     )
+    assert cache_key in cache_path.read_text(encoding="utf-8")
     loader = FakeVSLoader()
 
     asyncio.run(

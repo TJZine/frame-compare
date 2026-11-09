@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import tomllib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, TypeGuard, cast
@@ -17,9 +18,12 @@ import tomli_w
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
+from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
+from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
+from frame_compare.vs.source_admission import SourceAdmission, admit_source, source_identity
 from frame_compare.vs.types import HDRMetadata
 
 log = structlog.get_logger()
@@ -35,6 +39,44 @@ _MAX_PROBE_FRAME_COUNT = 2**31 - 1
 # R81's VSVideoInfo stores fpsNum/fpsDen as int64_t; the persisted snapshot
 # stores their positive Fraction representation.
 _MAX_PROBE_FPS_COMPONENT = 2**63 - 1
+
+
+@dataclass(frozen=True)
+class LiveProbeFingerprint:
+    fingerprint: ClipFingerprint
+    admission: SourceAdmission
+
+
+def live_probe_fingerprint(path: Path) -> LiveProbeFingerprint:
+    """Bind reusable probe facts to admitted source and probe runtime identities."""
+    try:
+        resolved = path.resolve(strict=True)
+        admission = admit_source(resolved, abort_check=raise_if_cancelling)
+        token = None
+        try:
+            identity = source_identity(resolved)
+        except OSError:
+            # An admitted private source remains usable without persisted authority.
+            identity = None
+        if identity is not None:
+            if identity != admission.stamp:
+                raise ValueError("Source video changed during admission")
+            if admission.geometry_probe_token is not None:
+                payload = (asdict(identity), admission.geometry_probe_token)
+                token = hashlib.sha256(
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+                ).hexdigest()
+        admission.verify(resolved)
+        return LiveProbeFingerprint(
+            ClipFingerprint(resolved, admission.stamp.size, admission.stamp.mtime_ns, token),
+            admission,
+        )
+    except (OSError, ValueError, FFmpegError, FFmpegNotFoundError) as error:
+        raise SourceLoadError(path, str(error)) from error
+
+
+def _valid_source_token(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F]{64}", value) is not None
 
 
 @dataclass(frozen=True)
@@ -155,9 +197,13 @@ def _load_cache_entry(entry_raw: object) -> _CacheEntryLoadOutcome:
         path = entry["path"]
         if not isinstance(path, str):
             raise TypeError("path must be a string")
+        source_token = entry.get("source_token")
+        if not _valid_source_token(source_token):
+            raise ValueError("source_token must be a 64-character hexadecimal token")
         size_bytes = _bounded_int(entry, "size_bytes", minimum=0, maximum=_MAX_PROBE_SIZE_BYTES)
         fingerprint = ClipFingerprint(
             path=Path(path),
+            source_token=cast(str, source_token),
             size_bytes=size_bytes,
             mtime_ns=_bounded_int(
                 entry,
@@ -216,8 +262,8 @@ def _bounded_int(
 def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
     """Return a stable key for clip probe cache entries.
 
-    The key is derived from the ClipFingerprint (path, size, mtime), the
-    probe-key schema, and the supported decoder runtime identity. It is
+    The key binds the strong source/probe token, path, size, mtime, probe-key
+    schema, and supported decoder runtime identity. It is
     independent of trim state and intentionally does not hash media contents.
 
     Serialization uses canonical JSON settings (sorted keys, no spaces)
@@ -227,7 +273,8 @@ def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
         "path": str(fingerprint.path),
         "size_bytes": fingerprint.size_bytes,
         "mtime_ns": fingerprint.mtime_ns,
-        "schema_version": 3,
+        "schema_version": 4,
+        "source_token": fingerprint.source_token,
         "media_runtime_fingerprint": media_runtime_fingerprint("probe"),
     }
 
@@ -330,12 +377,15 @@ def save_clip_probe_cache(
     for key in sorted(entries_by_key.keys()):
         snapshot = entries_by_key[key]
         fp = snapshot.fingerprint
+        if not _valid_source_token(fp.source_token):
+            continue
 
         if snapshot.is_hdr and snapshot.hdr_metadata is None:
             raise ValueError(f"Snapshot {key} is_hdr=True but hdr_metadata is None")
 
         entry: dict[str, Any] = {
             "path": str(fp.path),
+            "source_token": fp.source_token,
             "size_bytes": fp.size_bytes,
             "mtime_ns": fp.mtime_ns,
             "width": snapshot.width,

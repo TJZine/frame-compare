@@ -40,6 +40,7 @@ class ClipFingerprint:
     path: Path
     size_bytes: int
     mtime_ns: int
+    source_token: str | None = None
 
 
 @dataclass(frozen=True)

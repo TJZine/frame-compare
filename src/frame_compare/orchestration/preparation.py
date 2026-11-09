@@ -30,7 +30,6 @@ from frame_compare.orchestration.analysis_policy import (
 )
 from frame_compare.orchestration.analysis_source import resolve_analysis_source
 from frame_compare.orchestration.context import (
-    ClipFingerprint,
     ClipProbeSnapshot,
     ClipState,
 )
@@ -49,6 +48,7 @@ from frame_compare.orchestration.phase_post_render import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
+    live_probe_fingerprint,
     load_clip_probe_cache,
     merge_shared_clip_probe_cache,
     save_clip_probe_cache,
@@ -95,6 +95,7 @@ from frame_compare.utils.paths import (
 )
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
+from frame_compare.vs.errors import SourceLoadError
 
 log = structlog.get_logger()
 
@@ -312,14 +313,18 @@ def _cached_probe_snapshots_for_cache_only(
     snapshots: dict[Path, ClipProbeSnapshot] = {}
     for path in input_videos:
         raise_if_cancelling()
-        resolved_path = path.resolve(strict=True)
-        stats = resolved_path.stat()
-        fingerprint = ClipFingerprint(
-            path=resolved_path,
-            size_bytes=stats.st_size,
-            mtime_ns=stats.st_mtime_ns,
+        try:
+            fingerprint = live_probe_fingerprint(path).fingerprint
+        except SourceLoadError as error:
+            raise MetricsCalculationError(
+                "Cached clip probe data is required to validate --from-cache-only "
+                "analysis cache: current source authority could not be verified."
+            ) from error
+        snapshot = (
+            entries_by_key.get(compute_probe_cache_key(fingerprint))
+            if fingerprint.source_token is not None
+            else None
         )
-        snapshot = entries_by_key.get(compute_probe_cache_key(fingerprint))
         if snapshot is None:
             raise MetricsCalculationError(
                 "Cached clip probe data is required to validate --from-cache-only "
@@ -357,6 +362,7 @@ def _persist_probe_snapshots_for_run(
     current_entries = {
         compute_probe_cache_key(snapshot.fingerprint): snapshot
         for snapshot in snapshots_by_path.values()
+        if snapshot.fingerprint.source_token is not None
     }
     run_cache_path = workspace.generated_dir / "clip_probe.toml"
     shared_cache_path = _shared_probe_cache_path(workspace)
@@ -387,19 +393,23 @@ def _probe_input_videos(
 
     for path in input_videos:
         raise_if_cancelling()
-        resolved_path = path.resolve(strict=True)
-        stats = resolved_path.stat()
-        fingerprint = ClipFingerprint(
-            path=resolved_path,
-            size_bytes=stats.st_size,
-            mtime_ns=stats.st_mtime_ns,
-        )
+        live = live_probe_fingerprint(path)
+        fingerprint = live.fingerprint
+        resolved_path = fingerprint.path
         cache_key = compute_probe_cache_key(fingerprint)
-        snapshot = entries_by_key.get(cache_key)
+        snapshot = entries_by_key.get(cache_key) if fingerprint.source_token is not None else None
         if snapshot is None:
             if deps.vs_loader is None:
                 raise RuntimeError("VS loader must be initialized before probing clips.")
             source_info = deps.vs_loader.load(resolved_path)
+            verified = live_probe_fingerprint(resolved_path)
+            if (
+                verified.fingerprint != fingerprint
+                or verified.admission.stamp != live.admission.stamp
+            ):
+                raise SourceLoadError(
+                    resolved_path, "Source video changed while probing native source facts"
+                )
             tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
             preserved_props = compute_preserved_frame_props(source_info.frame_props)
             snapshot = ClipProbeSnapshot(

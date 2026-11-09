@@ -590,7 +590,13 @@ def test_render_frame_ffmpeg_passes_geometry_plan_to_runner() -> None:
     )
 
 
-def test_render_frame_ffmpeg_wraps_unrepresentable_geometry_as_render_error() -> None:
+def test_render_frame_ffmpeg_wraps_unrepresentable_geometry_as_render_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.probe_video_streams",
+        lambda _path, **_kwargs: [{"width": 4, "height": 4}],
+    )
     request = RenderRequest(
         clip=Path("test.mp4"),
         diagnostic_source=Path("test.mp4"),

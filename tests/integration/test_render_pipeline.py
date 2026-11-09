@@ -173,10 +173,10 @@ def test_ffprobe_count_handles_child_exit_with_cancellation_pending(
     async def run_count() -> None:
         if interrupt:
             with pytest.raises(_RunInterrupt):
-                runner.validate_source_frame_count(source, 4, 1)
+                runner.validate_source(source, (100, 100), 4, 1)
         else:
             with pytest.raises(FrameExtractionError, match="Could not count") as exc:
-                runner.validate_source_frame_count(source, 4, 1)
+                runner.validate_source(source, (100, 100), 4, 1)
             assert isinstance(exc.value.__cause__, subprocess.CalledProcessError)
         await cancellation_checkpoint()
 
@@ -484,3 +484,52 @@ def test_ffmpeg_padding_preserves_lossless_rgb_samples(
         assert image.crop((0, 0, 16, 96)).getbbox() is None
         assert image.crop((16, 0, 80, 96)).tobytes() == source.tobytes()
         assert image.crop((80, 0, 96, 96)).getbbox() is None
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_equal_count_source_replacement_cannot_reuse_prepared_geometry(
+    mock_video_path: Path, tmp_path: Path, batch: bool
+) -> None:
+    from frame_compare.render.geometry import GeometryRect, SourceGeometry, plan_render_geometry
+
+    [plan] = plan_render_geometry(
+        (SourceGeometry(100, 100, GeometryRect(0, 0, 100, 100), "full_frame"),),
+        mode="native",
+    )
+    replacement = tmp_path / "replacement.mp4"
+    run_subprocess(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=blue:s=128x96:r=10",
+            "-frames:v",
+            "3",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(replacement),
+        ],
+        timeout_seconds=15,
+    )
+    replacement.replace(mock_video_path)
+    runner = DefaultFFmpegRunner()
+    # The replacement still agrees with the prepared timeline; only geometry changed.
+    runner.validate_source(mock_video_path, (128, 96), 3, 0)
+    with pytest.raises(FrameExtractionError, match="disagree with prepared"):
+        runner.validate_source(mock_video_path, (100, 100), 3, 0)
+    output = tmp_path / "existing.png"
+    output.write_bytes(b"existing image")
+    with pytest.raises(FrameExtractionError, match="disagree with prepared"):
+        if batch:
+            runner.extract_frames(mock_video_path, [0, 1], tmp_path / "batch", geometry_plan=plan)
+        else:
+            runner.extract_frame(mock_video_path, 0, output, geometry_plan=plan)
+    assert output.read_bytes() == b"existing image"
+    assert not (tmp_path / "batch").exists()
+    assert not list(tmp_path.glob(".frame-compare-ffmpeg-*"))

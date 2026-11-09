@@ -14,10 +14,17 @@ notes used by the guarded publication workflow.
 - Reject unsupported or changing video dimensions before native indexing. The
   first open can take longer while Frame Compare checks the whole video. A
   matching managed index lets later opens reuse that check.
+- Refuse playlist-style and unrecognized source containers before native decoding.
+  Existing elementary MPEG-2 and supported single-file containers remain supported.
+- Bind saved clip-probe facts to the current source and probing runtime. Older
+  probe-cache entries refresh automatically instead of reusing stale dimensions
+  or color information.
 - Store generated decoder indexes in Frame Compare's data directory and leave
   old indexes beside media untouched.
 - Rebuild Windows portable releases independently and check them for known
   vulnerabilities before signing.
+- Provision the required Python 3.13 build interpreter directly for Windows
+  source installs without first installing the project's development dependencies.
 
 ### Removed
 
@@ -30,6 +37,10 @@ notes used by the guarded publication workflow.
 
 - Bound image allocations and external tool output, and limit the credentials
   passed to those tools.
+- Recheck source dimensions before FFmpeg writes screenshots, including when a
+  prepared render plan or cached frame count is available.
+- Refuse Windows batch-file FFmpeg and ffprobe wrappers so media filenames are
+  never interpreted by a command shell.
 - Reject incomplete or inconsistent slow.pics responses before reporting a
   successful upload.
 - Correct HDR screenshot colors by targeting BT.709 destination primaries; colors

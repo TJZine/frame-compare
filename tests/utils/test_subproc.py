@@ -273,6 +273,92 @@ def test_resolve_executable_media_overrides(
             resolve_optional_executable(requested)
 
 
+@pytest.mark.parametrize("route", ["path", "override", "absolute", "relative"])
+@pytest.mark.parametrize("suffix", [".cmd", ".BAT", ".CmD", ".exe"])
+def test_windows_executable_suffix_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str, suffix: str
+) -> None:
+    binary = tmp_path / "bin" / f"tool{suffix}"
+    binary.parent.mkdir()
+    binary.touch()
+    binary.chmod(0o755)
+    monkeypatch.setattr(sys, "platform", "win32")
+    discovered: list[str] = []
+
+    def find(executable: str) -> str:
+        discovered.append(executable)
+        return str(binary)
+
+    monkeypatch.setattr(subproc_module, "which", find)
+    requested = "tool"
+    if route == "override":
+        requested = "ffmpeg"
+        monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(binary))
+    elif route == "absolute":
+        requested = str(binary)
+    elif route == "relative":
+        requested = str(binary.relative_to(tmp_path))
+
+    if suffix == ".exe":
+        assert resolve_executable(requested, cwd=tmp_path) == str(binary)
+    else:
+        with pytest.raises(FileNotFoundError, match="Windows batch executables are unsupported"):
+            resolve_executable(requested, cwd=tmp_path)
+        if route == "override":
+            with pytest.raises(FileNotFoundError, match="use a native executable"):
+                resolve_optional_executable(requested, cwd=tmp_path)
+    assert discovered == ([requested] if route == "path" else [])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Uses POSIX symlinks to simulate Windows resolution")
+@pytest.mark.parametrize("route", ["path", "override", "absolute", "relative"])
+@pytest.mark.parametrize("batch_target", [False, True])
+def test_windows_executable_policy_checks_link_and_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str, batch_target: bool
+) -> None:
+    target = tmp_path / ("target.bAt" if batch_target else "target.exe")
+    target.touch()
+    target.chmod(0o755)
+    binary = tmp_path / "bin" / ("tool.exe" if batch_target else "tool.CmD")
+    binary.parent.mkdir()
+    binary.symlink_to(target)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(subproc_module, "which", lambda _: str(binary))
+    requested = "tool"
+    if route == "override":
+        requested = "ffprobe"
+        monkeypatch.setenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", str(binary))
+    elif route == "absolute":
+        requested = str(binary)
+    elif route == "relative":
+        requested = str(binary.relative_to(tmp_path))
+    with pytest.raises(FileNotFoundError, match="Windows batch executables are unsupported"):
+        resolve_executable(requested, cwd=tmp_path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Requires Windows batch dispatch semantics")
+@pytest.mark.parametrize("route", ["absolute", "path"])
+def test_windows_batch_wrapper_is_refused_before_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str
+) -> None:
+    sentinel = tmp_path / "wrapper-ran"
+    wrapper = tmp_path / "wrapper.cmd"
+    wrapper.write_bytes(b'@echo off\r\necho ran>"%~dp0wrapper-ran"\r\n')
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ.get("PATH", ""))
+    executable = str(wrapper) if route == "absolute" else wrapper.name
+    with pytest.raises(FileNotFoundError, match="use a native executable"):
+        run_subprocess([executable, "input & output | text > file"], timeout_seconds=5)
+    assert not sentinel.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Requires POSIX executable script semantics")
+def test_posix_script_with_batch_suffix_remains_executable(tmp_path: Path) -> None:
+    script = tmp_path / "script.cmd"
+    script.write_text("#!/bin/sh\nprintf 'script ran'\n", encoding="utf-8")
+    script.chmod(0o755)
+    assert run_subprocess([str(script)], timeout_seconds=5).stdout == b"script ran"
+
+
 @pytest.mark.parametrize("stop", ["abort", "timeout", "abort-kill"])
 def test_run_subprocess_abort_path_reaps_real_child(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stop: str

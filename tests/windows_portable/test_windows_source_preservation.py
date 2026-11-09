@@ -127,7 +127,7 @@ def test_builder_preserves_existing_state(
     source = script.read_text()
     source = (
         source.rsplit("Main", 1)[0]
-        + "\nfunction uv { return 'fixture python' }\nfunction Initialize-PortableRuntime { throw \"injected download failure\" }\nMain\n"
+        + "\nfunction uv { $global:LASTEXITCODE = 0; return 'fixture python' }\nfunction Initialize-PortableRuntime { throw \"injected download failure\" }\nMain\n"
     )
     script.write_text(source)
     before = _snapshot(tmp_path)
@@ -241,6 +241,122 @@ $global:LASTEXITCODE = 0
 $global:LASTEXITCODE = 0
 """)
     return owner / "install-from-source.ps1", previous, pointer
+
+
+@pytest.mark.parametrize("entrypoint", ["root", "direct"])
+@pytest.mark.parametrize("mode", ["provision", "failure", "SkipPythonInstall", "SkipSync"])
+def test_source_install_provisions_only_python_before_build(
+    pwsh: str,
+    tmp_path: Path,
+    source_fixture: tuple[Path, Path, Path],
+    entrypoint: str,
+    mode: str,
+) -> None:
+    script, previous, pointer = source_fixture
+    builder = script.with_name("build_portable.ps1")
+    builder.write_text(
+        builder.read_text().replace(
+            "param($ManifestPath, $OutDir, $CacheDir, $RepoRoot)",
+            "param($ManifestPath, $OutDir, $CacheDir, $RepoRoot)\n"
+            "Add-Content -LiteralPath $env:EVENTS -Value 'build'",
+        )
+    )
+    events = tmp_path / "provisioning-events"
+    old_data = _snapshot(previous)
+    old_pointer = pointer.read_bytes()
+    old_shims = _snapshot(pointer.parent.parent / "bin")
+    installer = script.parents[2] / "install.ps1" if entrypoint == "root" else script
+    switch = f" -{mode}" if mode.startswith("Skip") else ""
+    result = _run(
+        pwsh,
+        """
+function uv {
+  if (($args -join ' ') -ne 'python install 3.13') { throw "Unexpected uv arguments: $args" }
+  Add-Content -LiteralPath $env:EVENTS -Value ($args -join ' ')
+  $global:LASTEXITCODE = [int]$env:UV_EXIT
+}
+"""
+        + "& $env:INSTALL"
+        + switch,
+        tmp_path,
+        INSTALL=str(installer),
+        EVENTS=str(events),
+        UV_EXIT="23" if mode == "failure" else "0",
+    )
+    assert events.is_file(), result.stdout + result.stderr
+    recorded = events.read_text(encoding="utf-8-sig").splitlines()
+    if mode == "failure":
+        assert result.returncode != 0
+        assert "uv python install 3.13 failed with exit code 23" in result.stdout + result.stderr
+        assert recorded == ["python install 3.13"]
+        assert _snapshot(previous) == old_data
+        assert pointer.read_bytes() == old_pointer
+        assert _snapshot(pointer.parent.parent / "bin") == old_shims
+        assert not (script.parents[2] / "dist").exists()
+        assert not (tmp_path / "appdata/activation-events").exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        expected = ["build"] if switch else ["python install 3.13", "build"]
+        assert recorded == expected
+        assert json.loads(pointer.read_text())["bundle_path"] != str(previous)
+
+
+@pytest.mark.parametrize("switch", ["SkipPythonInstall", "SkipSync"])
+def test_source_install_skip_still_requires_builder_python_lookup(
+    pwsh: str,
+    tmp_path: Path,
+    repo_root: Path,
+    source_fixture: tuple[Path, Path, Path],
+    switch: str,
+) -> None:
+    script, previous, pointer = source_fixture
+    owner = script.parent
+    for name in (
+        "build_portable.ps1",
+        "version_utils.ps1",
+        "portable_launchers.ps1",
+        "manifest.schema.json",
+        "manifest.windows-x64.json",
+    ):
+        shutil.copyfile(repo_root / "tools/windows_portable" / name, owner / name)
+    (owner / "shim").mkdir()
+    shutil.copyfile(
+        repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
+        owner / "shim/frame-compare-version.ps1",
+    )
+    before = _snapshot(previous)
+    pointer_before = pointer.read_bytes()
+    shims_before = _snapshot(pointer.parent.parent / "bin")
+    events = tmp_path / "lookup-events"
+    result = _run(
+        pwsh,
+        """
+function uv {
+  if (($args -join ' ') -ne 'python find --system --no-project --no-python-downloads 3.13') {
+    throw "Unexpected uv arguments: $args"
+  }
+  Add-Content -LiteralPath $env:EVENTS -Value ($args -join ' ')
+  $global:LASTEXITCODE = 7
+  return 'fixture missing Python 3.13'
+}
+"""
+        + f"& $env:INSTALL -{switch}",
+        tmp_path,
+        INSTALL=str(script),
+        EVENTS=str(events),
+    )
+    assert result.returncode != 0
+    assert "find the host Python 3.13 interpreter failed with exit code 7" in (
+        result.stdout + result.stderr
+    )
+    assert events.read_text(encoding="utf-8-sig").splitlines() == [
+        "python find --system --no-project --no-python-downloads 3.13"
+    ]
+    assert _snapshot(previous) == before
+    assert pointer.read_bytes() == pointer_before
+    assert _snapshot(pointer.parent.parent / "bin") == shims_before
+    assert not list((script.parents[2] / "dist").glob("*/bundle_info.json"))
+    assert not (tmp_path / "appdata/activation-events").exists()
 
 
 @pytest.mark.parametrize("policy", ["Move", "Leave"])
@@ -469,7 +585,7 @@ def test_builder_uses_committed_version_and_empty_workspace(
     script = owner / "build_portable.ps1"
     source = script.read_text().rsplit("Main", 1)[0]
     source += r"""
-function uv { return $env:FIXTURE_PYTHON }
+function uv { $global:LASTEXITCODE = 0; return $env:FIXTURE_PYTHON }
 function Initialize-PortableRuntime { param($BundleRoot) Set-Content -LiteralPath (Join-Path $BundleRoot 'requirements.lock.txt') -Value 'fixture dependencies' }
 function Assert-BundleRuntime {}
 function Remove-PythonBytecodeCaches {}

@@ -260,6 +260,52 @@ signed updates. Removing the pre-equality producer-archive traversal in
 `portable_bundle.py` is an optional post-MVP simplification. Independent
 reconstruction and canonical ZIP equality remain required.
 
-All three findings are resolved. The orchestrator's next action is to update
-PR #173. Further active adversarial exercises remain outside the authorized
-scope. The release acceptance gates above remain open.
+GPT Pro review of `25c50f58` then identified five additional P2 merge blockers:
+persisted probe facts were not bound to referenced or same-stat replacement media;
+referenced segments could change between a full scan and native open; Windows could
+dispatch `.cmd` or `.bat` media-tool wrappers through the command shell; three
+hosted Windows fixtures failed before their intended assertions; and the public
+source installer did not provision the Python 3.13 interpreter required by the
+builder. No P0 or P1 issue was identified.
+
+The follow-up candidate closes those blockers without adding manifest copying,
+content hashing, another cache service, release-workflow changes, or the deferred
+P3 cleanup:
+
+- persisted probe key schema 4 binds the strong source identity to the verified
+  probe runtime; tokenless sources remain usable through cold private opens but
+  cannot persist or reuse probe facts;
+- native admission positively identifies supported single-file formats and the
+  elementary MPEG-2 private path, while refusing manifests and unclassified
+  demuxers before L-SMASH;
+- FFmpeg validates current geometry before extraction and combines geometry with
+  the existing once-per-clip decoded-count check;
+- Windows resolution refuses batch-file executables, and the portable tests now
+  exercise the real launcher emitter while retaining production exit-code checks;
+- source installation provisions Python 3.13 directly, keeps the builder's
+  no-download lookup, and retains `-SkipSync` as an alias for
+  `-SkipPythonInstall`.
+
+Integration verification on 2026-11-09 passed Ruff lint/formatting, Pyright, import
+contracts, the maintained Python security check, CLI documentation contracts,
+strict documentation build, Docker-context containment and `git diff --check`.
+The complete host suite passed after excluding the independently reproduced
+baseline headless-Chrome fullscreen refusal; the first run exposed and then closed
+four synthetic probe-cache fixture misses. The full rebuilt Docker gate passed 511
+tests with zero skips and proved L-SMASH-Works, FFmpeg/ffprobe, libplacebo/Vulkan,
+real frame rendering, generated fixtures, doctor JSON, production-tooling exclusion
+and an installed application run.
+
+Hosted unsigned Windows production and fresh-runner jobs still need to pass for the
+final candidate. Physical Windows source installation, Job Object/NTFS behavior,
+GPU/HDR and desktop acceptance remain release gates rather than source-review
+claims. Further active adversarial exercises remain outside the authorized scope.
+
+Independent defensive source review found no remaining P0–P2 production,
+correctness or material maintainability issue. It identified one P3 test-maintenance
+gap: an older preparation regression had become an empty-cache test after tokenless
+entries stopped persisting. The fixture now writes a real token-bearing mismatched
+entry and asserts that setup before exercising the cold re-probe. The focused test
+and its loader-level mismatch control passed, and focused re-review found no
+remaining issue. Source-review approval does not replace the hosted and physical
+acceptance gates above.

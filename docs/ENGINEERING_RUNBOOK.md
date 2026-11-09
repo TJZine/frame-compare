@@ -509,17 +509,19 @@ Required when changing:
 - bundle/update manifests and signing flow
 
 Source builds and source install entrypoints require PowerShell 7 or newer before
-bootstrap, sync, or output changes. Published-bundle installation, launch, and
-updates retain Windows PowerShell 5.1 support; exercise BOM-less UTF-8 install
-state from a non-ASCII bundle path under that interpreter.
+bootstrap, Python 3.13 provisioning, or output changes. Published-bundle
+installation, launch, and updates retain Windows PowerShell 5.1 support; exercise
+BOM-less UTF-8 install state from a non-ASCII bundle path under that interpreter.
 Windows portable pytest fixtures clear inherited `PSModulePath` for each test so
 Python-launched PS5.1 and PS7 initialize their own compatible module paths. The
 fixture restores the parent process environment after each test.
 
 For source-install changes, run `tests/windows_portable` on Windows with PowerShell
-7. Manually rerun source installation with populated config/media/generated
-sentinels using both default Move and `-UserData Leave`, and inject a manifest
-failure. Verify old runtime/code and the previous pointer survive failures, moved
+7. Verify the default path provisions Python 3.13 before the builder and that
+`-SkipPythonInstall` (plus the legacy `-SkipSync` alias) still requires an existing
+discoverable Python 3.13. Manually rerun source installation with populated
+config/media/generated sentinels using both default Move and `-UserData Leave`, and
+inject a manifest failure. Verify old runtime/code and the previous pointer survive failures, moved
 folders reverse on failed activation before and after pointer replacement, and the
 shim launches the new bundle after success. Old bundles must remain for manual
 removal. Source targets use a UTC timestamp; direct maintainer/CI builds retain the

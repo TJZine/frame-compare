@@ -38,6 +38,7 @@ _MISSING_FRAME_DIMENSIONS = "Source video frame dimensions could not be verified
 # Match complete FFprobe demuxer names. These ordinary containers read a single
 # file with the packaged defaults, including MOV with external tracks disabled.
 _SINGLE_FILE_FORMAT_NAMES = frozenset({"avi", "matroska,webm", "mov,mp4,m4a,3gp,3g2,mj2", "mpegts"})
+_NATIVE_FORMAT_NAMES = _SINGLE_FILE_FORMAT_NAMES | {"mpegvideo"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +125,7 @@ def _source_stamp(path: Path) -> SourceIdentity:
 @dataclass(frozen=True, slots=True)
 class SourceAdmission:
     video_stream: dict[str, object]
+    format_name: str
     stamp: SourceIdentity
     stream_indices: frozenset[int]
     executable: Path
@@ -163,17 +165,10 @@ def _probe_stamp(executable: Path) -> SourceIdentity | None:
 
 
 def _probe_token(
-    executable: Path, stamp: SourceIdentity | None, payload: dict[str, object]
+    executable: Path, stamp: SourceIdentity | None, payload: dict[str, object], format_name: str
 ) -> str | None:
-    format_info = payload.get("format")
-    format_name = (
-        cast(dict[str, object], format_info).get("format_name")
-        if isinstance(format_info, dict)
-        else None
-    )
-    if not isinstance(format_name, str) or format_name not in _SINGLE_FILE_FORMAT_NAMES:
-        # A top-level file stamp cannot cover referenced media. Unrecognized or
-        # unverifiable formats must use the full scan and a private index on every open.
+    if format_name not in _SINGLE_FILE_FORMAT_NAMES:
+        # Admitted elementary MPEG-2 retains a full scan and private index per open.
         return None
     program = payload.get("program_version")
     libraries = payload.get("library_versions")
@@ -288,6 +283,14 @@ def admit_source(path: Path, *, abort_check: Callable[[], None]) -> SourceAdmiss
     stamp = _source_stamp(path)
     # The indexer can inspect cover art even though it is not a playable track.
     streams, payload = probe_admission_headers(path, executable, abort=abort)
+    format_info = payload.get("format")
+    format_name = (
+        cast(dict[str, object], format_info).get("format_name")
+        if isinstance(format_info, dict)
+        else None
+    )
+    if not isinstance(format_name, str) or format_name not in _NATIVE_FORMAT_NAMES:
+        raise ValueError("Source container format is not supported for native decoding")
     real_streams = [stream for stream in streams if not is_attached_picture(stream)]
     if not real_streams:
         raise ValueError("no verifiable video stream is supported")
@@ -311,11 +314,12 @@ def admit_source(path: Path, *, abort_check: Callable[[], None]) -> SourceAdmiss
         raise ValueError("Source video stream indices could not be verified")
     admission = SourceAdmission(
         video_stream,
+        format_name,
         stamp,
         indices,
         executable,
         probe_stamp,
-        _probe_token(executable, probe_stamp, payload) if coded_header_known else None,
+        _probe_token(executable, probe_stamp, payload, format_name) if coded_header_known else None,
     )
     admission.verify(path)
     return admission

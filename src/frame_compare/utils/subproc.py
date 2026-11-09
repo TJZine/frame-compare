@@ -46,6 +46,18 @@ def _is_executable_file(path: Path) -> bool:
     return path.is_file() and os.access(path, os.X_OK)
 
 
+def _reject_windows_batch_executable(path: Path) -> None:
+    if sys.platform != "win32":
+        return
+    # Windows can dispatch batch files through a shell even with shell=False.
+    # Check both the selected name and its target so links cannot evade the rule.
+    for candidate in (path, path.resolve(strict=True)):
+        if candidate.suffix.casefold() in {".cmd", ".bat"}:
+            raise FileNotFoundError(
+                f"Windows batch executables are unsupported; use a native executable: {path}"
+            )
+
+
 def _resolve_cwd(cwd: Path | None) -> Path | None:
     if cwd is None:
         return None
@@ -89,24 +101,29 @@ def resolve_executable(executable: str, cwd: Path | None = None) -> str:
         override_path = Path(override)
         if not override_path.is_absolute() or not _is_executable_file(override_path):
             raise FileNotFoundError(override or f"{override_name} is empty")
+        _reject_windows_batch_executable(override_path)
         return str(override_path)
 
     executable_path = Path(executable)
     if executable_path.is_absolute():
         if not _is_executable_file(executable_path):
             raise FileNotFoundError(executable)
+        _reject_windows_batch_executable(executable_path)
         return str(executable_path)
 
     if executable_path.parent != Path():
         base_dir = cwd if cwd is not None else Path.cwd()
-        candidate = (base_dir / executable_path).resolve(strict=True)
-        if not _is_executable_file(candidate):
+        candidate = base_dir / executable_path
+        resolved_path = candidate.resolve(strict=True)
+        if not _is_executable_file(resolved_path):
             raise FileNotFoundError(executable)
-        return str(candidate)
+        _reject_windows_batch_executable(candidate)
+        return str(resolved_path)
 
     resolved = which(executable)
     if resolved is None:
         raise FileNotFoundError(executable)
+    _reject_windows_batch_executable(Path(resolved))
     return resolved
 
 

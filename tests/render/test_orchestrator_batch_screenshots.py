@@ -319,3 +319,58 @@ def test_real_ffmpeg_batch_result_is_paired_with_selected_source_frame(
         render_clip_jobs(prepared_jobs(requests))
     assert calls == [[1, 2]]
     assert not list(tmp_path.glob(".frame-compare-ffmpeg-*"))
+
+
+@pytest.mark.parametrize("count", [240, None], ids=["count-known", "count-unknown"])
+@pytest.mark.parametrize("width", [1920, 1280], ids=["unchanged", "equal-count-new-geometry"])
+def test_batch_validates_live_source_once_before_any_render_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int | None, width: int
+) -> None:
+    import json
+    import subprocess
+
+    from frame_compare.config.schema_enums import OverlayMode
+    from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
+    from frame_compare.render.batch.expansion import expand_batch_render_requests
+    from frame_compare.render.errors import FrameExtractionError
+
+    probe = MagicMock(
+        return_value=subprocess.CompletedProcess(
+            ["ffprobe"],
+            0,
+            json.dumps(
+                {"streams": [{"width": width, "height": 1080, "nb_read_frames": "240"}]}
+            ).encode(),
+            b"",
+        )
+    )
+    header = MagicMock(return_value=[{"width": width, "height": 1080}])
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", probe)
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.probe_video_streams", header)
+    runner = DefaultFFmpegRunner()
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
+    batches = [
+        _batch_request("clip.mkv", "clip", [1, 2, 3], total_frames=count),
+        _batch_request("empty.mkv", "empty", [], total_frames=count),
+    ]
+
+    def expand():
+        return expand_batch_render_requests(
+            batches,
+            output_dir=tmp_path,
+            config=config,
+            overlay_mode=OverlayMode.NONE,
+            renderer="ffmpeg",
+            ffmpeg_runner=runner,
+        )
+
+    if width == 1920:
+        jobs = expand()
+        assert len(jobs[0].requests) == 3
+        assert not jobs[1].requests
+    else:
+        with pytest.raises(FrameExtractionError, match="disagree with prepared"):
+            expand()
+    assert probe.call_count == (0 if count is None else 1)
+    assert header.call_count == (1 if count is None else 0)
+    assert not list(tmp_path.glob("*.png"))

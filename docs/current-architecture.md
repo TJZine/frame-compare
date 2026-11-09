@@ -426,10 +426,14 @@ never searches parent directories.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation. The file format remains version 1, while each probe key
-  uses key schema 3 and includes the scoped media-runtime probe fingerprint so a
+  uses key schema 4 and includes the scoped media-runtime probe fingerprint so a
   selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
   portable or Debian/Docker profiles misses without invalidating unrelated file-format
-  data. Probe keys use the resolved media path. Entries keyed by a discovered
+  data. Each reusable entry also binds the resolved source's device, inode, size,
+  mtime and change time to the verified ffprobe executable and reported runtime.
+  Sources without that strict identity or reusable probe authority remain usable
+  through a cold private open but are not persisted in this cache. Probe keys use
+  the resolved media path. Entries keyed by a discovered
   symlink miss and require a normal cold probe before cache-only reuse. Cold
   probing opens the resolved target. Pair names and report identity still use the discovered path.
   Older probe keys miss so source stream admission runs again. Persisted probe
@@ -465,15 +469,21 @@ never searches parent directories.
   `<media>.lwi` and `<media>.frame-compare-lsw1310-*.lwi` files.
 
 The subprocess executable resolver finds ffprobe, including the portable runtime's
-absolute override. Source and VSView admission begin with a bounded header probe
-and require exactly one non-attached video stream. The same probe reports the
-detected demuxer. Only AVI, Matroska/WebM, MOV/MP4-family and MPEG-TS demuxers
-qualify for managed reuse with the packaged defaults, which disable MOV external
-tracks. A manifest such as ffconcat can reference independently changing files, so
-it uses a private cache-free open every time, as do all other formats and sources
-with missing or malformed format information. Cold opens and private cache-free
-opens, including the VSView fallback, stream a complete bounded check of coded and
-visible frame geometry before native indexing or decoding. Each stream must retain
+absolute override. On Windows it refuses `.cmd` and `.bat` executables after
+resolution, including configured overrides and resolved link targets, because the
+operating system can interpret batch arguments through a command shell even when
+Python requests direct process execution. Source and VSView admission begin with a
+bounded header probe and require exactly one non-attached video stream. The same probe reports the
+detected demuxer. Native opening requires a positively identified AVI,
+Matroska/WebM, MOV/MP4-family, MPEG-TS, or elementary MPEG-2 source. Only the first
+four single-file container families qualify for managed reuse with the packaged
+defaults, which disable MOV external tracks. Elementary MPEG-2 retains its full-scan
+private-open path. Manifests such as ffconcat and sources with missing, malformed,
+or unrecognized format information are refused before native code because a
+top-level file identity cannot cover independently changing referenced media. Cold
+opens and private cache-free opens, including the VSView fallback, stream a complete
+bounded check of coded and visible frame geometry before native indexing or
+decoding. Each stream must retain
 constant dimensions within the canvas policy. Warm managed opens can reuse that
 proof under the cache checks above after the header probe. The full cold check
 remains because a real mixed-resolution H.264 transport stream reproduced a native
@@ -922,6 +932,8 @@ External runtime boundaries:
   child handle for cleanup. Paired alignment and VSView use the same launcher.
   The owner uses bounded cleanup on failure or cancellation. On leader exit,
   capture closes the job so job-owned descendants cannot retain its pipes.
+  Resolved `.cmd` and `.bat` launch targets are refused before process creation;
+  supported media tools must resolve to native executables.
 - VapourSynth runtime and plugins
 - TMDB HTTP API
 - slow.pics HTTP API

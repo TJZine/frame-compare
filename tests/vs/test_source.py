@@ -308,7 +308,9 @@ def test_load_source_rejects_change_at_native_open(
         admission_module, "resolve_optional_executable", lambda _name: sys.executable
     )
     monkeypatch.setattr(
-        admission_module, "probe_admission_headers", lambda *_args, **_kwargs: (streams, {})
+        admission_module,
+        "probe_admission_headers",
+        lambda *_args, **_kwargs: (streams, {"format": {"format_name": "matroska,webm"}}),
     )
     monkeypatch.setattr(admission_module, "_scan_video_frames", lambda *_args: None)
 
@@ -984,12 +986,8 @@ def test_load_source_real_video_stream_policy(
 def encode_source() -> Callable[[Path, int], None]:
     import shutil
 
-    import vapoursynth as vs
-
     from frame_compare.utils.subproc import run_subprocess
 
-    if isinstance(cast(object, vs), MagicMock) or not hasattr(vs.core, "lsmas"):
-        pytest.skip("native VapourSynth with L-SMASH is unavailable")
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
         pytest.skip("FFmpeg tools are unavailable")
 
@@ -1018,27 +1016,44 @@ def encode_source() -> Callable[[Path, int], None]:
     return encode
 
 
-@pytest.mark.vs_required
-def test_referenced_media_replacement_cannot_reuse_geometry_proof(
-    tmp_path: Path, encode_source: Callable[[Path, int], None]
+@pytest.mark.integration
+def test_real_concat_manifest_is_refused_before_native_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, encode_source: Callable[[Path, int], None]
 ) -> None:
+    from frame_compare.utils.subproc import run_subprocess
+
     first, second = tmp_path / "first.mp4", tmp_path / "second.mp4"
     encode_source(first, 64)
     encode_source(second, 64)
     manifest = tmp_path / "input.mp4"
     manifest.write_text("ffconcat version 1.0\nfile first.mp4\nfile second.mp4\n", encoding="ascii")
-    before = manifest.stat()
+    detected = run_subprocess(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=format_name",
+            "-of",
+            "csv=p=0",
+            str(manifest),
+        ],
+        timeout_seconds=15,
+    )
+    assert detected.stdout.strip() == b"concat"
     cache = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
+    monkeypatch.setattr(source_module, "admit_source", admission_module.admit_source)
+    scan = MagicMock(side_effect=AssertionError("concat must be refused before scanning"))
+    monkeypatch.setattr(admission_module, "_scan_video_frames", scan)
+    loader = MagicMock()
+    core = SimpleNamespace(lsmas=loader)
 
-    assert load_source(manifest, index_cache=cache).num_frames == 8
-    encode_source(second, 96)
-    assert manifest.stat().st_mtime_ns == before.st_mtime_ns
-    assert manifest.stat().st_ctime_ns == before.st_ctime_ns
-
-    with pytest.raises(SourceLoadError, match="dimensions change") as error:
-        load_source(manifest, index_cache=cache)
+    with pytest.raises(SourceLoadError, match="container format is not supported") as error:
+        load_source(manifest, cast(Core, core), index_cache=cache)
 
     assert error.value.context.code == "FC-4015"
+    scan.assert_not_called()
+    loader.LWLibavSource.assert_not_called()
     assert not cache.root.exists()
 
 
@@ -1046,6 +1061,10 @@ def test_referenced_media_replacement_cannot_reuse_geometry_proof(
 def test_self_contained_mp4_reuses_managed_geometry_proof(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, encode_source: Callable[[Path, int], None]
 ) -> None:
+    import vapoursynth as vs
+
+    if isinstance(cast(object, vs), MagicMock) or not hasattr(vs.core, "lsmas"):
+        pytest.skip("native VapourSynth with L-SMASH is unavailable")
     video = tmp_path / "input.mp4"
     encode_source(video, 64)
     cache = ManagedSourceIndexCache(tmp_path.resolve() / "generated")

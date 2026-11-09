@@ -930,8 +930,11 @@ recovery requirement.
   rather than silently validating a full-frame cache identity.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
-- Probe-cache files remain on-disk format version 1, but key schema 3 includes the
-  scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint. In the managed
+- Probe-cache files remain on-disk format version 1, but key schema 4 includes the
+  scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint plus a strong
+  source/probe token. The token binds device, inode, size, mtime and change time to
+  the verified ffprobe executable and reported runtime. Sources without strict
+  identity or reusable probe authority are not persisted. In the managed
   Windows portable and Debian/Docker profiles, a cache created by another selected
   decoder or FFmpeg/ffprobe lineage is a normal miss, including under
   `--from-cache-only` validation. Entries keyed by a discovered symlink miss
@@ -1035,8 +1038,9 @@ recovery requirement.
   cache prevalidation succeeds. `--skip-metadata`, disabled TMDB, and a missing API
   key perform no TMDB cache reads or writes.
 - When the exact all-source selection-domain token requires probe data and the
-  probe cache is missing, `--from-cache-only` fails before metadata prefetch and
-  before run-folder reservation rather than validating a weaker fingerprint.
+  probe cache is missing, stale, or cannot be authorized by a current bounded
+  header probe, `--from-cache-only` fails before metadata prefetch and before
+  run-folder reservation rather than validating a weaker fingerprint.
 - `--from-cache-only` does not require cached alignment offsets from a previous run.
   Previous alignment reuse is not part of analysis cache-only prevalidation. A
   cache-only run may reuse previous alignment offsets when
@@ -1757,6 +1761,11 @@ dedicated `run` flags for them:
   uses BT.601 when the coded source is at most 1024 pixels wide and 576 pixels high,
   and BT.709 otherwise. The decision uses the prepared source dimensions before any
   crop, resize, padding, or display-aspect expansion.
+- FFmpeg validates the current selected stream dimensions against the prepared
+  source before extraction, including when a geometry plan is supplied. Batch
+  rendering performs its decoded frame-count and geometry check once per nonempty
+  clip before constructing render jobs; direct extraction repeats the bounded
+  header check before publishing output.
 - `png_compression` remains an integer from `0` through `9`. It is the public
   compression input for Pillow and VapourSynth fpng. Pillow receives the value
   directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;
@@ -2273,6 +2282,9 @@ Review outputs keep original frame positions/counts, reference FPS, ordering,
   though their JSON `category` remains `optional`: `success` is false and `doctor`
   exits with the dependency error code. On unmanaged profiles, FFMS2 and FFmpeg
   availability failures remain noncritical.
+- On Windows, executable resolution refuses `.cmd` and `.bat` FFmpeg/ffprobe paths,
+  including configured overrides and resolved link targets. An invalid configured
+  override fails closed and does not fall back to `PATH`.
 - If the `doctor` command hits a typed top-level failure before it can produce a
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.

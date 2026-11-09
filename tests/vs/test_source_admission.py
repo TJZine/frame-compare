@@ -199,11 +199,11 @@ def test_geometry_probe_token_binds_executable_and_runtime(
         pytest.param({"format": "matroska,webm"}, id="malformed-format"),
         pytest.param({"format": {}}, id="missing-format-name"),
         pytest.param({"format": {"format_name": ["matroska,webm"]}}, id="malformed-format-name"),
-        pytest.param({"format": {"format_name": "ffconcat"}}, id="referencing-demuxer"),
+        pytest.param({"format": {"format_name": "concat"}}, id="referencing-demuxer"),
         pytest.param({"format": {"format_name": "matroska,webm,other"}}, id="unknown-demuxer"),
     ],
 )
-def test_admission_without_recognized_single_file_format_cannot_reuse_proof(
+def test_admission_refuses_unrecognized_or_missing_format(
     video: Path, monkeypatch: pytest.MonkeyPatch, format_facts: dict[str, object]
 ) -> None:
     payload = {
@@ -215,9 +215,8 @@ def test_admission_without_recognized_single_file_format_cannot_reuse_proof(
         admission_module, "probe_admission_headers", lambda *_args, **_kwargs: ([_VIDEO], payload)
     )
 
-    admission = admit_source(video, abort_check=lambda: None)
-
-    assert admission.geometry_probe_token is None
+    with pytest.raises(ValueError, match="container format is not supported"):
+        admit_source(video, abort_check=lambda: None)
 
 
 @pytest.mark.parametrize(
@@ -236,7 +235,7 @@ def test_unknown_coded_header_requires_fresh_frame_geometry(
 ) -> None:
     stream = {**_VIDEO, "coded_width": 0, "coded_height": 0}
     payload = {
-        "format": {"format_name": "mpegts"},
+        "format": {"format_name": "mpegvideo"},
         "program_version": {"version": "7.1.5"},
         "library_versions": [{"name": "libavcodec", "version": 61}],
     }
@@ -282,7 +281,9 @@ def test_admission_rejects_unsupported_headers(
     message: str,
 ) -> None:
     monkeypatch.setattr(
-        admission_module, "probe_admission_headers", lambda *_args, **_kwargs: (streams, {})
+        admission_module,
+        "probe_admission_headers",
+        lambda *_args, **_kwargs: (streams, {"format": {"format_name": "matroska,webm"}}),
     )
 
     with pytest.raises(ValueError, match=message):
@@ -296,7 +297,7 @@ def test_admission_rejects_source_changed_during_header_probe(
         path: Path, *_args: object, **_kwargs: object
     ) -> tuple[list[dict[str, object]], dict[str, object]]:
         path.write_bytes(b"new file contents")
-        return [_VIDEO], {}
+        return [_VIDEO], {"format": {"format_name": "matroska,webm"}}
 
     monkeypatch.setattr(admission_module, "probe_admission_headers", probe)
 
@@ -322,3 +323,91 @@ def test_decoder_options_replace_the_callers_pixel_limit() -> None:
 def test_decoder_options_reject_ambiguous_syntax(options: str) -> None:
     with pytest.raises(ValueError, match="complete key=value pairs"):
         bounded_decoder_options(options)
+
+
+@pytest.mark.parametrize("caller", ["source", "preview"])
+@pytest.mark.parametrize("format_name", ["concat", "unknown", "", None, ["avi"]])
+def test_native_callers_refuse_unverifiable_formats_before_scan_or_open(
+    video: Path, monkeypatch: pytest.MonkeyPatch, caller: str, format_name: object
+) -> None:
+    from typing import Any, cast
+
+    from frame_compare.vs.errors import SourceLoadError
+    from frame_compare.vs.source import load_source
+    from frame_compare.vsview.session_runtime import load_preview_source
+
+    monkeypatch.setattr(
+        admission_module,
+        "probe_admission_headers",
+        lambda *_args, **_kwargs: (
+            [_VIDEO],
+            {"format": {"format_name": format_name}},
+        ),
+    )
+    scan = MagicMock(side_effect=AssertionError("refused formats must never scan"))
+    monkeypatch.setattr(admission_module, "_scan_video_frames", scan)
+    loader = MagicMock()
+    with pytest.raises((ValueError, SourceLoadError), match="container format is not supported"):
+        if caller == "preview":
+            load_preview_source(loader, video, None)
+        else:
+            core = MagicMock(lsmas=loader)
+            load_source(video, cast(Any, core))
+    scan.assert_not_called()
+    loader.LWLibavSource.assert_not_called()
+
+
+@pytest.mark.parametrize("caller", ["source", "preview"])
+@pytest.mark.parametrize("coded_header", [False, True], ids=["unknown-coded", "known-coded"])
+def test_elementary_mpeg2_scans_before_private_native_open(
+    video: Path, monkeypatch: pytest.MonkeyPatch, caller: str, coded_header: bool
+) -> None:
+    from types import SimpleNamespace
+    from typing import Any, cast
+
+    from frame_compare.vs.source import load_source
+    from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
+    from frame_compare.vsview.session_runtime import load_preview_source
+
+    stream = dict(_VIDEO) if coded_header else {**_VIDEO, "coded_width": 0, "coded_height": 0}
+    monkeypatch.setattr(
+        admission_module,
+        "probe_admission_headers",
+        lambda *_args, **_kwargs: (
+            [stream],
+            {"format": {"format_name": "mpegvideo"}},
+        ),
+    )
+    scanned: list[Path] = []
+    monkeypatch.setattr(
+        admission_module, "_scan_video_frames", lambda path, *_args: scanned.append(path)
+    )
+    clip = MagicMock(
+        width=62, height=66, num_frames=2, fps=SimpleNamespace(numerator=24, denominator=1)
+    )
+    clip.get_frame.return_value.props = {}
+    indices: list[Path] = []
+
+    def open_source(path: str, **kwargs: object):
+        assert scanned == [video] * (len(indices) + 1)
+        assert kwargs["cache"] == 0
+        index = Path(cast(str, kwargs["cachefile"]))
+        assert index.name == "disabled.lwi" and not index.exists()
+        indices.append(index)
+        return clip
+
+    loader = MagicMock()
+    loader.LWLibavSource.side_effect = open_source
+    for _ in range(2):
+        if caller == "preview":
+            _, admitted = load_preview_source(loader, video, None)
+            assert admitted.format_name == "mpegvideo"
+            assert admitted.geometry_probe_token is None
+        else:
+            load_source(
+                video,
+                cast(Any, SimpleNamespace(lsmas=loader)),
+                index_cache=ManagedSourceIndexCache(video.parent / "generated"),
+            )
+    assert len(indices) == 2
+    assert all(not index.parent.exists() for index in indices)
