@@ -17,16 +17,12 @@ Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 . (Join-Path $PSScriptRoot "version_utils.ps1")
+. (Join-Path $PSScriptRoot "update_manifest_bytes.ps1")
 
 function Ensure-Directory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) {
     New-Item -ItemType Directory -Path $Path | Out-Null
   }
-}
-
-function Write-Utf8NoBomFile([string]$Path, [string]$Content) {
-  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-  [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
 }
 
 function ConvertTo-PortablePath([string]$PathValue) {
@@ -64,12 +60,6 @@ function Export-CommittedAppSource([string]$ResolvedRepoRoot, [string]$Destinati
   } finally {
     Remove-Item -Force -LiteralPath $archivePath -ErrorAction SilentlyContinue
   }
-}
-
-function Get-FromVersionMin([string]$VersionText) {
-  $version = ConvertTo-FrameCompareVersion $VersionText
-  if ($null -eq $version) { throw "Malformed app version '$VersionText'" }
-  return "{0}.{1}.0" -f $version.Major, $version.Minor
 }
 
 function Get-BundleCompatibilityContract([string]$ResolvedBundleDir) {
@@ -176,7 +166,7 @@ function Assert-BundleAppSourceMatches(
     throw "Complete portable bundle application source not found: $bundleSourceRoot"
   }
   Ensure-Directory -Path $ComparisonRoot
-  $bundleManifestFiles = New-ManifestFiles -SourceRoot $bundleSourceRoot -PayloadRoot $ComparisonRoot
+  $bundleManifestFiles = @(New-ManifestFiles -SourceRoot $bundleSourceRoot -PayloadRoot $ComparisonRoot)
   if ($bundleManifestFiles.Count -ne $ExpectedManifestFiles.Count) {
     throw (
       "Complete portable bundle application source does not match committed HEAD " +
@@ -248,13 +238,12 @@ try {
   $payloadRoot = Join-Path $stagingRoot "payload\\app\\src\\frame_compare"
   Ensure-Directory -Path $payloadRoot
 
-  $manifestFiles = New-ManifestFiles -SourceRoot $sourceRoot -PayloadRoot $payloadRoot
+  $manifestFiles = @(New-ManifestFiles -SourceRoot $sourceRoot -PayloadRoot $payloadRoot)
   if ($manifestFiles.Count -eq 0) {
     throw "No files found under src/frame_compare; refusing to create empty update."
   }
 
   $toAppVersion = Get-AppVersionFromSource -RepoRootPath $sourceSnapshotRoot
-  $fromAppVersionMin = Get-FromVersionMin -VersionText $toAppVersion
   $compatibility = Get-BundleCompatibilityContract -ResolvedBundleDir $resolvedBundleDir
   $bundleAppVersion = [string]$compatibility["app_version"]
   if ($bundleAppVersion -cne $toAppVersion) {
@@ -268,21 +257,11 @@ try {
     -ExpectedManifestFiles $manifestFiles `
     -ComparisonRoot (Join-Path $stagingRoot "bundle-source-comparison")
 
-  $manifest = [ordered]@{
-    schema_version = 2
-    target_platform = "windows-x64"
-    to_app_version = $toAppVersion
-    from_app_version_min = $fromAppVersionMin
-    from_app_version_max = $null
-    expected_requirements_lock_sha256 = $compatibility["requirements_lock_sha256"]
-    expected_media_runtime_fingerprint = $compatibility["media_runtime_fingerprint"]
-    signature_algorithm = "rsa-sha256-pkcs1"
-    signature_file = "update-manifest.sig"
-    payload_root = "payload"
-    files = $manifestFiles
-  }
   $manifestPath = Join-Path $stagingRoot "update-manifest.json"
-  Write-Utf8NoBomFile -Path $manifestPath -Content (($manifest | ConvertTo-Json -Depth 6) + "`n")
+  $manifestBytes = New-UpdateManifestBytes -Version $toAppVersion -Files $manifestFiles `
+    -RequirementsDigest $compatibility["requirements_lock_sha256"] `
+    -RuntimeFingerprint $compatibility["media_runtime_fingerprint"]
+  [System.IO.File]::WriteAllBytes($manifestPath, $manifestBytes)
 
   if (Test-Path -LiteralPath $outFilePath) {
     Remove-Item -LiteralPath $outFilePath -Force

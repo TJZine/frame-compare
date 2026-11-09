@@ -56,13 +56,9 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'push'
     permissions:
       contents: read
-    uses: ./.github/workflows/windows-portable-build.yml
+    uses: ./.github/workflows/windows-portable-unsigned.yml
     with:
       expected_sha: ${{ github.sha }}
-      release_tag: ""
-      require_signing: false
-      environment_name: windows-ci
-      prepare_release_assets: false
 
   validate_manual:
     name: Validate signed verification request
@@ -113,6 +109,8 @@ jobs:
     needs: validate_manual
     permissions:
       contents: read
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/windows-portable-build.yml
     with:
       expected_sha: ${{ needs.validate_manual.outputs.expected_sha }}

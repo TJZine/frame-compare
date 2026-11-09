@@ -171,7 +171,8 @@ import vapoursynth as vs
 from PySide6.QtWidgets import QApplication, QWidget
 
 from frame_compare.services.alignment_vsview import _confirmed_offsets
-from frame_compare.vs.source import source_index_path
+from frame_compare.vs.source import load_source
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 from frame_compare.vsview.adapter import (
     VSViewConfig,
     VSViewSessionRequest,
@@ -193,6 +194,12 @@ proof_dir = Path(sys.argv[1])
 reference = proof_dir / "reference.mkv"
 comparison = proof_dir / "comparison.mkv"
 comparison_2 = proof_dir / "comparison_2.mkv"
+index_cache = ManagedSourceIndexCache((proof_dir / "generated").resolve())
+load_source(reference, core=vs.core, index_cache=index_cache)
+reference_index = index_cache.validated_index(reference)
+if reference_index is None:
+    raise SystemExit("missing managed L-SMASH reference index")
+index_before = reference_index.stat()
 unspecified_color_props = {"_Matrix": 2, "_Transfer": 2, "_Primaries": 2}
 audio_review_by_key = {
     key: json.dumps(
@@ -216,6 +223,7 @@ session, _wait_seconds = launch_alignment_verification_session(
         },
         audio_review_by_key=audio_review_by_key,
         cache_dir=proof_dir / "cache",
+        source_indexes={reference: reference_index},
         frame_props_by_stem={
             reference.stem: unspecified_color_props,
             comparison.stem: unspecified_color_props,
@@ -273,13 +281,12 @@ for index in sorted(outputs):
     outputs[index].clip.get_frame(0)
 print("DOCKER_GUI_PROOF frame_zero=ok")
 
-index_paths = [
-    source_index_path(reference),
-    source_index_path(comparison),
-    source_index_path(comparison_2),
-]
-if not all(path.is_file() and path.stat().st_size > 0 for path in index_paths):
-    raise SystemExit(f"missing L-SMASH indexes: {index_paths!r}")
+if (
+    index_cache.validated_index(reference) != reference_index
+    or reference_index.stat().st_mtime_ns != index_before.st_mtime_ns
+    or list(index_cache.root.glob("*.lwi")) != [reference_index]
+):
+    raise SystemExit("VSView created or changed a managed L-SMASH index")
 print("DOCKER_GUI_PROOF lsmash_indexes=ok")
 
 candidates = tuple(

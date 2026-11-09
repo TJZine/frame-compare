@@ -92,7 +92,7 @@ function Read-ZipEntryBytes(
         if ($output.Length -ne $Entry.Length) {
           throw "$Context length did not match its ZIP metadata."
         }
-        return $output.ToArray()
+        return ,$output.ToArray()
       }
       if (($output.Length + $read) -gt $MaxBytes) {
         throw "$Context exceeds the $MaxBytes-byte limit while reading."

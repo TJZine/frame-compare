@@ -244,7 +244,8 @@ def prove_lwlibavsource(media_path: Path) -> None:
     import vapoursynth as vs
 
     from frame_compare.vs.env import candidate_lsmas_plugin_path_details, try_load_lsmas_plugin
-    from frame_compare.vs.source import load_source, source_index_path
+    from frame_compare.vs.source import load_source
+    from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 
     core = vs.core
     lsmas_loaded_path = None
@@ -257,12 +258,20 @@ def prove_lwlibavsource(media_path: Path) -> None:
     assert_true("LibavSMASHSource" in functions, f"LibavSMASHSource missing: {sorted(functions)}")
 
     if media_path.is_file():
-        source = load_source(media_path, core=core)
+        cache = ManagedSourceIndexCache((media_path.parent / "runtime-smoke-cache").resolve())
+        source = load_source(media_path, core=core, index_cache=cache)
         frame = source.clip.get_frame(0)
         assert_true(frame.width == 64 and frame.height == 64, "LWLibavSource frame render failed")
         assert_true(source.num_frames == 3, f"unexpected source frame count: {source.num_frames}")
-        owned_index = source_index_path(media_path)
-        assert_true(owned_index.is_file(), f"runtime-specific source index missing: {owned_index}")
+        owned_index = cache.validated_index(media_path)
+        assert owned_index is not None, "managed source index missing"
+        before = owned_index.stat()
+        load_source(media_path, core=core, index_cache=cache)
+        assert_true(
+            cache.validated_index(media_path) == owned_index
+            and owned_index.stat().st_mtime_ns == before.st_mtime_ns,
+            "warm L-SMASH-Works load changed the committed index",
+        )
         assert_true(
             not Path(f"{media_path}.lwi").exists(), "legacy unversioned source index was created"
         )
@@ -381,6 +390,7 @@ def prove_bestsource_frame(media_path: Path) -> None:
 def prove_generated_vsview_session(media_path: Path) -> None:
     import vapoursynth as vs  # noqa: I001
 
+    from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
     from frame_compare.vsview.alignment_review_contract import (
         AlignmentReviewContractError,
         AlignmentReviewExpectedComparison,
@@ -398,6 +408,8 @@ def prove_generated_vsview_session(media_path: Path) -> None:
     from vsview.vsenv import QtEventLoop
 
     cache_dir = media_path.parent / "runtime-smoke-cache"
+    reference_index = ManagedSourceIndexCache(cache_dir.resolve()).validated_index(media_path)
+    assert reference_index is not None, "VSView managed reference index missing"
     comparison_one_media_path = media_path.with_name("runtime-smoke-comparison-1.mp4")
     comparison_two_media_path = media_path.with_name("runtime-smoke-comparison-2.mp4")
     assert_true(
@@ -430,6 +442,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             )
         },
         cache_dir=cache_dir,
+        source_indexes={media_path: reference_index},
         frame_props_by_stem={
             media_path.stem: {"_Matrix": 2, "_Range": 2},
             comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2},
@@ -444,7 +457,9 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         diagnostics = io.StringIO()
         try:
             with redirect_stderr(diagnostics):
-                exec(compile(script_text, str(script_path), "exec"), script_module.__dict__)
+                # Exercise the session just generated from the local smoke fixture
+                # in the disposable, unprivileged build job.
+                exec(compile(script_text, str(script_path), "exec"), script_module.__dict__)  # nosec B102
         finally:
             sys.stderr.write(diagnostics.getvalue())
         assert_true(

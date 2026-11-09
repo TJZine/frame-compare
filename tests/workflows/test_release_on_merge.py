@@ -49,9 +49,12 @@ def test_merged_release_delegates_to_guarded_publication(repo_root: Path) -> Non
     assert manual["jobs"]["release"]["concurrency"]["group"].startswith("frame-compare-release-")
     guarded = load_workflow(repo_root / ".github/workflows/release.yml")
     assert guarded["jobs"]["windows"]["with"]["require_signing"] == "true"
-    for job in (guarded["jobs"]["windows"], guarded["jobs"]["publish"]):
-        environment = job.get("environment", job.get("with", {}))
-        assert "production" in str(environment)
+    assert guarded["jobs"]["windows"]["with"]["environment_name"] == (
+        "${{ inputs.channel == 'stable' && 'production' || 'release-candidate' }}"
+    )
+    publish = guarded["jobs"]["publish"]
+    assert publish["needs"] == ["preflight", "windows"]
+    assert "environment" not in publish
 
 
 @pytest.mark.parametrize(

@@ -1,0 +1,254 @@
+name: Build and exercise Windows portable artifacts
+description: Shared dependency, runtime, and unsigned packaging steps for Windows release and PR jobs.
+inputs:
+  expected_sha:
+    description: Exact commit checked out by the calling job
+    required: true
+  require_signing:
+    description: Require the release public key in the portable bundle
+    required: true
+outputs:
+  bundle_id:
+    description: Immutable portable input artifact ID
+    value: ${{ steps.bundle.outputs.artifact-id }}
+  bundle_digest:
+    description: SHA-256 of the raw portable ZIP
+    value: ${{ steps.bundle.outputs.artifact-digest }}
+  update_id:
+    description: Immutable unsigned update artifact ID
+    value: ${{ steps.update.outputs.artifact-id }}
+  update_digest:
+    description: SHA-256 of the raw unsigned update ZIP
+    value: ${{ steps.update.outputs.artifact-digest }}
+runs:
+  using: composite
+  steps:
+    - name: Setup Python 3.13.17
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: "3.13.17"
+
+    - name: Setup uv
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      with:
+        version: "0.13.5"
+        enable-cache: ${{ inputs.require_signing == 'true' }}
+
+    - name: Install dev dependencies (frozen)
+      shell: pwsh
+      run: uv sync --all-groups --extra vsview --frozen
+
+    - name: Full test suite (includes portable updater proof)
+      shell: pwsh
+      run: uv run --no-sync pytest -q
+
+    - name: Validate update public key
+      if: inputs.require_signing == 'true'
+      shell: pwsh
+      run: |
+        pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/validate_update_public_key.ps1 `
+          -PublicKeyPath tools/windows_portable/update_public_key.xml
+
+    - name: Build portable bundle
+      shell: pwsh
+      env:
+        REQUIRE_SIGNING: ${{ inputs.require_signing }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        $PSNativeCommandUseErrorActionPreference = $true
+        $out = "dist/frame-compare-portable-win-x64"
+        $proofLog = "dist/windows-bundle-runtime-proof.log"
+        New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+        $buildArgs = @(
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "tools/windows_portable/build_portable.ps1",
+          "-ManifestPath",
+          "tools/windows_portable/manifest.windows-x64.json",
+          "-OutDir",
+          $out,
+          "-CacheDir",
+          ".portable_cache"
+        )
+        if ($env:REQUIRE_SIGNING -eq "true") {
+          $buildArgs += "-RequireReleasePublicKey"
+        }
+        pwsh @buildArgs 2>&1 | Tee-Object -FilePath $proofLog
+        if ($LASTEXITCODE -ne 0) {
+          exit $LASTEXITCODE
+        }
+        $proof = Get-Content -LiteralPath $proofLog -Raw
+        foreach ($phase in @(
+          "package_imports",
+          "runtime_contract",
+          "vapoursynth_environment",
+          "lwlibavsource_frame",
+          "placebo_tonemap_api",
+          "apply_tonemap_frame",
+          "placebo_tonemap_frame",
+          "vsview_runtime"
+        )) {
+          if ($proof -notmatch "WINDOWS_BUNDLE_PROOF phase=$phase ok") {
+            throw "Required portable runtime proof phase missing: $phase"
+          }
+        }
+        if ($proof -notmatch "WINDOWS_BUNDLE_PROOF vsview_runtime=ok") {
+          throw "Required combined VSView runtime proof marker missing."
+        }
+        foreach ($marker in @(
+          "pyside6_event_loop=ok",
+          "vsview_deep_imports=ok",
+          "qt_ffmpeg_runtime=ok",
+          "qt_webengine_runtime=absent deployment=excluded",
+          "project_entrypoint=ok source=app/src",
+          "alignment_panel=ok state=inactive platform=offscreen",
+          "bestsource_frame=ok",
+          "alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 topology=one_reference_ordered_comparisons",
+          "alignment_result_roundtrip=ok",
+          "alignment_result_validation=ok malformed=rejected",
+          "generated_vsview_session=ok",
+          "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok"
+        )) {
+          if ($proof -notmatch "WINDOWS_BUNDLE_PROOF $marker") {
+            throw "Required VSView runtime proof marker missing: $marker"
+          }
+        }
+        if ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok ") {
+          Write-Host "Direct placebo frame proof completed."
+        } elseif ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable") {
+          Write-Warning "Hosted runner lacks a usable Vulkan runtime; direct placebo frame proof remains required in Phase 2."
+        } else {
+          throw "Direct placebo frame proof did not report a recognized result."
+        }
+
+    - name: Verify bundle workspace directories
+      shell: pwsh
+      run: |
+        $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
+        $bundleConfigDir = Join-Path $bundle "config"
+        $bundleInputDir = Join-Path $bundle "comparison_videos"
+        $vsPackagePlugins = Join-Path $bundle "app/site-packages/vapoursynth/plugins"
+        $canonicalLsmasPlugin = Join-Path $vsPackagePlugins "LSMASHSource.dll"
+        $extraPluginRoot = Join-Path $bundle "vs/extra-plugins"
+
+        if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
+          throw "Missing default workspace directory in bundle: $bundleConfigDir"
+        }
+        if (!(Test-Path -LiteralPath $bundleInputDir -PathType Container)) {
+          throw "Missing default workspace directory in bundle: $bundleInputDir"
+        }
+        if (!(Test-Path -LiteralPath $vsPackagePlugins -PathType Container)) {
+          throw "Missing R74+ VapourSynth package plugin directory: $vsPackagePlugins"
+        }
+        if (!(Test-Path -LiteralPath $canonicalLsmasPlugin -PathType Leaf)) {
+          throw "Missing canonical L-SMASH plugin: $canonicalLsmasPlugin"
+        }
+        if (Test-Path -LiteralPath $extraPluginRoot) {
+          throw "Unexpected duplicate extra-plugin tree: $extraPluginRoot"
+        }
+
+    - name: "Smoke: absolute candidate launcher"
+      shell: pwsh
+      run: |
+        $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
+        $launcher = Join-Path $bundle "frame-compare.ps1"
+        Get-Command -CommandType ExternalScript $launcher | Format-List Source,Path
+        & $launcher --help | Out-Host
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $launcher version | Out-Host
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $doctorStdout = Join-Path $env:RUNNER_TEMP "bundle-doctor.json"
+        $doctorStderr = Join-Path $env:RUNNER_TEMP "bundle-doctor.stderr.txt"
+        & $launcher doctor --json 1> $doctorStdout 2> $doctorStderr
+        $exitCode = $LASTEXITCODE
+        $knownNoise = "Core plugin autoloading failed. Installation is broken!"
+        foreach ($line in Get-Content -LiteralPath $doctorStderr) {
+          if ($line -eq $knownNoise) {
+            continue
+          }
+          Write-Warning $line
+        }
+        if ($exitCode -ne 0) {
+          exit $exitCode
+        }
+        $doctorJson = Get-Content -LiteralPath $doctorStdout -Raw
+        try {
+          $doctorPayload = $doctorJson | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+          throw "Candidate doctor stdout is not exactly one valid JSON document: $($_.Exception.Message)"
+        }
+        if ($doctorPayload -isnot [PSCustomObject] -or $doctorPayload.success -ne $true) {
+          throw "Candidate doctor JSON is not a successful object"
+        }
+        $ffmpegChecks = @(
+          $doctorPayload.doctor.checks |
+            Where-Object { $_.id -ceq "ffmpeg" }
+        )
+        if ($ffmpegChecks.Count -ne 1 -or $ffmpegChecks[0].status -cne "pass") {
+          throw "Candidate doctor FFmpeg check did not pass exactly once"
+        }
+        Write-Host $doctorJson
+
+    - name: Package zip
+      shell: pwsh
+      run: |
+        $bundle = "dist/frame-compare-portable-win-x64"
+        $zip = "dist/frame-compare-portable-win-x64.zip"
+        if (Test-Path $zip) { Remove-Item -Force $zip }
+        python -B -I -S tools/windows_portable/portable_bundle.py pack --root $bundle --output $zip
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Verify extracted portable bundle
+      shell: pwsh
+      env:
+        EXPECTED_SHA: ${{ inputs.expected_sha }}
+      run: |
+        $extractedProofLog = Join-Path $env:RUNNER_TEMP "windows-extracted-proof.log"
+        pwsh -NoProfile -ExecutionPolicy Bypass `
+          -File tools/windows_portable/verify_extracted_bundle.ps1 `
+          -ZipPath dist/frame-compare-portable-win-x64.zip `
+          -ExtractRoot dist/zip_extract_check `
+          -DoctorStdoutPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.json") `
+          -DoctorStderrPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt") `
+          -ExpectedCommitSha "$env:EXPECTED_SHA" `
+          -CommandTimeoutSeconds 300 2>&1 | Tee-Object -FilePath $extractedProofLog
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $extractedProof = Get-Content -LiteralPath $extractedProofLog -Raw
+        foreach ($marker in @(
+          "WINDOWS_EXTRACTED_PROOF license_inventory=ok",
+          "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok",
+          "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded",
+          "WINDOWS_EXTRACTED_PROOF result=ok"
+        )) {
+          if ($extractedProof -notmatch [regex]::Escape($marker)) {
+            throw "Required extracted-bundle proof marker missing: $marker"
+          }
+        }
+
+    - name: Build code-only update zip
+      shell: pwsh
+      run: |
+        ./tools/windows_portable/build_update.ps1 `
+          -BundleDir dist/frame-compare-portable-win-x64 `
+          -OutFile dist/unsigned-update.zip
+        Move-Item -LiteralPath dist/frame-compare-portable-win-x64.zip -Destination dist/portable.zip
+
+    - name: Upload portable input
+      id: bundle
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: portable.zip
+        path: dist/portable.zip
+        archive: false
+        if-no-files-found: error
+
+    - name: Upload unsigned update input
+      id: update
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: unsigned-update.zip
+        path: dist/unsigned-update.zip
+        archive: false
+        if-no-files-found: error

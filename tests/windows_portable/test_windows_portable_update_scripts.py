@@ -731,8 +731,6 @@ def test_update_generator_keeps_numeric_minimum_for_stable_and_rc(
     exe = shutil.which(interpreter)
     if exe is None:
         pytest.skip(f"{interpreter} unavailable for generator version calculation")
-    source = _read_text_or_fail(repo_root / "tools/windows_portable/build_update.ps1")
-    body = _extract_powershell_function(source, "Get-FromVersionMin")
     result = subprocess.run(
         [
             exe,
@@ -741,14 +739,15 @@ def test_update_generator_keeps_numeric_minimum_for_stable_and_rc(
             r"""
 $ErrorActionPreference = 'Stop'
 . $env:VERSION_OWNER
-. ([scriptblock]::Create($env:FUNCTION_BODY))
+. $env:MANIFEST_OWNER
 foreach ($version in @('1.2.3', '1.2.3rc1', '0.8.0rc999999999')) {
-  $actual = Get-FromVersionMin $version
+  $manifest = [Text.Encoding]::UTF8.GetString((New-UpdateManifestBytes $version)) | ConvertFrom-Json
+  $actual = $manifest.from_app_version_min
   $expected = if ($version.StartsWith('1.2.')) { '1.2.0' } else { '0.8.0' }
   if ($actual -cne $expected) { throw "incorrect stable minimum: $actual" }
 }
-try { Get-FromVersionMin '1.2.3RC1'; throw 'malformed version accepted' }
-catch { if ($_.Exception.Message -notlike 'Malformed app version*') { throw } }
+try { New-UpdateManifestBytes '1.2.3RC1'; throw 'malformed version accepted' }
+catch { if ($_.Exception.Message -ne 'Invalid update version.') { throw } }
 Write-Host 'generator-minimum-cases-complete'
 """,
         ],
@@ -757,7 +756,7 @@ Write-Host 'generator-minimum-cases-complete'
             "VERSION_OWNER": str(
                 repo_root / "tools/windows_portable/shim/frame-compare-version.ps1"
             ),
-            "FUNCTION_BODY": body,
+            "MANIFEST_OWNER": str(repo_root / "tools/windows_portable/update_manifest_bytes.ps1"),
         },
         capture_output=True,
         text=True,

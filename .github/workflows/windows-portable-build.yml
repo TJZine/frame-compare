@@ -1,4 +1,4 @@
-name: Reusable Windows portable build
+name: Reusable signed Windows portable build
 
 on:
   workflow_call:
@@ -24,409 +24,457 @@ on:
         description: Prepare the exact four versioned release assets
         required: true
         type: boolean
+    outputs:
+      release_assets_id:
+        description: Immutable artifact ID of the four verified release assets
+        value: ${{ jobs.package_attest.outputs.release_assets_id }}
     secrets:
       WINDOWS_UPDATE_SIGNING_KEY_XML:
-        required: false
+        description: Named binding for the protected environment secret. Provision the key only in protected environments.
+        required: true
+
+permissions: {}
 
 jobs:
-  build:
+  build_test:
     runs-on: windows-latest
     timeout-minutes: 90
-    environment:
-      name: ${{ inputs.environment_name }}
-    env:
-      REQUIRE_SIGNING: ${{ inputs.require_signing }}
+    permissions:
+      contents: read
+    outputs:
+      bundle_id: ${{ steps.build.outputs.bundle_id }}
+      bundle_digest: ${{ steps.build.outputs.bundle_digest }}
+      update_id: ${{ steps.build.outputs.update_id }}
+      update_digest: ${{ steps.build.outputs.update_digest }}
     steps:
-      - name: Validate reusable-workflow inputs
-        if: inputs.prepare_release_assets && !inputs.require_signing
+      - name: Validate signed workflow inputs
         shell: pwsh
+        env:
+          REQUIRE_SIGNING: ${{ inputs.require_signing }}
+          ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+          PREPARE_RELEASE_ASSETS: ${{ inputs.prepare_release_assets }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          throw "prepare_release_assets requires require_signing=true so orchestrated release assets are always signed."
+          if ($env:REQUIRE_SIGNING -cne "true" -or $env:ENVIRONMENT_NAME -cnotin @("production", "release-candidate")) {
+            throw "Signed portable builds require a protected release environment."
+          }
+          if (($env:PREPARE_RELEASE_ASSETS -ceq "true") -ne ![string]::IsNullOrEmpty($env:RELEASE_TAG)) {
+            throw "Release assets require a release tag; manual verification requires an empty tag."
+          }
 
-      - name: Checkout
+      - name: Checkout exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.expected_sha }}
+          fetch-depth: 1
           persist-credentials: false
 
-      - name: Verify exact reusable-workflow checkout
+      - name: Verify exact checkout
         shell: pwsh
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
-          $ErrorActionPreference = "Stop"
-          $actualSha = (git rev-parse HEAD).Trim()
-          if ($actualSha -ne $env:EXPECTED_SHA) {
-            throw "Reusable Windows workflow checked out $actualSha instead of expected SHA."
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:EXPECTED_SHA -cnotmatch '\A[0-9a-f]{40}\z' -or (git rev-parse HEAD).Trim() -cne $env:EXPECTED_SHA) {
+            throw "Checkout did not resolve to the exact expected commit."
           }
 
-      - name: Setup Python 3.13.17
+      - name: Require an independently approved portable runtime catalog
+        shell: pwsh
+        run: |
+          $catalog = "tools/windows_portable/release-runtime-files.json"
+          if ((git ls-tree --name-only HEAD -- $catalog) -cne $catalog) {
+            throw "Portable release blocked: the approved commit lacks an independently derived release-runtime-files.json."
+          }
+
+      - name: Build and exercise Windows portable inputs
+        id: build
+        uses: ./.github/actions/windows-portable-build
+        with:
+          expected_sha: ${{ inputs.expected_sha }}
+          require_signing: ${{ inputs.require_signing }}
+
+  verify_unsigned:
+    needs: build_test
+    runs-on: windows-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    outputs:
+      receipt_id: ${{ steps.verify.outputs.receipt_id }}
+      receipt_digest: ${{ steps.verify.outputs.receipt_digest }}
+      verified_bundle_id: ${{ steps.verify.outputs.verified_bundle_id }}
+      verified_update_id: ${{ steps.verify.outputs.verified_update_id }}
+      manifest_id: ${{ steps.verify.outputs.manifest_id }}
+      manifest_digest: ${{ steps.verify.outputs.manifest_digest }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:EXPECTED_SHA -cnotmatch '\A[0-9a-f]{40}\z' -or (git rev-parse HEAD).Trim() -cne $env:EXPECTED_SHA) {
+            throw "Checkout did not resolve to the exact expected commit."
+          }
+
+      - name: Verify unsigned inputs on a fresh runner
+        id: verify
+        uses: ./.github/actions/windows-portable-verify
+        with:
+          expected_sha: ${{ inputs.expected_sha }}
+          release_tag: ${{ inputs.release_tag }}
+          require_portable_authority: "true"
+          bundle_id: ${{ needs.build_test.outputs.bundle_id }}
+          bundle_digest: ${{ needs.build_test.outputs.bundle_digest }}
+          update_id: ${{ needs.build_test.outputs.update_id }}
+          update_digest: ${{ needs.build_test.outputs.update_digest }}
+
+  artifact_security:
+    name: Inventory and scan verified portable artifact
+    needs: verify_unsigned
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      evidence_id: ${{ steps.evidence.outputs.artifact-id }}
+      evidence_digest: ${{ steps.evidence.outputs.artifact-digest }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$(git rev-parse HEAD)" != "$EXPECTED_SHA" ]]; then
+            echo "Artifact security checkout did not resolve to the exact expected commit." >&2
+            exit 1
+          fi
+
+      - name: Setup isolated host Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13.17"
 
-      - name: Setup uv
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - name: Require immutable verified inputs
+        shell: bash
+        env:
+          VERIFIED_BUNDLE_ID: ${{ needs.verify_unsigned.outputs.verified_bundle_id }}
+          RECEIPT_ID: ${{ needs.verify_unsigned.outputs.receipt_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERIFIED_BUNDLE_ID" =~ ^[1-9][0-9]*$ ]] || [[ ! "$RECEIPT_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Artifact security requires exact portable and receipt artifact IDs." >&2
+            exit 1
+          fi
+
+      - name: Download exact verified portable ZIP
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          version: "0.13.5"
-          enable-cache: ${{ inputs.require_signing }}
+          artifact-ids: ${{ needs.verify_unsigned.outputs.verified_bundle_id }}
+          path: ${{ runner.temp }}/portable-security-inputs
+          skip-decompress: true
+          digest-mismatch: error
 
-      - name: Install dev dependencies (frozen)
-        run: uv sync --all-groups --extra vsview --frozen
+      - name: Download exact verification receipt
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.verify_unsigned.outputs.receipt_id }}
+          path: ${{ runner.temp }}/portable-security-inputs
+          skip-decompress: true
+          digest-mismatch: error
 
-      - name: Full test suite (includes portable updater proof)
-        run: uv run --no-sync pytest -q
-
-      - name: Validate update public key
-        if: env.REQUIRE_SIGNING == 'true'
-        shell: pwsh
+      - name: Safely stage the receipt-bound portable tree
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          VERIFIED_BUNDLE_ID: ${{ needs.verify_unsigned.outputs.verified_bundle_id }}
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/validate_update_public_key.ps1 `
-            -PublicKeyPath tools/windows_portable/update_public_key.xml
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/portable-security-evidence"
+          mkdir "$evidence"
+          python -B -I -S tools/windows_portable/artifact_security.py stage \
+            --archive "$RUNNER_TEMP/portable-security-inputs/verified-portable.zip" \
+            --verification "$RUNNER_TEMP/portable-security-inputs/verification.json" \
+            --expected-sha "$EXPECTED_SHA" \
+            --expected-artifact-id "$VERIFIED_BUNDLE_ID" \
+            --output "$RUNNER_TEMP/portable-security-tree" \
+            --scan-input "$evidence/scan-input.json"
 
-      - name: Build portable bundle
-        shell: pwsh
+      - name: Install checksum-pinned scanners
+        shell: bash
         run: |
-          $ErrorActionPreference = "Stop"
-          $PSNativeCommandUseErrorActionPreference = $true
-          $out = "dist/frame-compare-portable-win-x64"
-          $proofLog = "dist/windows-bundle-runtime-proof.log"
-          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
-          $buildArgs = @(
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            "tools/windows_portable/build_portable.ps1",
-            "-ManifestPath",
-            "tools/windows_portable/manifest.windows-x64.json",
-            "-OutDir",
-            $out,
-            "-CacheDir",
-            ".portable_cache"
+          set -euo pipefail
+          tools="$RUNNER_TEMP/portable-security-tools"
+          mkdir "$tools"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+            --output "$tools/syft.tar.gz" \
+            https://github.com/anchore/syft/releases/download/v1.56.0/syft_1.56.0_linux_amd64.tar.gz
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+            --output "$tools/grype.tar.gz" \
+            https://github.com/anchore/grype/releases/download/v0.121.0/grype_0.121.0_linux_amd64.tar.gz
+          (
+            cd "$tools"
+            echo "1c2493cfcf52d3367d6cb25780d9190c111c2219c34c820574c43e8bae15c528  syft.tar.gz" | sha256sum --check
+            echo "64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519  grype.tar.gz" | sha256sum --check
+            tar --extract --gzip --file syft.tar.gz --no-same-owner syft
+            tar --extract --gzip --file grype.tar.gz --no-same-owner grype
           )
-          if ($env:REQUIRE_SIGNING -eq "true") {
-            $buildArgs += "-RequireReleasePublicKey"
-          }
-          pwsh @buildArgs 2>&1 | Tee-Object -FilePath $proofLog
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
-          }
-          $proof = Get-Content -LiteralPath $proofLog -Raw
-          foreach ($phase in @(
-            "package_imports",
-            "runtime_contract",
-            "vapoursynth_environment",
-            "lwlibavsource_frame",
-            "placebo_tonemap_api",
-            "apply_tonemap_frame",
-            "placebo_tonemap_frame",
-            "vsview_runtime"
-          )) {
-            if ($proof -notmatch "WINDOWS_BUNDLE_PROOF phase=$phase ok") {
-              throw "Required portable runtime proof phase missing: $phase"
-            }
-          }
-          if ($proof -notmatch "WINDOWS_BUNDLE_PROOF vsview_runtime=ok") {
-            throw "Required combined VSView runtime proof marker missing."
-          }
-          foreach ($marker in @(
-            "pyside6_event_loop=ok",
-            "vsview_deep_imports=ok",
-            "qt_ffmpeg_runtime=ok",
-            "qt_webengine_runtime=absent deployment=excluded",
-            "project_entrypoint=ok source=app/src",
-            "alignment_panel=ok state=inactive platform=offscreen",
-            "bestsource_frame=ok",
-            "alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 topology=one_reference_ordered_comparisons",
-            "alignment_result_roundtrip=ok",
-            "alignment_result_validation=ok malformed=rejected",
-            "generated_vsview_session=ok",
-            "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok"
-          )) {
-            if ($proof -notmatch "WINDOWS_BUNDLE_PROOF $marker") {
-              throw "Required VSView runtime proof marker missing: $marker"
-            }
-          }
-          if ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok ") {
-            Write-Host "Direct placebo frame proof completed."
-          } elseif ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable") {
-            Write-Warning "Hosted runner lacks a usable Vulkan runtime; direct placebo frame proof remains required in Phase 2."
-          } else {
-            throw "Direct placebo frame proof did not report a recognized result."
-          }
+          printf 'SYFT_BIN=%s\n' "$tools/syft" >> "$GITHUB_ENV"
+          printf 'GRYPE_BIN=%s\n' "$tools/grype" >> "$GITHUB_ENV"
 
-      - name: Verify bundle workspace directories
-        shell: pwsh
+      - name: Generate SBOMs and unsuppressed advisory evidence
+        shell: bash
+        env:
+          GRYPE_DB_AUTO_UPDATE: "true"
+          GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/grype-db
+          GRYPE_DB_MAX_ALLOWED_BUILT_AGE: 120h
+          GRYPE_DB_MAX_UPDATE_CHECK_FREQUENCY: "0"
+          GRYPE_DB_REQUIRE_UPDATE_CHECK: "true"
+          GRYPE_DB_VALIDATE_AGE: "true"
+          GRYPE_DB_VALIDATE_BY_HASH_ON_START: "true"
         run: |
-          $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
-          $bundleConfigDir = Join-Path $bundle "config"
-          $bundleInputDir = Join-Path $bundle "comparison_videos"
-          $vsPackagePlugins = Join-Path $bundle "app/site-packages/vapoursynth/plugins"
-          $canonicalLsmasPlugin = Join-Path $vsPackagePlugins "LSMASHSource.dll"
-          $extraPluginRoot = Join-Path $bundle "vs/extra-plugins"
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/portable-security-evidence"
+          "$SYFT_BIN" version > "$evidence/syft-version.txt"
+          "$GRYPE_BIN" version > "$evidence/grype-version.txt"
+          "$SYFT_BIN" scan "dir:$RUNNER_TEMP/portable-security-tree" \
+            -o "syft-json=$evidence/windows-portable.syft.json" \
+            -o "cyclonedx-json=$evidence/windows-portable.cyclonedx.json"
+          "$GRYPE_BIN" "sbom:$evidence/windows-portable.syft.json" \
+            --output json > "$evidence/windows-portable.grype.json"
+          "$GRYPE_BIN" db status --output json > "$evidence/grype-db-status.json"
+          python -B -I -S tools/windows_portable/artifact_security.py policy \
+            --scan-input "$evidence/scan-input.json" \
+            --syft "$evidence/windows-portable.syft.json" \
+            --cyclonedx "$evidence/windows-portable.cyclonedx.json" \
+            --grype "$evidence/windows-portable.grype.json" \
+            --db-status "$evidence/grype-db-status.json" \
+            --syft-version "$evidence/syft-version.txt" \
+            --grype-version "$evidence/grype-version.txt" \
+            --expected-syft-version 1.56.0 \
+            --expected-grype-version 0.121.0 \
+            --output "$evidence/artifact-security.json"
 
-          if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
-            throw "Missing default workspace directory in bundle: $bundleConfigDir"
-          }
-          if (!(Test-Path -LiteralPath $bundleInputDir -PathType Container)) {
-            throw "Missing default workspace directory in bundle: $bundleInputDir"
-          }
-          if (!(Test-Path -LiteralPath $vsPackagePlugins -PathType Container)) {
-            throw "Missing R74+ VapourSynth package plugin directory: $vsPackagePlugins"
-          }
-          if (!(Test-Path -LiteralPath $canonicalLsmasPlugin -PathType Leaf)) {
-            throw "Missing canonical L-SMASH plugin: $canonicalLsmasPlugin"
-          }
-          if (Test-Path -LiteralPath $extraPluginRoot) {
-            throw "Unexpected duplicate extra-plugin tree: $extraPluginRoot"
-          }
+      - name: Retain final-artifact security evidence
+        if: always()
+        id: evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-portable-security-evidence
+          path: ${{ runner.temp }}/portable-security-evidence
+          if-no-files-found: error
+          retention-days: 90
 
-      - name: "Smoke: absolute candidate launcher"
-        shell: pwsh
-        run: |
-          $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
-          $launcher = Join-Path $bundle "frame-compare.ps1"
-          Get-Command -CommandType ExternalScript $launcher | Format-List Source,Path
-          & $launcher --help | Out-Host
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $launcher version | Out-Host
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $doctorStdout = Join-Path $env:RUNNER_TEMP "bundle-doctor.json"
-          $doctorStderr = Join-Path $env:RUNNER_TEMP "bundle-doctor.stderr.txt"
-          & $launcher doctor --json 1> $doctorStdout 2> $doctorStderr
-          $exitCode = $LASTEXITCODE
-          $knownNoise = "Core plugin autoloading failed. Installation is broken!"
-          foreach ($line in Get-Content -LiteralPath $doctorStderr) {
-            if ($line -eq $knownNoise) {
-              continue
-            }
-            Write-Warning $line
-          }
-          if ($exitCode -ne 0) {
-            exit $exitCode
-          }
-          $doctorJson = Get-Content -LiteralPath $doctorStdout -Raw
-          try {
-            $doctorPayload = $doctorJson | ConvertFrom-Json -ErrorAction Stop
-          } catch {
-            throw "Candidate doctor stdout is not exactly one valid JSON document: $($_.Exception.Message)"
-          }
-          if ($doctorPayload -isnot [PSCustomObject] -or $doctorPayload.success -ne $true) {
-            throw "Candidate doctor JSON is not a successful object"
-          }
-          $ffmpegChecks = @(
-            $doctorPayload.doctor.checks |
-              Where-Object { $_.id -ceq "ffmpeg" }
-          )
-          if ($ffmpegChecks.Count -ne 1 -or $ffmpegChecks[0].status -cne "pass") {
-            throw "Candidate doctor FFmpeg check did not pass exactly once"
-          }
-          Write-Host $doctorJson
+  sign_manifest:
+    needs: [verify_unsigned, artifact_security]
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    environment:
+      name: ${{ inputs.environment_name }}
+    outputs:
+      signature_id: ${{ steps.signature.outputs.artifact-id }}
+      signature_digest: ${{ steps.signature.outputs.artifact-digest }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Package zip
-        shell: pwsh
-        run: |
-          $bundle = "dist/frame-compare-portable-win-x64"
-          $zip = "dist/frame-compare-portable-win-x64.zip"
-          if (Test-Path $zip) { Remove-Item -Force $zip }
-          Compress-Archive -Path $bundle -DestinationPath $zip
-          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
-          Set-Content -Path "$zip.sha256" -Value "$hash  $(Split-Path -Leaf $zip)" -Encoding ASCII
-
-      - name: Verify extracted portable bundle
+      - name: Verify exact checkout
         shell: pwsh
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: |
-          $extractedProofLog = Join-Path $env:RUNNER_TEMP "windows-extracted-proof.log"
-          pwsh -NoProfile -ExecutionPolicy Bypass `
-            -File tools/windows_portable/verify_extracted_bundle.ps1 `
-            -ZipPath dist/frame-compare-portable-win-x64.zip `
-            -ExtractRoot dist/zip_extract_check `
-            -DoctorStdoutPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.json") `
-            -DoctorStderrPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt") `
-            -ExpectedCommitSha "$env:EXPECTED_SHA" `
-            -CommandTimeoutSeconds 300 2>&1 | Tee-Object -FilePath $extractedProofLog
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $extractedProof = Get-Content -LiteralPath $extractedProofLog -Raw
-          foreach ($marker in @(
-            "WINDOWS_EXTRACTED_PROOF license_inventory=ok",
-            "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok",
-            "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded",
-            "WINDOWS_EXTRACTED_PROOF result=ok"
-          )) {
-            if ($extractedProof -notmatch [regex]::Escape($marker)) {
-              throw "Required extracted-bundle proof marker missing: $marker"
-            }
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:EXPECTED_SHA -cnotmatch '\A[0-9a-f]{40}\z' -or (git rev-parse HEAD).Trim() -cne $env:EXPECTED_SHA) {
+            throw "Checkout did not resolve to the exact expected commit."
           }
 
-      - name: Build code-only update zip
+      - name: Require immutable input artifact IDs
         shell: pwsh
+        env:
+          MANIFEST_ID: ${{ needs.verify_unsigned.outputs.manifest_id }}
+          RECEIPT_ID: ${{ needs.verify_unsigned.outputs.receipt_id }}
+          SECURITY_EVIDENCE_ID: ${{ needs.artifact_security.outputs.evidence_id }}
+          SECURITY_EVIDENCE_DIGEST: ${{ needs.artifact_security.outputs.evidence_digest }}
         run: |
-          $ErrorActionPreference = "Stop"
-          $PSNativeCommandUseErrorActionPreference = $true
-          $bundle = "dist/frame-compare-portable-win-x64"
-          $version = (uv run --no-sync python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])").Trim()
-          $updateZip = "dist/frame-compare-update-win-x64-$version.zip"
-          pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_update.ps1 `
-            -BundleDir $bundle `
-            -OutFile $updateZip
-          "UPDATE_ZIP=$updateZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          foreach ($id in @($env:MANIFEST_ID, $env:RECEIPT_ID, $env:SECURITY_EVIDENCE_ID)) {
+            if ($id -notmatch '\A[1-9][0-9]*\z') { throw "Missing exact release input artifact ID." }
+          }
+          if ($env:SECURITY_EVIDENCE_DIGEST -cnotmatch '\A[0-9a-f]{64}\z') {
+            throw "Missing final-artifact security evidence digest."
+          }
 
-      # Pull requests prove unsigned update zip creation without signing secrets.
-      # Reusable release and manual runs require a signed update and fail closed.
-      - name: Sign code-only update zip
-        if: env.REQUIRE_SIGNING == 'true'
+      - name: Download exact canonical manifest
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.verify_unsigned.outputs.manifest_id }}
+          path: ${{ runner.temp }}/portable-inputs
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Download exact verification receipt
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.verify_unsigned.outputs.receipt_id }}
+          path: ${{ runner.temp }}/portable-inputs
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Regenerate and compare manifest from the exact checkout
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          MANIFEST_DIGEST: ${{ needs.verify_unsigned.outputs.manifest_digest }}
+          VERIFICATION_DIGEST: ${{ needs.verify_unsigned.outputs.receipt_digest }}
+        run: |
+          ./tools/windows_portable/release_update.ps1 -Stage PrepareSigning `
+            -ExpectedSha $env:EXPECTED_SHA -ReleaseTag $env:RELEASE_TAG `
+            -InputDir (Join-Path $env:RUNNER_TEMP "portable-inputs") `
+            -OutputDir (Join-Path $env:RUNNER_TEMP "approved") `
+            -ManifestDigest $env:MANIFEST_DIGEST -VerificationDigest $env:VERIFICATION_DIGEST
+
+      - name: Sign approved manifest bytes
         shell: pwsh
         env:
           WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}
+          MANIFEST_DIGEST: ${{ needs.verify_unsigned.outputs.manifest_digest }}
+          VERIFICATION_DIGEST: ${{ needs.verify_unsigned.outputs.receipt_digest }}
         run: |
-          $ErrorActionPreference = "Stop"
+          ./tools/windows_portable/sign_verified_manifest.ps1 `
+            -ManifestPath (Join-Path $env:RUNNER_TEMP "approved/manifest.json") `
+            -ManifestDigest $env:MANIFEST_DIGEST -VerificationDigest $env:VERIFICATION_DIGEST `
+            -OutFile (Join-Path $env:RUNNER_TEMP "approved/detached-signature.json")
+
+      - name: Upload detached signature and receipt binding
+        id: signature
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: detached-signature.json
+          path: ${{ runner.temp }}/approved/detached-signature.json
+          archive: false
+          if-no-files-found: error
+
+  package_attest:
+    needs: [verify_unsigned, artifact_security, sign_manifest]
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      release_assets_id: ${{ steps.release_assets.outputs.artifact-id }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_UPDATE_SIGNING_KEY_XML)) {
-            throw "WINDOWS_UPDATE_SIGNING_KEY_XML is required for reusable release and manual runs."
+          if ($env:EXPECTED_SHA -cnotmatch '\A[0-9a-f]{40}\z' -or (git rev-parse HEAD).Trim() -cne $env:EXPECTED_SHA) {
+            throw "Checkout did not resolve to the exact expected commit."
           }
 
-          $keyPath = Join-Path $env:RUNNER_TEMP "frame-compare-update-signing-key.xml"
-          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-          try {
-            [System.IO.File]::WriteAllText($keyPath, $env:WINDOWS_UPDATE_SIGNING_KEY_XML, $utf8NoBom)
-            $env:SIGNING_KEY_XML_PATH = $keyPath
-            pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update.ps1 `
-              -UpdateZip $env:UPDATE_ZIP `
-              -ExpectedPublicKeyPath tools/windows_portable/update_public_key.xml
-          } finally {
-            Remove-Item Env:\SIGNING_KEY_XML_PATH -ErrorAction SilentlyContinue
-            if (Test-Path -LiteralPath $keyPath -PathType Leaf) {
-              Remove-Item -LiteralPath $keyPath -Force
-            }
-          }
-
-      - name: Hash code-only update zip
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $hash = (Get-FileHash -Algorithm SHA256 $env:UPDATE_ZIP).Hash.ToLowerInvariant()
-          Set-Content -Path "$env:UPDATE_ZIP.sha256" -Value "$hash  $(Split-Path -Leaf $env:UPDATE_ZIP)" -Encoding ASCII
-
-      - name: Verify code-only update zip layout
+      - name: Require immutable input artifact IDs
         shell: pwsh
         env:
-          REQUIRE_SIGNED_UPDATE: ${{ env.REQUIRE_SIGNING }}
+          BUNDLE_ID: ${{ needs.verify_unsigned.outputs.verified_bundle_id }}
+          UPDATE_ID: ${{ needs.verify_unsigned.outputs.verified_update_id }}
+          MANIFEST_ID: ${{ needs.verify_unsigned.outputs.manifest_id }}
+          RECEIPT_ID: ${{ needs.verify_unsigned.outputs.receipt_id }}
+          SIGNATURE_ID: ${{ needs.sign_manifest.outputs.signature_id }}
         run: |
-          $ErrorActionPreference = "Stop"
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zipPath = (Resolve-Path $env:UPDATE_ZIP).Path
-          $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
-          try {
-            $entries = @($zip.Entries | ForEach-Object { $_.FullName })
-            $manifestEntry = $zip.GetEntry("update-manifest.json")
-            if ($null -eq $manifestEntry) {
-              throw "Missing update manifest in update zip."
-            }
-            $reader = New-Object System.IO.StreamReader($manifestEntry.Open(), [System.Text.Encoding]::UTF8)
-            try {
-              $manifest = $reader.ReadToEnd() | ConvertFrom-Json
-            } finally {
-              $reader.Dispose()
-            }
-          } finally {
-            $zip.Dispose()
+          foreach ($id in @($env:BUNDLE_ID, $env:UPDATE_ID, $env:MANIFEST_ID, $env:RECEIPT_ID, $env:SIGNATURE_ID)) {
+            if ($id -notmatch '\A[1-9][0-9]*\z') { throw "Missing exact release input artifact ID." }
           }
 
-          if ($entries -notcontains "update-manifest.json") {
-            throw "Missing update-manifest.json in update zip."
-          }
-          if (-not ($entries | Where-Object { $_.StartsWith("payload/app/src/frame_compare/") })) {
-            throw "Missing code payload under payload/app/src/frame_compare/."
-          }
-          if ($manifest.target_platform -ne "windows-x64") {
-            throw "Unexpected update target platform: $($manifest.target_platform)"
-          }
-          if ($manifest.payload_root -ne "payload") {
-            throw "Unexpected update payload root: $($manifest.payload_root)"
-          }
-          if ($manifest.signature_file -ne "update-manifest.sig") {
-            throw "Unexpected update signature file: $($manifest.signature_file)"
-          }
-          if ($env:REQUIRE_SIGNED_UPDATE -eq "true" -and $entries -notcontains "update-manifest.sig") {
-            throw "Signed update zip is missing update-manifest.sig."
-          }
+      - name: Download verified portable ZIP
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.verify_unsigned.outputs.verified_bundle_id }}
+          path: ${{ runner.temp }}/portable-inputs
+          skip-decompress: true
+          digest-mismatch: error
 
-      - name: Prepare exact orchestrated release assets
-        if: inputs.prepare_release_assets
+      - name: Download verified unsigned update ZIP
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.verify_unsigned.outputs.verified_update_id }}
+          path: ${{ runner.temp }}/portable-inputs
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Download exact canonical manifest
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.verify_unsigned.outputs.manifest_id }}
+          path: ${{ runner.temp }}/portable-inputs
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Download exact verification receipt
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.verify_unsigned.outputs.receipt_id }}
+          path: ${{ runner.temp }}/portable-inputs
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Download exact detached signature
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.sign_manifest.outputs.signature_id }}
+          path: ${{ runner.temp }}/portable-inputs
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Package and independently verify signed assets
         shell: pwsh
         env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          MANIFEST_DIGEST: ${{ needs.verify_unsigned.outputs.manifest_digest }}
+          VERIFICATION_DIGEST: ${{ needs.verify_unsigned.outputs.receipt_digest }}
+          SIGNATURE_DIGEST: ${{ needs.sign_manifest.outputs.signature_digest }}
+          VERIFIED_BUNDLE_ID: ${{ needs.verify_unsigned.outputs.verified_bundle_id }}
+          VERIFIED_UPDATE_ID: ${{ needs.verify_unsigned.outputs.verified_update_id }}
         run: |
-          $ErrorActionPreference = "Stop"
-          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+(?:-rc\.\d+)?$') {
-            throw "Reusable workflow received an invalid release tag."
-          }
-
-          $assetDir = "dist/release-assets"
-          if (Test-Path -LiteralPath $assetDir) {
-            Remove-Item -LiteralPath $assetDir -Recurse -Force
-          }
-          New-Item -ItemType Directory -Path $assetDir | Out-Null
-
-          $portableSource = "dist/frame-compare-portable-win-x64.zip"
-          $updateSources = @(
-            Get-ChildItem -LiteralPath "dist" -Filter "frame-compare-update-win-x64-*.zip" -File
-          )
-          if ($updateSources.Count -ne 1) {
-            throw "Expected exactly one signed update zip, found $($updateSources.Count)."
-          }
-
-          $portableName = "frame-compare-portable-win-x64-$($env:RELEASE_TAG).zip"
-          $updateName = "frame-compare-update-win-x64-$($env:RELEASE_TAG).zip"
-          $portableTarget = Join-Path $assetDir $portableName
-          $updateTarget = Join-Path $assetDir $updateName
-          Copy-Item -LiteralPath $portableSource -Destination $portableTarget
-          Copy-Item -LiteralPath $updateSources[0].FullName -Destination $updateTarget
-
-          foreach ($asset in @($portableTarget, $updateTarget)) {
-            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLowerInvariant()
-            $leaf = Split-Path -Leaf $asset
-            Set-Content -LiteralPath "$asset.sha256" -Value "$hash  $leaf" -Encoding ASCII
-          }
-
-      - name: Verify exact orchestrated release asset set
-        if: inputs.prepare_release_assets
-        shell: pwsh
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $assetDir = "dist/release-assets"
-          $expected = @(
-            "frame-compare-portable-win-x64-$($env:RELEASE_TAG).zip",
-            "frame-compare-portable-win-x64-$($env:RELEASE_TAG).zip.sha256",
-            "frame-compare-update-win-x64-$($env:RELEASE_TAG).zip",
-            "frame-compare-update-win-x64-$($env:RELEASE_TAG).zip.sha256"
-          ) | Sort-Object
-          $actual = @(
-            Get-ChildItem -LiteralPath $assetDir -File | ForEach-Object { $_.Name }
-          ) | Sort-Object
-          if (Compare-Object -ReferenceObject $expected -DifferenceObject $actual) {
-            throw "Orchestrated release assets do not match the exact mandatory set."
-          }
-
-          foreach ($checksumPath in @(
-            (Join-Path -Path $assetDir -ChildPath "frame-compare-portable-win-x64-$($env:RELEASE_TAG).zip.sha256"),
-            (Join-Path -Path $assetDir -ChildPath "frame-compare-update-win-x64-$($env:RELEASE_TAG).zip.sha256")
-          )) {
-            $line = (Get-Content -LiteralPath $checksumPath -Raw).Trim()
-            if ($line -notmatch '^([0-9a-f]{64})  ([^\\/]+\.zip)$') {
-              throw "Malformed checksum file: $checksumPath"
-            }
-            $assetPath = Join-Path $assetDir $Matches[2]
-            $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $assetPath).Hash.ToLowerInvariant()
-            if ($actualHash -ne $Matches[1]) {
-              throw "Checksum mismatch for $assetPath"
-            }
-          }
+          ./tools/windows_portable/release_update.ps1 -Stage Package `
+            -ExpectedSha $env:EXPECTED_SHA -ReleaseTag $env:RELEASE_TAG `
+            -InputDir (Join-Path $env:RUNNER_TEMP "portable-inputs") `
+            -OutputDir dist/release-assets `
+            -ManifestDigest $env:MANIFEST_DIGEST -VerificationDigest $env:VERIFICATION_DIGEST `
+            -SignatureDigest $env:SIGNATURE_DIGEST `
+            -VerifiedBundleId $env:VERIFIED_BUNDLE_ID -VerifiedUpdateId $env:VERIFIED_UPDATE_ID
 
       - name: Attest release ZIP provenance
         if: inputs.prepare_release_assets
@@ -436,25 +484,8 @@ jobs:
             dist/release-assets/frame-compare-portable-win-x64-${{ inputs.release_tag }}.zip
             dist/release-assets/frame-compare-update-win-x64-${{ inputs.release_tag }}.zip
 
-      - name: Upload bundle artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: frame-compare-portable-win-x64
-          path: |
-            dist/frame-compare-portable-win-x64.zip
-            dist/frame-compare-portable-win-x64.zip.sha256
-          if-no-files-found: error
-
-      - name: Upload code-only update artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: frame-compare-update-win-x64
-          path: |
-            dist/frame-compare-update-win-x64-*.zip
-            dist/frame-compare-update-win-x64-*.zip.sha256
-          if-no-files-found: error
-
       - name: Upload exact orchestrated release assets
+        id: release_assets
         if: inputs.prepare_release_assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -464,4 +495,24 @@ jobs:
             dist/release-assets/frame-compare-portable-win-x64-${{ inputs.release_tag }}.zip.sha256
             dist/release-assets/frame-compare-update-win-x64-${{ inputs.release_tag }}.zip
             dist/release-assets/frame-compare-update-win-x64-${{ inputs.release_tag }}.zip.sha256
+          if-no-files-found: error
+
+      - name: Upload verified manual portable artifact
+        if: '!inputs.prepare_release_assets'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frame-compare-portable-win-x64
+          path: |
+            dist/release-assets/frame-compare-portable-win-x64.zip
+            dist/release-assets/frame-compare-portable-win-x64.zip.sha256
+          if-no-files-found: error
+
+      - name: Upload signed manual update artifact
+        if: '!inputs.prepare_release_assets'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frame-compare-update-win-x64
+          path: |
+            dist/release-assets/frame-compare-update-win-x64-*.zip
+            dist/release-assets/frame-compare-update-win-x64-*.zip.sha256
           if-no-files-found: error

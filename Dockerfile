@@ -218,6 +218,12 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
         /tmp/libplacebo-src \
         /tmp/libdovi-src
 
+# Keep the application layer independent of the checkout's tools, tests and
+# workspace files. The scratch stage also lets CI inspect these exact COPY inputs.
+FROM scratch AS application-inputs
+COPY README.md LICENSE /
+COPY src/frame_compare/ /src/frame_compare/
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Runtime
 # ─────────────────────────────────────────────────────────────────────────────
@@ -281,7 +287,7 @@ RUN useradd --create-home --shell /bin/bash framecompare
 USER framecompare
 WORKDIR /home/framecompare
 
-# Export and install lock-derived Python runtime dependencies before copying full source.
+# Export and install lock-derived Python runtime dependencies before copying application source.
 COPY --chown=framecompare:framecompare pyproject.toml uv.lock /home/framecompare/frame-compare/
 WORKDIR /home/framecompare/frame-compare
 RUN uv export --frozen --no-dev --no-emit-project --format requirements.txt --output-file /tmp/requirements.lock.txt && \
@@ -293,8 +299,7 @@ RUN uv export --frozen --no-dev --no-emit-project --format requirements.txt --ou
     python -m pip install --no-cache-dir --user --no-deps --require-hashes --only-binary=:all: \
         -r /tmp/docker-plugin-requirements.txt
 
-# Copy application source
-COPY --chown=framecompare:framecompare . /home/framecompare/frame-compare/
+COPY --from=application-inputs --chown=framecompare:framecompare / /home/framecompare/frame-compare/
 
 # Install the project itself without dependency resolution.
 RUN python -m pip install --no-cache-dir --user --no-deps -e .

@@ -14,6 +14,9 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
         args: ['--maxkb=1000']
+        # This reviewed, deterministic text catalog is intentionally committed so
+        # release verification can derive the portable runtime independently.
+        exclude: ^tools/windows_portable/release-runtime-files\.json$
       - id: check-merge-conflict
 
   # Ruff: linting + formatting (replaces black, isort, flake8).

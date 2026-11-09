@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -72,6 +73,7 @@ def test_builder_preserves_existing_state(
         "build_portable.ps1",
         "version_utils.ps1",
         "path_safety.ps1",
+        "portable_launchers.ps1",
         "manifest.schema.json",
     ):
         shutil.copyfile(repo_root / "tools/windows_portable" / name, owner / name)
@@ -125,7 +127,7 @@ def test_builder_preserves_existing_state(
     source = script.read_text()
     source = (
         source.rsplit("Main", 1)[0]
-        + '\nfunction Download-Artifact { throw "injected download failure" }\nMain\n'
+        + "\nfunction uv { return 'fixture python' }\nfunction Initialize-PortableRuntime { throw \"injected download failure\" }\nMain\n"
     )
     script.write_text(source)
     before = _snapshot(tmp_path)
@@ -422,6 +424,10 @@ def test_builder_uses_committed_version_and_empty_workspace(
     owner.mkdir(parents=True)
     for name in (
         "build_portable.ps1",
+        "portable_runtime.py",
+        "portable_archive.py",
+        "portable_bundle.py",
+        "portable_launchers.ps1",
         "version_utils.ps1",
         "path_safety.ps1",
         "manifest.schema.json",
@@ -437,9 +443,17 @@ def test_builder_uses_committed_version_and_empty_workspace(
     init = root / "src/frame_compare/__init__.py"
     init.parent.mkdir(parents=True)
     init.write_text('__version__ = "1.2.3"\n')
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "frame-compare"\nversion = "1.2.3"\n'
+        'requires-python = ">=3.13"\n'
+        '[project.scripts]\nframe-compare = "frame_compare.cli.entry:console_main"\n'
+        "[project.entry-points.vsview]\n"
+        'frame-compare-alignment-review = "frame_compare.vsview.alignment_review_panel"\n'
+    )
+    (root / "LICENSE").write_text("fixture license")
     for arguments in (
         ["init"],
-        ["add", "src"],
+        ["add", "src", "pyproject.toml", "LICENSE"],
         [
             "-c",
             "user.name=Fixture",
@@ -455,12 +469,8 @@ def test_builder_uses_committed_version_and_empty_workspace(
     script = owner / "build_portable.ps1"
     source = script.read_text().rsplit("Main", 1)[0]
     source += r"""
-function Download-Artifact { return 'unused' }
-function Install-Artifact {}
-function Install-PythonDeps { param($BundleRoot) Set-Content -LiteralPath (Join-Path $BundleRoot 'requirements.lock.txt') -Value 'fixture dependencies' }
-function Install-PythonWheelArtifacts {}
-function Remove-UnusedQtWebEngineRuntime {}
-function Configure-EmbeddedPython {}
+function uv { return $env:FIXTURE_PYTHON }
+function Initialize-PortableRuntime { param($BundleRoot) Set-Content -LiteralPath (Join-Path $BundleRoot 'requirements.lock.txt') -Value 'fixture dependencies' }
 function Assert-BundleRuntime {}
 function Remove-PythonBytecodeCaches {}
 function Write-LauncherFiles {}
@@ -480,6 +490,7 @@ Main
         OUT=str(out),
         CACHE=str(tmp_path / "cache"),
         REPO=str(root),
+        FIXTURE_PYTHON=sys.executable,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads((out / "bundle_info.json").read_text())["app_version"] == "1.2.3"
@@ -1049,6 +1060,7 @@ def test_builder_refuses_junction_ancestry_before_mutation(
     owner.mkdir(parents=True)
     for name in (
         "build_portable.ps1",
+        "portable_launchers.ps1",
         "version_utils.ps1",
         "path_safety.ps1",
         "manifest.windows-x64.json",

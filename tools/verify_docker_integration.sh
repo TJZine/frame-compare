@@ -196,15 +196,15 @@ doctor_path="$(mktemp /tmp/frame-compare-doctor.XXXXXX.json)"
 ffindex_path="$(mktemp -u /tmp/frame-compare-docker-proof.XXXXXX.ffindex)"
 cleanup_runtime_proof() {
   rm -f "$media_path" "$doctor_path" "$ffindex_path"
-  rm -f "${media_path}.frame-compare-"*.lwi
   if [[ -n "${pytest_cache_dir:-}" ]]; then
     rm -rf "$pytest_cache_dir"
   fi
 }
 trap cleanup_runtime_proof EXIT
 
-frame-compare --help >/tmp/frame-compare-help.txt
-frame-compare version >/tmp/frame-compare-version.txt
+frame-compare --help >/dev/null
+FRAME_COMPARE_PROOF_VERSION="$(frame-compare version)"
+export FRAME_COMPARE_PROOF_VERSION
 frame-compare doctor --json >"$doctor_path"
 ffmpeg -hide_banner -loglevel error \
   -f lavfi -i testsrc2=size=64x48:rate=24000/1001 \
@@ -319,9 +319,9 @@ if python -c 'import pytest' >/dev/null 2>&1; then
   echo "ERROR: pytest test tooling leaked into the production image" >&2
   exit 6
 fi
-for ignored_path in .codex .claude; do
+for ignored_path in .codex .claude .env tests tools; do
   if [[ -e "/home/framecompare/frame-compare/$ignored_path" ]]; then
-    echo "ERROR: local agent state leaked into the production image: $ignored_path" >&2
+    echo "ERROR: checkout-only input leaked into the production image: $ignored_path" >&2
     exit 6
   fi
 done
