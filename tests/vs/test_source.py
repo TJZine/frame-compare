@@ -1,6 +1,6 @@
 import asyncio
-import logging
 from collections.abc import Mapping
+from contextlib import AbstractContextManager, nullcontext
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,14 +12,15 @@ from vapoursynth import Core, VideoFormat, VideoNode
 
 import frame_compare.vs.hdr_probe as hdr_probe_module
 import frame_compare.vs.source as source_module
+from frame_compare.utils.canvas import MAX_CANVAS_PIXELS
+from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.source import (
     LWLibavSourceOptions,
     apply_trim,
     load_source,
-    source_index_path,
-    validate_source_index,
 )
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 from frame_compare.vs.types import SourceInfo
 
 
@@ -28,9 +29,12 @@ def _stub_hdr_probe(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequ
     if request.node.get_closest_marker("vs_required") is not None:
         return
     monkeypatch.setattr(
-        source_module, "resolve_optional_executable", lambda _executable: "/fake/ffprobe"
+        source_module,
+        "admit_source",
+        lambda _path, **_kwargs: SimpleNamespace(
+            streams=({"width": 1920, "height": 1080},), verify=lambda _source: None
+        ),
     )
-    monkeypatch.setattr(source_module, "probe_video_streams", lambda _path: [])
     monkeypatch.setattr(source_module, "probe_hdr_metadata", lambda _path, **_kwargs: None)
 
 
@@ -91,8 +95,15 @@ def make_mock_core(with_lsmas: bool = True, fail_load: bool = False) -> SimpleNa
     return core
 
 
-def _index_kwargs(path: str | Path) -> dict[str, object]:
-    return {"cachefile": str(source_index_path(Path(path)))}
+def _assert_cache_free(kwargs: dict[str, object], **decoder_options: object) -> None:
+    cachefile = Path(cast(str, kwargs.pop("cachefile")))
+    assert cachefile.is_absolute() and cachefile.name == "disabled.lwi"
+    assert not cachefile.parent.exists()
+    assert kwargs == {
+        "cache": 0,
+        "ff_options": f"max_pixels={MAX_CANVAS_PIXELS}",
+        **decoder_options,
+    }
 
 
 def test_load_source_returns_source_info():
@@ -109,7 +120,7 @@ def test_load_source_extracts_fps():
     assert source.fps == Fraction(24, 1)
 
 
-def test_load_source_default_does_not_forward_decoder_kwargs():
+def test_load_source_default_enforces_decoder_pixel_limit():
     calls: list[tuple[str, dict[str, object]]] = []
 
     def loader(path: str, **kwargs: object) -> MockClip:
@@ -120,40 +131,9 @@ def test_load_source_default_does_not_forward_decoder_kwargs():
 
     load_source(Path("video.mkv"), cast(Core, core))
 
-    assert calls == [("video.mkv", _index_kwargs("video.mkv"))]
-
-
-def test_validate_source_index_opens_existing_index_without_mutating_it(tmp_path: Path) -> None:
-    video = tmp_path / "video.mkv"
-    index = source_index_path(video)
-    index.write_bytes(b"ready index")
-    calls: list[tuple[str, dict[str, object]]] = []
-
-    def loader(path: str, **kwargs: object) -> MockClip:
-        calls.append((path, kwargs))
-        return MockClip()
-
-    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
-
-    validate_source_index(video, cast(Core, core))
-
-    assert calls == [(str(video), {"cachefile": str(index)})]
-    assert index.read_bytes() == b"ready index"
-
-
-def test_validate_source_index_rejects_index_rebuilt_during_probe(tmp_path: Path) -> None:
-    video = tmp_path / "video.mkv"
-    index = source_index_path(video)
-    index.write_bytes(b"rejected index")
-
-    def loader(_path: str, **_kwargs: object) -> MockClip:
-        index.write_bytes(b"rebuilt index")
-        return MockClip()
-
-    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
-
-    with pytest.raises(SourceLoadError, match="changed during validation"):
-        validate_source_index(video, cast(Core, core))
+    [(path, kwargs)] = calls
+    assert path == "video.mkv"
+    _assert_cache_free(kwargs)
 
 
 def test_load_source_forwards_explicit_decoder_options():
@@ -175,17 +155,14 @@ def test_load_source_forwards_explicit_decoder_options():
         ),
     )
 
-    assert calls == [
-        (
-            "video.mkv",
-            {
-                **_index_kwargs("video.mkv"),
-                "threads": 12,
-                "ff_options": "skip_loop_filter=all",
-                "prefer_hw": 1,
-            },
-        )
-    ]
+    [(path, kwargs)] = calls
+    assert path == "video.mkv"
+    _assert_cache_free(
+        kwargs,
+        threads=12,
+        ff_options=f"skip_loop_filter=all max_pixels={MAX_CANVAS_PIXELS}",
+        prefer_hw=1,
+    )
 
 
 @pytest.mark.parametrize("threads", [-1, True, "4", 1.5])
@@ -238,125 +215,12 @@ def test_load_source_file_error_raises_source_load_error(tmp_path: Path) -> None
         load_source(tmp_path / "video.mkv", cast(Core, core))
 
     assert exc.value.code == "FC-4015"
-    assert calls == [_index_kwargs(tmp_path / "video.mkv")]
-
-
-def test_load_source_recovers_by_rebuilding_owned_index(tmp_path: Path) -> None:
-    video_path = tmp_path / "video.mkv"
-    index_path = source_index_path(video_path)
-    index_path.write_bytes(b"unusable index")
-    calls: list[dict[str, object]] = []
-
-    def loader(_path: str, **kwargs: object) -> MockClip:
-        calls.append(kwargs)
-        if len(calls) == 1:
-            raise RuntimeError("lsmas: failed to construct index for video.mkv")
-        return MockClip()
-
-    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
-
-    source = load_source(
-        video_path,
-        cast(Core, core),
-        decoder_options=LWLibavSourceOptions(
-            threads=12,
-            ff_options="skip_loop_filter=all",
-            prefer_hw=1,
-        ),
-    )
-
-    assert source.num_frames == 1000
-    expected = {
-        **_index_kwargs(video_path),
-        "threads": 12,
-        "ff_options": "skip_loop_filter=all",
-        "prefer_hw": 1,
-    }
-    assert calls == [expected, expected]
-    assert not index_path.exists()
-
-
-def test_load_source_does_not_retry_unrelated_loader_failure_with_adjacent_index(
-    tmp_path: Path,
-) -> None:
-    video_path = tmp_path / "video.mkv"
-    source_index_path(video_path).write_bytes(b"existing index")
-    calls: list[dict[str, object]] = []
-
-    def loader(_path: str, **kwargs: object) -> MockClip:
-        calls.append(kwargs)
-        raise RuntimeError("decoder initialization failed")
-
-    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
-
-    with pytest.raises(SourceLoadError, match="decoder initialization failed"):
-        load_source(video_path, cast(Core, core))
-
-    assert calls == [_index_kwargs(video_path)]
-
-
-def test_load_source_preserves_original_error_when_index_retry_fails(tmp_path: Path) -> None:
-    video_path = tmp_path / "video.mkv"
-    source_index_path(video_path).write_bytes(b"unusable index")
-    calls: list[dict[str, object]] = []
-
-    def loader(_path: str, **kwargs: object) -> MockClip:
-        calls.append(kwargs)
-        if len(calls) == 1:
-            raise RuntimeError("lsmas: failed to construct index for video.mkv")
-        raise RuntimeError("cache-free retry also failed")
-
-    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
-
-    with pytest.raises(SourceLoadError, match="failed to construct index") as exc_info:
-        load_source(video_path, cast(Core, core))
-
-    original_error = exc_info.value.__cause__
-    assert isinstance(original_error, RuntimeError)
-    assert "failed to construct index" in str(original_error)
-    assert isinstance(original_error.__cause__, RuntimeError)
-    assert str(original_error.__cause__) == "cache-free retry also failed"
-    assert calls == [_index_kwargs(video_path), _index_kwargs(video_path), {"cache": 0}]
-
-
-def test_load_source_warns_when_rejected_index_cannot_be_removed(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    video_path = tmp_path / "video.mkv"
-    index_path = source_index_path(video_path)
-    index_path.write_bytes(b"unusable index")
-    calls: list[dict[str, object]] = []
-
-    def loader(_path: str, **kwargs: object) -> MockClip:
-        calls.append(kwargs)
-        if len(calls) == 1:
-            raise RuntimeError("lsmas: failed to construct index for video.mkv")
-        return MockClip()
-
-    original_unlink = Path.unlink
-
-    def fail_owned_index_unlink(self: Path, missing_ok: bool = False) -> None:
-        if self == index_path:
-            raise PermissionError("index is locked")
-        original_unlink(self, missing_ok=missing_ok)
-
-    monkeypatch.setattr(Path, "unlink", fail_owned_index_unlink)
-    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
-
-    with caplog.at_level(logging.WARNING, logger="frame_compare.vs.source"):
-        source = load_source(video_path, cast(Core, core))
-
-    assert source.num_frames == 1000
-    assert calls == [_index_kwargs(video_path), {"cache": 0}]
-    assert "Could not remove rejected L-SMASH index" in caplog.text
-    assert "retrying without an index cache" in caplog.text
+    [kwargs] = calls
+    _assert_cache_free(kwargs)
 
 
 def test_load_source_does_not_retry_frame_read_failure(tmp_path: Path) -> None:
     video_path = tmp_path / "video.mkv"
-    source_index_path(video_path).write_bytes(b"existing index")
     calls: list[dict[str, object]] = []
 
     class FrameReadFailureClip(MockClip):
@@ -373,24 +237,97 @@ def test_load_source_does_not_retry_frame_read_failure(tmp_path: Path) -> None:
         load_source(video_path, cast(Core, core))
 
     assert exc.value.code == "FC-4015"
-    assert calls == [_index_kwargs(video_path)]
+    [kwargs] = calls
+    _assert_cache_free(kwargs)
 
 
-def test_load_source_ignores_legacy_unversioned_index(tmp_path: Path) -> None:
+def test_load_source_ignores_legacy_adjacent_indexes(tmp_path: Path) -> None:
     video_path = tmp_path / "video.mkv"
+    video_path.write_bytes(b"source")
+    cache = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
     legacy_index = Path(f"{video_path}.lwi")
     legacy_index.write_bytes(b"legacy")
+    canary = tmp_path / "canary"
+    canary.write_bytes(b"keep")
+    adjacent = Path(f"{video_path}.frame-compare-{cache.runtime_token}.lwi")
+    try:
+        adjacent.symlink_to(canary)
+    except OSError as error:
+        pytest.skip(f"symlink creation unavailable: {error}")
     calls: list[dict[str, object]] = []
 
     def loader(_path: str, **kwargs: object) -> MockClip:
         calls.append(kwargs)
+        index = Path(cast(str, kwargs["cachefile"]))
+        if kwargs["cache"] == 1:
+            assert not index.exists()
+            index.write_bytes(b"managed index")
         return MockClip()
 
     core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
     load_source(video_path, cast(Core, core))
+    load_source(video_path, cast(Core, core), index_cache=cache)
+    load_source(video_path, cast(Core, core), index_cache=cache)
 
-    assert calls == [_index_kwargs(video_path)]
+    [standalone, managed, warm] = calls
+    _assert_cache_free(standalone)
+    assert managed["cache"] == 1
+    stable = cache.validated_index(video_path)
+    assert stable is not None
+    assert warm == {
+        "cache": 0,
+        "cachefile": str(stable),
+        "ff_options": f"max_pixels={MAX_CANVAS_PIXELS}",
+    }
     assert legacy_index.read_bytes() == b"legacy"
+    assert adjacent.is_symlink()
+    assert canary.read_bytes() == b"keep"
+
+
+def test_load_source_rejects_an_index_as_media_before_probing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probe = MagicMock()
+    monkeypatch.setattr(source_module, "admit_source", probe)
+    with pytest.raises(SourceLoadError, match="cannot be used as source media"):
+        load_source(tmp_path / "video.mkv.lwi")
+    probe.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["construction", "lock-timeout", "missing-root"])
+def test_load_source_retries_cache_failures_using_controlled_nonexistent_leaf(
+    tmp_path: Path, failure: str
+) -> None:
+    video = tmp_path / "video.mkv"
+    video.touch()
+    generated = tmp_path.resolve() / "generated"
+    cache = ManagedSourceIndexCache(generated, lock_timeout_seconds=0)
+    lock: AbstractContextManager[None] = nullcontext()
+    if failure == "lock-timeout":
+        assert cache.try_load(video, lambda _source, _mode, index: index.write_bytes(b"index"))
+        stable = cache.validated_index(video)
+        assert stable is not None
+        lock = exclusive_file_lock(stable.with_suffix(".lock"))
+    elif failure == "missing-root":
+        generated.touch()
+
+    calls: list[dict[str, object]] = []
+
+    def loader(_path: str, **kwargs: object) -> MockClip:
+        calls.append(kwargs)
+        index = Path(cast(str, kwargs["cachefile"]))
+        assert index.parent.is_dir() and not index.exists()
+        if kwargs["cache"] == 1:
+            index.write_bytes(b"partial")
+            raise RuntimeError("failed to construct index")
+        return MockClip()
+
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+    with lock:
+        load_source(video, cast(Core, core), index_cache=cache)
+    assert [call["cache"] for call in calls] == ([1, 0] if failure == "construction" else [0])
+    _assert_cache_free(calls[-1])
+    assert not list(cache.root.glob(".stage-*"))
 
 
 # HDR Detection Tests
@@ -419,48 +356,91 @@ def test_load_source_falls_back_to_ffprobe_for_absent_hdr_props(
     assert source.hdr_metadata is not None
     assert source.hdr_metadata.transfer == 16
     assert source.hdr_metadata.color_primaries == 9
-    probe_hdr_metadata.assert_called_once_with(Path("video.mkv"), streams=[])
+    probe_hdr_metadata.assert_called_once_with(
+        Path("video.mkv"), streams=({"width": 1920, "height": 1080},)
+    )
 
 
-def test_load_source_requires_ffprobe_for_unspecified_hdr_signal(
+def test_load_source_requires_ffprobe_before_native_decode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(source_module, "resolve_optional_executable", lambda _executable: None)
-    monkeypatch.setenv("PATH", "")
-    monkeypatch.delenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", raising=False)
-    monkeypatch.setattr(source_module, "probe_hdr_metadata", hdr_probe_module.probe_hdr_metadata)
-    monkeypatch.setattr(source_module, "probe_video_streams", hdr_probe_module.probe_video_streams)
+    monkeypatch.setattr(
+        source_module,
+        "admit_source",
+        MagicMock(side_effect=ValueError("ffprobe is required to verify source dimensions")),
+    )
 
-    with pytest.raises(SourceLoadError) as exc_info:
-        load_source(Path("video.mkv"), cast(Core, make_mock_core()))
+    loader = MagicMock()
+    with pytest.raises(SourceLoadError, match="required to verify source dimensions") as exc_info:
+        load_source(
+            Path("video.mkv"),
+            cast(Core, SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))),
+        )
 
     assert exc_info.value.code == "FC-4015"
-    assert isinstance(exc_info.value.__cause__, hdr_probe_module.FFmpegNotFoundError)
-    assert isinstance(exc_info.value.__cause__.__cause__, FileNotFoundError)
-    assert "ffprobe" in str(exc_info.value.__cause__.__cause__)
+    loader.assert_not_called()
 
 
-def test_load_source_loads_signaled_source_without_ffprobe(
+def test_load_source_refuses_signaled_source_without_dimension_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(source_module, "resolve_optional_executable", lambda _executable: None)
-    monkeypatch.setenv("PATH", "")
-    monkeypatch.delenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", raising=False)
+    monkeypatch.setattr(
+        source_module,
+        "admit_source",
+        MagicMock(side_effect=ValueError("ffprobe is required to verify source dimensions")),
+    )
     hdr_probe = MagicMock(wraps=hdr_probe_module.probe_hdr_metadata)
-    stream_probe = MagicMock(wraps=hdr_probe_module.probe_video_streams)
     monkeypatch.setattr(source_module, "probe_hdr_metadata", hdr_probe)
-    monkeypatch.setattr(source_module, "probe_video_streams", stream_probe)
     props = {"_Primaries": 1, "_Transfer": 1, "_Matrix": 1}
     core = SimpleNamespace(
         lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
     )
 
-    source = load_source(Path("video.mkv"), cast(Core, core))
+    with pytest.raises(SourceLoadError, match="required to verify source dimensions"):
+        load_source(Path("video.mkv"), cast(Core, core))
 
-    assert source.num_frames == 1000
-    assert source.is_hdr is False
     hdr_probe.assert_not_called()
-    stream_probe.assert_not_called()
+
+
+@pytest.mark.parametrize("width", [7681, 10**1000])
+def test_oversize_probed_source_never_reaches_native_loader(
+    monkeypatch: pytest.MonkeyPatch, width: int
+) -> None:
+    monkeypatch.setattr(
+        source_module,
+        "admit_source",
+        MagicMock(
+            side_effect=ValueError(
+                "Source video dimensions are out of bounds. Use a positive size of at most "
+                "7,680 pixels per axis"
+            )
+        ),
+    )
+    loader = MagicMock(side_effect=AssertionError("must validate before native work"))
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+    with pytest.raises(SourceLoadError, match="7,680 pixels per axis"):
+        load_source(Path("video.mkv"), cast(Core, core))
+    loader.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "streams",
+    [[], [{"width": None, "height": 1080}], [{"width": 1920}], [{"height": 1080}]],
+)
+def test_unproven_dimensions_never_reach_native_loader(
+    monkeypatch: pytest.MonkeyPatch, streams: list[dict[str, object]]
+) -> None:
+    message = (
+        "no verifiable video stream is supported"
+        if not streams
+        else "Source video dimensions could not be verified before decoding"
+    )
+    monkeypatch.setattr(source_module, "admit_source", MagicMock(side_effect=ValueError(message)))
+    loader = MagicMock(side_effect=AssertionError("must validate before native work"))
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+    with pytest.raises(SourceLoadError, match="no verifiable|dimensions could not be verified"):
+        load_source(Path("video.mkv"), cast(Core, core))
+    loader.assert_not_called()
 
 
 def test_load_source_falls_back_to_ffprobe_for_unspecified_hdr_props(
@@ -509,7 +489,7 @@ def test_load_source_probes_when_color_signal_type_is_unusable(
     source = load_source(Path("video.mkv"), cast(Core, core))
 
     assert source.is_hdr is True
-    probe.assert_called_once_with(Path("video.mkv"), streams=[])
+    probe.assert_called_once_with(Path("video.mkv"), streams=({"width": 1920, "height": 1080},))
 
 
 def test_load_source_merges_partial_frame_signal_before_hdr_classification(
@@ -592,7 +572,7 @@ def test_load_source_backfills_malformed_matrix_without_overriding_explicit_sign
 
     assert source.is_hdr is True
     assert source.hdr_metadata == HDRMetadata(None, None, None, 9, 16, 9)
-    probe.assert_called_once_with(Path("video.mkv"), streams=[])
+    probe.assert_called_once_with(Path("video.mkv"), streams=({"width": 1920, "height": 1080},))
 
 
 @pytest.mark.parametrize("matrix", [None, "malformed"])
@@ -714,9 +694,7 @@ def test_load_source_hdr_cases(
         pytest.param("load", True, False, id="load"),
         pytest.param("index_retry", True, False, id="index-retry"),
         pytest.param("frame", True, False, id="frame-unspecified-with-probe"),
-        pytest.param("frame", False, False, id="frame-unspecified-without-probe"),
         pytest.param("frame", True, True, id="frame-sdr-with-probe"),
-        pytest.param("frame", False, True, id="frame-sdr-without-probe"),
     ],
 )
 def test_load_source_stops_native_admission_after_interruption(
@@ -729,14 +707,10 @@ def test_load_source_stops_native_admission_after_interruption(
     from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
 
     video_path = tmp_path / "video.mkv"
-    index_path = source_index_path(video_path)
-    index_path.write_bytes(b"existing-index")
+    video_path.touch()
+    cache = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
     calls: list[str] = []
-    monkeypatch.setattr(
-        source_module,
-        "resolve_optional_executable",
-        lambda _executable: "/fake/ffprobe" if ffprobe_available else None,
-    )
+    del ffprobe_available
 
     async def run() -> None:
         task = asyncio.current_task()
@@ -751,6 +725,8 @@ def test_load_source_stops_native_admission_after_interruption(
 
         def loader(_path: str, **_kwargs: object) -> MockClip:
             calls.append("load")
+            if _kwargs["cache"] == 1:
+                Path(cast(str, _kwargs["cachefile"])).write_bytes(b"staged")
             if stage in {"load", "index_retry"}:
                 task.cancel()
             if stage == "index_retry":
@@ -765,9 +741,10 @@ def test_load_source_stops_native_admission_after_interruption(
         monkeypatch.setattr(source_module, "probe_hdr_metadata", probe)
         core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
         with pytest.raises(_RunInterrupt):
-            load_source(video_path, cast(Core, core))
+            load_source(video_path, cast(Core, core), index_cache=cache)
         assert calls == (["load", "frame"] if stage == "frame" else ["load"])
-        assert index_path.read_bytes() == b"existing-index"
+        assert not list(cache.root.glob(".stage-*"))
+        assert bool(list(cache.root.glob("*.lwi"))) == (stage == "frame")
         assert task.cancelling() == 1
         await cancellation_checkpoint()
 
@@ -845,17 +822,8 @@ def test_load_source_real_video_stream_policy(
         )
         monkeypatch.delenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", raising=False)
         monkeypatch.setenv("PATH", "")
-        if mode == "no-ffprobe-untagged":
-            with pytest.raises(SourceLoadError) as exc_info:
-                load_source(video)
-            assert exc_info.value.code == "FC-4015"
-            assert isinstance(exc_info.value.__cause__, hdr_probe_module.FFmpegNotFoundError)
-            assert isinstance(exc_info.value.__cause__.__cause__, FileNotFoundError)
-            assert "ffprobe" in str(exc_info.value.__cause__.__cause__)
-            return
-        source = load_source(video)
-        assert (source.width, source.height) == (32, 24)
-        assert source.is_hdr is False
+        with pytest.raises(SourceLoadError, match="required to verify source dimensions"):
+            load_source(video)
         return
     if mode in {"multiple-video", "multiple-override", "invalid-override"}:
         inputs = [
@@ -916,12 +884,12 @@ def test_load_source_real_video_stream_policy(
         monkeypatch.setenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", str(tmp_path / "missing-ffprobe"))
         with pytest.raises(SourceLoadError):
             load_source(video)
-        assert not source_index_path(video).exists()
+        assert not list(tmp_path.glob("*.lwi"))
         return
     if mode in {"multiple-video", "multiple-override"}:
         with pytest.raises(SourceLoadError, match="multiple video streams are not supported"):
             load_source(video)
-        assert not source_index_path(video).exists()
+        assert not list(tmp_path.glob("*.lwi"))
         return
     # This generated MP4 has one track and cover metadata at the end of moov.
     # Put udta before trak so the demuxer discovers the attached picture first.

@@ -249,6 +249,7 @@ def build_phases_after_align(
     metadata_prefetch: MetadataPrefetch,
     config: ConfigSchema,
     confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None,
+    vs_loader: VSLoader | None = None,
 ) -> list[Phase]:
     def _retain_confirmed_upload(url: str, uploaded_file_paths: tuple[Path, ...]) -> None:
         state.artifacts.slowpics_url = url
@@ -300,7 +301,9 @@ def build_phases_after_align(
         )
 
     def _run_render_with_current_selection(ctx: RunContext):
-        return run_render_phase(ctx, frames=list(ctx.selection.frames), runner=ffmpeg_runner)
+        return run_render_phase(
+            ctx, frames=list(ctx.selection.frames), runner=ffmpeg_runner, vs_loader=vs_loader
+        )
 
     render_metadata_phases = [
         _create_timed_phase(
@@ -451,6 +454,7 @@ def build_execution_phase_plan(
         metadata_prefetch=prep.metadata_prefetch,
         config=prep.config,
         confirm_slowpics_upload=deps.confirm_slowpics_upload,
+        vs_loader=deps.vs_loader,
     )
     return ExecutionPhasePlan(
         before_align=before_align,

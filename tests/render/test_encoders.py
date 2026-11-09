@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -23,7 +24,12 @@ from frame_compare.render.encoders import (
     render_ffmpeg_batch_detailed,
     render_frame_detailed,
 )
-from frame_compare.render.errors import EncodingError, FrameExtractionError, RenderError
+from frame_compare.render.errors import (
+    EncodingError,
+    FrameExtractionError,
+    OverlayError,
+    RenderError,
+)
 from frame_compare.render.geometry import (
     GeometryMargins,
     GeometryRect,
@@ -76,7 +82,8 @@ def mock_apply_overlay_file(monkeypatch):
 
 
 class FakeClip:
-    pass
+    width = 4
+    height = 4
 
 
 def _overlay(mode: OverlayMode = OverlayMode.MINIMAL, *, frame: int = 0) -> OverlayConfig:
@@ -178,6 +185,9 @@ class _FakeFpngFrame:
 
 
 class _FakeFpngClip:
+    width = 6
+    height = 4
+
     def __init__(
         self,
         *,
@@ -594,7 +604,40 @@ def test_render_frame_ffmpeg_wraps_unrepresentable_geometry_as_render_error() ->
     with pytest.raises(RenderError) as exc_info:
         render_frame_detailed(request, renderer="ffmpeg")
 
-    assert "scale dimensions must be positive" in exc_info.value.context.message
+    assert "Scaled frame dimensions are out of bounds" in exc_info.value.context.message
+
+
+def test_oversized_padding_never_reaches_vapoursynth_frame_work(tmp_path: Path) -> None:
+    clip = MagicMock(width=4, height=4)
+    geometry = replace(_geometry_plan(), pad=GeometryMargins(left=10**1000))
+    output = tmp_path / "out.png"
+    with pytest.raises(RenderError, match="7,680 pixels per axis"):
+        render_frame_detailed(
+            RenderRequest(
+                clip=clip,
+                diagnostic_source=clip,
+                frame_number=0,
+                output_path=output,
+                overlay=None,
+                encoder_settings=EncoderSettings(),
+                geometry_plan=geometry,
+            ),
+            renderer="vapoursynth",
+        )
+    clip.get_frame.assert_not_called()
+    assert not output.exists()
+
+
+def test_oversized_rendered_image_fails_before_pillow_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    image = MagicMock(size=(7681, 2))
+    context = MagicMock()
+    context.__enter__.return_value = image
+    monkeypatch.setattr("frame_compare.render.encoders.Image.open", MagicMock(return_value=context))
+    with pytest.raises(OverlayError, match="7,680 pixels per axis"):
+        apply_overlay_to_file(tmp_path / "out.png", _overlay(), RenderedFrameFacts(source_frame=0))
+    image.load.assert_not_called()
 
 
 def _ffmpeg_batch_requests(
@@ -924,6 +967,9 @@ def test_render_vs_reads_picture_type_from_exact_diagnostic_source(
             self.props = {"_PictType": picture_type, "DolbyVisionRPU": b"opaque-rpu"}
 
     class _Node:
+        width = 4
+        height = 4
+
         def __init__(self, picture_type: str) -> None:
             self.picture_type = picture_type
             self.requested: list[int] = []
@@ -972,6 +1018,9 @@ def test_render_vs_applies_geometry_plan_before_saving(
             return self._planes[index]
 
     class _RgbClip:
+        width = 4
+        height = 4
+
         def __init__(self) -> None:
             self.format = SimpleNamespace(id=1, color_family=2)
             self._frame = _RgbFrame()
@@ -1014,6 +1063,9 @@ def test_render_vs_missing_or_invalid_source_property_is_nonfatal(
     monkeypatch.setattr("frame_compare.render.encoders._render_vs", MagicMock())
 
     class _Source:
+        width = 4
+        height = 4
+
         def get_frame(self, index: int) -> object:
             assert index == 3
             if source_case == "raises":
@@ -1023,7 +1075,7 @@ def test_render_vs_missing_or_invalid_source_property_is_nonfatal(
 
     result = render_frame_detailed(
         RenderRequest(
-            clip=cast(VideoNode, object()),
+            clip=cast(VideoNode, FakeClip()),
             diagnostic_source=cast(VideoNode, _Source()),
             frame_number=3,
             output_path=tmp_path / "out.png",

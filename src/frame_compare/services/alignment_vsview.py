@@ -6,7 +6,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import structlog
 
@@ -19,6 +19,7 @@ from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import stream_is_tty
 from frame_compare.utils.types import AlignmentClipRequest
+from frame_compare.vs.loader import DefaultVSLoader
 from frame_compare.vsview.adapter import (
     VSViewAvailabilityStatus,
     VSViewConfig,
@@ -39,6 +40,9 @@ from frame_compare.vsview.output import (
     print_vsview_review_result,
     print_vsview_unavailable,
 )
+
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
 log = structlog.get_logger()
 
@@ -315,6 +319,7 @@ def maybe_launch_alignment_vsview(
     config: AlignmentConfig,
     progress: ProgressReporter | None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
+    vs_loader: VSLoader | None = None,
     verbose: bool = False,
 ) -> AlignmentVSViewOutcome:
     """Launch one native review and apply only a complete, trusted result."""
@@ -354,6 +359,15 @@ def maybe_launch_alignment_vsview(
 
     reference_path = reference.path
     comparison_paths = [comparison.path for comparison in comparisons]
+    source_indexes = (
+        {
+            path: index
+            for path in (reference_path, *comparison_paths)
+            if (index := vs_loader.validated_index(path)) is not None
+        }
+        if isinstance(vs_loader, DefaultVSLoader)
+        else None
+    )
     progress_suspended = _suspend_progress_for_interaction(progress)
     review_seconds = 0.0
     try:
@@ -364,6 +378,7 @@ def maybe_launch_alignment_vsview(
                 suggested_offsets_by_key=offsets_by_key,
                 audio_review_by_key=audio_review_by_key,
                 cache_dir=cache_dir,
+                source_indexes=source_indexes,
                 memory_limit_mb=config.memory_limit_mb,
                 preview_tonemap=config.preview_tonemap,
                 frame_props_by_stem=frame_props_by_stem,

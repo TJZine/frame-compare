@@ -12,16 +12,18 @@ import types
 from contextlib import suppress
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 
-from frame_compare.vs.source import source_index_path
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 from frame_compare.vsview.adapter import (
     VSViewAvailabilityStatus,
     VSViewConfig,
     VSViewSessionRequest,
     _build_vsview_child_env,
+    _run_startup_probe,
     _run_vsview_command,
     check_vsview_availability,
     launch_alignment_verification_session,
@@ -31,7 +33,11 @@ from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewContractError,
 )
 from frame_compare.vsview.errors import VSViewError
-from frame_compare.vsview.session_runtime import install_workspace_log_filter
+from frame_compare.vsview.session_runtime import (
+    PreviewSourceLoader,
+    install_workspace_log_filter,
+    load_preview_source,
+)
 from frame_compare.vsview.session_script import (
     _build_script_content,
     write_vsview_session_script,
@@ -42,6 +48,65 @@ from tests.alignment_review_test_support import (
     trusted_audio_attempt,
     unavailable_audio_attempt,
 )
+
+
+def test_startup_probe_and_review_launcher_strip_explicit_credential_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "parent-secret")
+    env = _build_vsview_child_env(no_color=True) | {
+        "FRAME_COMPARE_SLOWPICS__WEBHOOK_URL": "override-secret",
+        "FRAME_COMPARE_RUNTIME_KIND": "fixture-runtime",
+    }
+    command = [
+        sys.executable,
+        "-c",
+        "import os; "
+        "assert 'FRAME_COMPARE_TMDB__API_KEY' not in os.environ; "
+        "assert 'FRAME_COMPARE_SLOWPICS__WEBHOOK_URL' not in os.environ; "
+        "assert os.environ['FRAME_COMPARE_RUNTIME_KIND'] == 'fixture-runtime'; "
+        "assert os.environ['NO_COLOR'] == '1'",
+    ]
+    assert _run_startup_probe(command, env=env).returncode == 0
+    assert _run_vsview_command(command, env=env)[0] == 0
+
+
+def test_oversize_preview_header_never_reaches_native_loader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vsview.session_runtime.admit_source",
+        MagicMock(side_effect=ValueError("33,177,600 pixels total")),
+    )
+    loader = MagicMock()
+    with pytest.raises(ValueError, match="33,177,600 pixels total"):
+        load_preview_source(cast(PreviewSourceLoader, loader), Path("clip.mkv"), None)
+    loader.LWLibavSource.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("available", "streams", "message"),
+    [
+        (False, [{"width": 1920, "height": 1080}], "ffprobe is required"),
+        (True, [], "no verifiable video stream"),
+        (True, [{"width": None, "height": 1080}], "dimensions could not be verified"),
+    ],
+)
+def test_unproven_preview_dimensions_never_reach_native_loader(
+    monkeypatch: pytest.MonkeyPatch,
+    available: bool,
+    streams: list[dict[str, object]],
+    message: str,
+) -> None:
+    del available, streams
+    monkeypatch.setattr(
+        "frame_compare.vsview.session_runtime.admit_source",
+        MagicMock(side_effect=ValueError(message)),
+    )
+    loader = MagicMock()
+    with pytest.raises(ValueError, match=message):
+        load_preview_source(cast(PreviewSourceLoader, loader), Path("clip.mkv"), None)
+    loader.LWLibavSource.assert_not_called()
 
 
 def _audio_review_map(offsets: dict[str, int | None]) -> dict[str, str]:
@@ -130,12 +195,15 @@ def test_windows_portable_child_env_relies_on_managed_embedded_path(
     assert child_env["FRAME_COMPARE_RUNTIME_KIND"] == "windows-portable"
     assert child_env["FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"] == "managed-fingerprint"
     assert "PYTHONPATH" not in child_env
-    build_script = (
-        Path(__file__).parents[2] / "tools" / "windows_portable" / "build_portable.ps1"
-    ).read_text(encoding="utf-8")
-    assert r'"..\\app\\site-packages"' in build_script
-    assert r'"..\\app\\src"' in build_script
-    assert '"import site"' in build_script
+    from tools.windows_portable.portable_runtime import EMBEDDED_SEARCH_PATH
+
+    assert EMBEDDED_SEARCH_PATH.splitlines() == [
+        b"python313.zip",
+        b".",
+        rb"..\app\site-packages",
+        rb"..\app\src",
+        b"import site",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -246,7 +314,9 @@ def test_run_vsview_command_returns_measured_wait_with_fake_clock(
         def wait(self, timeout: float | None = None) -> int:
             return 0
 
-    monkeypatch.setattr(adapter.subprocess, "Popen", lambda *args, **kwargs: _FakeProcess())
+    monkeypatch.setattr(
+        adapter, "spawn_owned_process", lambda *args, **kwargs: (_FakeProcess(), MagicMock())
+    )
 
     returncode, wait_seconds = _run_vsview_command(["vsview"], env={})
 
@@ -330,7 +400,7 @@ def test_startup_probe_failure_reports_reason_and_redacted_stderr(
     )
     monkeypatch.setattr("frame_compare.vsview.adapter._run_startup_probe", failure)
     monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.Popen",
+        "frame_compare.vsview.adapter.spawn_owned_process",
         MagicMock(side_effect=AssertionError("Failed startup checks must not launch VSView")),
     )
     with pytest.raises(VSViewError) as excinfo:
@@ -356,8 +426,8 @@ def test_launch_uses_managed_launcher(
     monkeypatch.setattr("frame_compare.vsview.adapter._run_startup_probe", mock_run)
     process = MagicMock()
     process.wait.return_value = 0
-    popen = MagicMock(return_value=process)
-    monkeypatch.setattr("frame_compare.vsview.adapter.subprocess.Popen", popen)
+    spawn = MagicMock(return_value=(process, MagicMock()))
+    monkeypatch.setattr("frame_compare.vsview.adapter.spawn_owned_process", spawn)
 
     session, _wait_seconds = launch_alignment_verification_session(
         _session_request(tmp_path),
@@ -365,14 +435,14 @@ def test_launch_uses_managed_launcher(
     )
 
     flags = ["-P"] if site.ENABLE_USER_SITE and not sys.flags.no_user_site else ["-P", "-s"]
-    assert popen.call_args.args[0] == [
+    assert spawn.call_args.args[0] == [
         sys.executable,
         *flags,
         "-m",
         "frame_compare.vsview.launcher",
         str(session.script_path),
     ]
-    launch_env = popen.call_args.kwargs["env"]
+    launch_env = spawn.call_args.kwargs["env"]
     assert "PYTHONPATH" not in launch_env
     assert "PYTHONHOME" not in launch_env
     assert launch_env["PYTHONSAFEPATH"] == "1"
@@ -427,9 +497,11 @@ def test_launch_timeout_terminates_child(
         MagicMock(return_value=subprocess.CompletedProcess([], 0, "", "")),
     )
     process = MagicMock()
-    process.wait.side_effect = [subprocess.TimeoutExpired(["vsview"], 1), 0]
+    process.wait.side_effect = [subprocess.TimeoutExpired(["vsview"], 1)]
+    process_tree = MagicMock()
     monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
+        "frame_compare.vsview.adapter.spawn_owned_process",
+        MagicMock(return_value=(process, process_tree)),
     )
 
     with pytest.raises(VSViewError, match="timed out"):
@@ -438,8 +510,8 @@ def test_launch_timeout_terminates_child(
             VSViewConfig(enabled=True),
         )
 
-    process.terminate.assert_called_once_with()
-    process.kill.assert_not_called()
+    process_tree.reap.assert_called_once_with(process)
+    process.terminate.assert_not_called()
 
 
 def test_launch_timeout_kills_child_when_terminate_does_not_reap(
@@ -458,8 +530,11 @@ def test_launch_timeout_kills_child_when_terminate_does_not_reap(
         subprocess.TimeoutExpired(["vsview"], 1),
         0,
     ]
+    process_tree = MagicMock()
+    process_tree.reap.side_effect = RuntimeError("tree cleanup unavailable")
     monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
+        "frame_compare.vsview.adapter.spawn_owned_process",
+        MagicMock(return_value=(process, process_tree)),
     )
 
     with pytest.raises(VSViewError, match="timed out"):
@@ -477,17 +552,18 @@ def test_run_vsview_command_reaps_child_after_interruption(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     process = MagicMock()
-    process.wait.side_effect = [KeyboardInterrupt(), 0]
+    process.wait.side_effect = [KeyboardInterrupt()]
+    process_tree = MagicMock()
     monkeypatch.setattr(
-        "frame_compare.vsview.adapter.subprocess.Popen", MagicMock(return_value=process)
+        "frame_compare.vsview.adapter.spawn_owned_process",
+        MagicMock(return_value=(process, process_tree)),
     )
 
     with pytest.raises(KeyboardInterrupt):
         _run_vsview_command(["vsview"], env={})
 
-    process.terminate.assert_called_once_with()
-    process.kill.assert_not_called()
-    assert process.wait.call_args_list[1].kwargs == {"timeout": 5.0}
+    process_tree.reap.assert_called_once_with(process)
+    process.terminate.assert_not_called()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="SIGINT wait interruption is POSIX-specific")
@@ -570,6 +646,7 @@ def _execute_generated_script(
     output_sink: list[tuple[str, int, str]] | None = None,
     audio_review_by_key: dict[str, str] | None = None,
     overlay_sink: list[str] | None = None,
+    legacy_index_payload: bool = False,
 ) -> tuple[
     list[tuple[str, int, str]],
     list[dict[str, object]],
@@ -593,10 +670,26 @@ def _execute_generated_script(
     default_props.update(frame_props_by_stem or {})
     rejected_indexes = unusable_index_stems or set()
     rejected_cache_free = cache_free_failure_stems or set()
+    cache_owner = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
+    source_indexes: dict[Path, Path] = {}
+
+    def seed_index(_source: Path, cache: int, index: Path) -> bool:
+        assert cache == 1
+        index.write_bytes(b"managed")
+        return True
+
+    for path in (reference, *comparisons):
+        if path.stem in rejected_indexes:
+            assert cache_owner.try_load(path, seed_index)
+            index = cache_owner.validated_index(path)
+            assert index is not None
+            source_indexes[path] = index
 
     class FakeClip:
         def __init__(self, stem: str) -> None:
             self.stem = stem
+            self.width = 1920
+            self.height = 1080
             self.num_frames = 20_000
             self.fps = SimpleNamespace(numerator=24, denominator=1)
 
@@ -609,10 +702,23 @@ def _execute_generated_script(
             *,
             cachefile: str | None = None,
             cache: int | None = None,
+            cachedir: str | None = None,
+            ff_options: str | None = None,
         ) -> FakeClip:
+            assert ff_options == "max_pixels=33177600"
             stem = Path(path).stem
-            loader_calls.append((stem, cachefile, cache))
-            if cachefile is not None and stem in rejected_indexes:
+            private_cache = cachefile is not None and Path(cachefile).name == "disabled.lwi"
+            loader_calls.append((stem, None if private_cache else cachefile, cache))
+            assert cache == 0
+            if private_cache:
+                assert cachefile is not None
+                assert not Path(cachefile).exists()
+                assert cachedir is None
+            else:
+                assert cachefile is not None
+                assert cachedir is None
+                assert cachefile == str(source_indexes[Path(path)])
+            if not private_cache and stem in rejected_indexes:
                 raise RuntimeError("failed to construct index")
             if cache == 0 and stem in rejected_cache_free:
                 raise RuntimeError("cache-free fallback failed")
@@ -640,6 +746,10 @@ def _execute_generated_script(
     fake_vsview.set_output = set_output  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vapoursynth)
     monkeypatch.setitem(sys.modules, "vsview", fake_vsview)
+    monkeypatch.setattr(
+        "frame_compare.vsview.session_runtime.admit_source",
+        lambda _path, **_kwargs: SimpleNamespace(verify=lambda _source: None),
+    )
 
     def capture_overlay(_core, clip, model, *, warn):
         del warn
@@ -663,7 +773,16 @@ def _execute_generated_script(
         ),
         frame_props_by_stem=default_props,
         presentation_names_by_stem=presentation_names_by_stem,
+        source_indexes=source_indexes,
+        source_index_generated_root=cache_owner.root.parent.parent,
     )
+    if legacy_index_payload:
+        legacy = tmp_path / "ref.mkv.frame-compare-old.lwi"
+        legacy.write_bytes(b"legacy")
+        script = script.replace(
+            "run_session(SESSION_DATA,",
+            f"SESSION_DATA['reference']['index_path'] = {str(legacy)!r}\nrun_session(SESSION_DATA,",
+        )
     exec(
         compile(script, "<vsview-generated>", "exec"),
         {
@@ -678,11 +797,12 @@ def test_generated_session_registers_named_outputs_in_input_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    output_calls, output_metadata, _props, _loader_calls = _execute_generated_script(
+    output_calls, output_metadata, _props, loader_calls = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         comparison_stems=("zeta", "alpha"),
         suggested_offsets_by_key={"ref:zeta": 4, "ref:alpha": None},
+        legacy_index_payload=True,
     )
 
     assert output_calls == [
@@ -690,6 +810,8 @@ def test_generated_session_registers_named_outputs_in_input_order(
         ("zeta", 1, "Comparison 1"),
         ("alpha", 2, "Comparison 2"),
     ]
+    assert loader_calls == [(stem, None, 0) for stem in ("ref", "zeta", "alpha")]
+    assert (tmp_path / "ref.mkv.frame-compare-old.lwi").read_bytes() == b"legacy"
     assert [metadata["frame_compare_output_role"] for metadata in output_metadata] == [
         "reference",
         "comparison",
@@ -708,10 +830,9 @@ def test_generated_session_registers_named_outputs_in_input_order(
     assert {metadata["frame_compare_session_id"] for metadata in output_metadata} == {"1" * 32}
 
 
-def test_generated_session_preserves_lsmash_indexes_and_only_retries_index_failures(
+def test_generated_session_passes_validated_indexes_read_only_and_retries_privately(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     output_calls, _metadata, _props, loader_calls = _execute_generated_script(
         tmp_path=tmp_path,
@@ -721,14 +842,14 @@ def test_generated_session_preserves_lsmash_indexes_and_only_retries_index_failu
         unusable_index_stems={"ref", "a"},
     )
 
+    index_cache = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
     assert loader_calls == [
-        ("ref", str(source_index_path(tmp_path / "ref.mkv")), None),
+        ("ref", str(index_cache.validated_index(tmp_path / "ref.mkv")), 0),
         ("ref", None, 0),
-        ("a", str(source_index_path(tmp_path / "a.mkv")), None),
+        ("a", str(index_cache.validated_index(tmp_path / "a.mkv")), 0),
         ("a", None, 0),
     ]
     assert output_calls == [("ref", 0, "Reference"), ("a", 1, "Comparison 1")]
-    assert capsys.readouterr().err.count("without an L-SMASH index cache") == 2
 
 
 def test_generated_session_load_failure_registers_no_partial_outputs(

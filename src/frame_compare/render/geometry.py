@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from frame_compare.utils.canvas import validate_canvas_size
 from frame_compare.utils.media_facts import ActivePictureProvenance
 
 GeometryMode = Literal["native", "aligned"]
@@ -81,6 +82,22 @@ class RenderGeometryPlan:
     content_origin: tuple[int, int]
     overlay_origin: tuple[int, int]
 
+    def validate_sizes(self) -> None:
+        """Check allocation sizes when accepting a plan at a backend boundary."""
+        validate_canvas_size(self.source_rect.width, self.source_rect.height, label="Source")
+        validate_canvas_size(self.crop_rect.width, self.crop_rect.height, label="Crop")
+        validate_canvas_size(*self.cropped_size, label="Cropped frame")
+        validate_canvas_size(*self.scaled_size, label="Scaled frame")
+        validate_canvas_size(*self.final_canvas_size, label="Canvas")
+        for margins in (self.crop, self.pad):
+            if min(margins.left, margins.top, margins.right, margins.bottom) < 0:
+                raise ValueError("Crop and pad margins must be non-negative")
+        validate_canvas_size(
+            self.scaled_size[0] + self.pad.left + self.pad.right,
+            self.scaled_size[1] + self.pad.top + self.pad.bottom,
+            label="Padded frame",
+        )
+
     @property
     def is_noop(self) -> bool:
         return (
@@ -118,6 +135,7 @@ def plan_render_geometry(
     _validate_options(resolved_options)
     crop_rects = tuple(_mod_safe_rect(source.active_rect) for source in sources)
     canvas_size = _target_canvas(crop_rects, options=resolved_options)
+    validate_canvas_size(*canvas_size, label="Canvas")
     scaled_sizes = _fit_to_target(crop_rects, canvas_size)
 
     plans: list[RenderGeometryPlan] = []
@@ -156,8 +174,7 @@ def plan_render_geometry(
 
 def _validate_sources(sources: Sequence[SourceGeometry]) -> None:
     for source in sources:
-        if source.width <= 0 or source.height <= 0:
-            raise ValueError("source dimensions must be positive")
+        validate_canvas_size(source.width, source.height, label="Source")
         if not _is_safe_active_rect(source.active_rect, source):
             raise ValueError("active rectangle must be positive and within source dimensions")
 
@@ -173,9 +190,7 @@ def _validate_options(options: RenderGeometryOptions) -> None:
     if options.aligned_scale_policy == "explicit_size":
         if options.aligned_target_size is None:
             raise ValueError("explicit_size requires an aligned target size")
-        width, height = options.aligned_target_size
-        if width <= 0 or height <= 0:
-            raise ValueError("aligned target dimensions must be positive")
+        validate_canvas_size(*options.aligned_target_size, label="Aligned target")
 
 
 def _native_plan(source: SourceGeometry, *, overlay_margin: int) -> RenderGeometryPlan:
@@ -276,17 +291,15 @@ def _fit_to_target(
     target_width, target_height = target
     scaled_sizes: list[tuple[int, int]] = []
     for rect in rects:
+        # Cross products are bounded by MAX_CANVAS_AXIS squared. Integer
+        # division avoids losing an otherwise exact pixel to float rounding.
         if target_width * rect.height <= target_height * rect.width:
-            width = target_width
-            height = rect.height * target_width // rect.width
+            width, height = target_width, rect.height * target_width // rect.width
         else:
-            width = rect.width * target_height // rect.height
-            height = target_height
-        scaled_width = _mod_safe_size(max(1, width))
-        scaled_height = _mod_safe_size(max(1, height))
-        if scaled_width <= 0 or scaled_height <= 0:
-            raise ValueError("scaled dimensions must be positive")
-        scaled_sizes.append((scaled_width, scaled_height))
+            width, height = rect.width * target_height // rect.height, target_height
+        size = (_mod_safe_size(max(1, width)), _mod_safe_size(max(1, height)))
+        validate_canvas_size(*size, label="Scaled frame")
+        scaled_sizes.append(size)
     return tuple(scaled_sizes)
 
 

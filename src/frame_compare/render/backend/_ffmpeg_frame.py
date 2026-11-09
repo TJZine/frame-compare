@@ -7,34 +7,22 @@ from pathlib import Path
 
 from frame_compare.render.color import BT2020_CL_TRANSFER, MATRIX_TO_ZIMG, untagged_matrix
 from frame_compare.render.geometry import GeometryMargins, GeometryRect, RenderGeometryPlan
+from frame_compare.utils.canvas import MAX_CANVAS_PIXELS
 from frame_compare.utils.media_facts import SourceSignalFacts
 
 
-def _validate_positive_size(width: int, height: int, *, label: str) -> None:
-    if width <= 0 or height <= 0:
-        raise ValueError(f"{label} dimensions must be positive")
-
-
 def _validate_rect(rect: GeometryRect, *, label: str) -> None:
-    _validate_positive_size(rect.width, rect.height, label=label)
     if rect.x < 0 or rect.y < 0:
         raise ValueError(f"{label} origin must be non-negative")
-
-
-def _validate_margins(margins: GeometryMargins, *, label: str) -> None:
-    if margins.left < 0 or margins.top < 0 or margins.right < 0 or margins.bottom < 0:
-        raise ValueError(f"{label} margins must be non-negative")
 
 
 def _geometry_filters(geometry_plan: RenderGeometryPlan | None) -> list[str]:
     if geometry_plan is None:
         return []
 
+    geometry_plan.validate_sizes()
     _validate_rect(geometry_plan.source_rect, label="source")
     _validate_rect(geometry_plan.crop_rect, label="crop")
-    _validate_positive_size(*geometry_plan.scaled_size, label="scale")
-    _validate_positive_size(*geometry_plan.final_canvas_size, label="pad")
-    _validate_margins(geometry_plan.pad, label="pad")
 
     # Negotiate full chroma in the input's color family and retain high depth
     # through geometry. RGB sources can pad without a round trip through YUV.
@@ -134,6 +122,8 @@ def build_extract_frame_argv(
     argv.extend(
         [
             "-noautorotate",
+            "-max_pixels",
+            str(MAX_CANVAS_PIXELS),
             "-i",
             str(video),
             "-map",
@@ -184,6 +174,8 @@ def build_extract_frames_argv(
     argv.extend(
         [
             "-noautorotate",
+            "-max_pixels",
+            str(MAX_CANVAS_PIXELS),
             "-i",
             str(video),
             "-map",

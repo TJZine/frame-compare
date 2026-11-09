@@ -9,8 +9,12 @@ from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import pytest
+
 from frame_compare.orchestration import phase_alignment, preparation
 from frame_compare.orchestration.types import RunDependencies
+from frame_compare.vs.loader import DefaultVSLoader
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 from frame_compare.vs.types import SourceInfo
 from tests.orchestration.preparation_test_support import (
     create_config as _create_config,
@@ -78,7 +82,9 @@ def test_execute_prep_probes_uncached_clips_and_persists_probe_snapshot(tmp_path
     assert {snapshot.fingerprint.path for snapshot in probe_cache.values()} == {source, encode}
 
 
-def test_execute_prep_reuses_probe_cache_without_vs_loader(tmp_path: Path) -> None:
+def test_execute_prep_reuses_probe_cache_with_lazy_managed_loader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     _create_config(tmp_path)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "source.mkv")
@@ -89,12 +95,31 @@ def test_execute_prep_reuses_probe_cache_without_vs_loader(tmp_path: Path) -> No
             RunDependencies(vs_loader=cast(Any, FakeVSLoader())),
         )
     )
-    second = asyncio.run(
-        preparation.execute_prep(make_run_request(root=tmp_path), RunDependencies())
-    )
+    constructed: list[ManagedSourceIndexCache | None] = []
+    original_init = DefaultVSLoader.__init__
+
+    def observe_init(
+        loader: DefaultVSLoader,
+        memory_limit_mb: int | None = None,
+        *,
+        index_cache: ManagedSourceIndexCache | None = None,
+    ) -> None:
+        constructed.append(index_cache)
+        original_init(loader, memory_limit_mb, index_cache=index_cache)
+
+    monkeypatch.setattr(DefaultVSLoader, "__init__", observe_init)
+    deps = RunDependencies()
+    second = asyncio.run(preparation.execute_prep(make_run_request(root=tmp_path), deps))
 
     assert second.clips[0].label == "source"
     assert second.clips[0].probe == first.clips[0].probe
+    assert isinstance(deps.vs_loader, DefaultVSLoader)
+    [index_cache] = constructed
+    assert (
+        index_cache is not None
+        and index_cache.root == second.workspace.shared_source_index_cache_dir
+    )
+    assert not index_cache.root.exists()
 
 
 def _symlinked_input(tmp_path: Path) -> tuple[Path, Path, Path]:

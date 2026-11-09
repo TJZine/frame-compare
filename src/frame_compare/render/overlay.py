@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from frame_compare.render.overlay_text import compose_overlay_text_lines
 from frame_compare.render.types import OverlayConfig
+from frame_compare.utils.canvas import validate_canvas_size
 from frame_compare.utils.media_facts import RenderedFrameFacts
 
 type Font = ImageFont.ImageFont | ImageFont.FreeTypeFont
@@ -42,6 +43,7 @@ def apply_overlay(
     lines = compose_overlay_text_lines(config, frame_facts)
     if not lines:
         return image
+    validate_canvas_size(*image.size, label="Rendered image")
     font = _load_font(config)
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)

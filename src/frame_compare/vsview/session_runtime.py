@@ -15,7 +15,10 @@ from typing import TYPE_CHECKING, NotRequired, Protocol, TextIO, TypedDict, cast
 
 from pydantic import TypeAdapter
 
-from frame_compare.vs.source import INDEX_CONSTRUCTION_FAILURE_MARKER
+from frame_compare.utils.cancellation import raise_if_cancelling
+from frame_compare.utils.canvas import validate_canvas_size
+from frame_compare.vs.source_admission import admit_source, bounded_decoder_options
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache, private_index_directory
 from frame_compare.vs.types import TonemapSettings
 from frame_compare.vsview.alignment_overlay import apply_alignment_overlay, build_launch_overlays
 from frame_compare.vsview.alignment_review_contract import (
@@ -65,13 +68,13 @@ class _SectionKeyValue:
 class ReferenceSource(TypedDict):
     label: str
     path: str
-    index_path: str
+    managed_index_path: NotRequired[str]
     display_name: str
 
 
 class ComparisonSource(TypedDict):
     path: str
-    index_path: str
+    managed_index_path: NotRequired[str]
     display_name: str
     comparison_key: str
     suggested_offset: int | None
@@ -85,6 +88,7 @@ class SessionData(TypedDict):
     short_names: dict[str, str]
     memory_limit_mb: int | None
     preview_tonemap: NotRequired[dict[str, object] | None]
+    source_index_generated_root: NotRequired[str]
 
 
 class AudioReviewAuthority(TypedDict):
@@ -413,26 +417,31 @@ def resolve_lwlibavsource(core: vs.Core) -> PreviewSourceLoader:
 def load_preview_source(
     loader: PreviewSourceLoader,
     path: Path,
-    index_path: Path,
-    display_name: str,
-    console: SessionConsole,
+    managed_index_path: str | None,
+    source_index_generated_root: str | None = None,
 ) -> vs.VideoNode:
-    try:
-        return loader.LWLibavSource(str(path), cachefile=str(index_path))
-    except Exception as original_error:
-        if INDEX_CONSTRUCTION_FAILURE_MARKER not in str(original_error).casefold():
-            raise
+    if path.suffix.lower() == ".lwi":
+        raise ValueError("An L-SMASH index cannot be used as source media")
+    admission = admit_source(path, abort_check=raise_if_cancelling)
+    ff_options = bounded_decoder_options()
 
-        console.safe_print(
-            console.status_line(
-                "[WARN]",
-                f"Retrying {display_name} without an L-SMASH index cache after index construction failed",
-            )
+    def open_source(source: Path, mode: int, index: Path) -> vs.VideoNode:
+        if source.suffix.lower() == ".lwi":
+            raise ValueError("An L-SMASH index cannot be used as source media")
+        admission.verify(source)
+        clip = loader.LWLibavSource(
+            str(source), cache=mode, cachefile=str(index), ff_options=ff_options
         )
-        try:
-            return loader.LWLibavSource(str(path), cache=0)
-        except Exception as fallback_error:
-            raise original_error from fallback_error
+        admission.verify(source)
+        return clip
+
+    if managed_index_path is not None and source_index_generated_root is not None:
+        cache = ManagedSourceIndexCache(Path(source_index_generated_root))
+        clip = cache.try_open_validated(path, Path(managed_index_path), open_source)
+        if clip is not None:
+            return clip
+    with private_index_directory() as directory:
+        return open_source(path, 0, directory / "disabled.lwi")
 
 
 FRAME_PROP_ALIASES = {
@@ -633,10 +642,10 @@ def run_session(data: SessionData, script_path: Path) -> None:
         ref_clip = load_preview_source(
             load_source,
             ref_path,
-            Path(reference["index_path"]),
-            reference["display_name"],
-            console,
+            reference.get("managed_index_path"),
+            data.get("source_index_generated_root"),
         )
+        validate_canvas_size(ref_clip.width, ref_clip.height, label="Source video")
     except Exception as e:
         console.safe_print(
             console.status_line("[FAIL]", f"Reference source could not be loaded: {e}")
@@ -674,10 +683,10 @@ def run_session(data: SessionData, script_path: Path) -> None:
             comp_clip = load_preview_source(
                 load_source,
                 comp_path,
-                Path(target["index_path"]),
-                display_name,
-                console,
+                target.get("managed_index_path"),
+                data.get("source_index_generated_root"),
             )
+            validate_canvas_size(comp_clip.width, comp_clip.height, label="Source video")
         except Exception as e:
             console.safe_print(
                 console.status_line("[FAIL]", f"Comparison source could not be loaded: {e}")

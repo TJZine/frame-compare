@@ -141,11 +141,11 @@ def test_libplacebo_probe_uses_current_vapoursynth_range_property(
     def fake_run(
         argv: list[str],
         **_kwargs: object,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> subprocess.CompletedProcess[bytes]:
         captured["script"] = argv[-1]
-        return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
 
-    monkeypatch.setattr(tonemap_runtime_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(tonemap_runtime_module, "run_subprocess", fake_run)
 
     assert probe_libplacebo_runtime() is True
     assert "_Range=1" in captured["script"]
@@ -190,16 +190,18 @@ def test_libplacebo_probe_launches_an_isolated_child_with_runtime_environment(
 ) -> None:
     captured: dict[str, object] = {}
 
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         captured["argv"] = argv
         captured.update(kwargs)
-        return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
 
     monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
     monkeypatch.setenv("PYTHONUSERBASE", "/caller/user-base")
     monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "/runtime/plugins")
     monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
-    monkeypatch.setattr(tonemap_runtime_module.subprocess, "run", fake_run)
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "fixture-api-secret")
+    monkeypatch.setenv("SOURCE_SIGNING_KEY", "fixture-migration-secret")
+    monkeypatch.setattr(tonemap_runtime_module, "run_subprocess", fake_run)
 
     assert probe_libplacebo_runtime() is True
 
@@ -214,6 +216,10 @@ def test_libplacebo_probe_launches_an_isolated_child_with_runtime_environment(
     assert child_env["PYTHONSAFEPATH"] == "1"
     assert child_env["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] == "/runtime/plugins"
     assert child_env["FRAME_COMPARE_RUNTIME_KIND"] == "docker"
+    assert "FRAME_COMPARE_TMDB__API_KEY" not in child_env
+    assert "SOURCE_SIGNING_KEY" not in child_env
+    assert captured["max_stdout_bytes"] == 16 * 1024
+    assert captured["max_stderr_bytes"] == 32 * 1024
     if site.ENABLE_USER_SITE and not sys.flags.no_user_site:
         assert "-s" not in child_argv
         assert child_env["PYTHONUSERBASE"] == "/caller/user-base"

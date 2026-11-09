@@ -1,19 +1,22 @@
 import asyncio
 import os
+import signal
 import subprocess
 import sys
 import textwrap
-from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import suppress
 from pathlib import Path
-from time import monotonic
-from typing import IO
+from time import monotonic, sleep
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 
 import frame_compare.utils.subproc as subproc_module
 from frame_compare.utils.subproc import (
     SubprocessAborted,
+    SubprocessCleanupError,
     SubprocessOutputLimitExceeded,
     prepare_python_child,
     resolve_executable,
@@ -275,14 +278,13 @@ def test_run_subprocess_abort_path_reaps_real_child(
     processes: list[subprocess.Popen[bytes]] = []
     original_popen = subprocess.Popen
 
-    def popen(
-        argv: list[str], *, cwd: Path | None, stdout: int, stderr: int, shell: bool
-    ) -> subprocess.Popen[bytes]:
-        process = original_popen(argv, cwd=cwd, stdout=stdout, stderr=stderr, shell=shell)
-        processes.append(process)
+    def popen(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        process = cast("subprocess.Popen[bytes]", original_popen(argv, **kwargs))
+        if kwargs.get("stdout") == subprocess.PIPE:
+            processes.append(process)
         return process
 
-    monkeypatch.setattr(subproc_module, "Popen", popen)
+    monkeypatch.setattr(subprocess, "Popen", popen)
     argv = [
         sys.executable,
         "-c",
@@ -312,21 +314,15 @@ def test_run_subprocess_abort_path_reaps_real_child(
 @pytest.fixture
 def streaming_children(monkeypatch: pytest.MonkeyPatch) -> list[subprocess.Popen[bytes]]:
     processes: list[subprocess.Popen[bytes]] = []
-    original_popen = subproc_module.Popen
+    original_popen = subprocess.Popen
 
-    def popen(
-        argv: list[str],
-        *,
-        cwd: Path | None,
-        stdout: IO[bytes],
-        stderr: IO[bytes] | int,
-        shell: bool,
-    ) -> subprocess.Popen[bytes]:
-        process = original_popen(argv, cwd=cwd, stdout=stdout, stderr=stderr, shell=shell)
-        processes.append(process)
+    def popen(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        process = cast("subprocess.Popen[bytes]", original_popen(argv, **kwargs))
+        if kwargs.get("stdout") == subprocess.PIPE:
+            processes.append(process)
         return process
 
-    monkeypatch.setattr(subproc_module, "Popen", popen)
+    monkeypatch.setattr(subprocess, "Popen", popen)
     return processes
 
 
@@ -362,75 +358,53 @@ def test_run_subprocess_streaming_consumes_all_bytes(
     assert streaming_children[0].poll() == 0
 
 
-def test_run_subprocess_streaming_keeps_only_stderr_tail() -> None:
-    result = run_subprocess(
-        [
-            sys.executable,
-            "-c",
-            "import sys; sys.stderr.buffer.write(b'x' * (4 * 1024 * 1024) + b'y' * 65536)",
-        ],
-        timeout_seconds=15,
-        stdout_consumer=lambda _chunk: None,
-        max_stdout_bytes=1,
-    )
-    assert result.returncode == 0
-    assert result.stderr == b"y" * 65536
-
-
-@pytest.mark.parametrize("teardown_fails", [False, True], ids=["reap", "reap-and-teardown"])
 def test_run_subprocess_reports_failed_final_wait(
-    streaming_children: list[subprocess.Popen[bytes]],
     monkeypatch: pytest.MonkeyPatch,
-    teardown_fails: bool,
 ) -> None:
+    processes: list[subprocess.Popen[bytes]] = []
     reap_attempts = 0
+    original_popen = subprocess.Popen
     original_wait = subprocess.Popen.wait
     final_wait_error = OSError("injected final wait failure")
     stop_error = RuntimeError("stop the child")
-    teardown_error = PermissionError("injected stdout capture unlink failure")
-    original_tempfile = subproc_module.NamedTemporaryFile
 
-    @contextmanager
-    def stdout_capture(*, delete_on_close: bool) -> Generator[IO[bytes]]:
-        try:
-            with original_tempfile(delete_on_close=delete_on_close) as capture:
-                yield capture
-        finally:
-            # Stand in for Windows rejecting deletion while the child still
-            # holds the file. The real temporary file is removed on this host.
-            raise teardown_error
+    def popen(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        process = cast("subprocess.Popen[bytes]", original_popen(argv, **kwargs))
+        processes.append(process)
+        return process
 
     def wait(process: subprocess.Popen[bytes], timeout: float | None = None) -> int:
         nonlocal reap_attempts
+        if timeout == 1.0:
+            reap_attempts += 1
+            raise subprocess.TimeoutExpired(process.args, 1.0)
         if timeout == 2.0:
             reap_attempts += 1
-            if reap_attempts == 1:
-                raise subprocess.TimeoutExpired(process.args, 2.0)
             raise final_wait_error
         return original_wait(process, timeout)
 
     def abort() -> bool:
-        if streaming_children:
+        if processes:
             raise stop_error
         return False
 
-    monkeypatch.setattr(subprocess.Popen, "wait", wait)
-    if teardown_fails:
-        monkeypatch.setattr(subproc_module, "NamedTemporaryFile", stdout_capture)
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(original_popen, "wait", wait)
     try:
-        with pytest.raises(Exception) as error:
+        with pytest.raises(SubprocessCleanupError) as error:
             run_subprocess(_streaming_child_command(), timeout_seconds=10, abort=abort)
     finally:
-        for process in streaming_children:
+        for process in processes:
             if process.poll() is None:
                 process.kill()
             original_wait(process, timeout=5)
     assert reap_attempts == 2
-    assert type(error.value).__name__ == "SubprocessCleanupError"
     assert error.value.__cause__ is final_wait_error
     assert final_wait_error.__context__ is stop_error
-    if teardown_fails:
-        assert any("PermissionError" in note for note in getattr(error.value, "__notes__", ()))
+    assert len(processes) == 1
+    child = processes[0]
+    assert child.stdout is not None and child.stdout.closed
+    assert child.stderr is not None and child.stderr.closed
 
 
 def test_run_subprocess_streaming_enforces_cap_and_reaps_child(
@@ -484,3 +458,379 @@ def test_run_subprocess_streaming_validates_cap(cap: int | None) -> None:
         run_subprocess(
             _streaming_child_command(), stdout_consumer=lambda _chunk: None, max_stdout_bytes=cap
         )
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@pytest.mark.parametrize("mode", ["exit-zero", "exit-nonzero", "live", "streaming"])
+def test_independent_output_caps_stop_and_reap_flooding_children(
+    stream: str,
+    mode: str,
+    streaming_children: list[subprocess.Popen[bytes]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "fixture-signing-secret"
+    monkeypatch.setenv("WINDOWS_UPDATE_SIGNING_KEY_XML", secret)
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    cap = 48 * 1024 if stream == "stdout" else 16 * 1024
+    fd = 1 if stream == "stdout" else 2
+    write = f"os.write({fd}, {secret.encode()!r} + b'\\x1b\\x07' + b'x' * {cap})"
+    ending = {
+        "exit-zero": "",
+        "exit-nonzero": "raise SystemExit(7)",
+        "live": "time.sleep(30)",
+        "streaming": "time.sleep(30)",
+    }[mode]
+    with pytest.raises(SubprocessOutputLimitExceeded) as error:
+        run_subprocess(
+            [sys.executable, "-c", f"import os,time\n{write}\n{ending}"],
+            timeout_seconds=3,
+            max_stdout_bytes=48 * 1024,
+            max_stderr_bytes=16 * 1024,
+            stdout_consumer=(lambda _chunk: None) if mode == "streaming" else None,
+        )
+    violation = error.value
+    assert (violation.stream, violation.limit, violation.observed) == (stream, cap, cap + 1)
+    assert violation.truncated
+    assert len(violation.diagnostics) < 9_000
+    assert b"<redacted>" in violation.diagnostics
+    assert secret.encode() not in violation.diagnostics
+    assert b"\x1b" not in violation.diagnostics and b"\x07" not in violation.diagnostics
+    assert len(streaming_children) == 1
+    child = streaming_children[0]
+    assert child.returncode is not None
+    assert child.stdout is not None and child.stdout.closed
+    assert child.stderr is not None and child.stderr.closed
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("outcome", ["failure", "timeout"])
+def test_retained_diagnostics_are_bounded_and_sanitized(
+    outcome: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = "fixture-webhook-secret"
+    monkeypatch.setenv("FRAME_COMPARE_SLOWPICS__WEBHOOK_URL", secret)
+    finish = "raise SystemExit(3)" if outcome == "failure" else "time.sleep(30)"
+    script = (
+        "import os,time\n"
+        f"payload = b'head\\x1b' + {secret.encode()!r} + b'x' * 20000 + b'tail\\x07'\n"
+        "os.write(1, payload)\nos.write(2, payload)\n"
+        f"{finish}"
+    )
+    kind = subprocess.CalledProcessError if outcome == "failure" else subprocess.TimeoutExpired
+    with pytest.raises(kind) as error:
+        run_subprocess([sys.executable, "-c", script], timeout_seconds=0.5)
+    for output in (error.value.stdout, error.value.stderr):
+        assert output is not None and 0 < len(output) < 9_000
+        assert output.startswith(b"head") and output.rstrip().endswith(b"tail")
+        assert b"<redacted>" in output and secret.encode() not in output
+        assert b"\x1b" not in output and b"\x07" not in output
+    assert secret not in str(error.value)
+
+
+@pytest.mark.parametrize("fd", [1, 2], ids=["stdout", "stderr"])
+def test_cancel_after_cap_sized_output_closes_both_pipes(
+    fd: int, streaming_children: list[subprocess.Popen[bytes]], tmp_path: Path
+) -> None:
+    cap = 32 * 1024
+    ready = tmp_path / "ready"
+    script = (
+        "import os,pathlib,sys,time; "
+        f"os.write({fd}, b'x' * {cap}); "
+        "pathlib.Path(sys.argv[1]).touch(); time.sleep(30)"
+    )
+    with pytest.raises(SubprocessAborted):
+        run_subprocess(
+            [sys.executable, "-c", script, str(ready)],
+            max_stdout_bytes=cap,
+            max_stderr_bytes=cap,
+            timeout_seconds=3,
+            abort=ready.exists,
+        )
+    [child] = streaming_children
+    assert child.returncode is not None
+    assert child.stdout is not None and child.stdout.closed
+    assert child.stderr is not None and child.stderr.closed
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Requires a POSIX process group")
+def test_overflow_stops_a_descendant_that_inherited_capture_pipes(tmp_path: Path) -> None:
+    ready = tmp_path / "grandchild-pid"
+    grandchild = (
+        "import os,pathlib,signal,sys,time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+    )
+    leader = (
+        "import os,pathlib,subprocess,sys,time\n"
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]])\n"
+        "while not pathlib.Path(sys.argv[1]).exists(): time.sleep(0.01)\n"
+        "os.write(2, b'x' * 8192)\ntime.sleep(30)"
+    )
+    with pytest.raises(SubprocessOutputLimitExceeded):
+        run_subprocess(
+            [sys.executable, "-c", leader, str(ready)],
+            timeout_seconds=3,
+            max_stderr_bytes=4096,
+        )
+    pid = int(ready.read_text())
+    state = "running"
+    try:
+        deadline = monotonic() + 2
+        while monotonic() < deadline:
+            status = subprocess.run(
+                ["ps", "-o", "stat=", "-p", str(pid)],
+                capture_output=True,
+                check=False,
+                timeout=1,
+            )
+            state = status.stdout.decode().strip()
+            if status.returncode or state.startswith("Z"):
+                return
+        pytest.fail(f"grandchild remained live after overflow: {state}")
+    finally:
+        if state and not state.startswith("Z"):
+            with suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+
+def test_nonzero_leader_cannot_leave_devnull_descendant_alive(tmp_path: Path) -> None:
+    ready = tmp_path / "grandchild-pid"
+    grandchild = (
+        "import os,pathlib,sys,time; "
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+    )
+    leader = (
+        "import pathlib,subprocess,sys,time\n"
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]], "
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "while not pathlib.Path(sys.argv[1]).exists(): time.sleep(0.01)\n"
+        "raise SystemExit(7)"
+    )
+    result = run_subprocess(
+        [sys.executable, "-c", leader, str(ready)], check=False, timeout_seconds=5
+    )
+
+    assert result.returncode == 7
+    pid = int(ready.read_text())
+    deadline = monotonic() + 3
+    while monotonic() < deadline:
+        if sys.platform == "win32":
+            status = subprocess.run(
+                ["tasklist.exe", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
+                capture_output=True,
+                check=False,
+                timeout=1,
+            )
+            if f'"{pid}"'.encode() not in status.stdout:
+                return
+        else:
+            status = subprocess.run(
+                ["ps", "-o", "stat=", "-p", str(pid)],
+                capture_output=True,
+                check=False,
+                timeout=1,
+            )
+            state = status.stdout.decode().strip()
+            if status.returncode or state.startswith("Z"):
+                return
+        sleep(0.02)
+    pytest.fail(f"grandchild {pid} survived its process-tree owner")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Requires a POSIX process group")
+def test_successful_leader_cannot_leave_a_capture_pipe_open(tmp_path: Path) -> None:
+    ready = tmp_path / "grandchild-pid"
+    grandchild = (
+        "import os,pathlib,sys,time; "
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
+        "print('descendant ready', flush=True); time.sleep(30)"
+    )
+    leader = (
+        "import pathlib,subprocess,sys,time\n"
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]])\n"
+        "while not pathlib.Path(sys.argv[1]).exists(): time.sleep(0.01)\n"
+        "print('leader done', flush=True)"
+    )
+
+    result = run_subprocess(
+        [sys.executable, "-c", leader, str(ready)],
+        timeout_seconds=3,
+    )
+
+    assert result.returncode == 0
+    assert b"leader done" in result.stdout
+    pid = int(ready.read_text())
+    deadline = monotonic() + 2
+    while monotonic() < deadline:
+        status = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            check=False,
+            timeout=1,
+        )
+        state = status.stdout.decode().strip()
+        if status.returncode or state.startswith("Z"):
+            return
+        sleep(0.02)
+    pytest.fail(f"grandchild {pid} retained the completed leader's capture pipe")
+
+
+@pytest.mark.parametrize("failure", [None, "assign", "sigint"])
+def test_windows_launch_orders_suspend_assignment_and_resume(
+    monkeypatch: pytest.MonkeyPatch, failure: str | None
+) -> None:
+    """Exercise the Windows launch control flow without a Windows kernel."""
+    events: list[str] = []
+    process = MagicMock(pid=123)
+    process.poll.return_value = None
+    kernel = MagicMock()
+    kernel.OpenProcess.return_value = 456
+    job = object.__new__(subproc_module._WindowsJob)
+    job._kernel32 = kernel
+    job._handle = 789
+
+    def create(*_args: object, **kwargs: object) -> object:
+        assert kwargs["creationflags"] == 0x00000004  # CREATE_SUSPENDED
+        assert kwargs["close_fds"] is True
+        events.append("create suspended")
+        if failure == "sigint":
+            signal.raise_signal(signal.SIGINT)
+        return process
+
+    def assign(job_handle: int, process_handle: int) -> bool:
+        assert (job_handle, process_handle) == (789, 456)
+        events.append("assign")
+        if failure == "assign":
+            raise OSError("injected job assignment failure")
+        return True
+
+    def resume(pid: int) -> None:
+        assert pid == 123
+        events.append("resume")
+
+    kernel.AssignProcessToJobObject.side_effect = assign
+    monkeypatch.setattr(job, "_resume_primary_thread", resume)
+    monkeypatch.setattr(subproc_module, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(subproc_module, "_WindowsJob", lambda: job)
+    monkeypatch.setattr(subprocess, "Popen", create)
+    previous_sigint = signal.getsignal(signal.SIGINT)
+    if failure is not None:
+        expected = OSError if failure == "assign" else KeyboardInterrupt
+        with pytest.raises(expected):
+            subproc_module.spawn_owned_process(["example.exe"], env={}, capture_output=True)
+        assert events == (
+            ["create suspended", "assign"] if failure == "assign" else ["create suspended"]
+        )
+        process.kill.assert_called_once_with()
+        process.stdout.close.assert_called_once_with()
+        process.stderr.close.assert_called_once_with()
+    else:
+        child, tree = subproc_module.spawn_owned_process(["example.exe"], env={})
+        assert child is process
+        assert events == ["create suspended", "assign", "resume"]
+        tree.reap(child)
+        process.kill.assert_not_called()
+    assert signal.getsignal(signal.SIGINT) is previous_sigint
+    expected_closed = [(789,)] if failure == "sigint" else [(456,), (789,)]
+    assert [call.args for call in kernel.CloseHandle.call_args_list] == expected_closed
+    process.wait.assert_called_once_with(timeout=1.0)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Requires a Windows Job Object")
+@pytest.mark.parametrize("hold_capture", [False, True], ids=["immediate-spawn", "inherited-pipe"])
+def test_windows_job_owns_immediate_descendant_after_leader_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hold_capture: bool
+) -> None:
+    attempted = tmp_path / "leader-started"
+    ready = tmp_path / "descendant-pid"
+    original_assign = subproc_module._WindowsJob.assign_and_resume
+
+    def observe_suspended(job: subproc_module._WindowsJob, pid: int) -> None:
+        # Widen the pre-assignment window. A runnable leader can immediately
+        # start its descendant and escape assignment of the leader alone.
+        sleep(0.25)
+        assert not attempted.exists()
+        original_assign(job, pid)
+
+    monkeypatch.setattr(subproc_module._WindowsJob, "assign_and_resume", observe_suspended)
+    inherited = "sys.stdout" if hold_capture else "subprocess.DEVNULL"
+    grandchild = (
+        "import pathlib,sys,time; "
+        "print('descendant ready', flush=True); "
+        "pathlib.Path(sys.argv[1]).touch(); time.sleep(30)"
+    )
+    leader = (
+        "import pathlib,subprocess,sys,time\n"
+        "pathlib.Path(sys.argv[1]).touch()\n"
+        f"child = subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[3]], "
+        f"stdin=subprocess.DEVNULL, stdout={inherited}, stderr=subprocess.DEVNULL)\n"
+        "pathlib.Path(sys.argv[2]).write_text(str(child.pid), encoding='ascii')\n"
+        "while not pathlib.Path(sys.argv[3]).exists(): time.sleep(0.01)\n"
+        "print('leader exiting', flush=True)\n"
+    )
+    try:
+        result = run_subprocess(
+            [sys.executable, "-c", leader, str(attempted), str(ready), str(tmp_path / "started")],
+            timeout_seconds=6,
+        )
+        assert b"leader exiting" in result.stdout
+        assert (b"descendant ready" in result.stdout) == hold_capture
+        pid = int(ready.read_text(encoding="ascii"))
+        deadline = monotonic() + 3
+        while monotonic() < deadline:
+            status = subprocess.run(
+                ["tasklist.exe", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
+                capture_output=True,
+                check=True,
+                timeout=2,
+            )
+            if f'"{pid}"'.encode() not in status.stdout:
+                ready.unlink()
+                return
+            sleep(0.02)
+        pytest.fail(f"descendant {pid} outlived the Windows job")
+    finally:
+        if ready.exists():
+            with suppress(OSError):
+                os.kill(int(ready.read_text(encoding="ascii")), signal.SIGTERM)
+
+
+def test_child_environment_filters_app_credentials_after_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "synthetic-api-key")
+    effective = os.environ | {
+        "frame_compare_slowpics__webhook_url": "synthetic-hook",
+        "FRAME_COMPARE_SLOWPICS__API_TOKEN": "synthetic-token",
+        "WINDOWS_UPDATE_SIGNING_KEY_XML": "synthetic-key",
+        "SIGNING_KEY_MIGRATION_TOKEN": "synthetic-migration-token",
+        "SOURCE_SIGNING_KEY": "synthetic-source-key",
+        "SIGNING_KEY_XML_PATH": "synthetic-path",
+        "VAPOURSYNTH_EXTRA_PLUGIN_PATH": "fixture/plugins",
+        "FRAME_COMPARE_LIBPLACEBO_EXPECTED_SHA256": "fixture-fingerprint",
+    }
+    observed_names = (
+        "frame_compare_slowpics__webhook_url",
+        "FRAME_COMPARE_SLOWPICS__API_TOKEN",
+        "WINDOWS_UPDATE_SIGNING_KEY_XML",
+        "SIGNING_KEY_MIGRATION_TOKEN",
+        "SOURCE_SIGNING_KEY",
+        "SIGNING_KEY_XML_PATH",
+        "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
+        "FRAME_COMPARE_LIBPLACEBO_EXPECTED_SHA256",
+        "FRAME_COMPARE_TMDB__API_KEY",
+    )
+    script = (
+        "import os; "
+        f"names = {observed_names!r}; "
+        "print([os.environ.get(name) for name in names if os.environ.get(name)])"
+    )
+    command, env = prepare_python_child([sys.executable, "-c", script], env=effective)
+    for argv, child_env in (([sys.executable, "-c", script], effective), (command, env)):
+        result = run_subprocess(argv, env=child_env, timeout_seconds=3)
+        assert b"fixture/plugins" in result.stdout
+        assert b"fixture-fingerprint" in result.stdout
+        assert b"synthetic" not in result.stdout
+    assert "frame_compare_slowpics__webhook_url" not in env

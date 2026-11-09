@@ -3,18 +3,33 @@
 from __future__ import annotations
 
 import os
+import signal
 import site
+import subprocess
 import sys
-from collections.abc import Callable, Sequence
-from contextlib import ExitStack, suppress
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import contextmanager, nullcontext, suppress
+from dataclasses import dataclass, field
 from pathlib import Path
 from shutil import which
-from subprocess import PIPE, CompletedProcess, Popen, TimeoutExpired, run
-from tempfile import NamedTemporaryFile, TemporaryFile
-from time import monotonic
-from typing import IO
+from subprocess import DEVNULL, PIPE, CompletedProcess, Popen, SubprocessError, TimeoutExpired
+from threading import current_thread, main_thread
+from time import monotonic, sleep
+from types import FrameType
+from typing import Literal
 
-_STDERR_TAIL_BYTES = 64 * 1024
+from frame_compare.utils.child_environment import (
+    child_environment,
+    diagnostic_secrets,
+    sanitize_diagnostic,
+)
+
+PROBE_STDOUT_BYTES = 256 * 1024
+PROBE_STDERR_BYTES = 64 * 1024
+_DIAGNOSTIC_EDGE_BYTES = 4096
+_READ_BYTES = 64 * 1024
+_POLL_SECONDS = 0.005
+_CREATE_SUSPENDED = 0x00000004
 
 _MEDIA_EXECUTABLE_ENV = {
     "ffmpeg": "FRAME_COMPARE_FFMPEG_EXECUTABLE",
@@ -122,7 +137,7 @@ def prepare_python_child(
     if not argv:
         raise ValueError("argv must contain at least one element")
 
-    child_env = dict(os.environ if env is None else env)
+    child_env = child_environment(env)
     for key in _PYTHON_INJECTION_ENV_KEYS:
         child_env.pop(key, None)
 
@@ -139,72 +154,367 @@ def prepare_python_child(
     return [str(argv[0]), *python_flags, *(str(part) for part in argv[1:])], child_env
 
 
-def run_subprocess(
-    argv: Sequence[str],
-    *,
-    timeout_seconds: float | None = None,
-    cwd: Path | None = None,
-    check: bool = True,
-    abort: Callable[[], bool] | None = None,
-    stdout_consumer: Callable[[bytes], None] | None = None,
-    max_stdout_bytes: int | None = None,
-) -> CompletedProcess[bytes]:
-    """
-    Execute a command with explicit argv validation and captured output.
-
-    Args:
-        argv: Command arguments sequence (e.g. ["ffprobe", "-version"])
-        timeout_seconds: Maximum execution time in seconds
-        cwd: Working directory
-        check: Whether to raise CalledProcessError on non-zero exit code
-        abort: Optional owner-provided check for stopping and reaping the child
-        stdout_consumer: Consume bounded chunks instead of retaining stdout
-        max_stdout_bytes: Required output limit when consuming stdout
-    """
-    if (stdout_consumer is None) != (max_stdout_bytes is None):
-        raise ValueError("stdout_consumer and max_stdout_bytes must be supplied together")
-    if max_stdout_bytes is not None and max_stdout_bytes < 0:
-        raise ValueError("max_stdout_bytes must be nonnegative")
-    resolved_cwd = _resolve_cwd(cwd)
-    normalized_argv = _normalize_argv(argv, resolved_cwd)
-    if abort is not None or stdout_consumer is not None:
-        return _run_abortable(
-            normalized_argv,
-            resolved_cwd,
-            timeout_seconds,
-            check,
-            abort or (lambda: False),
-            stdout_consumer,
-            max_stdout_bytes,
-        )
-    return run(
-        normalized_argv,
-        cwd=resolved_cwd,
-        capture_output=True,
-        timeout=timeout_seconds,
-        check=check,
-        shell=False,
-    )
+type OutputStream = Literal["stdout", "stderr"]
 
 
 class SubprocessAborted(Exception):
     """The owner stopped a process; incomplete output is not a successful result."""
 
 
-class SubprocessOutputLimitExceeded(Exception):
-    """Captured stdout exceeded the owner's byte limit; the child was reaped."""
+class SubprocessOutputLimitExceeded(SubprocessError):
+    """A child emitted more than the caller's byte budget for one stream."""
+
+    def __init__(
+        self,
+        stream: OutputStream,
+        limit: int,
+        observed: int,
+        diagnostics: bytes,
+    ) -> None:
+        self.stream = stream
+        self.limit = limit
+        self.observed = observed  # Bytes read so far, a lower bound on total emitted.
+        self.truncated = True
+        self.diagnostics = diagnostics
+        super().__init__(f"Child {stream} exceeded its {limit:,}-byte limit")
 
 
 class SubprocessCleanupError(Exception):
     """The child could not be reaped after escalation."""
 
 
-def _reap_stopped_process(process: Popen[bytes]) -> None:
-    # Escalate even if terminate or the first wait is interrupted.
-    with suppress(BaseException):
-        process.terminate()
+@dataclass(slots=True)
+class OutputBudget:
+    """Count raw bytes and retain only small diagnostic edges, even when streaming."""
+
+    stream: OutputStream
+    limit: int
+    secrets: tuple[str, ...] = field(default_factory=diagnostic_secrets)
+    observed: int = field(init=False, default=0)
+    _head: bytearray = field(init=False, default_factory=bytearray)
+    _tail: bytearray = field(init=False, default_factory=bytearray)
+
+    def consume(self, chunk: bytes) -> None:
+        self.observed += len(chunk)
+        head_remaining = _DIAGNOSTIC_EDGE_BYTES - len(self._head)
+        self._head.extend(chunk[:head_remaining])
+        tail_start = max(head_remaining, len(chunk) - _DIAGNOSTIC_EDGE_BYTES)
+        self._tail.extend(chunk[tail_start:])
+        del self._tail[:-_DIAGNOSTIC_EDGE_BYTES]
+        if self.observed > self.limit:
+            raise SubprocessOutputLimitExceeded(
+                self.stream, self.limit, self.observed, self.diagnostics()
+            )
+
+    def diagnostics(self) -> bytes:
+        if self.observed == len(self._head) + len(self._tail):
+            return sanitize_diagnostic(bytes(self._head + self._tail), self.secrets)[
+                : 2 * _DIAGNOSTIC_EDGE_BYTES
+            ]
+        head = sanitize_diagnostic(bytes(self._head), self.secrets)[:_DIAGNOSTIC_EDGE_BYTES]
+        tail = sanitize_diagnostic(bytes(self._tail), self.secrets)[-_DIAGNOSTIC_EDGE_BYTES:]
+        return head + b"\n[...output truncated...]\n" + tail
+
+    @property
+    def truncated(self) -> bool:
+        return self.observed > len(self._head) + len(self._tail)
+
+
+class _WindowsJob:
+    """Own a Windows process tree even after its original leader exits."""
+
+    def __init__(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        class _BasicLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("per_process_user_time_limit", ctypes.c_longlong),
+                ("per_job_user_time_limit", ctypes.c_longlong),
+                ("limit_flags", wintypes.DWORD),
+                ("minimum_working_set_size", ctypes.c_size_t),
+                ("maximum_working_set_size", ctypes.c_size_t),
+                ("active_process_limit", wintypes.DWORD),
+                ("affinity", ctypes.c_size_t),
+                ("priority_class", wintypes.DWORD),
+                ("scheduling_class", wintypes.DWORD),
+            ]
+
+        class _IoCounters(ctypes.Structure):
+            _fields_ = [
+                ("read_operation_count", ctypes.c_ulonglong),
+                ("write_operation_count", ctypes.c_ulonglong),
+                ("other_operation_count", ctypes.c_ulonglong),
+                ("read_transfer_count", ctypes.c_ulonglong),
+                ("write_transfer_count", ctypes.c_ulonglong),
+                ("other_transfer_count", ctypes.c_ulonglong),
+            ]
+
+        class _ExtendedLimitInformation(ctypes.Structure):
+            _fields_ = [
+                ("basic_limit_information", _BasicLimitInformation),
+                ("io_info", _IoCounters),
+                ("process_memory_limit", ctypes.c_size_t),
+                ("job_memory_limit", ctypes.c_size_t),
+                ("peak_process_memory_used", ctypes.c_size_t),
+                ("peak_job_memory_used", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+        ]
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        handle = kernel32.CreateJobObjectW(None, None)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        self._kernel32 = kernel32
+        self._handle = handle
+        try:
+            limits = _ExtendedLimitInformation()
+            limits.basic_limit_information.limit_flags = 0x00002000  # KILL_ON_JOB_CLOSE
+            if not kernel32.SetInformationJobObject(
+                handle,
+                9,
+                ctypes.byref(limits),
+                ctypes.sizeof(limits),  # ExtendedLimitInformation
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+        except BaseException:
+            kernel32.CloseHandle(handle)
+            self._handle = None
+            raise
+
+    def assign_and_resume(self, pid: int) -> None:
+        import ctypes
+
+        kernel32 = self._kernel32
+        # AssignProcessToJobObject needs PROCESS_TERMINATE | PROCESS_SET_QUOTA.
+        process_handle = kernel32.OpenProcess(0x0001 | 0x0100, False, pid)
+        if not process_handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            if not kernel32.AssignProcessToJobObject(self._handle, process_handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+            self._resume_primary_thread(pid)
+        finally:
+            kernel32.CloseHandle(process_handle)
+
+    def _resume_primary_thread(self, pid: int) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        class _ThreadEntry(ctypes.Structure):
+            _fields_ = [
+                ("size", wintypes.DWORD),
+                ("usage", wintypes.DWORD),
+                ("thread_id", wintypes.DWORD),
+                ("owner_pid", wintypes.DWORD),
+                ("base_priority", wintypes.LONG),
+                ("delta_priority", wintypes.LONG),
+                ("flags", wintypes.DWORD),
+            ]
+
+        kernel32 = self._kernel32
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.Thread32First.argtypes = [wintypes.HANDLE, ctypes.POINTER(_ThreadEntry)]
+        kernel32.Thread32First.restype = wintypes.BOOL
+        kernel32.Thread32Next.argtypes = kernel32.Thread32First.argtypes
+        kernel32.Thread32Next.restype = wintypes.BOOL
+        kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenThread.restype = wintypes.HANDLE
+        kernel32.GetProcessIdOfThread.argtypes = [wintypes.HANDLE]
+        kernel32.GetProcessIdOfThread.restype = wintypes.DWORD
+        kernel32.ResumeThread.argtypes = [wintypes.HANDLE]
+        kernel32.ResumeThread.restype = wintypes.DWORD
+
+        # Popen closes the primary thread handle. A CREATE_SUSPENDED child
+        # has one thread, which we reopen with the documented Toolhelp API.
+        snapshot = kernel32.CreateToolhelp32Snapshot(0x00000004, 0)  # TH32CS_SNAPTHREAD
+        if snapshot == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            entry = _ThreadEntry()
+            entry.size = ctypes.sizeof(entry)
+            found = kernel32.Thread32First(snapshot, ctypes.byref(entry))
+            thread_id = None
+            while found:
+                if entry.owner_pid == pid:
+                    if thread_id is not None:
+                        raise OSError("Suspended child has multiple threads")
+                    thread_id = entry.thread_id
+                entry.size = ctypes.sizeof(entry)
+                found = kernel32.Thread32Next(snapshot, ctypes.byref(entry))
+            if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+                raise ctypes.WinError(ctypes.get_last_error())
+        finally:
+            kernel32.CloseHandle(snapshot)
+        if thread_id is None:
+            raise OSError("Could not locate the suspended child's primary thread")
+
+        # THREAD_SUSPEND_RESUME | THREAD_QUERY_LIMITED_INFORMATION
+        thread = kernel32.OpenThread(0x0002 | 0x0800, False, thread_id)
+        if not thread:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            if kernel32.GetProcessIdOfThread(thread) != pid:
+                raise OSError("Suspended child's primary thread changed")
+            previous_count = kernel32.ResumeThread(thread)
+            if previous_count == 0xFFFFFFFF:
+                raise ctypes.WinError(ctypes.get_last_error())
+            if previous_count != 1:
+                raise OSError("Unexpected suspend count for child process")
+        finally:
+            kernel32.CloseHandle(thread)
+
+    def close(self) -> None:
+        if self._handle is None:
+            return
+        if not self._kernel32.CloseHandle(self._handle):
+            import ctypes
+
+            raise ctypes.WinError(ctypes.get_last_error())
+        self._handle = None
+
+
+class OwnedProcessTree:
+    """Retain cross-platform ownership of a child's complete process tree."""
+
+    def __init__(self, windows_job: _WindowsJob | None) -> None:
+        self._windows_job = windows_job
+
+    def close_windows_job(self) -> None:
+        """Stop remaining Windows descendants before waiting for their pipes."""
+        if self._windows_job is not None:
+            self._windows_job.close()
+
+    def signal(self, process: Popen[bytes], *, force: bool) -> None:
+        signal_child_tree(process, force=force, windows_job=self._windows_job)
+
+    def reap(self, process: Popen[bytes]) -> None:
+        try:
+            reap_stopped_process(process, self._windows_job)
+        finally:
+            with suppress(OSError):
+                self.close_windows_job()
+
+
+@contextmanager
+def _defer_windows_spawn_sigint() -> Generator[None]:
+    # A Python SIGINT in Popen could unwind after CreateProcess but before the
+    # suspended PID reaches its owner. Replay the caller's handler once owned.
+    previous = signal.getsignal(signal.SIGINT)
+    if current_thread() is not main_thread() or not callable(previous):
+        yield
+        return
+
+    pending: list[tuple[int, FrameType | None]] = []
+
+    def defer(signum: int, frame: FrameType | None) -> None:
+        pending.append((signum, frame))
+
     try:
-        process.wait(timeout=2.0)
+        signal.signal(signal.SIGINT, defer)
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous)
+        for signum, frame in pending:
+            previous(signum, frame)
+
+
+def spawn_owned_process(
+    command: Sequence[str],
+    *,
+    env: Mapping[str, str],
+    cwd: Path | None = None,
+    capture_output: bool = False,
+) -> tuple[Popen[bytes], OwnedProcessTree]:
+    """Start an already resolved command inside its owned process tree."""
+    windows_job = None
+    process = None
+    windows = sys.platform == "win32"
+    try:
+        with _defer_windows_spawn_sigint() if windows else nullcontext():
+            if windows:
+                windows_job = _WindowsJob()
+            process = subprocess.Popen(  # nosec B603
+                command,
+                cwd=cwd,
+                env=env,
+                stdin=DEVNULL if capture_output else None,
+                stdout=PIPE if capture_output else None,
+                stderr=PIPE if capture_output else None,
+                bufsize=0,
+                shell=False,
+                close_fds=True,
+                start_new_session=not windows,
+                creationflags=_CREATE_SUSPENDED if windows else 0,
+            )
+        if windows_job is not None:
+            windows_job.assign_and_resume(process.pid)
+        return process, OwnedProcessTree(windows_job)
+    except BaseException:
+        if windows_job is not None:
+            with suppress(BaseException):
+                windows_job.close()
+        if process is not None:
+            # Assignment may have failed before the job owned the suspended
+            # child. Explicitly terminate it and release both pipe endpoints.
+            try:
+                reap_stopped_process(process)
+            finally:
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        with suppress(BaseException):
+                            stream.close()
+        raise
+
+
+def signal_child_tree(
+    process: Popen[bytes] | Popen[str], *, force: bool, windows_job: _WindowsJob | None = None
+) -> None:
+    """Signal an owned process group or close its kill-on-close job."""
+    if sys.platform == "win32":
+        if windows_job is not None:
+            windows_job.close()
+        elif process.poll() is None:
+            process.kill() if force else process.terminate()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            # Some POSIX hosts deny signals to an exiting process group.
+            if process.poll() is None:
+                process.kill() if force else process.terminate()
+
+
+def reap_stopped_process(
+    process: Popen[bytes] | Popen[str], windows_job: _WindowsJob | None = None
+) -> None:
+    """Stop the owned tree and report failure to reap the child."""
+    # Kill the group even if its leader already exited and left writers behind.
+    try:
+        signal_child_tree(process, force=True, windows_job=windows_job)
+    except BaseException:
+        with suppress(BaseException):
+            process.kill()
+    try:
+        process.wait(timeout=1.0)
         return
     except BaseException:
         pass
@@ -216,137 +526,128 @@ def _reap_stopped_process(process: Popen[bytes]) -> None:
         raise SubprocessCleanupError("could not reap child after killing it") from exc
 
 
-def _read_captured_output(stream: IO[bytes]) -> bytes:
-    size = os.fstat(stream.fileno()).st_size
-    stream.seek(0)
-    return stream.read(size)
-
-
-def _run_abortable(
-    argv: list[str],
-    cwd: Path | None,
-    timeout_seconds: float | None,
-    check: bool,
-    abort: Callable[[], bool],
+def run_subprocess(
+    argv: Sequence[str],
+    *,
+    timeout_seconds: float | None = None,
+    cwd: Path | None = None,
+    check: bool = True,
+    abort: Callable[[], bool] | None = None,
     stdout_consumer: Callable[[bytes], None] | None = None,
     max_stdout_bytes: int | None = None,
+    max_stderr_bytes: int = PROBE_STDERR_BYTES,
+    env: Mapping[str, str] | None = None,
 ) -> CompletedProcess[bytes]:
-    if abort():
+    """Run a child with independently capped stdout/stderr and owned cleanup.
+
+    Stdout remains byte-exact on success. Streamed stdout must supply its own
+    byte budget and is never assembled in memory. Failure output is diagnostic
+    only, bounded to sanitized head/tail excerpts.
+    """
+    if stdout_consumer is not None and max_stdout_bytes is None:
+        raise ValueError("stdout_consumer and max_stdout_bytes must be supplied together")
+    if max_stdout_bytes is None:
+        max_stdout_bytes = PROBE_STDOUT_BYTES
+    if any(type(limit) is not int or limit < 0 for limit in (max_stdout_bytes, max_stderr_bytes)):
+        raise ValueError("output limits must be nonnegative byte counts")
+    if abort is not None and abort():
         raise SubprocessAborted()
 
-    # Reopen stdout so reading never changes the child's write offset.
-    with ExitStack() as stack:
-        stdout_file = stack.enter_context(NamedTemporaryFile(delete_on_close=False))
-        stdout_reader = stack.enter_context(open(stdout_file.name, "rb"))
-        # Non-streaming callers can use stderr as result data (FFmpeg showinfo).
-        stderr_file = stack.enter_context(TemporaryFile()) if stdout_consumer is None else None
-        process = Popen(argv, cwd=cwd, stdout=stdout_file, stderr=stderr_file or PIPE, shell=False)
-        stderr_tail = bytearray()
-        stderr_fd: int | None = None
-
-        def consume_stderr() -> bool:
-            if stderr_fd is None:
-                return False
-            received = False
-            # Cap work between deadline checks even if a descendant keeps writing.
-            for _ in range(16):
+    resolved_cwd = _resolve_cwd(cwd)
+    command = _normalize_argv(argv, resolved_cwd)
+    secrets = diagnostic_secrets(env)
+    stdout_budget = OutputBudget("stdout", max_stdout_bytes, secrets)
+    stderr_budget = OutputBudget("stderr", max_stderr_bytes, secrets)
+    deadline = None if timeout_seconds is None else monotonic() + timeout_seconds
+    stdout, stderr = bytearray(), bytearray()
+    process, process_tree = spawn_owned_process(
+        command,
+        cwd=resolved_cwd,
+        env=child_environment(env),
+        capture_output=True,
+    )
+    descendants_stopped = False
+    try:
+        assert process.stdout is not None and process.stderr is not None
+        readers = {
+            process.stdout.fileno(): (stdout_budget, stdout, stdout_consumer),
+            process.stderr.fileno(): (stderr_budget, stderr, None),
+        }
+        # Python 3.13 supports nonblocking anonymous pipes on Windows too.
+        # A single owner means there are no reader threads to strand on EOF.
+        for fd in readers:
+            os.set_blocking(fd, False)
+        while readers or process.poll() is None:
+            returncode = process.poll()
+            if returncode is not None and not descendants_stopped:
+                if sys.platform == "win32":
+                    process_tree.close_windows_job()
+                else:
+                    process_tree.signal(process, force=True)
+                descendants_stopped = True
+            # Keep a known child failure so the caller can distinguish a signal
+            # exit from an unrelated failure racing with cancellation.
+            if returncode in (None, 0) and abort is not None and abort():
+                raise SubprocessAborted()
+            remaining = None if deadline is None else deadline - monotonic()
+            if remaining is not None and remaining <= 0:
+                assert timeout_seconds is not None
+                raise TimeoutExpired(
+                    _diagnostic_command(command, secrets),
+                    timeout_seconds,
+                    output=stdout_budget.diagnostics(),
+                    stderr=stderr_budget.diagnostics(),
+                )
+            progressed = False
+            for fd, (budget, data, consume) in tuple(readers.items()):
                 try:
-                    chunk = os.read(stderr_fd, _STDERR_TAIL_BYTES)
+                    chunk = os.read(fd, min(_READ_BYTES, budget.limit - budget.observed + 1))
                 except BlockingIOError:
-                    break
-                if not chunk:
-                    break
-                received = True
-                stderr_tail.extend(chunk)
-                del stderr_tail[:-_STDERR_TAIL_BYTES]
-            return received
-
-        def captured_stderr() -> bytes:
-            if stderr_file is not None:
-                return _read_captured_output(stderr_file)
-            consume_stderr()
-            return bytes(stderr_tail)
-
-        try:
-            if process.stderr is not None:
-                stderr_pipe = stack.enter_context(process.stderr)
-                # Non-blocking pipes avoid reader threads and EOF waits on Windows too.
-                os.set_blocking(stderr_pipe.fileno(), False)
-                stderr_fd = stderr_pipe.fileno()
-            deadline = None if timeout_seconds is None else monotonic() + timeout_seconds
-            stdout_bytes = 0
-
-            def consume_stdout() -> None:
-                nonlocal stdout_bytes
-                if stdout_consumer is None or max_stdout_bytes is None:
-                    return
-                while chunk := stdout_reader.read(min(65536, max_stdout_bytes - stdout_bytes + 1)):
-                    if abort():
-                        raise SubprocessAborted()
-                    if (
-                        timeout_seconds is not None
-                        and deadline is not None
-                        and monotonic() >= deadline
-                    ):
-                        raise TimeoutExpired(argv, timeout_seconds)
-                    stdout_bytes += len(chunk)
-                    if stdout_bytes > max_stdout_bytes:
-                        raise SubprocessOutputLimitExceeded()
-                    stdout_consumer(chunk)
-
-            while True:
-                if abort():
-                    raise SubprocessAborted()
-                remaining = None if deadline is None else deadline - monotonic()
-                if timeout_seconds is not None and remaining is not None and remaining <= 0:
-                    raise TimeoutExpired(argv, timeout_seconds)
-                consume_stdout()
-                drained_stderr = consume_stderr()
-                wait_interval = 0.1 if stderr_fd is None else (0.0 if drained_stderr else 0.01)
-                try:
-                    process.wait(
-                        timeout=wait_interval
-                        if remaining is None
-                        else min(wait_interval, remaining)
-                    )
-                except TimeoutExpired:
                     continue
-                consume_stdout()
-                break
-        except BaseException as exc:
+                if not chunk:
+                    del readers[fd]
+                    continue
+                progressed = True
+                budget.consume(chunk)
+                if consume is None:
+                    data.extend(chunk)
+                else:
+                    consume(chunk)
+            if not progressed:
+                sleep(_POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining))
+    finally:
+        try:
+            process_tree.reap(process)
+        finally:
             try:
-                _reap_stopped_process(process)
-            except SubprocessCleanupError as cleanup_error:
-                # A live child can still hold the temporary stdout file open.
-                # Close the capture resources without masking the failed reap.
-                try:
-                    stack.close()
-                except OSError as teardown_error:
-                    cleanup_error.add_note(
-                        f"Capture teardown also failed ({type(teardown_error).__name__})."
-                    )
-                raise
-            if isinstance(exc, TimeoutExpired):
-                with suppress(BaseException):
-                    exc.stdout = (
-                        _read_captured_output(stdout_file) if stdout_consumer is None else b""
-                    )
-                    exc.stderr = captured_stderr()
-            raise
-        stdout = _read_captured_output(stdout_file) if stdout_consumer is None else b""
-        stderr = captured_stderr()
-    result = CompletedProcess(argv, process.returncode, stdout, stderr)
+                if process.stdout is not None:
+                    process.stdout.close()
+            finally:
+                if process.stderr is not None:
+                    process.stderr.close()
+
+    assert process.returncode is not None
+    if process.returncode:
+        result = CompletedProcess(
+            _diagnostic_command(command, secrets),
+            process.returncode,
+            stdout_budget.diagnostics(),
+            stderr_budget.diagnostics(),
+        )
+    else:
+        result = CompletedProcess(
+            command,
+            process.returncode,
+            bytes(stdout),
+            sanitize_diagnostic(bytes(stderr), secrets)[:max_stderr_bytes],
+        )
     if check:
         result.check_returncode()
     return result
 
 
-__all__ = [
-    "SubprocessAborted",
-    "SubprocessCleanupError",
-    "SubprocessOutputLimitExceeded",
-    "prepare_python_child",
-    "resolve_executable",
-    "resolve_optional_executable",
-    "run_subprocess",
-]
+def _diagnostic_command(command: list[str], secrets: tuple[str, ...]) -> list[str]:
+    return [
+        sanitize_diagnostic(part.encode("utf-8", errors="replace"), secrets).decode()
+        for part in command
+    ]

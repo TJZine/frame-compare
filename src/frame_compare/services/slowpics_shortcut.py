@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from frame_compare.errors import PathEscapesRootError
+from frame_compare.services.slowpics_url import require_comparison_url
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.paths import require_managed_descendant
@@ -44,6 +45,15 @@ def create_slowpics_url_shortcut(
 ) -> SlowpicsShortcutResult:
     """Create a deterministic Windows InternetShortcut-style file."""
     raise_if_cancelling()
+    try:
+        slowpics_url = require_comparison_url(slowpics_url)
+    except ValueError:
+        return SlowpicsShortcutResult(
+            success=False,
+            warning=RunWarning(
+                "slow.pics", "warning", "slow.pics shortcut:", "invalid comparison URL"
+            ),
+        )
     try:
         output_dir = _select_shortcut_directory(workspace)
     except (OSError, RuntimeError, PathEscapesRootError) as exc:

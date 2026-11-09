@@ -1,3 +1,4 @@
+import os
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -22,7 +23,16 @@ from frame_compare.render.geometry import (
     SourceGeometry,
 )
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
+from frame_compare.vs.hdr_probe import probe_video_streams
 from frame_compare.vs.types import HDRMetadata
+
+
+@pytest.fixture(autouse=True)
+def _stub_stream_headers_for_synthetic_video_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.probe_video_streams",
+        lambda _path, **_kwargs: [{"width": 1920, "height": 1080}],
+    )
 
 
 def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
@@ -34,6 +44,8 @@ def test_build_extract_frame_argv_supports_optional_overwrite() -> None:
     ) == [
         "ffmpeg",
         "-noautorotate",
+        "-max_pixels",
+        "33177600",
         "-i",
         "clip.mkv",
         "-map",
@@ -64,6 +76,56 @@ def test_build_extract_frame_argv_rejects_negative_frame_numbers() -> None:
             output=Path("frame.png"),
             overwrite=False,
         )
+
+
+def test_oversize_media_fails_before_ffmpeg_extraction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.probe_video_streams",
+        lambda _path: [{"width": 7681, "height": 2}],
+    )
+    run = MagicMock(side_effect=AssertionError("must validate before starting FFmpeg"))
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run)
+    output = tmp_path / "out.png"
+    with pytest.raises(ValueError, match="7,680 pixels per axis"):
+        DefaultFFmpegRunner().extract_frame(Path("clip.mkv"), 0, output)
+    run.assert_not_called()
+    assert not output.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Uses synthetic POSIX media executables")
+def test_ffmpeg_and_ffprobe_children_filter_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.probe_video_streams", probe_video_streams
+    )
+    monkeypatch.setenv("FRAME_COMPARE_SLOWPICS__WEBHOOK_URL", "fixture-hook")
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "fixture-api-key")
+    monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "fixture-plugin-path")
+    for tool, response in (
+        ("ffprobe", 'printf \'%s\' \'{"streams":[{"width":1920,"height":1080}]}\''),
+        (
+            "ffmpeg",
+            "for output do :; done\n"
+            "printf '%s' 'image' > \"$output\"\n"
+            "printf '%s' '[Parsed_showinfo_1 @ 0x1] n:0 type:I' >&2",
+        ),
+    ):
+        script = tmp_path / tool
+        script.write_text(
+            "#!/bin/sh\n"
+            '[ -z "$FRAME_COMPARE_SLOWPICS__WEBHOOK_URL" ] || exit 7\n'
+            '[ -z "$FRAME_COMPARE_TMDB__API_KEY" ] || exit 7\n'
+            '[ "$VAPOURSYNTH_EXTRA_PLUGIN_PATH" = fixture-plugin-path ] || exit 7\n'
+            f"{response}\n",
+            encoding="utf-8",
+        )
+        script.chmod(0o700)
+        monkeypatch.setenv(f"FRAME_COMPARE_{tool.upper()}_EXECUTABLE", str(script))
+    result = DefaultFFmpegRunner().extract_frame(Path("clip.mkv"), 0, tmp_path / "out.png")
+    assert result.picture_type == "I"
 
 
 def test_build_extract_frame_argv_places_geometry_filters_after_exact_frame_select() -> None:
@@ -125,7 +187,7 @@ def test_build_extract_frame_argv_rejects_unrepresentable_geometry_plan() -> Non
         overlay_origin=(10, 10),
     )
 
-    with pytest.raises(ValueError, match="scale dimensions must be positive"):
+    with pytest.raises(ValueError, match="Scaled frame dimensions are out of bounds"):
         build_extract_frame_argv(
             video=Path("clip.mkv"),
             frame_num=100,
@@ -145,6 +207,8 @@ def test_build_extract_frames_argv_selects_ordered_frames_in_one_pass() -> None:
         "ffmpeg",
         "-y",
         "-noautorotate",
+        "-max_pixels",
+        "33177600",
         "-i",
         "clip.mkv",
         "-map",
@@ -174,6 +238,34 @@ def test_build_extract_frames_argv_rejects_unsafe_frame_sequences(
             output_pattern=Path("staging/%09d.png"),
             overwrite=True,
         )
+
+
+def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def extract(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        staged_path = Path(argv[-1])
+        assert staged_path != output
+        assert staged_path.parent.parent == output.parent
+        staged_path.write_bytes(b"image")
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    run_subprocess = MagicMock(side_effect=extract)
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
+
+    runner = DefaultFFmpegRunner()
+    output = tmp_path / "shots" / "frame.png"
+    runner.extract_frame(Path("clip.mkv"), 100, output)
+
+    run_subprocess.assert_called_once()
+    assert run_subprocess.call_args.kwargs == {
+        "timeout_seconds": 30.0,
+        "abort": None,
+        "max_stdout_bytes": 8192,
+        "max_stderr_bytes": 128 * 1024,
+        "cwd": None,
+    }
+    assert output.read_bytes() == b"image"
 
 
 def test_default_ffmpeg_runner_extract_frames_preserves_indexed_picture_types(
@@ -208,6 +300,7 @@ def test_default_ffmpeg_runner_extract_frames_preserves_indexed_picture_types(
     assert run_subprocess.call_args.args[0][-1] == "%09d.png"
     assert run_subprocess.call_args.kwargs["cwd"] == output_dir
     assert run_subprocess.call_args.kwargs["timeout_seconds"] == 30.0
+    assert run_subprocess.call_args.kwargs["max_stderr_bytes"] == 2 * 1024 * 1024
 
 
 @pytest.mark.parametrize(

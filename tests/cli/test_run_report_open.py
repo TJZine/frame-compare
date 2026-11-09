@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import webbrowser
+import os
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 
+from frame_compare.cli.cli_helpers import copy_text_to_clipboard, open_url_in_browser
 from frame_compare.cli.entry import _maybe_open_report, app
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from frame_compare.orchestration.types import SlowpicsUploadConfirmationRequest
@@ -122,43 +124,37 @@ def test_run_confirmed_slowpics_opens_report_before_later_slowpics_browser(
     assert opened_urls == ["https://slow.pics/c/example"]
 
 
-def test_maybe_open_report_swallows_webbrowser_error(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr("frame_compare.cli.cli_helpers.os", SimpleNamespace(name="posix"))
-    monkeypatch.setattr(
-        "frame_compare.cli.cli_helpers.webbrowser.open",
-        lambda _uri: (_ for _ in ()).throw(webbrowser.Error("no browser")),
-    )
-
-    assert _maybe_open_report(Path("report.html")) is False
-
-
-def test_maybe_open_report_returns_false_when_no_browser_accepts(
-    monkeypatch: MonkeyPatch,
+@pytest.mark.skipif(os.name != "posix", reason="Uses a local POSIX browser command")
+def test_desktop_opener_preserves_default_browser_and_filters_credentials(
+    monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("frame_compare.cli.cli_helpers.os", SimpleNamespace(name="posix"))
-    monkeypatch.setattr("frame_compare.cli.cli_helpers.webbrowser.open", lambda _uri: False)
-
-    assert _maybe_open_report(Path("report.html")) is False
-
-
-@pytest.mark.parametrize("startfile_fails", [False, True], ids=["startfile", "uri-fallback"])
-def test_maybe_open_report_on_windows(monkeypatch: MonkeyPatch, startfile_fails: bool) -> None:
-    called: dict[str, str] = {}
-
-    def _startfile(value: str) -> None:
-        if startfile_fails:
-            raise OSError("boom")
-        called["value"] = value
-
-    monkeypatch.setattr(
-        "frame_compare.cli.cli_helpers.os", SimpleNamespace(name="nt", startfile=_startfile)
+    marker = tmp_path / "browser-result"
+    browser = tmp_path / "fixture-browser"
+    browser.write_text(
+        "#!/bin/sh\n"
+        'printf "%s\\n%s\\n%s\\n" "$1" "$FRAME_COMPARE_TMDB__API_KEY" '
+        '"$VAPOURSYNTH_EXTRA_PLUGIN_PATH" > "$FRAME_COMPARE_TEST_BROWSER_RESULT"\n'
+        "exit 0\n",
+        encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "frame_compare.cli.cli_helpers.webbrowser.open",
-        lambda uri: bool(called.setdefault("uri", uri)),
-    )
-    assert _maybe_open_report(Path("report.html")) is True
-    if startfile_fails:
-        assert called["uri"].startswith("file:")
-    else:
-        assert called == {"value": "report.html"}
+    browser.chmod(0o700)
+    monkeypatch.setenv("BROWSER", f"{browser} %s")
+    monkeypatch.setenv("FRAME_COMPARE_TEST_BROWSER_RESULT", str(marker))
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "synthetic-browser-secret")
+    monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "synthetic-plugin-path")
+    report = tmp_path / "report.html"
+    assert _maybe_open_report(report)
+    assert marker.read_text().splitlines() == [
+        report.resolve().as_uri(),
+        "",
+        "synthetic-plugin-path",
+    ]
+
+
+def test_browser_and_clipboard_reject_unsafe_publication_urls(monkeypatch: MonkeyPatch) -> None:
+    launch = Mock(side_effect=AssertionError("Must reject URL before desktop launch"))
+    monkeypatch.setattr("frame_compare.cli.cli_helpers._run_desktop_action", launch)
+    for action in (open_url_in_browser, copy_text_to_clipboard):
+        with pytest.raises(ValueError, match="canonical"):
+            action("https://slow.pics/c/id\nURL=https://example.test")
+    launch.assert_not_called()

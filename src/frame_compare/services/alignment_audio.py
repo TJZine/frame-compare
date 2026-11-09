@@ -29,6 +29,8 @@ from frame_compare.utils.alignment_evidence import (
 )
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.subproc import (
+    PROBE_STDERR_BYTES,
+    PROBE_STDOUT_BYTES,
     SubprocessCleanupError,
     SubprocessOutputLimitExceeded,
     run_subprocess,
@@ -202,13 +204,20 @@ def _is_commentary_tag(value: object) -> bool:
 
 def _load_ffprobe_json(argv: list[str], *, operation: str) -> dict[str, object]:
     try:
-        proc = run_subprocess(argv, timeout_seconds=_FFPROBE_TIMEOUT_SECONDS)
+        proc = run_subprocess(
+            argv,
+            timeout_seconds=_FFPROBE_TIMEOUT_SECONDS,
+            max_stdout_bytes=PROBE_STDOUT_BYTES,
+            max_stderr_bytes=PROBE_STDERR_BYTES,
+        )
     except FileNotFoundError:
         raise FFmpegNotFoundError() from None
     except TimeoutExpired as e:
         raise FFmpegError(f"ffprobe timed out while {operation}", 124) from e
     except CalledProcessError as e:
         raise FFmpegError(_decode_stderr(e.stderr), e.returncode) from e
+    except SubprocessOutputLimitExceeded as e:
+        raise FFmpegError(str(e), 1) from e
     except OSError as e:
         raise FFmpegError(f"ffprobe could not start while {operation}: {e}", 1) from e
 
@@ -401,6 +410,7 @@ def measure_selected_audio_duration(
             abort=abort,
             stdout_consumer=consumer,
             max_stdout_bytes=limit,
+            max_stderr_bytes=PROBE_STDERR_BYTES,
         )
 
     try:

@@ -268,8 +268,8 @@ def test_experimental_safety_child_must_confirm_loaded_identity(
     elif receipt_case == "nonobject":
         receipt = []
     stdout = "" if receipt_case == "missing" else json.dumps(receipt)
-    child = Mock(return_value=subprocess.CompletedProcess([], 0, stdout, ""))
-    monkeypatch.setattr(tonemap_runtime.subprocess, "run", child)
+    child = Mock(return_value=subprocess.CompletedProcess([], 0, stdout.encode(), b""))
+    monkeypatch.setattr(tonemap_runtime, "run_subprocess", child)
     assert tonemap_runtime.probe_libplacebo_runtime(plugin_identity=identity) is (
         receipt_case == "matching"
     )

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import os
-import webbrowser
+import subprocess
+import sys
 from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
@@ -19,6 +20,8 @@ from frame_compare.config.errors import ConfigWriteError
 from frame_compare.config.persistence import dump_config_for_persistence
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import FrameCompareError
+from frame_compare.services.slowpics_url import require_comparison_url
+from frame_compare.utils.subproc import prepare_python_child, run_subprocess
 from frame_compare.utils.terminal import no_color_requested
 from frame_compare.utils.terminal_theme import human_console
 
@@ -84,34 +87,71 @@ class FrameCompareTyperGroup(TyperGroup):
             typer_rich_utils.FORCE_TERMINAL = previous_force_terminal
 
 
-def maybe_open_report(report_path: Path) -> bool:
-    """Best-effort open of a generated HTML report in the default browser."""
-    if os.name == "nt" and hasattr(os, "startfile"):
-        try:
-            os.startfile(str(report_path))  # nosec B606
-            return True
-        except OSError:
-            try:
-                return webbrowser.open(report_path.resolve().as_uri())
-            except (OSError, webbrowser.Error):
-                return False
+# Desktop libraries may launch a browser, shell association, or clipboard
+# utility internally, without an environment argument. Isolate that boundary
+# in a child. A long-lived desktop app must not hold the capture pipes open.
+_DESKTOP_ACTION_CODE = """
+import os
+import sys
 
+with open(os.devnull, "wb") as sink:
+    os.dup2(sink.fileno(), 1)
+    os.dup2(sink.fileno(), 2)
+
+action, value, *fallback = sys.argv[1:]
+if action == "clipboard":
+    import pyperclip
+    pyperclip.copy(value)
+else:
+    import webbrowser
+    if action == "report" and sys.platform == "win32":
+        try:
+            os.startfile(value)
+        except OSError:
+            value = fallback[0]
+        else:
+            raise SystemExit(0)
+    elif action == "report":
+        value = fallback[0]
+    raise SystemExit(0 if webbrowser.open(value) else 1)
+"""
+
+
+def _run_desktop_action(action: str, value: str, *extra: str) -> bool:
+    command, env = prepare_python_child(
+        [sys.executable, "-c", _DESKTOP_ACTION_CODE, action, value, *extra]
+    )
     try:
-        return webbrowser.open(report_path.resolve().as_uri())
-    except (OSError, webbrowser.Error):
+        return (
+            run_subprocess(
+                command,
+                env=env,
+                check=False,
+                timeout_seconds=10.0,
+                max_stdout_bytes=4096,
+                max_stderr_bytes=4096,
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.SubprocessError):
         return False
 
 
-def copy_text_to_clipboard(text: str) -> None:
-    """Copy text to the clipboard while keeping pyperclip import lazy."""
-    import pyperclip
+def maybe_open_report(report_path: Path) -> bool:
+    """Best-effort open of a generated HTML report in the default browser."""
+    resolved = report_path.resolve()
+    return _run_desktop_action("report", str(resolved), resolved.as_uri())
 
-    pyperclip.copy(text)
+
+def copy_text_to_clipboard(text: str) -> None:
+    """Copy the validated publication URL using the desktop clipboard."""
+    if not _run_desktop_action("clipboard", require_comparison_url(text)):
+        raise OSError("Could not copy the comparison URL to the clipboard")
 
 
 def open_url_in_browser(url: str) -> bool:
     """Open a URL in the default browser and report whether a handler accepted it."""
-    return webbrowser.open(url)
+    return _run_desktop_action("browser", require_comparison_url(url))
 
 
 def handle_error(

@@ -1317,6 +1317,7 @@ async def align_clips_from_request(
             config=config,
             progress=progress,
             frame_props_by_stem=frame_props_by_stem,
+            vs_loader=vs_loader,
             verbose=verbose,
         )
         confirmed_offsets = review.confirmed_offsets

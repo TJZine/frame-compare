@@ -3,42 +3,70 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired
 from typing import cast
 
+from frame_compare.utils.canvas import MAX_CANVAS_PIXELS, validate_canvas_size
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.subproc import (
+    PROBE_STDERR_BYTES,
+    PROBE_STDOUT_BYTES,
+    SubprocessOutputLimitExceeded,
+    run_subprocess,
+)
 from frame_compare.vs.types import HDRMetadata
 
 _FFPROBE_TIMEOUT_SECONDS = 15.0
+_VIDEO_STREAM_ENTRIES = (
+    "stream=width,height,color_transfer,color_primaries,color_space:stream_disposition=attached_pic"
+)
 _PRIMARIES_BY_NAME = {"bt709": 1, "bt2020": 9}
 _TRANSFER_BY_NAME = {"bt709": 1, "smpte2084": 16, "arib-std-b67": 18}
 _MATRIX_BY_NAME = {"bt709": 1, "bt2020nc": 9, "bt2020c": 10}
 
 
-def probe_video_streams(video: Path) -> list[dict[str, object]]:
-    """List real video streams, excluding attached cover pictures."""
+def probe_video_streams(
+    video: Path,
+    *,
+    abort: Callable[[], bool] | None = None,
+    include_attached: bool = False,
+) -> list[dict[str, object]]:
+    """List video streams, excluding attached cover pictures by default."""
+    entries = _VIDEO_STREAM_ENTRIES
+    if include_attached:
+        entries = entries.replace("stream=", "stream=index,")
     argv = [
         "ffprobe",
         "-v",
         "error",
+        "-max_pixels",
+        str(MAX_CANVAS_PIXELS),
         "-select_streams",
         "v",
         "-show_entries",
-        "stream=color_transfer,color_primaries,color_space:stream_disposition=attached_pic",
+        entries,
         "-of",
         "json",
         str(video),
     ]
     try:
-        proc = run_subprocess(argv, timeout_seconds=_FFPROBE_TIMEOUT_SECONDS)
+        proc = run_subprocess(
+            argv,
+            timeout_seconds=_FFPROBE_TIMEOUT_SECONDS,
+            abort=abort,
+            max_stdout_bytes=PROBE_STDOUT_BYTES,
+            max_stderr_bytes=PROBE_STDERR_BYTES,
+        )
     except FileNotFoundError as exc:
         raise FFmpegNotFoundError() from exc
     except TimeoutExpired as exc:
         raise FFmpegError("ffprobe timed out while probing hdr", 124) from exc
     except CalledProcessError as exc:
         raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
+    except SubprocessOutputLimitExceeded as exc:
+        raise FFmpegError(str(exc), 1) from exc
 
     try:
         payload: object = json.loads(proc.stdout.decode("utf-8", errors="replace"))
@@ -56,18 +84,34 @@ def probe_video_streams(video: Path) -> list[dict[str, object]]:
         if not isinstance(stream_obj, dict):
             continue
         stream = cast(dict[str, object], stream_obj)
-        disposition = stream.get("disposition")
-        if (
-            isinstance(disposition, dict)
-            and cast(dict[str, object], disposition).get("attached_pic") == 1
-        ):
+        if not include_attached and is_attached_picture(stream):
             continue
         streams.append(stream)
     return streams
 
 
+def is_attached_picture(stream: dict[str, object]) -> bool:
+    disposition = stream.get("disposition")
+    return (
+        isinstance(disposition, dict)
+        and cast(dict[str, object], disposition).get("attached_pic") == 1
+    )
+
+
+def validate_video_stream_sizes(
+    streams: list[dict[str, object]], *, require_dimensions: bool = False
+) -> None:
+    """Reject oversized dimensions advertised by video headers before decoding."""
+    for stream in streams:
+        width, height = stream.get("width"), stream.get("height")
+        if type(width) is int and type(height) is int:
+            validate_canvas_size(width, height, label="Source video")
+        elif require_dimensions:
+            raise ValueError("Source video dimensions could not be verified before decoding")
+
+
 def probe_hdr_metadata(
-    video: Path, *, streams: list[dict[str, object]] | None = None
+    video: Path, *, streams: Sequence[dict[str, object]] | None = None
 ) -> HDRMetadata | None:
     """Return color metadata from the first real video stream, when available."""
     if streams is None:

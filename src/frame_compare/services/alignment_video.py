@@ -43,7 +43,7 @@ from frame_compare.utils.alignment_policy import (
     position_winner as _position_winner,
 )
 from frame_compare.utils.types import AlignmentClipIdentity
-from frame_compare.vs.loader import VSLoader
+from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.luma import luma_plane
 
 if TYPE_CHECKING:
@@ -97,8 +97,14 @@ class _CheckPointTarget:
     points: tuple[tuple[int, int], ...]
 
 
-def _load_source(loader: VSLoader, path: Path) -> SourceInfo:
+def _load_source(loader: VSLoader, path: Path, cancellation: Event | None) -> SourceInfo:
+    def abort_check() -> None:
+        if _is_cancelled(cancellation):
+            raise InterruptedError("Video alignment cancelled")
+
     try:
+        if isinstance(loader, DefaultVSLoader):
+            return loader.load(path, abort_check=abort_check)
         return loader.load(path)
     except Exception as exc:
         raise RuntimeError("video source loading failed") from exc
@@ -130,13 +136,13 @@ def check_video_alignment(
         on_stage("indexing video")
     try:
         load_started = time.monotonic()
-        reference_source = _load_source(loader, reference.path)
+        reference_source = _load_source(loader, reference.path, cancellation)
         if _is_cancelled(cancellation):
             return _failed()
         if not _identities_match(reference):
             return _failed()
 
-        comparison_source = _load_source(loader, comparison.path)
+        comparison_source = _load_source(loader, comparison.path, cancellation)
         if _is_cancelled(cancellation):
             return _failed()
         if not _identities_match(reference) or not _identities_match(comparison):

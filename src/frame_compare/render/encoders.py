@@ -31,6 +31,7 @@ from frame_compare.render.types import (
     Renderer,
     RenderRequest,
 )
+from frame_compare.utils.canvas import validate_canvas_size
 from frame_compare.utils.media_facts import (
     RenderedFrameFacts,
     SourceSignalFacts,
@@ -215,6 +216,9 @@ def _execute_vapoursynth_render(
     request: RenderRequest, facts: RenderedFrameFacts
 ) -> RenderedFrameFacts:
     node = cast("vs.VideoNode", request.clip)
+    validate_canvas_size(node.width, node.height, label="Source video")
+    if request.geometry_plan is not None:
+        request.geometry_plan.validate_sizes()
     facts = _facts_from_vapoursynth_source(request, facts)
     _render_vs(
         node,
@@ -257,6 +261,7 @@ def _facts_from_vapoursynth_source(
     source = request.diagnostic_source
     if isinstance(source, Path):
         return facts
+    validate_canvas_size(source.width, source.height, label="Source video")
     try:
         frame = source.get_frame(request.frame_number)
         frame_props = dict(frame.props)
@@ -569,6 +574,7 @@ def _apply_overlay_to_file(
     """Helper to apply overlay to an existing image file."""
     try:
         with Image.open(path) as img:
+            validate_canvas_size(*img.size, label="Rendered image")
             img.load()
             base = img.copy()
 
@@ -584,9 +590,11 @@ def _apply_geometry_plan(
     image: Image.Image,
     geometry_plan: RenderGeometryPlan | None,
 ) -> Image.Image:
+    validate_canvas_size(*image.size, label="Rendered image")
     if geometry_plan is None:
         return image
 
+    geometry_plan.validate_sizes()
     crop_rect = geometry_plan.crop_rect
     if crop_rect != geometry_plan.source_rect:
         image = image.crop((crop_rect.x, crop_rect.y, crop_rect.right, crop_rect.bottom))
@@ -609,6 +617,7 @@ def _apply_geometry_plan_to_vs_clip(
     if geometry_plan is None:
         return clip
 
+    geometry_plan.validate_sizes()
     work = clip
     crop_rect = geometry_plan.crop_rect
     if crop_rect != geometry_plan.source_rect:
@@ -632,6 +641,13 @@ def _apply_geometry_plan_to_vs_clip(
 
     if geometry_plan.pad != GeometryMargins():
         pad = geometry_plan.pad
+        # Verify the actual input to AddBorders even if a caller supplied a
+        # plan whose declared scale size differs from the real source node.
+        validate_canvas_size(
+            work.width + pad.left + pad.right,
+            work.height + pad.top + pad.bottom,
+            label="Padded frame",
+        )
         work = cast(
             "vs.VideoNode",
             work.std.AddBorders(  # type: ignore[attr-defined]

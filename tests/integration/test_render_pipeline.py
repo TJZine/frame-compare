@@ -3,6 +3,7 @@ import os
 import signal
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -18,7 +19,6 @@ from frame_compare.render.types import (
     OverlayMode,
     RenderRequest,
 )
-from frame_compare.utils import subproc
 from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
@@ -118,8 +118,10 @@ def test_ffmpeg_batch_resolves_relative_path_from_caller(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "ffmpeg").symlink_to(ffmpeg)
+    (bin_dir / "ffprobe").symlink_to(Path(resolve_executable("ffprobe")).absolute())
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", raising=False)
     monkeypatch.setenv("PATH", "bin")
 
     staging = Path("staging")
@@ -140,12 +142,12 @@ def test_ffprobe_count_handles_child_exit_with_cancellation_pending(
     returncodes: list[int] = []
 
     class CountProcess(subprocess.Popen[bytes]):
-        def wait(self, timeout: float | None = None) -> int:
+        def poll(self) -> int | None:
             if self.returncode is not None:
-                return super().wait(timeout)
+                return self.returncode
             if interrupt:
-                self.send_signal(signal.SIGINT)
-            # Queue cancellation before the real wait result reaches run_subprocess.
+                os.kill(self.pid, signal.SIGINT)
+            # Queue cancellation before the real exit status reaches run_subprocess.
             # This forces the race without relying on the scheduler or polling interval.
             try:
                 code = super().wait(timeout=5)
@@ -158,19 +160,13 @@ def test_ffprobe_count_handles_child_exit_with_cancellation_pending(
             task.cancel()
             return code
 
-    def start_count(
-        argv: list[str], *, cwd: Path | None, stdout: int, stderr: int, shell: bool
-    ) -> subprocess.Popen[bytes]:
-        return CountProcess(
-            argv,
-            cwd=cwd,
-            stdin=subprocess.DEVNULL if not interrupt else subprocess.PIPE,
-            stdout=stdout,
-            stderr=stderr,
-            shell=shell,
-        )
+    def start_count(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        assert kwargs["start_new_session"] is True
+        if interrupt:
+            kwargs["stdin"] = subprocess.PIPE
+        return CountProcess(argv, **kwargs)
 
-    monkeypatch.setattr(subproc, "Popen", start_count)
+    monkeypatch.setattr(subprocess, "Popen", start_count)
     runner = DefaultFFmpegRunner()
     source = Path("pipe:0") if interrupt else tmp_path / "absent.mkv"
 

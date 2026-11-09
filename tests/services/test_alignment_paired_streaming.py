@@ -419,13 +419,13 @@ def _fail_one_side_reader(
     stream_side: dict[int, str] = {}
     created = 0
 
-    def create(stdout: Any, stderr: Any, capture: Any, failure: Any) -> Any:
+    def create(stdout: Any, stderr: Any, capture: Any, failure: Any, **kwargs: Any) -> Any:
         nonlocal created
         side = "reference" if created == 0 else "comparison"
         created += 1
         stream_side[id(stdout)] = side
         stream_side[id(stderr)] = side
-        return real_create(stdout, stderr, capture, failure)
+        return real_create(stdout, stderr, capture, failure, **kwargs)
 
     def read(stream: Any, *args: Any) -> Any:
         if stream_side.get(id(stream)) == target:
@@ -527,6 +527,8 @@ def test_output_beyond_limit_is_a_failure(failing_side: str) -> None:
     failed = _assert_failed(result, "output_exceeded", failing_side)
     assert failed.reference_cleanup.completed
     assert failed.comparison_cleanup.completed
+    facts = failed.reference_facts if failing_side == "reference" else failed.comparison_facts
+    assert facts.emitted_byte_count == 4001
 
 
 @pytest.mark.parametrize(
@@ -621,6 +623,36 @@ def test_second_child_spawn_failure_still_cleans_the_first() -> None:
     assert failed.reference_cleanup.process_exited
     assert failed.reference_cleanup.termination_requested
     assert failed.comparison_cleanup.completed
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Requires a Windows Job Object")
+def test_windows_paired_collection_finishes_when_descendant_inherits_pipe(tmp_path: Path) -> None:
+    ready = tmp_path / "descendant-holds-pipe"
+    sample = _payload([1.0] * 64)
+    descendant = "import pathlib,sys,time; pathlib.Path(sys.argv[1]).touch(); time.sleep(12)"
+    leader = (
+        "import os,pathlib,subprocess,sys,time\n"
+        f"subprocess.Popen([sys.executable, '-c', {descendant!r}, sys.argv[1]], "
+        "stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr)\n"
+        "while not pathlib.Path(sys.argv[1]).exists(): time.sleep(0.01)\n"
+        f"os.write(1, {sample!r})\n"
+    )
+    accumulator = _StrictAccumulator()
+    result = collect_paired_audio_chunks(
+        [sys.executable, "-c", leader, str(ready)],
+        _child_argv(sample),
+        **_paired_kwargs(
+            accumulator,
+            chunks=((0, 64),),
+            lag_samples=0,
+            total_timeout_seconds=8.0,
+            stall_timeout_seconds=5.0,
+        ),
+    )
+    assert ready.exists()
+    assert isinstance(result, PairedAudioCollection), result
+    assert result.reference_cleanup.completed and result.comparison_cleanup.completed
+    assert result.chunks_delivered == 1
 
 
 def test_first_child_spawn_failure_spawns_nothing(
@@ -875,14 +907,21 @@ def test_terminate_reaches_both_children_before_any_wait(
 ) -> None:
     log: list[tuple[str, str]] = []
 
-    def fake_popen(argv: Any, **kwargs: Any) -> Any:
+    def fake_spawn(argv: Any, **kwargs: Any) -> Any:
         del kwargs
         name = str(argv[0])
         size = 64 if name == "fake-reference" else 128
-        return _RecordingChild(log, name, _payload([1.0] * size))
+        return _RecordingChild(
+            log, name, _payload([1.0] * size)
+        ), alignment_streaming.OwnedProcessTree(None)
 
     monkeypatch.setattr(alignment_streaming, "resolve_executable", lambda name: name)
-    monkeypatch.setattr(alignment_streaming.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(alignment_streaming, "spawn_owned_process", fake_spawn)
+    monkeypatch.setattr(
+        alignment_streaming.OwnedProcessTree,
+        "signal",
+        lambda self, process, *, force: process.terminate() if process.poll() is None else None,
+    )
 
     def fail_consumer(index: int, reference: np.ndarray, window: np.ndarray) -> None:
         del index, reference, window
@@ -958,22 +997,22 @@ def test_cleanup_failure_is_fatal_and_attributed_per_side(
     _assert_failed(result, "cleanup_failed", "reference")
 
 
-def test_stderr_flood_on_both_sides_is_drained_and_capped() -> None:
+@pytest.mark.parametrize("side", ["reference", "comparison"])
+def test_stderr_flood_stops_both_children(side: str) -> None:
     accumulator = _StrictAccumulator()
     result = collect_paired_audio_chunks(
-        _child_argv(_payload([1.0] * 10), stderr_flood_bytes=70_000),
-        _child_argv(_payload([2.0] * 10), stderr_flood_bytes=70_000),
+        _child_argv(_payload([1.0] * 10), stderr_flood_bytes=70_000 if side == "reference" else 0),
+        _child_argv(_payload([2.0] * 10), stderr_flood_bytes=70_000 if side == "comparison" else 0),
         **_paired_kwargs(accumulator, chunks=((0, 10),), lag_samples=2),
     )
 
-    assert isinstance(result, PairedAudioCollection)
-    assert result.chunks_delivered == 1
-    assert result.reference_facts.stderr_byte_count == 70_000
-    assert result.comparison_facts.stderr_byte_count == 70_000
-    assert len(result.reference_facts.stderr_retained) == 65_536
-    assert len(result.comparison_facts.stderr_retained) == 65_536
-    assert result.reference_facts.stderr_truncated
-    assert result.comparison_facts.stderr_truncated
+    failed = _assert_failed(result, "output_exceeded", side)
+    assert "stderr" in failed.message
+    assert failed.reference_cleanup.completed and failed.comparison_cleanup.completed
+    facts = failed.reference_facts if side == "reference" else failed.comparison_facts
+    assert facts.stderr_byte_count == 65_537
+    assert len(facts.stderr_retained) < 9_000
+    assert facts.stderr_truncated
 
 
 def test_at_most_two_simultaneous_children(monkeypatch: pytest.MonkeyPatch) -> None:

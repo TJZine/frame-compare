@@ -529,8 +529,12 @@ async def execute_prep(
     load_sources_start = deps.monotonic_timer()
     if deps.vs_loader is None:
         from frame_compare.vs.loader import DefaultVSLoader
+        from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 
-        deps.vs_loader = DefaultVSLoader(memory_limit_mb=config.runtime.memory_limit_mb)
+        deps.vs_loader = DefaultVSLoader(
+            memory_limit_mb=config.runtime.memory_limit_mb,
+            index_cache=ManagedSourceIndexCache(workspace.generated_root),
+        )
     validate_skip_analysis_frame_selection_contract(
         skip_analysis=request.skip_analysis,
         config=config.analysis,

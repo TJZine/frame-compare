@@ -85,6 +85,11 @@ class WorkspacePaths:
         return self.generated_root / "cache" / "tmdb.toml"
 
     @property
+    def shared_source_index_cache_dir(self) -> Path:
+        """Workspace-level decoder indexes shared across runs."""
+        return self.generated_root / "cache" / "source-indexes"
+
+    @property
     def alignment_diagnostics_dir(self) -> Path | None:
         """Run-local directory for diagnostic-only alignment evidence."""
         if self.run_dir is None:
@@ -120,6 +125,7 @@ class WorkspacePaths:
             resolved_run_dir / "generated",
             self.shared_analysis_cache_dir,
             self.shared_alignment_cache_dir,
+            self.shared_source_index_cache_dir,
             self.shared_tmdb_cache_path,
             self.generated_root / "clip_probe.toml",
             resolved_run_dir / "alignment_diagnostics",

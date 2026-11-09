@@ -16,10 +16,20 @@ from frame_compare.render.backend._ffmpeg_frame import (
 )
 from frame_compare.render.errors import FrameExtractionError
 from frame_compare.utils.cancellation import is_cancelling, raise_if_cancelling
+from frame_compare.utils.canvas import MAX_CANVAS_PIXELS
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.media_facts import PictureType, RenderedFrameFacts, normalize_picture_type
-from frame_compare.utils.subproc import SubprocessAborted, resolve_executable, run_subprocess
-from frame_compare.vs.hdr_probe import probe_hdr_metadata
+from frame_compare.utils.subproc import (
+    SubprocessAborted,
+    SubprocessOutputLimitExceeded,
+    resolve_executable,
+    run_subprocess,
+)
+from frame_compare.vs.hdr_probe import (
+    probe_hdr_metadata,
+    probe_video_streams,
+    validate_video_stream_sizes,
+)
 from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
@@ -62,6 +72,9 @@ class DefaultFFmpegRunner:
     """Default FFmpeg runner for dependency injection in orchestration."""
 
     _FFMPEG_TIMEOUT_SECONDS = 30.0
+    _SINGLE_FRAME_STDERR_BYTES = 128 * 1024
+    # Batch showinfo retains one selected-frame receipt per requested frame.
+    _BATCH_STDERR_BYTES = 2 * 1024 * 1024
 
     def __init__(self, extraction_timeout_seconds: float = _FFMPEG_TIMEOUT_SECONDS) -> None:
         self._extraction_timeout_seconds = extraction_timeout_seconds
@@ -75,6 +88,8 @@ class DefaultFFmpegRunner:
         geometry_plan: RenderGeometryPlan | None = None,
         source_signal: SourceSignalFacts | None = None,
     ) -> RenderedFrameFacts:
+        if geometry_plan is None:
+            validate_video_stream_sizes(probe_video_streams(video))
         output.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix=".frame-compare-ffmpeg-", dir=output.parent) as temp_dir:
             staged_path = Path(temp_dir) / "frame.png"
@@ -89,6 +104,7 @@ class DefaultFFmpegRunner:
             completed = self._run_extraction(
                 argv,
                 timeout_message="ffmpeg timed out while extracting frame",
+                stderr_limit=self._SINGLE_FRAME_STDERR_BYTES,
             )
             _validate_showinfo_timeline(completed.stderr, video, frame_num)
             if not staged_path.is_file() or staged_path.stat().st_size == 0:
@@ -110,6 +126,8 @@ class DefaultFFmpegRunner:
         abort: Callable[[], bool] | None = None,
     ) -> list[RenderedFrameFacts]:
         """Extract ordered frames in one decode pass into numbered staging files."""
+        if geometry_plan is None:
+            validate_video_stream_sizes(probe_video_streams(video, abort=abort))
         output_dir.mkdir(parents=True, exist_ok=True)
         argv = build_extract_frames_argv(
             video=video.absolute(),
@@ -122,6 +140,7 @@ class DefaultFFmpegRunner:
         completed = self._run_extraction(
             argv,
             timeout_message="ffmpeg timed out while extracting frames",
+            stderr_limit=self._BATCH_STDERR_BYTES,
             abort=abort,
             cwd=output_dir,
         )
@@ -140,6 +159,8 @@ class DefaultFFmpegRunner:
             "ffprobe",
             "-v",
             "error",
+            "-max_pixels",
+            str(MAX_CANVAS_PIXELS),
             "-select_streams",
             "V:0",
             "-threads",
@@ -165,8 +186,8 @@ class DefaultFFmpegRunner:
                 reason=f"FFmpeg's decoded frame count check timed out after {count_timeout} seconds",
                 hint="Use the VapourSynth renderer or raise screenshots.ffmpeg_timeout_seconds",
             ) from exc
-        except (FileNotFoundError, CalledProcessError) as exc:
-            # Ctrl+C can stop ffprobe inside wait() before the next abort poll.
+        except (FileNotFoundError, CalledProcessError, SubprocessOutputLimitExceeded) as exc:
+            # Ctrl+C can stop ffprobe before the next cancellation check.
             if isinstance(exc, CalledProcessError) and exc.returncode in (
                 -SIGINT,
                 _WINDOWS_STATUS_CONTROL_C_EXIT,
@@ -199,6 +220,7 @@ class DefaultFFmpegRunner:
         argv: list[str],
         *,
         timeout_message: str,
+        stderr_limit: int,
         abort: Callable[[], bool] | None = None,
         cwd: Path | None = None,
     ) -> CompletedProcess[bytes]:
@@ -208,7 +230,12 @@ class DefaultFFmpegRunner:
                 executable = Path(resolve_executable(argv[0])).absolute()
                 argv = [str(executable), *argv[1:]]
             return run_subprocess(
-                argv, timeout_seconds=self._extraction_timeout_seconds, abort=abort, cwd=cwd
+                argv,
+                timeout_seconds=self._extraction_timeout_seconds,
+                abort=abort,
+                max_stdout_bytes=8 * 1024,
+                max_stderr_bytes=stderr_limit,
+                cwd=cwd,
             )
         except FileNotFoundError as exc:
             raise FFmpegNotFoundError() from exc
@@ -217,6 +244,8 @@ class DefaultFFmpegRunner:
         except CalledProcessError as exc:
             stderr = exc.stderr.decode(errors="replace")
             raise FFmpegError(stderr, exc.returncode) from exc
+        except SubprocessOutputLimitExceeded as exc:
+            raise FFmpegError(str(exc), 1) from exc
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
         metadata = probe_hdr_metadata(video)

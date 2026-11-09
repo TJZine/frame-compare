@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from frame_compare.render.backend.ffmpeg import FFmpegRunner
     from frame_compare.render.geometry import RenderGeometryPlan
     from frame_compare.utils.progress_protocol import ProgressReporter
+    from frame_compare.vs.loader import VSLoader
 
 
 @dataclass
@@ -168,6 +169,7 @@ class BatchRenderOptions:
     reporter: ProgressReporter | None = None
     ffmpeg_runner: FFmpegRunner | None = None
     parallelism: int = 1
+    vs_loader: VSLoader | None = None
 
 
 __all__ = [

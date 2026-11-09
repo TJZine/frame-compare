@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import math
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -13,7 +14,18 @@ from typing import BinaryIO, cast
 import numpy as np
 
 from frame_compare.utils.alignment_evidence import AudioPairSide, CollectionFailureCategory
-from frame_compare.utils.subproc import resolve_executable
+from frame_compare.utils.child_environment import (
+    child_environment,
+    diagnostic_secrets,
+    sanitize_diagnostic,
+)
+from frame_compare.utils.subproc import (
+    OutputBudget,
+    OwnedProcessTree,
+    SubprocessOutputLimitExceeded,
+    resolve_executable,
+    spawn_owned_process,
+)
 
 _FLOAT32_BYTES = np.dtype("<f4").itemsize
 _READ_BYTES = 65_536
@@ -118,13 +130,6 @@ type _RecordFailure = Callable[[CollectionFailureCategory, str], None]
 
 
 @dataclass(slots=True)
-class _StderrCapture:
-    retained: bytearray = field(default_factory=bytearray)
-    byte_count: int = 0
-    truncated: bool = False
-
-
-@dataclass(slots=True)
 class _ReaderInfrastructure:
     chunks: Queue[bytes]
     stop: threading.Event
@@ -135,27 +140,33 @@ class _ReaderInfrastructure:
 
 
 def _bounded_message(message: str) -> str:
-    return message[:_MESSAGE_LIMIT]
+    return sanitize_diagnostic(message.encode(errors="replace"), diagnostic_secrets()).decode()[
+        :_MESSAGE_LIMIT
+    ]
 
 
 def _read_stdout(
     stream: BinaryIO,
     chunks: Queue[bytes],
     stop: threading.Event,
+    budget: OutputBudget,
     done: threading.Event,
     record_failure: _RecordFailure,
 ) -> None:
     try:
         while not stop.is_set():
-            chunk = stream.read(_READ_BYTES)
+            chunk = stream.read(min(_READ_BYTES, budget.limit - budget.observed + 1))
             if not chunk:
                 return
+            budget.consume(chunk)
             while not stop.is_set():
                 try:
                     chunks.put(chunk, timeout=_QUEUE_WAIT_SECONDS)
                     break
                 except Full:
                     continue
+    except SubprocessOutputLimitExceeded as exc:
+        record_failure("output_exceeded", str(exc))
     except Exception as exc:
         record_failure("stdout_reader_failed", f"stdout reader failed: {exc}")
     finally:
@@ -164,21 +175,18 @@ def _read_stdout(
 
 def _read_stderr(
     stream: BinaryIO,
-    capture: _StderrCapture,
+    capture: OutputBudget,
     done: threading.Event,
     record_failure: _RecordFailure,
 ) -> None:
     try:
         while True:
-            chunk = stream.read(_READ_BYTES)
+            chunk = stream.read(min(_READ_BYTES, capture.limit - capture.observed + 1))
             if not chunk:
                 return
-            capture.byte_count += len(chunk)
-            remaining = _STDERR_LIMIT_BYTES - len(capture.retained)
-            if remaining > 0:
-                capture.retained.extend(chunk[:remaining])
-            if capture.byte_count > _STDERR_LIMIT_BYTES:
-                capture.truncated = True
+            capture.consume(chunk)
+    except SubprocessOutputLimitExceeded as exc:
+        record_failure("output_exceeded", str(exc))
     except Exception as exc:
         record_failure("stderr_reader_failed", f"stderr reader failed: {exc}")
     finally:
@@ -192,8 +200,10 @@ def _start_reader(thread: threading.Thread) -> None:
 def _create_reader_infrastructure(
     stdout: BinaryIO,
     stderr: BinaryIO,
-    stderr_capture: _StderrCapture,
+    stderr_capture: OutputBudget,
     record_failure: _RecordFailure,
+    *,
+    stdout_budget: OutputBudget,
 ) -> _ReaderInfrastructure:
     chunks: Queue[bytes] = Queue(maxsize=_QUEUE_CAPACITY)
     stop = threading.Event()
@@ -206,7 +216,7 @@ def _create_reader_infrastructure(
         stderr_done=stderr_done,
         stdout_thread=threading.Thread(
             target=_read_stdout,
-            args=(stdout, chunks, stop, stdout_done, record_failure),
+            args=(stdout, chunks, stop, stdout_budget, stdout_done, record_failure),
             name="alignment-stdout-reader",
             daemon=True,
         ),
@@ -230,19 +240,16 @@ def _wait_for_exit(
     return True
 
 
-def _spawn_child(argv: Sequence[str]) -> subprocess.Popen[bytes]:
+def _spawn_child(argv: Sequence[str]) -> tuple[subprocess.Popen[bytes], OwnedProcessTree]:
     resolved = [str(part) for part in argv]
     resolved[0] = resolve_executable(resolved[0])
     # Explicit argument array, no shell, unbuffered pipes; the default
     # close_fds=True keeps each child's pipe ends private so one child lingering
     # can never hold the other side's stdout open past EOF.
-    return subprocess.Popen(
+    return spawn_owned_process(
         resolved,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        shell=False,
-        bufsize=0,
+        env=child_environment(),
+        capture_output=True,
     )
 
 
@@ -256,12 +263,11 @@ def _close_pipe(stream: BinaryIO, cleanup_failures: list[str]) -> bool:
 
 def _request_terminate(
     process: subprocess.Popen[bytes],
+    process_tree: OwnedProcessTree,
     cleanup_failures: list[str],
 ) -> bool:
-    if process.poll() is not None:
-        return False
     try:
-        process.terminate()
+        process_tree.signal(process, force=sys.platform == "win32")
     except (OSError, ProcessLookupError) as exc:
         cleanup_failures.append(f"terminate failed: {exc}")
     return True
@@ -269,16 +275,20 @@ def _request_terminate(
 
 def _wait_then_kill(
     process: subprocess.Popen[bytes],
+    process_tree: OwnedProcessTree,
     cleanup_failures: list[str],
 ) -> bool:
-    if process.poll() is None and not _wait_for_exit(process, _TERMINATE_WAIT_SECONDS):
+    exited = process.poll() is not None or _wait_for_exit(process, _TERMINATE_WAIT_SECONDS)
+    if not exited or sys.platform != "win32":
         try:
-            process.kill()
+            # On POSIX the leader can exit on TERM while a pipe-owning
+            # descendant ignores it. Escalate the group even in that case.
+            process_tree.signal(process, force=True)
         except (OSError, ProcessLookupError) as exc:
             cleanup_failures.append(f"kill failed: {exc}")
         if process.poll() is None and not _wait_for_exit(process, _KILL_WAIT_SECONDS):
             cleanup_failures.append("process remained live after kill")
-        return True
+        return not exited
     return False
 
 
@@ -405,21 +415,27 @@ class _ChildStream:
     samples: _SampleStore
     context: _RunContext
     process: subprocess.Popen[bytes] | None = None
+    process_tree: OwnedProcessTree | None = None
     stdout: BinaryIO | None = None
     stderr: BinaryIO | None = None
     infrastructure: _ReaderInfrastructure | None = None
     stdout_started: bool = False
     stderr_started: bool = False
-    stderr_capture: _StderrCapture = field(default_factory=_StderrCapture)
-    emitted_bytes: int = 0
+    stdout_budget: OutputBudget = field(init=False)
+    stderr_capture: OutputBudget = field(
+        default_factory=lambda: OutputBudget("stderr", _STDERR_LIMIT_BYTES)
+    )
     pending: bytes = b""
     eof: bool = False
     termination_requested: bool = False
     kill_requested: bool = False
     cleanup_failures: list[str] = field(default_factory=list[str])
 
+    def __post_init__(self) -> None:
+        self.stdout_budget = OutputBudget("stdout", self.limit_samples * _FLOAT32_BYTES)
+
     def spawn(self) -> None:
-        self.process = _spawn_child(self.argv)
+        self.process, self.process_tree = _spawn_child(self.argv)
         self.stdout = cast(BinaryIO, self.process.stdout)
         self.stderr = cast(BinaryIO, self.process.stderr)
 
@@ -431,6 +447,7 @@ class _ChildStream:
                 self.stderr,
                 self.stderr_capture,
                 functools.partial(self.context.shared.record, side=self.name),
+                stdout_budget=self.stdout_budget,
             )
             _start_reader(self.infrastructure.stdout_thread)
             self.stdout_started = True
@@ -448,6 +465,8 @@ class _ChildStream:
     def receive(self) -> bytes | None:
         infrastructure = self.infrastructure
         assert infrastructure is not None
+        process, process_tree = self.process, self.process_tree
+        assert process is not None and process_tree is not None
         context = self.context
         shared = context.shared
         last_progress = time.monotonic()
@@ -457,6 +476,8 @@ class _ChildStream:
             if context.cancellation is not None and context.cancellation.is_set():
                 shared.record("cancelled", "paired audio collection was cancelled")
                 return None
+            if sys.platform == "win32" and process.poll() is not None:
+                process_tree.close_windows_job()
             now = time.monotonic()
             remaining = context.deadline - now
             if remaining <= 0:
@@ -493,8 +514,8 @@ class _ChildStream:
                 continue
 
     def _await_exit(self) -> None:
-        process = self.process
-        assert process is not None
+        process, process_tree = self.process, self.process_tree
+        assert process is not None and process_tree is not None
         context = self.context
         shared = context.shared
         wait_started = time.monotonic()
@@ -516,6 +537,7 @@ class _ChildStream:
                 shared.record("timeout", "paired audio collection exceeded its total timeout")
                 return
             _wait_for_exit(process, min(_QUEUE_WAIT_SECONDS, remaining))
+        process_tree.close_windows_job()
         if process.returncode != 0:
             shared.record(
                 "nonzero_exit",
@@ -525,7 +547,6 @@ class _ChildStream:
 
     def ingest(self, block: bytes, *, retain: bool) -> np.ndarray | None:
         store = self.samples
-        self.emitted_bytes += len(block)
         payload = self.pending + block
         complete_bytes = len(payload) - len(payload) % _FLOAT32_BYTES
         samples = (
@@ -540,13 +561,6 @@ class _ChildStream:
                 side=self.name,
             )
             return None
-        if store.emitted + int(samples.size) > self.limit_samples:
-            self.context.shared.record(
-                "output_exceeded",
-                f"paired audio {self.name} output exceeded its {self.limit_samples}-sample limit",
-                side=self.name,
-            )
-            return None
         self.pending = payload[complete_bytes:]
         if retain:
             store.append(samples)
@@ -556,7 +570,10 @@ class _ChildStream:
 
     def request_terminate(self) -> None:
         if self.process is not None:
-            self.termination_requested = _request_terminate(self.process, self.cleanup_failures)
+            assert self.process_tree is not None
+            self.termination_requested = _request_terminate(
+                self.process, self.process_tree, self.cleanup_failures
+            )
 
     def reap(self) -> CollectionCleanup:
         if self.process is None:
@@ -570,6 +587,11 @@ class _ChildStream:
                 kill_requested=False,
                 failure=None,
             )
+        assert self.process_tree is not None
+        try:
+            self.process_tree.close_windows_job()
+        except OSError as exc:
+            self.cleanup_failures.append(f"job close failed: {exc}")
         infrastructure = self.infrastructure
         stdout_joined, stderr_joined = _join_started_readers(
             infrastructure.stdout_thread if infrastructure is not None else None,
@@ -598,10 +620,10 @@ class _ChildStream:
         capture = self.stderr_capture
         return CollectionFacts(
             emitted_sample_count=self.samples.emitted,
-            emitted_byte_count=self.emitted_bytes,
+            emitted_byte_count=self.stdout_budget.observed,
             retained_sample_count=self.samples.peak_count,
-            stderr_byte_count=capture.byte_count,
-            stderr_retained=bytes(capture.retained),
+            stderr_byte_count=capture.observed,
+            stderr_retained=capture.diagnostics(),
             stderr_truncated=capture.truncated,
             elapsed_seconds=time.monotonic() - started,
             returncode=self.process.returncode if self.process is not None else None,
@@ -690,7 +712,10 @@ def _cleanup_paired(
     cleanups: list[CollectionCleanup] = []
     for side in (reference, comparison):
         if side.process is not None and side.termination_requested:
-            side.kill_requested = _wait_then_kill(side.process, side.cleanup_failures)
+            assert side.process_tree is not None
+            side.kill_requested = _wait_then_kill(
+                side.process, side.process_tree, side.cleanup_failures
+            )
         cleanups.append(side.reap())
     return cleanups[0], cleanups[1]
 

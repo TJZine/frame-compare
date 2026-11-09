@@ -91,7 +91,12 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
     monkeypatch.setattr(
         "frame_compare.render.batch.orchestrator.render_frame_detailed", _fake_render_frame
     )
-    monkeypatch.setattr(vs_loader_module, "DefaultVSLoader", FakeVSLoader)
+    loader = FakeVSLoader()
+
+    def unexpected_loader(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("render constructed a separate source loader")
+
+    monkeypatch.setattr(vs_loader_module, "DefaultVSLoader", unexpected_loader)
 
     config = get_default_config()
 
@@ -132,6 +137,7 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         ctx=ctx,
         frames=[10],
         runner=FakeFFmpegRunner(),
+        vs_loader=loader,
     )
 
     assert output.render.screenshot_dir == workspace.screenshots_dir

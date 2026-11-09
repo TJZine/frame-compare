@@ -447,6 +447,11 @@ def test_runtime_wires_native_previews_using_strict_launch_workspace(tmp_path, m
     monkeypatch.setattr(
         runtime, "resolve_lwlibavsource", lambda _: SimpleNamespace(LWLibavSource=load)
     )
+    monkeypatch.setattr(
+        runtime,
+        "admit_source",
+        lambda _path, **_kwargs: SimpleNamespace(verify=lambda _source: None),
+    )
     registered = []
 
     def register(clip, index, name, *, hdr, **metadata):
@@ -476,7 +481,6 @@ def test_runtime_wires_native_previews_using_strict_launch_workspace(tmp_path, m
         )
         targets[name] = {
             "path": str(tmp_path / f"{name}.mkv"),
-            "index_path": str(tmp_path / f"{name}.index"),
             "display_name": name,
             "comparison_key": f"ref:{name}",
             "suggested_offset": 0 if ordinal == 1 else None,
@@ -488,7 +492,6 @@ def test_runtime_wires_native_previews_using_strict_launch_workspace(tmp_path, m
             "reference": {
                 "label": "ref",
                 "path": str(tmp_path / "ref.mkv"),
-                "index_path": str(tmp_path / "ref.index"),
                 "display_name": "Full reference",
             },
             "targets": targets,
