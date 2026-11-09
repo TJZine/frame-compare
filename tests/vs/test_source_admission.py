@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -9,6 +10,39 @@ import pytest
 import frame_compare.vs.source_admission as admission_module
 from frame_compare.utils.canvas import MAX_CANVAS_PIXELS
 from frame_compare.vs.source_admission import admit_source, bounded_decoder_options
+
+_VIDEO: dict[str, object] = {
+    "index": 2,
+    "width": 62,
+    "height": 66,
+    "coded_width": 64,
+    "coded_height": 72,
+}
+_COVER = {
+    "index": 0,
+    "width": 64,
+    "height": 64,
+    "coded_width": 64,
+    "coded_height": 64,
+    "disposition": {"attached_pic": 1},
+}
+
+
+@pytest.fixture
+def executable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    executable = tmp_path / "ffprobe"
+    executable.touch()
+    monkeypatch.setattr(
+        admission_module, "resolve_optional_executable", lambda _name: str(executable)
+    )
+    return executable
+
+
+@pytest.fixture
+def video(tmp_path: Path, executable: Path) -> Path:
+    path = tmp_path / "video.mkv"
+    path.write_bytes(b"fixture")
+    return path
 
 
 def _record(index: int, width: int, height: int, *, trailing_pipe: bool = False) -> bytes:
@@ -60,10 +94,8 @@ def test_frame_scan_requires_a_complete_record_for_every_stream() -> None:
 
 
 def test_scan_streams_output_without_buffering_the_complete_probe(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    video: Path, executable: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    video = tmp_path / "video.mkv"
-    video.touch()
     command: list[str] = []
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
@@ -75,7 +107,7 @@ def test_scan_streams_output_without_buffering_the_complete_probe(
         return subprocess.CompletedProcess(argv, 0, b"", b"")
 
     monkeypatch.setattr(admission_module, "run_subprocess", run)
-    admission_module._scan_video_frames(video, {0}, lambda: False)
+    admission_module._scan_video_frames(video, {0}, lambda: False, executable)
 
     assert "-show_entries" in command
     assert (
@@ -85,44 +117,137 @@ def test_scan_streams_output_without_buffering_the_complete_probe(
     assert "-max_pixels" in command
 
 
-def test_admission_scans_every_video_stream_but_selects_one_real_stream(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_admission_probes_headers_once_and_selects_the_real_stream(
+    video: Path, executable: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    video = tmp_path / "video.mkv"
-    video.write_bytes(b"fixture")
-    streams = [
-        {
-            "index": 0,
-            "width": 64,
-            "height": 64,
-            "disposition": {"attached_pic": 1},
-        },
-        {"index": 2, "width": 1920, "height": 1080, "disposition": {}},
-    ]
-    probe = MagicMock(return_value=streams)
-    scan = MagicMock()
-    monkeypatch.setattr(admission_module, "resolve_optional_executable", lambda _name: "/ffprobe")
-    monkeypatch.setattr(admission_module, "probe_video_streams", probe)
-    monkeypatch.setattr(admission_module, "_scan_video_frames", scan)
+    real_stream = {**_VIDEO, "color_transfer": "smpte2084"}
+    run_subprocess = MagicMock(
+        return_value=subprocess.CompletedProcess(
+            [str(executable)],
+            0,
+            json.dumps(
+                {
+                    "streams": [_COVER, real_stream],
+                    "program_version": {"version": "7.1.5"},
+                    "library_versions": [{"name": "libavcodec", "version": 61}],
+                }
+            ).encode(),
+            b"",
+        )
+    )
+    monkeypatch.setattr("frame_compare.vs.hdr_probe.run_subprocess", run_subprocess)
 
     admitted = admit_source(video, abort_check=lambda: None)
 
-    assert admitted.streams == (streams[1],)
-    probe.assert_called_once()
-    assert probe.call_args.kwargs["include_attached"] is True
-    scan.assert_called_once()
-    assert scan.call_args.args[:2] == (video.absolute(), {0, 2})
+    assert admitted.video_stream == real_stream
+    assert admitted.geometry_probe_token is not None
+    run_subprocess.assert_called_once()
+    argv, kwargs = run_subprocess.call_args.args[0], run_subprocess.call_args.kwargs
+    assert argv == [
+        str(executable),
+        "-v",
+        "error",
+        "-max_pixels",
+        str(MAX_CANVAS_PIXELS),
+        "-select_streams",
+        "v",
+        "-show_program_version",
+        "-show_library_versions",
+        "-show_entries",
+        "stream=index,coded_width,coded_height,width,height,color_transfer,color_primaries,"
+        "color_space:stream_disposition=attached_pic",
+        "-of",
+        "json",
+        str(video),
+    ]
+    assert kwargs["timeout_seconds"] == 15.0
+    assert kwargs["max_stdout_bytes"] == 256 * 1024
+    assert kwargs["max_stderr_bytes"] == 64 * 1024
     admitted.verify(video)
 
 
-def test_decoder_options_keep_the_owned_pixel_limit_last() -> None:
-    assert bounded_decoder_options() == f"max_pixels={MAX_CANVAS_PIXELS}"
-    assert bounded_decoder_options("threads=2 max_pixels=999999999") == (
-        f"threads=2 max_pixels=999999999 max_pixels={MAX_CANVAS_PIXELS}"
+def test_geometry_probe_token_binds_executable_and_runtime(
+    video: Path, executable: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload: dict[str, object] = {
+        "program_version": {"version": "7.1.5"},
+        "library_versions": [{"name": "libavcodec", "version": 61}],
+    }
+    monkeypatch.setattr(
+        admission_module, "probe_admission_headers", lambda *_args, **_kwargs: ([_VIDEO], payload)
+    )
+
+    first = admit_source(video, abort_check=lambda: None)
+    assert first.geometry_probe_token is not None
+    executable.write_bytes(b"replacement executable")
+    with pytest.raises(ValueError, match="FFprobe executable changed"):
+        first.verify(video)
+
+    replaced = admit_source(video, abort_check=lambda: None)
+    assert replaced.geometry_probe_token not in {None, first.geometry_probe_token}
+    payload["library_versions"] = [{"name": "libavcodec", "version": 62}]
+    changed_runtime = admit_source(video, abort_check=lambda: None)
+    assert changed_runtime.geometry_probe_token not in {None, replaced.geometry_probe_token}
+
+
+@pytest.mark.parametrize(
+    ("streams", "message"),
+    [
+        ([], "no verifiable video stream"),
+        ([_COVER], "no verifiable video stream"),
+        ([_VIDEO, {**_VIDEO, "index": 3}], "multiple video streams"),
+        ([{**_VIDEO, "width": None}], "Source video dimensions could not be verified"),
+        ([{**_VIDEO, "height": 0}], "Source video dimensions are out of bounds"),
+        ([{**_VIDEO, "coded_width": None}], "Coded source video dimensions could not be verified"),
+        ([{**_VIDEO, "coded_height": 0}], "Coded source video dimensions are out of bounds"),
+        ([{**_VIDEO, "coded_width": 7680, "coded_height": 4321}], "33,177,600 pixels total"),
+        ([_VIDEO, {**_COVER, "coded_width": 7681}], "7,680 pixels per axis"),
+    ],
+)
+def test_admission_rejects_unsupported_headers(
+    video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    streams: list[dict[str, object]],
+    message: str,
+) -> None:
+    monkeypatch.setattr(
+        admission_module, "probe_admission_headers", lambda *_args, **_kwargs: (streams, {})
+    )
+
+    with pytest.raises(ValueError, match=message):
+        admit_source(video, abort_check=lambda: None)
+
+
+def test_admission_rejects_source_changed_during_header_probe(
+    video: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def probe(
+        path: Path, *_args: object, **_kwargs: object
+    ) -> tuple[list[dict[str, object]], dict[str, object]]:
+        path.write_bytes(b"new file contents")
+        return [_VIDEO], {}
+
+    monkeypatch.setattr(admission_module, "probe_admission_headers", probe)
+
+    with pytest.raises(ValueError, match="Source video changed during admission"):
+        admit_source(video, abort_check=lambda: None)
+
+
+def test_decoder_options_replace_the_callers_pixel_limit() -> None:
+    limit = f"max_pixels={MAX_CANVAS_PIXELS}"
+    assert bounded_decoder_options() == limit
+    assert bounded_decoder_options("threads=2 max_pixels=999999999 MAX_PIXELS='0'") == (
+        f"threads=2 {limit}"
+    )
+    assert bounded_decoder_options(r"quoted='a max_pixels=1' escaped=a\ b") == (
+        rf"quoted='a max_pixels=1' escaped=a\ b {limit}"
     )
 
 
-@pytest.mark.parametrize("options", ["key", "key='unterminated", "key=value\nother=value"])
+@pytest.mark.parametrize(
+    "options",
+    ["key", "key='unterminated", "key=''", "key=value\\", "key=value\nother=value", "key=\0"],
+)
 def test_decoder_options_reject_ambiguous_syntax(options: str) -> None:
     with pytest.raises(ValueError, match="complete key=value pairs"):
         bounded_decoder_options(options)

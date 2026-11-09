@@ -955,6 +955,10 @@ def test_main_writes_expected_production_report(
 
 
 def _seed_index(script: ModuleType, root: Path, media: Path) -> Path:
+    from unittest.mock import MagicMock
+
+    from frame_compare.vs.source_admission import SourceAdmission
+
     cache = script.ManagedSourceIndexCache(root.resolve() / "generated")
 
     def build(_source: Path, mode: int, index: Path) -> bool:
@@ -962,7 +966,8 @@ def _seed_index(script: ModuleType, root: Path, media: Path) -> Path:
         index.write_bytes(b"index")
         return True
 
-    assert cache.try_load(media, build)
+    admission = MagicMock(spec=SourceAdmission, geometry_probe_token="a" * 64)
+    assert cache.try_load(media, build, admission=admission)
     index = cache.validated_index(media)
     assert index is not None
     return cast(Path, index)

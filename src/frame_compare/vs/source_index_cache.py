@@ -13,13 +13,22 @@ from dataclasses import dataclass
 from hashlib import file_digest, sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.vs.runtime_contract import index_cache_token
+from frame_compare.vs.source_admission import (
+    SourceAdmission,
+    SourceGeometryError,
+    SourceIdentity,
+    source_identity,
+)
 
 log = logging.getLogger(__name__)
+
+# Bump when the complete-frame geometry acceptance rules change.
+_GEOMETRY_POLICY_VERSION = 1
 
 
 class _IndexMetadata(TypedDict):
@@ -31,6 +40,8 @@ class _IndexMetadata(TypedDict):
     source_size: int
     source_mtime_ns: int
     source_change_time: int
+    geometry_policy_version: int
+    geometry_probe_token: str
     index_size: int
     index_sha256: str
 
@@ -42,15 +53,6 @@ class _Entry:
     index: Path
     metadata: Path
     lock: Path
-
-
-@dataclass(frozen=True, slots=True)
-class _SourceIdentity:
-    device: int
-    inode: int
-    size: int
-    mtime_ns: int
-    change_time: int
 
 
 def _redirected(info: os.stat_result) -> bool:
@@ -139,14 +141,16 @@ class ManagedSourceIndexCache:
             self._check_root(create=False)
             yield entry
 
-    def _metadata(self, entry: _Entry, source: _SourceIdentity, index_path: Path) -> _IndexMetadata:
+    def _metadata(
+        self, entry: _Entry, source: SourceIdentity, index_path: Path, geometry_probe_token: str
+    ) -> _IndexMetadata:
         index = _regular_info(index_path)
         if index.st_size <= 0:
             raise OSError("Source index is empty")
         with index_path.open("rb") as handle:
             digest = file_digest(handle, "sha256").hexdigest()
         return {
-            "schema_version": 3,
+            "schema_version": 4,
             "source_key": entry.key,
             "runtime_token": self.runtime_token,
             "source_device": source.device,
@@ -154,27 +158,42 @@ class ManagedSourceIndexCache:
             "source_size": source.size,
             "source_mtime_ns": source.mtime_ns,
             "source_change_time": source.change_time,
+            "geometry_policy_version": _GEOMETRY_POLICY_VERSION,
+            "geometry_probe_token": geometry_probe_token,
             "index_size": index.st_size,
             "index_sha256": digest,
         }
 
-    def _is_valid(self, entry: _Entry, source: _SourceIdentity) -> bool:
+    def _is_valid(
+        self, entry: _Entry, source: SourceIdentity, geometry_probe_token: str | None = None
+    ) -> bool:
         try:
             # Metadata contains only fixed-size fields. Bound reads of damaged files.
             if _regular_info(entry.metadata).st_size > 4096:
                 return False
             with entry.metadata.open("rb") as handle:
                 metadata = handle.read(4097)
-            expected = json.dumps(self._metadata(entry, source, entry.index), sort_keys=True)
+            if geometry_probe_token is None:
+                # Discovery returns a path hint. An actual open must match its own probe.
+                payload: object = json.loads(metadata)
+                if not isinstance(payload, dict):
+                    return False
+                token = cast(dict[str, object], payload).get("geometry_probe_token")
+                if not isinstance(token, str) or len(token) != 64:
+                    return False
+                geometry_probe_token = token
+            expected = json.dumps(
+                self._metadata(entry, source, entry.index, geometry_probe_token), sort_keys=True
+            )
             return metadata == expected.encode("ascii")
-        except OSError:
+        except (OSError, ValueError):
             return False
 
     def validated_index(self, path: Path) -> Path | None:
-        """Return a current committed index for read-only consumers, if available."""
+        """Find a committed index path. Recheck geometry authority when opening it."""
         try:
             with self._lease(path, create=False) as entry:
-                source = _source_identity(entry.source)
+                source = source_identity(entry.source)
                 if self._is_valid(entry, source) and _same_source(path, entry.source, source):
                     return entry.index
         except (OSError, RuntimeError, ValueError):
@@ -187,20 +206,21 @@ class ManagedSourceIndexCache:
         expected_index: Path,
         open_source: Callable[[Path, int, Path], T],
         *,
+        admission: SourceAdmission,
         abort_check: Callable[[], None] = raise_if_cancelling,
     ) -> T | None:
         """Open an existing index only while its owner lease and authority remain valid."""
+        probe_token = admission.geometry_probe_token
+        if probe_token is None:
+            return None
         try:
             with self._lease(path, create=False, abort_check=abort_check) as entry:
                 if expected_index != entry.index:
                     return None
-                source = _source_identity(entry.source)
-                if not self._is_valid(entry, source) or not _same_source(
-                    path, entry.source, source
-                ):
+                source = source_identity(entry.source)
+                if not self._is_valid(entry, source, probe_token):
                     return None
-                abort_check()
-                return _try_open(open_source, entry.source, 0, entry.index)
+                return self._open_warm(path, entry, source, open_source, admission, abort_check)
         except (OSError, RuntimeError, ValueError) as error:
             log.debug("Managed L-SMASH index could not be reopened: %s", type(error).__name__)
             return None
@@ -210,26 +230,57 @@ class ManagedSourceIndexCache:
         path: Path,
         open_source: Callable[[Path, int, Path], T],
         *,
+        admission: SourceAdmission,
         abort_check: Callable[[], None] = raise_if_cancelling,
     ) -> T | None:
         """Open through this cache. A miss with failed construction needs a private retry."""
+        probe_token = admission.geometry_probe_token
+        if probe_token is None:
+            return None
         try:
             with self._lease(path, create=True, abort_check=abort_check) as entry:
-                source = _source_identity(entry.source)
-                if self._is_valid(entry, source) and _same_source(path, entry.source, source):
-                    abort_check()
-                    return _try_open(open_source, entry.source, 0, entry.index)
-                return self._build(path, entry, source, open_source, abort_check)
+                source = source_identity(entry.source)
+                if self._is_valid(entry, source, probe_token):
+                    return self._open_warm(path, entry, source, open_source, admission, abort_check)
+                admission.scan(entry.source, abort_check=abort_check)
+                if not _same_source(path, entry.source, source):
+                    return None
+                return self._build(
+                    path, entry, source, open_source, admission, probe_token, abort_check
+                )
+        except SourceGeometryError:
+            raise
         except (OSError, RuntimeError, ValueError) as error:
             log.debug("Managed L-SMASH index unavailable: %s", type(error).__name__)
             return None
+
+    def _open_warm[T](
+        self,
+        path: Path,
+        entry: _Entry,
+        source: SourceIdentity,
+        open_source: Callable[[Path, int, Path], T],
+        admission: SourceAdmission,
+        abort_check: Callable[[], None],
+    ) -> T | None:
+        abort_check()
+        admission.verify(entry.source)
+        if not _same_source(path, entry.source, source):
+            return None
+        clip = _try_open(open_source, entry.source, 0, entry.index)
+        admission.verify(entry.source)
+        if not _same_source(path, entry.source, source):
+            return None
+        return clip
 
     def _build[T](
         self,
         path: Path,
         entry: _Entry,
-        source: _SourceIdentity,
+        source: SourceIdentity,
         open_source: Callable[[Path, int, Path], T],
+        admission: SourceAdmission,
+        probe_token: str,
         abort_check: Callable[[], None],
     ) -> T | None:
         with self._stage() as (directory, stage_info):
@@ -244,7 +295,7 @@ class ManagedSourceIndexCache:
             if not os.path.samestat(stage_info, _directory_info(directory)):
                 return None
             _sync_regular_file(index_path)
-            metadata = self._metadata(entry, source, index_path)
+            metadata = self._metadata(entry, source, index_path, probe_token)
             with metadata_path.open("x", encoding="ascii") as handle:
                 json.dump(metadata, handle, sort_keys=True)
                 handle.flush()
@@ -260,6 +311,7 @@ class ManagedSourceIndexCache:
             abort_check()
             if not _same_source(path, entry.source, source):
                 return None
+            admission.verify(entry.source)
             os.replace(metadata_path, entry.metadata)
             _sync_directory(self.root)
             return clip
@@ -282,65 +334,8 @@ class ManagedSourceIndexCache:
                 log.debug("Could not clean private L-SMASH index staging: %s", type(error).__name__)
 
 
-def _source_identity(path: Path) -> _SourceIdentity:
-    if os.name == "nt":
-        with path.open("rb") as handle:
-            info = os.fstat(handle.fileno())
-            change_time = _windows_change_time(handle.fileno())
-    else:
-        info = path.stat()
-        change_time = info.st_ctime_ns
-    return _SourceIdentity(info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, change_time)
-
-
-def _windows_change_time(fd: int) -> int:
-    import ctypes
-    import msvcrt
-    from ctypes import wintypes
-
-    class _FileBasicInfo(ctypes.Structure):
-        _fields_ = [
-            ("creation_time", ctypes.c_longlong),
-            ("last_access_time", ctypes.c_longlong),
-            ("last_write_time", ctypes.c_longlong),
-            ("change_time", ctypes.c_longlong),
-            ("file_attributes", wintypes.DWORD),
-        ]
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    get_volume_info = kernel32.GetVolumeInformationByHandleW
-    get_volume_info.argtypes = [
-        wintypes.HANDLE,
-        wintypes.LPWSTR,
-        wintypes.DWORD,
-        wintypes.LPDWORD,
-        wintypes.LPDWORD,
-        wintypes.LPDWORD,
-        wintypes.LPWSTR,
-        wintypes.DWORD,
-    ]
-    get_volume_info.restype = wintypes.BOOL
-    get_file_info = kernel32.GetFileInformationByHandleEx
-    get_file_info.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
-    get_file_info.restype = wintypes.BOOL
-
-    handle = msvcrt.get_osfhandle(fd)
-    filesystem = ctypes.create_unicode_buffer(261)  # MAX_PATH + 1
-    if not get_volume_info(handle, None, 0, None, None, None, filesystem, len(filesystem)):
-        raise ctypes.WinError(ctypes.get_last_error())
-    # Filesystems without NTFS change-time semantics use the cache-free path.
-    if filesystem.value != "NTFS":
-        raise OSError("Managed source indexes on Windows require NTFS change time")
-    basic = _FileBasicInfo()
-    if not get_file_info(handle, 0, ctypes.byref(basic), ctypes.sizeof(basic)):  # FileBasicInfo
-        raise ctypes.WinError(ctypes.get_last_error())
-    if basic.change_time <= 0:
-        raise OSError("Source change time is unavailable")
-    return basic.change_time
-
-
-def _same_source(path: Path, resolved: Path, before: _SourceIdentity) -> bool:
-    return path.resolve(strict=True) == resolved and _source_identity(resolved) == before
+def _same_source(path: Path, resolved: Path, before: SourceIdentity) -> bool:
+    return path.resolve(strict=True) == resolved and source_identity(resolved) == before
 
 
 def _sync_regular_file(path: Path) -> None:

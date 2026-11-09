@@ -672,6 +672,7 @@ def _execute_generated_script(
     rejected_cache_free = cache_free_failure_stems or set()
     cache_owner = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
     source_indexes: dict[Path, Path] = {}
+    admission = MagicMock(geometry_probe_token="a" * 64)
 
     def seed_index(_source: Path, cache: int, index: Path) -> bool:
         assert cache == 1
@@ -680,7 +681,7 @@ def _execute_generated_script(
 
     for path in (reference, *comparisons):
         if path.stem in rejected_indexes:
-            assert cache_owner.try_load(path, seed_index)
+            assert cache_owner.try_load(path, seed_index, admission=admission)
             index = cache_owner.validated_index(path)
             assert index is not None
             source_indexes[path] = index
@@ -748,7 +749,7 @@ def _execute_generated_script(
     monkeypatch.setitem(sys.modules, "vsview", fake_vsview)
     monkeypatch.setattr(
         "frame_compare.vsview.session_runtime.admit_source",
-        lambda _path, **_kwargs: SimpleNamespace(verify=lambda _source: None),
+        lambda _path, **_kwargs: admission,
     )
 
     def capture_overlay(_core, clip, model, *, warn):

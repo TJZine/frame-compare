@@ -31,20 +31,37 @@ def probe_video_streams(
     video: Path,
     *,
     abort: Callable[[], bool] | None = None,
-    include_attached: bool = False,
 ) -> list[dict[str, object]]:
-    """List video streams, excluding attached cover pictures by default."""
+    """List video streams, excluding attached cover pictures."""
+    streams, _ = _probe_video_streams(video, abort=abort)
+    return streams
+
+
+def probe_admission_headers(
+    video: Path, executable: Path, *, abort: Callable[[], bool]
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    """Get video headers and the identity reported by the same FFprobe invocation."""
+    return _probe_video_streams(video, abort=abort, admission_probe=executable)
+
+
+def _probe_video_streams(
+    video: Path,
+    *,
+    abort: Callable[[], bool] | None,
+    admission_probe: Path | None = None,
+) -> tuple[list[dict[str, object]], dict[str, object]]:
     entries = _VIDEO_STREAM_ENTRIES
-    if include_attached:
-        entries = entries.replace("stream=", "stream=index,")
+    if admission_probe is not None:
+        entries = entries.replace("stream=", "stream=index,coded_width,coded_height,")
     argv = [
-        "ffprobe",
+        str(admission_probe) if admission_probe is not None else "ffprobe",
         "-v",
         "error",
         "-max_pixels",
         str(MAX_CANVAS_PIXELS),
         "-select_streams",
         "v",
+        *(["-show_program_version", "-show_library_versions"] if admission_probe else []),
         "-show_entries",
         entries,
         "-of",
@@ -68,6 +85,9 @@ def probe_video_streams(
     except SubprocessOutputLimitExceeded as exc:
         raise FFmpegError(str(exc), 1) from exc
 
+    if admission_probe is not None and Path(proc.args[0]).resolve() != admission_probe:
+        raise ValueError("FFprobe executable changed during source admission")
+
     try:
         payload: object = json.loads(proc.stdout.decode("utf-8", errors="replace"))
     except json.JSONDecodeError as exc:
@@ -78,16 +98,16 @@ def probe_video_streams(
     payload_dict = cast(dict[str, object], payload)
     streams_obj = payload_dict.get("streams")
     if not isinstance(streams_obj, list):
-        return []
+        return [], payload_dict
     streams: list[dict[str, object]] = []
     for stream_obj in cast(list[object], streams_obj):
         if not isinstance(stream_obj, dict):
             continue
         stream = cast(dict[str, object], stream_obj)
-        if not include_attached and is_attached_picture(stream):
+        if admission_probe is None and is_attached_picture(stream):
             continue
         streams.append(stream)
-    return streams
+    return streams, payload_dict
 
 
 def is_attached_picture(stream: dict[str, object]) -> bool:

@@ -226,7 +226,9 @@ def _execute_ready_block(
     monkeypatch.setitem(sys.modules, "vsview", fake_vsview)
     monkeypatch.setattr(
         "frame_compare.vsview.session_runtime.admit_source",
-        lambda _path, **_kwargs: SimpleNamespace(verify=lambda _source: None),
+        lambda _path, **_kwargs: SimpleNamespace(
+            verify=lambda _source: None, scan=lambda _source, **_options: None
+        ),
     )
     monkeypatch.setenv("NO_COLOR", "1")
 

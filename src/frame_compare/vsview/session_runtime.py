@@ -17,7 +17,7 @@ from pydantic import TypeAdapter
 
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.canvas import validate_canvas_size
-from frame_compare.vs.source_admission import admit_source, bounded_decoder_options
+from frame_compare.vs.source_admission import SourceAdmission, admit_source, bounded_decoder_options
 from frame_compare.vs.source_index_cache import ManagedSourceIndexCache, private_index_directory
 from frame_compare.vs.types import TonemapSettings
 from frame_compare.vsview.alignment_overlay import apply_alignment_overlay, build_launch_overlays
@@ -419,7 +419,7 @@ def load_preview_source(
     path: Path,
     managed_index_path: str | None,
     source_index_generated_root: str | None = None,
-) -> vs.VideoNode:
+) -> tuple[vs.VideoNode, SourceAdmission]:
     if path.suffix.lower() == ".lwi":
         raise ValueError("An L-SMASH index cannot be used as source media")
     admission = admit_source(path, abort_check=raise_if_cancelling)
@@ -437,11 +437,14 @@ def load_preview_source(
 
     if managed_index_path is not None and source_index_generated_root is not None:
         cache = ManagedSourceIndexCache(Path(source_index_generated_root))
-        clip = cache.try_open_validated(path, Path(managed_index_path), open_source)
+        clip = cache.try_open_validated(
+            path, Path(managed_index_path), open_source, admission=admission
+        )
         if clip is not None:
-            return clip
+            return clip, admission
+    admission.scan(path, abort_check=raise_if_cancelling)
     with private_index_directory() as directory:
-        return open_source(path, 0, directory / "disabled.lwi")
+        return open_source(path, 0, directory / "disabled.lwi"), admission
 
 
 FRAME_PROP_ALIASES = {
@@ -551,6 +554,8 @@ def prepare_preview_clip(
     display_name: str,
     frame_props_by_label: Mapping[str, Mapping[str, str | int]],
     settings: TonemapSettings | None,
+    *,
+    admission: SourceAdmission,
 ) -> tuple[vs.VideoNode, dict[str, str] | None]:
     """Map original HDR evidence before any preview assumptions or overlays."""
     if settings is not None and settings.enabled:
@@ -559,7 +564,9 @@ def prepare_preview_clip(
         from frame_compare.vs.tonemap import apply_tonemap
 
         props = dict(clip.get_frame(0).props)
-        metadata = probe_hdr_metadata(path) if hdr_signal_is_unspecified(props) else None
+        metadata = None
+        if hdr_signal_is_unspecified(props):
+            metadata = probe_hdr_metadata(path, streams=(admission.video_stream,))
         is_hdr, metadata = detect_hdr(props, metadata)
         if is_hdr:
             return apply_tonemap(clip, settings, metadata, still_image=False).clip, None
@@ -639,7 +646,7 @@ def run_session(data: SessionData, script_path: Path) -> None:
         sys.exit(1)
 
     try:
-        ref_clip = load_preview_source(
+        ref_clip, ref_admission = load_preview_source(
             load_source,
             ref_path,
             reference.get("managed_index_path"),
@@ -664,6 +671,7 @@ def run_session(data: SessionData, script_path: Path) -> None:
         reference["display_name"],
         frame_props_by_label,
         preview_tonemap,
+        admission=ref_admission,
     )
     if ref_assumption is not None:
         preview_assumptions.append(ref_assumption)
@@ -680,7 +688,7 @@ def run_session(data: SessionData, script_path: Path) -> None:
             sys.exit(1)
 
         try:
-            comp_clip = load_preview_source(
+            comp_clip, comp_admission = load_preview_source(
                 load_source,
                 comp_path,
                 target.get("managed_index_path"),
@@ -694,7 +702,14 @@ def run_session(data: SessionData, script_path: Path) -> None:
             sys.exit(1)
 
         comp_clip, comp_assumption = prepare_preview_clip(
-            core, comp_clip, comp_path, label, display_name, frame_props_by_label, preview_tonemap
+            core,
+            comp_clip,
+            comp_path,
+            label,
+            display_name,
+            frame_props_by_label,
+            preview_tonemap,
+            admission=comp_admission,
         )
         if comp_assumption is not None:
             preview_assumptions.append(comp_assumption)

@@ -113,7 +113,7 @@ def load_source(
         abort_check()
         probed_metadata = None
         if hdr_signal_is_unspecified(frame_props):
-            probed_metadata = probe_hdr_metadata(path, streams=admission.streams)
+            probed_metadata = probe_hdr_metadata(path, streams=(admission.video_stream,))
         is_hdr, hdr_metadata = detect_hdr(frame_props, probed_metadata)
     except (PluginNotFoundError, SourceLoadError):
         raise
@@ -158,10 +158,11 @@ def _load_lwlibav_source(
         return clip
 
     if index_cache is not None:
-        clip = index_cache.try_load(path, open_source, abort_check=abort_check)
+        clip = index_cache.try_load(path, open_source, admission=admission, abort_check=abort_check)
         if clip is not None:
             return clip
     abort_check()
+    admission.scan(path, abort_check=abort_check)
     with private_index_directory() as directory:
         return open_source(path, 0, directory / "disabled.lwi")
 

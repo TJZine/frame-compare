@@ -450,7 +450,9 @@ def test_runtime_wires_native_previews_using_strict_launch_workspace(tmp_path, m
     monkeypatch.setattr(
         runtime,
         "admit_source",
-        lambda _path, **_kwargs: SimpleNamespace(verify=lambda _source: None),
+        lambda _path, **_kwargs: SimpleNamespace(
+            verify=lambda _source: None, scan=lambda _source, **_options: None
+        ),
     )
     registered = []
 

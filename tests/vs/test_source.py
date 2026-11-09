@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from collections.abc import Mapping
 from contextlib import AbstractContextManager, nullcontext
 from fractions import Fraction
@@ -12,6 +13,7 @@ from vapoursynth import Core, VideoFormat, VideoNode
 
 import frame_compare.vs.hdr_probe as hdr_probe_module
 import frame_compare.vs.source as source_module
+import frame_compare.vs.source_admission as admission_module
 from frame_compare.utils.canvas import MAX_CANVAS_PIXELS
 from frame_compare.utils.file_lock import exclusive_file_lock
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
@@ -25,17 +27,17 @@ from frame_compare.vs.types import SourceInfo
 
 
 @pytest.fixture(autouse=True)
-def _stub_hdr_probe(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
-    if request.node.get_closest_marker("vs_required") is not None:
-        return
-    monkeypatch.setattr(
-        source_module,
-        "admit_source",
-        lambda _path, **_kwargs: SimpleNamespace(
-            streams=({"width": 1920, "height": 1080},), verify=lambda _source: None
-        ),
+def _stub_hdr_probe(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> MagicMock:
+    admission = MagicMock(
+        spec=admission_module.SourceAdmission,
+        video_stream={"width": 1920, "height": 1080},
+        geometry_probe_token="a" * 64,
     )
+    if request.node.get_closest_marker("vs_required") is not None:
+        return admission
+    monkeypatch.setattr(source_module, "admit_source", lambda _path, **_kwargs: admission)
     monkeypatch.setattr(source_module, "probe_hdr_metadata", lambda _path, **_kwargs: None)
+    return admission
 
 
 class MockClip:
@@ -150,7 +152,7 @@ def test_load_source_forwards_explicit_decoder_options():
         cast(Core, core),
         decoder_options=LWLibavSourceOptions(
             threads=12,
-            ff_options="skip_loop_filter=all",
+            ff_options="skip_loop_filter=all MAX_PIXELS=0",
             prefer_hw=1,
         ),
     )
@@ -294,9 +296,45 @@ def test_load_source_rejects_an_index_as_media_before_probing(
     probe.assert_not_called()
 
 
-@pytest.mark.parametrize("failure", ["construction", "lock-timeout", "missing-root"])
+@pytest.mark.parametrize("changed_before_open", [True, False])
+def test_load_source_rejects_change_at_native_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed_before_open: bool
+) -> None:
+    video = tmp_path / "video.mkv"
+    video.write_bytes(b"fixture")
+    streams = [{"index": 0, "width": 64, "height": 64, "coded_width": 64, "coded_height": 64}]
+    monkeypatch.setattr(source_module, "admit_source", admission_module.admit_source)
+    monkeypatch.setattr(
+        admission_module, "resolve_optional_executable", lambda _name: sys.executable
+    )
+    monkeypatch.setattr(
+        admission_module, "probe_admission_headers", lambda *_args, **_kwargs: (streams, {})
+    )
+    monkeypatch.setattr(admission_module, "_scan_video_frames", lambda *_args: None)
+
+    def change_before_open(*_args: object) -> None:
+        video.write_bytes(b"changed before native open")
+
+    def change_during_open(*_args: object, **_kwargs: object) -> MockClip:
+        video.write_bytes(b"changed during native open")
+        return MockClip()
+
+    if changed_before_open:
+        monkeypatch.setattr(source_module, "require_plugin", change_before_open)
+    loader = MagicMock(side_effect=change_during_open)
+    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
+
+    with pytest.raises(SourceLoadError, match="Source video changed during admission"):
+        load_source(video, cast(Core, core))
+
+    assert loader.call_count == (0 if changed_before_open else 1)
+
+
+@pytest.mark.parametrize(
+    "failure", ["construction", "lock-timeout", "missing-root", "no-probe-identity"]
+)
 def test_load_source_retries_cache_failures_using_controlled_nonexistent_leaf(
-    tmp_path: Path, failure: str
+    tmp_path: Path, failure: str, _stub_hdr_probe: MagicMock
 ) -> None:
     video = tmp_path / "video.mkv"
     video.touch()
@@ -304,17 +342,25 @@ def test_load_source_retries_cache_failures_using_controlled_nonexistent_leaf(
     cache = ManagedSourceIndexCache(generated, lock_timeout_seconds=0)
     lock: AbstractContextManager[None] = nullcontext()
     if failure == "lock-timeout":
-        assert cache.try_load(video, lambda _source, _mode, index: index.write_bytes(b"index"))
+        assert cache.try_load(
+            video,
+            lambda _source, _mode, index: index.write_bytes(b"index"),
+            admission=_stub_hdr_probe,
+        )
         stable = cache.validated_index(video)
         assert stable is not None
         lock = exclusive_file_lock(stable.with_suffix(".lock"))
     elif failure == "missing-root":
         generated.touch()
+    elif failure == "no-probe-identity":
+        _stub_hdr_probe.geometry_probe_token = None
 
     calls: list[dict[str, object]] = []
+    _stub_hdr_probe.scan.reset_mock()
 
     def loader(_path: str, **kwargs: object) -> MockClip:
         calls.append(kwargs)
+        assert _stub_hdr_probe.scan.call_count == len(calls)
         index = Path(cast(str, kwargs["cachefile"]))
         assert index.parent.is_dir() and not index.exists()
         if kwargs["cache"] == 1:
