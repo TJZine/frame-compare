@@ -191,6 +191,45 @@ def test_geometry_probe_token_binds_executable_and_runtime(
 
 
 @pytest.mark.parametrize(
+    ("frames", "message"),
+    [
+        pytest.param(_record(2, 64, 72) * 2, None, id="complete"),
+        pytest.param(b"", "could not be verified", id="missing"),
+        pytest.param(_record(2, 7681, 72), "7,680 pixels per axis", id="oversize"),
+    ],
+)
+def test_unknown_coded_header_requires_fresh_frame_geometry(
+    video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    frames: bytes,
+    message: str | None,
+) -> None:
+    stream = {**_VIDEO, "coded_width": 0, "coded_height": 0}
+    payload = {
+        "program_version": {"version": "7.1.5"},
+        "library_versions": [{"name": "libavcodec", "version": 61}],
+    }
+    monkeypatch.setattr(
+        admission_module, "probe_admission_headers", lambda *_args, **_kwargs: ([stream], payload)
+    )
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        consumer = kwargs["stdout_consumer"]
+        assert callable(consumer)
+        consumer(frames)
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(admission_module, "run_subprocess", run)
+    admission = admit_source(video, abort_check=lambda: None)
+    assert admission.geometry_probe_token is None
+    if message is None:
+        admission.scan(video, abort_check=lambda: None)
+    else:
+        with pytest.raises(admission_module.SourceGeometryError, match=message):
+            admission.scan(video, abort_check=lambda: None)
+
+
+@pytest.mark.parametrize(
     ("streams", "message"),
     [
         ([], "no verifiable video stream"),
@@ -201,6 +240,7 @@ def test_geometry_probe_token_binds_executable_and_runtime(
         ([{**_VIDEO, "coded_width": None}], "Coded source video dimensions could not be verified"),
         ([{**_VIDEO, "coded_height": 0}], "Coded source video dimensions are out of bounds"),
         ([{**_VIDEO, "coded_width": 7680, "coded_height": 4321}], "33,177,600 pixels total"),
+        ([_VIDEO, {**_COVER, "coded_width": 0, "coded_height": 0}], "dimensions are out of bounds"),
         ([_VIDEO, {**_COVER, "coded_width": 7681}], "7,680 pixels per axis"),
     ],
 )

@@ -280,22 +280,29 @@ def admit_source(path: Path, *, abort_check: Callable[[], None]) -> SourceAdmiss
         raise ValueError("no verifiable video stream is supported")
     if len(real_streams) > 1:
         raise ValueError("multiple video streams are not supported")
+    video_stream = real_streams[0]
     validate_video_stream_sizes(streams, require_dimensions=True)
+    coded_header_known = True
     for stream in streams:
         width, height = stream.get("coded_width"), stream.get("coded_height")
         if type(width) is not int or type(height) is not int:
             raise ValueError("Coded source video dimensions could not be verified before decoding")
+        if stream is video_stream and (width, height) == (0, 0):
+            # Elementary streams can report unknown coded dimensions until decoding.
+            # Without a reuse token both native callers must scan before a private open.
+            coded_header_known = False
+            continue
         validate_canvas_size(width, height, label="Coded source video")
     indices = frozenset(index for stream in streams if type(index := stream.get("index")) is int)
     if len(indices) != len(streams) or min(indices) < 0:
         raise ValueError("Source video stream indices could not be verified")
     admission = SourceAdmission(
-        real_streams[0],
+        video_stream,
         stamp,
         indices,
         executable,
         probe_stamp,
-        _probe_token(executable, probe_stamp, payload),
+        _probe_token(executable, probe_stamp, payload) if coded_header_known else None,
     )
     admission.verify(path)
     return admission
