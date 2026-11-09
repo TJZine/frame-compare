@@ -47,9 +47,12 @@ Frame Compare handles local video files and optional network operations. Key sec
   always use the private cache-free path. See the
   [source admission rules](docs/current-architecture.md#shared-caches-and-decoder-indexes).
 - **Subprocess hardening.** External tool invocations use argument vectors,
-  independent stdout/stderr limits and bounded timeouts. Application children
-  receive only the credentials their specific integration owns. The Windows
-  launch and assignment limits are described under
+  independent stdout/stderr limits and bounded timeouts. The shared child
+  environment filter removes known Frame Compare credentials, including
+  `FRAME_COMPARE_TMDB` and `FRAME_COMPARE_SLOWPICS` section JSON and their
+  credential-specific nested variables, case-insensitively. This also applies
+  to the desktop broker and the browser or clipboard handlers it launches.
+  The Windows launch and assignment limits are described under
   [external boundaries](docs/current-architecture.md#external-boundaries).
 - **Network Operations**: slow.pics upload and webhook delivery are opt-in, and TMDB lookups run only when an API key is configured. Webhook delivery requires an external HTTPS endpoint, follows no redirects, and keeps the URL out of diagnostics.
 - **Release integrity.** The Windows release path independently rebuilds and

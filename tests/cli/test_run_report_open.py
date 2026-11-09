@@ -134,7 +134,8 @@ def test_desktop_opener_preserves_default_browser_and_filters_credentials(
     browser = tmp_path / "fixture-browser"
     browser.write_text(
         "#!/bin/sh\n"
-        'printf "%s\\n%s\\n%s\\n" "$1" "$FRAME_COMPARE_TMDB__API_KEY" '
+        'printf "%s\\n" "$1" "${FRAME_COMPARE_TMDB__API_KEY-unset}" '
+        '"${FRAME_COMPARE_TMDB-unset}" "${FRAME_COMPARE_SLOWPICS-unset}" '
         '"$VAPOURSYNTH_EXTRA_PLUGIN_PATH" > "$FRAME_COMPARE_TEST_BROWSER_RESULT"\n'
         "exit 0\n",
         encoding="utf-8",
@@ -143,12 +144,16 @@ def test_desktop_opener_preserves_default_browser_and_filters_credentials(
     monkeypatch.setenv("BROWSER", f"{shlex.quote(str(browser))} %s")
     monkeypatch.setenv("FRAME_COMPARE_TEST_BROWSER_RESULT", str(marker))
     monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "synthetic-browser-secret")
+    monkeypatch.setenv("FRAME_COMPARE_TMDB", '{"api_key":"synthetic-browser-section-key"}')
+    monkeypatch.setenv("FRAME_COMPARE_SLOWPICS", '{"webhook_url":"synthetic-browser-section-hook"}')
     monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "synthetic-plugin-path")
     report = tmp_path / "report.html"
     assert _maybe_open_report(report)
     assert marker.read_text().splitlines() == [
         report.resolve().as_uri(),
-        "",
+        "unset",
+        "unset",
+        "unset",
         "synthetic-plugin-path",
     ]
 

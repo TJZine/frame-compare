@@ -102,9 +102,9 @@ ownership of their descendants after the leader exits. Windows uses normal
 pre-assignment interval can let descendants escape, and an interrupt inside
 `Popen` can prevent the caller from acquiring the child handle for cleanup.
 Paired FFmpeg alignment and interactive VSView share this bounded cleanup owner.
-Application children receive a filtered environment with integration-specific
-credentials supplied only by their owner. The benchmark streams bounded frame
-records.
+The shared child environment filter removes known Frame Compare credential
+variables, including the TMDB and slow.pics section JSON and credential-specific
+nested variables. The benchmark streams bounded frame records.
 
 The candidate implements the simplified Windows owner in `4b7d084f`.
 Focused coverage includes overflow, timeout, malformed output, nonzero exit,
@@ -234,16 +234,32 @@ identified no P0 or P1 issue and no release-chain integrity defect.
   The separate headless Chrome fullscreen refusal also occurs on the
   baseline.
 - Desktop broker cleanup could kill a background handler after returning
-  success. `ce672500` keeps the broker filtered, silent and time-bounded,
-  while allowing desktop handlers and clipboard selection owners to outlive
-  it. The focused real delayed-handler and broker timeout/reap tests passed.
-  The generic subprocess owner is unchanged.
+  success. `ce672500` keeps the broker on the shared environment filter,
+  silent and time-bounded, while allowing desktop handlers and clipboard
+  selection owners to outlive it. The focused real delayed-handler and
+  broker timeout/reap tests passed. The generic subprocess owner is unchanged.
+
+A final P2 follow-up on `6adfa2c9` found that the shared filter removed nested
+credential variables but passed through `FRAME_COMPARE_TMDB` and
+`FRAME_COMPARE_SLOWPICS`. The normal config loader accepts credentials in
+these JSON sections, and real subprocesses and a desktop browser handler
+received both raw values. The shared predicate now excludes both names
+case-insensitively, including after caller overrides, and snapshots their
+complete raw values for diagnostic redaction. The loader control passed on
+the old revision, while the subprocess, browser handler and diagnostic
+assertions reproduced the leak. After the fix, all 361 focused config,
+subprocess and desktop tests passed. A separate macOS run through the desktop
+broker and pyperclip confirmed that a synthetic `pbcopy` received the
+canonical URL and plugin path with neither credential names nor values.
+The full local suite had one failure at the Chrome fullscreen transition,
+which also reproduced on `6adfa2c9`. Platform and capability skips leave
+native media and physical Windows acceptance open.
 
 The review concluded that the release controls are proportionate for public
 signed updates. Removing the pre-equality producer-archive traversal in
 `portable_bundle.py` is an optional post-MVP simplification. Independent
 reconstruction and canonical ZIP equality remain required.
 
-The two findings are resolved. The orchestrator's next action is to update
+All three findings are resolved. The orchestrator's next action is to update
 PR #173. Further active adversarial exercises remain outside the authorized
 scope. The release acceptance gates above remain open.

@@ -1,5 +1,6 @@
 import asyncio
 import ctypes
+import json
 import os
 import signal
 import subprocess
@@ -15,6 +16,7 @@ from unittest.mock import MagicMock, call
 import pytest
 
 import frame_compare.utils.subproc as subproc_module
+from frame_compare.utils.child_environment import child_environment
 from frame_compare.utils.subproc import (
     SubprocessAborted,
     SubprocessCleanupError,
@@ -511,23 +513,30 @@ def test_retained_diagnostics_are_bounded_and_sanitized(
     outcome: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     secret = "fixture-webhook-secret"
+    tmdb_section = '{"api_key":"fixture-section-key"}'
+    slowpics_section = '{"webhook_url":"fixture-section-hook"}'
     monkeypatch.setenv("FRAME_COMPARE_SLOWPICS__WEBHOOK_URL", secret)
+    monkeypatch.setenv("frame_compare_tmdb", tmdb_section)
+    environment = os.environ | {"FRAME_COMPARE_SLOWPICS": slowpics_section}
+    secret_values = (secret, tmdb_section, slowpics_section)
+    payload = " ".join(secret_values).encode()
     finish = "raise SystemExit(3)" if outcome == "failure" else "time.sleep(30)"
     script = (
         "import os,time\n"
-        f"payload = b'head\\x1b' + {secret.encode()!r} + b'x' * 20000 + b'tail\\x07'\n"
+        f"payload = b'head\\x1b' + {payload!r} + b'x' * 20000 + b'tail\\x07'\n"
         "os.write(1, payload)\nos.write(2, payload)\n"
         f"{finish}"
     )
     kind = subprocess.CalledProcessError if outcome == "failure" else subprocess.TimeoutExpired
     with pytest.raises(kind) as error:
-        run_subprocess([sys.executable, "-c", script], timeout_seconds=0.5)
+        run_subprocess([sys.executable, "-c", script], env=environment, timeout_seconds=0.5)
     for output in (error.value.stdout, error.value.stderr):
         assert output is not None and 0 < len(output) < 9_000
         assert output.startswith(b"head") and output.rstrip().endswith(b"tail")
-        assert b"<redacted>" in output and secret.encode() not in output
+        assert b"<redacted> <redacted> <redacted>" in output
+        assert all(value.encode() not in output for value in secret_values)
         assert b"\x1b" not in output and b"\x07" not in output
-    assert secret not in str(error.value)
+    assert all(value not in str(error.value) for value in secret_values)
 
 
 @pytest.mark.parametrize("fd", [1, 2], ids=["stdout", "stderr"])
@@ -793,36 +802,37 @@ def test_child_environment_filters_app_credentials_after_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "synthetic-api-key")
-    effective = os.environ | {
+    monkeypatch.setenv("FRAME_COMPARE_TMDB", '{"api_key":"synthetic-inherited-key"}')
+    overrides = {
+        "FRAME_COMPARE_TMDB": '{"api_key":"synthetic-overridden-key"}',
+        "frame_compare_slowpics": '{"webhook_url":"synthetic-section-hook"}',
         "frame_compare_slowpics__webhook_url": "synthetic-hook",
         "FRAME_COMPARE_SLOWPICS__API_TOKEN": "synthetic-token",
         "WINDOWS_UPDATE_SIGNING_KEY_XML": "synthetic-key",
         "SIGNING_KEY_MIGRATION_TOKEN": "synthetic-migration-token",
         "SOURCE_SIGNING_KEY": "synthetic-source-key",
         "SIGNING_KEY_XML_PATH": "synthetic-path",
+    }
+    runtime = {
         "VAPOURSYNTH_EXTRA_PLUGIN_PATH": "fixture/plugins",
         "FRAME_COMPARE_LIBPLACEBO_EXPECTED_SHA256": "fixture-fingerprint",
+        "FRAME_COMPARE_ANALYSIS": '{"random_frame_count":7}',
     }
-    observed_names = (
-        "frame_compare_slowpics__webhook_url",
-        "FRAME_COMPARE_SLOWPICS__API_TOKEN",
-        "WINDOWS_UPDATE_SIGNING_KEY_XML",
-        "SIGNING_KEY_MIGRATION_TOKEN",
-        "SOURCE_SIGNING_KEY",
-        "SIGNING_KEY_XML_PATH",
-        "VAPOURSYNTH_EXTRA_PLUGIN_PATH",
-        "FRAME_COMPARE_LIBPLACEBO_EXPECTED_SHA256",
-        "FRAME_COMPARE_TMDB__API_KEY",
-    )
+    effective = os.environ | overrides | runtime
+    credential_names = {*overrides, "FRAME_COMPARE_TMDB__API_KEY"}
+    observed_names = sorted({name.upper() for name in credential_names} | runtime.keys())
     script = (
-        "import os; "
+        "import json, os; "
         f"names = {observed_names!r}; "
-        "print([os.environ.get(name) for name in names if os.environ.get(name)])"
+        "print(json.dumps({k.upper(): v for k, v in os.environ.items() if k.upper() in names}))"
     )
-    command, env = prepare_python_child([sys.executable, "-c", script], env=effective)
-    for argv, child_env in (([sys.executable, "-c", script], effective), (command, env)):
-        result = run_subprocess(argv, env=child_env, timeout_seconds=3)
-        assert b"fixture/plugins" in result.stdout
-        assert b"fixture-fingerprint" in result.stdout
-        assert b"synthetic" not in result.stdout
-    assert "frame_compare_slowpics__webhook_url" not in env
+    argv = [sys.executable, "-c", script]
+    command, prepared = prepare_python_child(argv, env=effective)
+    result = run_subprocess(argv, env=effective, timeout_seconds=3)
+    assert json.loads(result.stdout) == runtime
+    assert credential_names.isdisjoint(child_environment())
+    for filtered in (child_environment(effective), prepared):
+        assert credential_names.isdisjoint(filtered)
+        assert {name: filtered[name] for name in runtime} == runtime
+    result = run_subprocess(command, env=prepared, timeout_seconds=3)
+    assert json.loads(result.stdout) == runtime

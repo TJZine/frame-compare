@@ -7,11 +7,13 @@ import re
 import unicodedata
 from collections.abc import Mapping
 
-# Match explicit owners, including the release/migration aliases. Do not
-# filter unrelated runtime settings (e.g. plugin paths and fingerprints).
+# Both section JSON and nested overrides can carry credentials. Match explicit
+# names so unrelated runtime settings (e.g. plugin paths) still reach children.
 _CREDENTIAL_NAMES = frozenset(
     {
+        "FRAME_COMPARE_SLOWPICS",
         "FRAME_COMPARE_SLOWPICS__WEBHOOK_URL",
+        "FRAME_COMPARE_TMDB",
         "FRAME_COMPARE_TMDB__API_KEY",
         "SIGNING_KEY_XML_PATH",
         "WINDOWS_UPDATE_SIGNING_KEY_XML",
