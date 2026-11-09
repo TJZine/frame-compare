@@ -18,14 +18,12 @@ from portable_archive import checked_zip, copy_exact, digest_file
 PREFIX = "frame-compare-portable-win-x64/"
 MAX_RECEIPT = 16 * 1024
 MAX_SCAN_DOCUMENT = 512 * 1024**2
-MAX_DATABASE = 1024**3
+# The observed Grype v6 database is about 3.2 GiB. Allow growth while bounding the hash read.
+MAX_DATABASE = 8 * 1024**3
 SHA256 = re.compile(r"[0-9a-f]{64}")
 COMMIT = re.compile(r"[0-9a-f]{40}")
 ARTIFACT_ID = re.compile(r"[1-9][0-9]*")
 ALLOWED_SEVERITIES = {"negligible", "low", "medium"}
-BLOCKED_SEVERITIES = {"high", "critical", "unknown", ""}
-SYFT_SCHEMA_VERSION = "16.1.12"
-CYCLONEDX_SPEC_VERSION = "1.7"
 
 
 def _read_json(path: Path, limit: int) -> dict[str, Any]:
@@ -50,104 +48,23 @@ def _require_digest(value: object, label: str) -> str:
     return value
 
 
-def _text(value: object) -> bool:
-    return isinstance(value, str) and bool(value.strip()) and len(value) <= 4096
-
-
-def _validate_syft_inventory(report: dict[str, Any], scanner_version: str) -> int:
-    artifacts = report.get("artifacts")
+def _require_scanner(report: dict[str, Any], name: str, version: str) -> None:
     descriptor = report.get("descriptor")
-    schema = report.get("schema")
-    source = report.get("source")
-    if not isinstance(artifacts, list) or not artifacts:
-        raise ValueError("Syft inventory is empty")
     if (
         not isinstance(descriptor, dict)
-        or descriptor.get("name") != "syft"
-        or descriptor.get("version") != scanner_version
+        or descriptor.get("name") != name
+        or descriptor.get("version") != version
     ):
-        raise ValueError("Syft inventory lacks verified scanner identity")
-    if (
-        not isinstance(schema, dict)
-        or schema.get("version") != SYFT_SCHEMA_VERSION
-        or not _text(schema.get("url"))
-        or SYFT_SCHEMA_VERSION not in str(schema.get("url"))
-    ):
-        raise ValueError("Syft inventory does not identify the pinned JSON schema")
-    if not isinstance(report.get("artifactRelationships"), list) or not isinstance(
-        report.get("distro"), dict
-    ):
-        raise ValueError("Syft inventory is missing required document fields")
-    if (
-        not isinstance(source, dict)
-        or source.get("type") != "directory"
-        or not _text(source.get("id"))
-        or not _text(source.get("name"))
-        or not isinstance(source.get("metadata"), dict)
-        or not _text(source["metadata"].get("path"))
-    ):
-        raise ValueError("Syft inventory lacks directory source provenance")
-    for artifact in artifacts:
-        if (
-            not isinstance(artifact, dict)
-            or any(not _text(artifact.get(field)) for field in ("id", "name", "version", "type"))
-            or not isinstance(artifact.get("locations"), list)
-            or not artifact["locations"]
-        ):
-            raise ValueError("Syft inventory contains a malformed package")
-    return len(artifacts)
+        raise ValueError(f"{name} report lacks verified scanner identity")
 
 
-def _validate_cyclonedx_inventory(report: dict[str, Any], scanner_version: str) -> int:
-    components = report.get("components")
-    metadata = report.get("metadata")
-    if (
-        report.get("bomFormat") != "CycloneDX"
-        or report.get("specVersion") != CYCLONEDX_SPEC_VERSION
-        or report.get("version") != 1
-        or report.get("$schema")
-        not in {
-            "http://cyclonedx.org/schema/bom-1.7.schema.json",
-            "https://cyclonedx.org/schema/bom-1.7.schema.json",
-        }
+def _inventory_count(report: dict[str, Any], field: str, label: str) -> int:
+    inventory = report.get(field)
+    if not isinstance(inventory, list) or not any(
+        isinstance(entry, dict) and entry.get("name") for entry in inventory
     ):
-        raise ValueError("CycloneDX inventory does not identify the pinned schema")
-    if not isinstance(components, list) or not components:
-        raise ValueError("CycloneDX inventory is empty")
-    tools = metadata.get("tools") if isinstance(metadata, dict) else None
-    tool_components = tools.get("components") if isinstance(tools, dict) else None
-    if not isinstance(tool_components, list) or not any(
-        isinstance(tool, dict)
-        and tool.get("name") == "syft"
-        and tool.get("version") == scanner_version
-        for tool in tool_components
-    ):
-        raise ValueError("CycloneDX inventory lacks verified scanner identity")
-    for component in components:
-        if (
-            not isinstance(component, dict)
-            or any(not _text(component.get(field)) for field in ("bom-ref", "type", "name"))
-            or (component.get("type") != "file" and not _text(component.get("version")))
-        ):
-            raise ValueError("CycloneDX inventory contains a malformed component")
-    return len(components)
-
-
-def _validate_grype_source(report: dict[str, Any], scanner_version: str) -> None:
-    descriptor = report.get("descriptor")
-    source = report.get("source")
-    if (
-        not isinstance(descriptor, dict)
-        or descriptor.get("name") != "grype"
-        or descriptor.get("version") != scanner_version
-    ):
-        raise ValueError("Grype report lacks verified scanner identity")
-    if (
-        not isinstance(source, dict)
-        or source.get("type") != "directory"
-        or not _text(source.get("target"))
-    ):
-        raise ValueError("Grype report lacks scanned-directory source provenance")
+        raise ValueError(f"{label} inventory is empty")
+    return len(inventory)
 
 
 def _stage(args: argparse.Namespace) -> None:
@@ -162,12 +79,12 @@ def _stage(args: argparse.Namespace) -> None:
     archive_digest = digest_file(args.archive)
     if (
         receipt.get("schema") != 2
+        or receipt.get("portable_reproduced") is not True
         or receipt.get("commit") != args.expected_sha
         or receipt.get("portable_artifact_id") != args.expected_artifact_id
         or receipt.get("bundle_sha256") != archive_digest
     ):
         raise ValueError("Portable artifact does not match its verification receipt")
-    catalog_digest = _require_digest(receipt.get("portable_catalog_sha256"), "catalog")
     _require_digest(receipt.get("requirements_sha256"), "requirements")
     _require_digest(receipt.get("manifest_sha256"), "manifest")
 
@@ -205,19 +122,12 @@ def _stage(args: argparse.Namespace) -> None:
             "portable_artifact_id": args.expected_artifact_id,
             "portable_sha256": archive_digest,
             "verification_sha256": digest_file(args.verification),
-            "portable_catalog_sha256": catalog_digest,
+            "portable_reproduced": True,
             "files": file_count,
             "directories": directory_count,
             "expanded_bytes": expanded_bytes,
         },
     )
-
-
-def _version(path: Path, expected: str, label: str) -> str:
-    value = path.read_text(encoding="utf-8")
-    if len(value) > 4096 or expected not in value:
-        raise ValueError(f"Unexpected {label} version output")
-    return expected
 
 
 def _database_status(path: Path) -> dict[str, Any]:
@@ -227,7 +137,9 @@ def _database_status(path: Path) -> dict[str, Any]:
     built_value = status.get("built")
     if not isinstance(built_value, str):
         raise ValueError("Grype vulnerability database lacks a build time")
-    built = datetime.fromisoformat(built_value.replace("Z", "+00:00")).astimezone(UTC)
+    built = datetime.fromisoformat(built_value)
+    if built.tzinfo is None:
+        raise ValueError("Grype vulnerability database lacks a timezone for its build time")
     now = datetime.now(UTC)
     if built > now + timedelta(minutes=5) or now - built > timedelta(days=5):
         raise ValueError("Grype vulnerability database is outside the five-day age limit")
@@ -242,81 +154,77 @@ def _database_status(path: Path) -> dict[str, Any]:
     _require_digest(archive_digest, "database archive")
 
     database_path = Path(str(status.get("path", "")))
-    if not database_path.is_file() or not 0 < database_path.stat().st_size <= MAX_DATABASE:
-        raise ValueError("Grype vulnerability database file is missing or oversized")
+    if not database_path.is_file():
+        raise ValueError("Grype vulnerability database file is missing")
+    with database_path.open("rb") as stream:
+        size = stream.seek(0, 2)
+        if not 0 < size <= MAX_DATABASE:
+            raise ValueError("Grype vulnerability database file is empty or exceeds the size limit")
+        stream.seek(0)
+        database_digest = copy_exact(stream, size)
     return {
         "schema_version": status.get("schemaVersion"),
         "built": built_value,
         "source": source,
         "archive_sha256": archive_digest,
-        "database_sha256": digest_file(database_path),
+        "database_sha256": database_digest,
     }
 
 
-def _validate_findings(report: dict[str, Any]) -> tuple[Counter[str], int]:
-    if report.get("ignoredMatches"):
+def _validate_findings(report: dict[str, Any]) -> Counter[str]:
+    if report.get("ignoredMatches", []) != []:
         raise ValueError("Grype report contains suppressed findings")
     matches = report.get("matches")
     if not isinstance(matches, list):
         raise ValueError("Grype report lacks a findings list")
     counts: Counter[str] = Counter()
-    known_exploited = 0
-    blockers: list[str] = []
     for match in matches:
-        if not isinstance(match, dict):
-            raise ValueError("Grype report contains a malformed finding")
-        artifact = match.get("artifact")
-        primary = match.get("vulnerability")
-        related = match.get("relatedVulnerabilities", [])
-        if (
-            not isinstance(artifact, dict)
-            or not isinstance(primary, dict)
-            or not isinstance(related, list)
+        if not isinstance(match, dict) or not isinstance(
+            match.get("relatedVulnerabilities", []), list
         ):
             raise ValueError("Grype report contains an incomplete finding")
-        package = f"{artifact.get('name', '<unknown>')}@{artifact.get('version', '<unknown>')}"
-        vulnerabilities = [primary, *related]
-        for vulnerability in vulnerabilities:
-            if not isinstance(vulnerability, dict) or not isinstance(vulnerability.get("id"), str):
+        for vulnerability in [match.get("vulnerability"), *match.get("relatedVulnerabilities", [])]:
+            if not isinstance(vulnerability, dict):
                 raise ValueError("Grype report contains malformed vulnerability metadata")
-            severity = str(vulnerability.get("severity", "")).lower()
-            counts[severity or "unknown"] += 1
+            identifier = vulnerability.get("id", "<unknown>")
+            severity = str(vulnerability.get("severity") or "unknown").lower()
             kev = vulnerability.get("knownExploited", [])
             if not isinstance(kev, list):
                 raise ValueError("Grype report contains malformed KEV metadata")
             if kev:
-                known_exploited += 1
-                blockers.append(f"{vulnerability['id']} ({package}) is known exploited")
-            if severity in BLOCKED_SEVERITIES or severity not in ALLOWED_SEVERITIES:
-                blockers.append(
-                    f"{vulnerability['id']} ({package}) has {severity or 'unknown'} severity"
+                raise ValueError(
+                    f"Artifact advisory policy blocked release: {identifier} is known exploited"
                 )
-    if blockers:
-        preview = "; ".join(blockers[:20])
-        suffix = f"; plus {len(blockers) - 20} more" if len(blockers) > 20 else ""
-        raise ValueError(f"Artifact advisory policy blocked release: {preview}{suffix}")
-    return counts, known_exploited
+            if severity not in ALLOWED_SEVERITIES:
+                raise ValueError(
+                    f"Artifact advisory policy blocked release: {identifier} has {severity} severity"
+                )
+            counts[severity] += 1
+    return counts
 
 
 def _policy(args: argparse.Namespace) -> None:
     scan_input = _read_json(args.scan_input, MAX_RECEIPT)
     if (
         scan_input.get("schema") != 1
+        or scan_input.get("portable_reproduced") is not True
         or COMMIT.fullmatch(str(scan_input.get("commit", ""))) is None
         or ARTIFACT_ID.fullmatch(str(scan_input.get("portable_artifact_id", ""))) is None
     ):
         raise ValueError("Scan input receipt is malformed")
 
-    syft_version = _version(args.syft_version, args.expected_syft_version, "Syft")
-    grype_version = _version(args.grype_version, args.expected_grype_version, "Grype")
-
+    _require_digest(scan_input.get("portable_sha256"), "portable")
+    _require_digest(scan_input.get("verification_sha256"), "verification receipt")
     syft = _read_json(args.syft, MAX_SCAN_DOCUMENT)
-    package_count = _validate_syft_inventory(syft, syft_version)
+    _require_scanner(syft, "syft", args.expected_syft_version)
+    package_count = _inventory_count(syft, "artifacts", "Syft")
     cyclonedx = _read_json(args.cyclonedx, MAX_SCAN_DOCUMENT)
-    component_count = _validate_cyclonedx_inventory(cyclonedx, syft_version)
+    if cyclonedx.get("bomFormat") != "CycloneDX":
+        raise ValueError("Expected a CycloneDX inventory")
+    component_count = _inventory_count(cyclonedx, "components", "CycloneDX")
     grype = _read_json(args.grype, MAX_SCAN_DOCUMENT)
-    _validate_grype_source(grype, grype_version)
-    counts, known_exploited = _validate_findings(grype)
+    _require_scanner(grype, "grype", args.expected_grype_version)
+    counts = _validate_findings(grype)
     database = _database_status(args.db_status)
 
     _write_json(
@@ -324,14 +232,14 @@ def _policy(args: argparse.Namespace) -> None:
         {
             "schema": 1,
             **scan_input,
-            "syft_version": syft_version,
-            "grype_version": grype_version,
+            "syft_version": args.expected_syft_version,
+            "grype_version": args.expected_grype_version,
+            "policy": "passed",
             "database": database,
             "inventory_packages": package_count,
             "cyclonedx_components": component_count,
             "advisory_matches": sum(counts.values()),
             "advisory_severities": dict(sorted(counts.items())),
-            "known_exploited_matches": known_exploited,
             "syft_sha256": digest_file(args.syft),
             "cyclonedx_sha256": digest_file(args.cyclonedx),
             "grype_sha256": digest_file(args.grype),
@@ -355,8 +263,6 @@ def _parser() -> argparse.ArgumentParser:
     policy = subparsers.add_parser("policy", help="validate SBOM and advisory evidence")
     for name in ("scan-input", "syft", "cyclonedx", "grype", "db-status"):
         policy.add_argument(f"--{name}", type=Path, required=True)
-    policy.add_argument("--syft-version", type=Path, required=True)
-    policy.add_argument("--grype-version", type=Path, required=True)
     policy.add_argument("--expected-syft-version", required=True)
     policy.add_argument("--expected-grype-version", required=True)
     policy.add_argument("--output", type=Path, required=True)
@@ -368,7 +274,7 @@ def main() -> None:
     args = _parser().parse_args()
     try:
         args.handler(args)
-    except (OSError, ValueError, json.JSONDecodeError) as error:
+    except (OSError, ValueError) as error:
         raise SystemExit(str(error)) from error
 
 

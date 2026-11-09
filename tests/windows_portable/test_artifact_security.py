@@ -10,6 +10,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 import pytest
+from tools.windows_portable import artifact_security
 
 
 def _digest(path: Path) -> str:
@@ -61,7 +62,7 @@ def _stage(
         "tag": "v1.2.3",
         "bundle_sha256": _digest(archive),
         "portable_artifact_id": "123",
-        "portable_catalog_sha256": "b" * 64,
+        "portable_reproduced": True,
         "requirements_sha256": "c" * 64,
         "manifest_sha256": "d" * 64,
     }
@@ -108,7 +109,8 @@ def test_artifact_security_stages_only_receipt_bound_portable(
     [
         ({"bundle_sha256": "0" * 64}, "does not match"),
         ({"portable_artifact_id": "456"}, "does not match"),
-        ({"portable_catalog_sha256": None}, "catalog"),
+        ({"portable_reproduced": False}, "does not match"),
+        ({"commit": "f" * 40}, "does not match"),
     ],
 )
 def test_artifact_security_rejects_unbound_inputs(
@@ -130,13 +132,24 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
+def _db_status(database: Path) -> dict[str, object]:
+    return {
+        "schemaVersion": "6.1.7",
+        "from": "https://example.invalid/db.tar.zst?checksum=sha256%3A" + "e" * 64,
+        "built": datetime.now(UTC).isoformat(),
+        "path": str(database),
+        "valid": True,
+    }
+
+
 def _policy(
     repo_root: Path,
     tmp_path: Path,
     *,
     matches: list[dict[str, object]] | None = None,
     ignored: list[object] | None = None,
-    built: str | None = None,
+    db_update: dict[str, object] | None = None,
+    scanner_version: str = "0.121.0",
     syft_artifacts: list[object] | None = None,
     cyclonedx_components: list[object] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
@@ -148,85 +161,35 @@ def _policy(
             "commit": "a" * 40,
             "portable_artifact_id": "123",
             "portable_sha256": "b" * 64,
+            "verification_sha256": "c" * 64,
+            "portable_reproduced": True,
         },
         "syft": {
-            "artifacts": syft_artifacts
-            if syft_artifacts is not None
-            else [
-                {
-                    "id": "package-id",
-                    "name": "demo",
-                    "version": "1.0",
-                    "type": "python",
-                    "locations": [{"path": "app/demo.dist-info/METADATA"}],
-                }
-            ],
-            "artifactRelationships": [],
-            "source": {
-                "id": "source-id",
-                "name": "portable-security-tree",
-                "type": "directory",
-                "metadata": {"path": "/tmp/portable-security-tree"},
-            },
-            "distro": {},
+            "artifacts": [{"name": "demo"}] if syft_artifacts is None else syft_artifacts,
             "descriptor": {"name": "syft", "version": "1.56.0"},
-            "schema": {
-                "version": "16.1.12",
-                "url": "https://raw.githubusercontent.com/anchore/syft/v1.56.0/schema/json/schema-16.1.12.json",
-            },
         },
         "cyclonedx": {
-            "$schema": "http://cyclonedx.org/schema/bom-1.7.schema.json",
             "bomFormat": "CycloneDX",
-            "specVersion": "1.7",
-            "version": 1,
-            "metadata": {
-                "tools": {
-                    "components": [{"type": "application", "name": "syft", "version": "1.56.0"}]
-                }
-            },
-            "components": cyclonedx_components
-            if cyclonedx_components is not None
-            else [
-                {
-                    "bom-ref": "package-id",
-                    "type": "library",
-                    "name": "demo",
-                    "version": "1.0",
-                }
-            ],
+            "components": [{"name": "demo"}]
+            if cyclonedx_components is None
+            else cyclonedx_components,
         },
         "grype": {
             "matches": matches or [],
             "ignoredMatches": ignored or [],
-            "descriptor": {"name": "grype", "version": "0.121.0"},
-            "source": {"type": "directory", "target": "portable-security-tree"},
+            "descriptor": {"name": "grype", "version": scanner_version},
         },
-        "db-status": {
-            "schemaVersion": "6.1.7",
-            "from": "https://example.invalid/db.tar.zst?checksum=sha256%3A" + "e" * 64,
-            "built": built or datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            "path": str(database),
-            "valid": True,
-        },
+        "db-status": _db_status(database) | (db_update or {}),
     }
     paths: dict[str, Path] = {}
     for name, value in inputs.items():
         paths[name] = tmp_path / f"{name}.json"
         _write_json(paths[name], value)
-    syft_version = tmp_path / "syft-version.txt"
-    grype_version = tmp_path / "grype-version.txt"
-    syft_version.write_text("syft 1.56.0\n", encoding="utf-8")
-    grype_version.write_text("grype 0.121.0\n", encoding="utf-8")
     output = tmp_path / "artifact-security.json"
     result = _run(
         repo_root,
         "policy",
         *(item for name, path in paths.items() for item in (f"--{name}", str(path))),
-        "--syft-version",
-        str(syft_version),
-        "--grype-version",
-        str(grype_version),
         "--expected-syft-version",
         "1.56.0",
         "--expected-grype-version",
@@ -258,7 +221,8 @@ def test_artifact_security_accepts_complete_lower_severity_evidence(
     receipt = json.loads(output.read_bytes())
     assert receipt["inventory_packages"] == 1
     assert receipt["advisory_severities"] == {"medium": 1}
-    assert receipt["known_exploited_matches"] == 0
+    assert receipt["policy"] == "passed"
+    assert receipt["verification_sha256"] == "c" * 64
     assert receipt["database"]["database_sha256"] == _digest(tmp_path / "vulnerability.db")
 
 
@@ -266,8 +230,17 @@ def test_artifact_security_accepts_complete_lower_severity_evidence(
     "matches, ignored, expected",
     [
         ([_match(severity="High")], None, "high severity"),
+        ([_match(severity="Critical")], None, "critical severity"),
         ([_match(severity="Unknown")], None, "unknown severity"),
         ([_match(severity="Low", known_exploited=True)], None, "known exploited"),
+        (
+            [
+                _match(severity="Low")
+                | {"relatedVulnerabilities": [{"id": "CVE-2026-3456", "severity": "High"}]}
+            ],
+            None,
+            "high severity",
+        ),
         (None, [{"reason": "broad suppression"}], "suppressed findings"),
     ],
 )
@@ -285,24 +258,56 @@ def test_artifact_security_blocks_unacceptable_or_suppressed_findings(
     assert not output.exists()
 
 
-def test_artifact_security_rejects_stale_database(repo_root: Path, tmp_path: Path) -> None:
-    result, output = _policy(repo_root, tmp_path, built="2020-01-01T00:00:00Z")
-
+@pytest.mark.parametrize(
+    ("db_update", "expected"),
+    [
+        ({"built": "2020-01-01T00:00:00Z"}, "five-day age limit"),
+        ({"valid": False}, "database is not valid"),
+        ({"path": ""}, "database file is missing"),
+    ],
+)
+def test_artifact_security_rejects_unusable_database(
+    repo_root: Path, tmp_path: Path, db_update: dict[str, object], expected: str
+) -> None:
+    result, output = _policy(repo_root, tmp_path, db_update=db_update)
     assert result.returncode != 0
-    assert "five-day age limit" in result.stderr
+    assert expected in result.stderr
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("size", [0, 16, 17])
+def test_artifact_security_bounds_database_hash_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, size: int
+) -> None:
+    monkeypatch.setattr(artifact_security, "MAX_DATABASE", 16)
+    database = tmp_path / "vulnerability.db"
+    database.write_bytes(b"x" * size)
+    status = tmp_path / "db-status.json"
+    _write_json(status, _db_status(database))
+
+    if size == 16:
+        assert artifact_security._database_status(status)["database_sha256"] == _digest(database)
+    else:
+        with pytest.raises(ValueError, match="database file is empty or exceeds the size limit"):
+            artifact_security._database_status(status)
+
+
+def test_artifact_security_rejects_unpinned_scanner(repo_root: Path, tmp_path: Path) -> None:
+    result, output = _policy(repo_root, tmp_path, scanner_version="0.121.0-dev")
+    assert result.returncode != 0
+    assert "verified scanner identity" in result.stderr
     assert not output.exists()
 
 
 @pytest.mark.parametrize(
     ("syft_artifacts", "cyclonedx_components", "expected"),
     [
-        ([None], None, "malformed package"),
-        (None, [None], "malformed component"),
         ([], None, "Syft inventory is empty"),
+        ([None], None, "Syft inventory is empty"),
         (None, [], "CycloneDX inventory is empty"),
     ],
 )
-def test_artifact_security_rejects_vacuous_or_malformed_inventory_entries(
+def test_artifact_security_rejects_empty_inventory(
     repo_root: Path,
     tmp_path: Path,
     syft_artifacts: list[object] | None,

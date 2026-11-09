@@ -15,7 +15,6 @@ Param(
   [switch]$RequireReleasePublicKey,
 
   [switch]$AssemblyOnly,
-  [switch]$RequireCatalog,
   [string]$RequirementsPath
 )
 
@@ -261,9 +260,7 @@ function Initialize-PortableRuntime([string]$BundleRoot) {
   $arguments = @(
     "assemble", "--repo", $RepoRoot, "--cache", $CacheDir, "--output", $BundleRoot
   )
-  if ($RequireCatalog) {
-    $arguments += "--check-catalog"
-  } elseif ($ManifestPath -ne (Join-Path $PSScriptRoot "manifest.windows-x64.json")) {
+  if ($ManifestPath -ne (Join-Path $PSScriptRoot "manifest.windows-x64.json")) {
     $arguments += @("--manifest", $ManifestPath)
   }
   if ($RequirementsPath) {
@@ -652,10 +649,10 @@ function Main() {
 
   $manifest = Get-Manifest
   Assert-BuildInputs -Manifest $manifest
-  if ($RequireCatalog -and @(
+  if ($RequireReleasePublicKey -and @(
     git -C $RepoRoot status --porcelain=v1 --untracked-files=all
   ).Count -gt 0) {
-    throw "Portable authority requires a clean, exact source checkout."
+    throw "Portable release builds require a clean, exact source checkout."
   }
   $artifacts = @(Get-RequiredProperty -Object $manifest -Name "artifacts" -Context "manifest")
   $reservedOutput = $null
@@ -663,7 +660,7 @@ function Main() {
     $reservedOutput = New-AtomicallyReservedDirectory -Path $OutDir -Label "OutDir"
     Ensure-Directory -Path $CacheDir
 
-    $HostPython = (& uv python find --no-project --no-python-downloads 3.13).Trim()
+    $HostPython = (& uv python find --system --no-project --no-python-downloads 3.13).Trim()
     Assert-LastExitCode -CommandLabel "find the host Python 3.13 interpreter"
     Initialize-PortableRuntime -BundleRoot $OutDir
     Copy-RepoApp -BundleRoot $OutDir

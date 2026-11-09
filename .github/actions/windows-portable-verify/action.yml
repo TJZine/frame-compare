@@ -9,7 +9,7 @@ inputs:
     required: false
     default: ""
   require_portable_authority:
-    description: Require independently approved bytes for all shipped runtime files
+    description: Rebuild the portable ZIP independently and require byte equality
     required: false
     default: "false"
   bundle_id:
@@ -77,7 +77,7 @@ runs:
       with:
         python-version: "3.13.17"
 
-    - name: Setup uv for frozen lock export only
+    - name: Setup uv for frozen lock export and offline wheel installation
       uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       with:
         version: "0.13.5"

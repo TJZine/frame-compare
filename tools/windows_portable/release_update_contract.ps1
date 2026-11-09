@@ -1,8 +1,6 @@
 . (Join-Path $PSScriptRoot "version_utils.ps1")
 . (Join-Path $PSScriptRoot "update_manifest_bytes.ps1")
 
-$portableCatalogPath = "tools/windows_portable/release-runtime-files.json"
-
 function Get-ReleaseDigest([byte[]]$Bytes) {
   return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
 }

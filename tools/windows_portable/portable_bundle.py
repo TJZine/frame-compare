@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portable_archive import PathIndex, checked_zip, copy_exact, digest_file
-from portable_runtime import SITE, Layout, _unpack_archive, _write_record, git_blob
+from portable_runtime import SITE, Layout, _unpack_archive, git_blob, record_bytes
 
 PREFIX = "frame-compare-portable-win-x64/"
 
@@ -40,7 +40,7 @@ def install_project(repo: Path, root: Path) -> None:
             timeout=60,
             check=True,
         )
-        _unpack_archive(layout, archive_path, "app", "", "project")
+        _unpack_archive(layout, archive_path, "app", "")
     if "app/src/frame_compare/__init__.py" not in layout.records:
         raise ValueError("Committed application source is missing from portable layout")
 
@@ -70,20 +70,22 @@ def install_project(repo: Path, root: Path) -> None:
                 raise ValueError(f"Invalid project entry point: {name}")
             lines.append(f"{name} = {target}")
         lines.append("")
-    dist = f"{SITE}/frame_compare-{version}.dist-info"
+    dist = f"frame_compare-{version}.dist-info"
+    license_text = git_blob(repo, commit, Path("LICENSE"))
     files = {
-        "METADATA": (
+        f"{dist}/METADATA": (
             f"Metadata-Version: 2.4\nName: frame-compare\nVersion: {version}\n"
             f"Requires-Python: {project['requires-python']}\nLicense-Expression: GPL-3.0-only\n"
             "License-File: licenses/LICENSE\n\n"
         ).encode(),
-        "entry_points.txt": ("\n".join(lines) + "\n").encode(),
-        "licenses/LICENSE": git_blob(repo, commit, Path("LICENSE")),
+        f"{dist}/entry_points.txt": ("\n".join(lines) + "\n").encode(),
+        f"{dist}/licenses/LICENSE": license_text,
     }
-    for name, data in files.items():
-        layout.generate(f"{dist}/{name}", data, "project")
-    _write_record(layout, f"{dist}/RECORD", [f"{dist}/{name}" for name in files], "project")
-    layout.copy(f"{dist}/licenses/LICENSE", "licenses/frame-compare-LICENSE.txt", "project")
+    record = f"{dist}/RECORD"
+    files[record] = record_bytes(files, record)
+    for path, data in files.items():
+        layout.generate(f"{SITE}/{path}", data)
+    layout.generate("licenses/frame-compare-LICENSE.txt", license_text)
 
 
 def bundle_tree(root: Path) -> PathIndex:
@@ -163,7 +165,12 @@ def main() -> None:
         if args.candidate is None:
             parser.error("verify-and-pack requires --candidate")
         assert_bundle(args.candidate, args.root)
-    write_bundle(args.root, args.output)
+        write_bundle(args.root, args.output)
+        if digest_file(args.candidate) != digest_file(args.output):
+            args.output.unlink()
+            raise ValueError("Portable ZIP differs from the independently rebuilt canonical bytes")
+    else:
+        write_bundle(args.root, args.output)
 
 
 if __name__ == "__main__":

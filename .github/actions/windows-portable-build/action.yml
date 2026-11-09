@@ -36,7 +36,14 @@ runs:
 
     - name: Install dev dependencies (frozen)
       shell: pwsh
-      run: uv sync --all-groups --extra vsview --frozen
+      run: |
+        $PSNativeCommandUseErrorActionPreference = $true
+        $wheelhouse = Join-Path $env:RUNNER_TEMP "anitopy-wheel"
+        python -B -I -S tools/windows_portable/portable_runtime.py anitopy-wheel `
+          --cache .portable_cache --output $wheelhouse
+        uv sync --all-groups --extra vsview --frozen --no-build --no-install-package anitopy
+        uv --offline --no-config pip install --no-index --no-deps --no-build --no-python-downloads `
+          (Join-Path $wheelhouse "anitopy-2.1.1-py3-none-any.whl")
 
     - name: Full test suite (includes portable updater proof)
       shell: pwsh

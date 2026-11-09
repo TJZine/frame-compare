@@ -14,8 +14,7 @@ for path in .env src/frame_compare/.env.local src/frame_compare/private-key.pem;
   printf '%s\n' "$marker" > "$context/$path"
 done
 for path in README.md LICENSE pyproject.toml uv.lock src/frame_compare/__init__.py \
-  tools/windows_portable/update_public_key.xml tools/windows_portable/release-runtime-files.json \
-  tests/fixture.txt; do
+  tools/windows_portable/update_public_key.xml tests/fixture.txt; do
   printf '%s\n' 'harmless context control' > "$context/$path"
 done
 
@@ -32,7 +31,6 @@ for path in .env src/frame_compare/.env.local src/frame_compare/private-key.pem;
 done
 test -f "$probe/filtered/src/frame_compare/__init__.py"
 test -f "$probe/filtered/tools/windows_portable/update_public_key.xml"
-test -f "$probe/filtered/tools/windows_portable/release-runtime-files.json"
 test -f "$probe/filtered/tests/fixture.txt"
 
 # Export the actual stage copied into the runtime application layer. Its

@@ -88,6 +88,5 @@ generated
 **/config.local.*
 **/config.private.*
 
-# These are reviewed public/provenance inputs, never private-key locations.
+# The updater's public verification key is safe to include.
 !tools/windows_portable/update_public_key.xml
-!tools/windows_portable/release-runtime-files.json

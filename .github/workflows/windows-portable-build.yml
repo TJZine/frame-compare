@@ -79,14 +79,6 @@ jobs:
             throw "Checkout did not resolve to the exact expected commit."
           }
 
-      - name: Require an independently approved portable runtime catalog
-        shell: pwsh
-        run: |
-          $catalog = "tools/windows_portable/release-runtime-files.json"
-          if ((git ls-tree --name-only HEAD -- $catalog) -cne $catalog) {
-            throw "Portable release blocked: the approved commit lacks an independently derived release-runtime-files.json."
-          }
-
       - name: Build and exercise Windows portable inputs
         id: build
         uses: ./.github/actions/windows-portable-build
@@ -251,22 +243,20 @@ jobs:
         run: |
           set -euo pipefail
           evidence="$RUNNER_TEMP/portable-security-evidence"
-          "$SYFT_BIN" version > "$evidence/syft-version.txt"
-          "$GRYPE_BIN" version > "$evidence/grype-version.txt"
-          "$SYFT_BIN" scan "dir:$RUNNER_TEMP/portable-security-tree" \
+          config="$RUNNER_TEMP/portable-scanner.yaml"
+          printf '{}\n' > "$config"
+          "$SYFT_BIN" --config "$config" scan "dir:$RUNNER_TEMP/portable-security-tree" \
             -o "syft-json=$evidence/windows-portable.syft.json" \
             -o "cyclonedx-json=$evidence/windows-portable.cyclonedx.json"
-          "$GRYPE_BIN" "sbom:$evidence/windows-portable.syft.json" \
+          "$GRYPE_BIN" --config "$config" "sbom:$evidence/windows-portable.syft.json" \
             --output json > "$evidence/windows-portable.grype.json"
-          "$GRYPE_BIN" db status --output json > "$evidence/grype-db-status.json"
+          "$GRYPE_BIN" --config "$config" db status --output json > "$evidence/grype-db-status.json"
           python -B -I -S tools/windows_portable/artifact_security.py policy \
             --scan-input "$evidence/scan-input.json" \
             --syft "$evidence/windows-portable.syft.json" \
             --cyclonedx "$evidence/windows-portable.cyclonedx.json" \
             --grype "$evidence/windows-portable.grype.json" \
             --db-status "$evidence/grype-db-status.json" \
-            --syft-version "$evidence/syft-version.txt" \
-            --grype-version "$evidence/grype-version.txt" \
             --expected-syft-version 1.56.0 \
             --expected-grype-version 0.121.0 \
             --output "$evidence/artifact-security.json"

@@ -294,12 +294,11 @@ if ($Stage -eq "Verify") {
   Assert-ReleaseFileDigest $updatePath $UpdateDigest $MaxUpdateArchiveBytes
   $canonical = Get-CanonicalManifest $source $RequirementsDigest
   Assert-UpdateArchive $updatePath $source $canonical
-  $catalogDigest = $null
   if ($RequirePortableAuthority) {
     Assert-ReleaseFileDigest $RequirementsPath $RequirementsDigest 4MB
     $verifiedBundle = Join-Path $OutputDir "verified-portable.zip"
     $verifiedUpdate = Join-Path $OutputDir "verified-update.zip"
-    $catalogDigest = Write-IndependentPortableZip $bundlePath $verifiedBundle $RequirementsPath
+    Write-IndependentPortableZip $bundlePath $verifiedBundle $RequirementsPath
     Write-CanonicalUpdateArchive $updatePath $verifiedUpdate $source $canonical
     Assert-UpdateArchive $verifiedUpdate $source $canonical
     $BundleDigest = Get-ReleaseFileDigest $verifiedBundle
@@ -315,7 +314,7 @@ if ($Stage -eq "Verify") {
     bundle_sha256 = $BundleDigest
     unsigned_update_sha256 = $UpdateDigest
     requirements_sha256 = $RequirementsDigest
-    portable_catalog_sha256 = $catalogDigest
+    portable_reproduced = [bool]$RequirePortableAuthority
     manifest_sha256 = Get-ReleaseDigest $canonical
   } | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $OutputDir "verification.json") -Encoding utf8NoBOM
   return
@@ -325,7 +324,8 @@ Assert-ReleaseFileDigest $receiptPath $VerificationDigest 4KB
 Assert-ReleaseFileDigest $manifestPath $ManifestDigest 4MB
 $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json -Depth 4
 if (
-  $receipt.schema -ne 2 -or $receipt.commit -cne $ExpectedSha -or $receipt.tag -cne $ReleaseTag -or
+  $receipt.schema -ne 2 -or $receipt.portable_reproduced -isnot [bool] -or !$receipt.portable_reproduced -or
+  $receipt.commit -cne $ExpectedSha -or $receipt.tag -cne $ReleaseTag -or
   $receipt.manifest_sha256 -cne $ManifestDigest -or
   $receipt.bundle_sha256 -cnotmatch '\A[0-9a-f]{64}\z' -or
   $receipt.unsigned_update_sha256 -cnotmatch '\A[0-9a-f]{64}\z' -or
@@ -336,10 +336,6 @@ if (
 $canonical = Get-CanonicalManifest $source $receipt.requirements_sha256
 if ((Get-ReleaseDigest $canonical) -cne $ManifestDigest) { throw "Signing input differs from the approved source." }
 
-if ((git ls-tree --name-only $ExpectedSha -- $portableCatalogPath) -cne $portableCatalogPath) {
-  throw "Release requires the approved portable runtime catalog."
-}
-Assert-ReleaseFileDigest $portableCatalogPath $receipt.portable_catalog_sha256 32MB
 if ($Stage -eq "PrepareSigning") {
   [IO.File]::WriteAllBytes((Join-Path $OutputDir "manifest.json"), $canonical)
   return

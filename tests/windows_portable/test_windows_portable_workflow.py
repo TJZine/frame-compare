@@ -43,7 +43,15 @@ def test_windows_portable_workflow_delegates_extracted_bundle_verification(
 def test_windows_portable_workflow_installs_native_vsview_extra(repo_root: Path) -> None:
     install_step = _step_by_name(_build_action(repo_root), "Install dev dependencies (frozen)")
 
-    assert install_step["run"] == "uv sync --all-groups --extra vsview --frozen"
+    assert (
+        "uv sync --all-groups --extra vsview --frozen --no-build --no-install-package anitopy"
+        in (install_step["run"])
+    )
+    assert "portable_runtime.py anitopy-wheel" in install_step["run"]
+    assert (
+        "uv --offline --no-config pip install --no-index --no-deps --no-build"
+        in (install_step["run"])
+    )
 
 
 def test_windows_portable_workflow_requires_native_alignment_package_proof(
@@ -157,14 +165,6 @@ def test_windows_portable_jobs_enforce_distinct_trust_boundaries(repo_root: Path
     }
     assert workflow["permissions"] == {}
     assert "needs" not in jobs["build_test"]
-    catalog_gate = _step_by_name(
-        jobs["build_test"], "Require an independently approved portable runtime catalog"
-    )
-    build_step = _step_by_name(jobs["build_test"], "Build and exercise Windows portable inputs")
-    assert jobs["build_test"]["steps"].index(catalog_gate) < jobs["build_test"]["steps"].index(
-        build_step
-    )
-    assert "git ls-tree --name-only HEAD" in catalog_gate["run"]
     assert jobs["verify_unsigned"]["needs"] == "build_test"
     verify = _step_by_name(jobs["verify_unsigned"], "Verify unsigned inputs on a fresh runner")
     assert verify["with"]["require_portable_authority"] == "true"
@@ -331,7 +331,10 @@ def test_windows_portable_security_gate_scans_exact_verified_artifact(repo_root:
         assert digest in install
     scan = _step_by_name(job, "Generate SBOMs and unsuppressed advisory evidence")
     assert "syft-json=" in scan["run"] and "cyclonedx-json=" in scan["run"]
-    assert '"sbom:$evidence/windows-portable.syft.json"' in scan["run"]
+    assert (
+        '"$GRYPE_BIN" --config "$config" "sbom:$evidence/windows-portable.syft.json"'
+        in (scan["run"])
+    )
     assert "artifact_security.py policy" in scan["run"]
     assert scan["env"]["GRYPE_DB_REQUIRE_UPDATE_CHECK"] == "true"
     assert scan["env"]["GRYPE_DB_VALIDATE_AGE"] == "true"

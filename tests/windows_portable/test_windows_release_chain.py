@@ -12,6 +12,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile, ZipInfo
 
 import pytest
+from tools.windows_portable.portable_bundle import write_bundle
 
 
 def _digest(path: Path) -> str:
@@ -93,7 +94,7 @@ def _refused(result: subprocess.CompletedProcess[str], expected: str) -> None:
 
 
 @pytest.fixture
-def release_chain(repo_root: Path, tmp_path: Path, request: pytest.FixtureRequest) -> _Release:
+def release_chain(repo_root: Path, tmp_path: Path) -> _Release:
     exe = shutil.which("pwsh")
     if exe is None:
         pytest.skip("PowerShell 7 unavailable for detached release chain")
@@ -251,33 +252,13 @@ def release_chain(repo_root: Path, tmp_path: Path, request: pytest.FixtureReques
         },
     }
     inventory_template = json.dumps(inventory)
-    authority = getattr(request, "param", "approved")
-    if authority != "unapproved":
-        (owner / "release-runtime-files.json").write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "manifest_sha256": _digest(manifest_path),
-                    "uv_lock_sha256": _digest(lock) if authority == "approved" else "f" * 64,
-                }
-            ),
-            encoding="utf-8",
-        )
-
     # Keep the independent fixture tree outside the candidate input. Stub only
     # the expensive authenticated-input assembly in this PowerShell handoff test.
     (owner / "build_portable.ps1").write_text(
         r"""
-param($OutDir, $CacheDir, $RequirementsPath, [switch]$AssemblyOnly,
-      [switch]$RequireCatalog, [switch]$RequireReleasePublicKey)
-if (!$AssemblyOnly -or !$RequireCatalog -or !$RequireReleasePublicKey) {
+param($OutDir, $CacheDir, $RequirementsPath, [switch]$AssemblyOnly, [switch]$RequireReleasePublicKey)
+if (!$AssemblyOnly -or !$RequireReleasePublicKey) {
   throw "Expected the isolated authority mode."
-}
-$owner = Join-Path $PSScriptRoot "release-runtime-files.json"
-$catalog = Get-Content -LiteralPath $owner -Raw | ConvertFrom-Json
-$lock = (Get-FileHash -LiteralPath "uv.lock").Hash.ToLowerInvariant()
-if ($catalog.uv_lock_sha256 -cne $lock) {
-  throw "Committed release-runtime-files.json is stale or differs from authenticated inputs."
 }
 $null = New-Item -ItemType Directory -Path $OutDir -Force
 $source = Join-Path (Split-Path -Parent (Get-Location).Path) "frame-compare-portable-win-x64"
@@ -302,10 +283,7 @@ Get-ChildItem -LiteralPath $source -Force | ForEach-Object {
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     shutil.copyfile(requirements, inputs / "requirements.lock.txt")
-    with ZipFile(inputs / "portable.zip", "w", ZIP_DEFLATED) as archive:
-        for file in bundle.rglob("*"):
-            if file.is_file():
-                archive.write(file, file.relative_to(bundle.parent).as_posix())
+    write_bundle(bundle, inputs / "portable.zip")
     release = _Release(exe, repo, inputs, sha, requirements_sha, private_key)
     _ok(
         release.run(
@@ -319,21 +297,16 @@ Get-ChildItem -LiteralPath $source -Force | ForEach-Object {
     return release
 
 
-@pytest.mark.parametrize(
-    ("release_chain", "message"),
-    [
-        ("unapproved", "lacks an independently derived"),
-        ("stale-lock", "stale or differs from authenticated inputs"),
-    ],
-    indirect=["release_chain"],
-)
-def test_windows_signed_flow_refuses_without_independent_portable_bytes(
-    release_chain: _Release, tmp_path: Path, message: str
+def test_windows_release_rejects_portable_zip_with_noncanonical_bytes(
+    release_chain: _Release, tmp_path: Path
 ) -> None:
     _ok(release_chain.verify(tmp_path / "unsigned", require_authority=False))
+    with ZipFile(release_chain.input / "portable.zip", "a") as candidate:
+        candidate.comment = b"a" * 40
     output = tmp_path / "blocked"
-    _refused(release_chain.verify(output), message)
+    _refused(release_chain.verify(output), "differs from the independently rebuilt canonical bytes")
     assert not (output / "verification.json").exists()
+    assert not (output / "verified-portable.zip").exists()
 
 
 @pytest.mark.parametrize(
@@ -429,7 +402,20 @@ def test_windows_detached_release_chain_and_digest_binding(
     manifest = release.input / "manifest.json"
     receipt = release.input / "verification.json"
     receipt_data = json.loads(receipt.read_bytes())
+    assert receipt_data["portable_reproduced"] is True
     receipt_data.update(portable_artifact_id="123", unsigned_update_artifact_id="456")
+    receipt.write_text(json.dumps(receipt_data | {"portable_reproduced": False}), encoding="utf-8")
+    _refused(
+        release.stage(
+            "PrepareSigning",
+            tmp_path / "unreproduced",
+            "-ManifestDigest",
+            _digest(manifest),
+            "-VerificationDigest",
+            _digest(receipt),
+        ),
+        "Verification receipt does not bind this release and manifest",
+    )
     receipt.write_text(json.dumps(receipt_data), encoding="utf-8")
     binding = ("-ManifestDigest", _digest(manifest), "-VerificationDigest", _digest(receipt))
     package_binding = (*binding, "-VerifiedBundleId", "123", "-VerifiedUpdateId", "456")
