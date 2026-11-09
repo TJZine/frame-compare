@@ -122,15 +122,17 @@ exactly one real video stream. Cold and private cache-free opens, including
 the VSView fallback, scan complete coded and visible frame geometry before
 L-SMASH indexing or decoding. A real mixed-resolution H.264 transport stream
 reproduced a native L-SMASH heap abort when admitted without that scan. Warm
-managed opens can reuse the proof only when the source identity, geometry
-policy version, ffprobe file identity and reported program/library versions,
-native runtime token, and index digest match. L-SMASH playback receives an
-owned maximum-pixel option that caller options cannot remove. Pillow, FFmpeg,
+managed opens can reuse the proof for positively recognized single-file
+formats when the source identity, geometry policy version, ffprobe file
+identity and reported program/library versions, native runtime token, and
+index digest match. Referencing and unknown formats use the private full-scan
+path on each open. L-SMASH playback receives an owned maximum-pixel option that
+caller options cannot remove. Pillow, FFmpeg,
 VapourSynth, batch expansion and overlay paths enforce the same limits.
 
-The candidate implements proof reuse in `dca6af39` with focused cache,
-geometry and caller-path coverage. At the user's direction, further active
-adversarial exercises remain out of scope.
+The candidate implements proof reuse in `dca6af39` and restricts its scope
+in `a66fbd70`. Focused tests cover cache binding, geometry and the caller
+paths.
 
 ### FC-SEC-06 — S2 — slow.pics success accepted an under-bound response
 
@@ -186,13 +188,15 @@ The candidate code can be reviewed and merged without claiming that release
 acceptance has already happened. Public distribution remains blocked until the
 runbook's records are complete:
 
-- Hosted Windows rebuild/reproduction, artifact handoff, protected-environment
-  approval/secret precedence and provenance attestation against the final commit.
-- Physical Windows PowerShell 5.1 and 7 install, update, rollback and refusal paths,
-  plus real GPU Vulkan/HDR and real-media acceptance tied to the bundle digest.
-- Native component provenance, notices, corresponding-source offer, SBOM coverage
-  reconciliation and advisory adjudication for embedded Python, Qt Multimedia,
-  FFmpeg, VapourSynth and decoder/plugin libraries.
+- Hosted Windows exact reproduction, artifact handoffs and protected signing,
+  including approval and secret precedence. Obtain provenance attestations
+  from the guarded release packaging job for both exact release ZIPs.
+- Physical Windows Job Object cleanup, NTFS ChangeTime and index durability,
+  PowerShell 5.1 and 7 install/update/rollback/refusal paths, GPU Vulkan/HDR,
+  real-media checks and visible desktop UI acceptance tied to the bundle digest.
+- Final-bundle native provenance, notices, corresponding-source offer, SBOM
+  coverage reconciliation and advisory adjudication for embedded Python, Qt
+  Multimedia, FFmpeg, VapourSynth and decoder/plugin libraries.
 - Lifetime archival of the accepted SBOM, advisory, waiver and provenance evidence.
 
 These are observable environment, platform and legal/provenance obligations. A
@@ -217,9 +221,29 @@ Windows Job Object, NTFS ChangeTime, protected signing and physical Windows runt
 claims remain in the residual gates above. The user-directed omission of further
 active adversarial exercises is recorded rather than counted as evidence.
 
-## Review state
+## Final integration and review
 
-The simplified candidate still needs the applicable integrated verification in
-[the implementation plan](IMPLEMENTATION_PLAN.md#integrated-verification-matrix)
-and a defensive code/security review before PR #173 is updated. The
-orchestrator owns finding adjudication and the PR update.
+Independent defensive review of `6c17ca10` found two P2 issues. The review
+identified no P0 or P1 issue and no release-chain integrity defect.
+
+- Referenced-media manifests could reuse geometry proof keyed only to the
+  manifest file. `a66fbd70` restricts reuse to positively recognized
+  single-file demuxers. Referencing and unknown formats run the full scan and
+  open privately each time. The full rebuilt Docker suite passed 495 tests
+  with zero skips. The broader host suite passed 4,297 tests with 368 skips.
+  The separate headless Chrome fullscreen refusal also occurs on the
+  baseline.
+- Desktop broker cleanup could kill a background handler after returning
+  success. `ce672500` keeps the broker filtered, silent and time-bounded,
+  while allowing desktop handlers and clipboard selection owners to outlive
+  it. The focused real delayed-handler and broker timeout/reap tests passed.
+  The generic subprocess owner is unchanged.
+
+The review concluded that the release controls are proportionate for public
+signed updates. Removing the pre-equality producer-archive traversal in
+`portable_bundle.py` is an optional post-MVP simplification. Independent
+reconstruction and canonical ZIP equality remain required.
+
+The two findings are resolved. The orchestrator's next action is to update
+PR #173. Further active adversarial exercises remain outside the authorized
+scope. The release acceptance gates above remain open.

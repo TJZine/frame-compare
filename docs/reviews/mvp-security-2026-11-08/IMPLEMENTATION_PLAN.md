@@ -42,7 +42,9 @@ Required implementation:
 2. Bind reuse to the canonical source identity, geometry policy version, geometry
    probe token, native runtime token, and index size and digest. The probe token
    covers ffprobe's resolved path, file identity and reported program/library
-   versions. Reuse only after a fresh header probe.
+   versions. Reuse only after a fresh header probe positively recognizes a
+   single-file demuxer. Referencing and unknown formats use the private
+   full-scan path every time.
 3. Write into a private staging location, make the completed index durable, then
    publish metadata last so interruption cannot authorize a partial index.
 4. Set stable cache behavior explicitly and share the owner across render,
@@ -149,7 +151,9 @@ Required implementation:
    let a descendant escape, and an interrupt inside `Popen` can prevent it
    from returning the child handle needed for cleanup.
 2. Filter application child environments. Pass only each integration's owned
-   credential; do not treat ignored legacy aliases as supported secrets.
+   credential. Ignored legacy aliases remain unsupported. The silent,
+   time-bounded desktop broker owns its own lifetime and lets desktop handlers
+   and clipboard owners outlive it.
 3. Enforce one canvas dimension/pixel policy before Pillow, FFmpeg, VapourSynth,
    batch or overlay allocation. Start native admission with a bounded header
    probe. On cold and cache-free opens, including the VSView fallback, scan
@@ -255,12 +259,11 @@ PowerShell 5.1/7 update journeys, GPU Vulkan/HDR and real-media acceptance.
 
 ## Completion and ready signal
 
-The orchestrator may give the ready signal only when:
+The [final integration record](REPORT.md#final-integration-and-review) records
+the defensive review, the fixes for both P2 findings and the verification
+results. The known headless Chrome fullscreen refusal is present on the baseline.
+The remaining PR handoff is the orchestrator's update of PR #173 to the verified
+candidate.
 
-- every accepted code finding is remediated;
-- the integrated verification appropriate to the changed contracts is green;
-- documentation and user-facing changelog match the implementation;
-- the integrated diff has passed the recorded defensive code/security review, with
-  the user-directed omission of further active adversarial exercises disclosed;
-- conventional commits contain only this branch's intended changes; and
-- PR #173 into `v0.7.0` reflects the verified candidate.
+The [residual release gates](REPORT.md#residual-release-gates) require separate
+hosted and physical Windows evidence before public distribution.

@@ -552,12 +552,14 @@ Canonical verification path:
    FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
    required bundled Python process, preload the managed VapourSynth runtime before
    importing PySide6 or VSView, then recheck the plugin environment, open the generated
-   media through L-SMASH, and invoke the application tonemap path. The build must fail
-   closed unless exactly one repository wheel and one `frame_compare-*.dist-info`
-   directory exist; it copies only that metadata directory into `app/site-packages`,
-   verifies the exact `frame-compare-alignment-review` entry point, and keeps executable
-   application code resolved from `app/src`. The bundled Python proof must discover
-   and load that entry point, construct the panel offscreen, round-trip the generated
+   media through L-SMASH, and invoke the application tonemap path.
+   `tools/windows_portable/portable_bundle.py` projects the exact commit's
+   `src/frame_compare` into `app/src` and generates one
+   `frame_compare-*.dist-info` directory in `app/site-packages` from the
+   committed `pyproject.toml` and `LICENSE`. It checks the version against the packaged
+   source and requires the exact `frame-compare-alignment-review` entry point.
+   The bundled Python proof must discover and load that entry point, construct
+   the panel offscreen, round-trip the generated
    metadata/result sidecar, and reject a malformed result. BestSource is VSView/UI-only
    and does not replace Frame Compare's generated-session source loader.
    The repository-owned `tools/windows_portable/runtime_smoke.py` supplies this
@@ -626,10 +628,10 @@ Canonical verification path:
    branches and release tags are not signed-verification entrypoints. The selected `release-candidate` or `production`
    environment owns the signing key, required reviewer approval, and allowed
    deployment branch/tag rules. Unsigned jobs run without a protected environment.
-   Record the resulting workflow URL, exact SHA,
-   success/failure result, and any uploaded portable/package proof. A hosted success
-   proves package/offscreen behavior;
-   complete physical Windows desktop acceptance remains a separate handoff.
+   Record the resulting workflow URL, exact SHA, result and uploaded artifact
+   digests. This route exercises reproduction, signing and packaging with
+   `prepare_release_assets: false` and skips provenance attestation.
+   Physical Windows desktop acceptance remains a separate handoff.
 
    Before enabling this workflow, maintainers must finish the environment migration:
 
@@ -712,8 +714,10 @@ Current CI ownership:
      checkout and receipt before signing them. A missing key, wrong public-key
      match, or verification failure blocks the chain.
   5. A separate packaging job consumes the verified artifact IDs and detached
-     signature, validates the signature with the public key, and packages and
-     attests the ZIPs without access to the private key.
+     signature, validates the signature with the public key, and packages the
+     ZIPs without access to the private key. The guarded `release.yml` route
+     sets `prepare_release_assets: true` and attests both versioned ZIPs before
+     uploading the release assets for publication.
 
   The publisher checks the assets from this chain and publishes the verified
   ZIPs and checksums. It has release write permissions without a signing
@@ -729,10 +733,10 @@ frozen lock and stages them in a local wheelhouse. It converts the authenticated
 `anitopy` 2.1.1 source archive into a deterministic wheel from an explicit
 allowlist of package files and metadata. Pinned uv installs the exact wheels
 offline by version and hash with index access, dependency resolution and builds
-disabled. Native archives use manifest size and SHA-256 pins. The assembled tree retains the
-approved Qt/PySide6 subset, native components, licenses and committed project
-metadata and entry points. The fresh verifier reconstructs the tree from those
-inputs and compares the produced ZIP to the build candidate.
+disabled. Native archives use manifest size and SHA-256 pins. The assembled tree
+retains the approved Qt/PySide6 subset, native components, licenses and committed
+project metadata and entry points. The fresh verifier reconstructs the tree from
+those inputs and compares the produced ZIP to the build candidate.
 
 Use GitHub-hosted Windows to verify packaging and generated-fixture behavior. Complete
 the separate [physical Windows handoff](media-runtime-windows-validation.md) for
@@ -751,9 +755,11 @@ unreachable proof leaves the corresponding gate open.
   rulesets. Verify that a stale SHA and an unprotected ref cannot reach signing,
   and that ordinary and unsigned jobs lack signing-key access. Record the hosted
   canary on a permitted branch, including positive environment-secret resolution,
-  exact manifest signing and public-key verification, package attestation, and
-  the key-free publisher permission boundary. A source assertion cannot prove
-  the hosted rules, secret resolution, approval, or attestation behavior.
+  exact ZIP reproduction and artifact handoffs, manifest signing and public-key
+  verification. Record the guarded release run's `package_attest` job, the
+  attestations for both exact versioned ZIP digests and the key-free publisher
+  permission boundary. The manual verify route supplies signing evidence.
+  The guarded release packaging route supplies attestation evidence.
 - Retain physical Windows acceptance tied to the candidate bundle SHA-256.
   If hosted direct Vulkan proof reports `vulkan_runtime_unavailable`, document
   the exact capability, candidate SHA, observed reason, accountable release

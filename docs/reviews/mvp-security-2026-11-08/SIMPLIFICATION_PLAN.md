@@ -1,6 +1,6 @@
 # Proportional MVP security simplification
 
-Status: Implementation complete. Integrated verification and review remain open.
+Status: Implemented and reviewed. PR #173 update and release acceptance remain open.
 
 The [implementation plan](IMPLEMENTATION_PLAN.md) records the current
 requirements and verification matrix. This record captures the decisions
@@ -25,10 +25,12 @@ complete frame validation. Cold and private cache-free opens, including the
 VSView fallback, therefore retain a bounded scan of coded and visible geometry.
 Each open still begins with a bounded header probe.
 
-Warm managed L-SMASH opens reuse a proof only when the source identity, geometry
-policy version, ffprobe identity and runtime facts, native runtime token and
-index digest match under the cache lease. The managed index transaction, owned
-decoder-side pixel limits and shared canvas policy remain in force. See the
+Warm managed L-SMASH opens reuse a proof only for positively recognized
+single-file demuxers and only when the source identity, geometry policy version,
+ffprobe identity and runtime facts, native runtime token and index digest match
+under the cache lease. Referencing or unknown formats use the private full-scan
+path on every open. The managed index transaction, owned decoder-side pixel
+limits and shared canvas policy remain in force. See the
 [cache and admission contract](../../current-architecture.md#shared-caches-and-decoder-indexes).
 
 ## S2 — Reconstruct and scan the portable artifact
@@ -63,9 +65,9 @@ limits and credential filtering. POSIX uses process groups. See
 
 ## S4 — Integration and review
 
-The report, implementation contract, runbook, architecture, security policy
-and changelog reflect S1–S3. The orchestrator runs the applicable integrated
-checks and reviews the complete diff before updating PR #173. Hosted Windows
-reproduction and signing, and physical Windows runtime acceptance, remain
-separate release gates. Further active adversarial exercises remain outside
-the authorized scope.
+Independent defensive review of `6c17ca10` found two P2 issues. The geometry
+proof restriction in `a66fbd70` and desktop handoff fix in `ce672500` close
+both. The [final integration record](REPORT.md#final-integration-and-review)
+captures the evidence and the proportionality decision. The orchestrator
+updates PR #173 next. The [residual release gates](REPORT.md#residual-release-gates)
+remain open.
