@@ -40,14 +40,20 @@ Frame Compare handles local video files and optional network operations. Key sec
   their own workspace policy. Frame Compare's managed loader treats all
   media-adjacent L-SMASH-Works indexes as inert. See the
   [source-index boundary](docs/current-architecture.md#shared-caches-and-decoder-indexes).
+- **Native media admission.** Cold and cache-free L-SMASH-Works opens validate
+  coded and visible frame dimensions with a bounded scan. Warm managed opens
+  reuse that proof only when the source, probe, policy, runtime and index still
+  match. See the [source admission rules](docs/current-architecture.md#shared-caches-and-decoder-indexes).
 - **Subprocess hardening.** External tool invocations use argument vectors,
   independent stdout/stderr limits and bounded timeouts. Application children
-  receive only the credentials their specific integration owns.
+  receive only the credentials their specific integration owns. The Windows
+  launch and assignment limits are described under
+  [external boundaries](docs/current-architecture.md#external-boundaries).
 - **Network Operations**: slow.pics upload and webhook delivery are opt-in, and TMDB lookups run only when an API key is configured. Webhook delivery requires an external HTTPS endpoint, follows no redirects, and keeps the URL out of diagnostics.
-- **Release integrity.** The Windows release path independently reproduces the
-  portable runtime, scans the exact verified artifact before entering the protected
-  signer, signs only bounded canonical manifest bytes, attests the packaged ZIPs,
-  and keeps publication credentials out of the signing job.
+- **Release integrity.** The Windows release path independently rebuilds and
+  compares the portable ZIP, scans the verified artifact before signing the
+  canonical update manifest, and separates signing from publication. See the
+  [final-artifact gate](docs/ENGINEERING_RUNBOOK.md#final-artifact-security-evidence).
 
 For implementation details, see [Current architecture](docs/current-architecture.md).
 

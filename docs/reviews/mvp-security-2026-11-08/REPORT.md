@@ -1,8 +1,9 @@
 # MVP security audit
 
-Audit date: 2026-11-08
-Reviewed base: `e56f00a429ef494549cba153b2a7ff49230b2ea2` (`v0.7.0`)
-Remediation branch: `dev/mvp-security-hardening`
+- Audit date 2026-11-08
+- Original audit base `e56f00a429ef494549cba153b2a7ff49230b2ea2`
+- Remediation base `origin/v0.7.0` at `1ad19886efc1424a9e475a52f156c86f5013782a`
+- Remediation branch `dev/mvp-security-hardening`
 
 ## Scope and method
 
@@ -41,11 +42,11 @@ not merely an expendable performance cache.
 Remediation: all generated indexes use a private staged write, durable index bytes
 and metadata-last commit beneath the generated root. Reuse requires
 replacement-sensitive source identity (device, inode, size, mtime and change time),
-runtime metadata and the index digest. Windows reads NTFS ChangeTime from the file
-handle rather than treating creation time as a mutation stamp, and uses a
-write-capable non-truncating handle for the durable flush. VSView re-establishes
-authority under the cache lease through the native open instead of trusting a
-serialized path. The loader and VSView paths share the same owner.
+geometry policy and probe identity, the native runtime token and the index digest.
+Windows reads NTFS ChangeTime from the file handle and uses a write-capable
+non-truncating handle for the durable flush. The loader and VSView share the
+same owner. VSView re-establishes authority under the cache lease through the
+native open.
 
 Status: remediated in the candidate branch with focused cache, loader, VSView and
 native-policy coverage.
@@ -74,16 +75,17 @@ A normal package installation path can execute dependency build hooks and can ma
 the result depend on mutable installer behavior. Rechecking only the producer's
 output would not establish independent authority for the shipped runtime.
 
-Remediation: the portable assembler now derives the runtime from the frozen lock,
-pinned distribution archives and committed catalog without executing package build
-hooks. It validates archive layout, file types, expansion bounds, wheel RECORDs,
-the trimmed Qt/WebEngine profile and the complete output tree. A fresh verifier
-reproduces and compares the canonical ZIP byte-for-byte before it can reach the
-signer.
+The portable assembler stages exact lock-authenticated inputs and uses pinned
+uv to install hash-verified dependencies from an offline wheelhouse. A
+package-specific deterministic conversion builds the wheel for the pinned
+`anitopy` 2.1.1 source archive without running build hooks. The assembler
+retains archive safety checks, the Qt subset with WebEngine excluded, native
+manifest pins, licenses and committed project metadata. A fresh verifier
+independently reconstructs the tree and requires byte equality for the
+canonical ZIP before the signed chain can proceed.
 
-Status: remediated in the candidate branch. A real inert build reproduced the
-402 MiB candidate ZIP byte-for-byte during development. Hosted Windows execution
-against the committed candidate remains a required CI/release observation.
+The candidate implements this control in `01f4019b`. Hosted Windows
+reproduction for the simplified candidate remains a release observation.
 
 ### FC-SEC-04 — S2 — Child process output and inherited credentials were overbroad
 
@@ -92,18 +94,22 @@ capture. A hostile input or noisy tool could exhaust memory, deadlock on one pip
 or leave children behind after timeout. Application children also inherited
 unrelated parent credentials.
 
-Remediation: shared process execution drains stdout and stderr independently under
+Shared process execution drains stdout and stderr independently under
 separate limits, owns timeout/cancellation/nonzero cleanup and reports typed
 failure. POSIX process groups and Windows kill-on-close Job Objects retain
-descendant ownership after the leader exits. Windows children start suspended, are
-assigned to the job, and only then resume; paired FFmpeg alignment and interactive
-VSView use the same owner. Application children receive a filtered environment,
-with integration-specific credentials supplied only by their owner. The benchmark
-frame scan is streaming and bounded instead of materializing an unbounded JSON
-document.
+ownership of their descendants after the leader exits. Windows uses normal
+`Popen` followed by immediate assignment to a preconfigured job. The small
+pre-assignment interval can let descendants escape, and an interrupt inside
+`Popen` can prevent the caller from acquiring the child handle for cleanup.
+Paired FFmpeg alignment and interactive VSView share this bounded cleanup owner.
+Application children receive a filtered environment with integration-specific
+credentials supplied only by their owner. The benchmark streams bounded frame
+records.
 
-Status: remediated with overflow, timeout, malformed output, nonzero exit, cleanup,
-credential filtering and real FFmpeg sample coverage.
+The candidate implements the simplified Windows owner in `4b7d084f`.
+Focused coverage includes overflow, timeout, malformed output, nonzero exit,
+cleanup, credential filtering and a real FFmpeg sample. Physical Windows
+cleanup remains an acceptance gate.
 
 ### FC-SEC-05 — S2 — Media-derived dimensions could allocate unbounded canvases
 
@@ -111,17 +117,20 @@ Image, frame and overlay dimensions cross decoder and renderer boundaries. Witho
 one consistent ceiling, small hostile inputs or forged metadata could request very
 large Pillow, FFmpeg or VapourSynth allocations.
 
-Remediation: source and VSView admission require ffprobe to prove exactly one real
-video stream, then stream every video frame's coded and visible geometry through
-bounded output. Each admitted stream must retain constant dimensions inside the
-central axis and pixel policy before L-SMASH indexing or decode. L-SMASH playback
-receives an owned maximum-pixel option that caller options cannot remove. Pillow,
-FFmpeg, VapourSynth, batch expansion and overlay paths enforce the same limits.
+Source and VSView admission start with a bounded ffprobe header check for
+exactly one real video stream. Cold and private cache-free opens, including
+the VSView fallback, scan complete coded and visible frame geometry before
+L-SMASH indexing or decoding. A real mixed-resolution H.264 transport stream
+reproduced a native L-SMASH heap abort when admitted without that scan. Warm
+managed opens can reuse the proof only when the source identity, geometry
+policy version, ffprobe file identity and reported program/library versions,
+native runtime token, and index digest match. L-SMASH playback receives an
+owned maximum-pixel option that caller options cannot remove. Pillow, FFmpeg,
+VapourSynth, batch expansion and overlay paths enforce the same limits.
 
-Status: remediated with boundary, malformed-record and caller-path coverage plus
-the normal Docker native-media gate. At the user's direction, active crafted-input
-crash reproduction and further red-team exercises were omitted because the
-available Daybreak environment repeatedly blocked that work.
+The candidate implements proof reuse in `dca6af39` with focused cache,
+geometry and caller-path coverage. At the user's direction, further active
+adversarial exercises remain out of scope.
 
 ### FC-SEC-06 — S2 — slow.pics success accepted an under-bound response
 
@@ -147,12 +156,12 @@ runtime.
 Remediation: reusable exact-SHA security CI runs maintained-owner Bandit/Ruff checks
 and frozen dependency audits on Linux and Windows. The audit emits JSON and rejects
 zero or malformed dependency coverage. The release caller requires that gate. The
-final-artifact job safely extracts the exact independently verified ZIP, runs
-checksum-pinned Syft and Grype versions, pins and validates the Syft 16.1.12 and
-CycloneDX 1.7 document contracts plus source/package/component identity, rejects
-stale or invalid advisory data, empty inventories, suppressions,
-unknown/high/critical severity and CISA KEV matches, then retains the unsuppressed
-evidence and receipt for 90 days before the signer can run.
+final-artifact job safely extracts the exact independently verified ZIP and
+runs checksum-pinned Syft and Grype. It checks scanner identity, requires
+nonempty inventories and a fresh, size-bounded advisory database, and refuses
+suppressions, unknown/high/critical severity and CISA KEV matches. The job
+retains the unsuppressed evidence and receipt for 90 days. Signing requires a
+successful policy result.
 
 Status: remediated for source and Windows portable automation. Native component
 identification/provenance review and evidence archival remain explicit human release
@@ -189,29 +198,28 @@ runbook's records are complete:
 These are observable environment, platform and legal/provenance obligations. A
 source review or simulated test must not be reported as satisfying them.
 
-## Candidate verification record
+## Verification before simplification
 
-The integrated candidate was rechecked on 2026-11-09. Ruff lint and formatting,
-Pyright, the maintained security script, import contracts, actionlint, strict docs,
+The pre-simplification candidate's verification was recorded on 2026-11-09
+in `34b7c5da`. Ruff lint and formatting, Pyright, the maintained security
+script, import contracts, actionlint, strict docs,
 workflow/portable structure tests, Docker-context containment and `git diff --check`
 passed. The complete local non-browser suite passed with platform/capability skips
 recorded. The full Docker media gate passed 427 tests with zero skips and proved the
 installed non-root runtime, native plugin provenance, real frame rendering, software
 Vulkan, production-tooling exclusion and an application journey. After the final
-POSIX descendant-cleanup correction, the current source passed its focused Docker
+POSIX descendant-cleanup correction, that candidate passed its focused Docker
 runtime/application journey with zero skips.
 
-The macOS headless Chrome baseline still has one fullscreen failure because that
-environment refuses the fullscreen transition; the remaining browser cases pass.
+That macOS headless Chrome run had one fullscreen failure because the environment
+refused the fullscreen transition. The remaining browser cases passed.
 Windows Job Object, NTFS ChangeTime, protected signing and physical Windows runtime
 claims remain in the residual gates above. The user-directed omission of further
 active adversarial exercises is recorded rather than counted as evidence.
 
 ## Review state
 
-The integrated candidate must pass the verification matrix in
-`IMPLEMENTATION_PLAN.md` and a standard defensive code/security review before the
-branch is presented for inspection. The originally planned active adversarial
-reproduction was stopped at the user's direction after repeated Daybreak policy
-blocks; no omitted exercise is represented as passing. The orchestrator owns
-finding adjudication, commits, push and PR creation; it does not merge or release.
+The simplified candidate still needs the applicable integrated verification in
+[the implementation plan](IMPLEMENTATION_PLAN.md#integrated-verification-matrix)
+and a defensive code/security review before PR #173 is updated. The
+orchestrator owns finding adjudication and the PR update.

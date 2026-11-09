@@ -444,18 +444,20 @@ never searches parent directories.
   `lsw1310-1ec4b81a7724` for unmanaged Windows, and `lsw1310-877219813395` for
   Debian/Docker. Managed Windows and Debian/Docker tokens isolate their
   packaged decoder ABIs. Unmanaged profile tokens do not verify native ABI
-  changes. Under a per-entry lock, reuse checks the
-  source identity (device, inode, size, mtime and change time), index size and
-  SHA-256, and the ownership of cache paths. Windows reads NTFS change time from
-  the source handle. Sources without that Windows identity use a private
-  cache-free open. POSIX uses ctime.
+  changes. Under a per-entry lock, reuse checks the cache paths and matches the
+  source identity (device, inode, size, mtime and change time), geometry policy
+  version, geometry probe token, decoder runtime token, and index size and SHA-256.
+  The probe token binds the resolved ffprobe executable path and file identity
+  to its reported program and library versions. Windows reads NTFS change time
+  from the source handle. Sources without that Windows identity or a verifiable
+  probe token use a private cache-free open. POSIX uses ctime.
   A miss or invalid entry builds with `cache=1` in an unpredictable private
   staging directory beneath the cache root. Publication replaces the stable
   index and commits its metadata last, after rechecking the same source identity
   at the commit boundary. Older cache metadata is rebuilt on demand. A valid
   stable index opens with `cache=0`. A generated VSView session may reuse a
-  validated parent-owned index with `cache=0`; the child re-establishes metadata,
-  source and digest authority under the cache lease through the native open.
+  validated parent-owned index with `cache=0`. The child checks its own probe
+  token and re-establishes cache authority under the lease through the native open.
   Missing or rejected indexes use a private cache-free path. Cache-free opens
   explicitly direct L-SMASH-Works
   to a disposable private directory. The managed loader never reads,
@@ -463,14 +465,17 @@ never searches parent directories.
   `<media>.lwi` and `<media>.frame-compare-lsw1310-*.lwi` files.
 
 The subprocess executable resolver finds ffprobe, including the portable runtime's
-absolute override. Source and VSView admission require one non-attached video stream
-and stream every video frame's coded and visible geometry through bounded ffprobe
-output before entering the native decoder. Every admitted stream must keep constant
-dimensions inside the canvas policy. L-SMASH playback also receives an owned
+absolute override. Source and VSView admission begin with a bounded header probe
+and require exactly one non-attached video stream. Cold opens and private cache-free
+opens, including the VSView fallback, stream a complete bounded check of coded and
+visible frame geometry before native indexing or decoding. Each stream must retain
+constant dimensions within the canvas policy. Warm managed opens can reuse that
+proof under the cache checks above after the header probe. The full cold check
+remains because a real mixed-resolution H.264 transport stream reproduced a native
+L-SMASH heap abort when admitted without it. L-SMASH playback also receives an owned
 `max_pixels` option that caller-supplied decoder options cannot remove. Absent
 ffprobe, missing or changing frame dimensions, and multiple real video streams fail
-with a typed source-load error. This complete scan adds source-open latency in
-exchange for keeping unsupported geometry out of the native index and decode paths.
+with a typed source-load error on the managed loader path.
 HDR probing and FFmpeg screenshots use the
 first video stream that is not an attached picture; extraction explicitly maps
 `0:V:0`. Selected-video
@@ -905,10 +910,13 @@ upstream worker stalls in the non-display Windows runtime; visible launches reta
 
 External runtime boundaries:
 
-- FFmpeg / ffprobe subprocess calls. On Windows, the shared launcher assigns
-  each suspended child to a kill-on-close Job Object before resuming it. Paired
-  alignment and VSView use the same launcher. Capture releases the job when
-  the leader exits so descendants cannot retain its pipes.
+- FFmpeg / ffprobe subprocess calls. On Windows, the shared launcher starts the
+  process with normal `Popen` and immediately assigns it to a preconfigured
+  kill-on-close Job Object. A descendant started before assignment can escape
+  the job. An interrupt inside `Popen` can also prevent it from returning the
+  child handle for cleanup. Paired alignment and VSView use the same launcher.
+  The owner uses bounded cleanup on failure or cancellation. On leader exit,
+  capture closes the job so job-owned descendants cannot retain its pipes.
 - VapourSynth runtime and plugins
 - TMDB HTTP API
 - slow.pics HTTP API

@@ -11,18 +11,13 @@ notes used by the guarded publication workflow.
 
 - Default the BT.2390 knee to 1.0, so HDR screenshots keep more separation in
   bright areas and look slightly different from earlier versions.
-- Harden local-media processing with bounded image canvases, decoder dimensions,
-  subprocess output, alignment evidence and diagnostic scans. Inputs that exceed
-  the documented safety limits now fail with a clear error instead of consuming
-  unbounded memory or disk.
-- Verify every video frame has constant, supported geometry before native indexing
-  or decoding. Source opening may take longer because this check scans the complete
-  video stream.
-- Keep generated decoder indexes inside Frame Compare's managed data root. Existing
-  media-adjacent index files are no longer trusted or reused.
-- Verify Windows portable releases from independently reproduced bytes, scan the
-  exact verified artifact for known vulnerabilities before signing, and retain
-  SBOM and advisory evidence for release review.
+- Reject unsupported or changing video dimensions before native indexing. The
+  first open can take longer while Frame Compare checks the whole video. A
+  matching managed index lets later opens reuse that check.
+- Store generated decoder indexes in Frame Compare's data directory and leave
+  old indexes beside media untouched.
+- Rebuild Windows portable releases independently and check them for known
+  vulnerabilities before signing.
 
 ### Removed
 
@@ -33,11 +28,10 @@ notes used by the guarded publication workflow.
 
 ### Fixed
 
-- Prevent application subprocesses from inheriting configured Frame Compare and
-  release-signing credentials from the parent shell.
-- Require slow.pics responses to identify every uploaded comparison, reject duplicate
-  image slots, and construct the canonical HTTPS result URL from a validated response
-  identifier before Frame Compare reports a successful publish.
+- Bound image allocations and external tool output, and limit the credentials
+  passed to those tools.
+- Reject incomplete or inconsistent slow.pics responses before reporting a
+  successful upload.
 - Correct HDR screenshot colors by targeting BT.709 destination primaries; colors
   may change slightly compared with previous versions.
 - Align audio in older Matroska files that lack per-stream duration metadata.

@@ -691,25 +691,27 @@ Current CI ownership:
   GitHub-release creation remains disabled; the guarded release workflow owns
   publication through either automatic merge or manual dispatch.
 - PRs call `windows-portable-unsigned.yml` and exercise the build and unsigned
-  verification without the signing environment. The signed reusable
+  archive/source verification without the signing environment. The signed reusable
   workflow `windows-portable-build.yml` serves protected manual verification
-  and the release orchestrator. It separates four jobs:
+  and the release orchestrator. It separates five jobs:
 
   1. Build and exercise the native runtime without a signing secret. Upload the
      portable and unsigned code-only update inputs with immutable artifact IDs
      and digests.
   2. Verify unsigned inputs on a fresh runner. Independently assemble the
      portable tree from authenticated pins and the approved checkout, without
-     running candidate code or candidate native executables. Check the approved
-     runtime catalog and compare candidate files to the independently derived
-     tree. This job creates the canonical portable ZIP, checks the update against
-     approved source and compatibility inputs, and binds the canonical manifest
-     and artifact digests in its verification receipt.
-  3. The protected signer downloads only the canonical manifest and receipt.
+     running candidate code or candidate native executables. Check the complete
+     candidate tree against that reconstruction, create the canonical portable
+     ZIP, and require byte equality by SHA-256. Check the update against approved
+     source and compatibility inputs and bind the canonical manifest and artifact
+     digests in the verification receipt.
+  3. Safely extract the independently reproduced ZIP and apply the
+     [final-artifact security gate](#final-artifact-security-evidence).
+  4. The protected signer downloads only the canonical manifest and receipt.
      It reconstructs and checks the approved manifest bytes against the exact
      checkout and receipt before signing them. A missing key, wrong public-key
      match, or verification failure blocks the chain.
-  4. A separate packaging job consumes the verified artifact IDs and detached
+  5. A separate packaging job consumes the verified artifact IDs and detached
      signature, validates the signature with the public key, and packages and
      attests the ZIPs without access to the private key.
 
@@ -717,34 +719,22 @@ Current CI ownership:
   ZIPs and checksums. It has release write permissions without a signing
   environment.
 
-#### Regenerate and review the portable runtime catalog
+#### Portable runtime input authority
 
-Regenerate from a clean checkout at the candidate revision with the workflow's
-pinned Python 3.13.17 and uv. Commit changes to `uv.lock` and the Windows
-runtime manifest first so the catalog generator reads the intended Git blobs.
-Use a fresh output filename and a cache that may be populated only by inputs
-that pass their pinned checks:
+Use the candidate's committed `uv.lock` and Windows runtime manifest with the
+workflow's pinned host Python 3.13.17 and uv 0.13.5. Review changed archive pins,
+native provenance, Qt WebEngine exclusions and notices at the candidate commit.
+The assembler authenticates the exact Windows Python dependencies against the
+frozen lock and stages them in a local wheelhouse. It converts the authenticated
+`anitopy` 2.1.1 source archive into a deterministic wheel from an explicit
+allowlist of package files and metadata. Pinned uv installs the exact wheels
+offline by version and hash with index access, dependency resolution and builds
+disabled. Native archives use manifest size and SHA-256 pins. The assembled tree retains the
+approved Qt/PySide6 subset, native components, licenses and committed project
+metadata and entry points. The fresh verifier reconstructs the tree from those
+inputs and compares the produced ZIP to the build candidate.
 
-```powershell
-python -B -I -S tools/windows_portable/portable_runtime.py catalog --output $CandidateCatalog
-git diff --no-index -- tools/windows_portable/release-runtime-files.json $CandidateCatalog
-```
-
-Set `$CandidateCatalog` to an unused temporary filename before running the
-commands. Review the entire added, removed, or changed file set, the runtime
-pin and source provenance changes, Qt WebEngine exclusions, notices and hashes.
-After committing the reviewed catalog at its canonical path, rerun from the
-clean candidate revision:
-
-```powershell
-python -B -I -S tools/windows_portable/portable_runtime.py check-catalog
-```
-
-The signed path requires the committed catalog and compares its bytes with
-independently derived bytes. A missing or stale catalog blocks signing. Treat
-the build artifact as an input to compare, never as a source for catalog updates.
-
-GitHub-hosted Windows proves packaging and generated-fixture behavior. Complete
+Use GitHub-hosted Windows to verify packaging and generated-fixture behavior. Complete
 the separate [physical Windows handoff](media-runtime-windows-validation.md) for
 the release candidate. Record real GPU Vulkan initialization, HDR10/Dolby Vision
 output, range and bit-depth preservation, real-media timing and frame properties,
@@ -811,28 +801,32 @@ OCI digest. If only a local image exists, export it and bind both its exact imag
 ID and the export SHA-256 to the evidence. Scan the runtime profile's installed
 contents, including optional GUI or GPU profiles when those are distributed.
 
-Retain CycloneDX JSON and the native Syft JSON from a single inventory. Run Grype
-against that Syft JSON, using a successfully refreshed database with age
-validation enabled and a maximum age of five days. Record tool versions, database
-build time and checksum, source SHA, artifact ID/digest and SBOM digest. Compare
-against the Windows runtime catalog and the Docker native provenance records.
+Retain CycloneDX JSON and the native Syft JSON from a single inventory. Require
+nonempty inventories and check the scanner name and version in the Syft and
+Grype reports. Run Grype against the Syft JSON with a required update check, age
+and hash validation, and a valid database no older than five days. The gate
+requires the database source checksum and hashes a nonempty local database file
+up to 8 GiB. Retain the receipt with the tool versions, database identity, exact
+commit, artifact ID and digest, verification receipt hash, evidence hashes,
+counts and policy result. Reconcile coverage against the verified bundle
+inventory and native runtime pins for Windows, and against the native provenance
+records for Docker.
 Manually account for packages or files a scanner cannot identify, including
 embedded Python, Qt Multimedia FFmpeg, standalone FFmpeg, VapourSynth and native
 decoder/plugin libraries. Record the exact version or commit, license, source and
-advisory coverage for each missing native component. A catalog miss requires
-adjudication with upstream advisories. An empty inventory, scanner error, stale
-database, or unresolved component coverage blocks acceptance.
+advisory coverage for each missing native component using upstream advisories.
+An empty inventory, scanner error, invalid or stale database, or unresolved
+component coverage blocks acceptance.
 
-Block high and critical findings, including unfixed findings, and findings
-identified as known exploited at any severity. Record lower-severity and
-unknown-severity findings for review. Resolve unknown severity before accepting
-a finding that could meet the block criteria. A finding waiver must match the
-advisory ID, component identifier and version, target profile and artifact digest.
-It must record the release maintainer and independent approver, rationale,
-compensating controls, UTC expiry and removal condition. A missing, ambiguous or
-expired waiver blocks acceptance. Keep the unsuppressed machine-readable result
-and record every accepted waiver separately. Broad severity ignores and
-ecosystem-wide exclusions are out of policy.
+The automated gate refuses suppressions, high, critical or unknown severity
+(including unfixed findings), and any known exploited vulnerability (KEV)
+match. It applies those rules to primary and related vulnerabilities. Keep the
+unsuppressed machine-readable result and record lower-severity findings for
+review. A waiver for a finding eligible for manual acceptance must match the
+advisory ID, component identifier and version, target profile and artifact
+digest. Record the release maintainer and independent approver, rationale,
+compensating controls, UTC expiry and removal condition. The automated gate
+must pass independently of manual waivers.
 
 Keep scanner reports and provenance receipts in CI for 90 days. Archive the
 SBOMs, scan receipts, native coverage notes and waiver decisions with the

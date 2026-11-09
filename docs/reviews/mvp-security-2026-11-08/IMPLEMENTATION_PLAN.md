@@ -1,35 +1,29 @@
 # Approved MVP security implementation contract
 
-This is the explicit, implementation-ready contract derived from the accepted
-findings in `REPORT.md`. It is intentionally specific enough for an implementation
-chat to execute without inventing product policy or redesigning the solution.
+This contract records the remediation requirements derived from
+[the accepted findings](REPORT.md) and incorporates
+[the simplification decisions](SIMPLIFICATION_PLAN.md).
 
 ## Execution and repository workflow
 
-1. Start from exact base `e56f00a429ef494549cba153b2a7ff49230b2ea2`
-   (`v0.7.0`) on branch `dev/mvp-security-hardening`.
+1. The candidate is on branch `dev/mvp-security-hardening`, based on
+   `origin/v0.7.0` at `1ad19886efc1424a9e475a52f156c86f5013782a`.
 2. Keep one integration owner. Parallel chats may investigate, implement or review
    only their assigned package. They must send contradictions, ownership conflicts,
    failing external prerequisites and completion evidence directly to the parent
    orchestrator; they do not ask the user to relay callbacks.
-3. Implementation chats use GPT-6.1 Sol at high reasoning. Execute this contract as
-   written. Additional design is authorized only when current source proves a
-   contradiction; report that contradiction to the orchestrator before changing
-   another package's contract.
+3. Report source contradictions to the orchestrator before changing another
+   package's contract.
 4. Do not use production secrets, private media, installed user runtimes or live
    publisher accounts. Do not merge, release or deploy.
 5. Preserve unrelated work. Use repository-native tests and the smallest faithful
    verification before the integrated full matrix.
 6. After implementation, run a defensive code/security review of the complete diff
-   and its verification evidence. Resolve or explicitly reject every finding with
-   source evidence. Active crafted-input reproduction and additional red-team work
-   are omitted at the user's direction because the available Daybreak environment
-   repeatedly blocked that work; record the omission instead of treating it as a
-   pass.
-7. Record user-facing changes in `CHANGELOG.md`, create conventional commits, push
-   the branch, and open a PR into `v0.7.0` titled
-   `fix(security): harden MVP trust boundaries and release pipeline`. Stop after the
-   PR is open so the user can inspect it.
+   and its verification evidence. Resolve or explicitly reject every finding
+   with source evidence. Further active adversarial exercises are out of scope
+   at the user's direction.
+7. Record user-facing changes in `CHANGELOG.md` and create conventional commits.
+   The orchestrator owns updating PR #173 into `v0.7.0` after verification.
 
 ## Package P0A — Generated decoder index authority
 
@@ -45,7 +39,10 @@ Required implementation:
 
 1. Resolve every generated L-SMASH-Works index beneath the canonical generated-data
    root; never select or mutate a media-adjacent index.
-2. Bind reuse to the canonical source identity and required cache metadata.
+2. Bind reuse to the canonical source identity, geometry policy version, geometry
+   probe token, native runtime token, and index size and digest. The probe token
+   covers ffprobe's resolved path, file identity and reported program/library
+   versions. Reuse only after a fresh header probe.
 3. Write into a private staging location, make the completed index durable, then
    publish metadata last so interruption cannot authorize a partial index.
 4. Set stable cache behavior explicitly and share the owner across render,
@@ -56,6 +53,7 @@ Acceptance:
 
 - Alias, symlink, stale metadata, interrupted write and concurrent reuse tests.
 - Same-size/same-mtime atomic source replacement and lease-held native-open tests.
+- Warm reuse skips the frame scan. A probe or policy mismatch invalidates proof.
 - Loader/source/VSView caller tests and affected native-policy coverage.
 - No writes beside selected media.
 
@@ -74,13 +72,14 @@ Owner scope:
 
 Required implementation:
 
-1. Separate unsigned build, fresh-runner verification, protected signing,
-   package/attestation and publication into distinct jobs.
+1. Separate unsigned build, fresh-runner verification, final-artifact security,
+   protected signing, package/attestation and publication into distinct jobs.
 2. Transfer only exact immutable artifact IDs and digests. Recompute canonical
    manifest bytes from the exact checkout before signing.
 3. Expose the signing secret only to the protected signer. The signer receives no
    publication permission; the publisher receives no signing secret or environment.
-4. Independently verify the complete tree and source/launcher/key/catalog bindings.
+4. Independently reconstruct the complete tree and compare the ZIP. Verify the
+   exact source, launcher, key and update compatibility bindings.
 5. Make skipped or failed upstream jobs fail closed, including `always()` guards.
 6. Paginate remote draft enumeration and prove tag/release/draft absence before any
    mutation. Recheck exact tag target, release body, asset set and remote asset
@@ -102,33 +101,32 @@ Owner scope:
 
 - `tools/windows_portable/portable_*.py`
 - `tools/windows_portable/build_portable.ps1`
-- `tools/windows_portable/release-runtime-files.json`
-- `.gitattributes`
 - Windows portable actions/workflows and derivation tests
 
 Required implementation:
 
-1. Build the runtime from `uv.lock`, pinned archives and the approved catalog
-   without importing or executing dependency build/install hooks.
-2. Validate every input archive before projection: path spelling, case collisions,
-   file types, entry counts, compression ratio, member and aggregate expansion,
-   offsets, CRC and decompression completion.
-3. Project wheels from exact RECORD authority. Handle the approved source archive
-   using inert package-specific projection, never its hooks.
-4. Remove the exact WebEngine runtime profile while preserving required PySide6/Qt
-   and native media components.
-5. Generate a deterministic complete-tree catalog independently, review and commit
-   it, then require a fresh job to reproduce and byte-compare the canonical ZIP.
+1. Authenticate the exact Windows Python inputs from the frozen lock and native
+   archives from the committed runtime manifest. Apply archive safety checks
+   and bounded extraction at the assembly boundary.
+2. Convert the authenticated `anitopy` 2.1.1 sdist deterministically using its
+   allowlisted source and metadata files without executing build hooks. Install
+   the hash-verified local wheelhouse with pinned uv offline, with index access,
+   dependency resolution and builds disabled.
+3. Exclude Qt WebEngine while preserving required PySide6/Qt and native media
+   components, licenses and committed project metadata and entry points.
+4. Require the fresh release verifier to reconstruct the complete tree from the
+   exact approved inputs and reproduce the canonical ZIP byte-for-byte.
 
 Acceptance:
 
-- Archive-confusion, path, RECORD, tamper, omission, extra-file and reproducibility
+- Archive-confusion, path, tamper, omission, extra-file and reproducibility
   tests.
 - Python, Ruff, Pyright, actionlint and PowerShell parsing.
-- One real inert Windows-runtime build with exact ZIP digest reproduction.
+- Hosted Windows candidate build and fresh verification with exact ZIP digest
+  reproduction for the signed chain.
 
-Rollback: revert assembler, catalog and workflow consumers together. A stale catalog
-must block rather than fall back to producer authority.
+Revert assembler and workflow consumers together if rollback is needed.
+Independent verification must remain a prerequisite of signing.
 
 ## Package P1 — Application input and resource boundaries
 
@@ -144,15 +142,20 @@ Owner scope:
 Required implementation:
 
 1. Drain child stdout and stderr concurrently with independent byte ceilings.
-   Timeout, overflow, cancellation and nonzero exit terminate and reap the owned
-   process tree and return typed failure without partial success.
+   Use bounded cleanup of the owned process tree on timeout, overflow,
+   cancellation and nonzero exit, and close descendant-held capture pipes on
+   leader exit. Windows uses normal `Popen` followed by immediate assignment
+   to a preconfigured kill-on-close Job Object. The pre-assignment interval can
+   let a descendant escape, and an interrupt inside `Popen` can prevent it
+   from returning the child handle needed for cleanup.
 2. Filter application child environments. Pass only each integration's owned
    credential; do not treat ignored legacy aliases as supported secrets.
 3. Enforce one canvas dimension/pixel policy before Pillow, FFmpeg, VapourSynth,
-   batch or overlay allocation. Before native source admission, stream bounded
-   ffprobe records for every video frame and reject missing, changing or out-of-policy
-   coded/visible geometry. Supply an owned decoder-side maximum-pixel option that
-   caller options cannot remove.
+   batch or overlay allocation. Start native admission with a bounded header
+   probe. On cold and cache-free opens, including the VSView fallback, scan
+   complete coded and visible frame geometry under the output and time limits.
+   Warm managed opens can reuse the bound proof in P0A. Supply an owned
+   decoder-side maximum-pixel option that caller options cannot remove.
 4. Validate every slow.pics comparison identity, reject duplicates across the
    complete matrix before upload, and construct the canonical HTTPS result URL.
 5. Stream FFprobe frame-type CSV with bounded rows, bytes, pending gaps and counters.
@@ -162,7 +165,8 @@ Required implementation:
 Acceptance:
 
 - Independent pipe overflow/deadlock, timeout, cancellation and cleanup tests.
-- Nonzero-leader/DEVNULL-descendant coverage, including Windows Job Object ownership.
+- Leader-exit descendant and pipe cleanup coverage, including Windows Job
+  Object assignment and bounded failure handling.
 - Credential filtering tests for application and diagnostic children.
 - Canvas exact-boundary/overflow tests through each allocator.
 - Network identity/canonical URL tests.
@@ -199,15 +203,15 @@ Required implementation:
 5. Download Syft 1.56.0 and Grype 0.121.0 Linux x64 archives, require their committed
    SHA-256 values, then generate native Syft and CycloneDX inventories from the same
    extracted tree.
-6. Run Grype against the Syft JSON with update-check, age and hash validation. Require
-   a valid database no older than five days and retain its source checksum, build
-   time and local digest.
-7. Reject empty inventories, scan errors, ignored matches, unknown/high/critical
-   severity and any known-exploited metadata. Pin Syft JSON 16.1.12 and CycloneDX
-   1.7 document identity and validate nonempty package/component/source entries.
-   Keep the unsuppressed result. Upload
-   all evidence for 90 days even when policy fails; only a successful job may allow
-   the protected signer to run.
+6. Run Grype against the Syft JSON with update-check, age and hash validation.
+   Require a valid database no older than five days and no larger than 8 GiB.
+   Retain its source checksum, build time and local digest.
+7. Check scanner identity and require nonempty Syft and CycloneDX inventories.
+   Reject scan errors, ignored matches, unknown/high/critical severity and KEV
+   matches. Keep the unsuppressed result and a receipt binding the candidate,
+   verifier result, database, evidence hashes and policy result. Retain
+   available evidence for 90 days even when policy fails. The protected signer
+   requires a successful policy result.
 8. Document exact waiver fields, signer-compromise response, native coverage and
    legal/provenance release gates. Do not claim source scanning covers unidentified
    native binaries.
@@ -238,6 +242,7 @@ bash tools/check_python_security.sh
 uv run --no-sync lint-imports --config importlinter.ini
 uv run --no-sync pytest -q -n 4 --dist loadgroup --ignore=tests/browser
 uv run --no-sync pytest -q tests/browser/test_report_browser_smoke.py
+uv run --no-sync zensical build --clean --strict
 bash tools/verify_docker_context.sh
 bash tools/verify_docker_integration.sh --no-cache
 ```
@@ -258,4 +263,4 @@ The orchestrator may give the ready signal only when:
 - the integrated diff has passed the recorded defensive code/security review, with
   the user-directed omission of further active adversarial exercises disclosed;
 - conventional commits contain only this branch's intended changes; and
-- the PR into `v0.7.0` is open, with no merge or release performed.
+- PR #173 into `v0.7.0` reflects the verified candidate.
