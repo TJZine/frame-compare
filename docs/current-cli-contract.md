@@ -963,21 +963,16 @@ recovery requirement.
   cached. Corrupt, unsupported, malformed, unreadable, unwritable, or lock-blocked
   cache state produces a sanitized warning and continues through the network path.
   Deleting this file clears durable TMDB history and forces fresh successful lookups.
-- Frame Compare-owned L-SMASH-Works indexes use
-  `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`. The token is
-  profile scoped (currently `lsw1310-f125953022b6` on managed/portable Windows,
-  `lsw1310-1ec4b81a7724` on unmanaged Windows, and `lsw1310-877219813395`
-  on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
-  their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
-  changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
-  corrupt owned index is removed and rebuilt once; removal/rebuild failure produces
-  a warning and an unusable index location retries source loading without an index.
-  Generated VSView sessions pass this same owned, runtime-versioned path as the
-  `cachefile` for the reference and every comparison; a missing index may be created
-  there by L-SMASH-Works instead of creating a second adjacent index. When L-SMASH
-  rejects that index location during VSView loading, the managed VSView child does
-  not remove or rebuild the parent-owned index; it retries that source cache-free and
-  preserves the original construction error if the fallback also fails.
+- Persistent L-SMASH-Works indexes live under
+  `<resolved paths.generated_dir>/cache/source-indexes/`. The managed loader
+  may rebuild a missing or invalid entry in private staging and reuses stable
+  indexes with `cache=0`. With an unusable cache it can open the source cache-free
+  and report the fallback. Generated VSView sessions can reuse validated stable
+  entries or open cache-free. The current profile tokens are
+  `lsw1310-f125953022b6` for managed Windows, `lsw1310-1ec4b81a7724` for unmanaged
+  Windows, and `lsw1310-877219813395` for Debian/Docker. All legacy media-adjacent
+  indexes remain inert.
+  See the [source-index transaction](current-architecture.md#shared-caches-and-decoder-indexes).
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
   user/random frames. Every run that proceeds reserves a fresh run folder beneath

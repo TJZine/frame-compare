@@ -93,7 +93,7 @@ uv sync --all-groups --extra vsview --frozen
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
 uv run --no-sync pyright --warnings
-uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+bash tools/check_python_security.sh
 uv run --no-sync lint-imports
 uv run --no-sync pytest
 uv run --no-sync zensical build --clean --strict
@@ -293,7 +293,7 @@ retain:
 
 Metric equality alone is not sufficient evidence of perceptual equivalence.
 
-## 7. Cache and index migration
+## 7. Cache and index isolation
 
 Use copies of media so test cleanup cannot damage a production library.
 
@@ -301,14 +301,38 @@ Use copies of media so test cleanup cannot damage a production library.
 
 Verify all of the following:
 
-- A legacy adjacent `<media>.lwi` is ignored and not deleted.
-- The candidate creates
-  `<media>.frame-compare-lsw1310-f125953022b6.lwi`.
-- A second run reuses the candidate-owned index.
-- A corrupt candidate-owned index is removed and regenerated once.
-- A missing index is created normally.
-- An unwritable index location falls back to the documented cache-free open.
-- Indexes from another runtime profile are not silently reused.
+- Use a read-only media directory containing both a legacy `<media>.lwi` and an
+  old runtime-token-named sidecar. Retain their original byte hashes and directory
+  listing. Run the installed CLI and a generated VSView session. Both legacy
+  files and the directory listing must remain unchanged. Deliberately invalid
+  sidecar bytes must have no effect on the decoded result.
+- A first run creates an index and commit metadata under
+  `<resolved paths.generated_dir>/cache/source-indexes/`. A second run opens it
+  with `cache=0` and leaves the committed bytes and modification times unchanged.
+- On NTFS, replace source bytes in place with the same byte length and restore the
+  original modification time. The next run must reject the old index because the
+  handle-reported ChangeTime changed. Repeat a normal cold write and warm hit to
+  prove the staged index flush succeeds with the Windows write-capable handle.
+- A missing or corrupt managed entry rebuilds in a private staging directory.
+  Invalid metadata, runtime-token mismatches and redirected entries cannot
+  authorize stable reuse. An unwritable cache falls back to a cache-free open.
+- Confirm cancellation and failures do not commit incomplete index metadata, and
+  the native plugin never creates or changes an index in the media directory.
+
+Run the Windows-only process and cache selection from the exact candidate checkout:
+
+```powershell
+uv run --no-sync pytest -o addopts="" -q -ra `
+  tests/utils/test_subproc.py `
+  tests/services/test_alignment_paired_streaming.py `
+  tests/vs/test_source_index_cache.py `
+  -k "windows_job_owns or windows_paired_collection or cold_write_warm_hit or source_overwrite_after_index_replace"
+```
+
+The process cases must show that a child cannot execute before Job Object assignment,
+and that a descendant retaining an inherited capture pipe is stopped after its
+leader exits. Also close/cancel an installed VSView review and a paired FFmpeg
+alignment run; neither may leave a descendant process running.
 
 ### Application caches
 

@@ -61,19 +61,17 @@ commands above from the host instead.
 
 ## The index warning
 
-A comparison run (not a dry run) may print this warning when a source has no usable
-L-SMASH index and the loader cannot create or rebuild one beside the media:
+A comparison run may print this warning when the loader cannot use the managed
+L-SMASH index cache:
 
 `Loading /workspace/comparison_videos/<file> without an L-SMASH index cache after index construction failed`
 
-The run service mounts media read-only, and Frame Compare keeps its L-SMASH-Works
-index beside the media as described in [Output layout](../reference/output-layout.md).
-If index construction fails, Frame Compare retries without a disk cache. These
-cache-free source loads rebuild the index in memory and repeat the indexing cost.
-
-A usable existing Frame Compare-owned index can be reused even on a read-only mount,
-so the warning is not expected on every run. The warning alone needs no action;
-frame selection, alignment, and rendering are unaffected by the cache-free fallback.
+The run service mounts media read-only and persists indexes under
+`/workspace/generated/cache/source-indexes/` by default. The generated mount
+must be writable by the container's effective user for the first build and later
+reuse. Existing adjacent media indexes are left untouched. If the managed cache is
+unusable, Frame Compare retries without a disk cache and repeats the in-memory
+indexing cost on subsequent loads. See [Output layout](../reference/output-layout.md).
 
 ## Next steps
 

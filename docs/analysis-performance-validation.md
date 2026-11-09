@@ -128,11 +128,11 @@ $AnimeComparison = (Resolve-Path -LiteralPath `
   'comparison_videos\DAN.DA.DAN.S02E01.Like.This.Is.the.Legend.of.the.Giant.Snake.REPACK.1080p.CR.WEB-DL.DUAL.DDP2.0.H.264-Kitsune.mkv').Path
 ```
 
-Prepare probe data and warm Frame Compare-owned, runtime-versioned L-SMASH-Works
-`.lwi` source indexes through a normal application run before timing. The current
-filename suffix is `.frame-compare-lsw1310-f125953022b6.lwi`; an unrelated legacy
-adjacent `<media>.lwi` is intentionally not a warm-cache input. Point `--input` at a directory containing
-only the fixed case under test:
+Prepare probe data and warm the L-SMASH-Works indexes through a normal application
+run before timing. Use the same resolved source paths, generated root and runtime
+for the benchmark so it can reuse `cache/source-indexes/`; the managed Windows
+decoder token for this recipe is `lsw1310-f125953022b6`. Legacy adjacent indexes are
+inert. Point `--input` at a directory containing only the fixed case under test:
 
 ```powershell
 uv run --no-sync frame-compare run `

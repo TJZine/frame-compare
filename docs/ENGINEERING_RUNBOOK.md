@@ -144,12 +144,24 @@ uv run --no-sync pip-audit --strict --require-hashes --disable-pip --progress-sp
 Remove-Item -LiteralPath $auditRequirements
 ```
 
-Run the audit on both Windows and Linux before a release. The PyPA advisory
-database exposed by PyPI is the authority. Any known advisory or dependency
-collection failure blocks the release. An exception must be explicit and
-time-bounded in the active release plan with the advisory ID, affected package,
-owner, rationale, expiry, and removal condition; do not add an unrecorded
-`--ignore-vuln`.
+The reusable source-security workflow runs the lock audit on both Windows and
+Linux against the explicit candidate SHA. On a PR, the caller supplies the PR head
+SHA, and on a push or CI dispatch it supplies the event SHA. The release caller
+uses its validated release SHA and requires the audit before the Windows build and
+signing path. Both audit
+jobs verify the checked-out commit before installing tools or reading inputs.
+The PyPA advisory database exposed by PyPI is the authority for this dependency
+check. Known advisories and dependency collection failures block the gate.
+The source audit has no advisory suppressions.
+
+`bash tools/check_python_security.sh` runs Ruff and Bandit over the application,
+maintained release scripts, and the selected runtime and diagnostic tools. It
+fails on missing targets, incomplete scans, and medium or high findings. Bandit
+excludes tests and fixtures. Triage subprocess findings at the call site. The
+reviewed low-severity cases in the release and runtime tools use argument
+vectors without shell evaluation for pinned tools, resolved executables, or the
+invoking interpreter. Retain the medium/high gate and use rule-specific
+annotations for any justified exception at that severity.
 
 ## Verification Policy
 
@@ -187,7 +199,7 @@ Use for most code changes that do not affect packaging, Docker, Windows portable
 - Run the touched tests or a focused `pytest` selection.
 - Run `pyright --warnings`.
 - Run `ruff check .` and `ruff format --check .`.
-- Run `bandit -c pyproject.toml -r src --severity-level medium`.
+- Run `bash tools/check_python_security.sh`.
 - Run `lint-imports` if imports or top-level module boundaries changed.
 
 ### Full Verification
@@ -206,7 +218,7 @@ Run:
 uv run --no-sync pyright --warnings
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
-uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+bash tools/check_python_security.sh
 uv run --no-sync pytest -q -n4 --dist loadgroup
 uv run --no-sync lint-imports --config importlinter.ini
 ```
@@ -286,18 +298,33 @@ VapourSynth and skip unavailable real integrations; inspect what actually ran.
 Canonical command for the default Docker media runtime:
 
 ```bash
+bash tools/verify_docker_context.sh
 bash tools/verify_docker_integration.sh
 ```
+
+The context probe uses disposable, harmless `.env` and private-key-style
+sentinels. It checks the real Docker ignore rules, then exports the exact
+`application-inputs` stage used by the runtime and compares its entire file
+list. The production image copies that stage and the explicit locked package
+metadata. The test service mounts the checkout for tests and verification tools.
 
 The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` with
 10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
 It explicitly excludes `tests/integration/test_alignment_streaming_resources.py`.
 `tools/verify_docker_integration.sh` owns image builds, container invocation,
 cleanup, logs, and artifact handling. It invokes the repository-owned
-`tools/docker_runtime_smoke.py` from the image for native runtime, provenance,
-fixture, and application assertions. Edit that Python owner for runtime proof;
-its source is included in the Docker build context and workflow trigger paths.
+`tools/docker_runtime_smoke.py` from the test service's repository mount for
+native runtime, provenance, fixture, and application assertions. The tool remains
+in the workflow trigger paths.
 Lint and shell-routing tests support the canonical gate but do not replace it.
+
+The production-image proof must run with a read-only media mount and writable
+generated mount. Record first-run managed index creation and second-run
+`cache=0` reuse. Preserve hashes and modification times for both managed
+entries on reuse and legacy media-adjacent sentinels throughout the proof.
+Compare the media directory listing before and after. The corresponding native
+Windows observations belong to the
+[physical Windows validation](media-runtime-windows-validation.md#7-cache-and-index-isolation).
 
 For changes to whole-track memory bounds, maximum admitted lag, or streaming collector
 cleanup, run the existing resource proof separately after the canonical gate has
@@ -538,9 +565,12 @@ Canonical verification path:
    runs every required phase with the bundled interpreter and environment, and
    removes it in the existing cleanup. Source provenance includes the Python file;
    lint, syntax, and source equivalence do not establish Windows bundle acceptance.
-   Run the direct vs-placebo frame proof after Qt when Vulkan is usable; an exact
-   `vulkan_runtime_unavailable` skip is permitted only on hosts without that runtime
-   and does not replace the separate physical-Windows GPU proof.
+   Run the direct vs-placebo frame proof after Qt when Vulkan is usable. A
+   reported `vulkan_runtime_unavailable` means this capability remains unproved.
+   Before accepting a candidate with that hosted gap, the release maintainer
+   records a candidate-specific capability waiver and the separate successful
+   physical Windows GPU proof. See
+   [acceptance records](#release-acceptance-records).
 5. Build the code-only update ZIP when updater logic changes and prove both a
    matching-runtime apply/rollback and a mismatched media-runtime or requirements-
    fingerprint fail-closed refusal. Every pre-native-panel schema-2 bundle must be
@@ -573,7 +603,8 @@ Canonical verification path:
    code-only updates cannot deliver this updater repair. A full
    runtime reinstall uses a fresh, empty directory, preserves user configuration
    and data, and never overlays a full ZIP onto an existing root.
-6. Sign the update ZIP when updater or release-package logic changes.
+6. Verify the protected manifest signature and the resulting update ZIP when
+   updater or release-package logic changes.
 7. Confirm the GitHub Actions Windows workflow still matches the documented local path.
    For an exact hosted verification of a candidate SHA, dispatch the default-branch
    workflow with its explicit verify inputs (the workflow checks out the supplied SHA):
@@ -594,23 +625,23 @@ Canonical verification path:
    stable verification before the signed reusable workflow can start. Development
    branches and release tags are not signed-verification entrypoints. The selected `release-candidate` or `production`
    environment owns the signing key, required reviewer approval, and allowed
-   deployment branch/tag rules; `windows-ci` is the unsigned pull-request environment
-   and must not contain signing secrets. Record the resulting workflow URL, exact SHA,
+   deployment branch/tag rules. Unsigned jobs run without a protected environment.
+   Record the resulting workflow URL, exact SHA,
    success/failure result, and any uploaded portable/package proof. A hosted success
    proves package/offscreen behavior;
    complete physical Windows desktop acceptance remains a separate handoff.
 
    Before enabling this workflow, maintainers must finish the environment migration:
 
-   - create `windows-ci` without secrets or approval requirements;
    - require reviewers and restrict deployment branches/tags on both
      `release-candidate` and `production`;
    - store `WINDOWS_UPDATE_SIGNING_KEY_XML` only as an environment secret in both
      protected environments; and
    - after confirming the protected copies and signed verification, remove the
      same-named repository secret and any organization secret that grants this
-     repository access, then confirm `windows-ci` and an ordinary workflow cannot
-     resolve it. The one-time migration below retains the source until that proof.
+     repository access, then confirm the unsigned path and an ordinary workflow
+     cannot resolve it. The one-time migration below retains the source until
+     the protected value proof succeeds.
 
    GitHub resolves same-named environment secrets ahead of repository/organization
    secrets rather than enforcing an environment-only namespace. The migration and
@@ -621,12 +652,12 @@ Canonical verification path:
 Current CI ownership:
 
 - Every signed caller explicitly passes `WINDOWS_UPDATE_SIGNING_KEY_XML` through
-  each reusable-workflow boundary. The final build job keeps its protected
-  environment and required approval. The existing repository key works during
-  migration; an environment key of the same name takes precedence when configured.
-  Unsigned PR calls pass no signing secret. Keep named forwarding at every boundary;
-  an environment binding alone does not supply an omitted secret in a reusable
-  workflow. Do not replace the explicit mapping with broad `secrets: inherit`.
+  each reusable-workflow boundary. Only the signer binds the protected
+  `release-candidate` or `production` environment. A same-named environment
+  secret takes precedence over a passed repository or organization secret.
+  Unsigned PR calls pass no signing secret. Keep explicit named forwarding at
+  every boundary and verify the hosted positive and negative cases before
+  release. See [GitHub's reusable workflow secret rules](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows).
 - `.github/workflows/release-on-merge.yml` observes pushes to `main`. A changed
   stable manifest version starts publication only when GitHub identifies that exact
   pushed commit as the squash commit of a release PR from this repository's
@@ -659,25 +690,172 @@ Current CI ownership:
   separately titled release promotion PR from `pre-release` into `main`.
   GitHub-release creation remains disabled; the guarded release workflow owns
   publication through either automatic merge or manual dispatch.
-- `.github/workflows/windows-portable-build.yml` is the reusable full portable
-  build/sign/verification boundary called by PR, manual verification, and the
-  release orchestrator.
-- `.github/workflows/windows-portable-build.yml` also builds and verifies a code-only
-  update zip after the full bundle exists. Pull requests prove unsigned update
-  zip creation and layout in the secret-free `windows-ci` environment. Reusable
-  release and manual runs obtain `WINDOWS_UPDATE_SIGNING_KEY_XML` from the selected
-  protected `release-candidate` or `production` environment only after its approval
-  and branch/tag rules pass; they fail before artifact publication when the secret is
-  absent, does not match the committed public key, or signing verification fails.
-  Every public Windows release includes the signed update zip and its checksum.
+- PRs call `windows-portable-unsigned.yml` and exercise the build and unsigned
+  verification without the signing environment. The signed reusable
+  workflow `windows-portable-build.yml` serves protected manual verification
+  and the release orchestrator. It separates four jobs:
 
-GitHub-hosted Windows proves packaging and generated-fixture behavior, not a
-physical release workstation. A media-runtime refresh remains unmergeable until
-the separate physical-Windows handoff records real GPU Vulkan initialization,
-HDR10/Dolby Vision output, range/bit-depth preservation, real-media timing and
-frame properties, old/new index and cache behavior, updater migration from the
-previous bundle, and objective plus perceptual comparison evidence. Never describe
-that handoff as complete based only on hosted CI.
+  1. Build and exercise the native runtime without a signing secret. Upload the
+     portable and unsigned code-only update inputs with immutable artifact IDs
+     and digests.
+  2. Verify unsigned inputs on a fresh runner. Independently assemble the
+     portable tree from authenticated pins and the approved checkout, without
+     running candidate code or candidate native executables. Check the approved
+     runtime catalog and compare candidate files to the independently derived
+     tree. This job creates the canonical portable ZIP, checks the update against
+     approved source and compatibility inputs, and binds the canonical manifest
+     and artifact digests in its verification receipt.
+  3. The protected signer downloads only the canonical manifest and receipt.
+     It reconstructs and checks the approved manifest bytes against the exact
+     checkout and receipt before signing them. A missing key, wrong public-key
+     match, or verification failure blocks the chain.
+  4. A separate packaging job consumes the verified artifact IDs and detached
+     signature, validates the signature with the public key, and packages and
+     attests the ZIPs without access to the private key.
+
+  The publisher checks the assets from this chain and publishes the verified
+  ZIPs and checksums. It has release write permissions without a signing
+  environment.
+
+#### Regenerate and review the portable runtime catalog
+
+Regenerate from a clean checkout at the candidate revision with the workflow's
+pinned Python 3.13.17 and uv. Commit changes to `uv.lock` and the Windows
+runtime manifest first so the catalog generator reads the intended Git blobs.
+Use a fresh output filename and a cache that may be populated only by inputs
+that pass their pinned checks:
+
+```powershell
+python -B -I -S tools/windows_portable/portable_runtime.py catalog --output $CandidateCatalog
+git diff --no-index -- tools/windows_portable/release-runtime-files.json $CandidateCatalog
+```
+
+Set `$CandidateCatalog` to an unused temporary filename before running the
+commands. Review the entire added, removed, or changed file set, the runtime
+pin and source provenance changes, Qt WebEngine exclusions, notices and hashes.
+After committing the reviewed catalog at its canonical path, rerun from the
+clean candidate revision:
+
+```powershell
+python -B -I -S tools/windows_portable/portable_runtime.py check-catalog
+```
+
+The signed path requires the committed catalog and compares its bytes with
+independently derived bytes. A missing or stale catalog blocks signing. Treat
+the build artifact as an input to compare, never as a source for catalog updates.
+
+GitHub-hosted Windows proves packaging and generated-fixture behavior. Complete
+the separate [physical Windows handoff](media-runtime-windows-validation.md) for
+the release candidate. Record real GPU Vulkan initialization, HDR10/Dolby Vision
+output, range and bit-depth preservation, real-media timing and frame properties,
+managed-index isolation and reuse, updater migration, and objective and perceptual
+comparison evidence.
+
+#### Release acceptance records
+
+The maintainer records the candidate SHA, exact artifact digests, owner and result
+for each gate below before approving a public release. A skipped, missing or
+unreachable proof leaves the corresponding gate open.
+
+- Confirm the protected environment reviewer, allowed branch rules, and repository
+  rulesets. Verify that a stale SHA and an unprotected ref cannot reach signing,
+  and that ordinary and unsigned jobs lack signing-key access. Record the hosted
+  canary on a permitted branch, including positive environment-secret resolution,
+  exact manifest signing and public-key verification, package attestation, and
+  the key-free publisher permission boundary. A source assertion cannot prove
+  the hosted rules, secret resolution, approval, or attestation behavior.
+- Retain physical Windows acceptance tied to the candidate bundle SHA-256.
+  If hosted direct Vulkan proof reports `vulkan_runtime_unavailable`, document
+  the exact capability, candidate SHA, observed reason, accountable release
+  maintainer, expiry in UTC, and a link to the successful substitute physical
+  proof. A waiver expires at the earlier of its stated date or any candidate
+  change. CI capability preflights otherwise fail closed. An unexplained skip
+  has no waiver.
+- Verify the shipped Qt/PySide6 subset, including WebEngine exclusion and the
+  source and build configuration of Qt Multimedia's FFmpeg libraries. Retain
+  matching third-party notices, license texts and a distributor-controlled
+  corresponding-source offer for the exact shipped binaries. Resolve native
+  provenance and license coverage for both Windows and Docker with the
+  release maintainer and legal reviewer before public distribution.
+- Retain the [final-artifact SBOM and advisory evidence](#final-artifact-security-evidence)
+  for each distributable runtime.
+
+#### Final-artifact security evidence
+
+This is the acceptance policy and implementation recipe for the final-artifact
+gate. The signed Windows workflow enforces the automated portion against the exact
+independently reproduced portable ZIP before the protected signing environment is
+entered. It retains the native Syft JSON, CycloneDX JSON, unsuppressed Grype JSON,
+database status, scanner versions, artifact binding and policy receipt for 90 days.
+The release maintainer must still complete the native-component coverage review
+and archive the accepted evidence with the supported release. If a Docker image is
+distributed, its immutable image digest requires the equivalent external evidence
+until a publisher-owned image workflow implements that gate. The locked Python
+source audit is a separate check.
+
+Use [Syft](https://oss.anchore.com/docs/guides/sbom/) for inventories and
+[Grype](https://oss.anchore.com/docs/guides/vulnerability/scan-targets/) for
+advisory matching. The candidate scanner pins for a Linux x64 verifier are:
+
+| Verified release archive | SHA-256 |
+| --- | --- |
+| [Syft 1.56.0 Linux x64](https://github.com/anchore/syft/releases/tag/v1.56.0) | `1c2493cfcf52d3367d6cb25780d9190c111c2219c34c820574c43e8bae15c528` |
+| [Grype 0.121.0 Linux x64](https://github.com/anchore/grype/releases/tag/v0.121.0) | `64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519` |
+
+Verify archive hashes before extracting tools. For Windows, consume the verified
+canonical portable ZIP by immutable artifact ID and SHA-256. Use the portable
+archive safety policy for extraction into an empty isolated directory and
+inventory that tree with Syft's directory source. Never execute files from the
+bundle. For Docker, consume each distributable platform image by its immutable
+OCI digest. If only a local image exists, export it and bind both its exact image
+ID and the export SHA-256 to the evidence. Scan the runtime profile's installed
+contents, including optional GUI or GPU profiles when those are distributed.
+
+Retain CycloneDX JSON and the native Syft JSON from a single inventory. Run Grype
+against that Syft JSON, using a successfully refreshed database with age
+validation enabled and a maximum age of five days. Record tool versions, database
+build time and checksum, source SHA, artifact ID/digest and SBOM digest. Compare
+against the Windows runtime catalog and the Docker native provenance records.
+Manually account for packages or files a scanner cannot identify, including
+embedded Python, Qt Multimedia FFmpeg, standalone FFmpeg, VapourSynth and native
+decoder/plugin libraries. Record the exact version or commit, license, source and
+advisory coverage for each missing native component. A catalog miss requires
+adjudication with upstream advisories. An empty inventory, scanner error, stale
+database, or unresolved component coverage blocks acceptance.
+
+Block high and critical findings, including unfixed findings, and findings
+identified as known exploited at any severity. Record lower-severity and
+unknown-severity findings for review. Resolve unknown severity before accepting
+a finding that could meet the block criteria. A finding waiver must match the
+advisory ID, component identifier and version, target profile and artifact digest.
+It must record the release maintainer and independent approver, rationale,
+compensating controls, UTC expiry and removal condition. A missing, ambiguous or
+expired waiver blocks acceptance. Keep the unsuppressed machine-readable result
+and record every accepted waiver separately. Broad severity ignores and
+ecosystem-wide exclusions are out of policy.
+
+Keep scanner reports and provenance receipts in CI for 90 days. Archive the
+SBOMs, scan receipts, native coverage notes and waiver decisions with the
+release evidence for the life of the supported release line. Record tool and
+database identifiers so later reassessments can distinguish changes in the
+artifact from changes in the advisory feed.
+
+#### Signer compromise response
+
+The release maintainer pauses signed release and verification immediately,
+revokes the key from both protected environment secrets and removes any
+repository or organization fallback. Disable access to affected release assets
+as appropriate and preserve artifact digests, signing receipts, audit logs, and
+the exposure window for investigation. Notify affected users through the official
+release channel and security advisory process. Tell users to stop using code-only
+updates until the recovery release is available.
+
+Generate a replacement key in a trusted environment, commit the new public key
+through the protected review process, and independently verify a fresh complete
+portable bundle before publishing the recovery release. Existing installs trust
+the old key through their installed updater, so MVP rotation requires a full
+bundle reinstall into a fresh directory with user data preserved. The old updater
+has no in-band key rotation path.
 
 ### Pre-release, staging, and dependency-update flow
 
@@ -868,11 +1046,9 @@ dispatch; the reusable migration workflow does not have a separate dispatch trig
    cannot resolve it. Preserve a private backup through your own secure storage
    if the original file is later recovered.
 
-The code on the current `main` revision omits named signing-secret forwarding;
-copying secrets alone does not repair that revision. A signed verification can
-exercise the corrected workflow on this branch after its protection and environment
-rules permit it. Stable publication still requires the corrected code on `main`
-and the exact-main release checks; this migration does not bypass that contract.
+Verify the selected revision includes named signing-secret forwarding before
+running the protected canary. Stable publication still requires the protected
+signing path on `main` and the exact-main release checks.
 
 Local proof for this migration is
 `uv run --no-sync pytest -q tests/workflows/test_signing_key_migration.py tests/workflows/test_github_workflows.py tests/workflows/test_release_on_merge.py`.

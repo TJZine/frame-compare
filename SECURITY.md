@@ -4,7 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.6.x   | :white_check_mark: |
+| 0.7.x   | :white_check_mark: |
 
 ## Reporting a Vulnerability
 
@@ -12,8 +12,9 @@ We take security seriously. If you discover a security vulnerability in Frame Co
 
 ### How to Report
 
-1. **Do not** open a public GitHub issue for security vulnerabilities
-2. Email security concerns to: **<zine96@proton.me>**
+1. Use [GitHub's private vulnerability report form](https://github.com/TJZine/frame-compare/security/advisories/new)
+   if available, or email **<zine96@proton.me>**. Keep the report private.
+2. Redact credentials, webhook URLs, private media, and unrelated personal paths.
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce
@@ -30,14 +31,28 @@ We take security seriously. If you discover a security vulnerability in Frame Co
 
 Frame Compare handles local video files and optional network operations. Key security areas include:
 
-- **Path Boundaries**: Media inputs may be read from outside the workspace. The selected config file and `paths.config_dir` must resolve inside the workspace root after symlink resolution. `paths.generated_dir` may name an external directory, and every run folder, cache, and report Frame Compare writes stays inside that resolved generated-data root. Outside it, Frame Compare writes only the selected config file (inside the workspace root), preset files under `<root>/config/presets` (`preset save` follows a user-authored symlink there), and its own L-SMASH-Works `.lwi` index beside each media file. The only selected-config exception is the
-  installed Windows portable shim's exact
-  `%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` fallback; a symlinked
-  fallback that resolves elsewhere is rejected.
-- **Subprocess Hardening**: External tool invocations (FFmpeg, VapourSynth) use validated arguments
+- **Path boundaries.** Media may be read from outside the workspace. The selected
+  config file and `paths.config_dir` must resolve inside the workspace after
+  symlink resolution. The installed Windows shim may also select its exact
+  `%LOCALAPPDATA%/Programs/FrameCompare/state/config.toml` fallback. Redirected
+  fallback paths are rejected. Run folders, durable source indexes, other caches
+  and reports stay inside the resolved generated-data root. Preset writes have
+  their own workspace policy. Frame Compare's managed loader treats all
+  media-adjacent L-SMASH-Works indexes as inert. See the
+  [source-index boundary](docs/current-architecture.md#shared-caches-and-decoder-indexes).
+- **Subprocess hardening.** External tool invocations use argument vectors,
+  independent stdout/stderr limits and bounded timeouts. Application children
+  receive only the credentials their specific integration owns.
 - **Network Operations**: slow.pics upload and webhook delivery are opt-in, and TMDB lookups run only when an API key is configured. Webhook delivery requires an external HTTPS endpoint, follows no redirects, and keeps the URL out of diagnostics.
+- **Release integrity.** The Windows release path independently reproduces the
+  portable runtime, scans the exact verified artifact before entering the protected
+  signer, signs only bounded canonical manifest bytes, attests the packaged ZIPs,
+  and keeps publication credentials out of the signing job.
 
 For implementation details, see [Current architecture](docs/current-architecture.md).
+
+For a suspected update-signing key compromise, report it privately and follow the
+[signer compromise response](docs/ENGINEERING_RUNBOOK.md#signer-compromise-response).
 
 ## Security-Related Error Codes
 

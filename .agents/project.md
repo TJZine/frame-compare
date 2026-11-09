@@ -103,7 +103,7 @@ the current runbook's applicable gates; do not run every route on every edit.
 | Type analysis (`src` and `tests`) | `uv run --no-sync pyright --warnings` |
 | Lint | `uv run --no-sync ruff check .` |
 | Formatting | `uv run --no-sync ruff format --check .` |
-| Static security gate | `uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium` |
+| Maintained Python security gate | `bash tools/check_python_security.sh` |
 | Import contracts | `uv run --no-sync lint-imports --config importlinter.ini` |
 | Focused behavioral check | `uv run --no-sync pytest -q <existing-test-path-or-selection>`; replace the placeholder with the actual affected tests |
 | Full native suite | `uv run --no-sync pytest -q -n4 --dist loadgroup` |
