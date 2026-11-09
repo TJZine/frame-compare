@@ -128,6 +128,7 @@ def test_admission_probes_headers_once_and_selects_the_real_stream(
             json.dumps(
                 {
                     "streams": [_COVER, real_stream],
+                    "format": {"format_name": "matroska,webm"},
                     "program_version": {"version": "7.1.5"},
                     "library_versions": [{"name": "libavcodec", "version": 61}],
                 }
@@ -155,7 +156,7 @@ def test_admission_probes_headers_once_and_selects_the_real_stream(
         "-show_library_versions",
         "-show_entries",
         "stream=index,coded_width,coded_height,width,height,color_transfer,color_primaries,"
-        "color_space:stream_disposition=attached_pic",
+        "color_space:stream_disposition=attached_pic:format=format_name",
         "-of",
         "json",
         str(video),
@@ -170,6 +171,7 @@ def test_geometry_probe_token_binds_executable_and_runtime(
     video: Path, executable: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     payload: dict[str, object] = {
+        "format": {"format_name": "matroska,webm"},
         "program_version": {"version": "7.1.5"},
         "library_versions": [{"name": "libavcodec", "version": 61}],
     }
@@ -191,6 +193,34 @@ def test_geometry_probe_token_binds_executable_and_runtime(
 
 
 @pytest.mark.parametrize(
+    "format_facts",
+    [
+        pytest.param({}, id="missing-format"),
+        pytest.param({"format": "matroska,webm"}, id="malformed-format"),
+        pytest.param({"format": {}}, id="missing-format-name"),
+        pytest.param({"format": {"format_name": ["matroska,webm"]}}, id="malformed-format-name"),
+        pytest.param({"format": {"format_name": "ffconcat"}}, id="referencing-demuxer"),
+        pytest.param({"format": {"format_name": "matroska,webm,other"}}, id="unknown-demuxer"),
+    ],
+)
+def test_admission_without_recognized_single_file_format_cannot_reuse_proof(
+    video: Path, monkeypatch: pytest.MonkeyPatch, format_facts: dict[str, object]
+) -> None:
+    payload = {
+        **format_facts,
+        "program_version": {"version": "7.1.5"},
+        "library_versions": [{"name": "libavcodec", "version": 61}],
+    }
+    monkeypatch.setattr(
+        admission_module, "probe_admission_headers", lambda *_args, **_kwargs: ([_VIDEO], payload)
+    )
+
+    admission = admit_source(video, abort_check=lambda: None)
+
+    assert admission.geometry_probe_token is None
+
+
+@pytest.mark.parametrize(
     ("frames", "message"),
     [
         pytest.param(_record(2, 64, 72) * 2, None, id="complete"),
@@ -206,6 +236,7 @@ def test_unknown_coded_header_requires_fresh_frame_geometry(
 ) -> None:
     stream = {**_VIDEO, "coded_width": 0, "coded_height": 0}
     payload = {
+        "format": {"format_name": "mpegts"},
         "program_version": {"version": "7.1.5"},
         "library_versions": [{"name": "libavcodec", "version": 61}],
     }

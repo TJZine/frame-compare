@@ -1,6 +1,6 @@
 import asyncio
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
 from fractions import Fraction
 from pathlib import Path
@@ -978,3 +978,82 @@ def test_load_source_real_video_stream_policy(
             pixel = image.convert("RGB").getpixel((16, 12))
             assert isinstance(pixel, tuple)
             assert min(pixel) >= 250
+
+
+@pytest.fixture
+def encode_source() -> Callable[[Path, int], None]:
+    import shutil
+
+    import vapoursynth as vs
+
+    from frame_compare.utils.subproc import run_subprocess
+
+    if isinstance(cast(object, vs), MagicMock) or not hasattr(vs.core, "lsmas"):
+        pytest.skip("native VapourSynth with L-SMASH is unavailable")
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        pytest.skip("FFmpeg tools are unavailable")
+
+    def encode(path: Path, size: int) -> None:
+        run_subprocess(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"testsrc2=size={size}x{size}:rate=4",
+                "-frames:v",
+                "4",
+                "-c:v",
+                "libx264",
+                "-g",
+                "1",
+                str(path),
+            ],
+            timeout_seconds=15,
+        )
+
+    return encode
+
+
+@pytest.mark.vs_required
+def test_referenced_media_replacement_cannot_reuse_geometry_proof(
+    tmp_path: Path, encode_source: Callable[[Path, int], None]
+) -> None:
+    first, second = tmp_path / "first.mp4", tmp_path / "second.mp4"
+    encode_source(first, 64)
+    encode_source(second, 64)
+    manifest = tmp_path / "input.mp4"
+    manifest.write_text("ffconcat version 1.0\nfile first.mp4\nfile second.mp4\n", encoding="ascii")
+    before = manifest.stat()
+    cache = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
+
+    assert load_source(manifest, index_cache=cache).num_frames == 8
+    encode_source(second, 96)
+    assert manifest.stat().st_mtime_ns == before.st_mtime_ns
+    assert manifest.stat().st_ctime_ns == before.st_ctime_ns
+
+    with pytest.raises(SourceLoadError, match="dimensions change") as error:
+        load_source(manifest, index_cache=cache)
+
+    assert error.value.context.code == "FC-4015"
+    assert not cache.root.exists()
+
+
+@pytest.mark.vs_required
+def test_self_contained_mp4_reuses_managed_geometry_proof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, encode_source: Callable[[Path, int], None]
+) -> None:
+    video = tmp_path / "input.mp4"
+    encode_source(video, 64)
+    cache = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
+    assert load_source(video, index_cache=cache).num_frames == 4
+    assert cache.validated_index(video) is not None
+
+    def unexpected_scan(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("The warm managed open repeated the full scan")
+
+    monkeypatch.setattr(admission_module.SourceAdmission, "scan", unexpected_scan)
+    assert load_source(video, index_cache=cache).num_frames == 4

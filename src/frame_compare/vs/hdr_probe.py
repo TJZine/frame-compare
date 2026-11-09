@@ -40,7 +40,7 @@ def probe_video_streams(
 def probe_admission_headers(
     video: Path, executable: Path, *, abort: Callable[[], bool]
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
-    """Get video headers and the identity reported by the same FFprobe invocation."""
+    """Get video headers, the detected format, and probe identity in one invocation."""
     return _probe_video_streams(video, abort=abort, admission_probe=executable)
 
 
@@ -53,6 +53,7 @@ def _probe_video_streams(
     entries = _VIDEO_STREAM_ENTRIES
     if admission_probe is not None:
         entries = entries.replace("stream=", "stream=index,coded_width,coded_height,")
+        entries += ":format=format_name"
     argv = [
         str(admission_probe) if admission_probe is not None else "ffprobe",
         "-v",

@@ -466,7 +466,12 @@ never searches parent directories.
 
 The subprocess executable resolver finds ffprobe, including the portable runtime's
 absolute override. Source and VSView admission begin with a bounded header probe
-and require exactly one non-attached video stream. Cold opens and private cache-free
+and require exactly one non-attached video stream. The same probe reports the
+detected demuxer. Only AVI, Matroska/WebM, MOV/MP4-family and MPEG-TS demuxers
+qualify for managed reuse with the packaged defaults, which disable MOV external
+tracks. A manifest such as ffconcat can reference independently changing files, so
+it uses a private cache-free open every time, as do all other formats and sources
+with missing or malformed format information. Cold opens and private cache-free
 opens, including the VSView fallback, stream a complete bounded check of coded and
 visible frame geometry before native indexing or decoding. Each stream must retain
 constant dimensions within the canvas policy. Warm managed opens can reuse that

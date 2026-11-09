@@ -42,8 +42,10 @@ Frame Compare handles local video files and optional network operations. Key sec
   [source-index boundary](docs/current-architecture.md#shared-caches-and-decoder-indexes).
 - **Native media admission.** Cold and cache-free L-SMASH-Works opens validate
   coded and visible frame dimensions with a bounded scan. Warm managed opens
-  reuse that proof only when the source, probe, policy, runtime and index still
-  match. See the [source admission rules](docs/current-architecture.md#shared-caches-and-decoder-indexes).
+  reuse that proof only for detected single-file demuxers when the source, probe,
+  policy, runtime and index still match. Referencing formats such as ffconcat
+  always use the private cache-free path. See the
+  [source admission rules](docs/current-architecture.md#shared-caches-and-decoder-indexes).
 - **Subprocess hardening.** External tool invocations use argument vectors,
   independent stdout/stderr limits and bounded timeouts. Application children
   receive only the credentials their specific integration owns. The Windows

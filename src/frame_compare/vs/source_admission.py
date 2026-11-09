@@ -35,6 +35,9 @@ _FRAME_RECORD = re.compile(
     rb"\|crop_top=(\d+)\|crop_bottom=(\d+)\|crop_left=(\d+)\|crop_right=(\d+)(?:\|)?"
 )
 _MISSING_FRAME_DIMENSIONS = "Source video frame dimensions could not be verified"
+# Match complete FFprobe demuxer names. These ordinary containers read a single
+# file with the packaged defaults, including MOV with external tracks disabled.
+_SINGLE_FILE_FORMAT_NAMES = frozenset({"avi", "matroska,webm", "mov,mp4,m4a,3gp,3g2,mj2", "mpegts"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +165,16 @@ def _probe_stamp(executable: Path) -> SourceIdentity | None:
 def _probe_token(
     executable: Path, stamp: SourceIdentity | None, payload: dict[str, object]
 ) -> str | None:
+    format_info = payload.get("format")
+    format_name = (
+        cast(dict[str, object], format_info).get("format_name")
+        if isinstance(format_info, dict)
+        else None
+    )
+    if not isinstance(format_name, str) or format_name not in _SINGLE_FILE_FORMAT_NAMES:
+        # A top-level file stamp cannot cover referenced media. Unrecognized or
+        # unverifiable formats must use the full scan and a private index on every open.
+        return None
     program = payload.get("program_version")
     libraries = payload.get("library_versions")
     if (
