@@ -481,16 +481,17 @@ defaults, which disable MOV external tracks. Elementary MPEG-2 retains its full-
 private-open path. Manifests such as ffconcat and sources with missing, malformed,
 or unrecognized format information are refused before native code because a
 top-level file identity cannot cover independently changing referenced media. Cold
-opens and private cache-free opens, including the VSView fallback, stream a complete
-bounded check of coded and visible frame geometry before native indexing or
-decoding. The scan uses multiple decoder threads and runs once per admission,
-even if a managed build falls back to a private open. The scan stops if ffprobe
-produces no stdout for 120 seconds. Its total duration can exceed that interval
-while frames keep arriving. Decoder diagnostics alone do not cause refusal.
-Each stream must retain constant dimensions within the canvas policy. Warm
-managed opens can reuse that proof under the cache checks above after the header
-probe. The full cold check
-remains because a real mixed-resolution H.264 transport stream reproduced a native
+opens and private cache-free opens, including the VSView fallback, scan the frame
+records emitted by ffprobe before native indexing or decoding. For each stream,
+the coded and visible dimensions must stay constant and within the canvas policy.
+The scan uses multiple decoder threads and runs once per admission, even if a
+managed build falls back to a private open. The scan stops if ffprobe produces no
+stdout for 120 seconds. Its total duration can exceed that interval while frames
+keep arriving. An explicit ffprobe pixel-limit rejection causes refusal even
+when ffprobe exits successfully. Ordinary decoder diagnostics within the output
+budget do not cause refusal on their own. Warm managed opens can reuse the scan
+proof under the cache checks above after the header probe. The cold scan remains
+because a real mixed-resolution H.264 transport stream reproduced a native
 L-SMASH heap abort when admitted without it. L-SMASH playback also receives an owned
 `max_pixels` option that caller-supplied decoder options cannot remove. Absent
 ffprobe, missing or changing frame dimensions, and multiple real video streams fail

@@ -142,6 +142,36 @@ def test_scan_streams_output_without_buffering_the_complete_probe(
     ]
 
 
+@pytest.mark.parametrize("decoration", [b"", b" [1;31m"], ids=["plain", "forced-color"])
+def test_scan_refuses_probe_pixel_limit_diagnostic_on_zero_exit(
+    video: Path, executable: Path, monkeypatch: pytest.MonkeyPatch, decoration: bytes
+) -> None:
+    # Place the verified libavutil message beyond the user-facing excerpt.
+    preceding = b"[h264 @ 0x123] non-existing PPS 0 referenced\n" * 20
+    stderr = (
+        preceding
+        + b"[h264 @ 0x123] [IMGUTILS @ 0x456] "
+        + decoration
+        + (
+            b"Picture size 8192x4320 exceeds specified max pixel "
+            b"count 33177600, see the documentation if you wish to increase it\n"
+        )
+    )
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        consumer = kwargs["stdout_consumer"]
+        assert callable(consumer)
+        consumer(_record(0, 64, 64))
+        return subprocess.CompletedProcess(argv, 0, b"", stderr)
+
+    monkeypatch.setattr(admission_module, "run_subprocess", run)
+    reason = "FFprobe rejected a source video picture at its pixel limit"
+    with pytest.raises(ValueError, match=reason) as error:
+        admission_module._scan_video_frames(video, {0}, lambda: False, executable)
+
+    assert str(error.value) == f"{reason}: {preceding[:512].decode().strip()}"
+
+
 @pytest.fixture
 def encode_ts() -> Callable[[Path, str, int, int], None]:
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:

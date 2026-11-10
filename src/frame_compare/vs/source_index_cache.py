@@ -28,7 +28,7 @@ from frame_compare.vs.source_admission import (
 log = logging.getLogger(__name__)
 
 # Bump when the complete-frame geometry acceptance rules change.
-_GEOMETRY_POLICY_VERSION = 2
+_GEOMETRY_POLICY_VERSION = 3
 
 
 class _IndexMetadata(TypedDict):

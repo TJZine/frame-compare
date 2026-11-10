@@ -36,6 +36,12 @@ _FRAME_RECORD = re.compile(
     rb"frame\|stream_index=(\d+)\|width=(\d+)\|height=(\d+)"
     rb"\|crop_top=(\d+)\|crop_bottom=(\d+)\|crop_left=(\d+)\|crop_right=(\d+)(?:\|)?"
 )
+# libavutil's av_image_check_size2 can reject a picture before ffprobe reports it.
+# Match the message body regardless of the logger's prefix or color formatting.
+_PROBE_PIXEL_LIMIT_FAILURE = re.compile(
+    rb"Picture size [0-9]+x[0-9]+ exceeds specified max pixel count [0-9]+,"
+    rb" see the documentation if you wish to increase it\b"
+)
 _MISSING_FRAME_DIMENSIONS = "Source video frame dimensions could not be verified"
 # Match complete FFprobe demuxer names. These ordinary containers read a single
 # file with the packaged defaults, including MOV with external tracks disabled.
@@ -303,6 +309,8 @@ def _scan_video_frames(
     try:
         if Path(result.args[0]).resolve() != executable:
             raise ValueError("FFprobe executable changed during source admission")
+        if _PROBE_PIXEL_LIMIT_FAILURE.search(result.stderr):
+            raise ValueError("FFprobe rejected a source video picture at its pixel limit")
         scan.finish()
     except (OSError, ValueError) as exc:
         raise ValueError(_scan_refusal(str(exc), result.stderr)) from exc
