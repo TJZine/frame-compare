@@ -595,6 +595,55 @@ def test_independent_output_caps_stop_and_reap_flooding_children(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("stop", ["stdout-cap", "consumer"])
+def test_early_stdout_refusal_includes_queued_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    streaming_children: list[subprocess.Popen[bytes]],
+    stop: str,
+) -> None:
+    secret = "fixture-signing-secret"
+    monkeypatch.setenv("WINDOWS_UPDATE_SIGNING_KEY_XML", secret)
+    diagnostic = b"warning\x1b " + secret.encode()
+    script = f"import os; os.write(2, {diagnostic + b'ignored'!r}); os.write(1, b'abc')"
+    spawn = subproc_module.spawn_owned_process
+
+    def spawn_with_queued_output(
+        *args: Any, **kwargs: Any
+    ) -> tuple["subprocess.Popen[bytes]", subproc_module.OwnedProcessTree]:
+        child, tree = spawn(*args, **kwargs)
+        # The child writes less than a pipe can hold. Wait here so both streams
+        # are queued before the real reader reaches its first stdout read.
+        assert child.wait(timeout=5) == 0
+        return child, tree
+
+    monkeypatch.setattr(subproc_module, "spawn_owned_process", spawn_with_queued_output)
+    refusal = SubprocessAborted("stdout rejected")
+
+    def reject_stdout(_chunk: bytes) -> None:
+        raise refusal
+
+    with pytest.raises(
+        SubprocessOutputLimitExceeded if stop == "stdout-cap" else SubprocessAborted
+    ) as error:
+        run_subprocess(
+            [sys.executable, "-c", script],
+            max_stdout_bytes=2 if stop == "stdout-cap" else 3,
+            max_stderr_bytes=len(diagnostic),
+            stdout_consumer=reject_stdout if stop == "consumer" else None,
+        )
+
+    failure = error.value
+    if isinstance(failure, SubprocessOutputLimitExceeded):
+        assert (failure.stream, failure.limit, failure.observed) == ("stdout", 2, 3)
+        assert failure.diagnostics == b"abc"
+    else:
+        assert failure is refusal
+    assert failure.stderr == b"warning  <redacted>"
+    [child] = streaming_children
+    assert child.stdout is not None and child.stdout.closed
+    assert child.stderr is not None and child.stderr.closed
+
+
 @pytest.mark.parametrize("outcome", ["failure", "timeout", "abort"])
 def test_retained_diagnostics_are_bounded_and_sanitized(
     outcome: str, monkeypatch: pytest.MonkeyPatch
