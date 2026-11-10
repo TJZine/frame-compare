@@ -99,6 +99,11 @@ class ManagedSourceIndexCache:
         self.runtime_token = index_cache_token()
         self._lock_timeout_seconds = lock_timeout_seconds
 
+    @property
+    def generated_root(self) -> Path:
+        """Return the generated-data root that owns this cache."""
+        return self._generated_root
+
     def _entry(self, path: Path) -> _Entry:
         source = path.resolve(strict=True)
         identity = os.fsencode(os.path.normcase(source))

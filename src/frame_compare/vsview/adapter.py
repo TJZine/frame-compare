@@ -188,6 +188,7 @@ class VSViewSessionRequest:
     memory_limit_mb: int | None = None
     preview_tonemap: TonemapSettings | None = None
     source_indexes: dict[Path, Path] | None = None
+    source_index_generated_root: Path | None = None
 
 
 def launch_alignment_verification_session(
@@ -449,6 +450,7 @@ def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:
         memory_limit_mb=request.memory_limit_mb,
         preview_tonemap=request.preview_tonemap,
         source_indexes=request.source_indexes,
+        source_index_generated_root=request.source_index_generated_root,
     )
 
 

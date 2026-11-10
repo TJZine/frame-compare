@@ -368,6 +368,9 @@ def maybe_launch_alignment_vsview(
         if isinstance(vs_loader, DefaultVSLoader)
         else None
     )
+    source_index_generated_root = (
+        vs_loader.source_index_generated_root if isinstance(vs_loader, DefaultVSLoader) else None
+    )
     progress_suspended = _suspend_progress_for_interaction(progress)
     review_seconds = 0.0
     try:
@@ -379,6 +382,7 @@ def maybe_launch_alignment_vsview(
                 audio_review_by_key=audio_review_by_key,
                 cache_dir=cache_dir,
                 source_indexes=source_indexes,
+                source_index_generated_root=source_index_generated_root,
                 memory_limit_mb=config.memory_limit_mb,
                 preview_tonemap=config.preview_tonemap,
                 frame_props_by_stem=frame_props_by_stem,
