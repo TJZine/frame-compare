@@ -175,9 +175,13 @@ type OutputStream = Literal["stdout", "stderr"]
 class SubprocessAborted(Exception):
     """The owner stopped a process; incomplete output is not a successful result."""
 
+    stderr: bytes = b""
+
 
 class SubprocessOutputLimitExceeded(SubprocessError):
     """A child emitted more than the caller's byte budget for one stream."""
+
+    stderr: bytes = b""
 
     def __init__(
         self,
@@ -434,6 +438,10 @@ def run_subprocess(
                     consume(chunk)
             if not progressed:
                 sleep(_POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining))
+    except (SubprocessAborted, SubprocessOutputLimitExceeded) as exc:
+        # Keep the diagnostics already captured without reading more output on stop.
+        exc.stderr = stderr_budget.diagnostics()
+        raise
     finally:
         try:
             process_tree.reap(process)

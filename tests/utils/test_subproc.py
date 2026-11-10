@@ -582,6 +582,7 @@ def test_independent_output_caps_stop_and_reap_flooding_children(
     violation = error.value
     assert (violation.stream, violation.limit, violation.observed) == (stream, cap, cap + 1)
     assert violation.truncated
+    assert violation.stderr == (violation.diagnostics if stream == "stderr" else b"")
     assert len(violation.diagnostics) < 9_000
     assert b"<redacted>" in violation.diagnostics
     assert secret.encode() not in violation.diagnostics
@@ -594,7 +595,7 @@ def test_independent_output_caps_stop_and_reap_flooding_children(
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("outcome", ["failure", "timeout"])
+@pytest.mark.parametrize("outcome", ["failure", "timeout", "abort"])
 def test_retained_diagnostics_are_bounded_and_sanitized(
     outcome: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -610,13 +611,34 @@ def test_retained_diagnostics_are_bounded_and_sanitized(
     script = (
         "import os,time\n"
         f"payload = b'head\\x1b' + {payload!r} + b'x' * 20000 + b'tail\\x07'\n"
-        "os.write(1, payload)\nos.write(2, payload)\n"
+        "os.write(2, payload)\nos.write(1, payload)\n"
         f"{finish}"
     )
-    kind = subprocess.CalledProcessError if outcome == "failure" else subprocess.TimeoutExpired
+    kind = {
+        "failure": subprocess.CalledProcessError,
+        "timeout": subprocess.TimeoutExpired,
+        "abort": SubprocessAborted,
+    }[outcome]
+    stdout_chunks: list[bytes] = []
     with pytest.raises(kind) as error:
-        run_subprocess([sys.executable, "-c", script], env=environment, timeout_seconds=0.5)
-    for output in (error.value.stdout, error.value.stderr):
+        run_subprocess(
+            [sys.executable, "-c", script],
+            env=environment,
+            timeout_seconds=0.5 if outcome != "abort" else 3,
+            abort=(lambda: bool(stdout_chunks)) if outcome == "abort" else None,
+            stdout_consumer=stdout_chunks.append if outcome == "abort" else None,
+            max_stdout_bytes=32 * 1024,
+        )
+    failure = error.value
+    outputs = (
+        (failure.stderr,)
+        if isinstance(failure, SubprocessAborted)
+        else (
+            failure.stdout,
+            failure.stderr,
+        )
+    )
+    for output in outputs:
         assert output is not None and 0 < len(output) < 9_000
         assert output.startswith(b"head") and output.rstrip().endswith(b"tail")
         assert b"<redacted> <redacted> <redacted>" in output

@@ -312,7 +312,7 @@ def test_load_source_rejects_change_at_native_open(
         "probe_admission_headers",
         lambda *_args, **_kwargs: (streams, {"format": {"format_name": "matroska,webm"}}),
     )
-    monkeypatch.setattr(admission_module, "_scan_video_frames", lambda *_args: None)
+    monkeypatch.setattr(admission_module, "_scan_video_frames", lambda *_args: b"")
 
     def change_before_open(*_args: object) -> None:
         video.write_bytes(b"changed before native open")
@@ -336,10 +336,16 @@ def test_load_source_rejects_change_at_native_open(
     "failure", ["construction", "lock-timeout", "missing-root", "no-probe-identity"]
 )
 def test_load_source_retries_cache_failures_using_controlled_nonexistent_leaf(
-    tmp_path: Path, failure: str, _stub_hdr_probe: MagicMock
+    tmp_path: Path,
+    failure: str,
+    monkeypatch: pytest.MonkeyPatch,
+    encode_source: Callable[[Path, int], None],
 ) -> None:
-    video = tmp_path / "video.mkv"
-    video.touch()
+    video = tmp_path / "video.mp4"
+    encode_source(video, 64)
+    monkeypatch.setattr(source_module, "admit_source", admission_module.admit_source)
+    scan = MagicMock(wraps=admission_module._scan_video_frames)
+    monkeypatch.setattr(admission_module, "_scan_video_frames", scan)
     generated = tmp_path.resolve() / "generated"
     cache = ManagedSourceIndexCache(generated, lock_timeout_seconds=0)
     lock: AbstractContextManager[None] = nullcontext()
@@ -347,7 +353,7 @@ def test_load_source_retries_cache_failures_using_controlled_nonexistent_leaf(
         assert cache.try_load(
             video,
             lambda _source, _mode, index: index.write_bytes(b"index"),
-            admission=_stub_hdr_probe,
+            admission=admission_module.admit_source(video, abort_check=lambda: None),
         )
         stable = cache.validated_index(video)
         assert stable is not None
@@ -355,14 +361,14 @@ def test_load_source_retries_cache_failures_using_controlled_nonexistent_leaf(
     elif failure == "missing-root":
         generated.touch()
     elif failure == "no-probe-identity":
-        _stub_hdr_probe.geometry_probe_token = None
+        monkeypatch.setattr(admission_module, "_probe_token", lambda *_args: None)
 
     calls: list[dict[str, object]] = []
-    _stub_hdr_probe.scan.reset_mock()
+    scan.reset_mock()
 
     def loader(_path: str, **kwargs: object) -> MockClip:
         calls.append(kwargs)
-        assert _stub_hdr_probe.scan.call_count == len(calls)
+        assert scan.call_count == 1
         index = Path(cast(str, kwargs["cachefile"]))
         assert index.parent.is_dir() and not index.exists()
         if kwargs["cache"] == 1:

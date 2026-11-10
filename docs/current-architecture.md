@@ -483,9 +483,13 @@ or unrecognized format information are refused before native code because a
 top-level file identity cannot cover independently changing referenced media. Cold
 opens and private cache-free opens, including the VSView fallback, stream a complete
 bounded check of coded and visible frame geometry before native indexing or
-decoding. Each stream must retain
-constant dimensions within the canvas policy. Warm managed opens can reuse that
-proof under the cache checks above after the header probe. The full cold check
+decoding. The scan uses multiple decoder threads and runs once per admission,
+even if a managed build falls back to a private open. The scan stops if ffprobe
+produces no stdout for 120 seconds. Its total duration can exceed that interval
+while frames keep arriving. Decoder diagnostics alone do not cause refusal.
+Each stream must retain constant dimensions within the canvas policy. Warm
+managed opens can reuse that proof under the cache checks above after the header
+probe. The full cold check
 remains because a real mixed-resolution H.264 transport stream reproduced a native
 L-SMASH heap abort when admitted without it. L-SMASH playback also receives an owned
 `max_pixels` option that caller-supplied decoder options cannot remove. Absent

@@ -12,8 +12,8 @@ notes used by the guarded publication workflow.
 - Default the BT.2390 knee to 1.0, so HDR screenshots keep more separation in
   bright areas and look slightly different from earlier versions.
 - Reject unsupported or changing video dimensions before native indexing. The
-  first open can take longer while Frame Compare checks the whole video. A
-  matching managed index lets later opens reuse that check.
+  first open of a long source decodes the whole video once and can take longer.
+  A matching managed index lets later opens reuse that check.
 - Refuse playlist-style and unrecognized source containers before native decoding.
   Existing elementary MPEG-2 and supported single-file containers remain supported.
 - Bind saved clip-probe facts to the current source and probing runtime. Older
