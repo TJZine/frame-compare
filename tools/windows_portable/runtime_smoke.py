@@ -408,7 +408,8 @@ def prove_generated_vsview_session(media_path: Path) -> None:
     from vsview.vsenv import QtEventLoop
 
     cache_dir = media_path.parent / "runtime-smoke-cache"
-    reference_index = ManagedSourceIndexCache(cache_dir.resolve()).validated_index(media_path)
+    index_cache = ManagedSourceIndexCache(cache_dir.resolve())
+    reference_index = index_cache.validated_index(media_path)
     assert reference_index is not None, "VSView managed reference index missing"
     comparison_one_media_path = media_path.with_name("runtime-smoke-comparison-1.mp4")
     comparison_two_media_path = media_path.with_name("runtime-smoke-comparison-2.mp4")
@@ -443,6 +444,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         },
         cache_dir=cache_dir,
         source_indexes={media_path: reference_index},
+        source_index_generated_root=index_cache.generated_root,
         frame_props_by_stem={
             media_path.stem: {"_Matrix": 2, "_Range": 2},
             comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2},
