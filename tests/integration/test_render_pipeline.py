@@ -488,7 +488,7 @@ def test_ffmpeg_padding_preserves_lossless_rgb_samples(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
-def test_equal_count_source_replacement_cannot_reuse_prepared_geometry(
+def test_equal_count_source_geometry_change_rejects_prepared_geometry(
     mock_video_path: Path, tmp_path: Path, batch: bool
 ) -> None:
     from frame_compare.render.geometry import GeometryRect, SourceGeometry, plan_render_geometry

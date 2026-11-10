@@ -473,9 +473,17 @@ def test_ffmpeg_extract_wraps_external_errors(
 
 
 @pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
-@pytest.mark.parametrize("width", [1280, 7681], ids=["in-limit-replacement", "oversize"])
+@pytest.mark.parametrize(
+    ("width", "expected_error"),
+    [(1280, "dimensions"), (7681, "7,680")],
+    ids=["in-limit-replacement", "oversize"],
+)
 def test_supplied_plan_cannot_bypass_live_geometry_validation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, batch: bool, width: int
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    batch: bool,
+    width: int,
+    expected_error: str,
 ) -> None:
     from frame_compare.render.geometry import plan_render_geometry
 
@@ -485,13 +493,13 @@ def test_supplied_plan_cannot_bypass_live_geometry_validation(
     )
     monkeypatch.setattr(
         "frame_compare.render.backend.ffmpeg.probe_video_streams",
-        lambda _path, **_kwargs: [{"width": width, "height": 720}],
+        lambda _path, **_kwargs: [{"width": width, "height": 1080}],
     )
     extraction = MagicMock(side_effect=AssertionError("must refuse stale geometry before decode"))
     monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", extraction)
     output = tmp_path / "frame.png"
     output.write_bytes(b"existing image")
-    with pytest.raises(FrameExtractionError, match="dimensions"):
+    with pytest.raises(FrameExtractionError, match=expected_error):
         if batch:
             DefaultFFmpegRunner().extract_frames(
                 Path("clip.mkv"), [0, 1], tmp_path, geometry_plan=plan

@@ -60,3 +60,10 @@ class DefaultVSLoader:
         if self._index_cache is None:
             return None
         return self._index_cache.validated_index(path)
+
+    @property
+    def source_index_generated_root(self) -> Path | None:
+        """Return the generated-data root that owns the source index cache."""
+        if self._index_cache is None:
+            return None
+        return self._index_cache.generated_root

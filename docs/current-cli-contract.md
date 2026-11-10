@@ -969,9 +969,13 @@ recovery requirement.
 - Persistent L-SMASH-Works indexes live under
   `<resolved paths.generated_dir>/cache/source-indexes/`. The managed loader
   may rebuild a missing or invalid entry in private staging and reuses stable
-  indexes with `cache=0`. With an unusable cache it can open the source cache-free
-  and report the fallback. Generated VSView sessions can reuse validated stable
-  entries or open cache-free. The current profile tokens are
+  indexes with `cache=0`. When an index cache was supplied, source admission
+  produced a reusable geometry probe token, and the managed load returned no clip,
+  it logs
+  `Loading <path> without the managed L-SMASH index cache; indexing in memory for this run`
+  before opening the source cache-free. Sources without a
+  reusable geometry probe token do not log this warning. Generated VSView sessions
+  can reuse validated stable entries or open cache-free. The current profile tokens are
   `lsw1310-f125953022b6` for managed Windows, `lsw1310-1ec4b81a7724` for unmanaged
   Windows, and `lsw1310-877219813395` for Debian/Docker. All legacy media-adjacent
   indexes remain inert.

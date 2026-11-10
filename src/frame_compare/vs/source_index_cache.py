@@ -28,7 +28,7 @@ from frame_compare.vs.source_admission import (
 log = logging.getLogger(__name__)
 
 # Bump when the complete-frame geometry acceptance rules change.
-_GEOMETRY_POLICY_VERSION = 1
+_GEOMETRY_POLICY_VERSION = 3
 
 
 class _IndexMetadata(TypedDict):
@@ -98,6 +98,11 @@ class ManagedSourceIndexCache:
         self.root = generated_root / "cache" / "source-indexes"
         self.runtime_token = index_cache_token()
         self._lock_timeout_seconds = lock_timeout_seconds
+
+    @property
+    def generated_root(self) -> Path:
+        """Return the generated-data root that owns this cache."""
+        return self._generated_root
 
     def _entry(self, path: Path) -> _Entry:
         source = path.resolve(strict=True)

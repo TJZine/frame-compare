@@ -7,15 +7,17 @@ import os
 import re
 import stat
 from collections.abc import Callable, Set
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from pathlib import Path
-from subprocess import CalledProcessError, TimeoutExpired
+from subprocess import CalledProcessError
+from time import monotonic
 from typing import cast
 
 from frame_compare.utils.canvas import MAX_CANVAS_PIXELS, validate_canvas_size
 from frame_compare.utils.subproc import (
     PROBE_STDERR_BYTES,
+    SubprocessAborted,
     SubprocessOutputLimitExceeded,
     resolve_optional_executable,
     run_subprocess,
@@ -27,12 +29,18 @@ from frame_compare.vs.hdr_probe import (
 )
 
 _DECODER_PAIR = re.compile(r"[A-Za-z0-9_-]+=(?:[^ \t\r\n'\\\x00]|\\[^\x00]|'[^'\x00]*')+")
-_SCAN_TIMEOUT_SECONDS = 1800.0
+_SCAN_STALL_SECONDS = 120.0
 _SCAN_STDOUT_BYTES = 128 * 1024 * 1024
 _MAX_FRAME_RECORD_BYTES = 256
 _FRAME_RECORD = re.compile(
     rb"frame\|stream_index=(\d+)\|width=(\d+)\|height=(\d+)"
     rb"\|crop_top=(\d+)\|crop_bottom=(\d+)\|crop_left=(\d+)\|crop_right=(\d+)(?:\|)?"
+)
+# libavutil's av_image_check_size2 can reject a picture before ffprobe reports it.
+# Match the message body regardless of the logger's prefix or color formatting.
+_PROBE_PIXEL_LIMIT_FAILURE = re.compile(
+    rb"Picture size [0-9]+x[0-9]+ exceeds specified max pixel count [0-9]+,"
+    rb" see the documentation if you wish to increase it\b"
 )
 _MISSING_FRAME_DIMENSIONS = "Source video frame dimensions could not be verified"
 # Match complete FFprobe demuxer names. These ordinary containers read a single
@@ -131,6 +139,7 @@ class SourceAdmission:
     executable: Path
     probe_stamp: SourceIdentity | None
     geometry_probe_token: str | None
+    _scan_complete: bool = field(default=False, init=False, repr=False, compare=False)
 
     def verify(self, path: Path) -> None:
         if _source_stamp(path) != self.stamp:
@@ -143,13 +152,20 @@ class SourceAdmission:
             abort_check()
             return False
 
+        stderr = b""
         try:
+            abort_check()
             self.verify(path)
-            _scan_video_frames(path.absolute(), self.stream_indices, abort, self.executable)
+            if self._scan_complete:
+                return
+            stderr = _scan_video_frames(
+                path.absolute(), self.stream_indices, abort, self.executable
+            )
             self.verify(path)
             abort_check()
         except (OSError, ValueError) as error:
-            raise SourceGeometryError(str(error)) from error
+            raise SourceGeometryError(_scan_refusal(str(error), stderr)) from error
+        object.__setattr__(self, "_scan_complete", True)
 
 
 class SourceGeometryError(ValueError):
@@ -222,10 +238,38 @@ class _FrameGeometryScan:
             raise ValueError(_MISSING_FRAME_DIMENSIONS)
 
 
+def _scan_refusal(reason: str, stderr: bytes) -> str:
+    excerpt = stderr[:512].decode(errors="replace").strip()
+    return f"{reason}: {excerpt}" if excerpt else reason
+
+
 def _scan_video_frames(
     path: Path, stream_indices: Set[int], abort: Callable[[], bool], executable: Path
-) -> None:
+) -> bytes:
     scan = _FrameGeometryScan(stream_indices)
+    last_stdout = monotonic()
+    refusal: str | None = None
+
+    def feed(chunk: bytes) -> None:
+        nonlocal last_stdout, refusal
+        last_stdout = monotonic()
+        try:
+            scan.feed(chunk)
+        except ValueError as exc:
+            refusal = str(exc)
+            raise SubprocessAborted() from exc
+
+    def abort_if_stalled() -> bool:
+        nonlocal refusal
+        if abort():
+            return True
+        if monotonic() - last_stdout >= _SCAN_STALL_SECONDS:
+            refusal = (
+                f"Source video frame scan made no progress for {_SCAN_STALL_SECONDS:g} seconds"
+            )
+            return True
+        return False
+
     try:
         result = run_subprocess(
             [
@@ -234,8 +278,8 @@ def _scan_video_frames(
                 "error",
                 "-max_pixels",
                 str(MAX_CANVAS_PIXELS),
-                "-err_detect",
-                "explode",
+                "-threads",
+                "0",
                 "-apply_cropping",
                 "0",
                 "-select_streams",
@@ -247,24 +291,30 @@ def _scan_video_frames(
                 "compact=p=1:nk=0",
                 str(path),
             ],
-            timeout_seconds=_SCAN_TIMEOUT_SECONDS,
-            abort=abort,
-            stdout_consumer=scan.feed,
+            abort=abort_if_stalled,
+            stdout_consumer=feed,
             max_stdout_bytes=_SCAN_STDOUT_BYTES,
             max_stderr_bytes=PROBE_STDERR_BYTES,
         )
-    except TimeoutExpired as exc:
-        raise ValueError("Source video frame scan timed out") from exc
+    except SubprocessAborted as exc:
+        if refusal is None:
+            raise
+        raise ValueError(_scan_refusal(refusal, exc.stderr)) from exc
     except SubprocessOutputLimitExceeded as exc:
-        raise ValueError("Source video frame scan exceeded its output limit") from exc
+        raise ValueError(
+            _scan_refusal("Source video frame scan exceeded its output limit", exc.stderr)
+        ) from exc
     except CalledProcessError as exc:
-        raise ValueError(_MISSING_FRAME_DIMENSIONS) from exc
-    if Path(result.args[0]).resolve() != executable:
-        raise ValueError("FFprobe executable changed during source admission")
-    # ffprobe can report decoding errors and still exit successfully.
-    if result.stderr:
-        raise ValueError(_MISSING_FRAME_DIMENSIONS)
-    scan.finish()
+        raise ValueError(_scan_refusal(_MISSING_FRAME_DIMENSIONS, exc.stderr)) from exc
+    try:
+        if Path(result.args[0]).resolve() != executable:
+            raise ValueError("FFprobe executable changed during source admission")
+        if _PROBE_PIXEL_LIMIT_FAILURE.search(result.stderr):
+            raise ValueError("FFprobe rejected a source video picture at its pixel limit")
+        scan.finish()
+    except (OSError, ValueError) as exc:
+        raise ValueError(_scan_refusal(str(exc), result.stderr)) from exc
+    return result.stderr
 
 
 def admit_source(path: Path, *, abort_check: Callable[[], None]) -> SourceAdmission:

@@ -175,9 +175,13 @@ type OutputStream = Literal["stdout", "stderr"]
 class SubprocessAborted(Exception):
     """The owner stopped a process; incomplete output is not a successful result."""
 
+    stderr: bytes = b""
+
 
 class SubprocessOutputLimitExceeded(SubprocessError):
     """A child emitted more than the caller's byte budget for one stream."""
+
+    stderr: bytes = b""
 
     def __init__(
         self,
@@ -389,6 +393,7 @@ def run_subprocess(
         env=child_environment(env),
         capture_output=True,
     )
+    stderr_fd: int | None = None
     try:
         assert process.stdout is not None and process.stderr is not None
         readers = {
@@ -399,6 +404,7 @@ def run_subprocess(
         # A single owner means there are no reader threads to strand on EOF.
         for fd in readers:
             os.set_blocking(fd, False)
+        stderr_fd = process.stderr.fileno()
         while readers or process.poll() is None:
             returncode = process.poll()
             if returncode is not None:
@@ -434,6 +440,15 @@ def run_subprocess(
                     consume(chunk)
             if not progressed:
                 sleep(_POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining))
+    except (SubprocessAborted, SubprocessOutputLimitExceeded) as exc:
+        # Stdout may have stopped the loop before its stderr read. Take one
+        # nonblocking read within the remaining budget and keep the original error.
+        stderr_remaining = stderr_budget.limit - stderr_budget.observed
+        if stderr_fd is not None and stderr_remaining > 0:
+            with suppress(OSError):
+                stderr_budget.consume(os.read(stderr_fd, min(_READ_BYTES, stderr_remaining)))
+        exc.stderr = stderr_budget.diagnostics()
+        raise
     finally:
         try:
             process_tree.reap(process)

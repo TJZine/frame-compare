@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # MVP security audit
 
 - Audit date 2026-11-08

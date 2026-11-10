@@ -582,6 +582,7 @@ def test_independent_output_caps_stop_and_reap_flooding_children(
     violation = error.value
     assert (violation.stream, violation.limit, violation.observed) == (stream, cap, cap + 1)
     assert violation.truncated
+    assert violation.stderr == (violation.diagnostics if stream == "stderr" else b"")
     assert len(violation.diagnostics) < 9_000
     assert b"<redacted>" in violation.diagnostics
     assert secret.encode() not in violation.diagnostics
@@ -594,7 +595,56 @@ def test_independent_output_caps_stop_and_reap_flooding_children(
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("outcome", ["failure", "timeout"])
+@pytest.mark.parametrize("stop", ["stdout-cap", "consumer"])
+def test_early_stdout_refusal_includes_queued_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    streaming_children: list[subprocess.Popen[bytes]],
+    stop: str,
+) -> None:
+    secret = "fixture-signing-secret"
+    monkeypatch.setenv("WINDOWS_UPDATE_SIGNING_KEY_XML", secret)
+    diagnostic = b"warning\x1b " + secret.encode()
+    script = f"import os; os.write(2, {diagnostic + b'ignored'!r}); os.write(1, b'abc')"
+    spawn = subproc_module.spawn_owned_process
+
+    def spawn_with_queued_output(
+        *args: Any, **kwargs: Any
+    ) -> tuple["subprocess.Popen[bytes]", subproc_module.OwnedProcessTree]:
+        child, tree = spawn(*args, **kwargs)
+        # The child writes less than a pipe can hold. Wait here so both streams
+        # are queued before the real reader reaches its first stdout read.
+        assert child.wait(timeout=5) == 0
+        return child, tree
+
+    monkeypatch.setattr(subproc_module, "spawn_owned_process", spawn_with_queued_output)
+    refusal = SubprocessAborted("stdout rejected")
+
+    def reject_stdout(_chunk: bytes) -> None:
+        raise refusal
+
+    with pytest.raises(
+        SubprocessOutputLimitExceeded if stop == "stdout-cap" else SubprocessAborted
+    ) as error:
+        run_subprocess(
+            [sys.executable, "-c", script],
+            max_stdout_bytes=2 if stop == "stdout-cap" else 3,
+            max_stderr_bytes=len(diagnostic),
+            stdout_consumer=reject_stdout if stop == "consumer" else None,
+        )
+
+    failure = error.value
+    if isinstance(failure, SubprocessOutputLimitExceeded):
+        assert (failure.stream, failure.limit, failure.observed) == ("stdout", 2, 3)
+        assert failure.diagnostics == b"abc"
+    else:
+        assert failure is refusal
+    assert failure.stderr == b"warning  <redacted>"
+    [child] = streaming_children
+    assert child.stdout is not None and child.stdout.closed
+    assert child.stderr is not None and child.stderr.closed
+
+
+@pytest.mark.parametrize("outcome", ["failure", "timeout", "abort"])
 def test_retained_diagnostics_are_bounded_and_sanitized(
     outcome: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -610,13 +660,34 @@ def test_retained_diagnostics_are_bounded_and_sanitized(
     script = (
         "import os,time\n"
         f"payload = b'head\\x1b' + {payload!r} + b'x' * 20000 + b'tail\\x07'\n"
-        "os.write(1, payload)\nos.write(2, payload)\n"
+        "os.write(2, payload)\nos.write(1, payload)\n"
         f"{finish}"
     )
-    kind = subprocess.CalledProcessError if outcome == "failure" else subprocess.TimeoutExpired
+    kind = {
+        "failure": subprocess.CalledProcessError,
+        "timeout": subprocess.TimeoutExpired,
+        "abort": SubprocessAborted,
+    }[outcome]
+    stdout_chunks: list[bytes] = []
     with pytest.raises(kind) as error:
-        run_subprocess([sys.executable, "-c", script], env=environment, timeout_seconds=0.5)
-    for output in (error.value.stdout, error.value.stderr):
+        run_subprocess(
+            [sys.executable, "-c", script],
+            env=environment,
+            timeout_seconds=0.5 if outcome != "abort" else 3,
+            abort=(lambda: bool(stdout_chunks)) if outcome == "abort" else None,
+            stdout_consumer=stdout_chunks.append if outcome == "abort" else None,
+            max_stdout_bytes=32 * 1024,
+        )
+    failure = error.value
+    outputs = (
+        (failure.stderr,)
+        if isinstance(failure, SubprocessAborted)
+        else (
+            failure.stdout,
+            failure.stderr,
+        )
+    )
+    for output in outputs:
         assert output is not None and 0 < len(output) < 9_000
         assert output.startswith(b"head") and output.rstrip().endswith(b"tail")
         assert b"<redacted> <redacted> <redacted>" in output

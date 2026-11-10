@@ -1,15 +1,28 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
+from vapoursynth import Core
 
 import frame_compare.vs.source_admission as admission_module
 from frame_compare.utils.canvas import MAX_CANVAS_PIXELS
-from frame_compare.vs.source_admission import admit_source, bounded_decoder_options
+from frame_compare.utils.subproc import run_subprocess
+from frame_compare.vs.errors import SourceLoadError
+from frame_compare.vs.source import load_source
+from frame_compare.vs.source_admission import (
+    SourceGeometryError,
+    admit_source,
+    bounded_decoder_options,
+)
 
 _VIDEO: dict[str, object] = {
     "index": 2,
@@ -109,12 +122,158 @@ def test_scan_streams_output_without_buffering_the_complete_probe(
     monkeypatch.setattr(admission_module, "run_subprocess", run)
     admission_module._scan_video_frames(video, {0}, lambda: False, executable)
 
-    assert "-show_entries" in command
-    assert (
-        "frame=stream_index,width,height,crop_top,crop_bottom,crop_left,crop_right:frame_side_data="
-        in command
+    assert command == [
+        str(executable),
+        "-v",
+        "error",
+        "-max_pixels",
+        str(MAX_CANVAS_PIXELS),
+        "-threads",
+        "0",
+        "-apply_cropping",
+        "0",
+        "-select_streams",
+        "v",
+        "-show_entries",
+        "frame=stream_index,width,height,crop_top,crop_bottom,crop_left,crop_right:frame_side_data=",
+        "-of",
+        "compact=p=1:nk=0",
+        str(video),
+    ]
+
+
+@pytest.mark.parametrize("decoration", [b"", b" [1;31m"], ids=["plain", "forced-color"])
+def test_scan_refuses_probe_pixel_limit_diagnostic_on_zero_exit(
+    video: Path, executable: Path, monkeypatch: pytest.MonkeyPatch, decoration: bytes
+) -> None:
+    # Place the verified libavutil message beyond the user-facing excerpt.
+    preceding = b"[h264 @ 0x123] non-existing PPS 0 referenced\n" * 20
+    stderr = (
+        preceding
+        + b"[h264 @ 0x123] [IMGUTILS @ 0x456] "
+        + decoration
+        + (
+            b"Picture size 8192x4320 exceeds specified max pixel "
+            b"count 33177600, see the documentation if you wish to increase it\n"
+        )
     )
-    assert "-max_pixels" in command
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        consumer = kwargs["stdout_consumer"]
+        assert callable(consumer)
+        consumer(_record(0, 64, 64))
+        return subprocess.CompletedProcess(argv, 0, b"", stderr)
+
+    monkeypatch.setattr(admission_module, "run_subprocess", run)
+    reason = "FFprobe rejected a source video picture at its pixel limit"
+    with pytest.raises(ValueError, match=reason) as error:
+        admission_module._scan_video_frames(video, {0}, lambda: False, executable)
+
+    assert str(error.value) == f"{reason}: {preceding[:512].decode().strip()}"
+
+
+@pytest.fixture
+def encode_ts() -> Callable[[Path, str, int, int], None]:
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        pytest.skip("FFmpeg tools are unavailable")
+
+    def encode(path: Path, size: str, seconds: int, gop: int) -> None:
+        run_subprocess(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                f"testsrc2=size={size}:rate=24",
+                "-t",
+                str(seconds),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-g",
+                str(gop),
+                "-sc_threshold",
+                "0",
+                "-f",
+                "mpegts",
+                str(path),
+            ],
+            timeout_seconds=30,
+        )
+
+    return encode
+
+
+def test_scan_admits_mpegts_cut_mid_gop(
+    tmp_path: Path, encode_ts: Callable[[Path, str, int, int], None]
+) -> None:
+    original = tmp_path / "full.ts"
+    encode_ts(original, "1280x720", 8, 96)
+    data = original.read_bytes()
+    packet_bytes = 188
+    start = len(data) // (3 * packet_bytes) * packet_bytes
+    cut = tmp_path / "cut.ts"
+    cut.write_bytes(data[start:])
+
+    admission = admit_source(cut, abort_check=lambda: None)
+    admission.scan(cut, abort_check=lambda: None)
+
+
+def test_scan_refuses_mixed_resolution_mpegts_before_native_open(
+    tmp_path: Path, encode_ts: Callable[[Path, str, int, int], None]
+) -> None:
+    first, second = tmp_path / "720p.ts", tmp_path / "1080p.ts"
+    encode_ts(first, "1280x720", 1, 24)
+    encode_ts(second, "1920x1080", 1, 24)
+    joined = tmp_path / "joined.ts"
+    joined.write_bytes(first.read_bytes() + second.read_bytes())
+    loader = MagicMock()
+
+    with pytest.raises(SourceLoadError, match="dimensions change within a stream"):
+        load_source(joined, cast(Core, SimpleNamespace(lsmas=loader)))
+
+    loader.LWLibavSource.assert_not_called()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="The sleeping ffprobe fixture uses a POSIX executable")
+@pytest.mark.parametrize(
+    ("stop", "reason"),
+    [
+        ("stall", "Source video frame scan made no progress for 0.5 seconds"),
+        ("stdout-cap", "Source video frame scan exceeded its output limit"),
+        ("invalid-frame", "Source video frame dimensions could not be verified"),
+    ],
+)
+def test_scan_reports_bounded_diagnostics_when_stopped(
+    video: Path, executable: Path, monkeypatch: pytest.MonkeyPatch, stop: str, reason: str
+) -> None:
+    secret = "fixture-signing-secret"
+    marker = executable.with_suffix(".finished")
+    script = f"#!/bin/sh\nprintf 'diagnostic \\033\\007{secret} {'x' * 2048}\\n' >&2\n"
+    if stop == "stall":
+        monkeypatch.setattr(admission_module, "_SCAN_STALL_SECONDS", 0.5, raising=False)
+    else:
+        script += "sleep 0.2\nprintf 'invalid frame\\n'\n"
+    if stop == "stdout-cap":
+        monkeypatch.setattr(admission_module, "_SCAN_STDOUT_BYTES", 4)
+    script += 'sleep 2\n: > "$0.finished"\n'
+    executable.write_text(script, encoding="ascii")
+    executable.chmod(0o700)
+    monkeypatch.setenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", str(executable))
+    monkeypatch.setenv("WINDOWS_UPDATE_SIGNING_KEY_XML", secret)
+
+    with pytest.raises(ValueError, match=reason) as error:
+        admission_module._scan_video_frames(video, {0}, lambda: False, executable)
+
+    assert not marker.exists()
+    excerpt = str(error.value).removeprefix(f"{reason}: ")
+    assert excerpt.startswith("diagnostic   <redacted> ")
+    assert len(excerpt.encode()) == 512
+    assert secret not in excerpt
+    assert "\x1b" not in excerpt and "\x07" not in excerpt
 
 
 def test_admission_probes_headers_once_and_selects_the_real_stream(
@@ -255,7 +414,7 @@ def test_unknown_coded_header_requires_fresh_frame_geometry(
     if message is None:
         admission.scan(video, abort_check=lambda: None)
     else:
-        with pytest.raises(admission_module.SourceGeometryError, match=message):
+        with pytest.raises(SourceGeometryError, match=message):
             admission.scan(video, abort_check=lambda: None)
 
 
@@ -330,10 +489,8 @@ def test_decoder_options_reject_ambiguous_syntax(options: str) -> None:
 def test_native_callers_refuse_unverifiable_formats_before_scan_or_open(
     video: Path, monkeypatch: pytest.MonkeyPatch, caller: str, format_name: object
 ) -> None:
-    from typing import Any, cast
+    from typing import Any
 
-    from frame_compare.vs.errors import SourceLoadError
-    from frame_compare.vs.source import load_source
     from frame_compare.vsview.session_runtime import load_preview_source
 
     monkeypatch.setattr(
@@ -362,10 +519,8 @@ def test_native_callers_refuse_unverifiable_formats_before_scan_or_open(
 def test_elementary_mpeg2_scans_before_private_native_open(
     video: Path, monkeypatch: pytest.MonkeyPatch, caller: str, coded_header: bool
 ) -> None:
-    from types import SimpleNamespace
-    from typing import Any, cast
+    from typing import Any
 
-    from frame_compare.vs.source import load_source
     from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
     from frame_compare.vsview.session_runtime import load_preview_source
 

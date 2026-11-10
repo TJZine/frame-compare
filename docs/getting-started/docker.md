@@ -61,17 +61,20 @@ commands above from the host instead.
 
 ## The index warning
 
-A comparison run may print this warning when the loader cannot use the managed
-L-SMASH index cache:
+A comparison run logs this warning when an index cache was supplied, source
+admission produced a reusable geometry probe token, and the managed load returned
+no clip:
 
-`Loading /workspace/comparison_videos/<file> without an L-SMASH index cache after index construction failed`
+`Loading <path> without the managed L-SMASH index cache; indexing in memory for this run`
+
+Sources without a reusable geometry probe token do not produce this warning.
 
 The run service mounts media read-only and persists indexes under
 `/workspace/generated/cache/source-indexes/` by default. The generated mount
 must be writable by the container's effective user for the first build and later
 reuse. Existing adjacent media indexes are left untouched. If the managed cache is
-unusable, Frame Compare retries without a disk cache and repeats the in-memory
-indexing cost on subsequent loads. See [Output layout](../reference/output-layout.md).
+unusable, Frame Compare retries without a disk cache and indexes in memory for that
+run. See [Output layout](../reference/output-layout.md).
 
 ## Next steps
 

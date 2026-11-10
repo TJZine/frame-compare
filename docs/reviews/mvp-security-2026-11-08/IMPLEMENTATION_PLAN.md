@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Approved MVP security implementation contract
 
 This contract records the remediation requirements derived from

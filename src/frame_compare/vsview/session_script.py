@@ -30,6 +30,9 @@ def write_vsview_session_script(
     source_indexes: dict[Path, Path] | None = None,
     source_index_generated_root: Path | None = None,
 ) -> Path:
+    if source_indexes and source_index_generated_root is None:
+        raise ValueError("source_index_generated_root is required when source_indexes are provided")
+
     sessions_dir = cache_dir / "vsview_sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
@@ -44,9 +47,7 @@ def write_vsview_session_script(
         memory_limit_mb=memory_limit_mb,
         preview_tonemap=preview_tonemap,
         source_indexes=source_indexes,
-        source_index_generated_root=(
-            cache_dir if source_index_generated_root is None else source_index_generated_root
-        ),
+        source_index_generated_root=source_index_generated_root,
     )
 
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")

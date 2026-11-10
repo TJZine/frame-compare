@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import sys
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
@@ -11,7 +12,6 @@ from unittest.mock import MagicMock
 import pytest
 from vapoursynth import Core, VideoFormat, VideoNode
 
-import frame_compare.vs.hdr_probe as hdr_probe_module
 import frame_compare.vs.source as source_module
 import frame_compare.vs.source_admission as admission_module
 from frame_compare.utils.canvas import MAX_CANVAS_PIXELS
@@ -312,7 +312,7 @@ def test_load_source_rejects_change_at_native_open(
         "probe_admission_headers",
         lambda *_args, **_kwargs: (streams, {"format": {"format_name": "matroska,webm"}}),
     )
-    monkeypatch.setattr(admission_module, "_scan_video_frames", lambda *_args: None)
+    monkeypatch.setattr(admission_module, "_scan_video_frames", lambda *_args: b"")
 
     def change_before_open(*_args: object) -> None:
         video.write_bytes(b"changed before native open")
@@ -336,10 +336,17 @@ def test_load_source_rejects_change_at_native_open(
     "failure", ["construction", "lock-timeout", "missing-root", "no-probe-identity"]
 )
 def test_load_source_retries_cache_failures_using_controlled_nonexistent_leaf(
-    tmp_path: Path, failure: str, _stub_hdr_probe: MagicMock
+    tmp_path: Path,
+    failure: str,
+    monkeypatch: pytest.MonkeyPatch,
+    encode_source: Callable[[Path, int], None],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    video = tmp_path / "video.mkv"
-    video.touch()
+    video = tmp_path / "video.mp4"
+    encode_source(video, 64)
+    monkeypatch.setattr(source_module, "admit_source", admission_module.admit_source)
+    scan = MagicMock(wraps=admission_module._scan_video_frames)
+    monkeypatch.setattr(admission_module, "_scan_video_frames", scan)
     generated = tmp_path.resolve() / "generated"
     cache = ManagedSourceIndexCache(generated, lock_timeout_seconds=0)
     lock: AbstractContextManager[None] = nullcontext()
@@ -347,7 +354,7 @@ def test_load_source_retries_cache_failures_using_controlled_nonexistent_leaf(
         assert cache.try_load(
             video,
             lambda _source, _mode, index: index.write_bytes(b"index"),
-            admission=_stub_hdr_probe,
+            admission=admission_module.admit_source(video, abort_check=lambda: None),
         )
         stable = cache.validated_index(video)
         assert stable is not None
@@ -355,14 +362,14 @@ def test_load_source_retries_cache_failures_using_controlled_nonexistent_leaf(
     elif failure == "missing-root":
         generated.touch()
     elif failure == "no-probe-identity":
-        _stub_hdr_probe.geometry_probe_token = None
+        monkeypatch.setattr(admission_module, "_probe_token", lambda *_args: None)
 
     calls: list[dict[str, object]] = []
-    _stub_hdr_probe.scan.reset_mock()
+    scan.reset_mock()
 
     def loader(_path: str, **kwargs: object) -> MockClip:
         calls.append(kwargs)
-        assert _stub_hdr_probe.scan.call_count == len(calls)
+        assert scan.call_count == 1
         index = Path(cast(str, kwargs["cachefile"]))
         assert index.parent.is_dir() and not index.exists()
         if kwargs["cache"] == 1:
@@ -371,11 +378,18 @@ def test_load_source_retries_cache_failures_using_controlled_nonexistent_leaf(
         return MockClip()
 
     core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
-    with lock:
+    with caplog.at_level(logging.WARNING, logger=source_module.__name__), lock:
         load_source(video, cast(Core, core), index_cache=cache)
     assert [call["cache"] for call in calls] == ([1, 0] if failure == "construction" else [0])
     _assert_cache_free(calls[-1])
     assert not list(cache.root.glob(".stage-*"))
+    warning = (
+        f"Loading {video} without the managed L-SMASH index cache; indexing in memory for this run"
+    )
+    if failure == "construction":
+        assert [record.getMessage() for record in caplog.records] == [warning]
+    elif failure == "no-probe-identity":
+        assert warning not in [record.getMessage() for record in caplog.records]
 
 
 # HDR Detection Tests
@@ -409,7 +423,7 @@ def test_load_source_falls_back_to_ffprobe_for_absent_hdr_props(
     )
 
 
-def test_load_source_requires_ffprobe_before_native_decode(
+def test_load_source_stops_before_native_loader_when_admission_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -426,68 +440,6 @@ def test_load_source_requires_ffprobe_before_native_decode(
         )
 
     assert exc_info.value.code == "FC-4015"
-    loader.assert_not_called()
-
-
-def test_load_source_refuses_signaled_source_without_dimension_probe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        source_module,
-        "admit_source",
-        MagicMock(side_effect=ValueError("ffprobe is required to verify source dimensions")),
-    )
-    hdr_probe = MagicMock(wraps=hdr_probe_module.probe_hdr_metadata)
-    monkeypatch.setattr(source_module, "probe_hdr_metadata", hdr_probe)
-    props = {"_Primaries": 1, "_Transfer": 1, "_Matrix": 1}
-    core = SimpleNamespace(
-        lsmas=SimpleNamespace(LWLibavSource=lambda _p, **_kwargs: MockClip(frame_props=props))
-    )
-
-    with pytest.raises(SourceLoadError, match="required to verify source dimensions"):
-        load_source(Path("video.mkv"), cast(Core, core))
-
-    hdr_probe.assert_not_called()
-
-
-@pytest.mark.parametrize("width", [7681, 10**1000])
-def test_oversize_probed_source_never_reaches_native_loader(
-    monkeypatch: pytest.MonkeyPatch, width: int
-) -> None:
-    monkeypatch.setattr(
-        source_module,
-        "admit_source",
-        MagicMock(
-            side_effect=ValueError(
-                "Source video dimensions are out of bounds. Use a positive size of at most "
-                "7,680 pixels per axis"
-            )
-        ),
-    )
-    loader = MagicMock(side_effect=AssertionError("must validate before native work"))
-    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
-    with pytest.raises(SourceLoadError, match="7,680 pixels per axis"):
-        load_source(Path("video.mkv"), cast(Core, core))
-    loader.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    "streams",
-    [[], [{"width": None, "height": 1080}], [{"width": 1920}], [{"height": 1080}]],
-)
-def test_unproven_dimensions_never_reach_native_loader(
-    monkeypatch: pytest.MonkeyPatch, streams: list[dict[str, object]]
-) -> None:
-    message = (
-        "no verifiable video stream is supported"
-        if not streams
-        else "Source video dimensions could not be verified before decoding"
-    )
-    monkeypatch.setattr(source_module, "admit_source", MagicMock(side_effect=ValueError(message)))
-    loader = MagicMock(side_effect=AssertionError("must validate before native work"))
-    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
-    with pytest.raises(SourceLoadError, match="no verifiable|dimensions could not be verified"):
-        load_source(Path("video.mkv"), cast(Core, core))
     loader.assert_not_called()
 
 
@@ -737,17 +689,16 @@ def test_load_source_hdr_cases(
 
 
 @pytest.mark.parametrize(
-    ("stage", "ffprobe_available", "signaled_sdr"),
+    ("stage", "signaled_sdr"),
     [
-        pytest.param("load", True, False, id="load"),
-        pytest.param("index_retry", True, False, id="index-retry"),
-        pytest.param("frame", True, False, id="frame-unspecified-with-probe"),
-        pytest.param("frame", True, True, id="frame-sdr-with-probe"),
+        pytest.param("load", False, id="load"),
+        pytest.param("index_retry", False, id="index-retry"),
+        pytest.param("frame", False, id="frame-unspecified-with-probe"),
+        pytest.param("frame", True, id="frame-sdr-with-probe"),
     ],
 )
 def test_load_source_stops_native_admission_after_interruption(
     stage: str,
-    ffprobe_available: bool,
     signaled_sdr: bool,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -758,7 +709,6 @@ def test_load_source_stops_native_admission_after_interruption(
     video_path.touch()
     cache = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
     calls: list[str] = []
-    del ffprobe_available
 
     async def run() -> None:
         task = asyncio.current_task()

@@ -25,6 +25,7 @@ from frame_compare.vsview.adapter import (
     _build_vsview_child_env,
     _run_startup_probe,
     _run_vsview_command,
+    _write_vsview_session_script,
     check_vsview_availability,
     launch_alignment_verification_session,
 )
@@ -38,10 +39,7 @@ from frame_compare.vsview.session_runtime import (
     install_workspace_log_filter,
     load_preview_source,
 )
-from frame_compare.vsview.session_script import (
-    _build_script_content,
-    write_vsview_session_script,
-)
+from frame_compare.vsview.session_script import write_vsview_session_script
 from tests.alignment_review_test_support import (
     native_attempt_payload,
     provisional_audio_attempt,
@@ -642,7 +640,9 @@ def _execute_generated_script(
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     presentation_names_by_stem: dict[str, str] | None = None,
     unusable_index_stems: set[str] | None = None,
+    successful_index_stems: set[str] | None = None,
     cache_free_failure_stems: set[str] | None = None,
+    admission_scan_calls: list[Path] | None = None,
     output_sink: list[tuple[str, int, str]] | None = None,
     audio_review_by_key: dict[str, str] | None = None,
     overlay_sink: list[str] | None = None,
@@ -669,10 +669,13 @@ def _execute_generated_script(
     }
     default_props.update(frame_props_by_stem or {})
     rejected_indexes = unusable_index_stems or set()
+    managed_indexes = rejected_indexes | (successful_index_stems or set())
     rejected_cache_free = cache_free_failure_stems or set()
     cache_owner = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
     source_indexes: dict[Path, Path] = {}
     admission = MagicMock(geometry_probe_token="a" * 64)
+    if admission_scan_calls is not None:
+        admission.scan.side_effect = lambda path, **_kwargs: admission_scan_calls.append(path)
 
     def seed_index(_source: Path, cache: int, index: Path) -> bool:
         assert cache == 1
@@ -680,7 +683,7 @@ def _execute_generated_script(
         return True
 
     for path in (reference, *comparisons):
-        if path.stem in rejected_indexes:
+        if path.stem in managed_indexes:
             assert cache_owner.try_load(path, seed_index, admission=admission)
             index = cache_owner.validated_index(path)
             assert index is not None
@@ -763,20 +766,25 @@ def _execute_generated_script(
         "frame_compare.vsview.session_runtime.apply_alignment_overlay", capture_overlay
     )
 
-    script = _build_script_content(
-        reference=reference,
-        comparisons=comparisons,
-        suggested_offsets_by_key=suggested_offsets_by_key,
-        audio_review_by_key=(
-            _audio_review_map(suggested_offsets_by_key)
-            if audio_review_by_key is None
-            else audio_review_by_key
-        ),
-        frame_props_by_stem=default_props,
-        presentation_names_by_stem=presentation_names_by_stem,
-        source_indexes=source_indexes,
-        source_index_generated_root=cache_owner.root.parent.parent,
+    generated_root = cache_owner.generated_root
+    session_path = _write_vsview_session_script(
+        VSViewSessionRequest(
+            reference=reference,
+            comparisons=comparisons,
+            suggested_offsets_by_key=suggested_offsets_by_key,
+            audio_review_by_key=(
+                _audio_review_map(suggested_offsets_by_key)
+                if audio_review_by_key is None
+                else audio_review_by_key
+            ),
+            cache_dir=generated_root / "run" / "generated",
+            frame_props_by_stem=default_props,
+            presentation_names_by_stem=presentation_names_by_stem,
+            source_indexes=source_indexes,
+            source_index_generated_root=generated_root,
+        )
     )
+    script = session_path.read_text(encoding="utf-8")
     if legacy_index_payload:
         legacy = tmp_path / "ref.mkv.frame-compare-old.lwi"
         legacy.write_bytes(b"legacy")
@@ -792,6 +800,65 @@ def _execute_generated_script(
         },
     )
     return output_calls, output_metadata, applied_props, loader_calls
+
+
+def test_adapter_writer_emits_parent_source_index_root(
+    tmp_path: Path,
+) -> None:
+    import ast
+
+    generated_root = (tmp_path / "workspace-generated").resolve()
+    run_generated = generated_root / "run-20261110" / "generated"
+    cache = ManagedSourceIndexCache(generated_root)
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    admission = MagicMock(geometry_probe_token="a" * 64)
+
+    def create_index(_source: Path, _cache: int, index: Path) -> bool:
+        index.write_bytes(b"managed")
+        return True
+
+    indexes = {}
+    for source in (reference, comparison):
+        assert cache.try_load(source, create_index, admission=admission)
+        index = cache.validated_index(source)
+        assert index is not None
+        indexes[source] = index
+
+    script_path = _write_vsview_session_script(
+        VSViewSessionRequest(
+            reference=reference,
+            comparisons=[comparison],
+            suggested_offsets_by_key={"ref:comparison": 0},
+            audio_review_by_key=_audio_review_map({"ref:comparison": 0}),
+            cache_dir=run_generated,
+            source_indexes=indexes,
+            source_index_generated_root=cache.generated_root,
+        )
+    )
+    assignment = next(
+        node
+        for node in ast.parse(script_path.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "SESSION_DATA"
+    )
+    payload = next(
+        node.value
+        for node in ast.walk(assignment)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
+    data = json.loads(payload)
+
+    emitted_root = Path(data["source_index_generated_root"])
+    assert emitted_root == cache.generated_root
+    emitted_cache = ManagedSourceIndexCache(emitted_root)
+    assert emitted_cache.validated_index(reference) == Path(data["reference"]["managed_index_path"])
+    assert emitted_cache.validated_index(comparison) == Path(
+        data["targets"]["comparison"]["managed_index_path"]
+    )
 
 
 def test_generated_session_registers_named_outputs_in_input_order(
@@ -835,20 +902,31 @@ def test_generated_session_passes_validated_indexes_read_only_and_retries_privat
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    admission_scan_calls: list[Path] = []
     output_calls, _metadata, _props, loader_calls = _execute_generated_script(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         comparison_stems=("a",),
         suggested_offsets_by_key={"ref:a": 0},
-        unusable_index_stems={"ref", "a"},
+        unusable_index_stems={"a"},
+        successful_index_stems={"ref"},
+        admission_scan_calls=admission_scan_calls,
     )
 
     index_cache = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
+    reference_index = index_cache.validated_index(tmp_path / "ref.mkv")
+    comparison_index = index_cache.validated_index(tmp_path / "a.mkv")
+    assert reference_index is not None
+    assert comparison_index is not None
     assert loader_calls == [
-        ("ref", str(index_cache.validated_index(tmp_path / "ref.mkv")), 0),
-        ("ref", None, 0),
-        ("a", str(index_cache.validated_index(tmp_path / "a.mkv")), 0),
+        ("ref", str(reference_index), 0),
+        ("a", str(comparison_index), 0),
         ("a", None, 0),
+    ]
+    assert admission_scan_calls == [
+        tmp_path / "ref.mkv",
+        tmp_path / "a.mkv",
+        tmp_path / "a.mkv",
     ]
     assert output_calls == [("ref", 0, "Reference"), ("a", 1, "Comparison 1")]
 

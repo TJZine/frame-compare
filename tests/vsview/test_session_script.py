@@ -59,6 +59,20 @@ def test_write_vsview_session_script_removes_reserved_path_after_write_failure(
     assert list(sessions_dir.iterdir()) == []
 
 
+def test_write_vsview_session_script_requires_root_for_managed_indexes(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="source_index_generated_root"):
+        write_vsview_session_script(
+            reference=Path("ref.mkv"),
+            comparisons=[Path("comparison.mkv")],
+            suggested_offsets_by_key={"ref:comparison": 0},
+            audio_review_by_key={"ref:comparison": "{}"},
+            cache_dir=tmp_path,
+            source_indexes={Path("ref.mkv"): Path("ref.lwi")},
+        )
+
+
 def _session_console(*, stderr: io.TextIOBase) -> SessionConsole:
     with redirect_stderr(stderr):
         return SessionConsole()
