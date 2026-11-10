@@ -1,3 +1,8 @@
+---
+search:
+  exclude: true
+---
+
 # Proportional MVP security simplification
 
 Status: Implemented and reviewed. PR #173 update and release acceptance remain open.

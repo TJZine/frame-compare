@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from fractions import Fraction
@@ -20,6 +21,9 @@ from frame_compare.vs.types import SourceInfo
 
 if TYPE_CHECKING:
     import vapoursynth as vs
+
+
+log = logging.getLogger(__name__)
 
 
 class _LWLibavSourcePlugin(Protocol):
@@ -161,6 +165,11 @@ def _load_lwlibav_source(
         clip = index_cache.try_load(path, open_source, admission=admission, abort_check=abort_check)
         if clip is not None:
             return clip
+        if admission.geometry_probe_token is not None:
+            log.warning(
+                "Loading %s without the managed L-SMASH index cache; indexing in memory for this run",
+                path,
+            )
     abort_check()
     admission.scan(path, abort_check=abort_check)
     with private_index_directory() as directory:
