@@ -111,12 +111,15 @@ class SlowpicsPublisher:
         self,
         upload_plan: SlowpicsUploadPlan,
         collection_metadata: SlowpicsCollectionMetadata,
+        *,
+        on_upload_confirmed: Callable[[str, tuple[Path, ...]], None] | None = None,
     ) -> str:
         """Upload screenshots to slow.pics.
 
         Args:
             upload_plan: Planned rows/images to upload.
             collection_metadata: Resolved collection title and optional TMDB association.
+            on_upload_confirmed: Called synchronously after the final accepted image.
 
         Returns:
             The URL of the uploaded comparison.
@@ -152,6 +155,7 @@ class SlowpicsPublisher:
             await self._upload_planned_images_with_retry(
                 upload_plan=upload_plan,
                 metadata_response=metadata_response,
+                on_upload_confirmed=on_upload_confirmed,
                 xsrf_token=xsrf_token,
                 browser_id=browser_id,
             )
@@ -329,12 +333,15 @@ class SlowpicsPublisher:
         *,
         upload_plan: SlowpicsUploadPlan,
         metadata_response: _SlowpicsMetadataResponse,
+        on_upload_confirmed: Callable[[str, tuple[Path, ...]], None] | None,
         xsrf_token: str,
         browser_id: str,
     ) -> None:
         semaphore = asyncio.Semaphore(SLOWPICS_IMAGE_UPLOAD_CONCURRENCY)
+        remaining = upload_plan.screenshot_count
 
         async def _upload_one(image_path: Path, image_uuid: str) -> None:
+            nonlocal remaining
             async with semaphore:
                 await self._upload_image_with_retry(
                     image_path=image_path,
@@ -343,6 +350,9 @@ class SlowpicsPublisher:
                     xsrf_token=xsrf_token,
                     browser_id=browser_id,
                 )
+            remaining -= 1
+            if remaining == 0 and on_upload_confirmed is not None:
+                on_upload_confirmed(metadata_response.comparison_url, tuple(upload_plan.file_paths))
             if self._progress is not None:
                 self._progress.advance()
 
@@ -464,6 +474,8 @@ async def publish_to_slowpics(
     client: httpx.AsyncClient,
     progress: ProgressReporter | None = None,
     upload_plan: SlowpicsUploadPlan | None = None,
+    *,
+    on_upload_confirmed: Callable[[str, tuple[Path, ...]], None] | None = None,
 ) -> PublishResult:
     """Publish screenshots through the browser-compatible slow.pics upload flow.
 
@@ -473,6 +485,7 @@ async def publish_to_slowpics(
         client: HTTP client to use.
         progress: Optional progress reporter.
         upload_plan: Explicit row-major upload plan.
+        on_upload_confirmed: Called synchronously after the final accepted image.
 
     Returns:
         PublishResult containing the URL.
@@ -496,7 +509,9 @@ async def publish_to_slowpics(
     publisher = SlowpicsPublisher(config, client, progress)
     upload_progress_status = ProgressPhaseStatus.FAILED
     try:
-        url = await publisher.upload(upload_plan, collection_metadata)
+        url = await publisher.upload(
+            upload_plan, collection_metadata, on_upload_confirmed=on_upload_confirmed
+        )
         upload_progress_status = ProgressPhaseStatus.COMPLETED
     finally:
         if progress is not None:

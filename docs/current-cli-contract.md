@@ -807,11 +807,10 @@ once the standalone CLI has completed its Python cleanup and selected exit 130,
 it ignores further Ctrl+C during interpreter/native-module teardown to preserve
 that exit status. This does not change repeated-interrupt behavior while the run
 or its cleanup is active, or the signal policy of the reusable Typer application.
-Its failure
-record retains a confirmed slow.pics upload outcome and URL if remote
-publishing completed before the interrupt, even when optional post-upload work
-did not finish. That does not make the run successful or permit new work after
-cancellation. The shared
+Its failure record retains a confirmed slow.pics upload outcome and URL once
+the final planned image has been accepted, even if the interrupt prevents the
+publish phase from returning. That does not make the run successful or permit
+new work after cancellation. The shared
 TMDB response cache is an exception to the publication rule: an already-in-flight
 validated upstream response may finish its locked, atomic worker publication.
 It carries no run, selection, alignment, or analysis-cache authority, and the

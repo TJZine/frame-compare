@@ -1058,9 +1058,10 @@ upload ordering; the final upload path uses that plan and does not scan the
 screenshot directory for membership. Orchestration carries canonical clip labels as
 local screenshot lookup keys while assigning exact explicit labels or unique release
 descriptors as remote image names. Collection metadata, row names, membership,
-ordering, and multipart construction remain owned by their existing seams. After a
-successful upload, orchestration
-carries the exact uploaded planned local file paths into `post_report_cleanup`
+ordering, and multipart construction remain owned by their existing seams. The
+publisher passes the comparison URL and exact planned local file paths to
+orchestration synchronously when the final image is accepted. After a successful
+upload, orchestration passes those paths into `post_report_cleanup`
 and carries typed post-upload action results plus warnings returned by
 `frame_compare.services.slowpics_post_upload` into the final `RunResult`.
 Orchestration does not own clipboard, browser, shortcut, or webhook side-effect
