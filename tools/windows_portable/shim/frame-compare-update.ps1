@@ -1029,9 +1029,19 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
       }
     }
 
-    $expectedFingerprint = Get-RequiredStringProperty -Object $manifest -Name "expected_requirements_lock_sha256" -Context "manifest"
+    $requirementsFingerprintProperty = $manifest.PSObject.Properties["expected_requirements_lock_sha256"]
+    if ($null -eq $requirementsFingerprintProperty -or $null -eq $requirementsFingerprintProperty.Value) {
+      throw "manifest is missing required property 'expected_requirements_lock_sha256'"
+    }
+    $expectedFingerprint = $requirementsFingerprintProperty.Value
+    if ($expectedFingerprint -isnot [string]) {
+      throw "Manifest expected_requirements_lock_sha256 must be a JSON string."
+    }
+    if ($expectedFingerprint -cnotmatch '^[a-f0-9]{64}\z') {
+      throw "Manifest expected_requirements_lock_sha256 is invalid."
+    }
     $installedFingerprint = [string]$installedCompatibility["requirements_lock_sha256"]
-    if ($installedFingerprint -ne $expectedFingerprint.ToLowerInvariant()) {
+    if ($installedFingerprint -cne $expectedFingerprint) {
       throw (
         "Dependency fingerprint mismatch; code-only update refused. " +
         "Install the complete Windows portable bundle from the releases page."

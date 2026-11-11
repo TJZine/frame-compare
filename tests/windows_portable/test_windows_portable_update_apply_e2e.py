@@ -170,7 +170,7 @@ def _build_update_zip(
     *,
     tmp_path: Path,
     runtime_fingerprint: str = _RUNTIME_HASH,
-    requirements_fingerprint: str = _REQ_HASH,
+    requirements_fingerprint: str | list[str] = _REQ_HASH,
     archive_name: str = "update.zip",
     payload_content: str = _NEW_VERSION_CONTENT,
     target_version: str = "1.0.1",
@@ -487,32 +487,38 @@ def test_windows_portable_update_apply_e2e(
     assert not (bundle_dir / "app" / ".update_backups").exists()
     assert _snapshot_bytes(external_generated_root) == external_snapshot
 
-    dependency_mismatch_zip = _build_update_zip(
-        tmp_path=tmp_path,
-        requirements_fingerprint="e" * 64,
-        archive_name="dependency-mismatch.zip",
-    )
-    _sign_update_zip(
-        exe=exe,
-        repo_root=repo_root,
-        update_zip_path=dependency_mismatch_zip,
-        private_key_path=private_key_path,
-        expected_public_key_path=shim_update_ps1.parent / "update_public_key.xml",
-    )
-    dependency_rejection = _apply_update(
-        exe=exe,
-        env=env,
-        bundle_dir=bundle_dir,
-        shim_update_ps1=shim_update_ps1,
-        update_zip_path=dependency_mismatch_zip,
-    )
-    assert dependency_rejection.returncode != 0
-    dependency_output = dependency_rejection.stdout + dependency_rejection.stderr
-    assert "Dependency fingerprint mismatch; code-only update refused" in dependency_output
-    assert "complete Windows portable bundle" in dependency_output
-    assert _snapshot_tree(installed_tree) == original_snapshot
-    assert not (bundle_dir / "app" / ".update_backups").exists()
-    assert _snapshot_bytes(external_generated_root) == external_snapshot
+    for reason, fingerprint, expected_message in (
+        ("mismatch", "e" * 64, "Dependency fingerprint mismatch; code-only update refused"),
+        ("uppercase", _REQ_HASH.upper(), "Manifest expected_requirements_lock_sha256 is invalid."),
+        ("array", [_REQ_HASH], "Manifest expected_requirements_lock_sha256 must be a JSON string."),
+    ):
+        dependency_zip = _build_update_zip(
+            tmp_path=tmp_path,
+            requirements_fingerprint=fingerprint,
+            archive_name=f"dependency-{reason}.zip",
+        )
+        _sign_update_zip(
+            exe=exe,
+            repo_root=repo_root,
+            update_zip_path=dependency_zip,
+            private_key_path=private_key_path,
+            expected_public_key_path=shim_update_ps1.parent / "update_public_key.xml",
+        )
+        dependency_rejection = _apply_update(
+            exe=exe,
+            env=env,
+            bundle_dir=bundle_dir,
+            shim_update_ps1=shim_update_ps1,
+            update_zip_path=dependency_zip,
+        )
+        dependency_output = dependency_rejection.stdout + dependency_rejection.stderr
+        assert dependency_rejection.returncode != 0, dependency_output
+        assert expected_message in dependency_output
+        if reason == "mismatch":
+            assert "complete Windows portable bundle" in dependency_output
+        assert _snapshot_tree(installed_tree) == original_snapshot
+        assert not (bundle_dir / "app" / ".update_backups").exists()
+        assert _snapshot_bytes(external_generated_root) == external_snapshot
 
     manifest_tampered_zip = tmp_path / "manifest-tampered.zip"
     _rewrite_zip_entry(
