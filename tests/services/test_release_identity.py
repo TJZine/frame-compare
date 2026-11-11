@@ -3,7 +3,6 @@
 import pytest
 
 from frame_compare.services.metadata_parsing import (
-    parse_filename,
     parse_filename_with_release_identity,
 )
 from frame_compare.services.release_identity import (
@@ -16,6 +15,7 @@ from frame_compare.services.release_identity import (
     short_source_names,
     unique_presentation_names,
 )
+from frame_compare.services.types import ParsedMetadata
 
 
 @pytest.mark.parametrize(
@@ -188,24 +188,36 @@ def test_parser_derived_controls_are_normalized(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.parametrize(
-    ("filename", "expected_year", "expected_episode"),
+    ("filename", "expected_canonical", "expected_year", "expected_episode"),
     [
-        ("[Group] Movie.2024.1080p.NF.WEB-DL.HDR10.mkv", 2024, None),
-        ("[SubsPlease] Show - 03 (1080p) [ABC].mkv", None, 3),
+        (
+            "[Group] Movie.2024.1080p.NF.WEB-DL.HDR10.mkv",
+            ParsedMetadata(title="Movie 2024", release_group="Group", resolution="1080p"),
+            2024,
+            None,
+        ),
+        (
+            "[SubsPlease] Show - 03 (1080p) [ABC].mkv",
+            ParsedMetadata(
+                title="Show",
+                episode=3,
+                release_group="SubsPlease",
+                resolution="1080p",
+            ),
+            None,
+            3,
+        ),
     ],
 )
 def test_combined_parse_preserves_canonical_fallback_and_merged_release_facts(
     filename: str,
+    expected_canonical: ParsedMetadata,
     expected_year: int | None,
     expected_episode: int | None,
 ) -> None:
     canonical, release = parse_filename_with_release_identity(filename, parser_priority="auto")
 
-    assert canonical == parse_filename(
-        filename,
-        parser_priority="auto",
-        alternate_policy="fallback",
-    )
+    assert canonical == expected_canonical
     assert release.content.year == expected_year
     assert release.content.episode == expected_episode
 

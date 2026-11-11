@@ -159,6 +159,9 @@ def open_url_in_browser(url: str) -> bool:
     return _run_desktop_action("browser", require_comparison_url(url))
 
 
+UNEXPECTED_ERROR_MESSAGE = "Unexpected error: please report this bug."
+
+
 def handle_error(
     error: Exception,
     *,
@@ -180,21 +183,8 @@ def handle_error(
         console = human_console(stderr=True, no_color=no_color)
         console.print(message)
         return int(get_exit_code(error))
-    typer.echo("Unexpected error: please report this bug.", err=True)
+    typer.echo(UNEXPECTED_ERROR_MESSAGE, err=True)
     return int(ExitCode.GENERAL_ERROR)
-
-
-def resolve_root_and_config(root: Path, config: Path | None) -> tuple[Path, Path]:
-    resolved_root = Path(root).resolve()
-    if config is not None:
-        config_path = Path(config)
-        if not config_path.is_absolute():
-            config_path = (resolved_root / config_path).resolve()
-        else:
-            config_path = config_path.resolve()
-    else:
-        config_path = (resolved_root / "config" / "config.toml").resolve()
-    return resolved_root, config_path
 
 
 def write_config_to(path: Path, config: ConfigSchema, *, text_writer: TextWriter) -> None:

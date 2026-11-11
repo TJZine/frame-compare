@@ -11,17 +11,18 @@ from typing import TYPE_CHECKING
 import typer
 
 from frame_compare.cli.cli_helpers import (
+    UNEXPECTED_ERROR_MESSAGE,
     FrameCompareTyperGroup,
     copy_text_to_clipboard,
     handle_error,
     open_url_in_browser,
-    resolve_root_and_config,
     write_config_to,
 )
 from frame_compare.cli.cli_helpers import (
     maybe_open_report as _maybe_open_report,
 )
 from frame_compare.cli.doctor_command import handle_doctor
+from frame_compare.cli.errors import ExitCode
 from frame_compare.cli.history_command import handle_history_list, handle_history_open
 from frame_compare.cli.preset_command import (
     handle_preset_apply,
@@ -57,7 +58,6 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
-    from frame_compare.utils.progress_protocol import ProgressReporter
 
 
 class _RunnerProxy:
@@ -74,13 +74,12 @@ runner = _RunnerProxy()
 
 def run_doctor(
     checks: list[DoctorCheck] | None = None,
-    reporter: ProgressReporter | None = None,
     selection: DoctorConfigSelection | None = None,
 ) -> DoctorReport:
     """Lazy doctor entry point to keep CLI import VS-independent."""
     from frame_compare.orchestration.doctor import run_doctor as runtime_run_doctor
 
-    return runtime_run_doctor(checks=checks, reporter=reporter, selection=selection)
+    return runtime_run_doctor(checks=checks, selection=selection)
 
 
 app = typer.Typer(
@@ -103,7 +102,6 @@ app = typer.Typer(
 )
 
 
-_resolve_root_and_config = resolve_root_and_config
 _copy_text_to_clipboard = copy_text_to_clipboard
 _open_url_in_browser = open_url_in_browser
 _prompt_input_dir = prompt_input_dir
@@ -420,11 +418,10 @@ def wizard(
     ),
 ) -> None:
     """Interactively configure input, reference, and frame selection."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
     effective_no_color = no_color_requested()
     handle_wizard(
-        resolved_root,
-        config_path,
+        root,
+        config,
         prompt_input_dir=_prompt_input_dir,
         prompt_generated_dir=_prompt_generated_dir,
         prompt=_prompt_text,
@@ -471,10 +468,9 @@ def history_list(
     json_output: bool = _option(False, "--json", help="Emit the run list as JSON."),
 ) -> None:
     """List recorded runs newest first."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_history_list(
-        resolved_root,
-        config_path,
+        root,
+        config,
         json_output=json_output,
         handle_error=handle_error,
         no_color=no_color_requested(),
@@ -490,11 +486,10 @@ def history_open(
     ),
 ) -> None:
     """Open one exact-name recorded report."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_history_open(
         run_name,
-        resolved_root,
-        config_path,
+        root,
+        config,
         open_report=_maybe_open_report,
         handle_error=handle_error,
         no_color=no_color_requested(),
@@ -510,13 +505,13 @@ def preset_list(
         None,
         "--config",
         "-c",
-        help="Accepted for consistency; ignored here. Presets are located under --root.",
+        help="Validate the config path. Presets are located under --root.",
     ),
 ) -> None:
     """List available configuration presets."""
-    resolved_root, _ = _resolve_root_and_config(root, config)
     handle_preset_list(
-        resolved_root,
+        root,
+        config,
         list_presets=list_presets,
         handle_error=handle_error,
         no_color=no_color_requested(),
@@ -534,11 +529,10 @@ def preset_apply(
     ),
 ) -> None:
     """Apply a named preset to the selected config file."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_preset_apply(
         name,
-        resolved_root,
-        config_path,
+        root,
+        config,
         load_config=load_config,
         apply_preset=apply_preset,
         write_config_to=_write_config_to,
@@ -558,11 +552,10 @@ def preset_save(
     ),
 ) -> None:
     """Save the selected config as a named preset."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_preset_save(
         name,
-        resolved_root,
-        config_path,
+        root,
+        config,
         load_config=load_config,
         save_preset=save_preset,
         handle_error=handle_error,
@@ -585,6 +578,9 @@ def console_main() -> None:
             if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
                 signal.signal(signal.SIGINT, signal.SIG_IGN)
         raise
+    except Exception:
+        typer.echo(UNEXPECTED_ERROR_MESSAGE, err=True)
+        raise SystemExit(int(ExitCode.GENERAL_ERROR)) from None
 
 
 if __name__ == "__main__":

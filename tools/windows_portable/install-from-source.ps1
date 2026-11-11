@@ -146,7 +146,7 @@ if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
   throw "install-from-source.ps1 is supported on Windows only."
 }
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path
+$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\\..")).Path
 $buildScript = Join-Path $PSScriptRoot "build_portable.ps1"
 if (!(Test-Path -LiteralPath $buildScript)) {
   throw "Build script not found: $buildScript"
@@ -375,7 +375,7 @@ try {
     throw "A pending source migration must be repaired manually before another source install can run."
   }
 
-  Push-Location $repoRoot
+  Push-Location -LiteralPath $repoRoot
   try {
     Update-ProcessPathFromRegistry
     Ensure-UvOnPath

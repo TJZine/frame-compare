@@ -90,7 +90,7 @@ def _audio_evidence_summary(attempt: AudioAlignmentAttempt) -> Text:
 
 
 def _normal_evidence_rows(
-    *, resolution: ComparisonResolution, review_pending: bool
+    *, resolution: ComparisonResolution, review_pending: bool, verbose: bool
 ) -> tuple[Text, ...]:
     result = resolution.result
     attempt = result.audio_attempt
@@ -110,7 +110,9 @@ def _normal_evidence_rows(
             rows.append(Text("no audio analysis ran this time", style=MUTED))
         elif origin == "computed_this_run" and attempt is not None:
             rows.append(_audio_evidence_summary(attempt))
-            noted = build_audio_review_presentation(attempt).noted_line()
+            noted = build_audio_review_presentation(attempt).noted_line(
+                include_same_frame=not verbose
+            )
             if noted is not None:
                 rows.append(Text(noted, style=MUTED))
         return tuple(rows)
@@ -125,7 +127,7 @@ def _normal_evidence_rows(
         rows.append(Text(f"no audio match ({phrase})" + pending, style=WARN))
     if attempt is not None:
         rows.append(_audio_evidence_summary(attempt))
-        noted = review.noted_line() if review is not None else None
+        noted = review.noted_line(include_same_frame=not verbose) if review is not None else None
         if noted is not None:
             rows.append(Text(noted, style=MUTED))
     if review is not None:
@@ -248,6 +250,7 @@ def present_alignment_evidence(
         normal_rows = _normal_evidence_rows(
             resolution=resolution,
             review_pending=review_pending,
+            verbose=verbose and not quiet,
         )
         normal_lines = [line.plain for line in normal_rows]
         short = comparison.short_name or comparison.label or comparison.path.name

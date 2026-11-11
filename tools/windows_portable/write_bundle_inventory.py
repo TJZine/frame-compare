@@ -6,7 +6,7 @@ import importlib.metadata
 import json
 import re
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import cast
 
 JsonObject = dict[str, object]
@@ -77,6 +77,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--bundle-root", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--require-clean-repo", action="store_true")
     return parser.parse_args()
@@ -298,6 +299,41 @@ def _license_inventory(bundle_root: Path) -> list[JsonObject]:
     return records
 
 
+def _assert_manifest_notices(manifest: JsonObject, licenses: list[JsonObject]) -> None:
+    hashes = {record["path"]: record["sha256"] for record in licenses}
+    required_paths: set[str] = set()
+    for raw_artifact in _require_list(manifest.get("artifacts"), "manifest.artifacts"):
+        artifact = _require_dict(raw_artifact, "manifest artifact")
+        license_info = _require_dict(artifact.get("license"), "manifest artifact license")
+        if "files" not in license_info:
+            continue
+        artifact_id = _require_str(artifact.get("id"), "manifest artifact id")
+        spdx = _require_str(license_info.get("spdx"), f"{artifact_id}.license.spdx")
+        files = _require_list(license_info["files"], f"{artifact_id}.license.files")
+        for raw_file in files:
+            notice = _require_dict(raw_file, f"{artifact_id} license file")
+            source = _require_str(notice.get("path"), f"{artifact_id} license path")
+            sha256 = _require_sha256(notice.get("sha256"), f"{artifact_id} license SHA-256")
+            filename = PurePosixPath(source).name
+            if len(files) > 1:
+                suffix = f"--{filename}"
+            else:
+                # .NET GetExtension includes a leading dot and ignores a final dot.
+                last_dot = filename.rfind(".")
+                suffix = filename[last_dot:] if 0 <= last_dot < len(filename) - 1 else ""
+            name = f"{artifact_id}-{spdx}{suffix}"
+            if not re.fullmatch(r"[A-Za-z0-9._+() -]+", name) or name.endswith((".", " ")):
+                raise ValueError(f"Unsafe bundle license filename: {name}")
+            path = f"licenses/{name}"
+            if path.casefold() in required_paths:
+                raise ValueError(f"Duplicate manifest notice destination: {path}")
+            required_paths.add(path.casefold())
+            if path not in hashes:
+                raise ValueError(f"Missing manifest notice: {path}")
+            if hashes[path] != sha256:
+                raise ValueError(f"Manifest notice SHA-256 mismatch: {path}")
+
+
 def _archive_inventory(bundle_root: Path, output_path: Path) -> JsonObject:
     """Describe all members except the inventory itself."""
     files: list[JsonObject] = []
@@ -449,9 +485,9 @@ def main() -> int:
         raise NotADirectoryError(packaged_src)
     media_runtime_scopes = ("analysis", "probe", "alignment", "index", "full")
 
-    commit_sha = _run_git(repo_root, "rev-parse", "HEAD")
+    commit_sha = args.commit_sha
     if not re.fullmatch(r"[a-f0-9]{40}", commit_sha):
-        raise ValueError("git HEAD is not a full commit SHA")
+        raise ValueError("--commit-sha must be a complete lowercase 40-character commit SHA")
     if args.require_clean_repo and _run_git(
         repo_root, "status", "--porcelain", "--untracked-files=all"
     ):
@@ -533,6 +569,7 @@ def main() -> int:
         distributions=distributions,
     )
     licenses = _license_inventory(bundle_root)
+    _assert_manifest_notices(manifest, licenses)
 
     inventory: JsonObject = {
         "archive": _archive_inventory(bundle_root, output_path),

@@ -21,6 +21,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $true
 
+. (Join-Path $PSScriptRoot "path_safety.ps1")
+
 function Resolve-NewFilePath([string]$PathValue, [string]$FieldName) {
   if ([string]::IsNullOrWhiteSpace($PathValue)) {
     throw "$FieldName must not be empty."
@@ -191,6 +193,8 @@ $expectedPlaceholder = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "upda
 $resolvedPublicPath = Resolve-NewFilePath -PathValue $PublicKeyPath -FieldName "PublicKeyPath"
 $resolvedPrivatePath = Resolve-NewFilePath -PathValue $PrivateKeyPath -FieldName "PrivateKeyPath"
 
+Assert-NoReparsePointAncestor -Path $resolvedPrivatePath -Label "PrivateKeyPath"
+Assert-NoReparsePointAncestor -Path $repositoryRoot -Label "Repository root"
 if (Test-PathContainedBy -Candidate $resolvedPrivatePath -Root $repositoryRoot) {
   throw "PrivateKeyPath must resolve outside the repository."
 }

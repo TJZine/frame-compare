@@ -112,21 +112,22 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update
 
 The Windows commands require a Windows host with PowerShell and the expected
 toolchain. In non-Windows environments, treat them as documented-only unless a
-compatible runner is available. `build_portable.ps1` packages application source
-and builds wheel metadata from committed `HEAD`, excluding uncommitted changes in
-`src/frame_compare` and `pyproject.toml`. Record the packaged SHA and relevant
-working-tree differences; a successful bundle check does not verify excluded edits.
-Other packaging inputs may come from the worktree, so a SHA alone does not describe
-a dirty local build. Use a candidate commit when authorized or record that candidate
-packaging proof remains outstanding; this recipe does not authorize a commit.
+compatible runner is available. `build_portable.ps1` uses one commit for the
+application source, wheel metadata, dependency lock, default portable manifest,
+vendored notices, and recorded provenance. Use `-ExpectedCommitSha` to select
+it, or let the builder capture `HEAD` once. A custom `-ManifestPath` supplies
+its own manifest and adjacent notices. The installer, shims, and public key
+come from the live worktree. An unsigned
+local build can select an older commit, so record the selected SHA and relevant
+worktree differences with the result. Release mode requires a clean worktree
+whose `HEAD` matches the selected commit before reserving the bundle output.
 A code-only update does not carry native media
 artifacts. `build_update.ps1` accepts only a native-panel-capable full bundle with
 `bundle_info.schema_version` 3, and copies the complete bundle's required
 media-runtime fingerprint into the signed update manifest. The installed updater
 refuses pre-native-panel schema-2 bundles, as well as missing, legacy, malformed,
-or different fingerprints, before any unsafe dependency override; each refusal
-requires a complete portable bundle reinstall. Crossing a media-runtime
-fingerprint also requires a complete portable bundle reinstall.
+or different fingerprints. Each refusal requires a complete portable bundle
+reinstall.
 
 Maintainer update builds refuse uncommitted changes under `src/frame_compare` or
 `pyproject.toml` and package committed `HEAD`, matching the complete portable bundle's
@@ -259,11 +260,12 @@ uv venv "$distribution_dir/venv" --python 3.13
 uv pip install --python "$distribution_dir/venv/bin/python" "$distribution_dir"/*.whl
 "$distribution_dir/venv/bin/frame-compare" version
 "$distribution_dir/venv/bin/frame-compare" --help
+"$distribution_dir/venv/bin/python" -c 'from frame_compare.services.report.viewer import get_css, get_js; assert get_css() and get_js()'
 ```
 
-The verifier requires exactly one wheel and sdist. Inspect the built artifacts and
-installed behavior affected by the task; the verifier and help/version smoke do not
-exercise every packaged feature. On Windows use the corresponding `Scripts`
+The verifier requires exactly one wheel and sdist, with the report viewer assets
+and `py.typed` present in both. CI also reads the report CSS and JavaScript from the
+freshly installed wheel. Inspect any other installed behavior affected by the task. On Windows use the corresponding `Scripts`
 executables or an observed matching-SHA CI package result. This route does not prove
 Windows portable layout, native plugins, updater behavior, or signing. Runtime
 dependency changes also need the matching dependency audit and deployment proof.
@@ -312,7 +314,11 @@ The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` wi
 10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
 It explicitly excludes `tests/integration/test_alignment_streaming_resources.py`.
 `tools/verify_docker_integration.sh` owns image builds, container invocation,
-cleanup, logs, and artifact handling. It invokes the repository-owned
+cleanup, logs, and artifact handling. It retains `pytest.xml` in each run's artifact
+directory. The gate requires a readable JUnit report with at least one test and
+zero skipped or xfailed tests. The verifier sets pytest's xfail default to strict,
+so an unexpected pass fails unless the test explicitly sets `xfail(strict=False)`.
+A Docker or log-writer failure fails the gate. The verifier invokes the repository-owned
 `tools/docker_runtime_smoke.py` from the test service's repository mount for
 native runtime, provenance, fixture, and application assertions. The tool remains
 in the workflow trigger paths.
@@ -595,7 +601,9 @@ Canonical verification path:
    creation. Purge keeps five complete, compatible backups and removes incomplete
    ones. Legacy backups missing either record are not migrated.
    Exercise both commands repairing every staging/promoting/committed journal
-   interruption immediately after the lock, before any version/target check. The
+   interruption immediately after acquiring the lock, before the requested
+   operation's version and target checks. Rollback checks backup availability,
+   compatibility, and completeness before acquiring the lock. The
    `app/.frame_compare_replacement.json` journal uses temporary-file plus atomic
    File.Replace/File.Move writes. Unknown .old/.new trees without a journal refuse
    with paths. Inject copy, rename, hash/size and smoke failures; current source must
@@ -945,8 +953,9 @@ has no in-band key rotation path.
 
 - `.github/workflows/sync-staging.yml` runs after each `main` push and can also be
   dispatched manually. It fast-forwards `staging` when possible, merges `main`
-  when the branches have diverged, and never force-pushes. A concurrent update or
-  merge conflict fails closed without changing the remote `staging` branch.
+  when the branches have diverged, and stops on a merge conflict. It rechecks
+  `main` before pushing and never force-pushes. The normal push is refused if it
+  would update `staging` without a fast-forward.
 - If a ruleset protects `staging`, it must allow this non-force update (or provide
   an explicit bypass for the workflow actor); a required pull request or required
   status check that blocks the bot will make the sync fail closed. Keep branch

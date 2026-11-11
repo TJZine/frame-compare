@@ -13,10 +13,8 @@ import typer
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import FrameCompareError
-from frame_compare.orchestration.preflight import (
-    resolve_paths,
-    resolve_selected_config_path,
-)
+from frame_compare.orchestration.preflight import resolve_paths
+from frame_compare.orchestration.run_inputs import select_run_config_path
 from frame_compare.services.errors import HistoryOpenError
 from frame_compare.services.run_result_record import (
     HistoryEntry,
@@ -28,12 +26,11 @@ from frame_compare.utils.terminal_theme import glyphs_for_stream
 from .cli_helpers import HandleErrorFn
 
 
-def _resolve_history_roots(root: Path, config_path: Path) -> tuple[Path, Path]:
-    resolved_root = root.resolve()
-    selected_config = resolve_selected_config_path(config_path, resolved_root)
+def _resolve_history_generated_root(root: Path, config_path: Path | None) -> Path:
+    resolved_root, selected_config = select_run_config_path(config_path, root)
     config: ConfigSchema = load_config(selected_config)
     workspace = resolve_paths(config, resolved_root)
-    return resolved_root, workspace.generated_root
+    return workspace.generated_root
 
 
 def _timestamp(value: datetime | None) -> str | None:
@@ -56,7 +53,7 @@ def history_entry_json(entry: HistoryEntry) -> dict[str, str | float | bool | No
 
 def handle_history_list(
     root: Path,
-    config_path: Path,
+    config_path: Path | None,
     *,
     json_output: bool,
     handle_error: HandleErrorFn,
@@ -64,13 +61,14 @@ def handle_history_list(
 ) -> None:
     """Resolve config and print contained run history."""
     try:
-        _, generated_root = _resolve_history_roots(root, config_path)
+        generated_root = _resolve_history_generated_root(root, config_path)
         entries = list_history(generated_root)
         if json_output:
             typer.echo(
                 json.dumps(
                     {"runs": [history_entry_json(entry) for entry in entries]},
                     separators=(",", ":"),
+                    allow_nan=False,
                 )
             )
         else:
@@ -93,7 +91,7 @@ def handle_history_list(
 def handle_history_open(
     run_name: str,
     root: Path,
-    config_path: Path,
+    config_path: Path | None,
     *,
     open_report: Callable[[Path], bool],
     handle_error: HandleErrorFn,
@@ -101,7 +99,7 @@ def handle_history_open(
 ) -> None:
     """Open one exact-name, contained recorded report."""
     try:
-        _, generated_root = _resolve_history_roots(root, config_path)
+        generated_root = _resolve_history_generated_root(root, config_path)
         report_path = resolve_history_report(generated_root, run_name)
         try:
             opened = open_report(report_path)

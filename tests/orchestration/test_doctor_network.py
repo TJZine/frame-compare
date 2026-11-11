@@ -105,12 +105,12 @@ def test_check_tmdb_api_key_fails_with_malformed_env(
             "[tmdb\nenabled = true",
             False,
             "TMDB configuration could not be loaded",
-            "Fix config/config.toml syntax, then rerun doctor",
+            "Make {config_file} readable and valid TOML, then rerun doctor",
             False,
             None,
             {"exception_type": "ConfigParseError"},
             False,
-            id="check_tmdb_parse_failure_points_to_config_syntax",
+            id="check_tmdb_parse_failure_points_to_selected_config",
         ),
         pytest.param(
             "[tmdb]\nunknown = true",
@@ -152,7 +152,8 @@ def test_check_tmdb_workspace_config(
         assert hint is not None
         assert hint in result.hint
     else:
-        assert result.hint == hint
+        config_file = tmp_path.resolve() / "config" / "config.toml"
+        assert result.hint == (hint.format(config_file=config_file) if hint else None)
     if forbidden_hint is not None:
         assert result.hint is not None
         assert forbidden_hint not in result.hint

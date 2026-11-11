@@ -123,24 +123,34 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File `
   tools\windows_portable\build_portable.ps1 `
   -ManifestPath $Manifest `
   -RepoRoot $Repo `
+  -ExpectedCommitSha $ExpectedPrHeadSha `
   -OutDir $Candidate `
   -CacheDir $Cache
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ```
 
-This is the canonical manifest-based build command. For a release run, add
+This is the canonical manifest-based build command. The builder uses the supplied
+commit for the projected application source, dependency lock and source inventory.
+A local invocation without `-ExpectedCommitSha` resolves `HEAD` once at the start. For a release run, add
 `-RequireReleasePublicKey` to this same invocation; do not rebuild a second candidate.
 All evidence, packaging, and digest verification must use this exact `$Candidate`.
 
 Required evidence:
 
 - Every download passes exact byte-size and SHA-256 verification.
+- Every destination declared through `license.files` has the manifest-pinned
+  SHA-256 in the bundle inventory.
 - No artifact is accepted from a mutable fallback URL.
 - The bundle contains `bundle_info.json`, `bundle_inventory.json`,
   `licenses/SOURCE_URLS.txt`, and `licenses/THIRD_PARTY_NOTICES.txt`.
 - `bundle_info.schema_version` is 3, identifying a native-panel-capable full bundle;
   schema-2 pre-native-panel bundles are not eligible for code-only updates.
 - The recorded source SHA equals the tested pull-request SHA.
+- The direct libplacebo frame proof reports a separate result before and after
+  Qt initialization. The hosted skip is reserved for Windows exit code
+  `3221225477` with `VK_ERROR_INCOMPATIBLE_DRIVER` or `Failed creating instance`
+  in stderr. Other probe failures fail the build. Record a successful direct
+  frame on the physical Windows GPU.
 - The bundle runtime fingerprint equals the expected value above.
 - FFmpeg is the LGPL-only artifact; no GPL or nonfree build is present.
 - FFMS2 is not present in the Windows bundle or plugin manifests.
@@ -165,7 +175,9 @@ not a globally installed Frame Compare environment.
 The focused verifier below is also invoked by the hosted workflow's
 `Verify extracted portable bundle` step. It owns ZIP containment/layout, extraction,
 default workspace directories, candidate launcher and doctor checks, installation,
-and installed-shim parity. Every command it reports must exit `0`; a thrown assertion
+and installed-shim parity. It verifies the extracted manifest-pinned notices against
+the inventory and extracted files. Before installation, the extracted Python must
+import VSView and load the registered Frame Compare alignment panel. Every command it reports must exit `0`; a thrown assertion
 is a failed check. The verifier atomically reserves the fresh extraction root, writes
 without overwrite, and retains extracted evidence after any later failure. Its
 expected commit argument must be the recorded detached pull-request head used to build

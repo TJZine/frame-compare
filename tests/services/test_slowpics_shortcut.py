@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ntpath
 from collections.abc import Callable
 from pathlib import Path
 
@@ -101,6 +102,32 @@ def test_create_slowpics_url_shortcut_sanitizes_title_and_falls_back_to_url_key(
 
     assert title_result.path == run_dir / "The Movie Finale Special.url"
     assert fallback_result.path == run_dir / "url-key.url"
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        pytest.param("CON.release", id="device-with-extension"),
+        pytest.param("COM¹", id="superscript-com"),
+    ],
+)
+def test_create_slowpics_url_shortcut_writes_nonreserved_basename(
+    tmp_path: Path, title: str
+) -> None:
+    run_dir = tmp_path / "generated" / "Example"
+    run_dir.mkdir(parents=True)
+    url = "https://slow.pics/c/example-key"
+    result = create_slowpics_url_shortcut(
+        workspace=_workspace(tmp_path, run_dir=run_dir),
+        slowpics_url=url,
+        collection_title=title,
+    )
+    assert result.success
+    assert result.path is not None
+    assert result.path.parent == run_dir
+    assert result.path.suffix == ".url"
+    assert not ntpath.isreserved(result.path.name)
+    assert result.path.read_text(encoding="utf-8") == f"[InternetShortcut]\nURL={url}\n"
 
 
 def test_create_slowpics_url_shortcut_overwrites_same_deterministic_path(

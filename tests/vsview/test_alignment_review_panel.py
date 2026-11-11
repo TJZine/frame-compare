@@ -176,18 +176,6 @@ def _call_hook(method: Callable[..., object], *args: object) -> None:
     _APP.processEvents()
 
 
-class _Timeline:
-    def __init__(self) -> None:
-        self.cleared: list[tuple[str, bool]] = []
-        self.added: list[tuple[object, ...]] = []
-
-    def clear_notches(self, identifier: str, *, update: bool = True) -> None:
-        self.cleared.append((identifier, update))
-
-    def add_notch(self, *args: object) -> None:
-        self.added.append(args)
-
-
 def _reference_output(*, frame_count: int = 200) -> Any:
     return SimpleNamespace(
         vs_index=0,
@@ -260,7 +248,6 @@ def _panel(
         voutputs=outputs,
         current_voutput=outputs[0],
         current_frame=12,
-        timeline=_Timeline(),
         register_on_destroy=lambda cb: None,
     )
     parent = QWidget()
@@ -300,7 +287,6 @@ def test_known_offset_hide_restores_source_basis_without_losing_drafts(tmp_path:
 
 
 def test_panel_is_inert_for_ordinary_workspace(tmp_path: Path) -> None:
-    timeline = _Timeline()
     script = tmp_path / "ordinary.py"
     script.write_text("# ordinary VSView session\n", encoding="utf-8")
     output = SimpleNamespace(
@@ -308,16 +294,13 @@ def test_panel_is_inert_for_ordinary_workspace(tmp_path: Path) -> None:
         vs_output=SimpleNamespace(clip=SimpleNamespace(num_frames=200)),
         kwargs={"unrelated_plugin_metadata": "untouched"},
     )
-    api = SimpleNamespace(
-        file_path=script, voutputs=[output], timeline=timeline, register_on_destroy=lambda cb: None
-    )
+    api = SimpleNamespace(file_path=script, voutputs=[output], register_on_destroy=lambda cb: None)
     parent = QWidget()
     panel = AlignmentReviewPanel(parent, cast(Any, api))
     panel.setParent(None)
 
     _call_hook(panel.on_workspace_loaded)
 
-    assert timeline.cleared == [("frame_compare_alignment_review", True)]
     assert "Inactive" in panel.progress_label.text()
     assert not panel.use_positions_button.isEnabled()
     assert not panel.keep_button.isEnabled()
@@ -344,7 +327,6 @@ def test_panel_reports_invalid_workspace_metadata(tmp_path: Path, problem: str) 
     api = SimpleNamespace(
         file_path=script,
         voutputs=[reference],
-        timeline=_Timeline(),
         register_on_destroy=lambda cb: None,
     )
     parent = QWidget()
@@ -614,10 +596,12 @@ def test_panel_resolved_run_context_matrix(
 @pytest.mark.parametrize(
     ("planned", "active", "credible", "agreeing", "expected"),
     [
-        (4, 4, 3, 3, "(0 differ; 1 weak, 0 quiet not counted)."),
-        (4, 3, 3, 3, "(0 differ; 0 weak, 1 quiet not counted)."),
-        (5, 4, 3, 3, "(0 differ; 1 weak, 1 quiet not counted)."),
-        (4, 0, 0, 0, "(0 differ; 0 weak, 4 quiet not counted)."),
+        (4, 4, 3, 3, " on +0f (0 differ; 1 weak, 0 quiet not counted)."),
+        (4, 3, 3, 3, " on +0f (0 differ; 0 weak, 1 quiet not counted)."),
+        (5, 4, 3, 3, " on +0f (0 differ; 1 weak, 1 quiet not counted)."),
+        pytest.param(
+            4, 0, 0, 0, " (0 differ; 0 weak, 4 quiet not counted).", id="all-quiet-no-offset"
+        ),
     ],
 )
 def test_panel_established_counts_matrix(
@@ -634,7 +618,7 @@ def test_panel_established_counts_matrix(
         credible=credible,
         agreeing=agreeing,
     )
-    expected_line = f"Audio: {agreeing} of {credible} clear sections agree on +0f {expected}"
+    expected_line = f"Audio: {agreeing} of {credible} clear sections agree{expected}"
     panel, _api, _script = _panel(
         tmp_path, suggestion=None, audio_review=_attempt_audio_review(attempt)
     )
@@ -697,14 +681,12 @@ def test_unavailable_suggestions_leave_honest_whole_set_keep_available(
     assert all("retained" in label.text() for label in panel.source_outcome_labels[1:])
 
 
-def test_out_of_range_reference_suggestions_publish_no_marker(tmp_path: Path) -> None:
+def test_out_of_range_reference_suggestions_are_explained(tmp_path: Path) -> None:
     panel, api, _script = _panel(tmp_path, suggestion=250)
     _enter_frame(panel, 1, 0)
 
     _visit(panel, api, 0, 12)
 
-    assert api.timeline.cleared[-1] == ("frame_compare_alignment_review", True)
-    assert api.timeline.added == []
     details_label = cast(QLabel, panel.audio_detail_groups[0].findChild(QLabel))
     assert "outside raw source bounds" in details_label.text().lower()
 
@@ -728,7 +710,6 @@ def test_provisional_zero_is_visible_but_never_seeds_manual_authority(tmp_path: 
     assert not panel.use_positions_button.isEnabled()
     _enter_frame(panel, 0, 12)
     _visit(panel, api, 1, 12)
-    assert not api.timeline.added
 
     panel.keep_button.click()
 
@@ -795,7 +776,6 @@ def test_mixed_states_save_authority_labels_and_preserve_evidence(
         ]
         assert [field.text() for field in panel.offset_inputs] == ["", "", "", ""]
         _visit(panel, api, 0, 0)
-        assert api.timeline.added == []  # Browsing never creates panel predictions.
 
         panel.keep_button.click()
 
@@ -834,7 +814,7 @@ def test_mixed_states_save_authority_labels_and_preserve_evidence(
 def test_manual_authority_stays_distinct_from_retained_provisional_attempt(
     tmp_path: Path,
 ) -> None:
-    panel, api, _script = _panel(
+    panel, _api, _script = _panel(
         tmp_path,
         suggestion=0,
         audio_review=_manual_with_provisional_audio_review(),
@@ -843,44 +823,35 @@ def test_manual_authority_stays_distinct_from_retained_provisional_attempt(
     summary = panel.audio_summary_labels[0].text()
     assert "Manually confirmed alignment: +0f — APPLIED" in summary
     assert "Provisional audio candidate: +0f — NOT APPLIED" in summary
-    _visit(panel, api, 0, 0)
-    _enter_frame(panel, 0, 0)
-    _visit(panel, api, 1, 0)
-    assert not api.timeline.added
 
 
 @pytest.mark.parametrize(
-    ("origin", "manual", "summary_prefix", "marker_prefix"),
+    ("origin", "manual", "summary_prefix"),
     [
         (
             "interactive_confirmed_this_run",
             True,
             "Manually confirmed alignment: +0f — APPLIED",
-            "[MANUAL ALIGNMENT]",
         ),
         (
             "shared_previous_offsets",
             True,
             "Manually confirmed alignment: +0f — APPLIED",
-            "[MANUAL ALIGNMENT]",
         ),
         (
             "preexisting_manual_override",
             True,
             "Manually confirmed alignment: +0f — APPLIED",
-            "[MANUAL ALIGNMENT]",
         ),
         (
             "computed_this_run",
             False,
             "Accepted audio alignment: +0f — APPLIED",
-            "[ACCEPTED AUDIO]",
         ),
         (
             "shared_computed_offsets",
             False,
             "Accepted audio alignment reused: +0f — APPLIED",
-            "[REUSED ACCEPTED AUDIO]",
         ),
     ],
 )
@@ -889,7 +860,6 @@ def test_authority_origin_consistently_drives_alignment_presentation(
     origin: str,
     manual: bool,
     summary_prefix: str,
-    marker_prefix: str,
 ) -> None:
     panel, api, _script = _panel(
         tmp_path,
@@ -903,8 +873,6 @@ def test_authority_origin_consistently_drives_alignment_presentation(
 
     _enter_frame(panel, 0, 0)
     _visit(panel, api, 1, 0)
-    assert not api.timeline.added
-    assert marker_prefix  # Origin-specific evidence remains in summary, not a second marker system.
 
     panel.keep_button.click()
 
@@ -1069,18 +1037,29 @@ def test_save_failure_stays_editable_unsaved_and_redacted(
 
 
 @pytest.mark.parametrize("next_workspace", ["ordinary", "malformed"])
-def test_deactivation_clears_only_owned_marker_group(tmp_path: Path, next_workspace: str) -> None:
-    panel, api, _script = _panel(tmp_path, initialize_output=True)
+def test_deactivation_disables_save_authority(tmp_path: Path, next_workspace: str) -> None:
+    panel, api, script = _panel(tmp_path, initialize_output=True)
+    _enter_frame(panel, 0, 12)
+    _enter_frame(panel, 1, 12)
+    assert panel.use_positions_button.isEnabled()
+    assert panel.keep_button.isEnabled()
+
     if next_workspace == "ordinary":
         api.file_path = None
     else:
-        api.voutputs = [SimpleNamespace(vs_index=0, kwargs={})]
-
-    before = len(api.timeline.cleared)
+        api.voutputs = [_reference_output()]
     _call_hook(panel.on_workspace_loaded)
 
-    assert api.timeline.cleared[before:] == [("frame_compare_alignment_review", True)]
+    if next_workspace == "malformed":
+        assert "alignment review workspace must contain at least one comparison" in (
+            panel.error_label.text()
+        )
     assert "Inactive" in panel.progress_label.text()
+    assert not panel.use_positions_button.isEnabled()
+    assert not panel.keep_button.isEnabled()
+    panel.use_positions_button.click()
+    panel.keep_button.click()
+    assert not script.with_suffix(".alignment-result.json").exists()
 
 
 def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(

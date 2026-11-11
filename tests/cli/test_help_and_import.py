@@ -10,7 +10,7 @@ from typer.main import get_command
 from frame_compare.cli.cli_helpers import stabilize_typer_help_width
 from frame_compare.cli.entry import app
 from frame_compare.config.overrides import CLI_OVERRIDE_MAP
-from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset
+from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset, TonemapSpeed
 
 from .cli_helpers import _normalize_cli_help, _normalize_cli_output, runner
 
@@ -207,7 +207,7 @@ def test_run_rejects_retired_frame_count_options(
             ["preset", "list", "--help"],
             [
                 "List available configuration presets.",
-                "Accepted for consistency; ignored here. Presets are located under --root.",
+                "Validate the config path. Presets are located under --root.",
             ],
         ),
         (
@@ -344,10 +344,11 @@ def test_run_help_does_not_repeat_persistence_clause_per_option() -> None:
         ("--overlay", OverlayMode),
         ("--tm-preset", TonemapPreset),
         ("--tm-curve", ToneCurve),
+        ("--tm-speed", TonemapSpeed),
     ],
 )
 def test_run_help_lists_enum_choices_without_drift(
-    flag: str, enum_type: type[OverlayMode] | type[TonemapPreset] | type[ToneCurve]
+    flag: str, enum_type: type[OverlayMode | TonemapPreset | ToneCurve | TonemapSpeed]
 ) -> None:
     result = runner.invoke(
         app,
@@ -356,12 +357,11 @@ def test_run_help_lists_enum_choices_without_drift(
         terminal_width=200,
         env={"NO_COLOR": "1", "TERM": "dumb"},
     )
-    output = _normalize_cli_help(result.stdout)
-
     assert result.exit_code == 0
-    assert flag in output
-    for member in enum_type:
-        assert member.value in output
+    lines = [_normalize_cli_help(line) for line in result.stdout.splitlines()]
+    entry = next(line for line in lines if line.startswith(f"{flag} "))
+    choices = entry.partition("Choose one of: ")[2].removesuffix(".")
+    assert choices.split(", ") == [member.value for member in enum_type]
 
 
 def test_run_help_uses_improved_metavariables() -> None:

@@ -170,7 +170,7 @@ def _build_update_zip(
     *,
     tmp_path: Path,
     runtime_fingerprint: str = _RUNTIME_HASH,
-    requirements_fingerprint: str = _REQ_HASH,
+    requirements_fingerprint: str | list[str] = _REQ_HASH,
     archive_name: str = "update.zip",
     payload_content: str = _NEW_VERSION_CONTENT,
     target_version: str = "1.0.1",
@@ -487,32 +487,38 @@ def test_windows_portable_update_apply_e2e(
     assert not (bundle_dir / "app" / ".update_backups").exists()
     assert _snapshot_bytes(external_generated_root) == external_snapshot
 
-    dependency_mismatch_zip = _build_update_zip(
-        tmp_path=tmp_path,
-        requirements_fingerprint="e" * 64,
-        archive_name="dependency-mismatch.zip",
-    )
-    _sign_update_zip(
-        exe=exe,
-        repo_root=repo_root,
-        update_zip_path=dependency_mismatch_zip,
-        private_key_path=private_key_path,
-        expected_public_key_path=shim_update_ps1.parent / "update_public_key.xml",
-    )
-    dependency_rejection = _apply_update(
-        exe=exe,
-        env=env,
-        bundle_dir=bundle_dir,
-        shim_update_ps1=shim_update_ps1,
-        update_zip_path=dependency_mismatch_zip,
-    )
-    assert dependency_rejection.returncode != 0
-    dependency_output = dependency_rejection.stdout + dependency_rejection.stderr
-    assert "Dependency fingerprint mismatch; code-only update refused" in dependency_output
-    assert "complete Windows portable bundle" in dependency_output
-    assert _snapshot_tree(installed_tree) == original_snapshot
-    assert not (bundle_dir / "app" / ".update_backups").exists()
-    assert _snapshot_bytes(external_generated_root) == external_snapshot
+    for reason, fingerprint, expected_message in (
+        ("mismatch", "e" * 64, "Dependency fingerprint mismatch; code-only update refused"),
+        ("uppercase", _REQ_HASH.upper(), "Manifest expected_requirements_lock_sha256 is invalid."),
+        ("array", [_REQ_HASH], "Manifest expected_requirements_lock_sha256 must be a JSON string."),
+    ):
+        dependency_zip = _build_update_zip(
+            tmp_path=tmp_path,
+            requirements_fingerprint=fingerprint,
+            archive_name=f"dependency-{reason}.zip",
+        )
+        _sign_update_zip(
+            exe=exe,
+            repo_root=repo_root,
+            update_zip_path=dependency_zip,
+            private_key_path=private_key_path,
+            expected_public_key_path=shim_update_ps1.parent / "update_public_key.xml",
+        )
+        dependency_rejection = _apply_update(
+            exe=exe,
+            env=env,
+            bundle_dir=bundle_dir,
+            shim_update_ps1=shim_update_ps1,
+            update_zip_path=dependency_zip,
+        )
+        dependency_output = dependency_rejection.stdout + dependency_rejection.stderr
+        assert dependency_rejection.returncode != 0, dependency_output
+        assert expected_message in dependency_output
+        if reason == "mismatch":
+            assert "complete Windows portable bundle" in dependency_output
+        assert _snapshot_tree(installed_tree) == original_snapshot
+        assert not (bundle_dir / "app" / ".update_backups").exists()
+        assert _snapshot_bytes(external_generated_root) == external_snapshot
 
     manifest_tampered_zip = tmp_path / "manifest-tampered.zip"
     _rewrite_zip_entry(
@@ -1004,6 +1010,65 @@ def test_update_commands_repair_interrupted_journals(
             len(failed) == 1
             and (failed[0] / "version.py").read_text(encoding="utf-8") == '__version__ = "2.2.2"\n'
         )
+
+
+def test_committed_cleanup_failure_preserves_accepted_target(
+    tmp_path: Path, repo_root: Path, update_exe: str
+) -> None:
+    bundle, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml="unused"
+    )
+    version = _write_mock_bundle(bundle_dir=bundle)
+    version.write_bytes(_NEW_VERSION_CONTENT.encode())
+    target_before = _snapshot_bytes(version.parent)
+    old = version.parent.with_name("frame_compare.old")
+    old.mkdir()
+    # Only one file remains from the previous tree after an interrupted cleanup.
+    locked = old / "remaining"
+    locked.write_bytes(b"previous install remnant")
+    journal = bundle / "app/.frame_compare_replacement.json"
+    journal_bytes = json.dumps(
+        {
+            "schema_version": 1,
+            "operation": "apply",
+            "state": "committed",
+            "started_at": "2026-10-15T00:00:00Z",
+        }
+    ).encode()
+    journal.write_bytes(journal_bytes)
+
+    result = _run_updater_functions(
+        update_exe,
+        updater,
+        bundle,
+        """
+$held = Acquire-UpdateLock $env:BUNDLE
+try {
+  $file = [IO.File]::Open($env:LOCKED, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+  try { Repair-InterruptedReplacement $env:BUNDLE } finally { $file.Dispose() }
+} finally { Release-UpdateLock $held }
+""",
+        LOCKED=str(locked),
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "Remove committed previous tree failed" in result.stderr
+    assert "The current target is the accepted install. Keep it in place and retry cleanup." in (
+        result.stderr
+    )
+    assert "restore the previous .old" not in result.stderr.lower()
+    assert _snapshot_bytes(version.parent) == target_before
+    assert journal.read_bytes() == journal_bytes
+    assert locked.read_bytes() == b"previous install remnant"
+
+    retry = _run_updater_functions(
+        update_exe,
+        updater,
+        bundle,
+        "$held = Acquire-UpdateLock $env:BUNDLE; try { Repair-InterruptedReplacement $env:BUNDLE } finally { Release-UpdateLock $held }",
+    )
+    assert retry.returncode == 0, retry.stdout + retry.stderr
+    assert _snapshot_bytes(version.parent) == target_before
+    assert not journal.exists() and not old.exists()
 
 
 @pytest.mark.parametrize("operation", ["apply", "rollback"])

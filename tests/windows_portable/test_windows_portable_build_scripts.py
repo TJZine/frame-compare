@@ -5,14 +5,18 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
 import tomllib
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+
+from frame_compare.vs import tonemap_runtime
 
 from ._helpers import normalized_process_output as _normalized_process_output
 from ._helpers import read_text_or_fail as _read_text_or_fail
@@ -58,6 +62,55 @@ def test_windows_portable_generated_cmd_launchers_have_absolute_powershell_fallb
     for assignment in ("$cmd = @'", "$updateCmd = @'"):
         launcher = build_script.split(assignment, 1)[1].split("'@", 1)[0]
         assert 'set "POWERSHELL_EXE="' in launcher
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows CMD required")
+@pytest.mark.parametrize("launcher", ["frame-compare", "frame-compare-update"])
+def test_windows_portable_generated_cmd_launchers_select_script_and_propagate_exit(
+    repo_root: Path, tmp_path: Path, launcher: str
+) -> None:
+    pwsh = shutil.which("pwsh.exe")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required to generate portable launchers")
+    bundle = tmp_path / "Media & Tools"
+    bundle.mkdir()
+    owner = repo_root / "tools/windows_portable/portable_launchers.ps1"
+    system_root = Path(os.environ["SYSTEMROOT"])
+    env = os.environ | {"LAUNCHER_SOURCE": str(owner), "BUNDLE": str(bundle)}
+    subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-Command",
+            ". $env:LAUNCHER_SOURCE; Write-LauncherFiles -BundleRoot $env:BUNDLE",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    for index, name in enumerate(("frame-compare", "frame-compare-update"), start=23):
+        (bundle / f"{name}.ps1").write_text(
+            f'Write-Output "{name} $($args[0]) $($PSVersionTable.PSEdition)"\nexit {index}\n',
+            encoding="ascii",
+        )
+    # Supply the same pwsh on PATH for the CMD's first discovery branch.
+    env = env | {
+        "PATH": os.pathsep.join((str(Path(pwsh).parent), str(system_root / "System32"))),
+        "PATHEXT": ".EXE",
+    }
+    result = subprocess.run(
+        [str(system_root / "System32/cmd.exe"), "/d", "/c", f"{launcher}.cmd", "test-argument"],
+        cwd=bundle,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    expected_exit = 23 if launcher == "frame-compare" else 24
+    assert result.returncode == expected_exit, _normalized_process_output(result)
+    assert result.stdout.strip() == f"{launcher} test-argument Core"
 
 
 def test_windows_portable_build_resolves_relative_paths_from_provider_location(
@@ -374,17 +427,72 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
         assert artifact["bytes"] == wheel["size"]
 
 
+@pytest.mark.parametrize(
+    ("exit_code", "stderr", "error", "expected"),
+    [
+        (3221225477, b"\x1b[31mVK_ERROR_INCOMPATIBLE_DRIVER\x1b[0m", None, "unavailable"),
+        (3221225477, b"Failed creating instance", None, "unavailable"),
+        (1, b"VK_ERROR_INCOMPATIBLE_DRIVER", None, "probe failed"),
+        (3221225477, b"unexpected access violation", None, "probe failed"),
+        (1, b"filter error", None, "probe failed"),
+        (None, b"", subprocess.TimeoutExpired("probe", 5), "probe failed"),
+        (0, b"", None, "render failed"),
+    ],
+    ids=[
+        "incompatible-driver",
+        "instance-failure",
+        "wrong-exit-code",
+        "unexpected-crash",
+        "filter-error",
+        "timeout",
+        "render-error",
+    ],
+)
 def test_windows_portable_direct_placebo_smoke_respects_runtime_probe(
     repo_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    exit_code: int | None,
+    stderr: bytes,
+    error: subprocess.TimeoutExpired | None,
+    expected: str,
 ) -> None:
-    proof_source = _runtime_proof_source(repo_root)
-    direct_smoke = proof_source[
-        proof_source.index("def prove_placebo_tonemap_frame()") : proof_source.index(
-            "def prove_apply_tonemap_frame()"
-        )
-    ]
-    assert "placebo_direct_frame=skipped reason=vulkan_runtime_unavailable" in direct_smoke
-    assert "direct_out.get_frame(0)" in direct_smoke
+    def run_probe(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if error is not None:
+            raise error
+        assert exit_code is not None
+        return subprocess.CompletedProcess([], exit_code, b"", stderr)
+
+    def fail_render(_frame: int) -> None:
+        raise RuntimeError("render failed")
+
+    def blank_clip(**_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(std=SimpleNamespace(SetFrameProps=lambda **_: object()))
+
+    def tonemap(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(get_frame=fail_render)
+
+    monkeypatch.setattr(tonemap_runtime, "run_subprocess", run_probe)
+    monkeypatch.setitem(
+        sys.modules,
+        "vapoursynth",
+        SimpleNamespace(
+            core=SimpleNamespace(
+                std=SimpleNamespace(BlankClip=blank_clip), placebo=SimpleNamespace(Tonemap=tonemap)
+            ),
+            RGB48=0,
+        ),
+    )
+    smoke = repo_root / "tools/windows_portable/runtime_smoke.py"
+    monkeypatch.setattr(sys, "argv", [str(smoke), "placebo_tonemap_frame", "fixture.mp4"])
+    skip_receipt = "placebo_direct_frame=skipped reason=vulkan_runtime_unavailable"
+    if expected == "unavailable":
+        runpy.run_path(str(smoke))
+        assert skip_receipt in capsys.readouterr().out
+    else:
+        with pytest.raises((AssertionError, RuntimeError), match=expected):
+            runpy.run_path(str(smoke))
+        assert skip_receipt not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -464,6 +572,57 @@ def test_windows_portable_workflow_surfaces_direct_placebo_result(repo_root: Pat
         "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable"
     ) in workflow
     assert "direct placebo frame proof remains required in Phase 2" in workflow
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell required")
+@pytest.mark.parametrize(
+    ("variant", "accepted", "warns"),
+    [
+        ("both-ok", True, False),
+        ("post-qt-skip", True, True),
+        ("missing", False, False),
+        ("prefixed", False, False),
+        ("suffixed", False, False),
+        ("wrong-reason", False, False),
+        ("duplicate", False, False),
+    ],
+)
+def test_windows_portable_workflow_admits_exact_direct_placebo_receipts(
+    repo_root: Path, variant: str, accepted: bool, warns: bool
+) -> None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required")
+    action = _read_text_or_fail(repo_root / ".github/actions/windows-portable-build/action.yml")
+    block = action[
+        action.index("        $directReceipts = @(") : action.index(
+            "    - name: Verify bundle workspace directories"
+        )
+    ]
+    prefix = "WINDOWS_BUNDLE_PROOF placebo_direct_frame="
+    standalone = prefix + "ok format=RGB48 bits=16 context=standalone"
+    post_qt_ok = prefix + "ok format=RGB48 bits=16 context=post_qt"
+    post_qt_skip = prefix + "skipped reason=vulkan_runtime_unavailable context=post_qt"
+    post_qt = {
+        "both-ok": post_qt_ok,
+        "post-qt-skip": post_qt_skip,
+        "missing": "",
+        "prefixed": f"unrelated {post_qt_skip}",
+        "suffixed": f"{post_qt_skip} unrelated",
+        "wrong-reason": post_qt_skip.replace("vulkan_runtime_unavailable", "probe_failed"),
+        "duplicate": f"{standalone}\n{post_qt_ok}",
+    }[variant]
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", "$proof = $env:WB_RECEIPTS\n" + block],
+        env=os.environ | {"WB_RECEIPTS": f"{standalone}\r\n{post_qt}\r\n"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert (result.returncode == 0) is accepted, _normalized_process_output(result)
+    assert ("remains required in Phase 2" in result.stdout) is warns
 
 
 def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: Path) -> None:
@@ -739,7 +898,7 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
         "prove_generated_vsview_session(media_path)",
         "prove_placebo_tonemap_api()",
         "prove_apply_tonemap_frame()",
-        "prove_placebo_tonemap_frame()",
+        'prove_placebo_tonemap_frame(context="post_qt")',
     ):
         assert required_proof in combined_proof
     assert "vsview_runtime_preload=ok" in combined_proof
@@ -886,9 +1045,7 @@ def test_windows_portable_workflow_requires_combined_vsview_proof(
     workflow = _read_text_or_fail(repo_root / ".github/actions/windows-portable-build/action.yml")
 
     required_phases = workflow[
-        workflow.index("foreach ($phase in @(") : workflow.index(
-            'if ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok ")'
-        )
+        workflow.index("foreach ($phase in @(") : workflow.index("$directReceipts = @(")
     ]
     assert '"vsview_runtime"' in required_phases
     assert "WINDOWS_BUNDLE_PROOF vsview_runtime=ok" in required_phases
@@ -1063,6 +1220,7 @@ def _write_extracted_verifier_fixture(
     tmp_path: Path,
     candidate_launcher: str,
     installer: str = "exit 0\n",
+    with_vsview: bool = False,
 ) -> Path:
     bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
     (bundle / "config").mkdir(parents=True)
@@ -1240,11 +1398,50 @@ def _write_extracted_verifier_fixture(
     }
     (bundle / "bundle_inventory.json").write_text(json.dumps(inventory), encoding="utf-8")
 
-    zip_path = tmp_path / "fixture.zip"
-    with zipfile.ZipFile(zip_path, "w") as archive:
-        for path in sorted(bundle.rglob("*")):
-            archive.write(path, path.relative_to(bundle.parent).as_posix())
-    return zip_path
+    if with_vsview:
+        _add_extracted_vsview_fixture(bundle)
+    return _rewrite_extracted_verifier_fixture_zip(tmp_path, "fixture.zip")
+
+
+def _add_extracted_vsview_fixture(bundle: Path) -> None:
+    # Use a real isolated Windows interpreter with fixture packages and registration.
+    base = Path(sys.base_prefix)
+    embedded = bundle / "python"
+    embedded.mkdir()
+    shutil.copyfile(base / "python.exe", embedded / "python.exe")
+    dll_stem = f"python{sys.version_info.major}{sys.version_info.minor}"
+    shutil.copyfile(base / f"{dll_stem}.dll", embedded / f"{dll_stem}.dll")
+    for dll in base.glob("vcruntime*.dll"):
+        shutil.copyfile(dll, embedded / dll.name)
+    (embedded / f"{dll_stem}._pth").write_text(
+        "\n".join((str(base / "Lib"), str(base / "DLLs"), "../app/site-packages", "")),
+        encoding="utf-8",
+    )
+    site = bundle / "app" / "site-packages"
+    vsview = site / "vsview"
+    vsview.mkdir()
+    (vsview / "__init__.py").write_text("", encoding="utf-8")
+    app = site / "frame_compare" / "vsview"
+    app.mkdir(parents=True)
+    (app / "launcher.py").write_text(
+        """import os
+
+def preload_vapoursynth_runtime():
+    for name in ("VAPOURSYNTH_HOME", "VAPOURSYNTH_PLUGIN_PATH", "VAPOURSYNTH_EXTRA_PLUGIN_PATH"):
+        if name in os.environ:
+            raise RuntimeError(f"extracted probe inherited {name}")
+""",
+        encoding="utf-8",
+    )
+    (app / "alignment_review_panel.py").write_text(
+        "class AlignmentReviewPanel: pass\n", encoding="utf-8"
+    )
+    dist = site / "frame_compare-1.2.3.dist-info"
+    dist.mkdir()
+    (dist / "entry_points.txt").write_text(
+        "[vsview]\nframe-compare-alignment-review = frame_compare.vsview.alignment_review_panel\n",
+        encoding="utf-8",
+    )
 
 
 def _rewrite_extracted_verifier_fixture_zip(tmp_path: Path, name: str) -> Path:
@@ -1687,6 +1884,7 @@ exit 0
         tmp_path=tmp_path,
         candidate_launcher=candidate_launcher,
         installer=installer,
+        with_vsview=True,
     )
 
     result = _run_extracted_bundle_verifier(
@@ -1736,6 +1934,7 @@ exit 0
         tmp_path=tmp_path,
         candidate_launcher=candidate_launcher,
         installer=installer,
+        with_vsview=True,
     )
 
     result = _run_extracted_bundle_verifier(
@@ -1749,6 +1948,103 @@ exit 0
     assert (
         "Installed shim version output does not match the candidate launcher"
         in _normalized_process_output(result)
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
+@pytest.mark.parametrize("damage", ["missing-vsview", "missing-entrypoint", "missing-panel"])
+def test_extracted_bundle_verifier_requires_vsview_entrypoint(
+    repo_root: Path, tmp_path: Path, damage: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("PowerShell 7 is required")
+    for name in ("VAPOURSYNTH_HOME", "VAPOURSYNTH_PLUGIN_PATH", "VAPOURSYNTH_EXTRA_PLUGIN_PATH"):
+        monkeypatch.setenv(name, str(tmp_path / name))
+    intact_zip = _write_extracted_verifier_fixture(
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+        candidate_launcher="""
+if ($args[0] -eq "--help") { exit 0 }
+if ($args[0] -eq "version") { Write-Output "frame-compare 1.2.3"; exit 0 }
+if ($args[0] -eq "doctor") { Write-Output '{"success":true,"doctor":{"checks":[{"id":"ffmpeg","status":"pass"}]}}'; exit 0 }
+exit 1
+""",
+        installer="exit 77\n",
+        with_vsview=True,
+    )
+    bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
+    good = _run_extracted_bundle_verifier(
+        repo_root=repo_root,
+        zip_path=intact_zip,
+        extract_root=tmp_path / "intact",
+        local_app_data=tmp_path / "local-app-data",
+    )
+    assert "WINDOWS_EXTRACTED_PROOF vsview_entrypoint=ok" in good.stdout
+    assert "candidate_install failed with exit code 77" in _normalized_process_output(good)
+
+    site = bundle / "app" / "site-packages"
+    if damage == "missing-vsview":
+        shutil.rmtree(site / "vsview")
+    elif damage == "missing-entrypoint":
+        (site / "frame_compare-1.2.3.dist-info" / "entry_points.txt").unlink()
+    else:
+        (site / "frame_compare" / "vsview" / "alignment_review_panel.py").unlink()
+    result = _run_extracted_bundle_verifier(
+        repo_root=repo_root,
+        zip_path=_rewrite_extracted_verifier_fixture_zip(tmp_path, "damaged.zip"),
+        extract_root=tmp_path / "damaged",
+        local_app_data=tmp_path / "local-app-data",
+    )
+
+    assert result.returncode != 0
+    assert "candidate_vsview_entrypoint failed with exit code 1" in _normalized_process_output(
+        result
+    )
+    assert "vsview_entrypoint=ok" not in result.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
+@pytest.mark.parametrize("damage", ["missing", "tampered"])
+def test_extracted_bundle_verifier_requires_each_manifest_notice(
+    repo_root: Path, tmp_path: Path, damage: str
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("PowerShell 7 is required")
+    _write_extracted_verifier_fixture(
+        repo_root=repo_root, tmp_path=tmp_path, candidate_launcher="exit 17\n"
+    )
+    bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
+    manifest_path = bundle / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    inventory_path = bundle / "bundle_inventory.json"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    manifest["artifacts"][0]["license"]["files"] = [
+        {"path": f"licenses/{name}.txt", "sha256": hashlib.sha256(name.encode()).hexdigest()}
+        for name in ("FIRST", "SECOND")
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    for name in ("FIRST", "SECOND"):
+        if name == "SECOND" and damage == "missing":
+            continue
+        path = f"licenses/fixture-runtime-MIT--{name}.txt"
+        content = b"wrong content" if name == "SECOND" else name.encode()
+        (bundle / path).write_bytes(content)
+        inventory["licenses"].append({"path": path, "sha256": hashlib.sha256(content).hexdigest()})
+    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+
+    result = _run_extracted_bundle_verifier(
+        repo_root=repo_root,
+        zip_path=_rewrite_extracted_verifier_fixture_zip(tmp_path, "damaged.zip"),
+        extract_root=tmp_path / "damaged",
+        local_app_data=tmp_path / "local-app-data",
+    )
+
+    assert result.returncode != 0
+    message = (
+        "Missing manifest notice" if damage == "missing" else "Manifest notice SHA-256 mismatch"
+    )
+    assert f"{message}: licenses/fixture-runtime-MIT--SECOND.txt" in _normalized_process_output(
+        result
     )
 
 
@@ -1987,6 +2283,14 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
             encoding="utf-8"
         )
     )
+    for artifact in manifest["artifacts"]:
+        license_info = artifact["license"]
+        files = license_info.get("files", [])
+        for notice in files:
+            source = repo_root / "tools/windows_portable" / notice["path"]
+            prefix = f"{artifact['id']}-{license_info['spdx']}"
+            suffix = source.suffix if len(files) == 1 else f"--{source.name}"
+            shutil.copyfile(source, licenses / f"{prefix}{suffix}")
     runtime_fingerprints = manifest["bundle"]["runtime_fingerprints"]
     _write_packaged_runtime_contract(bundle=bundle, fingerprints=runtime_fingerprints)
     bundled_font_dir = bundle / "app" / "src" / "frame_compare" / "assets" / "fonts"
@@ -2055,13 +2359,22 @@ def inventory_source_repo(repo_root: Path, tmp_path_factory: pytest.TempPathFact
     return source_repo
 
 
+def _source_commit(repo: Path) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True, timeout=10
+    ).strip()
+
+
 def _run_bundle_inventory(
     *,
     bundle: Path,
     repo_root: Path,
     source_repo: Path,
     manifest: Path | None = None,
+    commit_sha: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    if commit_sha is None:
+        commit_sha = _source_commit(source_repo)
     return subprocess.run(
         [
             sys.executable,
@@ -2072,6 +2385,8 @@ def _run_bundle_inventory(
             str(manifest or repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"),
             "--repo-root",
             str(source_repo),
+            "--commit-sha",
+            commit_sha,
             "--output",
             str(bundle / "bundle_inventory.json"),
         ],
@@ -2158,6 +2473,348 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     assert "Inter 4.1: https://github.com/rsms/inter/releases/tag/v4.1" in source_urls
     notices = (bundle / "licenses" / "THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8")
     assert "Inter 4.1 (OFL-1.1)" in notices
+
+
+@pytest.mark.parametrize(
+    ("tampered", "expected_error"),
+    [(False, "Missing manifest notice"), (True, "Manifest notice SHA-256 mismatch")],
+    ids=["missing", "tampered"],
+)
+def test_windows_portable_inventory_requires_each_manifest_notice(
+    tmp_path: Path,
+    repo_root: Path,
+    inventory_source_repo: Path,
+    tampered: bool,
+    expected_error: str,
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    # Omit one member of a multi-file notice set while keeping the others.
+    notice = next((bundle / "licenses").glob("vs-plugin-lsmas-*--VapourSynth-LICENSE.txt"))
+    if tampered:
+        notice.write_bytes(b"wrong license content")
+    else:
+        notice.unlink()
+
+    result = _run_bundle_inventory(
+        bundle=bundle, repo_root=repo_root, source_repo=inventory_source_repo
+    )
+
+    assert result.returncode != 0
+    assert f"{expected_error}: licenses/{notice.name}" in result.stderr
+    assert not (bundle / "bundle_inventory.json").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell build semantics required")
+@pytest.mark.parametrize("custom", [False, True], ids=["committed-default", "explicit-custom"])
+def test_windows_portable_builder_uses_one_manifest_for_notices_and_inventory(
+    tmp_path: Path, repo_root: Path, inventory_source_repo: Path, custom: bool
+) -> None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required")
+    source = inventory_source_repo
+    owner = source / "tools/windows_portable"
+    original = repo_root / "tools/windows_portable"
+    shutil.copytree(original / "licenses", owner / "licenses")
+    for relative in ("version_utils.ps1", "shim/frame-compare-version.ps1"):
+        shutil.copyfile(original / relative, owner / relative)
+
+    manifest_path = owner / "manifest.windows-x64.json"
+    committed_manifest = manifest_path.read_bytes()
+    manifest = json.loads(committed_manifest)
+    artifact = next(
+        item for item in manifest["artifacts"] if len(item["license"].get("files", [])) == 1
+    )
+    pin = artifact["license"]["files"][0]
+    notice = owner / pin["path"]
+    committed_notice = notice.read_bytes()
+    destination = f"{artifact['id']}-{artifact['license']['spdx']}{notice.suffix}"
+
+    seed = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    for path in (seed / "licenses").iterdir():
+        if path.name != "frame-compare-LICENSE.txt":
+            path.unlink()
+    (seed / "requirements.lock.txt").write_text("fixture requirements", encoding="utf-8")
+    (seed / "app/src/frame_compare/__init__.py").write_text(
+        '__version__ = "0.1.0"\n', encoding="utf-8"
+    )
+    script = owner / "build_portable.ps1"
+    script.write_text(
+        script.read_text(encoding="utf-8").rsplit("\nMain", 1)[0]
+        + r"""
+function uv { $global:LASTEXITCODE = 0; return $env:FIXTURE_PYTHON }
+function Initialize-PortableRuntime {
+  param($BundleRoot, $CommitSha, $SelectedManifestPath)
+  Get-ChildItem -LiteralPath $env:FIXTURE_LAYOUT | Copy-Item -Destination $BundleRoot -Recurse
+  Copy-Item -LiteralPath $SelectedManifestPath -Destination (Join-Path $BundleRoot "manifest.json")
+}
+function Copy-RepoApp {}
+function Copy-InstallerFiles {}
+function Assert-RequiredPySideLicenseMetadata {}
+Main
+""",
+        encoding="utf-8",
+    )
+
+    def commit(message: str) -> str:
+        for args in (
+            ("add", "."),
+            (
+                "-c",
+                "user.name=Portable test",
+                "-c",
+                "user.email=portable@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--quiet",
+                "-m",
+                message,
+            ),
+        ):
+            subprocess.run(
+                ["git", "-C", str(source), *args], check=True, capture_output=True, timeout=30
+            )
+        return _source_commit(source)
+
+    subprocess.run(
+        ["git", "-C", str(source), "config", "core.autocrlf", "false"],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    selected = commit("selected manifest and notices")
+    newer_notice = b"changed live notice\r\n"
+    # Give this artifact its own notice so other pins for the common file still agree.
+    pin["path"] = f"licenses/fixture-notice{notice.suffix}"
+    (owner / pin["path"]).write_bytes(newer_notice)
+    pin["sha256"] = hashlib.sha256(newer_notice).hexdigest()
+    manifest["bundle"]["runtime_fingerprints"]["full"] = "b" * 64
+    newer_manifest = json.dumps(manifest).encode()
+    manifest_path.write_bytes(newer_manifest)
+    assert commit("newer manifest and notices") != selected
+
+    command = [
+        pwsh,
+        "-NoProfile",
+        "-File",
+        str(script),
+        "-ExpectedCommitSha",
+        selected,
+        "-AssemblyOnly",
+        "-RepoRoot",
+        str(source),
+        "-CacheDir",
+        str(tmp_path / "cache"),
+        "-OutDir",
+        str(tmp_path / "out"),
+    ]
+    expected_manifest = committed_manifest
+    expected_notice = committed_notice
+    if custom:
+        custom_dir = tmp_path / "custom-manifest"
+        shutil.copytree(owner / "licenses", custom_dir / "licenses")
+        expected_notice = b"custom manifest notice\n"
+        (custom_dir / pin["path"]).write_bytes(expected_notice)
+        pin["sha256"] = hashlib.sha256(expected_notice).hexdigest()
+        manifest["bundle"]["runtime_fingerprints"]["full"] = "c" * 64
+        expected_manifest = json.dumps(manifest).encode()
+        custom_path = custom_dir / "custom.json"
+        custom_path.write_bytes(expected_manifest)
+        command.extend(("-ManifestPath", str(custom_path)))
+    result = subprocess.run(
+        command,
+        env=os.environ | {"FIXTURE_PYTHON": sys.executable, "FIXTURE_LAYOUT": str(seed)},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+
+    assert result.returncode == 0, _normalized_process_output(result)
+    out = tmp_path / "out"
+    assert (out / "manifest.json").read_bytes() == expected_manifest
+    assert (out / "licenses" / destination).read_bytes() == expected_notice
+    inventory = json.loads((out / "bundle_inventory.json").read_text(encoding="utf-8"))
+    assert inventory["bundle"]["commit_sha"] == selected
+    assert (
+        inventory["bundle"]["media_runtime_fingerprints"]
+        == json.loads(expected_manifest)["bundle"]["runtime_fingerprints"]
+    )
+    assert {
+        "path": f"licenses/{destination}",
+        "sha256": hashlib.sha256(expected_notice).hexdigest(),
+    } in inventory["licenses"]
+
+
+def test_windows_portable_inventory_uses_dotfile_notice_extension(
+    tmp_path: Path, repo_root: Path, inventory_source_repo: Path
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    manifest = json.loads(
+        (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")
+    )
+    artifact = next(
+        item for item in manifest["artifacts"] if len(item["license"].get("files", [])) == 1
+    )
+    artifact["license"]["files"][0]["path"] = "licenses/.LICENSE"
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    notice = next((bundle / "licenses").glob(f"{artifact['id']}-{artifact['license']['spdx']}.*"))
+    dotfile_destination = notice.with_suffix(".LICENSE")
+    notice.rename(dotfile_destination)
+
+    result = _run_bundle_inventory(
+        bundle=bundle,
+        repo_root=repo_root,
+        source_repo=inventory_source_repo,
+        manifest=manifest_path,
+    )
+    assert result.returncode == 0, _normalized_process_output(result)
+    inventory_path = bundle / "bundle_inventory.json"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    assert {
+        "path": f"licenses/{dotfile_destination.name}",
+        "sha256": artifact["license"]["files"][0]["sha256"],
+    } in inventory["licenses"]
+
+    inventory_path.unlink()
+    dotfile_destination.rename(dotfile_destination.with_suffix(""))
+    result = _run_bundle_inventory(
+        bundle=bundle,
+        repo_root=repo_root,
+        source_repo=inventory_source_repo,
+        manifest=manifest_path,
+    )
+    assert result.returncode != 0
+    assert f"Missing manifest notice: licenses/{dotfile_destination.name}" in result.stderr
+    assert not inventory_path.exists()
+
+
+def test_windows_portable_inventory_records_the_captured_commit(
+    tmp_path: Path, repo_root: Path, inventory_source_repo: Path
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    captured = _source_commit(inventory_source_repo)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(inventory_source_repo),
+            "-c",
+            "user.name=Portable test",
+            "-c",
+            "user.email=portable@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "later checkout",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    assert _source_commit(inventory_source_repo) != captured
+
+    result = _run_bundle_inventory(
+        bundle=bundle, repo_root=repo_root, source_repo=inventory_source_repo, commit_sha=captured
+    )
+
+    assert result.returncode == 0, _normalized_process_output(result)
+    inventory = json.loads((bundle / "bundle_inventory.json").read_text(encoding="utf-8"))
+    assert inventory["bundle"]["commit_sha"] == captured
+    assert inventory["bundle"]["source_archive_url"].endswith(f"/{captured}.tar.gz")
+    assert captured in (bundle / "licenses/SOURCE_URLS.txt").read_text(encoding="utf-8")
+
+
+def test_windows_portable_requirements_export_uses_the_captured_commit(
+    tmp_path: Path, repo_root: Path
+) -> None:
+    if shutil.which("uv") is None:
+        pytest.skip("uv is required to export the committed dependency lock")
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in ("pyproject.toml", "uv.lock"):
+        (source / name).write_bytes(
+            subprocess.check_output(
+                ["git", "-C", str(repo_root), "show", f"HEAD:{name}"], timeout=15
+            )
+        )
+    for args in (
+        ("init", "--quiet"),
+        ("add", "pyproject.toml", "uv.lock"),
+        (
+            "-c",
+            "user.name=Portable test",
+            "-c",
+            "user.email=portable@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "locked inputs",
+        ),
+    ):
+        subprocess.run(
+            ["git", "-C", str(source), *args], check=True, capture_output=True, timeout=30
+        )
+    captured = _source_commit(source)
+    output = tmp_path / "requirements.lock.txt"
+    subprocess.run(
+        [
+            "uv",
+            "export",
+            "--frozen",
+            "--no-dev",
+            "--no-emit-project",
+            "--no-emit-package",
+            "vapoursynth-lsmas",
+            "--extra",
+            "vsview",
+            "--format",
+            "requirements.txt",
+            "--output-file",
+            str(output),
+        ],
+        cwd=source,
+        env=os.environ | {"UV_OFFLINE": "1", "UV_NO_CONFIG": "1"},
+        check=True,
+        capture_output=True,
+        timeout=45,
+    )
+    expected = output.read_bytes()
+    output.unlink()
+    # Exporting from the live checkout would now fail to parse the lock.
+    (source / "uv.lock").write_text("corrupt live lock", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-I",
+            "-S",
+            str(repo_root / "tools/windows_portable/portable_runtime.py"),
+            "export",
+            "--repo",
+            str(source),
+            "--commit-sha",
+            captured,
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+
+    assert result.returncode == 0, _normalized_process_output(result)
+    assert b"vsview==0.13.0" in expected
+    assert output.read_bytes() == expected
 
 
 def test_windows_portable_inventory_requires_committed_python_proof(

@@ -294,8 +294,8 @@ imports belong in focused protocol modules such as
 `frame_compare.utils.terminal_sections` owns the shared open-rail renderer used by
 Rich human panels, rules, and prompts. `frame_compare.utils.artifact_paths` owns
 human artifact-path display and terminal hyperlinks. The VSView `SessionConsole`
-implements the same section rules in its separate process because Rich is not
-available there. `progress_protocol.AlignmentSummary` and
+uses the shared Rich renderer for its session instructions and output rows.
+`progress_protocol.AlignmentSummary` and
 `AlignmentSummaryEntry` are memory-only final alignment facts carried through
 phase output, artifacts, `RunResult`, and completion presentation; they do not
 change JSON or persistence projections.
@@ -554,8 +554,10 @@ identity is not persisted.
 - `<run-folder>/generated/vsview_sessions/vsview_*.py`: generated VSView session
   scripts, with L-SMASH-Works remaining the source/index loader owned by Frame Compare
   (VSView's BestSource workspace is not a Frame Compare source-loader change).
-  Frame Compare metadata in generated sessions is schema v5; older, unknown,
-  or mixed versions require regeneration.
+  Script filenames use a prefix of the reference stem capped at 64 characters and
+  150 UTF-8 bytes, followed by a timestamp and session UUID. Session metadata retains
+  the full display name. Frame Compare metadata in generated
+  sessions is schema v5. Older, unknown, or mixed versions require regeneration.
 - `<run-folder>/generated/vsview_sessions/vsview_*.alignment-result.json`: the
   session-scoped native alignment-review result sidecar. It is written atomically by
   the VSView panel only after one complete whole-set confirm action (positions or
@@ -632,7 +634,8 @@ orchestration; no report-specific output directory or fallback placement exists.
 
 Run-folder names are title-first and capped at 64 characters for Windows path
 headroom. The base name comes from resolved TMDB title/year, common parsed
-metadata, combined filename stems, or `unnamed_run`. Exact timestamps are not
+metadata, combined filename stems, or `unnamed_run`. Windows reserved basenames
+are rewritten before reservation. Exact timestamps are not
 part of folder names; collisions use compact numeric suffixes such as `_2` and
 `_3`, then a short random suffix if bounded numeric claiming cannot reserve a
 directory. Preparation validates the reserved immediate-child path and completes
@@ -643,12 +646,11 @@ transition, or the metadata write fails, the run fails immediately and cleanup
 attempts to remove the empty reserved directory as best effort.
 
 Preparation reports the reserved `WorkspacePaths` through an internal dependency
-capture immediately after `run_info.toml` succeeds, without changing the
-`execute_prep(request, deps)` call shape. The coordinator owns whole-run outcome
-timing and asks the run-result service to write success only after post-run phases
-settle, or to make one best-effort failure write while re-raising the original
-exception unchanged. Completed-run record failures add a stable warning and do
-not change successful media work into failure.
+capture after the workspace transition and before writing `run_info.toml`. The
+coordinator owns whole-run outcome timing and asks the run-result service to
+write success after post-run phases settle and its owned HTTP client closes, or
+to make one best-effort failure write while re-raising the original exception.
+Completed-run record failures add a stable warning and leave the run successful.
 
 ### Alignment requests and authority
 
@@ -1059,9 +1061,10 @@ upload ordering; the final upload path uses that plan and does not scan the
 screenshot directory for membership. Orchestration carries canonical clip labels as
 local screenshot lookup keys while assigning exact explicit labels or unique release
 descriptors as remote image names. Collection metadata, row names, membership,
-ordering, and multipart construction remain owned by their existing seams. After a
-successful upload, orchestration
-carries the exact uploaded planned local file paths into `post_report_cleanup`
+ordering, and multipart construction remain owned by their existing seams. The
+publisher passes the comparison URL and exact planned local file paths to
+orchestration synchronously when the final image is accepted. After a successful
+upload, orchestration passes those paths into `post_report_cleanup`
 and carries typed post-upload action results plus warnings returned by
 `frame_compare.services.slowpics_post_upload` into the final `RunResult`.
 Orchestration does not own clipboard, browser, shortcut, or webhook side-effect
@@ -1164,10 +1167,12 @@ reordering. Frame arrow shortcuts select the adjacent visible frame while suppre
 native document and filmstrip scrolling; the selected filmstrip item owns its roving
 tab stop. Custom view-mode, fit, filmstrip-size, and lens-option radio groups use
 standard arrow and Home/End selection. The header Help dialog is the single persistent
-shortcut reference; the filmstrip is the final visible report region. One responsive
-Inspector width token owns both desktop drawer width and
-stage reservation; the existing tablet/phone overlay boundary keeps stage margin at
-zero.
+shortcut reference, and the filmstrip is the final visible report region. The
+desktop Inspector starts at the measured toolbar bottom, including shifts caused
+by the viewer status banner. One responsive Inspector width token controls both
+drawer width and desktop stage reservation. At 992 px and below, the drawer
+overlays the stage from the top of the viewport and reserves no stage space.
+The drawer also starts at the top in fullscreen.
 
 Help and Report Information share the local `HelpInfoDialog` owner in
 `assets/viewer.js` for visibility, focus restoration, Tab trapping, and Escape
@@ -1403,7 +1408,9 @@ filmstrip or Inspector changes.
 Restored custom zoom applies to the canvas and controls, and pan is clamped once
 image geometry is available. Diff lens images share the stage comparison transform and offset, while Single and Slider
 magnify each native source. Viewport preferences use the report-scoped
-`viewport-v2` key; older viewport state is ignored.
+`viewport-v2` key; older viewport state is ignored. When leaving Grid, the
+viewer saves the selected view mode and stores pending normalized pan separately
+until the destination image supplies the geometry for pixel conversion and clamping.
 `currentAlignment()` derives a normalized copy from the selected directional pair's
 `pairAlignments` entry; missing entries mean neutral. Offset edits write that map,
 while `rawAlignX`/`rawAlignY` remain transient input drafts. Visiting a pair or
@@ -1553,7 +1560,7 @@ Runtime ownership matrix:
 | Memory-only final alignment summary carried to phase and completion output | `frame_compare.utils.progress_protocol` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
 | Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
-| Native VSView alignment-review panel, public callback observation, source-lineup decisions, and marker lifecycle | `frame_compare.vsview.alignment_review_panel` |
+| Native VSView alignment-review panel, public callback observation, and source-lineup decisions | `frame_compare.vsview.alignment_review_panel` |
 | VSView availability, launch adapter, and selected media-runtime preload | `frame_compare.vsview.adapter`, `frame_compare.vsview.launcher` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
 | Coordinated media component identity, scoped cache/index fingerprints, and deployment runtime comparison | `frame_compare.vs.runtime_contract` |
@@ -1604,7 +1611,7 @@ Native alignment-review hotspot dispositions for the current implementation:
 | `src/frame_compare/vsview/session_script.py` | Owns script-path reservation, deterministic session data and the installed-package bootstrap. The generated path remains the session identity. |
 | `src/frame_compare/vsview/session_runtime.py` | Owns typed session execution: L-SMASH preview source loading, defaults and console guidance, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v5 transport required by the panel. |
 | `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict metadata-v5/result-v1 validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape; it validates the embedded audio attempt through the single `utils/alignment_evidence.py` parser instead of re-describing the schema. |
-| `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, validated evidence presentation, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, synchronization markers, and safe contract-rejection feedback. |
+| `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, validated evidence presentation, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, and safe contract-rejection feedback. |
 | `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |
 | `src/frame_compare/services/alignment_vsview.py` | Responsibility reduced: it parses and validates the native result through the typed contract, accepts it, and applies existing offset/override policy; terminal confirmation parsing is no longer an owner. |
 | `src/frame_compare/orchestration/doctor_checks.py` | Responsibility unchanged: it reports the existing structured VSView/panel availability check and does not launch a review or own panel behavior. |

@@ -3,12 +3,11 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: bash tools/verify_docker_gui.sh [--service NAME] [--no-build] [--no-cache]
+Usage: bash tools/verify_docker_gui.sh [--no-build] [--no-cache]
 
 Runs the optional Linux X11/VSView Docker proof without launching a real UI.
 
-Defaults:
-  --service frame-compare-test
+Uses the frame-compare-test Compose service.
 
 Host contract:
   - Linux host with an active X11 DISPLAY
@@ -20,25 +19,15 @@ Manual UI launch remains separate from this proof.
 EOF
 }
 
-readonly DEFAULT_SERVICE="frame-compare-test"
+readonly TEST_SERVICE="frame-compare-test"
 readonly COMPOSE_BASE=(-f docker-compose.yml -f docker-compose.gui-linux.yml)
 
-service="$DEFAULT_SERVICE"
 run_build="1"
 no_cache="0"
 inside_container="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --service)
-      if [[ $# -lt 2 || -z "${2:-}" ]]; then
-        echo "ERROR: --service requires a value" >&2
-        usage >&2
-        exit 2
-      fi
-      service="${2:-}"
-      shift 2
-      ;;
     --no-build)
       run_build="0"
       shift
@@ -484,7 +473,7 @@ if [[ "$run_build" == "1" ]]; then
   if [[ "$no_cache" == "1" ]]; then
     build_args+=(--no-cache)
   fi
-  "${compose_cmd[@]}" build "${build_args[@]}" "$service"
+  "${compose_cmd[@]}" build "${build_args[@]}" "$TEST_SERVICE"
 fi
 
 if ! host_user_name="$(id -un)"; then
@@ -494,5 +483,5 @@ fi
 readonly host_user_name
 print_manual_ui_instructions "$host_user_name"
 
-"${compose_cmd[@]}" run --rm --entrypoint /bin/bash "$service" -c \
+"${compose_cmd[@]}" run --rm --entrypoint /bin/bash "$TEST_SERVICE" -c \
   'bash tools/verify_docker_gui.sh --inside-container'

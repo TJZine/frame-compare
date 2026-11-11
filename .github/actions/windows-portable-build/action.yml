@@ -36,11 +36,13 @@ runs:
 
     - name: Install dev dependencies (frozen)
       shell: pwsh
+      env:
+        EXPECTED_SHA: ${{ inputs.expected_sha }}
       run: |
         $PSNativeCommandUseErrorActionPreference = $true
         $wheelhouse = Join-Path $env:RUNNER_TEMP "anitopy-wheel"
         python -B -I -S tools/windows_portable/portable_runtime.py anitopy-wheel `
-          --cache .portable_cache --output $wheelhouse
+          --cache .portable_cache --output $wheelhouse --commit-sha "$env:EXPECTED_SHA"
         uv sync --all-groups --extra vsview --frozen --no-build --no-install-package anitopy
         uv --offline --no-config pip install --no-index --no-deps --no-build --no-python-downloads `
           (Join-Path $wheelhouse "anitopy-2.1.1-py3-none-any.whl")
@@ -60,6 +62,7 @@ runs:
       shell: pwsh
       env:
         REQUIRE_SIGNING: ${{ inputs.require_signing }}
+        EXPECTED_SHA: ${{ inputs.expected_sha }}
       run: |
         $ErrorActionPreference = "Stop"
         $PSNativeCommandUseErrorActionPreference = $true
@@ -72,6 +75,8 @@ runs:
           "Bypass",
           "-File",
           "tools/windows_portable/build_portable.ps1",
+          "-ExpectedCommitSha",
+          $env:EXPECTED_SHA,
           "-ManifestPath",
           "tools/windows_portable/manifest.windows-x64.json",
           "-OutDir",
@@ -122,12 +127,24 @@ runs:
             throw "Required VSView runtime proof marker missing: $marker"
           }
         }
-        if ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok ") {
-          Write-Host "Direct placebo frame proof completed."
-        } elseif ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable") {
-          Write-Warning "Hosted runner lacks a usable Vulkan runtime; direct placebo frame proof remains required in Phase 2."
-        } else {
-          throw "Direct placebo frame proof did not report a recognized result."
+        $directReceipts = @(
+          $proof -split '\r?\n' | Where-Object { $_ -cmatch '^WINDOWS_BUNDLE_PROOF placebo_direct_frame=' }
+        )
+        if ($directReceipts.Count -ne 2) {
+          throw "Expected exactly two direct placebo frame receipts."
+        }
+        foreach ($context in @("standalone", "post_qt")) {
+          $receipt = @($directReceipts | Where-Object { $_ -cmatch " context=$context$" })
+          if ($receipt.Count -ne 1) {
+            throw "Expected one direct placebo frame receipt for $context."
+          }
+          if ($receipt[0] -cmatch "^WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok format=[A-Za-z0-9_]+ bits=[0-9]+ context=$context$") {
+            Write-Host "Direct placebo frame proof completed ($context)."
+          } elseif ($receipt[0] -ceq "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable context=$context") {
+            Write-Warning "Hosted runner lacks a usable Vulkan runtime ($context); direct placebo frame proof remains required in Phase 2."
+          } else {
+            throw "Direct placebo frame proof did not report a recognized result for $context."
+          }
         }
 
     - name: Verify bundle workspace directories
@@ -226,6 +243,7 @@ runs:
         foreach ($marker in @(
           "WINDOWS_EXTRACTED_PROOF license_inventory=ok",
           "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok",
+          "WINDOWS_EXTRACTED_PROOF vsview_entrypoint=ok",
           "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded",
           "WINDOWS_EXTRACTED_PROOF result=ok"
         )) {

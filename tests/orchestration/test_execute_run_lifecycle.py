@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
+from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
 from typing import Never, cast
@@ -36,6 +38,7 @@ from frame_compare.services.types import SlowpicsCollectionMetadata, TmdbMetadat
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.loader import DefaultVSLoader
 from frame_compare.vs.types import SourceInfo
@@ -1116,6 +1119,89 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
         assert observed["close_completed"] == [True]
 
 
+async def test_first_cancellation_during_owned_client_close_records_only_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_config(tmp_path)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
+    records_at_close: list[list[Path]] = []
+
+    class InterruptingCloseTransport(httpx.AsyncBaseTransport):
+        async def aclose(self) -> None:
+            records_at_close.append(list(tmp_path.glob("generated/*/run_result.toml")))
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            await asyncio.sleep(0)
+
+    client = httpx.AsyncClient(transport=InterruptingCloseTransport())
+    monkeypatch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
+    worker = asyncio.create_task(
+        execute_run(
+            make_run_request(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                overrides=CLIConfigOverrides(no_upload=True),
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+        )
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(worker, 3)
+
+    assert records_at_close == [[]]
+    records = list(tmp_path.glob("generated/*/run_result.toml"))
+    assert len(records) == 1
+    assert read_run_result(records[0]).status == "failed"
+
+
+async def test_cancellation_at_completed_record_guard_records_only_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_config(tmp_path)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
+    client = httpx.AsyncClient()
+    monkeypatch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
+    real_record_completed = coordinator.record_completed_run_result
+    client_closed_at_publication: list[bool] = []
+
+    def cancel_before_publication(
+        *,
+        workspace: WorkspacePaths | None,
+        result: RunResult,
+        started_at: datetime,
+        completed_at: datetime,
+    ) -> RunResult:
+        client_closed_at_publication.append(client.is_closed)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        return real_record_completed(
+            workspace=workspace, result=result, started_at=started_at, completed_at=completed_at
+        )
+
+    monkeypatch.setattr(coordinator, "record_completed_run_result", cancel_before_publication)
+    worker = asyncio.create_task(
+        execute_run(
+            make_run_request(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                overrides=CLIConfigOverrides(no_upload=True),
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+        )
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(worker, 3)
+
+    assert client_closed_at_publication == [True]
+    records = list(tmp_path.glob("generated/*/run_result.toml"))
+    assert len(records) == 1
+    assert read_run_result(records[0]).status == "failed"
+
+
 def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failure(
     tmp_path: Path,
 ) -> None:
@@ -1223,7 +1309,15 @@ def test_reservation_is_captured_before_interrupted_run_info_writer(
 
 @pytest.mark.parametrize("confirm_after_report", [False, True])
 @pytest.mark.parametrize(
-    "outcome", ["success", "webhook_cancel", "publisher_handoff", "phase_handoff", "upload_failure"]
+    "outcome",
+    [
+        "success",
+        "webhook_cancel",
+        "publisher_handoff",
+        "phase_handoff",
+        "upload_failure",
+        "final_image_progress",
+    ],
 )
 async def test_confirmed_upload_facts_survive_cancellation(
     tmp_path: Path,
@@ -1254,7 +1348,7 @@ async def test_confirmed_upload_facts_survive_cancellation(
     config.report.embed_images = True
     config.slowpics.auto_upload = True
     config.slowpics.confirm_upload_after_report = confirm_after_report
-    config.slowpics.create_url_shortcut = outcome == "publisher_handoff"
+    config.slowpics.create_url_shortcut = outcome in {"publisher_handoff", "final_image_progress"}
     config.slowpics.delete_after_upload = True
     config.slowpics.webhook_url = "https://hooks.example.test/offline"
     config.slowpics.title = "Offline cancellation test"
@@ -1282,6 +1376,41 @@ async def test_confirmed_upload_facts_survive_cancellation(
     applied_publish: list[bool] = []
     post_upload_started: list[bool] = []
     cleanup_started: list[bool] = []
+    image_uploads: set[str] = set()
+    final_progress_facts: list[tuple[str | None, tuple[Path, ...]]] = []
+
+    class CancelAfterLastImageProgress(NullProgressReporter):
+        def advance(self, amount: int = 1) -> None:
+            super().advance(amount)
+            if image_uploads and len(image_uploads) == len(uploaded_paths):
+                final_progress_facts.append(
+                    (artifacts.slowpics_url, artifacts.uploaded_slowpics_file_paths)
+                )
+                worker.cancel()
+
+    def upload_transport(request: httpx.Request) -> httpx.Response:
+        assert outcome == "final_image_progress"
+        assert request.url.host == "slow.pics"
+        if request.method == "GET" and request.url.path == "/comparison":
+            return httpx.Response(200, headers={"Set-Cookie": "XSRF-TOKEN=test-token; Path=/"})
+        assert request.method == "POST"
+        image_ids = [f"image-{index}" for index in range(len(uploaded_paths))]
+        if request.url.path == "/upload/comparison":
+            return httpx.Response(
+                200,
+                json={
+                    "key": "collection-key",
+                    "firstComparisonKey": "confirmed-offline",
+                    "collectionUuid": "collection-id",
+                    "images": [[image_id] for image_id in image_ids],
+                },
+            )
+        image_id = request.url.path.removeprefix("/upload/image/")
+        assert request.url.path == f"/upload/image/{image_id}"
+        assert image_id in image_ids
+        assert image_id not in image_uploads
+        image_uploads.add(image_id)
+        return httpx.Response(200)
 
     async def fake_prep(_request: RunRequest, deps: RunDependencies) -> PrepState:
         assert deps.capture_reserved_run is not None
@@ -1299,11 +1428,14 @@ async def test_confirmed_upload_facts_survive_cancellation(
     def fake_render(
         _ctx: RunContext, *, frames: list[int], runner: object, vs_loader: object
     ) -> RenderPhaseOutput:
+        nonlocal uploaded_paths
         del runner, vs_loader
         screenshots = workspace.screenshots_dir
         assert screenshots is not None
         screenshots.mkdir()
         paths = [screenshots / f"{frame}.png" for frame in frames]
+        if outcome == "final_image_progress":
+            uploaded_paths = tuple(paths)
         for path in paths:
             path.write_bytes(b"PNG")
         # A leftover screenshot must never be mistaken for part of this upload.
@@ -1323,6 +1455,11 @@ async def test_confirmed_upload_facts_survive_cancellation(
         if outcome == "upload_failure":
             raise SlowpicsError("Image upload failed with status 400")
         uploaded_paths = tuple(cast(SlowpicsUploadPlan, kwargs["upload_plan"]).file_paths)
+        callback = cast(
+            Callable[[str, tuple[Path, ...]], None] | None, kwargs.get("on_upload_confirmed")
+        )
+        if callback is not None:
+            callback(known_url, uploaded_paths)
         if outcome == "publisher_handoff":
             task = asyncio.current_task()
             assert task is not None
@@ -1395,7 +1532,8 @@ async def test_confirmed_upload_facts_survive_cancellation(
     monkeypatch.setattr(execution, "run_report_phase", fake_report)
     monkeypatch.setattr(execution, "apply_phase_output", apply)
     monkeypatch.setattr(execution, "run_post_report_cleanup_phase", cleanup)
-    monkeypatch.setattr(phase_post_render, "publish_to_slowpics", fake_publish)
+    if outcome != "final_image_progress":
+        monkeypatch.setattr(phase_post_render, "publish_to_slowpics", fake_publish)
     monkeypatch.setattr(phase_post_render, "run_slowpics_post_upload_actions", post_upload)
     monkeypatch.setattr(
         "frame_compare.services.slowpics_post_upload.deliver_slowpics_webhook", injected_webhook
@@ -1404,7 +1542,16 @@ async def test_confirmed_upload_facts_survive_cancellation(
     monkeypatch.setattr("socket.create_connection", reject_network)
     monkeypatch.setattr("socket.socket.connect", reject_network)
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(reject_network)) as client:
+    cancelled = outcome in {
+        "webhook_cancel",
+        "publisher_handoff",
+        "phase_handoff",
+        "final_image_progress",
+    }
+    transport = httpx.MockTransport(
+        upload_transport if outcome == "final_image_progress" else reject_network
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
         worker = asyncio.create_task(
             execute_run(
                 make_run_request(
@@ -1414,7 +1561,11 @@ async def test_confirmed_upload_facts_survive_cancellation(
                     ffmpeg_runner=FakeFFmpegRunner(),
                     http_client=client,
                     monotonic_timer=_zero_monotonic_timer,
-                    progress=NullProgressReporter(),
+                    progress=(
+                        CancelAfterLastImageProgress()
+                        if outcome == "final_image_progress"
+                        else NullProgressReporter()
+                    ),
                     confirm_slowpics_upload=lambda request: "confirmed",
                 ),
             )
@@ -1432,7 +1583,7 @@ async def test_confirmed_upload_facts_survive_cancellation(
                 await asyncio.sleep(0)
                 assert not worker.done(), "cancellation abandoned the blocked webhook worker"
                 release_connector.set()
-            if outcome in {"webhook_cancel", "publisher_handoff", "phase_handoff"}:
+            if cancelled:
                 with pytest.raises(asyncio.CancelledError):
                     await asyncio.wait_for(worker, 3)
             else:
@@ -1446,7 +1597,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
                 await asyncio.gather(worker, return_exceptions=True)
 
     record = read_run_result(workspace.run_dir / "run_result.toml")
-    cancelled = outcome in {"webhook_cancel", "publisher_handoff", "phase_handoff"}
     confirmed = outcome != "upload_failure"
     assert record.status == (
         "failed" if cancelled else "completed_with_warnings" if not confirmed else "completed"
@@ -1457,7 +1607,12 @@ async def test_confirmed_upload_facts_survive_cancellation(
     assert artifacts.uploaded_slowpics_file_paths == uploaded_paths
     assert bool(applied_publish) == (outcome == "success")
     assert bool(cleanup_started) == (not cancelled)
-    assert bool(post_upload_started) == (outcome not in {"publisher_handoff", "upload_failure"})
+    assert bool(post_upload_started) == (
+        outcome not in {"publisher_handoff", "upload_failure", "final_image_progress"}
+    )
+    if outcome == "final_image_progress":
+        assert len(image_uploads) == len(uploaded_paths) > 1
+        assert final_progress_facts == [(known_url, uploaded_paths)]
     assert connector_started.is_set() == (outcome in {"success", "webhook_cancel"})
     assert connector_finished.is_set() == connector_started.is_set()
     if cancelled:

@@ -86,8 +86,8 @@ Help uses the current terminal width; it does not impose a routine 200-column wi
 ## Exit Codes And Error Families
 
 Commands exit with these codes (`src/frame_compare/cli/errors.py`,
-`src/frame_compare/cli/run_command.py:346-354`,
-`src/frame_compare/cli/cli_helpers.py:130-139`):
+`run_command.handle_run`, `run_command.handle_json_output`,
+and `cli_helpers.handle_error`):
 
 | Code | Meaning |
 | --- | --- |
@@ -102,7 +102,8 @@ Commands exit with these codes (`src/frame_compare/cli/errors.py`,
 
 The first digit of an `FC-` code selects its family and exit code. Human output
 prints the code and message on stderr; `--json` prints the typed error document
-described under Output Modes.
+described under Output Modes. An unexpected error exits 1 and prints a fixed
+message to stderr. In `--json` mode it emits no stdout document.
 
 ## Shared Path Resolution Rules
 
@@ -111,6 +112,7 @@ These commands share the same root/config path resolution rules:
 - `run`
 - `doctor`
 - `wizard`
+- `preset list`
 - `preset apply`
 - `preset save`
 - `history list`
@@ -119,7 +121,7 @@ These commands share the same root/config path resolution rules:
 For those commands:
 
 - `--root` selects the workspace root and defaults to `.`.
-- `--config` selects the config file path. Relative paths resolve from `--root`.
+- `--config` expands environment variables before resolving relative paths from `--root`.
 - If `--config` is omitted, the CLI resolves `config/config.toml` under `--root`.
 
 The selected config file and configured `paths.config_dir` must resolve beneath the
@@ -131,8 +133,7 @@ Containment follows symlinks and expands environment variables in config path va
 so invalid config paths fail through the standard typed path error. `run`, `doctor`, `wizard`, `preset apply`,
 `preset save`, and both `history` subcommands validate their selected config
 destination before config reads or writes; `run` also validates generated-data
-root structure before diagnostics, config writes, or runtime entry. `preset list`
-remains root-only and ignores its accepted `--config` value.
+root structure before diagnostics, config writes, or runtime entry.
 Configuration acquisition requires a readable regular file; authored file symlinks
 remain allowed within the resolved path rules. Nonregular or unreadable selected
 config input fails as sanitized `FC-1002`/`CONFIG_PARSE_ERROR`; a missing selected
@@ -236,7 +237,8 @@ resampling, dropping, interpolating, or duplicating source frames. Mixed-FPS
 validation compares effective FPS values after explicit overrides and after
 `match_fps = "assume_reference"` or
 `match_fps = "majority"` matching. Explicit per-source `effective_fps` values
-take precedence over `match_fps`.
+take precedence over `match_fps`. Source preparation rejects an effective rate
+whose value or resulting clip duration exceeds the floating-point range.
 
 Explicit labels are trimmed. They reject control characters and bidirectional
 formatting controls U+202A–U+202E and U+2066–U+2069. Derived labels replace control
@@ -291,10 +293,12 @@ unchanged.
 - Entries sort newest first using persisted UTC completion/start time, with an
   exact folder-name tie-break. Unavailable records without valid lifecycle times
   sort after valid records.
-- If the selected generated-data root is missing, disconnected, unreadable, or not
-  a directory, history fails with `FC-3016` and an actionable reconnect/permissions
-  hint. History does not create the root, return a JSON success document, or fall
-  back to the workspace or portable bundle.
+- History fails with `FC-3016` and an actionable reconnect/permissions hint if
+  the selected generated-data root is missing, disconnected, unreadable, or not
+  a directory. On POSIX, history also fails with `FC-3016` if the root denies
+  search permission.
+  History does not create the root, return a JSON success document, or fall back
+  to the workspace or portable bundle.
 - Human `history list` output goes to stdout and exposes the exact run name,
   status, persisted time, and report availability. Diagnostics and warnings use
   stderr.
@@ -807,11 +811,10 @@ once the standalone CLI has completed its Python cleanup and selected exit 130,
 it ignores further Ctrl+C during interpreter/native-module teardown to preserve
 that exit status. This does not change repeated-interrupt behavior while the run
 or its cleanup is active, or the signal policy of the reusable Typer application.
-Its failure
-record retains a confirmed slow.pics upload outcome and URL if remote
-publishing completed before the interrupt, even when optional post-upload work
-did not finish. That does not make the run successful or permit new work after
-cancellation. The shared
+Its failure record retains a confirmed slow.pics upload outcome and URL once
+the final planned image has been accepted, even if the interrupt prevents the
+publish phase from returning. That does not make the run successful or permit
+new work after cancellation. The shared
 TMDB response cache is an exception to the publication rule: an already-in-flight
 validated upstream response may finish its locked, atomic worker publication.
 It carries no run, selection, alignment, or analysis-cache authority, and the
@@ -859,7 +862,8 @@ CLI drains the executor before exit. No new TMDB request starts after the interr
   guidance to reduce selector counts, use a longer clip, or reduce exclusions. It
   does not prompt again, substitute the deterministic uniform fallback, render,
   report success, publish, or upload.
-- No, default No, EOF, interruption, and prompt failure all fail through typed
+- Ctrl+C at the prompt cancels a Runner-owned run and exits 130.
+- No, default No, EOF, and prompt failure all fail through typed
   `FC-4012` without retry or downstream success side effects. The hint directs users
   to reduce `analysis.ignore_lead_seconds` / `analysis.ignore_trail_seconds` or use a
   clip-specific config.
@@ -1012,9 +1016,10 @@ recovery requirement.
   original error. Both attempt best-effort cleanup.
 - A separate atomically written `<run-folder>/run_result.toml` V1 record captures
   the final outcome without modifying `run_info.toml`. Successful records are
-  written after all post-run phases settle and use `completed` or
-  `completed_with_warnings`; failures after reservation get one best-effort
-  `failed` record. Failures before reservation write no record. An ordinary
+  written after all post-run phases settle and the coordinator's HTTP client
+  closes. Their status is `completed` or `completed_with_warnings`. Failures
+  after reservation get one best-effort `failed` record. Failures before
+  reservation write no record. An ordinary
   completed-run result-write failure is warning-only and leaves the run successful;
   an ordinary failed-run result-write failure preserves the identical original
   exception and exit mapping. `KeyboardInterrupt` and `SystemExit` raised while
@@ -1278,7 +1283,8 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 - A run-folder reservation is required before shortcut creation; escaped or
   symlinked run aliases are rejected rather than redirected elsewhere.
 - The filename is derived from the same final collection title sent to
-  slow.pics, with a stable fallback from the slow.pics URL key.
+  slow.pics, with a stable fallback from the slow.pics URL key. Windows
+  reserved basenames are rewritten before adding `.url`.
 - Repeated writes overwrite the same deterministic shortcut path.
 - Shortcut files are not members of `slowpics.delete_after_upload` cleanup.
 - Shortcut write or path-selection failures are warning-only.
@@ -1793,6 +1799,7 @@ fails config validation instead of silently using a default.
 Validation details retain rejected non-secret inputs for diagnostics. Inputs at
 `slowpics.webhook_url` and `tmdb.api_key` are always replaced with `<redacted>`
 before human, JSON, doctor, preset, or other typed config errors can expose them.
+TOML syntax diagnostics include a fixed message and any available parser location.
 
 The implemented `[logging]` surface contains only:
 
@@ -2317,7 +2324,8 @@ Review outputs keep original frame positions/counts, reference FPS, ordering,
   optional GUI dependency classes and TMDB
   configuration/credential classes without guessing a package-manager command or
   install mode; when setup mode is unknown, they point to the repository's current
-  setup documentation.
+  setup documentation. Config acquisition failures identify the selected file and
+  ask for readable, valid TOML.
 - If an unexpected check function raises, the generic fallback uses stable failure
   wording and may expose only the exception type in JSON `details`; raw exception
   messages are not emitted in human or JSON doctor output.
@@ -2334,9 +2342,7 @@ Review outputs keep original frame positions/counts, reference FPS, ordering,
 ### `preset list`
 
 - Resolves the presets directory under `<root>/config/presets`.
-- Accepts `--config` for interface consistency, but current behavior ignores the resolved
-  config path and uses `--root` only when locating presets. Help describes this value
-  as accepted for consistency and ignored by `preset list`.
+- Validates the selected config path without reading the config file.
 - Prints preset names one per line to stdout.
 - Emits no success confirmation.
 
