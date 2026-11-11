@@ -124,9 +124,8 @@ artifacts. `build_update.ps1` accepts only a native-panel-capable full bundle wi
 `bundle_info.schema_version` 3, and copies the complete bundle's required
 media-runtime fingerprint into the signed update manifest. The installed updater
 refuses pre-native-panel schema-2 bundles, as well as missing, legacy, malformed,
-or different fingerprints, before any unsafe dependency override; each refusal
-requires a complete portable bundle reinstall. Crossing a media-runtime
-fingerprint also requires a complete portable bundle reinstall.
+or different fingerprints. Each refusal requires a complete portable bundle
+reinstall.
 
 Maintainer update builds refuse uncommitted changes under `src/frame_compare` or
 `pyproject.toml` and package committed `HEAD`, matching the complete portable bundle's
@@ -595,7 +594,9 @@ Canonical verification path:
    creation. Purge keeps five complete, compatible backups and removes incomplete
    ones. Legacy backups missing either record are not migrated.
    Exercise both commands repairing every staging/promoting/committed journal
-   interruption immediately after the lock, before any version/target check. The
+   interruption immediately after acquiring the lock, before the requested
+   operation's version and target checks. Rollback checks backup availability,
+   compatibility, and completeness before acquiring the lock. The
    `app/.frame_compare_replacement.json` journal uses temporary-file plus atomic
    File.Replace/File.Move writes. Unknown .old/.new trees without a journal refuse
    with paths. Inject copy, rename, hash/size and smoke failures; current source must
