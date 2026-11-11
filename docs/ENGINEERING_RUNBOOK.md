@@ -312,7 +312,11 @@ The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` wi
 10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
 It explicitly excludes `tests/integration/test_alignment_streaming_resources.py`.
 `tools/verify_docker_integration.sh` owns image builds, container invocation,
-cleanup, logs, and artifact handling. It invokes the repository-owned
+cleanup, logs, and artifact handling. It retains `pytest.xml` in each run's artifact
+directory. The gate requires a readable JUnit report with at least one test and
+zero skipped or xfailed tests. The verifier sets pytest's xfail default to strict,
+so an unexpected pass fails unless the test explicitly sets `xfail(strict=False)`.
+A Docker or log-writer failure fails the gate. The verifier invokes the repository-owned
 `tools/docker_runtime_smoke.py` from the test service's repository mount for
 native runtime, provenance, fixture, and application assertions. The tool remains
 in the workflow trigger paths.
