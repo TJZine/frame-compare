@@ -2393,12 +2393,13 @@ def test_p4a_verbose_rows_include_established_context_and_all_checks(
             3,
             "Audio: 3 of 3 clear sections agree on +0f (0 differ; 1 weak, 1 quiet not counted).",
         ),
-        (
+        pytest.param(
             4,
             0,
             0,
             0,
-            "Audio: 0 of 0 clear sections agree on +0f (0 differ; 0 weak, 4 quiet not counted).",
+            "Audio: 0 of 0 clear sections agree (0 differ; 0 weak, 4 quiet not counted).",
+            id="all-quiet-no-offset",
         ),
     ],
 )

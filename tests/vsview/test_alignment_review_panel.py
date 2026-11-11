@@ -614,10 +614,12 @@ def test_panel_resolved_run_context_matrix(
 @pytest.mark.parametrize(
     ("planned", "active", "credible", "agreeing", "expected"),
     [
-        (4, 4, 3, 3, "(0 differ; 1 weak, 0 quiet not counted)."),
-        (4, 3, 3, 3, "(0 differ; 0 weak, 1 quiet not counted)."),
-        (5, 4, 3, 3, "(0 differ; 1 weak, 1 quiet not counted)."),
-        (4, 0, 0, 0, "(0 differ; 0 weak, 4 quiet not counted)."),
+        (4, 4, 3, 3, " on +0f (0 differ; 1 weak, 0 quiet not counted)."),
+        (4, 3, 3, 3, " on +0f (0 differ; 0 weak, 1 quiet not counted)."),
+        (5, 4, 3, 3, " on +0f (0 differ; 1 weak, 1 quiet not counted)."),
+        pytest.param(
+            4, 0, 0, 0, " (0 differ; 0 weak, 4 quiet not counted).", id="all-quiet-no-offset"
+        ),
     ],
 )
 def test_panel_established_counts_matrix(
@@ -634,7 +636,7 @@ def test_panel_established_counts_matrix(
         credible=credible,
         agreeing=agreeing,
     )
-    expected_line = f"Audio: {agreeing} of {credible} clear sections agree on +0f {expected}"
+    expected_line = f"Audio: {agreeing} of {credible} clear sections agree{expected}"
     panel, _api, _script = _panel(
         tmp_path, suggestion=None, audio_review=_attempt_audio_review(attempt)
     )

@@ -349,17 +349,18 @@ class AudioReviewPresentation:
         )
         offset = self.suggested_offset
         if offset is None:
-            offset = self.attempt.audio.rounded_frame or 0
+            offset = self.attempt.audio.rounded_frame
         weak = max(0, self.attempt.audio.active_chunks - self.attempt.audio.credible_chunks)
         inactive = max(
             0,
             self.attempt.analysis.planned_chunk_count - self.attempt.audio.active_chunks,
         )
         ignored = f"; {weak} weak, {inactive} quiet not counted" if weak or inactive else ""
+        counts = f"Audio: {agreeing} of {self.attempt.audio.credible_chunks} clear sections agree"
+        if offset is not None:
+            counts += f" on {offset:+d}f"
         return (
-            f"Audio: {agreeing} of {self.attempt.audio.credible_chunks} clear sections agree on "
-            f"{offset:+d}f ({max(0, self.attempt.audio.credible_chunks - agreeing)} differ"
-            f"{ignored})."
+            f"{counts} ({max(0, self.attempt.audio.credible_chunks - agreeing)} differ{ignored})."
         )
 
     def established_video_line(self) -> str:
