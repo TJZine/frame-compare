@@ -28,9 +28,10 @@ For exact output streams and JSON fields, see the
 the config file; relative paths resolve from `--root`, and the default is
 `config/config.toml`.
 
-`run`, `doctor`, `wizard`, `preset apply`, `preset save`, `history list`, and `history open`
-accept both options. `preset list` accepts `--config` but ignores it and reads
-presets from `<root>/config/presets`. `version` accepts neither option.
+`run`, `doctor`, `wizard`, `preset list`, `preset apply`, `preset save`,
+`history list`, and `history open` accept both options. `preset list` validates the selected config path and reads
+presets from `<root>/config/presets` without loading the config file.
+`version` accepts neither option.
 
 The installed Windows shim supplies the bundle or AppData config when you omit
 `--config`; see the contract's [shared path rules](../current-cli-contract.md#shared-path-resolution-rules).

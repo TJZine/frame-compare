@@ -330,3 +330,32 @@ def test_history_open_rejects_nonexact_name(tmp_path: Path) -> None:
 
     assert result.exit_code == 4
     assert "Run was not found" in result.stderr
+
+
+@pytest.mark.parametrize("command", ["list", "open"])
+def test_history_uses_environment_selected_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    root = tmp_path / "workspace"
+    report = _setup(root)
+    selected = root / "config" / "config.toml"
+    literal = root / "$FC_TEST_CONFIG"
+    literal.write_text(CONFIG.replace('"generated"', '"wrong-generated"'), encoding="utf-8")
+    (root / "wrong-generated").mkdir()
+    opened: list[Path] = []
+
+    def open_report(path: Path) -> bool:
+        opened.append(path)
+        return True
+
+    monkeypatch.setattr("frame_compare.cli.entry._maybe_open_report", open_report)
+    for value in (selected.relative_to(root), selected.resolve()):
+        monkeypatch.setenv("FC_TEST_CONFIG", str(value))
+        arguments = ["list", "--json"] if command == "list" else ["open", "Exact Run"]
+        result = _invoke(root, [*arguments, "--config", literal.name])
+        assert result.exit_code == 0, result.stderr
+        if command == "list":
+            assert [entry["name"] for entry in json.loads(result.stdout)["runs"]] == ["Exact Run"]
+        else:
+            assert opened.pop() == report.resolve()
+            assert opened == []

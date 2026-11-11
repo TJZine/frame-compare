@@ -112,6 +112,7 @@ These commands share the same root/config path resolution rules:
 - `run`
 - `doctor`
 - `wizard`
+- `preset list`
 - `preset apply`
 - `preset save`
 - `history list`
@@ -120,7 +121,7 @@ These commands share the same root/config path resolution rules:
 For those commands:
 
 - `--root` selects the workspace root and defaults to `.`.
-- `--config` selects the config file path. Relative paths resolve from `--root`.
+- `--config` expands environment variables before resolving relative paths from `--root`.
 - If `--config` is omitted, the CLI resolves `config/config.toml` under `--root`.
 
 The selected config file and configured `paths.config_dir` must resolve beneath the
@@ -132,8 +133,7 @@ Containment follows symlinks and expands environment variables in config path va
 so invalid config paths fail through the standard typed path error. `run`, `doctor`, `wizard`, `preset apply`,
 `preset save`, and both `history` subcommands validate their selected config
 destination before config reads or writes; `run` also validates generated-data
-root structure before diagnostics, config writes, or runtime entry. `preset list`
-remains root-only and ignores its accepted `--config` value.
+root structure before diagnostics, config writes, or runtime entry.
 Configuration acquisition requires a readable regular file; authored file symlinks
 remain allowed within the resolved path rules. Nonregular or unreadable selected
 config input fails as sanitized `FC-1002`/`CONFIG_PARSE_ERROR`; a missing selected
@@ -2335,9 +2335,7 @@ Review outputs keep original frame positions/counts, reference FPS, ordering,
 ### `preset list`
 
 - Resolves the presets directory under `<root>/config/presets`.
-- Accepts `--config` for interface consistency, but current behavior ignores the resolved
-  config path and uses `--root` only when locating presets. Help describes this value
-  as accepted for consistency and ignored by `preset list`.
+- Validates the selected config path without reading the config file.
 - Prints preset names one per line to stdout.
 - Emits no success confirmation.
 
