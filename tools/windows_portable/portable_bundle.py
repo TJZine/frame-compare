@@ -19,10 +19,7 @@ from portable_runtime import SITE, Layout, _unpack_archive, git_blob, record_byt
 PREFIX = "frame-compare-portable-win-x64/"
 
 
-def install_project(repo: Path, root: Path) -> None:
-    commit = (
-        subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, timeout=30).decode().strip()
-    )
+def install_project(repo: Path, root: Path, commit: str) -> None:
     project = tomllib.loads(git_blob(repo, commit, Path("pyproject.toml")).decode())["project"]
     layout = Layout(root)
     with tempfile.TemporaryDirectory(prefix="portable-source-") as temporary:
@@ -151,13 +148,16 @@ def main() -> None:
     parser.add_argument("mode", choices=("install-project", "pack", "verify-and-pack"))
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--repo", type=Path)
+    parser.add_argument("--commit-sha")
     parser.add_argument("--candidate", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.mode == "install-project":
         if args.repo is None:
             parser.error("install-project requires --repo")
-        install_project(args.repo, args.root)
+        if args.commit_sha is None or not re.fullmatch(r"[a-f0-9]{40}", args.commit_sha):
+            parser.error("--commit-sha must be a complete lowercase 40-character commit SHA")
+        install_project(args.repo, args.root, args.commit_sha)
         return
     if args.output is None:
         parser.error("portable packaging requires --output")

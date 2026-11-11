@@ -73,6 +73,7 @@ def _unexpected_connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
         "https://localhost/path",
         "https://worker.localhost/path",
         "https://hooks.example.test/path#secret-token",
+        "https://hooks.example.test:0/path",
     ],
 )
 async def test_rejects_non_https_and_localhost_names(url: str) -> None:
@@ -203,7 +204,7 @@ async def test_delivery_connects_to_resolved_ip_preserving_hostname_sni_and_host
         return WebhookResponse(status_code=204)
 
     result = await _deliver(
-        "https://hooks.example.test:8443/webhook/token?secret=value",
+        "https://hooks.example.test:8443/webhook/token;params?secret=value",
         connector=_connector,
     )
 
@@ -214,7 +215,7 @@ async def test_delivery_connects_to_resolved_ip_preserving_hostname_sni_and_host
     assert request.hostname == "hooks.example.test"
     assert request.port == 8443
     assert request.host_header == "hooks.example.test:8443"
-    assert request.target == "/webhook/token?secret=value"
+    assert request.target == "/webhook/token;params?secret=value"
     assert request.timeout_seconds == WEBHOOK_TIMEOUT_SECONDS
     assert request.body == b'{"content":"https://slow.pics/c/example"}'
     assert dict(request.headers) == {
@@ -852,20 +853,25 @@ async def test_default_resolution_cancellation_reaps_child_without_transport(
 
 
 @pytest.mark.parametrize(
-    "output",
+    ("output", "expected_returncode"),
     [
-        b"invalid-json",
-        b"[123]",
-        b"{}",
-        b'["93.184.216.34"]' * 1000,
-        b"[" + b'"93.184.216.34",' * 64 + b'"93.184.216.34"]',
-        b'["93.184.216.34", "10.0.0.1"]',
-        b'["not-an-address"]',
+        (b"invalid-json", 0),
+        (b"[123]", 0),
+        (b"{}", 0),
+        (
+            b'["93.184.216.34"]'
+            + b" " * (webhook.WEBHOOK_RESOLUTION_MAX_BYTES + 1 - len(b'["93.184.216.34"]')),
+            None,
+        ),
+        (b"[" + b'"93.184.216.34",' * 64 + b'"93.184.216.34"]', 0),
+        (b'["93.184.216.34", "10.0.0.1"]', 0),
+        (b'["not-an-address"]', 0),
     ],
     ids=["invalid-json", "non-string", "non-list", "oversized", "too-many", "mixed", "invalid-ip"],
 )
 async def test_default_resolver_rejects_invalid_process_output(
     output: bytes,
+    expected_returncode: int | None,
     monkeypatch: pytest.MonkeyPatch,
     resolver_children: list[subprocess.Popen[bytes]],
 ) -> None:
@@ -878,7 +884,10 @@ async def test_default_resolver_rejects_invalid_process_output(
         connector=_unexpected_connector,
     )
     assert result.failure_kind is WebhookFailureKind.VALIDATION
-    assert resolver_children[0].returncode == 0
+    if expected_returncode is None:
+        assert resolver_children[0].returncode is not None
+    else:
+        assert resolver_children[0].returncode == expected_returncode
 
 
 async def test_default_resolver_process_failure_is_sanitized(

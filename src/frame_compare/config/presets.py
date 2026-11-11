@@ -14,6 +14,7 @@ from frame_compare.config.errors import (
     PresetInvalidError,
     PresetNameInvalidError,
     PresetNotFoundError,
+    format_toml_syntax_error,
 )
 from frame_compare.config.loader import validate_raw_config_payload
 from frame_compare.config.persistence import (
@@ -65,7 +66,7 @@ def load_preset(name: str, presets_dir: Path | None = None) -> dict[str, object]
     except FileNotFoundError:
         raise PresetNotFoundError(name) from None
     except tomllib.TOMLDecodeError as exc:
-        raise PresetInvalidError(preset_path, str(exc)) from None
+        raise PresetInvalidError(preset_path, format_toml_syntax_error(exc)) from None
     except UnicodeDecodeError:
         raise PresetInvalidError(preset_path, "preset is not valid UTF-8") from None
     except OSError:

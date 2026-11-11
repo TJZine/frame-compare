@@ -185,11 +185,8 @@ async def run_publish_phase(
         client=client,
         progress=ctx.reporter,
         upload_plan=upload_plan,
+        on_upload_confirmed=on_upload_confirmed,
     )
-    # Remote success is already a fact even if cancellation prevents this phase's
-    # output from being applied. Retain it synchronously before any more awaits.
-    if on_upload_confirmed is not None:
-        on_upload_confirmed(result.url, result.uploaded_file_paths)
     await cancellation_checkpoint()
     post_upload_actions = await run_slowpics_post_upload_actions(
         SlowpicsPostUploadRequest(

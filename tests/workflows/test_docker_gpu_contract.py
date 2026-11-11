@@ -71,6 +71,7 @@ docker() {
     return 0
   fi
   if [[ "$1" == "compose" && " $* " == *" run "* ]]; then
+    [[ "${@: -2:1}" == "-lc" && "${@: -3:1}" == "frame-compare-test" ]] || return 98
     printf 'compose run ok\\n'
     return 0
   fi
@@ -112,6 +113,7 @@ docker() {
         ("llvmpipe (LLVM 17.0.0, 256 bits)", "NVIDIA RTX 6000 Ada Generation"),
         ("NVIDIA RTX 6000 Ada Generation", "lavapipe (LLVM 17.0.0, 256 bits)"),
     ],
+    ids=["software-selected", "hardware-selected"],
 )
 def test_verify_docker_gpu_selected_device_route(
     repo_root: Path, tmp_path: Path, selected: str, secondary: str
@@ -134,6 +136,18 @@ vulkaninfo() {
   printf 'GPU0 : {selected}\\n'
   printf 'GPU1 : {secondary}\\n'
 }
+
+python() {
+  if [[ "$#" == 3 && "$1" == "-" ]]; then
+    command python "$@"
+    return
+  fi
+  [[ "$#" == 1 && "$1" == "-" ]] || return 98
+  proof="$(cat)"
+  [[ "$proof" == *"core.placebo.Tonemap("* ]] || return 99
+  printf 'DOCKER_GPU_PROOF placebo_tonemap=ok\\n'
+}
+
 """.replace("{selected}", selected).replace("{secondary}", secondary),
     )
 
@@ -143,7 +157,12 @@ vulkaninfo() {
         env=_with_bash_env(
             {
                 "FRAME_COMPARE_GPU_ICD_SEARCH_DIRS": bash_icd_dir,
-                "FRAME_COMPARE_GPU_PLACEBO_PROOF_CMD": "printf 'DOCKER_GPU_PROOF placebo_tonemap=ok\\n'",
+                # A retired environment override must have no effect on native proof.
+                (
+                    "FRAME_COMPARE_GPU_FORCE_NO_NVIDIA_ICD"
+                    if selected.startswith("llvmpipe")
+                    else "FRAME_COMPARE_GPU_PLACEBO_PROOF_CMD"
+                ): "false",
             },
             bash_env,
         ),
@@ -221,3 +240,21 @@ def test_verify_docker_gpu_script_unsets_default_software_forcing(repo_root: Pat
     assert "DOCKER_GPU_PROOF vulkan_device=" in script
     assert "DOCKER_GPU_PROOF vulkan_hardware=ok" in script
     assert "DOCKER_GPU_PROOF placebo_tonemap=ok" in script
+
+
+@pytest.mark.parametrize("verifier", ["gpu", "gui"])
+def test_optional_verifiers_reject_service_override(repo_root: Path, verifier: str) -> None:
+    bash = _bash_executable_or_skip()
+
+    result = subprocess.run(
+        [bash, f"tools/verify_docker_{verifier}.sh", "--service", "frame-compare-run", "--help"],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=SCRIPT_SUBPROCESS_TIMEOUT_SECONDS,
+    )
+
+    assert result.returncode == 2
+    assert "unknown arg: --service" in result.stderr
+    assert "Uses the frame-compare-test Compose service." in result.stderr

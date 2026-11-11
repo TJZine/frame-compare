@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import sys
 import types
@@ -13,7 +14,14 @@ from typing import Any, cast
 import pytest
 from rich.cells import cell_len
 
-from frame_compare.vsview.session_runtime import AudioReviewPayload, SessionConsole
+from frame_compare.utils.terminal_sections import Section, section_title
+from frame_compare.utils.terminal_theme import ACCENT, human_console
+from frame_compare.vsview.session_runtime import (
+    AudioReviewPayload,
+    ComparisonSource,
+    ReferenceSource,
+    SessionConsole,
+)
 from frame_compare.vsview.session_script import (
     _build_script_content,
     write_vsview_session_script,
@@ -89,61 +97,35 @@ class _AsciiStderr(_StubStderr):
     encoding = "ascii"
 
 
-@pytest.mark.parametrize(
-    ("env", "expected"),
-    [
-        ({"COLORTERM": "truecolor"}, "38;2;210;172;107"),
-        ({"COLORTERM": "24bit"}, "38;2;210;172;107"),
-        ({"WT_SESSION": "1"}, "38;2;210;172;107"),
-        ({"WT_SESSION": ""}, "38;2;210;172;107"),
-        ({"TERM": "xterm-256color"}, "38;5;180"),
-        ({"TERM": "xterm"}, "33"),
-        ({}, "33"),
-    ],
-)
-def test_generated_accent_colour_tiers(
-    monkeypatch: pytest.MonkeyPatch, env: dict[str, str], expected: str
+@pytest.mark.parametrize("no_color", [False, True])
+def test_generated_diagnostics_honour_no_color(
+    monkeypatch: pytest.MonkeyPatch, no_color: bool
 ) -> None:
-    for key in ("COLORTERM", "WT_SESSION", "TERM", "NO_COLOR"):
-        monkeypatch.delenv(key, raising=False)
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    helpers = _session_console(stderr=_StubStderr())
+    monkeypatch.setenv("TERM", "xterm")
+    if no_color:
+        monkeypatch.setenv("NO_COLOR", "")
+    else:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+    stderr = _StubStderr()
+    with redirect_stderr(stderr):
+        console = SessionConsole()
+        console.safe_print(console.status_line("[FAIL]", "Test diagnostic"))
 
-    assert helpers.accent_code() == expected
+    output = stderr.getvalue()
+    assert re.sub(r"\x1b\[[0-9;]*m", "", output) == "  ✗ Test diagnostic\n"
+    assert ("\x1b[" in output) is not no_color
 
 
-def test_generated_helpers_honour_no_color(
+def test_generated_diagnostics_use_legacy_stream_encoding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    for key in ("COLORTERM", "WT_SESSION", "TERM"):
-        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("NO_COLOR", "1")
-    helpers = _session_console(stderr=_StubStderr())
-
-    with redirect_stderr(_StubStderr()):
-        assert helpers.header("text") == "text"
-        assert helpers.style("text", "33") == "text"
-
-
-def test_generated_glyph_and_arrow_ascii_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("NO_COLOR", raising=False)
-    ascii_stderr = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
-    helpers = _session_console(stderr=ascii_stderr)
-
-    assert helpers.glyph("waiting") == ">"
-    assert helpers.glyph("failed") == "x"
-    assert helpers.glyph("warning") == "!"
-    assert helpers.arrow() == "->"
-    ascii_stderr.close()
-
-    helpers = _session_console(stderr=_StubStderr())
-
-    assert helpers.glyph("waiting") == "\u203a"
-    assert helpers.glyph("failed") == "\u2717"
-    assert helpers.arrow() == "\u2192"
+    with io.BytesIO() as buffer, io.TextIOWrapper(buffer, encoding="cp1252") as stderr:
+        with redirect_stderr(stderr):
+            console = SessionConsole()
+            console.safe_print(console.status_line("[FAIL]", "Épisode 映"))
+        stderr.flush()
+        assert buffer.getvalue() == f"  x Épisode ?{os.linesep}".encode("cp1252")
 
 
 def _decision_payload(*, state: str) -> dict[str, object]:
@@ -200,9 +182,11 @@ def _execute_ready_block(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    stderr_encoding: str,
+    stderr_encoding: str = "utf-8",
     audio_review_by_key: dict[str, str] | None = None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
+    stderr: io.StringIO | None = None,
+    no_color: bool = True,
 ) -> str:
     reference = tmp_path / "ref.mkv"
     comparisons = [tmp_path / "a.mkv", tmp_path / "b.mkv"]
@@ -244,7 +228,8 @@ def _execute_ready_block(
             verify=lambda _source: None, scan=lambda _source, **_options: None
         ),
     )
-    monkeypatch.setenv("NO_COLOR", "1")
+    if no_color:
+        monkeypatch.setenv("NO_COLOR", "1")
 
     script = _build_script_content(
         reference=reference,
@@ -266,7 +251,8 @@ def _execute_ready_block(
         },
         short_names_by_stem={"ref": "Ref", "a": "ShortA", "b": "LongerB"},
     )
-    stderr: io.StringIO = _AsciiStderr() if stderr_encoding == "ascii" else _StubStderr()
+    if stderr is None:
+        stderr = _AsciiStderr() if stderr_encoding == "ascii" else _StubStderr()
     with redirect_stderr(stderr):
         exec(
             compile(script, "<vsview-ready>", "exec"),
@@ -351,20 +337,15 @@ def test_session_section_wraps_key_values_and_list_rows_at_terminal_width(
         monkeypatch.setenv("NO_COLOR", "1")
     else:
         monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.setattr(
-        "frame_compare.vsview.session_runtime.shutil.get_terminal_size",
-        lambda **_kwargs: SimpleNamespace(columns=40, lines=24),
-    )
+    monkeypatch.setenv("COLUMNS", "40")
     stderr = _StubStderr()
     with redirect_stderr(stderr):
         console = SessionConsole()
-        console.section(
-            "› VSView is open · waiting for you",
-            [
-                console.key_value("source", console.dim(value)),
-                "A long instruction row that must continue after the rail without losing text.",
-                console.note("warning", "A long warning row that also needs to wrap."),
-            ],
+        console.print_ready(
+            ReferenceSource(label="ref", path="ref.mkv", display_name="Ref"),
+            {},
+            {},
+            [{"source": value}],
         )
 
     output = stderr.getvalue()
@@ -385,8 +366,70 @@ def test_session_section_wraps_key_values_and_list_rows_at_terminal_width(
             break
         source_lines.append(line[18:])
     assert "".join(source_lines) == value
-    assert "instruction row" in output
-    assert "warning row" in output
+    assert "VSView display assumptions" in output
+
+
+@pytest.mark.parametrize(
+    ("environment", "sgr"),
+    [
+        pytest.param({"COLORTERM": "truecolor"}, "38;2;210;172;107", id="truecolor"),
+        pytest.param({"COLORTERM": "24bit"}, "38;2;210;172;107", id="24bit"),
+        pytest.param({"WT_SESSION": ""}, "38;2;210;172;107", id="windows-terminal"),
+        pytest.param({"TERM": "xterm-256color"}, "38;5;180", id="256color"),
+        pytest.param({"TERM": "xterm"}, "33", id="standard"),
+    ],
+)
+def test_generated_ready_block_preserves_accent_tiers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: dict[str, str], sgr: str
+) -> None:
+    for name in ("COLORTERM", "WT_SESSION", "TERM", "NO_COLOR", "FORCE_COLOR"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+
+    # The parent process can render a shared section in a different color system first.
+    standard = human_console(file=io.StringIO(), color_system="standard")
+    Section(section_title("Shared section"), rail_style=ACCENT).print(standard)
+
+    output = _execute_ready_block(tmp_path, monkeypatch, no_color=False)
+
+    assert f"\x1b[{sgr}m╭─" in output
+    assert f"\x1b[{sgr}m│" in output
+    assert f"\x1b[{sgr}m╰─" in output
+    heading = re.search(r"\x1b\[([0-9;]+)m› VSView is open", output)
+    assert heading is not None and sgr in heading[1]
+
+
+@pytest.mark.parametrize("tty", [False, True], ids=["redirected", "no-color"])
+def test_generated_ready_block_guards_against_forced_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tty: bool
+) -> None:
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    if tty:
+        monkeypatch.setenv("NO_COLOR", "")
+    stderr = _StubStderr() if tty else io.StringIO()
+
+    output = _execute_ready_block(tmp_path, monkeypatch, stderr=stderr, no_color=False)
+
+    assert "VSView is open" in output
+    assert "\x1b[" not in output
+
+
+def test_generated_ready_block_fits_narrow_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    width = 20
+    monkeypatch.setenv("COLUMNS", str(width))
+
+    output = _execute_ready_block(tmp_path, monkeypatch, stderr_encoding="utf-8")
+
+    section = output[output.index("╭─") :].splitlines()
+    assert all(cell_len(line) <= width for line in section)
+    assert "waiting for you" in " ".join(section[:2])
+    assert any(line.startswith("│ outputs") for line in section)
+    assert section[-2] == "╰─"
 
 
 @pytest.mark.parametrize(
@@ -481,13 +524,11 @@ def test_session_script_optional_frame_cache_limit(
 
 
 def test_session_output_names_pad_by_terminal_cells(monkeypatch: pytest.MonkeyPatch) -> None:
-    from frame_compare.vsview.session_runtime import ComparisonSource, ReferenceSource
-
     monkeypatch.setenv("NO_COLOR", "1")
     stderr = _StubStderr()
     with redirect_stderr(stderr):
         console = SessionConsole()
-        reference = ReferenceSource(label="ref", path="ref.mkv", display_name="日本語")
+        reference = ReferenceSource(label="ref", path="ref.mkv", display_name="日[red]")
         target = ComparisonSource(
             path="a.mkv",
             display_name="Cafe\u0301",
@@ -495,12 +536,13 @@ def test_session_output_names_pad_by_terminal_cells(monkeypatch: pytest.MonkeyPa
             suggested_offset=0,
             audio_review=_accepted_review(),
         )
-        console.section("Outputs", console._output_table_rows(reference, {"a": target}, {}))
+        console.print_ready(reference, {"a": target}, {}, [])
     lines = stderr.getvalue().splitlines()
     reference_line = next(line for line in lines if "reference" in line)
     comparison_line = next(line for line in lines if "audio +0f" in line)
-    assert cell_len(reference_line[: reference_line.index("reference")]) == 29
-    assert cell_len(comparison_line[: comparison_line.index("audio")]) == 29
+    assert cell_len(reference_line[: reference_line.index("reference")]) == 30
+    assert cell_len(comparison_line[: comparison_line.index("audio")]) == 30
+    assert "日[red]" in reference_line
     assert "Cafe\u0301" in comparison_line
 
 

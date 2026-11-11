@@ -10,6 +10,7 @@ import sys
 import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum, auto
 from pathlib import Path
 from typing import cast
 
@@ -116,7 +117,20 @@ def experimental_native_still_plugin(core: object) -> LibplaceboPluginIdentity |
     return LibplaceboPluginIdentity(str(path), digest)
 
 
+class LibplaceboProbeStatus(Enum):
+    USABLE = auto()
+    VULKAN_UNAVAILABLE = auto()
+    FAILED = auto()
+
+
 def probe_libplacebo_runtime(*, plugin_identity: LibplaceboPluginIdentity | None = None) -> bool:
+    """Enable the application path only when the probe succeeds."""
+    return libplacebo_probe_status(plugin_identity=plugin_identity) is LibplaceboProbeStatus.USABLE
+
+
+def libplacebo_probe_status(
+    *, plugin_identity: LibplaceboPluginIdentity | None = None
+) -> LibplaceboProbeStatus:
     """Probe generic runtime safety; an experimental child must load the same DLL."""
     identity_check = ""
     identity_result = ""
@@ -197,10 +211,10 @@ def probe_libplacebo_runtime(*, plugin_identity: LibplaceboPluginIdentity | None
         )
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("libplacebo_probe_failed_disabling", error=f"{type(exc).__name__}: {exc}")
-        return False
+        return LibplaceboProbeStatus.FAILED
     if result.returncode == 0:
         if plugin_identity is None:
-            return True
+            return LibplaceboProbeStatus.USABLE
         try:
             receipt: object = json.loads(result.stdout)
             if isinstance(receipt, dict):
@@ -221,14 +235,21 @@ def probe_libplacebo_runtime(*, plugin_identity: LibplaceboPluginIdentity | None
                 plugin_path=plugin_identity.path,
                 plugin_sha256=plugin_identity.sha256,
             )
-            return True
+            return LibplaceboProbeStatus.USABLE
     log.warning(
         "libplacebo_probe_unusable_disabling",
         returncode=result.returncode,
         stdout=sanitize_diagnostic(result.stdout, diagnostic_secrets()).decode().strip()[-400:],
         stderr=result.stderr.decode("utf-8", errors="replace").strip()[-400:],
     )
-    return False
+    # The hosted Windows runner reports this access violation when the
+    # driver cannot create a Vulkan instance. Other probe failures are errors.
+    if result.returncode == 3221225477 and (
+        b"VK_ERROR_INCOMPATIBLE_DRIVER" in result.stderr
+        or b"Failed creating instance" in result.stderr
+    ):
+        return LibplaceboProbeStatus.VULKAN_UNAVAILABLE
+    return LibplaceboProbeStatus.FAILED
 
 
 def libplacebo_runtime_override() -> bool | None:

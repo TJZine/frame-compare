@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ntpath
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,14 +17,6 @@ from frame_compare.utils.paths import require_managed_descendant
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
-_WINDOWS_RESERVED_FILENAMES = {
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    *(f"COM{index}" for index in range(1, 10)),
-    *(f"LPT{index}" for index in range(1, 10)),
-}
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _WHITESPACE_RE = re.compile(r"\s+")
 
@@ -129,8 +122,8 @@ def _safe_filename_stem(value: str) -> str | None:
     stem = _WHITESPACE_RE.sub(" ", stem).strip(" .")
     if not stem:
         return None
-    if stem.upper() in _WINDOWS_RESERVED_FILENAMES:
-        stem = f"{stem}-slowpics"
+    if ntpath.isreserved(stem):
+        stem = f"{stem.replace('.', ' ')}-slowpics"
     return stem
 
 

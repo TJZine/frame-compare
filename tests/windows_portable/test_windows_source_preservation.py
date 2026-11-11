@@ -41,6 +41,35 @@ def _snapshot(root: Path) -> dict[str, bytes]:
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
 
+def _initialize_builder_fixture_repo(root: Path) -> None:
+    if shutil.which("git") is None:
+        pytest.skip("git is required for the builder source commit lookup")
+    subprocess.run(
+        ["git", "init", "--quiet", str(root)], check=True, capture_output=True, timeout=30
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+
 @pytest.mark.parametrize(
     "scenario",
     [
@@ -119,6 +148,10 @@ def test_builder_preserves_existing_state(
         manifest["manifest_version"] = 1
     elif scenario == "fingerprints":
         del manifest["bundle"]["runtime_fingerprints"]
+    elif scenario == "reserved-failure":
+        _initialize_builder_fixture_repo(tmp_path / "repo")
+        cache.mkdir()
+        (cache / "sentinel").write_bytes(b"existing cache data")
     manifest_path.write_text("{" if scenario == "malformed" else json.dumps(manifest))
     if scenario == "missing":
         manifest_path.unlink()
@@ -127,7 +160,15 @@ def test_builder_preserves_existing_state(
     source = script.read_text()
     source = (
         source.rsplit("Main", 1)[0]
-        + "\nfunction uv { $global:LASTEXITCODE = 0; return 'fixture python' }\nfunction Initialize-PortableRuntime { throw \"injected download failure\" }\nMain\n"
+        + r"""
+function uv { $global:LASTEXITCODE = 0; return 'fixture python' }
+function Initialize-PortableRuntime {
+  param($BundleRoot)
+  Set-Content -LiteralPath (Join-Path $BundleRoot 'partial-runtime.txt') -Value 'partial download'
+  throw "injected download failure"
+}
+Main
+"""
     )
     script.write_text(source)
     before = _snapshot(tmp_path)
@@ -324,6 +365,7 @@ def test_source_install_skip_still_requires_builder_python_lookup(
         repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
         owner / "shim/frame-compare-version.ps1",
     )
+    _initialize_builder_fixture_repo(script.parents[2])
     before = _snapshot(previous)
     pointer_before = pointer.read_bytes()
     shims_before = _snapshot(pointer.parent.parent / "bin")
@@ -529,8 +571,9 @@ def test_source_install_repeat_uses_fresh_default(
     assert (second_bundle / "config/config.toml").read_text() == "user config"
 
 
+@pytest.mark.parametrize("mode", ["capture-head", "supplied-sha", "mismatched-release"])
 def test_builder_uses_committed_version_and_empty_workspace(
-    pwsh: str, tmp_path: Path, repo_root: Path
+    pwsh: str, tmp_path: Path, repo_root: Path, mode: str
 ) -> None:
     """Observe Main's assembled metadata/layout with native/download work stubbed."""
     if shutil.which("git") is None or shutil.which("tar") is None:
@@ -556,6 +599,7 @@ def test_builder_uses_committed_version_and_empty_workspace(
                 repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
                 owner / "shim/frame-compare-version.ps1",
             )
+    shutil.copytree(repo_root / "tools/windows_portable/licenses", owner / "licenses")
     init = root / "src/frame_compare/__init__.py"
     init.parent.mkdir(parents=True)
     init.write_text('__version__ = "1.2.3"\n')
@@ -567,48 +611,101 @@ def test_builder_uses_committed_version_and_empty_workspace(
         'frame-compare-alignment-review = "frame_compare.vsview.alignment_review_panel"\n'
     )
     (root / "LICENSE").write_text("fixture license")
-    for arguments in (
-        ["init"],
-        ["add", "src", "pyproject.toml", "LICENSE"],
-        [
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.invalid",
-            "commit",
-            "-m",
-            "fixture",
-        ],
-    ):
-        subprocess.run(["git", "-C", str(root), *arguments], check=True, capture_output=True)
-    init.write_text('__version__ = "9.9.9"\n')
     script = owner / "build_portable.ps1"
     source = script.read_text().rsplit("Main", 1)[0]
     source += r"""
 function uv { $global:LASTEXITCODE = 0; return $env:FIXTURE_PYTHON }
-function Initialize-PortableRuntime { param($BundleRoot) Set-Content -LiteralPath (Join-Path $BundleRoot 'requirements.lock.txt') -Value 'fixture dependencies' }
+function Initialize-PortableRuntime {
+  param($BundleRoot, $CommitSha)
+  Set-Content -LiteralPath (Join-Path $BundleRoot 'requirements.lock.txt') -Value $CommitSha
+  git -C $env:REPO update-ref HEAD $env:LATER_SHA
+}
+function Assert-ReleasePublicKey {}
 function Assert-BundleRuntime {}
 function Remove-PythonBytecodeCaches {}
 function Write-LauncherFiles {}
 function Copy-InstallerFiles {}
 function Copy-Licenses {}
 function Assert-RequiredPySideLicenseMetadata {}
-function Write-BundleInventory {}
+function Write-BundleInventory {
+  param($BundleRoot, $CommitSha)
+  Set-Content -LiteralPath (Join-Path $BundleRoot 'inventory-sha.txt') -Value $CommitSha
+}
 Main
 """
     script.write_text(source)
+    for arguments in (
+        ["init"],
+        ["add", "."],
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "fixture",
+        ],
+    ):
+        subprocess.run(["git", "-C", str(root), *arguments], check=True, capture_output=True)
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", str(root), *args], text=True, timeout=30
+        ).strip()
+
+    captured = git("rev-parse", "HEAD")
+    init.write_text('__version__ = "9.9.9"\n')
+    git("add", "src")
+    git(
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "later checkout",
+    )
+    later = git("rev-parse", "HEAD")
+    if mode == "capture-head":
+        git("update-ref", "HEAD", captured)
     out = root / "dist/new"
+    command = "& $env:BUILD -OutDir $env:OUT -CacheDir $env:CACHE -RepoRoot $env:REPO"
+    if mode != "capture-head":
+        command += " -ExpectedCommitSha $env:CAPTURED_SHA"
+    if mode == "mismatched-release":
+        assert git("status", "--porcelain", "--untracked-files=all") == ""
+        command += " -RequireReleasePublicKey"
+    cache = tmp_path / "cache"
     result = _run(
         pwsh,
-        "& $env:BUILD -OutDir $env:OUT -CacheDir $env:CACHE -RepoRoot $env:REPO",
+        command,
         tmp_path,
         BUILD=str(script),
         OUT=str(out),
-        CACHE=str(tmp_path / "cache"),
+        CACHE=str(cache),
         REPO=str(root),
         FIXTURE_PYTHON=sys.executable,
+        CAPTURED_SHA=captured,
+        LATER_SHA=later,
     )
+    if mode == "mismatched-release":
+        assert result.returncode != 0
+        output = result.stdout + result.stderr
+        assert "Portable release source commit must match the live checkout" in output
+        assert f"expected={captured}" in output
+        assert f"actual={later}" in output
+        assert not out.exists()
+        assert not cache.exists()
+        return
     assert result.returncode == 0, result.stdout + result.stderr
+    assert git("rev-parse", "HEAD") == later
+    assert (out / "requirements.lock.txt").read_text().strip() == captured
+    assert (out / "inventory-sha.txt").read_text().strip() == captured
     assert json.loads((out / "bundle_info.json").read_text())["app_version"] == "1.2.3"
     for name in ("config", "comparison_videos"):
         assert (out / name).is_dir()

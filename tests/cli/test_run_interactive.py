@@ -476,55 +476,21 @@ def test_handle_run_interrupts_when_confirmation_prompt_aborts() -> None:
     assert exc_info.value.exit_code == int(ExitCode.INTERRUPTED)
 
 
-def test_maybe_open_run_report_is_suppressed_for_quiet_args() -> None:
+@pytest.mark.parametrize("gate", ["quiet", "json", "non-tty", "missing-report"])
+def test_maybe_open_run_report_is_suppressed_for_quiet_args(gate: str) -> None:
     opened: list[Path] = []
-    result = RunResult(success=True, report_path=Path("report.html"))
-
-    maybe_open_run_report(
-        result,
-        args=replace(_base_args(), json_output=True),
-        deps=replace(
-            _deps(DepsOptions(stdout_is_tty=True), opened),
-            load_config=lambda config_path=None, overrides=None: get_default_config(),
-        ),
-        inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
-        ),
+    config = get_default_config()
+    inputs = AcquiredRunConfig(Path("/workspace"), Path("/workspace/config/config.toml"), config)
+    result = RunResult(
+        success=True, report_path=None if gate == "missing-report" else Path("report.html")
     )
-    maybe_open_run_report(
-        result,
-        args=replace(_base_args(), quiet=True),
-        deps=replace(
-            _deps(DepsOptions(stdout_is_tty=True), opened),
-            load_config=lambda config_path=None, overrides=None: get_default_config(),
-        ),
-        inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
-        ),
-    )
-    maybe_open_run_report(
-        result,
-        args=_base_args(),
-        deps=replace(
-            _deps(DepsOptions(stdout_is_tty=False), opened),
-            load_config=lambda config_path=None, overrides=None: get_default_config(),
-        ),
-        inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
-        ),
-    )
-    maybe_open_run_report(
-        RunResult(success=True),
-        args=_base_args(),
-        deps=replace(
-            _deps(DepsOptions(stdout_is_tty=True), opened),
-            load_config=lambda config_path=None, overrides=None: get_default_config(),
-        ),
-        inputs=AcquiredRunConfig(
-            Path("/workspace"), Path("/workspace/config/config.toml"), get_default_config()
-        ),
+    args = replace(_base_args(), quiet=gate == "quiet", json_output=gate == "json")
+    deps = replace(
+        _deps(DepsOptions(stdout_is_tty=gate != "non-tty"), opened),
+        load_config=lambda config_path=None, overrides=None: config,
     )
 
+    assert not maybe_open_run_report(result, args=args, deps=deps, inputs=inputs)
     assert opened == []
 
 

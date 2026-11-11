@@ -450,6 +450,7 @@ const ReviewState = (() => {
         }
 
         async function mutate(patch) {
+            applyingImport?.abort();
             try {
                 const saving = model.mutate(viewer.state.currentFrameIdx, patch);
                 updateImportPreview();

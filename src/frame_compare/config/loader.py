@@ -22,6 +22,7 @@ from frame_compare.config.errors import (
     ConfigNotFoundError,
     ConfigParseError,
     ConfigValidationError,
+    format_toml_syntax_error,
 )
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_sources import EnvironmentSettingsSource
@@ -154,7 +155,7 @@ def _load_settings(
         # on kwargs unpacking.
         return settings_cls(**cast(Any, overrides))
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigParseError(source_path, str(exc)) from None
+        raise ConfigParseError(source_path, format_toml_syntax_error(exc)) from None
     except UnicodeDecodeError:
         raise ConfigParseError(
             source_path,
@@ -191,7 +192,7 @@ def load_raw_config(config_path: Path) -> RawConfigDocument:
     except FileNotFoundError:
         raise ConfigNotFoundError(config_path) from None
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigParseError(config_path, str(exc)) from None
+        raise ConfigParseError(config_path, format_toml_syntax_error(exc)) from None
     except UnicodeDecodeError:
         raise ConfigParseError(config_path, "configuration is not valid UTF-8") from None
     except OSError:

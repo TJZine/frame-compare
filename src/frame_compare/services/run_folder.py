@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import ntpath
 import re
 import uuid
 from contextlib import suppress
@@ -17,14 +18,6 @@ from frame_compare.utils.paths import require_managed_immediate_child
 _UNNAMED_RUN_BASE = "unnamed_run"
 _MAX_FOLDER_NAME_LENGTH = 64
 _NUMERIC_COLLISION_ATTEMPTS = 100
-_WINDOWS_RESERVED_FILENAMES = {
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    *(f"COM{index}" for index in range(1, 10)),
-    *(f"LPT{index}" for index in range(1, 10)),
-}
 
 # Characters illegal in Windows filenames (also avoid on Unix for portability)
 _ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -67,22 +60,13 @@ def sanitize_folder_name(name: str) -> str:
 
 
 def _avoid_windows_reserved_filename(name: str) -> str:
-    if _windows_reserved_filename(name):
+    if ntpath.isreserved(name):
         safe_name = f"{name.replace('.', ' ')} run"
         safe_name = _MULTI_SPACE.sub(" ", safe_name).strip().rstrip(". ")
         if len(safe_name) > _MAX_FOLDER_NAME_LENGTH:
             safe_name = safe_name[:_MAX_FOLDER_NAME_LENGTH].rstrip(". ")
-        return (
-            safe_name
-            if safe_name and not _windows_reserved_filename(safe_name)
-            else _UNNAMED_RUN_BASE
-        )
+        return safe_name if safe_name and not ntpath.isreserved(safe_name) else _UNNAMED_RUN_BASE
     return name
-
-
-def _windows_reserved_filename(name: str) -> bool:
-    stem = name.split(".", maxsplit=1)[0].upper()
-    return stem in _WINDOWS_RESERVED_FILENAMES
 
 
 def find_common_metadata(filenames: list[str]) -> tuple[str | None, int | None]:

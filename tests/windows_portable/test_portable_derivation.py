@@ -8,6 +8,8 @@ import json
 import shutil
 import stat
 import struct
+import subprocess
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -291,12 +293,91 @@ def test_portable_assembly_is_inert_and_reproducible(
         for name, version, _ in packages
         if name != "vapoursynth-lsmas"
     )
+    source = tmp_path / "source"
+    live_manifest = source / runtime.MANIFEST
+    live_notice = live_manifest.parent / "licenses" / "TEST.txt"
+    live_notice.parent.mkdir(parents=True)
+    older_notice = b"selected notice\r\n"
+    live_notice.write_bytes(older_notice)
+    for record in manifest_records:
+        record["license"] = {
+            "files": [{"path": "licenses/TEST.txt", "sha256": runtime.sha(older_notice)}]
+        }
     manifest = json.dumps({"artifacts": manifest_records}).encode()
+    live_manifest.write_bytes(manifest)
+    (source / "uv.lock").write_bytes(lock)
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", str(source), *args], timeout=30, text=True
+        ).strip()
+
+    def commit(message: str) -> str:
+        git("add", ".")
+        git(
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            message,
+        )
+        return git("rev-parse", "HEAD")
+
+    git("init", "-q")
+    git("config", "core.autocrlf", "false")
+    selected = commit("selected runtime")
+    newer_notice = b"newer notice\n"
+    live_notice.write_bytes(newer_notice)
+    newer_manifest = manifest.replace(
+        runtime.sha(older_notice).encode(), runtime.sha(newer_notice).encode()
+    )
+    live_manifest.write_bytes(newer_manifest)
+    assert commit("newer runtime") != selected
+
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    requirements_path = tmp_path / "requirements.txt"
+    requirements_path.write_bytes(requirements)
+
+    def run_runtime(mode: str, *args: str) -> None:
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["portable_runtime.py", mode, "--repo", str(source), "--commit-sha", selected, *args],
+        )
+        runtime.main()
+
+    run_runtime("snapshot-manifest", "--output", str(snapshot))
+    assert (snapshot / runtime.MANIFEST.name).read_bytes() == manifest
+    assert (snapshot / "licenses" / "TEST.txt").read_bytes() == older_notice
     monkeypatch.setattr(runtime, "TRIM", (1, 4))
     output = tmp_path / "runtime"
     producer = tmp_path / "producer"
-    runtime.assemble(output, manifest, lock, requirements, cache)
-    runtime.assemble(producer, manifest, lock, requirements, cache)
+    custom = tmp_path / "custom"
+    for destination, manifest_input in (
+        (output, snapshot / runtime.MANIFEST.name),
+        (producer, snapshot / runtime.MANIFEST.name),
+        (custom, live_manifest),
+    ):
+        destination.mkdir()
+        run_runtime(
+            "assemble",
+            "--manifest",
+            str(manifest_input),
+            "--cache",
+            str(cache),
+            "--requirements",
+            str(requirements_path),
+            "--output",
+            str(destination),
+        )
+        assert (destination / "manifest.json").read_bytes() == manifest_input.read_bytes()
+    assert (output / "manifest.json").read_bytes() == manifest
+    assert (custom / "manifest.json").read_bytes() == newer_manifest
 
     site = output / runtime.SITE
     assert not marker.exists()

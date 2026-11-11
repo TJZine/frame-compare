@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
+from frame_compare.config.errors import ConfigValidationError
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.errors import (
     MixedSourceFpsError,
@@ -38,10 +39,12 @@ class FakeVSLoader:
         self,
         *,
         fps_by_name: dict[str, Fraction] | None = None,
+        frame_counts_by_name: dict[str, int] | None = None,
         dimensions_by_name: dict[str, tuple[int, int]] | None = None,
         frame_props_by_name: dict[str, dict[str, object]] | None = None,
     ) -> None:
         self.loaded: list[Path] = []
+        self._frame_counts_by_name = frame_counts_by_name or {}
         self._fps_by_name = fps_by_name or {}
         self._dimensions_by_name = dimensions_by_name or {}
         self._frame_props_by_name = frame_props_by_name or {}
@@ -53,7 +56,7 @@ class FakeVSLoader:
             clip=cast(Any, object()),
             width=width,
             height=height,
-            num_frames=100,
+            num_frames=self._frame_counts_by_name.get(path.name, 100),
             fps=self._fps_by_name.get(path.name, Fraction(24000, 1001)),
             format=cast(Any, object()),
             frame_props=self._frame_props_by_name.get(
@@ -383,3 +386,69 @@ def test_execute_prep_canonicalizes_only_rates_within_ten_ppm(
     assert [clip.probe.fps for clip in prep.clips] == [decoder_fps] * 2
     assert [clip.source_fps for clip in prep.clips] == [expected_source_fps] * 2
     assert [clip.effective_fps for clip in prep.clips] == [expected_source_fps] * 2
+
+
+def test_execute_prep_rejects_unrepresentable_effective_fps_duration(tmp_path: Path) -> None:
+    reference = "00-reference.mkv"
+    rate = "1/" + "1" + "0" * 310
+    _create_config(
+        tmp_path,
+        content=MINIMAL_CONFIG
+        + '\n[sources]\nmatch_fps = "assume_reference"\n'
+        + f'[sources.overrides."{reference}"]\neffective_fps = "{rate}"\n',
+    )
+    _create_video_files(tmp_path / "comparison_videos", reference, "01-comparison.mkv")
+
+    with pytest.raises(ConfigValidationError) as error:
+        asyncio.run(
+            preparation.execute_prep(
+                make_run_request(root=tmp_path),
+                RunDependencies(
+                    vs_loader=cast(Any, FakeVSLoader(frame_counts_by_name={reference: 240}))
+                ),
+            )
+        )
+
+    detail = error.value.validation_errors[0]
+    assert detail["loc"] == ["sources", "overrides", "effective_fps"]
+    assert reference in str(detail["msg"])
+    assert "duration" in str(detail["msg"])
+
+
+@pytest.mark.parametrize(
+    ("mode", "has_majority"),
+    [("assume_reference", False), ("majority", True), ("majority", False)],
+    ids=["assume-reference", "majority", "majority-fallback"],
+)
+def test_execute_prep_attributes_inherited_fps_overflow_to_matching(
+    tmp_path: Path, mode: str, has_majority: bool
+) -> None:
+    reference = "00-reference.mkv"
+    long_clip = "02-long-comparison.mkv"
+    rate = "1/" + "1" + "0" * 306
+    overridden = [reference, "01-short-comparison.mkv"] if has_majority else [reference]
+    overrides = "".join(
+        f'[sources.overrides."{name}"]\neffective_fps = "{rate}"\n' for name in overridden
+    )
+    _create_config(
+        tmp_path,
+        content=MINIMAL_CONFIG + f'\n[sources]\nmatch_fps = "{mode}"\n' + overrides,
+    )
+    _create_video_files(tmp_path / "comparison_videos", *overridden, long_clip)
+
+    with pytest.raises(ConfigValidationError) as error:
+        asyncio.run(
+            preparation.execute_prep(
+                make_run_request(root=tmp_path),
+                RunDependencies(
+                    vs_loader=cast(Any, FakeVSLoader(frame_counts_by_name={long_clip: 240}))
+                ),
+            )
+        )
+
+    detail = error.value.validation_errors[0]
+    assert detail["loc"] == ["sources", "match_fps"]
+    assert detail["input"] == rate
+    assert "Inherited effective_fps" in str(detail["msg"])
+    assert long_clip in str(detail["msg"])
+    assert "sources.match_fps" in str(error.value.context.hint)

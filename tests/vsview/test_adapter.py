@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import runpy
 import signal
 import site
 import subprocess
@@ -32,6 +33,12 @@ from frame_compare.vsview.adapter import (
 from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_VERSION,
     AlignmentReviewContractError,
+    AlignmentReviewExpectedComparison,
+    AlignmentReviewResult,
+    ConfirmedAlignmentReviewDecision,
+    alignment_review_session_from_script,
+    read_alignment_review_result,
+    write_alignment_review_result,
 )
 from frame_compare.vsview.errors import VSViewError
 from frame_compare.vsview.session_runtime import (
@@ -1094,6 +1101,45 @@ def test_write_vsview_session_script_uses_unique_uuid_paths(
     assert first != second
     assert first.read_bytes() == second.read_bytes()
     compile(first.read_text(encoding="utf-8"), str(first), "exec")
+
+
+@pytest.mark.parametrize(
+    ("stem", "expected_prefix"),
+    [
+        pytest.param("r" * 170, "r" * 64, id="ascii"),
+        pytest.param("xy" + "映" * 60 + "画" * 12, "xy" + "映" * 49, id="multibyte"),
+    ],
+)
+def test_long_reference_stem_allows_review_result_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stem: str, expected_prefix: str
+) -> None:
+    reference = tmp_path / f"{stem}.mkv"
+    comparison = tmp_path / "a.mkv"
+    reference.touch()
+    comparison.touch()
+    key = f"{stem}:a"
+    script = write_vsview_session_script(
+        reference=reference,
+        comparisons=[comparison],
+        suggested_offsets_by_key={key: 1},
+        audio_review_by_key=_audio_review_map({key: 1}),
+        cache_dir=tmp_path,
+    )
+    session = alignment_review_session_from_script(script)
+    result = AlignmentReviewResult(
+        session.session_id, (ConfirmedAlignmentReviewDecision(key, 11, 10),)
+    )
+    write_alignment_review_result(session, result)
+    assert (
+        read_alignment_review_result(session, (AlignmentReviewExpectedComparison(key, 100, 100),))
+        == result
+    )
+
+    # Read the generated session data without launching a native decoder.
+    monkeypatch.setattr("frame_compare.vsview.session_runtime.run_session", lambda *_args: None)
+    data = runpy.run_path(str(script))["SESSION_DATA"]
+    assert data["reference"]["display_name"] == stem
+    assert script.stem.removeprefix("vsview_").rsplit("_", 2)[0] == expected_prefix
 
 
 def test_write_vsview_session_script_retries_uuid_path_collision(

@@ -59,7 +59,6 @@ from frame_compare.vsview.alignment_review_contract import (
 from frame_compare.vsview.alignment_selection import opening_hint
 from frame_compare.vsview.workspace_positions import WorkspacePositions
 
-_TIMELINE_GROUP = "frame_compare_alignment_review"
 type _InputBasis = Literal["positions", "offsets"]
 _MANUAL_AUTHORITY_ORIGINS = frozenset(
     {
@@ -158,7 +157,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 panel._invalidate_positions()
 
         self.api.register_on_destroy(invalidate)
-        self._show_inactive(clear_marker=False)
+        self._show_inactive()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -557,9 +556,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                 widget.hide()
                 widget.deleteLater()
 
-    def _show_inactive(self, *, clear_marker: bool = True) -> None:
-        if clear_marker:
-            self.api.timeline.clear_notches(_TIMELINE_GROUP)
+    def _show_inactive(self) -> None:
         self._workspace = None
         self._session = None
         self._presentations = ()
@@ -865,7 +862,6 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._position_timer.stop()
         for draft in self._source_drafts:
             draft.viewer_status = None
-        self.api.timeline.clear_notches(_TIMELINE_GROUP)
         self.error_label.clear()
         for label in self.audio_summary_labels:
             label.hide()

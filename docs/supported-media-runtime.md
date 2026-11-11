@@ -269,8 +269,7 @@ the installed decoder ABI. Legacy media-adjacent indexes remain inert. See
 A code-only update ZIP does not contain VapourSynth, L-SMASH-Works, vs-placebo,
 FFmpeg, native manifests, or their licenses. The updater therefore compares the
 installed bundle's full runtime fingerprint with the signed update manifest before
-changing files. A missing, legacy, malformed, or different fingerprint fails closed,
-even when an unsafe Python-dependency override was requested.
+changing files. A missing, legacy, malformed, or different fingerprint blocks the update.
 
 A pre-native-panel portable bundle may have matching runtime fingerprints but lacks
 the native-panel capability recorded by `bundle_info.schema_version` 3. It requires

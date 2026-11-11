@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import cast
 from urllib.parse import urlsplit, urlunsplit
@@ -46,6 +47,8 @@ def _to_json_value(value: object, *, depth: int = 0) -> JSONValue:
         return "<nested value omitted>"
     if value is None:
         return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
     if isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, list | tuple):

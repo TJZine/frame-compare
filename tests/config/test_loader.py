@@ -247,6 +247,12 @@ def test_nested_runtime_memory_limit_environment_value_is_decoded_without_relaxi
             overrides={"runtime": {"memory_limit_mb": "2048"}},
         )
 
+    with monkeypatch.context() as whole_section:
+        whole_section.setenv("FRAME_COMPARE_RUNTIME", '{"memory_limit_mb":"4096"}')
+        assert load_config(config_file).runtime.memory_limit_mb == 2048
+        whole_section.delenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB")
+        assert load_config(config_file).runtime.memory_limit_mb == 4096
+
     monkeypatch.delenv("FRAME_COMPARE_RUNTIME__MEMORY_LIMIT_MB")
     config_file.write_text(
         '[runtime]\nmemory_limit_mb = "2048"\n',
@@ -615,3 +621,68 @@ def test_shallow_environment_shape_and_valid_control_keep_config_policy(
     payload = caught.value.context.to_dict()
     assert payload["code"] == "FC-1003"
     assert "sentinel-shallow-secret" not in json.dumps(payload)
+
+
+@pytest.mark.parametrize(
+    ("is_hentai", "tmdb_id", "remove_after_days"),
+    [(True, 123, 30), (False, 456, 0)],
+    ids=["true-and-positive-retention", "false-and-zero-retention"],
+)
+def test_slowpics_environment_decodes_strict_nested_scalars(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    is_hentai: bool,
+    tmdb_id: int,
+    remove_after_days: int,
+) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[slowpics]\ntmdb_media_type = "movie"\n', encoding="utf-8")
+    values = {
+        "is_hentai": is_hentai,
+        "tmdb_id": tmdb_id,
+        "remove_after_days": remove_after_days,
+    }
+    strings = {name: str(value).lower() for name, value in values.items()}
+    for name, value in strings.items():
+        monkeypatch.setenv(f"FRAME_COMPARE_SLOWPICS__{name.upper()}", value)
+
+    config = load_config(config_file)
+    assert {name: getattr(config.slowpics, name) for name in values} == values
+
+    for name in strings:
+        monkeypatch.delenv(f"FRAME_COMPARE_SLOWPICS__{name.upper()}")
+    with monkeypatch.context() as whole_section:
+        whole_section.setenv(
+            "FRAME_COMPARE_SLOWPICS", json.dumps({"tmdb_media_type": "movie", **values})
+        )
+        config = load_config(config_file)
+        assert {name: getattr(config.slowpics, name) for name in values} == values
+
+        whole_section.setenv(
+            "FRAME_COMPARE_SLOWPICS", json.dumps({"tmdb_media_type": "tv", **strings})
+        )
+        with pytest.raises(ConfigValidationError) as quoted_json_error:
+            load_config(config_file)
+
+        # Nested keys win over the whole-section strings; untouched JSON
+        # fields still come from the whole section.
+        for name, value in strings.items():
+            whole_section.setenv(f"FRAME_COMPARE_SLOWPICS__{name.upper()}", value)
+        config = load_config(config_file)
+        assert {name: getattr(config.slowpics, name) for name in values} == values
+        assert config.slowpics.tmdb_media_type == "tv"
+
+    with pytest.raises(ConfigValidationError) as overrides_error:
+        load_config(config_file, overrides={"slowpics": {**strings, "tmdb_media_type": "movie"}})
+    config_file.write_text(
+        '[slowpics]\ntmdb_media_type = "movie"\n'
+        + "".join(f'{name} = "{value}"\n' for name, value in strings.items()),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigValidationError) as toml_error:
+        load_config(config_file)
+    for error in (quoted_json_error.value, overrides_error.value, toml_error.value):
+        assert all(
+            any(item["loc"] == ["slowpics", name] for item in error.validation_errors)
+            for name in values
+        )

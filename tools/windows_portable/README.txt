@@ -42,11 +42,11 @@ NOTES:
     previous active bundle by default. Use install.cmd -UserData Leave to opt out;
     the folders then remain in the old bundle, and the shim may select an older
     AppData fallback config if the new bundle has no config\config.toml.
-    After building, the installer re-reads one active-pointer byte snapshot under
-    an exclusive activation lock, so another completed installation is respected.
-    Current bundle installers use the same lock; overlapping activation refuses
-    with the lock path and retry instructions. A leftover lock file is harmless
-    once its process handle closes. The build itself does not hold this lock.
+    The source installer holds the exclusive activation lock during the build
+    and activation. After building, it re-reads the active-pointer byte snapshot
+    under that lock. Current bundle installers use the same lock and report its
+    path and retry instructions if the lock is held. A leftover lock file is
+    harmless once its process handle closes.
     Builder and source-install paths with junction/symlink/mount-point ancestry
     are refused because lexical containment cannot prove their physical location.
     Use physical paths. Drive-relative and root-relative stored pointers are invalid.
@@ -163,8 +163,10 @@ RELEASE SIGNING (Maintainers):
       -KeySize 3072 `
       -ReplacePlaceholderPublicKey
 
-    The generator refuses repository-contained or existing private outputs, replaces
-    only the known public-key placeholder, applies a current-user-only private-file
+    Use physical paths for the repository and the private output. The generator
+    refuses junctions, symlinks, or mount points in either path. It also refuses
+    repository-contained or existing private outputs, replaces only the known
+    public-key placeholder, applies a current-user-only private-file
     ACL on Windows or owner-read/write-only permissions on POSIX, and reports only
     public metadata and a public-key fingerprint.
     Commit only tools\windows_portable\update_public_key.xml. Never paste private

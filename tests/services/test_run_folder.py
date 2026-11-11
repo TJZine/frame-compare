@@ -60,6 +60,22 @@ def test_sanitize_folder_name_avoids_windows_reserved_device_name() -> None:
     assert sanitize_folder_name("COM1.txt") == "COM1 txt run"
 
 
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        pytest.param("COM¹", "COM¹ run", id="superscript-com"),
+        pytest.param("LPT²", "LPT² run", id="superscript-lpt"),
+        pytest.param("CONIN$", "CONIN$ run", id="console-input"),
+        pytest.param("CONOUT$", "CONOUT$ run", id="console-output"),
+        pytest.param("NUL .txt", "NUL txt run", id="space-before-extension"),
+    ],
+)
+def test_sanitize_folder_name_rewrites_additional_windows_device_names(
+    name: str, expected: str
+) -> None:
+    assert sanitize_folder_name(name) == expected
+
+
 # ─── find_common_metadata Tests ───────────────────────────────────────────────
 
 

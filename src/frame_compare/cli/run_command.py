@@ -652,7 +652,11 @@ def handle_dry_run(args: RunCliRawArgs, config: ConfigSchema, console: Console) 
         from_cache_only=args.from_cache_only,
     )
     if args.json_output:
-        typer.echo(json.dumps(dry_run_plan_json(plan), sort_keys=True, separators=(",", ":")))
+        typer.echo(
+            json.dumps(
+                dry_run_plan_json(plan), sort_keys=True, separators=(",", ":"), allow_nan=False
+            )
+        )
         return
     print_dry_run_plan(console, plan, quiet=args.quiet)
 
@@ -678,7 +682,11 @@ def run_error_exit(
     no_color: bool,
 ) -> typer.Exit:
     if args.json_output:
-        typer.echo(json.dumps(format_error_json(error), sort_keys=True, separators=(",", ":")))
+        typer.echo(
+            json.dumps(
+                format_error_json(error), sort_keys=True, separators=(",", ":"), allow_nan=False
+            )
+        )
         return typer.Exit(code=int(get_exit_code(error)))
     return typer.Exit(code=deps.handle_error(error, no_color=no_color, verbose=args.verbose))
 
@@ -817,7 +825,7 @@ def handle_diagnose_paths(resolved_root: Path, config_path: Path, config: Config
         "output": str(workspace.generated_root),
         "cache": str(workspace.generated_root / "cache"),
     }
-    typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False))
 
 
 def handle_json_output(result: RunResult) -> None:
@@ -832,6 +840,6 @@ def handle_json_output(result: RunResult) -> None:
         "cache_hit": result.cache_hit,
         "errors": list(result.errors),
     }
-    typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False))
     if not result.success:
         raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))

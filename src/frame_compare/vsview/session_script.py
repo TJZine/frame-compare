@@ -50,12 +50,16 @@ def write_vsview_session_script(
         source_index_generated_root=source_index_generated_root,
     )
 
+    # Leave room for the result sidecar and its atomic-write sibling.
+    reference_stem = reference.stem[:64]
+    while len(reference_stem.encode("utf-8", errors="surrogateescape")) > 150:
+        reference_stem = reference_stem[:-1]
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     script_path = None
     for _attempt in range(100):
         session_id = uuid.uuid4().hex
-        script_name = f"vsview_{reference.stem}_{base_timestamp}_{session_id}.py"
+        script_name = f"vsview_{reference_stem}_{base_timestamp}_{session_id}.py"
         candidate_path = sessions_dir / script_name
         if _reserve_empty_file(candidate_path):
             script_path = candidate_path

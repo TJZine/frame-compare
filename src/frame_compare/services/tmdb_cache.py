@@ -30,7 +30,7 @@ from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
 log = structlog.get_logger()
 
-TMDB_CACHE_VERSION = "1"
+TMDB_CACHE_VERSION = "2"
 TMDB_CACHE_MAX_ENTRIES = 2000
 TMDB_CACHE_MAX_BYTES = 5 * 1024 * 1024
 TMDB_CACHE_POSITIVE_TTL = timedelta(days=30)

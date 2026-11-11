@@ -98,7 +98,7 @@ runs:
         # the released updater compatibility fingerprint.
         $root = New-Item -ItemType Directory -Path "dist/frame-compare-portable-win-x64" -Force
         $requirements = Join-Path $root.FullName "requirements.lock.txt"
-        python -B -I -S tools/windows_portable/portable_runtime.py export --output $requirements
+        python -B -I -S tools/windows_portable/portable_runtime.py export --output $requirements --commit-sha "$env:EXPECTED_SHA"
         ./tools/windows_portable/release_update.ps1 -Stage Verify `
           -ExpectedSha $env:EXPECTED_SHA -ReleaseTag $env:RELEASE_TAG `
           -InputDir (Join-Path $env:RUNNER_TEMP "portable-inputs") `

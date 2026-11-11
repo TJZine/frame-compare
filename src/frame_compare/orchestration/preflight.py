@@ -24,7 +24,7 @@ from frame_compare.utils.types import WorkspacePaths
 _VIDEO_PATTERNS: list[str] = ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"]
 
 
-def _resolve_path(path_str: str, root: Path) -> Path:
+def resolve_input_path(path_str: str, root: Path) -> Path:
     """Expand env vars and resolve relative to root."""
     expanded = os.path.expandvars(path_str)
     _validate_filesystem_path(expanded, field_name="input_dir")
@@ -268,7 +268,7 @@ def resolve_paths(config: ConfigSchema, root: Path) -> WorkspacePaths:
 
     return WorkspacePaths(
         root=resolved_root,
-        input_dir=_resolve_path(paths.input_dir, resolved_root),
+        input_dir=resolve_input_path(paths.input_dir, resolved_root),
         generated_root=generated_dir,
         run_dir=None,  # Real runs reserve a child before rendering.
         screenshots_dir=generated_dir / "screenshots",

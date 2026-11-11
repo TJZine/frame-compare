@@ -170,6 +170,15 @@ jobs:
           .dist-venv/bin/frame-compare version
           .dist-venv/bin/frame-compare --help
 
+      - name: Read installed report assets
+        run: |
+          .dist-venv/bin/python - <<'PYTHON'
+          from frame_compare.services.report.viewer import get_css, get_js
+
+          assert get_css()
+          assert get_js()
+          PYTHON
+
   report-browser:
     name: Generated Report Browser Smoke
     runs-on: ubuntu-24.04

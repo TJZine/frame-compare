@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from threading import Event
 from typing import Protocol, cast
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 from frame_compare import __version__
 from frame_compare.utils.run_warnings import RunWarning
@@ -465,7 +465,7 @@ def _validate_webhook_url(
     resolver: WebhookResolver,
 ) -> _ValidatedWebhookTarget | None:
     try:
-        parsed = urlparse(webhook_url)
+        parsed = urlsplit(webhook_url)
     except ValueError:
         return None
 
@@ -490,7 +490,7 @@ def _validate_webhook_url(
     if _is_localhost_name(hostname):
         return None
 
-    port = parsed_port or 443
+    port = parsed_port if parsed_port is not None else 443
     if not 1 <= port <= 65535:
         return None
     host_header = _host_header(hostname, port)

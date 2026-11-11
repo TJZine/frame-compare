@@ -398,17 +398,17 @@ def _nested_alternative_confirmed_chunk_attempt():
     )
 
 
-def _producer_target_context_attempt(*, credible: bool, resolution: str):
+def _producer_target_context_attempt(*, credible: bool, resolution: str, first_chunk_lag: int = 0):
     observations = tuple(
         ChunkObservation(
             index=index,
             reference_start=index * 240_000,
             reference_count=240_000,
             active=True,
-            lag=667 if index == 2 else 0,
+            lag={0: first_chunk_lag, 2: 667}.get(index, 0),
             psr=30.0 if index != 2 or credible else 5.0,
             credible=index != 2 or credible,
-            agrees=index != 2,
+            agrees=index != 2 and not (index == 0 and first_chunk_lag),
         )
         for index in range(5)
     )
@@ -419,7 +419,7 @@ def _producer_target_context_attempt(*, credible: bool, resolution: str):
         runs=(),
         active_count=5,
         credible_count=sum(item.credible for item in observations),
-        agreeing_count=4,
+        agreeing_count=sum(item.agrees for item in observations),
     )
     plan = ChunkPlan(
         chunk_samples=240_000,
@@ -450,7 +450,7 @@ def _producer_target_context_attempt(*, credible: bool, resolution: str):
         authority_recount=stage.authority_recount,
     )
     chunks = alignment_video._chunks(producer_attempt)
-    producer_targets, _same_frame = alignment_video._build_targets(
+    producer_targets, same_frame = alignment_video._build_targets(
         producer_attempt,
         chunks,
         confirmed=0,
@@ -517,6 +517,7 @@ def _producer_target_context_attempt(*, credible: bool, resolution: str):
         index_build_seconds=0.1,
         positions=base_positions,
         targets=(target,),
+        same_frame_context=same_frame,
         check_points=alignment_video._check_points(
             base_positions,
             (target,),
@@ -2319,19 +2320,25 @@ def test_applied_noted_line_prefers_same_frame_context_over_weak_audio_context(
         "so it was not counted."
     ) in capsys.readouterr().err
 
-    contextual = replace(
-        plain,
-        video_check=replace(
-            plain.video_check,
-            same_frame_context=(
-                AudioSameFrameContext(0, 0, 0.0, 0),
-                AudioSameFrameContext(1, 0, 0.0, 0),
-            ),
-        ),
+    contextual = _producer_target_context_attempt(
+        credible=False, resolution="unresolved", first_chunk_lag=80
     )
-    _present(request, _applied_result(reference, comparison, contextual), config)
+    assert contextual.video_check.same_frame_context == (AudioSameFrameContext(0, 80, 0.24, 0),)
+    assert all(point.reference_frame >= 30 * 24 for point in contextual.video_check.check_points)
+    result = _applied_result(reference, comparison, contextual)
+    _present(request, result, config)
     err = capsys.readouterr().err
-    assert "Noted: audio differed in 2 sections (0:00-0:30, 0:30-1:00);" in err
+    assert (
+        "Noted: audio differed in 1 section (0:00-0:30) by less than a frame (sub-frame); "
+        "not a disagreement."
+    ) in err
+    assert "the video confirmed +0f there" not in err
+    assert "Noted: weak audio" not in err
+
+    _present(request, result, config, verbose=True)
+    err = capsys.readouterr().err
+    assert "1 section differ by less than a frame (sub-frame); not a disagreement." in err
+    assert err.count("by less than a frame (sub-frame); not a disagreement.") == 1
 
 
 def test_p4a_verbose_rows_include_established_context_and_all_checks(
@@ -2393,12 +2400,13 @@ def test_p4a_verbose_rows_include_established_context_and_all_checks(
             3,
             "Audio: 3 of 3 clear sections agree on +0f (0 differ; 1 weak, 1 quiet not counted).",
         ),
-        (
+        pytest.param(
             4,
             0,
             0,
             0,
-            "Audio: 0 of 0 clear sections agree on +0f (0 differ; 0 weak, 4 quiet not counted).",
+            "Audio: 0 of 0 clear sections agree (0 differ; 0 weak, 4 quiet not counted).",
+            id="all-quiet-no-offset",
         ),
     ],
 )

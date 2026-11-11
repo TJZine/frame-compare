@@ -29,7 +29,6 @@ from .cli_helpers import HandleErrorFn
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
-    from frame_compare.utils.progress_protocol import ProgressReporter
 
 _DOCTOR_DISPLAY_LABELS = {
     "vapoursynth": "VapourSynth",
@@ -51,7 +50,6 @@ class RunDoctorFn(Protocol):
     def __call__(
         self,
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport: ...
 
@@ -69,10 +67,14 @@ def handle_doctor(
     try:
         resolved_root, selected = select_run_config_path(config_path, root)
         selection = DoctorConfigSelection(resolved_root, selected, config_path is not None)
-        report = run_doctor(checks=None, reporter=None, selection=selection)
+        report = run_doctor(selection=selection)
     except FrameCompareError as error:
         if json_output:
-            typer.echo(json.dumps(format_error_json(error), sort_keys=True, separators=(",", ":")))
+            typer.echo(
+                json.dumps(
+                    format_error_json(error), sort_keys=True, separators=(",", ":"), allow_nan=False
+                )
+            )
             raise typer.Exit(code=int(get_exit_code(error))) from error
         raise typer.Exit(
             code=handle_error(
@@ -85,7 +87,7 @@ def handle_doctor(
 
     if json_output:
         payload = doctor_report_json(report)
-        typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False))
     else:
         print_doctor_report(report, no_color=no_color)
 
