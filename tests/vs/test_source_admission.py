@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from time import time_ns
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock
@@ -22,6 +23,7 @@ from frame_compare.vs.source_admission import (
     SourceGeometryError,
     admit_source,
     bounded_decoder_options,
+    source_identity,
 )
 
 _VIDEO: dict[str, object] = {
@@ -68,6 +70,43 @@ def _record(index: int, width: int, height: int, *, trailing_pipe: bool = False)
         + suffix
         + b"\n"
     )
+
+
+def test_source_identity_distinguishes_an_immediate_same_size_overwrite(tmp_path: Path) -> None:
+    source = tmp_path / "source.mkv"
+    source.write_bytes(b"original")
+    before = source.stat()
+
+    identity = source_identity(source)
+    # NTFS and Linux without multigrain timestamps can give two changes within one
+    # clock interval the same change time. Local filesystems with fine-grained change
+    # times cannot reproduce that, so check that the interval has passed as well.
+    assert time_ns() - identity.change_time >= admission_module._CHANGE_TIME_SETTLE_NS
+    with source.open("r+b") as handle:
+        handle.write(b"replaced")
+    os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+    after = source.stat()
+
+    assert os.path.samestat(before, after)
+    assert (after.st_size, after.st_mtime_ns) == (before.st_size, before.st_mtime_ns)
+    assert source_identity(source) != identity
+
+
+def test_source_identity_refuses_a_change_time_ahead_of_the_clock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.mkv"
+    source.write_bytes(b"video")
+
+    def unexpected_sleep(_seconds: float) -> None:
+        raise AssertionError("a future change time must not block")
+
+    # A share whose server clock leads this machine reports such change times.
+    monkeypatch.setattr(admission_module, "time_ns", lambda: 0)
+    monkeypatch.setattr(admission_module, "sleep", unexpected_sleep)
+
+    with pytest.raises(OSError, match="ahead of the system clock"):
+        source_identity(source)
 
 
 def test_frame_scan_accepts_chunked_constant_dimensions() -> None:
