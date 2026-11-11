@@ -1006,6 +1006,65 @@ def test_update_commands_repair_interrupted_journals(
         )
 
 
+def test_committed_cleanup_failure_preserves_accepted_target(
+    tmp_path: Path, repo_root: Path, update_exe: str
+) -> None:
+    bundle, updater, _ = _setup_update_install(
+        tmp_path=tmp_path, repo_root=repo_root, public_key_xml="unused"
+    )
+    version = _write_mock_bundle(bundle_dir=bundle)
+    version.write_bytes(_NEW_VERSION_CONTENT.encode())
+    target_before = _snapshot_bytes(version.parent)
+    old = version.parent.with_name("frame_compare.old")
+    old.mkdir()
+    # Only one file remains from the previous tree after an interrupted cleanup.
+    locked = old / "remaining"
+    locked.write_bytes(b"previous install remnant")
+    journal = bundle / "app/.frame_compare_replacement.json"
+    journal_bytes = json.dumps(
+        {
+            "schema_version": 1,
+            "operation": "apply",
+            "state": "committed",
+            "started_at": "2026-10-15T00:00:00Z",
+        }
+    ).encode()
+    journal.write_bytes(journal_bytes)
+
+    result = _run_updater_functions(
+        update_exe,
+        updater,
+        bundle,
+        """
+$held = Acquire-UpdateLock $env:BUNDLE
+try {
+  $file = [IO.File]::Open($env:LOCKED, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+  try { Repair-InterruptedReplacement $env:BUNDLE } finally { $file.Dispose() }
+} finally { Release-UpdateLock $held }
+""",
+        LOCKED=str(locked),
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "Remove committed previous tree failed" in result.stderr
+    assert "The current target is the accepted install. Keep it in place and retry cleanup." in (
+        result.stderr
+    )
+    assert "restore the previous .old" not in result.stderr.lower()
+    assert _snapshot_bytes(version.parent) == target_before
+    assert journal.read_bytes() == journal_bytes
+    assert locked.read_bytes() == b"previous install remnant"
+
+    retry = _run_updater_functions(
+        update_exe,
+        updater,
+        bundle,
+        "$held = Acquire-UpdateLock $env:BUNDLE; try { Repair-InterruptedReplacement $env:BUNDLE } finally { Release-UpdateLock $held }",
+    )
+    assert retry.returncode == 0, retry.stdout + retry.stderr
+    assert _snapshot_bytes(version.parent) == target_before
+    assert not journal.exists() and not old.exists()
+
+
 @pytest.mark.parametrize("operation", ["apply", "rollback"])
 @pytest.mark.parametrize("state", ["orphan-new", "orphan-old", "invalid-journal", "missing-both"])
 def test_update_commands_refuse_unknown_replacement_state(

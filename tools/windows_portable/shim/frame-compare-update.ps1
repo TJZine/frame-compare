@@ -681,6 +681,7 @@ function Get-ReplacementPaths([string]$BundlePath) {
 function Repair-InterruptedReplacement([string]$BundlePath) {
   $paths = Get-ReplacementPaths $BundlePath
   $temporary = $paths.Journal + ".tmp"
+  $recoveryAdvice = "Inspect the retained paths and journal before attempting repair."
   try {
     foreach ($path in @($paths.Target, $paths.New, $paths.Old)) {
       if (Test-Path -LiteralPath $path) {
@@ -714,6 +715,7 @@ function Repair-InterruptedReplacement([string]$BundlePath) {
       if ($journal.state -ceq "staging") {
         if (!$targetExists -or $oldExists) { throw "Staging journal does not describe an untouched target." }
       } elseif ($journal.state -ceq "promoting") {
+        $recoveryAdvice = "If .old contains a complete previous install, move any target aside before restoring .old by rename. Retain the journal until the trees are reconciled."
         if ($oldExists) {
           if ($targetExists) {
             $failed = $paths.Target + ".failed-" + [DateTime]::UtcNow.ToString("yyyyMMddHHmmssfffffff") + "-" + [guid]::NewGuid().ToString("N")
@@ -723,6 +725,7 @@ function Repair-InterruptedReplacement([string]$BundlePath) {
         } elseif (!$targetExists) { throw "Promoting journal has neither target nor .old." }
       } else {
         if (!$targetExists -or (Test-Path -LiteralPath $paths.New)) { throw "Committed journal has missing target or unexpected .new." }
+        $recoveryAdvice = "The current target is the accepted install. Keep it in place and retry cleanup."
         if ($oldExists) { Invoke-WithRetry -Label "Remove committed previous tree" -Action { Remove-Item -LiteralPath $paths.Old -Recurse -Force -ErrorAction Stop } }
       }
       if (Test-Path -LiteralPath $paths.New) { Remove-Item -LiteralPath $paths.New -Recurse -Force -ErrorAction Stop }
@@ -731,7 +734,7 @@ function Repair-InterruptedReplacement([string]$BundlePath) {
     # An interrupted atomic write is never authoritative and cannot block retry.
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force -ErrorAction Stop }
   } catch {
-    throw "Replacement recovery refused/failed: $($_.Exception.Message). Retained paths: target=$($paths.Target); old=$($paths.Old); new=$($paths.New); journal=$($paths.Journal); failed=$($paths.Target).failed-*. Restore the previous .old by rename after moving any target aside; retain the journal until the trees are reconciled."
+    throw "Replacement recovery refused/failed: $($_.Exception.Message). Retained paths: target=$($paths.Target); old=$($paths.Old); new=$($paths.New); journal=$($paths.Journal); failed=$($paths.Target).failed-*. $recoveryAdvice"
   }
 }
 
