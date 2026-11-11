@@ -554,8 +554,10 @@ identity is not persisted.
 - `<run-folder>/generated/vsview_sessions/vsview_*.py`: generated VSView session
   scripts, with L-SMASH-Works remaining the source/index loader owned by Frame Compare
   (VSView's BestSource workspace is not a Frame Compare source-loader change).
-  Frame Compare metadata in generated sessions is schema v5; older, unknown,
-  or mixed versions require regeneration.
+  Script filenames use a prefix of the reference stem capped at 64 characters and
+  150 UTF-8 bytes, followed by a timestamp and session UUID. Session metadata retains
+  the full display name. Frame Compare metadata in generated
+  sessions is schema v5. Older, unknown, or mixed versions require regeneration.
 - `<run-folder>/generated/vsview_sessions/vsview_*.alignment-result.json`: the
   session-scoped native alignment-review result sidecar. It is written atomically by
   the VSView panel only after one complete whole-set confirm action (positions or
