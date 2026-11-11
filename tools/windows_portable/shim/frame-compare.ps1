@@ -1,5 +1,8 @@
 function Test-ArgsContainConfigFlag([string[]]$ArgsValues) {
   foreach ($arg in $ArgsValues) {
+    if ($arg -eq "--") {
+      break
+    }
     if ($arg -eq "--config" -or $arg -eq "-c") {
       return $true
     }

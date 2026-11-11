@@ -28,6 +28,11 @@ windows_portable_launcher_e2e = pytest.mark.skipif(
         (("run", "--diagnose-paths"), ("run", "--config")),
         (("preset", "list"), ("preset", "list", "--config")),
         (("history", "list"), ("history", "list", "--config")),
+        pytest.param(
+            ("preset", "save", "--", "--config"),
+            ("preset", "save", "--config"),
+            id="config-after-option-terminator",
+        ),
     ),
 )
 def test_windows_portable_shim_routes_all_fallback_config_commands_to_one_file(
@@ -65,9 +70,8 @@ def test_windows_portable_shim_routes_all_fallback_config_commands_to_one_file(
     assert completed.returncode == 0, f"stdout:\n{completed.stdout}\n\nstderr:\n{completed.stderr}"
 
     forwarded = args_file.read_text(encoding="utf-8-sig").rstrip("\r\n").split("|")
-    assert tuple(forwarded[: len(expected_prefix)]) == expected_prefix
-    config_index = forwarded.index("--config")
-    assert forwarded[config_index + 1] == str(state_config_toml)
+    config_index = len(expected_prefix) - 1
+    assert tuple(forwarded) == (*expected_prefix, str(state_config_toml), *args[config_index:])
 
 
 @pytest.mark.integration
