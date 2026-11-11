@@ -10,6 +10,10 @@ from pytest import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
+from frame_compare.orchestration.alignment_report import (
+    AlignmentReportComparison,
+    emit_frame_alignment_report,
+)
 from frame_compare.orchestration.fps_report import FpsReportClip, emit_consolidated_fps_report
 from frame_compare.orchestration.progress import uses_rich_progress
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
@@ -63,9 +67,46 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        print("Clip Overview", file=sys.stderr)
-        print("Frame Alignment", file=sys.stderr)
+    def _run(request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        emit_consolidated_fps_report(
+            stage="after_load_sources",
+            clips=[
+                FpsReportClip(
+                    path=Path("reference.mkv"),
+                    label="Reference",
+                    width=1920,
+                    height=1080,
+                    num_frames=240,
+                    is_hdr=False,
+                    source_fps=Fraction(24),
+                    effective_fps=Fraction(24),
+                    fps_divergent=False,
+                    note=None,
+                    raw_fps=Fraction(24),
+                )
+            ],
+            json_output=request.json_output,
+            quiet=request.quiet,
+            rich_output=True,
+        )
+        emit_frame_alignment_report(
+            stage="after_alignment",
+            comparisons=[
+                AlignmentReportComparison(
+                    label="Comparison",
+                    alignment_source=None,
+                    relative_offset_frames=2,
+                    reference_row_zero_source_frame=2,
+                    comparison_row_zero_source_frame=0,
+                    reference_trim_range=(2, 239),
+                    comparison_trim_range=(0, 237),
+                )
+            ],
+            selected_frames=[4, 8],
+            alignment_warnings=[],
+            json_output=request.json_output,
+            quiet=request.quiet,
+        )
         return RunResult(
             success=True,
             screenshot_dir=Path("screenshots").resolve(),
@@ -83,10 +124,10 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     assert "Comparison complete" in stdout
     assert "Warnings" in stdout
     assert "metadata skipped" in stdout
-    assert "Clip Overview" not in stdout
-    assert "Frame Alignment" not in stdout
-    assert "Clip Overview" in stderr
-    assert "Frame Alignment" in stderr
+    assert "Sources · 1 loaded" not in stdout
+    assert "Frame alignment" not in stdout
+    assert "Sources · 1 loaded" in stderr
+    assert "Frame alignment" in stderr
     assert "Run plan" not in stderr
     assert "Result" not in stderr
 
