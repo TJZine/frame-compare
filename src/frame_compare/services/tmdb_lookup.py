@@ -114,7 +114,11 @@ def _map_tmdb_result(
     else:
         return None
 
-    title = _optional_str(item.get("title")) or _optional_str(item.get("name")) or "Unknown"
+    title = _optional_str(item.get("title"))
+    if title is None or not title.strip():
+        title = _optional_str(item.get("name"))
+    if title is None or not title.strip():
+        return None
     original_title = (
         _optional_str(item.get("original_title"))
         or _optional_str(item.get("original_name"))

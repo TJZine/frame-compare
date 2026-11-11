@@ -411,6 +411,46 @@ async def test_lookup_does_not_cache_malformed_success_response(
 
 
 @pytest.mark.anyio
+async def test_lookup_skips_original_title_only_exact_match_and_keeps_valid_neighbors(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "tmdb.toml"
+    cache = TmdbCache(cache_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "id": 329865,
+                        "original_title": "Arrival",
+                        "release_date": "2016-11-10",
+                    },
+                    {
+                        "id": 1,
+                        "title": "Neighbor",
+                        "original_title": "Neighbor",
+                        "release_date": "2020-01-01",
+                    },
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await tmdb_lookup.search_tmdb_movie(
+            ParsedMetadata(title="Arrival"),
+            MetadataConfig(api_key="a" * 32),
+            client,
+            cache=cache,
+        )
+
+    assert [item.tmdb_id for item in result] == [1]
+    assert not cache_path.exists()
+
+
+@pytest.mark.anyio
 async def test_multi_search_can_cache_while_ignoring_person_results(tmp_path: Path) -> None:
     request_count = 0
 
