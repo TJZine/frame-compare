@@ -143,6 +143,7 @@ const ReportViewer = {
             this.inspector.updateTabs();
             this.inspector.updateVisibility();
             this.inspector.renderReportInformation();
+            this.observeToolbar();
 
             if (!this.hasRenderableData()) {
                 this.renderEmptyState(this.emptyStateMessage());
@@ -715,6 +716,20 @@ const ReportViewer = {
         this.dom.stage.addEventListener('pointerleave', () => this.viewport.handleStagePointerLeave());
         this.dom.stage.addEventListener('dblclick', (e) => this.handleViewportDoubleClick(e));
         this.dom.stage.addEventListener('wheel', (e) => this.handleViewportWheel(e), { passive: false });
+    },
+
+    observeToolbar() {
+        const toolbar = document.querySelector('.rv-controls');
+        const header = document.querySelector('.rv-header');
+        const update = () => document.body.style.setProperty(
+            '--rv-toolbar-bottom',
+            `${toolbar.getBoundingClientRect().bottom}px`,
+        );
+        update();
+        const observer = new ResizeObserver(update);
+        observer.observe(toolbar);
+        observer.observe(header);
+        observer.observe(this.dom.status);
     },
 
     isViewerChromeEvent(e) {

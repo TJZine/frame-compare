@@ -1324,6 +1324,8 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     slider_attributes = parser.mode_attributes["slider"]
     assert "active" not in (slider_attributes.get("class") or "").split()
     assert slider_attributes["aria-checked"] == "false"
+    if width == 1024:
+        _assert_inspector_clears_toolbar_during_image_retry(browser, tmp_path / "status-banner")
 
 
 @pytest.mark.integration
@@ -1837,6 +1839,55 @@ async function evaluate(expression) {
     )
 
 
+def _assert_inspector_clears_toolbar_during_image_retry(browser: str, tmp_path: Path) -> None:
+    report_path = _generated_report(tmp_path, frames=(10, 12), encoded_image_paths=True)
+    missing_image = next(tmp_path.glob("screenshots*/encode 12*.png"))
+    missing_image.rename(missing_image.with_suffix(".held"))
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1024, height: 768, deviceScaleFactor: 1, mobile: false,
+        });
+        await evaluate(`(() => {
+            document.querySelector('[data-mode="slider"]').click();
+            document.getElementById('rv-inspector').style.transition = 'none';
+            document.getElementById('btn-inspector').click();
+        })()`);
+        const toolbarBottom = "document.querySelector('.rv-controls').getBoundingClientRect().bottom";
+        const toolbarReachable = `(() => {
+            const drawer = document.getElementById('rv-inspector');
+            return Math.abs(drawer.getBoundingClientRect().top - ${toolbarBottom}) <= 0.5
+                && ['left-select', 'btn-swap-clips', 'right-select', 'alignment-status'].every(id => {
+                    const control = document.getElementById(id);
+                    const { x, y, width, height } = control.getBoundingClientRect();
+                    return control.contains(document.elementFromPoint(x + width / 2, y + height / 2));
+                });
+        })()`;
+        await waitFor(toolbarReachable, 'open Inspector obscures the toolbar before image failure');
+        const before = await evaluate(toolbarBottom);
+        await evaluate("document.getElementById('btn-next').click()");
+        await waitFor(
+            "!document.getElementById('viewer-status').hidden && ReportViewer.dom.rightLayer.dataset.status === 'error'",
+            'missing screenshot did not show the status banner',
+        );
+        assert.ok(await evaluate(toolbarBottom) > before, 'status banner did not move the toolbar');
+        await waitFor(toolbarReachable, 'open Inspector obscures the toolbar after image failure');
+        await fs.rename(HELD_IMAGE, MISSING_IMAGE);
+        await evaluate("document.querySelector('[data-empty-state] button').click()");
+        await waitFor(
+            "document.getElementById('viewer-status').hidden && ReportViewer.dom.rightLayer.dataset.status === 'ready'",
+            'retry did not load the restored screenshot and clear the status banner',
+        );
+        assert.equal(await evaluate(toolbarBottom), before);
+        await waitFor(toolbarReachable, 'open Inspector obscures the toolbar after image recovery');
+""".replace("HELD_IMAGE", json.dumps(str(missing_image.with_suffix(".held")))).replace(
+            "MISSING_IMAGE", json.dumps(str(missing_image))
+        )
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-status-banner", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(("source_width", "window_width"), [(1920, 1024), (3840, 640)])
 def test_report_actual_pixels_fit_and_diff_lens_share_coordinates(
@@ -1930,51 +1981,6 @@ def test_report_actual_pixels_fit_and_diff_lens_share_coordinates(
     if source_width == 3840:
         assert proof["fitZoom"] < 0.25, proof
     assert proof["zoomed"] > proof["fitZoom"], proof
-
-
-@pytest.mark.integration
-def test_report_restores_custom_zoom_and_pan_after_reload(tmp_path: Path) -> None:
-    from PIL import Image
-
-    browser = _browser_executable()
-    if browser is None:
-        pytest.skip("Chrome/Chromium is unavailable")
-    report_path = _generated_report(tmp_path)
-    for name in ("reference", "encode"):
-        Image.new("RGB", (960, 540)).save(tmp_path / "screenshots" / name / "10.png")
-    script = _viewer_input_script(
-        r"""
-        const ready = `typeof ReportViewer !== 'undefined' && ReportViewer.dom?.leftImg?.naturalWidth === 960
-            && ReportViewer.dom.rightImg.naturalWidth === 960 && ReportViewer.dom.sizerImg.naturalWidth === 960`;
-        await waitFor(ready, 'report images did not load');
-        await evaluate(`(() => {
-            const range = ReportViewer.dom.zoomRange;
-            range.value = '2';
-            range.dispatchEvent(new Event('input'));
-            ReportViewer.viewport.setPan(-173, -125);
-        })()`);
-        await command('Page.reload');
-        await waitFor(ready, 'report images did not load after reloading');
-        const restored = await evaluate(`(() => {
-            const {dom, state} = ReportViewer;
-            const stage = dom.stage.getBoundingClientRect();
-            const image = dom.leftImg.getBoundingClientRect();
-            return {
-                fitMode: state.fitMode,
-                width: image.width,
-                range: dom.zoomRange.value,
-                readout: dom.zoomVal.textContent,
-                panX: image.left + image.width / 2 - stage.left - stage.width / 2,
-                panY: image.top + image.height / 2 - stage.top - stage.height / 2,
-            };
-        })()`);
-        assert.deepEqual(restored, {
-            fitMode: 'custom', width: 1920, range: '2', readout: '200%', panX: -173, panY: -125,
-        });
-"""
-    )
-    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-reload", script)
-    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 @pytest.mark.integration
@@ -2085,6 +2091,51 @@ def test_grid_to_single_preserves_pan_for_destination_image_size(tmp_path: Path)
     completed = _run_browser_input(browser, report_path, tmp_path / "chrome-grid-to-single", script)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert json.loads(completed.stdout) == pytest.approx({"x": 216, "y": 192})
+
+
+@pytest.mark.integration
+def test_report_restores_custom_zoom_and_pan_after_reload(tmp_path: Path) -> None:
+    from PIL import Image
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    for name in ("reference", "encode"):
+        Image.new("RGB", (960, 540)).save(tmp_path / "screenshots" / name / "10.png")
+    script = _viewer_input_script(
+        r"""
+        const ready = `typeof ReportViewer !== 'undefined' && ReportViewer.dom?.leftImg?.naturalWidth === 960
+            && ReportViewer.dom.rightImg.naturalWidth === 960 && ReportViewer.dom.sizerImg.naturalWidth === 960`;
+        await waitFor(ready, 'report images did not load');
+        await evaluate(`(() => {
+            const range = ReportViewer.dom.zoomRange;
+            range.value = '2';
+            range.dispatchEvent(new Event('input'));
+            ReportViewer.viewport.setPan(-173, -125);
+        })()`);
+        await command('Page.reload');
+        await waitFor(ready, 'report images did not load after reloading');
+        const restored = await evaluate(`(() => {
+            const {dom, state} = ReportViewer;
+            const stage = dom.stage.getBoundingClientRect();
+            const image = dom.leftImg.getBoundingClientRect();
+            return {
+                fitMode: state.fitMode,
+                width: image.width,
+                range: dom.zoomRange.value,
+                readout: dom.zoomVal.textContent,
+                panX: image.left + image.width / 2 - stage.left - stage.width / 2,
+                panY: image.top + image.height / 2 - stage.top - stage.height / 2,
+            };
+        })()`);
+        assert.deepEqual(restored, {
+            fitMode: 'custom', width: 1920, range: '2', readout: '200%', panX: -173, panY: -125,
+        });
+"""
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-reload", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 @pytest.mark.integration
