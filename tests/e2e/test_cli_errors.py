@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
+import sys
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Never
 
 import pytest
 
 from tests.e2e.harness import CommandResult, Workspace
+
+
+def _reject_nonfinite_json(token: str) -> Never:
+    raise ValueError(f"Nonstandard JSON constant: {token}")
+
 
 ERROR_CASES = (
     pytest.param(
@@ -239,9 +247,157 @@ def test_cli_rejects_nonfinite_exclusions_as_typed_config_errors(
         ],
     )
 
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout, parse_constant=_reject_nonfinite_json)
     assert result.exit_code == 2
     assert payload["error"]["code"] == "FC-1003"
     assert payload["error"]["name"] == "CONFIG_VALIDATION_ERROR"
     assert result.stderr == ""
     assert root.config_path.read_bytes() == before
+
+
+@pytest.mark.e2e
+def test_cli_doctor_nonfinite_timeout_diagnostic_is_strict_json(
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+) -> None:
+    root = workspace({"screenshots": {"ffmpeg_timeout_seconds": float("inf")}})
+    result = run_cli(root.root, ["doctor", "--json"])
+
+    payload = json.loads(result.stdout, parse_constant=_reject_nonfinite_json)
+    check = next(entry for entry in payload["doctor"]["checks"] if entry["id"] == "tmdb_api_key")
+    assert check["status"] == "fail"
+    details = check["details"]
+    assert details["exception_type"] == "ConfigValidationError"
+    assert any(
+        error["loc"] == ["screenshots", "ffmpeg_timeout_seconds"] and error["input"] == "inf"
+        for error in details["validation_errors"]
+    )
+    assert result.stderr == ""
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("json_mode", [False, True], ids=["human", "json"])
+def test_cli_sanitizes_unexpected_startup_failure(
+    json_mode: bool,
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = workspace()
+    monkeypatch.setenv("SSL_CERT_FILE", str(root.root / "missing-ca-cert.pem"))
+    arguments = ["run", "--skip-metadata", "--no-upload"]
+    if json_mode:
+        arguments.append("--json")
+    result = run_cli(root.root, arguments)
+
+    assert result.exit_code == 1, (result.stdout, result.stderr)
+    assert result.stderr == "Unexpected error: please report this bug.\n"
+    if json_mode:
+        assert result.stdout == ""
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("command", ["run", "doctor"])
+def test_cli_toml_syntax_diagnostic_omits_duplicate_secret_key(
+    command: str,
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+) -> None:
+    root = workspace()
+    sentinel = "secret-inline-key"
+    root.config_path.write_text(
+        f'[tmdb]\napi_key = {{"{sentinel}" = 1, "{sentinel}" = 2}}\n',
+        encoding="utf-8",
+    )
+    arguments = [command, "--json"]
+    if command == "run":
+        arguments.append("--dry-run")
+    result = run_cli(root.root, arguments)
+
+    payload = json.loads(result.stdout)
+    assert sentinel not in result.stdout
+    assert result.stderr == ""
+    if command == "run":
+        assert result.exit_code == 2
+        assert payload["error"]["code"] == "FC-1002"
+        message = payload["error"]["message"]
+    else:
+        check = next(
+            entry for entry in payload["doctor"]["checks"] if entry["id"] == "tmdb_api_key"
+        )
+        assert check["status"] == "fail"
+        assert check["details"]["exception_type"] == "ConfigParseError"
+        message = check["details"]["exception"]
+    assert "invalid TOML syntax (at line 2, column " in message
+
+
+@pytest.mark.e2e
+def test_doctor_generic_check_failure_sanitizes_json_details(
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = workspace()
+    sentinel = "SECRET_DOCTOR_EXCEPTION"
+    result = _run_doctor_with_permission_failure(root, sentinel, run_cli, monkeypatch)
+    if result is None:
+        # Some hosts permit directory traversal, and Python 3.14+ suppresses
+        # stat errors in Path.is_file(). Replace only the check in a fresh CLI.
+        script = """
+import sys
+
+from frame_compare.cli.entry import console_main
+from frame_compare.orchestration import doctor_checks
+
+sentinel = sys.argv.pop()
+
+def fail():
+    raise PermissionError(sentinel)
+
+doctor_checks._check_ffmpeg = fail
+console_main()
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script, "doctor", "--json", sentinel],
+            cwd=root.root,
+            capture_output=True,
+            encoding="utf-8",
+            timeout=30,
+            check=False,
+        )
+        result = CommandResult(completed.returncode, completed.stdout, completed.stderr)
+
+    payload = json.loads(result.stdout, parse_constant=_reject_nonfinite_json)
+    check = next(entry for entry in payload["doctor"]["checks"] if entry["id"] == "ffmpeg")
+    assert check["status"] == "fail"
+    assert check["message"] == "ffmpeg check failed"
+    assert check["details"] == {"exception_type": "PermissionError"}
+    assert sentinel not in result.stdout
+    assert sentinel not in result.stderr
+    assert result.stderr == ""
+
+
+def _run_doctor_with_permission_failure(
+    root: Workspace,
+    sentinel: str,
+    run_cli: Callable[..., CommandResult],
+    monkeypatch: pytest.MonkeyPatch,
+) -> CommandResult | None:
+    if os.name != "posix":
+        return None
+
+    denied = root.root / sentinel
+    denied.mkdir()
+    executable = denied / "ffmpeg"
+    executable.touch()
+    denied.chmod(0)
+    try:
+        # This is the predicate used by the real executable resolver.
+        try:
+            executable.is_file()
+        except PermissionError:
+            monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(executable))
+            return run_cli(root.root, ["doctor", "--json"])
+        return None
+    finally:
+        denied.chmod(0o700)

@@ -28,9 +28,10 @@ For exact output streams and JSON fields, see the
 the config file; relative paths resolve from `--root`, and the default is
 `config/config.toml`.
 
-`run`, `doctor`, `wizard`, `preset apply`, `preset save`, `history list`, and `history open`
-accept both options. `preset list` accepts `--config` but ignores it and reads
-presets from `<root>/config/presets`. `version` accepts neither option.
+`run`, `doctor`, `wizard`, `preset list`, `preset apply`, `preset save`,
+`history list`, and `history open` accept both options. `preset list` validates the selected config path and reads
+presets from `<root>/config/presets` without loading the config file.
+`version` accepts neither option.
 
 The installed Windows shim supplies the bundle or AppData config when you omit
 `--config`; see the contract's [shared path rules](../current-cli-contract.md#shared-path-resolution-rules).
@@ -42,7 +43,7 @@ exits without running.
 
 Runs and dry runs reject `--no-cache` combined with `--from-cache-only`
 ([`--no-cache` and `--from-cache-only`](../current-cli-contract.md#run-command-contract)).
-An invalid `--overlay`, `--tm-preset`, or `--tm-curve` value names the option and
+An invalid `--overlay`, `--tm-preset`, `--tm-speed`, or `--tm-curve` value names the option and
 lists its choices before any work starts. Preset names are `reference`, `contrast`,
 `spline`, `bright_lift`, and `highlight_guard`. The default `reference` uses BT.2390 at 100 nits with knee 1.0.
 An explicit curve override that changes the preset curve uses that curve's default
@@ -159,6 +160,17 @@ Saved by `--write-config`
 :   `color.preset`
 
 Tonemap preset.
+
+#### `--tm-speed` { #run-tm-speed .fc-key }
+
+Value
+:   `quality`, `fast`
+
+Saved by `--write-config`
+:   `color.tonemap_speed`
+
+Choose the source-peak policy for tonemapping. The default `quality` measures
+source peaks, while `fast` uses source metadata or the resolved static peak hint.
 
 #### `--tm-target` { #run-tm-target .fc-key }
 

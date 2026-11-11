@@ -19,9 +19,11 @@ from frame_compare.analysis.window import (
     SelectionWindow,
     compute_shared_selection_window,
 )
+from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection, SourceMatchFpsMode
 from frame_compare.config.schema_models import SourceOverrideConfig
+from frame_compare.error_context import JSONValue
 from frame_compare.orchestration.active_rect import (
     active_rect_identity,
     active_rect_policy_identity,
@@ -163,20 +165,56 @@ def build_selection_domain_clips_with_diagnostics(
         overrides_by_path=overrides_by_path,
         detection=active_rect_detection,
     )
+    unmatched_clips = clips
+    diagnostics = FpsMatchDiagnostics()
     if match_fps == SourceMatchFpsMode.ASSUME_REFERENCE:
-        matched = _apply_reference_fps_match(
+        clips = _apply_reference_fps_match(
             clips=clips,
             ordered_paths=ordered_paths,
             overrides_by_path=overrides_by_path,
         )
-        return SelectionDomainClips(clips=matched, fps_diagnostics=FpsMatchDiagnostics())
-    if match_fps == SourceMatchFpsMode.MAJORITY:
-        return _apply_majority_fps_match(
+    elif match_fps == SourceMatchFpsMode.MAJORITY:
+        matched = _apply_majority_fps_match(
             clips=clips,
             ordered_paths=ordered_paths,
             overrides_by_path=overrides_by_path,
         )
-    return SelectionDomainClips(clips=clips, fps_diagnostics=FpsMatchDiagnostics())
+        clips, diagnostics = matched.clips, matched.fps_diagnostics
+
+    for clip, unmatched in zip(clips, unmatched_clips, strict=True):
+        try:
+            float(clip.effective_fps)
+            float(Fraction(clip.probe.num_frames, 1) / clip.effective_fps)
+        except OverflowError:
+            location: list[JSONValue]
+            if clip.effective_fps != unmatched.effective_fps:
+                location = ["sources", "match_fps"]
+                field = "Inherited effective_fps"
+                hint = "Change sources.match_fps or choose a representable effective_fps"
+            else:
+                override = overrides_by_path.get(clip.path)
+                location = (
+                    ["sources", "overrides", "effective_fps"]
+                    if override is not None and override.effective_fps is not None
+                    else ["effective_fps"]
+                )
+                field = "Effective FPS"
+                hint = "Choose an effective_fps that keeps the clip duration representable"
+            raise ConfigValidationError(
+                [
+                    {
+                        "type": "value_error",
+                        "loc": location,
+                        "msg": (
+                            f"{field} for {clip.path} or its clip duration "
+                            "exceeds the floating-point range"
+                        ),
+                        "input": str(clip.effective_fps),
+                    }
+                ],
+                hint=hint,
+            ) from None
+    return SelectionDomainClips(clips=clips, fps_diagnostics=diagnostics)
 
 
 def _apply_reference_fps_match(

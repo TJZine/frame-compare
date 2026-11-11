@@ -615,8 +615,8 @@ def _check_tmdb_api_key(selection: DoctorConfigSelection | None = None) -> Check
 
 
 def _tmdb_config_error_hint(config_error: dict[str, JSONValue]) -> str:
-    if config_error.get("exception_type") == "ConfigParseError":
-        return "Fix config/config.toml syntax, then rerun doctor"
+    if config_error.get("exception_type") in {"ConfigNotFoundError", "ConfigParseError"}:
+        return f"Make {config_error['config_file']} readable and valid TOML, then rerun doctor"
     return "Fix the reported config/environment validation errors, then rerun doctor"
 
 

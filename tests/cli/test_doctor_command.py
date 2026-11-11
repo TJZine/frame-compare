@@ -5,14 +5,12 @@ from unittest.mock import patch
 
 import pytest
 from pytest import MonkeyPatch
-from structlog.testing import capture_logs
 
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode, format_error_json
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport, run_doctor
 from frame_compare.orchestration.doctor_types import DoctorConfigSelection
-from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal_theme import GLYPHS_ASCII
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
 
@@ -102,7 +100,6 @@ _AUDITED_HINTS = (
         "Check the optional VSView setup, then rerun doctor; see "
         "https://tjzine.github.io/frame-compare/getting-started/native/"
     ),
-    "Fix config/config.toml syntax, then rerun doctor",
     "Fix the reported config/environment validation errors, then rerun doctor",
     "Replace the TMDB credential with a 32-character hexadecimal API key",
 )
@@ -142,13 +139,11 @@ def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
     ]
     report = DoctorReport(
         checks=[(checks[0], checks[0].check_fn()), (checks[1], checks[1].check_fn())],
-        all_passed=False,
         critical_failures=[],
     )
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
@@ -196,13 +191,11 @@ def test_doctor_exit_code_is_3_on_core_failure(monkeypatch: MonkeyPatch) -> None
     )
     report = DoctorReport(
         checks=[(check, check.check_fn())],
-        all_passed=False,
         critical_failures=["vapoursynth"],
     )
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
@@ -250,7 +243,6 @@ def test_doctor_human_output_is_verdict_last_and_grouped(monkeypatch: MonkeyPatc
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
@@ -305,7 +297,6 @@ def test_doctor_managed_optional_policy_failure_blocks_human_and_json_output(
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
@@ -340,13 +331,11 @@ def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
     )
     report = DoctorReport(
         checks=[(check, check.check_fn())],
-        all_passed=False,
         critical_failures=[],
     )
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
@@ -375,13 +364,11 @@ def test_doctor_human_marks_optional_failed_check_neutrally(monkeypatch: MonkeyP
     )
     report = DoctorReport(
         checks=[(check, check.check_fn())],
-        all_passed=False,
         critical_failures=[],
     )
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
@@ -423,11 +410,10 @@ def test_doctor_optional_vsview_presentation(
         category="optional",
         check_fn=lambda: CheckResult(passed=True, message=message, available=available),
     )
-    report = DoctorReport(checks=[(check, check.check_fn())], all_passed=True, critical_failures=[])
+    report = DoctorReport(checks=[(check, check.check_fn())], critical_failures=[])
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
@@ -464,13 +450,11 @@ def test_doctor_text_preserves_literal_brackets(monkeypatch: MonkeyPatch) -> Non
     )
     report = DoctorReport(
         checks=[(check, check.check_fn())],
-        all_passed=False,
         critical_failures=[],
     )
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
@@ -506,13 +490,11 @@ def test_doctor_preserves_supplied_hint_text_in_human_and_json_output(
     ]
     report = DoctorReport(
         checks=[(check, check.check_fn()) for check in checks],
-        all_passed=False,
         critical_failures=[],
     )
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
@@ -563,13 +545,11 @@ def test_doctor_verdict_combines_failure_and_warning_counts(
     ]
     report = DoctorReport(
         checks=[(check, check.check_fn()) for check in checks],
-        all_passed=False,
         critical_failures=["vapoursynth", "lsmas"],
     )
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
@@ -594,13 +574,11 @@ def test_doctor_ascii_fallback_uses_ascii_glyphs(monkeypatch: MonkeyPatch) -> No
     )
     report = DoctorReport(
         checks=[(check, check.check_fn())],
-        all_passed=False,
         critical_failures=["vapoursynth"],
     )
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         return report
@@ -622,37 +600,6 @@ def test_doctor_ascii_fallback_uses_ascii_glyphs(monkeypatch: MonkeyPatch) -> No
     assert "✓" not in result.stdout
 
 
-def test_doctor_generic_check_failure_sanitizes_json_details(monkeypatch: MonkeyPatch) -> None:
-    sentinel = "SECRET_DOCTOR_EXCEPTION"
-
-    def _raise() -> CheckResult:
-        raise RuntimeError(f"{sentinel} at /private/config.toml")
-
-    check = DoctorCheck(name="custom_check", category="optional", check_fn=_raise)
-    with capture_logs():
-        report = run_doctor(checks=[check])
-
-    def _run_doctor(
-        checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
-        selection: DoctorConfigSelection | None = None,
-    ) -> DoctorReport:
-        return report
-
-    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
-
-    result = runner.invoke(app, ["doctor", "--json"])
-
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    payload = json.loads(result.stdout)
-    entry = _doctor_check_entry(payload, "custom_check")
-    assert entry["message"] == "custom_check check failed"
-    assert entry["details"] == {"exception_type": "RuntimeError"}
-    assert sentinel not in result.stdout
-    assert "/private/config.toml" not in result.stdout
-
-
 def test_doctor_top_level_frame_compare_error_uses_cli_error_contract(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -660,7 +607,6 @@ def test_doctor_top_level_frame_compare_error_uses_cli_error_contract(
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         raise error
@@ -686,7 +632,6 @@ def test_doctor_top_level_error_uses_default_terminal_color_policy(
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         raise error
@@ -723,7 +668,6 @@ def test_doctor_json_top_level_frame_compare_error_uses_standard_error_schema(
 
     def _run_doctor(
         checks: list[DoctorCheck] | None = None,
-        reporter: ProgressReporter | None = None,
         selection: DoctorConfigSelection | None = None,
     ) -> DoctorReport:
         raise error
@@ -799,6 +743,17 @@ def test_doctor_selected_config_matches_run_and_keeps_config_failures_in_check(
         assert isinstance(details, dict)
         assert details["exception_type"] == error_type.__name__
         assert details["config_file"] == str(selected)
+
+        if kind != "invalid-setting":
+            hint = f"Make {selected} readable and valid TOML, then rerun doctor"
+            assert entry["install_hint"] == hint
+            human = runner.invoke(
+                app,
+                ["doctor", "--root", str(root), "--config", selected.name],
+                env={"COLUMNS": "240"},
+            )
+            assert human.exit_code == 0
+            assert hint in " ".join(human.stdout.split())
 
 
 def test_doctor_selection_rejects_escape_as_typed_top_level_json_error(

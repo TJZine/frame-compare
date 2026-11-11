@@ -26,7 +26,7 @@ class TestRunDoctor:
     """Tests for run_doctor function."""
 
     @pytest.mark.parametrize(
-        ("checks", "all_passed", "critical_failures"),
+        ("checks", "critical_failures"),
         [
             pytest.param(
                 [
@@ -36,7 +36,6 @@ class TestRunDoctor:
                         check_fn=lambda: CheckResult(passed=True, message="OK"),
                     )
                 ],
-                True,
                 [],
                 id="all-pass",
             ),
@@ -48,7 +47,6 @@ class TestRunDoctor:
                         check_fn=lambda: CheckResult(passed=False, message="Failed"),
                     )
                 ],
-                False,
                 ["vapoursynth"],
                 id="core-failure",
             ),
@@ -65,17 +63,15 @@ class TestRunDoctor:
                         check_fn=lambda: CheckResult(passed=False, message="Missing"),
                     ),
                 ],
-                False,
                 [],
                 id="optional-failure",
             ),
         ],
     )
     def test_run_doctor_outcomes(
-        self, checks: list[DoctorCheck], all_passed: bool, critical_failures: list[str]
+        self, checks: list[DoctorCheck], critical_failures: list[str]
     ) -> None:
         report = run_doctor(checks=checks)
-        assert report.all_passed is all_passed
         assert report.critical_failures == critical_failures
 
 
