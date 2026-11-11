@@ -138,6 +138,8 @@ All evidence, packaging, and digest verification must use this exact `$Candidate
 Required evidence:
 
 - Every download passes exact byte-size and SHA-256 verification.
+- Every destination declared through `license.files` has the manifest-pinned
+  SHA-256 in the bundle inventory.
 - No artifact is accepted from a mutable fallback URL.
 - The bundle contains `bundle_info.json`, `bundle_inventory.json`,
   `licenses/SOURCE_URLS.txt`, and `licenses/THIRD_PARTY_NOTICES.txt`.
@@ -173,8 +175,9 @@ not a globally installed Frame Compare environment.
 The focused verifier below is also invoked by the hosted workflow's
 `Verify extracted portable bundle` step. It owns ZIP containment/layout, extraction,
 default workspace directories, candidate launcher and doctor checks, installation,
-and installed-shim parity. Before installation, the extracted Python must import
-VSView and load the registered Frame Compare alignment panel. Every command it reports must exit `0`; a thrown assertion
+and installed-shim parity. It verifies the extracted manifest-pinned notices against
+the inventory and extracted files. Before installation, the extracted Python must
+import VSView and load the registered Frame Compare alignment panel. Every command it reports must exit `0`; a thrown assertion
 is a failed check. The verifier atomically reserves the fresh extraction root, writes
 without overwrite, and retains extracted evidence after any later failure. Its
 expected commit argument must be the recorded detached pull-request head used to build

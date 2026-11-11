@@ -2005,6 +2005,51 @@ exit 1
     assert "vsview_entrypoint=ok" not in result.stdout
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
+@pytest.mark.parametrize("damage", ["missing", "tampered"])
+def test_extracted_bundle_verifier_requires_each_manifest_notice(
+    repo_root: Path, tmp_path: Path, damage: str
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("PowerShell 7 is required")
+    _write_extracted_verifier_fixture(
+        repo_root=repo_root, tmp_path=tmp_path, candidate_launcher="exit 17\n"
+    )
+    bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
+    manifest_path = bundle / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    inventory_path = bundle / "bundle_inventory.json"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    manifest["artifacts"][0]["license"]["files"] = [
+        {"path": f"licenses/{name}.txt", "sha256": hashlib.sha256(name.encode()).hexdigest()}
+        for name in ("FIRST", "SECOND")
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    for name in ("FIRST", "SECOND"):
+        if name == "SECOND" and damage == "missing":
+            continue
+        path = f"licenses/fixture-runtime-MIT--{name}.txt"
+        content = b"wrong content" if name == "SECOND" else name.encode()
+        (bundle / path).write_bytes(content)
+        inventory["licenses"].append({"path": path, "sha256": hashlib.sha256(content).hexdigest()})
+    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+
+    result = _run_extracted_bundle_verifier(
+        repo_root=repo_root,
+        zip_path=_rewrite_extracted_verifier_fixture_zip(tmp_path, "damaged.zip"),
+        extract_root=tmp_path / "damaged",
+        local_app_data=tmp_path / "local-app-data",
+    )
+
+    assert result.returncode != 0
+    message = (
+        "Missing manifest notice" if damage == "missing" else "Manifest notice SHA-256 mismatch"
+    )
+    assert f"{message}: licenses/fixture-runtime-MIT--SECOND.txt" in _normalized_process_output(
+        result
+    )
+
+
 def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parity(
     repo_root: Path,
 ) -> None:
@@ -2240,6 +2285,14 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
             encoding="utf-8"
         )
     )
+    for artifact in manifest["artifacts"]:
+        license_info = artifact["license"]
+        files = license_info.get("files", [])
+        for notice in files:
+            source = repo_root / "tools/windows_portable" / notice["path"]
+            prefix = f"{artifact['id']}-{license_info['spdx']}"
+            suffix = source.suffix if len(files) == 1 else f"--{source.name}"
+            shutil.copyfile(source, licenses / f"{prefix}{suffix}")
     runtime_fingerprints = manifest["bundle"]["runtime_fingerprints"]
     _write_packaged_runtime_contract(bundle=bundle, fingerprints=runtime_fingerprints)
     bundled_font_dir = bundle / "app" / "src" / "frame_compare" / "assets" / "fonts"
@@ -2422,6 +2475,79 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     assert "Inter 4.1: https://github.com/rsms/inter/releases/tag/v4.1" in source_urls
     notices = (bundle / "licenses" / "THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8")
     assert "Inter 4.1 (OFL-1.1)" in notices
+
+
+@pytest.mark.parametrize(
+    ("tampered", "expected_error"),
+    [(False, "Missing manifest notice"), (True, "Manifest notice SHA-256 mismatch")],
+    ids=["missing", "tampered"],
+)
+def test_windows_portable_inventory_requires_each_manifest_notice(
+    tmp_path: Path,
+    repo_root: Path,
+    inventory_source_repo: Path,
+    tampered: bool,
+    expected_error: str,
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    # Omit one member of a multi-file notice set while keeping the others.
+    notice = next((bundle / "licenses").glob("vs-plugin-lsmas-*--VapourSynth-LICENSE.txt"))
+    if tampered:
+        notice.write_bytes(b"wrong license content")
+    else:
+        notice.unlink()
+
+    result = _run_bundle_inventory(
+        bundle=bundle, repo_root=repo_root, source_repo=inventory_source_repo
+    )
+
+    assert result.returncode != 0
+    assert f"{expected_error}: licenses/{notice.name}" in result.stderr
+    assert not (bundle / "bundle_inventory.json").exists()
+
+
+def test_windows_portable_inventory_uses_dotfile_notice_extension(
+    tmp_path: Path, repo_root: Path, inventory_source_repo: Path
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    manifest = json.loads(
+        (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")
+    )
+    artifact = next(
+        item for item in manifest["artifacts"] if len(item["license"].get("files", [])) == 1
+    )
+    artifact["license"]["files"][0]["path"] = "licenses/.LICENSE"
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    notice = next((bundle / "licenses").glob(f"{artifact['id']}-{artifact['license']['spdx']}.*"))
+    dotfile_destination = notice.with_suffix(".LICENSE")
+    notice.rename(dotfile_destination)
+
+    result = _run_bundle_inventory(
+        bundle=bundle,
+        repo_root=repo_root,
+        source_repo=inventory_source_repo,
+        manifest=manifest_path,
+    )
+    assert result.returncode == 0, _normalized_process_output(result)
+    inventory_path = bundle / "bundle_inventory.json"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    assert {
+        "path": f"licenses/{dotfile_destination.name}",
+        "sha256": artifact["license"]["files"][0]["sha256"],
+    } in inventory["licenses"]
+
+    inventory_path.unlink()
+    dotfile_destination.rename(dotfile_destination.with_suffix(""))
+    result = _run_bundle_inventory(
+        bundle=bundle,
+        repo_root=repo_root,
+        source_repo=inventory_source_repo,
+        manifest=manifest_path,
+    )
+    assert result.returncode != 0
+    assert f"Missing manifest notice: licenses/{dotfile_destination.name}" in result.stderr
+    assert not inventory_path.exists()
 
 
 def test_windows_portable_inventory_records_the_captured_commit(

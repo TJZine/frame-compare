@@ -919,6 +919,38 @@ foreach ($licenseRecord in $licenseRecords) {
     throw "Inventoried license SHA-256 mismatch: $relativeLicensePath"
   }
 }
+$requiredNoticePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($artifact in $manifestArtifacts) {
+  $artifactId = Get-RequiredString $artifact "id" "manifest artifact"
+  $license = Get-RequiredObject $artifact "license" "manifest artifact $artifactId"
+  if ($null -eq $license.PSObject.Properties["files"]) { continue }
+  $files = Get-RequiredArray $license "files" "manifest artifact $artifactId license"
+  $spdx = Get-RequiredString $license "spdx" "manifest artifact $artifactId license"
+  foreach ($file in $files) {
+    if ($file -isnot [PSCustomObject]) { throw "Manifest license file must be an object: $artifactId" }
+    $source = Get-RequiredString $file "path" "manifest artifact $artifactId license file"
+    $expectedHash = Get-RequiredString $file "sha256" "manifest artifact $artifactId license file"
+    $basename = [IO.Path]::GetFileName($source)
+    $name = if ($files.Count -gt 1) {
+      "{0}-{1}--{2}" -f $artifactId, $spdx, $basename
+    } else {
+      "{0}-{1}{2}" -f $artifactId, $spdx, [IO.Path]::GetExtension($basename)
+    }
+    if ($name -cnotmatch '\A[A-Za-z0-9._+() -]+\z' -or $name -match '[. ]$') {
+      throw "Unsafe bundle license filename: $name"
+    }
+    $path = "licenses/$name"
+    if (!$requiredNoticePaths.Add($path)) {
+      throw "Duplicate manifest notice destination: $path"
+    }
+    if (!$inventoryLicenses.ContainsKey($path)) {
+      throw "Missing manifest notice: $path"
+    }
+    if ($inventoryLicenses[$path] -cne $expectedHash) {
+      throw "Manifest notice SHA-256 mismatch: $path"
+    }
+  }
+}
 $actualLicensePaths = @(
   Get-ChildItem -LiteralPath $licensesRoot -Recurse -File | ForEach-Object {
     $relativeLicensePath = [System.IO.Path]::GetRelativePath($licensesRoot, $_.FullName)
