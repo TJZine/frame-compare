@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from tomllib import TOMLDecodeError
 from typing import cast
 
 from frame_compare.errors import ErrorContext, FrameCompareError, JSONValue
@@ -26,6 +28,12 @@ def _redact_config_input(value: JSONValue, location: tuple[str, ...]) -> JSONVal
         # An invalid array of config tables still has its section's location.
         return [_redact_config_input(item, location) for item in value]
     return value
+
+
+def format_toml_syntax_error(error: TOMLDecodeError) -> str:
+    """Keep the parser location while omitting authored tokens from its message."""
+    location = re.search(r" \(at (?:line [0-9]+, column [0-9]+|end of document)\)\Z", str(error))
+    return "invalid TOML syntax" + (location.group() if location else "")
 
 
 class ConfigError(FrameCompareError):

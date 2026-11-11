@@ -291,3 +291,38 @@ def test_cli_sanitizes_unexpected_startup_failure(
     assert result.stderr == "Unexpected error: please report this bug.\n"
     if json_mode:
         assert result.stdout == ""
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("command", ["run", "doctor"])
+def test_cli_toml_syntax_diagnostic_omits_duplicate_secret_key(
+    command: str,
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+) -> None:
+    root = workspace()
+    sentinel = "secret-inline-key"
+    root.config_path.write_text(
+        f'[tmdb]\napi_key = {{"{sentinel}" = 1, "{sentinel}" = 2}}\n',
+        encoding="utf-8",
+    )
+    arguments = [command, "--json"]
+    if command == "run":
+        arguments.append("--dry-run")
+    result = run_cli(root.root, arguments)
+
+    payload = json.loads(result.stdout)
+    assert sentinel not in result.stdout
+    assert result.stderr == ""
+    if command == "run":
+        assert result.exit_code == 2
+        assert payload["error"]["code"] == "FC-1002"
+        message = payload["error"]["message"]
+    else:
+        check = next(
+            entry for entry in payload["doctor"]["checks"] if entry["id"] == "tmdb_api_key"
+        )
+        assert check["status"] == "fail"
+        assert check["details"]["exception_type"] == "ConfigParseError"
+        message = check["details"]["exception"]
+    assert "invalid TOML syntax (at line 2, column " in message

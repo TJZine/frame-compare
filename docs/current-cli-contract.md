@@ -1794,6 +1794,7 @@ fails config validation instead of silently using a default.
 Validation details retain rejected non-secret inputs for diagnostics. Inputs at
 `slowpics.webhook_url` and `tmdb.api_key` are always replaced with `<redacted>`
 before human, JSON, doctor, preset, or other typed config errors can expose them.
+TOML syntax diagnostics include a fixed message and any available parser location.
 
 The implemented `[logging]` surface contains only:
 
