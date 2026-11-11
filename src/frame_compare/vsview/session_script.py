@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from frame_compare.utils.atomic_write import write_text_atomic
-from frame_compare.vs.source import source_index_path
 from frame_compare.vs.types import TonemapSettings
 
 if TYPE_CHECKING:
@@ -28,7 +27,12 @@ def write_vsview_session_script(
     short_names_by_stem: dict[str, str] | None = None,
     memory_limit_mb: int | None = None,
     preview_tonemap: TonemapSettings | None = None,
+    source_indexes: dict[Path, Path] | None = None,
+    source_index_generated_root: Path | None = None,
 ) -> Path:
+    if source_indexes and source_index_generated_root is None:
+        raise ValueError("source_index_generated_root is required when source_indexes are provided")
+
     sessions_dir = cache_dir / "vsview_sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
@@ -42,6 +46,8 @@ def write_vsview_session_script(
         short_names_by_stem=short_names_by_stem,
         memory_limit_mb=memory_limit_mb,
         preview_tonemap=preview_tonemap,
+        source_indexes=source_indexes,
+        source_index_generated_root=source_index_generated_root,
     )
 
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -107,25 +113,28 @@ def _build_script_content(
     short_names_by_stem: dict[str, str] | None = None,
     memory_limit_mb: int | None = None,
     preview_tonemap: TonemapSettings | None = None,
+    source_indexes: dict[Path, Path] | None = None,
+    source_index_generated_root: Path | None = None,
 ) -> str:
     presentation_names = presentation_names_by_stem or {}
+    indexes = source_indexes or {}
     targets: dict[str, ComparisonSource] = {}
     for comparison in comparisons:
         key = f"{reference.stem}:{comparison.stem}"
         targets[comparison.stem] = {
             "path": str(comparison),
-            "index_path": str(source_index_path(comparison)),
             "display_name": presentation_names.get(comparison.stem, comparison.stem),
             "comparison_key": key,
             "suggested_offset": suggested_offsets_by_key.get(key),
             "audio_review": audio_review_by_key[key],
         }
+        if comparison in indexes:
+            targets[comparison.stem]["managed_index_path"] = str(indexes[comparison])
     frame_props = _preview_frame_props_for_script(frame_props_by_stem)
     data: SessionData = {
         "reference": {
             "label": reference.stem,
             "path": str(reference),
-            "index_path": str(source_index_path(reference)),
             "display_name": presentation_names.get(reference.stem, reference.stem),
         },
         "targets": targets,
@@ -136,6 +145,10 @@ def _build_script_content(
         "memory_limit_mb": memory_limit_mb,
         "preview_tonemap": asdict(preview_tonemap) if preview_tonemap is not None else None,
     }
+    if reference in indexes:
+        data["reference"]["managed_index_path"] = str(indexes[reference])
+    if indexes and source_index_generated_root is not None:
+        data["source_index_generated_root"] = str(source_index_generated_root)
     # Encode JSON as a Python string literal so filenames and JSON null/booleans
     # remain data rather than source.
     payload = json.dumps(data, ensure_ascii=True, allow_nan=False, indent=4)

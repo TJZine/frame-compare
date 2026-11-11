@@ -10,6 +10,7 @@ from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 from threading import Barrier, Event, Lock, Thread
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1069,7 +1070,6 @@ def test_ffmpeg_batch_stop_reaps_child_without_publishing_partial_results(
     import subprocess
     import sys
 
-    from frame_compare.utils import subproc
     from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
 
     ready = tmp_path / "ready"
@@ -1091,11 +1091,10 @@ def test_ffmpeg_batch_stop_reaps_child_without_publishing_partial_results(
     task: asyncio.Task[None] | None = None
     requested_cancel = False
 
-    def popen(
-        argv: list[str], *, cwd: Path | None, stdout: int, stderr: int, shell: bool
-    ) -> subprocess.Popen[bytes]:
-        process = original_popen(argv, cwd=cwd, stdout=stdout, stderr=stderr, shell=shell)
-        processes.append(process)
+    def popen(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        process = cast("subprocess.Popen[bytes]", original_popen(argv, **kwargs))
+        if kwargs.get("stdout") == subprocess.PIPE:
+            processes.append(process)
         return process
 
     def cancel_when_ready() -> bool:
@@ -1106,7 +1105,11 @@ def test_ffmpeg_batch_stop_reaps_child_without_publishing_partial_results(
             requested_cancel = True
         return task is not None and task.cancelling() > 0
 
-    monkeypatch.setattr(subproc, "Popen", popen)
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.probe_video_streams",
+        lambda _path, **_kwargs: [{"width": 64, "height": 64}],
+    )
     monkeypatch.setattr("frame_compare.render.batch.orchestrator.is_cancelling", cancel_when_ready)
     monkeypatch.setattr(
         "frame_compare.render.backend.ffmpeg.build_extract_frames_argv",

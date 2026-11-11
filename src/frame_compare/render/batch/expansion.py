@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from frame_compare.config.schema import ConfigSchema, OverlayMode
 from frame_compare.config.schema_enums import ScreenshotAlignedScalePolicy, ScreenshotGeometryMode
@@ -32,6 +33,9 @@ from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     RenderedGeometryFacts,
 )
+
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
 
 def resolve_target_renderer(config: ConfigSchema, renderer: Renderer) -> Renderer:
@@ -88,6 +92,7 @@ def expand_batch_render_requests(
     overlay_mode: OverlayMode,
     renderer: Renderer,
     ffmpeg_runner: FFmpegRunner,
+    vs_loader: VSLoader | None = None,
 ) -> tuple[PreparedClipRender, ...]:
     output_paths = [
         [
@@ -109,6 +114,7 @@ def expand_batch_render_requests(
                 config,
                 ffmpeg_runner=ffmpeg_runner,
                 source_is_hdr=request.signal.is_hdr,
+                vs_loader=vs_loader,
             )
         )
     raise_if_cancelling()
@@ -132,11 +138,13 @@ def expand_batch_render_requests(
         if (
             isinstance(source.prepared_clip, Path)
             and isinstance(ffmpeg_runner, DefaultFFmpegRunner)
-            and source_total_frames is not None
             and batch.frames
         ):
-            ffmpeg_runner.validate_source_frame_count(
-                source.prepared_clip, source_total_frames, batch.frames[0].source_frame
+            ffmpeg_runner.validate_source(
+                source.prepared_clip,
+                (plan.source.width, plan.source.height),
+                source_total_frames,
+                batch.frames[0].source_frame,
             )
         # Preparation owns this state: it reflects the actual source and whether
         # the resolved tonemap was applied, rather than re-deriving it from the

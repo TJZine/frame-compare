@@ -36,7 +36,16 @@ def test_root_install_delegates_to_fail_closed_source_install(repo_root: Path) -
 
     assert "tools/windows_portable/install-from-source.ps1" in root_install
     assert "exit $LASTEXITCODE" in root_install
-    assert "uv sync --group dev --frozen" in source_install
+    assert (
+        'uv python install 3.13\n      Assert-LastExitCode -Label "uv python install 3.13"'
+        in source_install
+    )
+    assert "uv sync" not in source_install
+    assert "uv run" not in source_install
+    assert "-SkipPythonInstall:$SkipPythonInstall" in root_install
+    for source in (root_install, source_install):
+        assert '[Alias("SkipSync")]' in source
+        assert "[switch]$SkipPythonInstall" in source
 
 
 @pytest.mark.parametrize(
@@ -90,7 +99,7 @@ def test_source_install_requires_ps7_before_bootstrap(repo_root: Path, entrypoin
             in {
                 "Update-ProcessPathFromRegistry",
                 "Ensure-UvOnPath",
-                "uv sync --group dev --frozen",
+                "uv python install 3.13",
             }
         ]
         assert invocation_lines, "source bootstrap invocations are missing"

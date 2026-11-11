@@ -25,9 +25,10 @@ def _entry(
     fps_den: int = 1,
 ) -> tuple[str, dict[str, object]]:
     fingerprint_path = Path(path) if isinstance(path, str) else Path("video.mkv")
-    fingerprint = ClipFingerprint(fingerprint_path, size_bytes, mtime_ns)
+    fingerprint = ClipFingerprint(fingerprint_path, size_bytes, mtime_ns, source_token="a" * 64)
     return compute_probe_cache_key(fingerprint), {
         "path": path,
+        "source_token": "a" * 64,
         "size_bytes": size_bytes,
         "mtime_ns": mtime_ns,
         "width": width,
@@ -251,3 +252,39 @@ def test_parser_limits_read_as_miss(tmp_path: Path, content: str) -> None:
     with patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning:
         assert load_clip_probe_cache(path) == {}
     warning.assert_called_once()
+
+
+@pytest.mark.parametrize("token", [None, "", "a" * 63, "a" * 65, "z" * 64, 42])
+def test_legacy_or_malformed_source_token_cannot_authorize_reuse(
+    tmp_path: Path, token: object
+) -> None:
+    key, entry = _entry()
+    if token is None:
+        entry.pop("source_token")
+    else:
+        entry["source_token"] = token
+    path = tmp_path / "legacy.toml"
+    path.write_text(tomli_w.dumps({"version": "1", key: entry}), encoding="utf-8")
+    assert load_clip_probe_cache(path) == {}
+
+
+def test_schema_three_key_cannot_reauthorize_snapshot(tmp_path: Path) -> None:
+    import hashlib
+    import json
+
+    from frame_compare.vs.runtime_contract import media_runtime_fingerprint
+
+    _, entry = _entry()
+    old_payload = {
+        "path": entry["path"],
+        "size_bytes": entry["size_bytes"],
+        "mtime_ns": entry["mtime_ns"],
+        "schema_version": 3,
+        "media_runtime_fingerprint": media_runtime_fingerprint("probe"),
+    }
+    old_key = hashlib.blake2s(
+        json.dumps(old_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    path = tmp_path / "schema-three.toml"
+    path.write_text(tomli_w.dumps({"version": "1", old_key: entry}), encoding="utf-8")
+    assert load_clip_probe_cache(path) == {}

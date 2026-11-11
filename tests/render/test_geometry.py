@@ -17,7 +17,7 @@ from frame_compare.render.geometry import (
 def test_plan_render_geometry_rejects_non_positive_source_dimensions(
     width: int, height: int
 ) -> None:
-    with pytest.raises(ValueError, match="source dimensions must be positive"):
+    with pytest.raises(ValueError, match="7,680 pixels per axis"):
         plan_render_geometry(
             (
                 SourceGeometry(
@@ -63,6 +63,30 @@ def test_plan_render_geometry_aligned_scales_proportionally_and_centers_padding(
     assert square.content_origin == (100, 0)
     assert square.overlay_origin == (110, 10)
     assert square.final_canvas_size == (1000, 800)
+
+
+def test_exact_8k_and_asymmetric_fit_use_integer_geometry() -> None:
+    horizontal = SourceGeometry(7680, 4320, GeometryRect(0, 0, 7680, 4320), "full_frame")
+    vertical = SourceGeometry(2, 7680, GeometryRect(0, 0, 2, 7680), "full_frame")
+    plans = plan_render_geometry(
+        (horizontal, vertical),
+        mode="aligned",
+        options=RenderGeometryOptions("explicit_size", (7680, 4320)),
+    )
+    assert plans[0].is_noop
+    assert plans[1].scaled_size == (1, 4320)
+    assert plans[1].final_canvas_size == (7680, 4320)
+    # Largest-active derives maxima independently. Each source is valid, but
+    # their combined 7680×7680 target exceeds the total-pixel budget.
+    with pytest.raises(ValueError, match="33,177,600 pixels total"):
+        plan_render_geometry((horizontal, vertical), mode="aligned")
+
+
+@pytest.mark.parametrize("width", [7681, 10**1000])
+def test_native_plan_rejects_oversize_before_deriving_geometry(width: int) -> None:
+    source = SourceGeometry(width, 2, GeometryRect(0, 0, width, 2), "full_frame")
+    with pytest.raises(ValueError, match="7,680 pixels per axis"):
+        plan_render_geometry((source,))
 
 
 def test_plan_render_geometry_clamps_overlay_origin_to_padded_content_bounds():

@@ -15,7 +15,8 @@ from typing import cast
 
 import structlog
 
-from frame_compare.utils.subproc import prepare_python_child
+from frame_compare.utils.child_environment import diagnostic_secrets, sanitize_diagnostic
+from frame_compare.utils.subproc import prepare_python_child, run_subprocess
 from frame_compare.vs.errors import TonemapError
 
 log = structlog.get_logger()
@@ -185,13 +186,13 @@ def probe_libplacebo_runtime(*, plugin_identity: LibplaceboPluginIdentity | None
     env[_LIBPLACEBO_PROBE_ENV] = "1"
     probe_argv, env = prepare_python_child([sys.executable, "-c", probe_script], env=env)
     try:
-        result = subprocess.run(  # nosec B603
+        result = run_subprocess(
             probe_argv,
             env=env,
             cwd=_CHILD_PROCESS_CWD,
-            capture_output=True,
-            text=True,
-            timeout=_LIBPLACEBO_PROBE_TIMEOUT_SECONDS,
+            timeout_seconds=_LIBPLACEBO_PROBE_TIMEOUT_SECONDS,
+            max_stdout_bytes=16 * 1024,
+            max_stderr_bytes=32 * 1024,
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -224,8 +225,8 @@ def probe_libplacebo_runtime(*, plugin_identity: LibplaceboPluginIdentity | None
     log.warning(
         "libplacebo_probe_unusable_disabling",
         returncode=result.returncode,
-        stdout=result.stdout.strip()[-400:],
-        stderr=result.stderr.strip()[-400:],
+        stdout=sanitize_diagnostic(result.stdout, diagnostic_secrets()).decode().strip()[-400:],
+        stderr=result.stderr.decode("utf-8", errors="replace").strip()[-400:],
     )
     return False
 

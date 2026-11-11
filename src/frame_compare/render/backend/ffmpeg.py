@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from signal import SIGINT
 from subprocess import CalledProcessError, CompletedProcess, TimeoutExpired
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from frame_compare.render.backend._ffmpeg_frame import (
     build_extract_frame_argv,
@@ -16,10 +17,20 @@ from frame_compare.render.backend._ffmpeg_frame import (
 )
 from frame_compare.render.errors import FrameExtractionError
 from frame_compare.utils.cancellation import is_cancelling, raise_if_cancelling
+from frame_compare.utils.canvas import MAX_CANVAS_PIXELS, validate_canvas_size
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.media_facts import PictureType, RenderedFrameFacts, normalize_picture_type
-from frame_compare.utils.subproc import SubprocessAborted, resolve_executable, run_subprocess
-from frame_compare.vs.hdr_probe import probe_hdr_metadata
+from frame_compare.utils.subproc import (
+    SubprocessAborted,
+    SubprocessOutputLimitExceeded,
+    resolve_executable,
+    run_subprocess,
+)
+from frame_compare.vs.hdr_probe import (
+    is_attached_picture,
+    probe_hdr_metadata,
+    probe_video_streams,
+)
 from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
@@ -62,6 +73,9 @@ class DefaultFFmpegRunner:
     """Default FFmpeg runner for dependency injection in orchestration."""
 
     _FFMPEG_TIMEOUT_SECONDS = 30.0
+    _SINGLE_FRAME_STDERR_BYTES = 128 * 1024
+    # Batch showinfo retains one selected-frame receipt per requested frame.
+    _BATCH_STDERR_BYTES = 2 * 1024 * 1024
 
     def __init__(self, extraction_timeout_seconds: float = _FFMPEG_TIMEOUT_SECONDS) -> None:
         self._extraction_timeout_seconds = extraction_timeout_seconds
@@ -75,6 +89,9 @@ class DefaultFFmpegRunner:
         geometry_plan: RenderGeometryPlan | None = None,
         source_signal: SourceSignalFacts | None = None,
     ) -> RenderedFrameFacts:
+        self._validate_current_geometry(
+            video, frame_num, geometry_plan=geometry_plan, abort=is_cancelling
+        )
         output.parent.mkdir(parents=True, exist_ok=True)
         with TemporaryDirectory(prefix=".frame-compare-ffmpeg-", dir=output.parent) as temp_dir:
             staged_path = Path(temp_dir) / "frame.png"
@@ -89,6 +106,7 @@ class DefaultFFmpegRunner:
             completed = self._run_extraction(
                 argv,
                 timeout_message="ffmpeg timed out while extracting frame",
+                stderr_limit=self._SINGLE_FRAME_STDERR_BYTES,
             )
             _validate_showinfo_timeline(completed.stderr, video, frame_num)
             if not staged_path.is_file() or staged_path.stat().st_size == 0:
@@ -110,6 +128,11 @@ class DefaultFFmpegRunner:
         abort: Callable[[], bool] | None = None,
     ) -> list[RenderedFrameFacts]:
         """Extract ordered frames in one decode pass into numbered staging files."""
+        if not frame_nums:
+            raise ValueError("frame_nums must not be empty")
+        self._validate_current_geometry(
+            video, frame_nums[0], geometry_plan=geometry_plan, abort=abort
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
         argv = build_extract_frames_argv(
             video=video.absolute(),
@@ -122,6 +145,7 @@ class DefaultFFmpegRunner:
         completed = self._run_extraction(
             argv,
             timeout_message="ffmpeg timed out while extracting frames",
+            stderr_limit=self._BATCH_STDERR_BYTES,
             abort=abort,
             cwd=output_dir,
         )
@@ -132,23 +156,56 @@ class DefaultFFmpegRunner:
             for frame_num, picture_type in zip(frame_nums, picture_types, strict=True)
         ]
 
-    def validate_source_frame_count(
-        self, video: Path, expected_count: int, first_requested_frame: int
+    def _validate_current_geometry(
+        self,
+        video: Path,
+        first_requested_frame: int,
+        *,
+        geometry_plan: RenderGeometryPlan | None = None,
+        expected_dimensions: tuple[int, int] | None = None,
+        abort: Callable[[], bool] | None = None,
     ) -> None:
-        """Refuse extraction when the decoded count disagrees with the prepared timeline."""
+        try:
+            streams = probe_video_streams(video, abort=abort)
+            if geometry_plan is not None:
+                expected_dimensions = (geometry_plan.source.width, geometry_plan.source.height)
+            _validate_selected_geometry(streams, expected_dimensions)
+        except (ValueError, FFmpegError, FFmpegNotFoundError) as error:
+            raise FrameExtractionError(
+                first_requested_frame, str(video), reason=str(error)
+            ) from error
+
+    def validate_source(
+        self,
+        video: Path,
+        expected_dimensions: tuple[int, int],
+        expected_count: int | None,
+        first_requested_frame: int,
+    ) -> None:
+        """Validate the live source against the prepared geometry and timeline once per clip."""
+        if expected_count is None:
+            self._validate_current_geometry(
+                video,
+                first_requested_frame,
+                expected_dimensions=expected_dimensions,
+                abort=is_cancelling,
+            )
+            return
         argv = [
             "ffprobe",
             "-v",
             "error",
+            "-max_pixels",
+            str(MAX_CANVAS_PIXELS),
             "-select_streams",
             "V:0",
             "-threads",
             "0",
             "-count_frames",
             "-show_entries",
-            "stream=nb_read_frames",
+            "stream=width,height,nb_read_frames",
             "-of",
-            "default=noprint_wrappers=1:nokey=1",
+            "json",
             "-i",
             str(video),
         ]
@@ -165,8 +222,7 @@ class DefaultFFmpegRunner:
                 reason=f"FFmpeg's decoded frame count check timed out after {count_timeout} seconds",
                 hint="Use the VapourSynth renderer or raise screenshots.ffmpeg_timeout_seconds",
             ) from exc
-        except (FileNotFoundError, CalledProcessError) as exc:
-            # Ctrl+C can stop ffprobe inside wait() before the next abort poll.
+        except (FileNotFoundError, CalledProcessError, SubprocessOutputLimitExceeded) as exc:
             if isinstance(exc, CalledProcessError) and exc.returncode in (
                 -SIGINT,
                 _WINDOWS_STATUS_CONTROL_C_EXIT,
@@ -179,26 +235,42 @@ class DefaultFFmpegRunner:
                 hint="Use the VapourSynth renderer",
             ) from exc
 
-        decoded = completed.stdout.strip()
-        if completed.stderr or not decoded.isdigit():
-            reason = "Could not count FFmpeg's decoded frames"
-        else:
+        try:
+            payload: object = json.loads(completed.stdout)
+            if completed.stderr or not isinstance(payload, dict):
+                raise ValueError("Could not count FFmpeg's decoded frames")
+            raw_streams = cast(dict[str, object], payload).get("streams")
+            if not isinstance(raw_streams, list) or any(
+                not isinstance(stream, dict) for stream in cast(list[object], raw_streams)
+            ):
+                raise ValueError("Could not count FFmpeg's decoded frames")
+            streams = cast(list[dict[str, object]], raw_streams)
+            if len(streams) != 1 or is_attached_picture(streams[0]):
+                raise ValueError("Exactly one verifiable playable video stream is required")
+            _validate_selected_geometry(streams, expected_dimensions)
+            decoded = streams[0].get("nb_read_frames")
+            if not isinstance(decoded, str) or not decoded.isascii() or not decoded.isdigit():
+                raise ValueError("Could not count FFmpeg's decoded frames")
             decoded_count = int(decoded)
-            if decoded_count == expected_count:
-                return
-            reason = (
-                f"FFmpeg decoded {decoded_count} frames but the prepared "
-                f"L-SMASH timeline has {expected_count}"
-            )
-        raise FrameExtractionError(
-            first_requested_frame, str(video), reason=reason, hint="Use the VapourSynth renderer"
-        )
+            if decoded_count != expected_count:
+                raise ValueError(
+                    f"FFmpeg decoded {decoded_count} frames but the prepared "
+                    f"L-SMASH timeline has {expected_count}"
+                )
+        except (ValueError, TypeError) as exc:
+            raise FrameExtractionError(
+                first_requested_frame,
+                str(video),
+                reason=str(exc),
+                hint="Use the VapourSynth renderer",
+            ) from exc
 
     def _run_extraction(
         self,
         argv: list[str],
         *,
         timeout_message: str,
+        stderr_limit: int,
         abort: Callable[[], bool] | None = None,
         cwd: Path | None = None,
     ) -> CompletedProcess[bytes]:
@@ -208,7 +280,12 @@ class DefaultFFmpegRunner:
                 executable = Path(resolve_executable(argv[0])).absolute()
                 argv = [str(executable), *argv[1:]]
             return run_subprocess(
-                argv, timeout_seconds=self._extraction_timeout_seconds, abort=abort, cwd=cwd
+                argv,
+                timeout_seconds=self._extraction_timeout_seconds,
+                abort=abort,
+                max_stdout_bytes=8 * 1024,
+                max_stderr_bytes=stderr_limit,
+                cwd=cwd,
             )
         except FileNotFoundError as exc:
             raise FFmpegNotFoundError() from exc
@@ -217,6 +294,8 @@ class DefaultFFmpegRunner:
         except CalledProcessError as exc:
             stderr = exc.stderr.decode(errors="replace")
             raise FFmpegError(stderr, exc.returncode) from exc
+        except SubprocessOutputLimitExceeded as exc:
+            raise FFmpegError(str(exc), 1) from exc
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
         metadata = probe_hdr_metadata(video)
@@ -227,6 +306,23 @@ class DefaultFFmpegRunner:
         ):
             return None
         return metadata
+
+
+def _validate_selected_geometry(
+    streams: list[dict[str, object]], expected_dimensions: tuple[int, int] | None
+) -> None:
+    playable = [stream for stream in streams if not is_attached_picture(stream)]
+    if len(playable) != 1:
+        raise ValueError("Exactly one verifiable playable video stream is required")
+    width, height = playable[0].get("width"), playable[0].get("height")
+    if type(width) is not int or type(height) is not int:
+        raise ValueError("Source video dimensions could not be verified before decoding")
+    validate_canvas_size(width, height, label="Source video")
+    if expected_dimensions is not None and (width, height) != expected_dimensions:
+        raise ValueError(
+            f"Current source dimensions {width}x{height} disagree with prepared "
+            f"source dimensions {expected_dimensions[0]}x{expected_dimensions[1]}"
+        )
 
 
 _SHOWINFO_CONFIG_RE = re.compile(rb"\[Parsed_showinfo_[^]]+\] config in time_base:")

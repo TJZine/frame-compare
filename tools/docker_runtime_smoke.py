@@ -35,10 +35,10 @@ from frame_compare.vs.runtime_contract import (
     VS_PLACEBO_RELEASE,
     VS_PLACEBO_SOURCE_COMMIT,
     VS_PLACEBO_SOURCE_TREE_SHA256,
-    index_cache_token,
     media_runtime_fingerprint,
 )
-from frame_compare.vs.source import load_source, source_index_path
+from frame_compare.vs.source import load_source
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 from frame_compare.vs.tonemap import apply_tonemap
 from frame_compare.vs.types import LibplaceboTonemap, TonemapSettings
 
@@ -146,11 +146,19 @@ assert_true(hasattr(core, "lsmas"), "core.lsmas namespace missing")
 lsmas_functions = sorted(function.name for function in core.lsmas.functions())
 assert_true("LWLibavSource" in lsmas_functions, "lsmas.LWLibavSource missing")
 assert_true("LibavSMASHSource" in lsmas_functions, "lsmas.LibavSMASHSource missing")
-source = load_source(media_path, core=core)
+with tempfile.TemporaryDirectory(prefix="frame-compare-source-index-proof-") as index_root:
+    index_cache = ManagedSourceIndexCache(Path(index_root).resolve())
+    source = load_source(media_path, core=core, index_cache=index_cache)
+    expected_index = index_cache.validated_index(media_path)
+    assert expected_index is not None, "managed L-SMASH-Works index missing"
+    before = expected_index.stat()
+    load_source(media_path, core=core, index_cache=index_cache)
+    assert_true(
+        index_cache.validated_index(media_path) == expected_index
+        and expected_index.stat().st_mtime_ns == before.st_mtime_ns,
+        "warm L-SMASH-Works load changed the committed index",
+    )
 source_frame = source.clip.get_frame(0)
-expected_index = source_index_path(media_path)
-assert_true(expected_index.is_file(), f"versioned L-SMASH-Works index missing: {expected_index}")
-assert_true(index_cache_token() in expected_index.name, "source index lacks runtime token")
 assert_true(source.num_frames == 12, f"unexpected L-SMASH-Works frame count: {source.num_frames}")
 assert_true(
     source_frame.width == 64 and source_frame.height == 48,
@@ -602,7 +610,7 @@ assert_true(
     "doctor vs-placebo distribution mismatch",
 )
 
-version_output = Path("/tmp/frame-compare-version.txt").read_text(encoding="utf-8").strip()
+version_output = os.environ["FRAME_COMPARE_PROOF_VERSION"].strip()
 print(f"DOCKER_PROOF cli=ok version_output={version_output}")
 print(f"DOCKER_PROOF non_root=ok uid={os.geteuid()}")
 print(f"DOCKER_PROOF vapoursynth_import=ok version={version_label} api={api_major}.{api_minor}")

@@ -88,6 +88,10 @@ class TestResolvePaths:
             result.shared_alignment_cache_dir
             == (tmp_path / "generated" / "cache" / "alignment").resolve()
         )
+        assert (
+            result.shared_source_index_cache_dir
+            == (tmp_path / "generated" / "cache" / "source-indexes").resolve()
+        )
         assert result.config_dir == (tmp_path / "config").resolve()
         # config_file is derived as config_dir / "config.toml"
         assert result.config_file == (tmp_path / "config" / "config.toml").resolve()
@@ -256,8 +260,8 @@ class TestResolvePaths:
 
     @pytest.mark.parametrize(
         ("name", "is_directory"),
-        [("analysis", True), ("tmdb.toml", False)],
-        ids=["analysis", "tmdb"],
+        [("analysis", True), ("source-indexes", True), ("tmdb.toml", False)],
+        ids=["analysis", "source-indexes", "tmdb"],
     )
     def test_resolve_paths_rejects_shared_cache_symlink_escape(
         self, tmp_path: Path, name: str, is_directory: bool

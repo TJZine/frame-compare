@@ -28,6 +28,18 @@ def _workspace(
     )
 
 
+def test_shortcut_rejects_url_line_injection_before_writing(tmp_path: Path) -> None:
+    run_dir = tmp_path / "generated" / "Example"
+    run_dir.mkdir(parents=True)
+    result = create_slowpics_url_shortcut(
+        workspace=_workspace(tmp_path, run_dir=run_dir),
+        slowpics_url="https://slow.pics/c/valid\r\nURL=https://example.test",
+        collection_title="Example",
+    )
+    assert not result.success
+    assert list(run_dir.iterdir()) == []
+
+
 @pytest.mark.parametrize("junction", [False, True], ids=["no-run-dir", "junction-run-dir"])
 def test_create_slowpics_url_shortcut_requires_safe_reserved_run_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, junction: bool

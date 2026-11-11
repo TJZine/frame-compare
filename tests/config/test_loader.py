@@ -321,6 +321,21 @@ def test_config_environment_aliases(
     assert getattr(getattr(config, section), field) == expected
 
 
+def test_load_config_accepts_credentials_from_section_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    api_key = "synthetic-section-key"
+    webhook_url = "https://example.test/hooks/synthetic-section-hook"
+    monkeypatch.setenv("frame_compare_tmdb", json.dumps({"api_key": api_key}))
+    monkeypatch.setenv("FRAME_COMPARE_SLOWPICS", json.dumps({"webhook_url": webhook_url}))
+
+    config = load_config()
+
+    assert config.tmdb.api_key == api_key
+    assert config.slowpics.webhook_url == webhook_url
+
+
 @pytest.mark.parametrize("raw", [False, True])
 def test_config_acquisition_rejects_directories_and_sanitizes_read_failures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: bool

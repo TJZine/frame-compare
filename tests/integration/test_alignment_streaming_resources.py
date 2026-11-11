@@ -62,26 +62,11 @@ class _ProcessTracker:
         self._processes: list[subprocess.Popen[Any]] = []
         self._commands_by_pid: dict[int, tuple[str, ...]] = {}
         self._real_popen = real_popen
-        self.terminate_requests = 0
-        self.kill_requests = 0
 
     def popen(self, *args: Any, **kwargs: Any) -> subprocess.Popen[Any]:
         process = self._real_popen(*args, **kwargs)
         argv = args[0] if args else kwargs.get("args", ())
         if "f32le" in argv:
-            real_terminate = process.terminate
-            real_kill = process.kill
-
-            def terminate() -> None:
-                self.terminate_requests += 1
-                real_terminate()
-
-            def kill() -> None:
-                self.kill_requests += 1
-                real_kill()
-
-            process.terminate = terminate
-            process.kill = kill
             with self._lock:
                 self._processes.append(process)
                 self._commands_by_pid[process.pid] = tuple(str(part) for part in argv)
@@ -439,16 +424,16 @@ def test_paired_mid_run_cancellation_reaps_both_children(
     assert consumer.count == 1
     assert result.reference_cleanup.completed
     assert result.comparison_cleanup.completed
+    assert result.reference_cleanup.termination_requested
+    assert result.comparison_cleanup.termination_requested
     assert elapsed < 60
     assert tracker.active_pids() == ()
-    assert tracker.terminate_requests == 2
     print(
         {
             "case": "paired-cancellation",
             "elapsed_seconds": elapsed,
             "chunks_delivered": consumer.count,
             "live_pids_at_cancellation": consumer.live_pids_at_cancellation,
-            "terminate_requests": tracker.terminate_requests,
-            "kill_requests": tracker.kill_requests,
+            "child_returncodes": tracker.returncodes(),
         }
     )

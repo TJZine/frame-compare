@@ -35,6 +35,7 @@ from frame_compare.config.schema_enums import (
 )
 from frame_compare.config.slowpics import validate_slowpics_title_template
 from frame_compare.config.text_validation import reject_control_characters, reject_label_controls
+from frame_compare.utils.canvas import validate_canvas_size
 
 _EFFECTIVE_FPS_PATTERN = re.compile(r"^[0-9]+/[0-9]+$")
 
@@ -220,14 +221,17 @@ class ScreenshotsConfig(BaseModel):
     def validate_aligned_target_dimension(cls, value: int | None) -> int | None:
         if value is None:
             return value
-        if value <= 0:
-            raise ValueError("aligned target dimensions must be positive")
+        validate_canvas_size(value, 1, label="Aligned target")
         if value % 2 != 0:
             raise ValueError("aligned target dimensions must be even")
         return value
 
     @model_validator(mode="after")
     def validate_aligned_target_policy(self) -> ScreenshotsConfig:
+        if self.aligned_target_width is not None and self.aligned_target_height is not None:
+            validate_canvas_size(
+                self.aligned_target_width, self.aligned_target_height, label="Aligned target"
+            )
         if self.geometry_mode != ScreenshotGeometryMode.ALIGNED:
             return self
 

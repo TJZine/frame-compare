@@ -45,6 +45,31 @@ from frame_compare.config.schema_sources import TomlConfigSettingsSourceNoBOM
 
 
 @pytest.mark.parametrize(
+    ("width", "height", "accepted"),
+    [
+        (7680, 4320, True),
+        (4320, 7680, True),
+        (7681, 2, False),
+        (7680, 4322, False),
+        (10**1000, 2, False),
+    ],
+)
+def test_aligned_canvas_size_limits(width: int, height: int, accepted: bool) -> None:
+    config = {
+        "geometry_mode": "aligned",
+        "aligned_scale_policy": "explicit_size",
+        "aligned_target_width": width,
+        "aligned_target_height": height,
+    }
+    if accepted:
+        validated = ScreenshotsConfig.model_validate(config)
+        assert (validated.aligned_target_width, validated.aligned_target_height) == (width, height)
+    else:
+        with pytest.raises(ValidationError, match="7,680 pixels per axis and 33,177,600"):
+            ScreenshotsConfig.model_validate(config)
+
+
+@pytest.mark.parametrize(
     ("payload", "message"),
     [
         ({"random_frame_count": 0}, "at least one analysis frame selector"),

@@ -20,7 +20,7 @@ from ._helpers import read_text_or_fail as _read_text_or_fail
 
 def _bundle_runtime_function_block(build_script: str) -> str:
     start = build_script.index("function Assert-BundleRuntime")
-    end = build_script.index("function Copy-PythonDistLicenses")
+    end = build_script.index("function Remove-PythonBytecodeCaches")
     return build_script[start:end]
 
 
@@ -28,10 +28,13 @@ def _runtime_proof_source(repo_root: Path) -> str:
     return _read_text_or_fail(repo_root / "tools/windows_portable/runtime_smoke.py")
 
 
-def _generated_portable_launcher(build_script: str) -> str:
+def _generated_portable_launcher(repo_root: Path) -> str:
+    launcher_source = _read_text_or_fail(
+        repo_root / "tools/windows_portable/portable_launchers.ps1"
+    )
     match = re.search(
         r"\$ps1 = @'\r?\n(?P<launcher>.*?)\r?\n'@\r?\n\r?\n  \$cmd = @'",
-        build_script,
+        launcher_source,
         flags=re.DOTALL,
     )
     assert match is not None, "generated portable launcher payload not found"
@@ -39,17 +42,15 @@ def _generated_portable_launcher(build_script: str) -> str:
 
 
 def test_windows_portable_bundle_launcher_uses_cli_package_entry(repo_root: Path) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    assert "& $python -m frame_compare.cli.entry @args" in build_script
-    assert "frame_compare.cli_entry" not in build_script
+    launcher = _generated_portable_launcher(repo_root)
+    assert "& $python -m frame_compare.cli.entry @args" in launcher
+    assert "frame_compare.cli_entry" not in launcher
 
 
 def test_windows_portable_generated_cmd_launchers_have_absolute_powershell_fallbacks(
     repo_root: Path,
 ) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
+    build_script = _read_text_or_fail(repo_root / "tools/windows_portable/portable_launchers.ps1")
 
     assert "%ProgramFiles%\\PowerShell\\7\\pwsh.exe" in build_script
     assert "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" in build_script
@@ -168,13 +169,6 @@ def test_windows_portable_lifecycle_does_not_manage_generated_data(repo_root: Pa
     assert ".update_backups" in lifecycle_sources
 
 
-def test_windows_portable_build_download_errors_name_manifest_remediation(repo_root: Path) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    assert "Failed to download artifact '$id' from $url" in build_script
-    assert "update $ManifestPath with a reachable URL and matching sha256" in build_script
-
-
 def test_windows_portable_ffmpeg_manifest_has_pinned_zip_asset_shape(
     repo_root: Path,
 ) -> None:
@@ -274,18 +268,12 @@ def test_windows_portable_build_uses_r74_plus_plugin_layout(repo_root: Path) -> 
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
 
-    assert "--no-emit-package vapoursynth-lsmas" in build_script
     assert "$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH =" not in build_script
     assert "Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH" in build_script
     assert "Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue" in build_script
     assert '$sitePackages = Join-Path $BundleRoot "app\\\\site-packages"' in build_script
     assert '$vsPackage = Join-Path $sitePackages "vapoursynth"' in build_script
     assert '(Join-Path $vsPackage "plugins")' in build_script
-    assert (
-        '$vsDllPackage = Join-Path $sitePackages "vapoursynth\\\\libvapoursynth.dll"'
-        in build_script
-    )
-    assert "expected R81 package layout" in build_script
     assert 'Join-Path $sitePackages "vapoursynth.dll"' not in build_script
     assert 'Join-Path $sitePackages "Lib\\\\site-packages\\\\vapoursynth.dll"' not in build_script
     assert "VAPOURSYNTH_PLUGIN_PATH =" not in build_script
@@ -469,9 +457,7 @@ def test_windows_portable_copies_python_proof_under_owned_cleanup(repo_root: Pat
 
 
 def test_windows_portable_workflow_surfaces_direct_placebo_result(repo_root: Path) -> None:
-    workflow = _read_text_or_fail(
-        repo_root / ".github" / "workflows" / "windows-portable-build.yml"
-    )
+    workflow = _read_text_or_fail(repo_root / ".github/actions/windows-portable-build/action.yml")
 
     assert "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok " in workflow
     assert (
@@ -555,7 +541,7 @@ def test_windows_portable_restores_environment_and_location_after_failure(
     # environment scope; failure must happen after that admission.
     (bundle / "python/python.exe").touch()
     launcher = bundle / "frame-compare.ps1"
-    launcher.write_text(_generated_portable_launcher(build_path.read_text()), encoding="utf-8")
+    launcher.write_text(_generated_portable_launcher(repo_root), encoding="utf-8")
     (bundle / "bundle_info.json").write_text(
         '{"media_runtime_fingerprint":"fixture-fingerprint"}', encoding="utf-8"
     )
@@ -668,28 +654,14 @@ foreach ($name in $inputs.names) {
     assert observed["location_after"] == observed["location_before"]
 
 
-def test_windows_portable_build_exports_vsview_extra(repo_root: Path) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    assert "--extra vsview" in build_script
-    assert "requirements.lock.txt" in build_script
-
-
-def test_windows_portable_build_installs_manifest_wheels_dependency_closed(
+def test_windows_portable_build_projects_dependencies_in_isolated_host_python(
     repo_root: Path,
 ) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-
-    assert "Assert-Sha256 -FilePath $wheelPath -ExpectedHex $sha256" in build_script
-    assert re.search(
-        r"uv pip install --reinstall --strict --no-deps --target \$sitePackages \$wheelPath",
-        build_script,
-    )
-    assert "uv pip install --no-deps --only-binary :all: --target $sitePackages $vsWheel" in (
-        build_script
-    )
-    assert 'Get-RequiredStringProperty -Object $artifact -Name "sha256"' in build_script
+    build_script = _read_text_or_fail(repo_root / "tools/windows_portable/build_portable.ps1")
+    assert '& $HostPython -B -I -S (Join-Path $PSScriptRoot "portable_runtime.py")' in build_script
+    assert "uv pip install" not in build_script
+    assert "uv build" not in build_script
+    assert "requirements.lock.txt" in build_script
 
 
 def test_windows_portable_build_has_release_public_key_gate(repo_root: Path) -> None:
@@ -711,13 +683,13 @@ def test_windows_portable_build_surfaces_dirty_app_source_before_archiving(
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
     function_start = build_script.index("function Copy-RepoApp")
-    function_end = build_script.index("function Configure-EmbeddedPython")
+    function_end = build_script.index("function Initialize-PortableRuntime")
     copy_repo_app = build_script[function_start:function_end]
 
     status_command = (
         "git -C $RepoRoot status --porcelain=v1 --untracked-files=all -- src/frame_compare"
     )
-    archive_command = "git -C $RepoRoot archive"
+    archive_command = '"portable_bundle.py") install-project'
     assert status_command in copy_repo_app
     assert "if ($RequireReleasePublicKey)" in copy_repo_app
     assert "throw $dirtySourceMessage" in copy_repo_app
@@ -866,28 +838,6 @@ def test_windows_portable_python_vsview_proof_covers_viewer_first_whole_set(
     assert '"alignment_result_validation=ok malformed=rejected"' in proof
 
 
-def test_windows_portable_build_excludes_unused_qt_webengine_runtime(repo_root: Path) -> None:
-    build_script = _read_text_or_fail(
-        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    )
-    exclusion = build_script[
-        build_script.index("function Remove-UnusedQtWebEngineRuntime") : build_script.index(
-            "function Set-BundleRuntimeEnvironment"
-        )
-    ]
-
-    assert (
-        '$_.FullName.Substring($resolvedPySideRoot.Length + 1) -match "(?i)webengine"' in exclusion
-    )
-    assert '"icudtl.dat"' in exclusion
-    assert '"v8_context_snapshot.bin"' in exclusion
-    assert "$excludedFiles.Count -ne 125" in exclusion
-    assert "$excludedBytes -ne 359295997" in exclusion
-    assert "Refusing to trim Qt runtime outside bundle site-packages" in exclusion
-    assert "Qt WebEngine deployment exclusion was incomplete" in exclusion
-    assert "Remove-UnusedQtWebEngineRuntime -BundleRoot $OutDir" in build_script
-
-
 def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
     repo_root: Path,
 ) -> None:
@@ -933,9 +883,7 @@ def test_windows_portable_build_launches_real_vsview_offscreen_and_cleans_up(
 def test_windows_portable_workflow_requires_combined_vsview_proof(
     repo_root: Path,
 ) -> None:
-    workflow = _read_text_or_fail(
-        repo_root / ".github" / "workflows" / "windows-portable-build.yml"
-    )
+    workflow = _read_text_or_fail(repo_root / ".github/actions/windows-portable-build/action.yml")
 
     required_phases = workflow[
         workflow.index("foreach ($phase in @(") : workflow.index(
@@ -951,10 +899,7 @@ def test_windows_portable_workflow_requires_combined_vsview_proof(
 def test_windows_portable_generated_launcher_sanitizes_malformed_bundle_info(
     repo_root: Path,
 ) -> None:
-    build_script = _read_text_or_fail(
-        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    )
-    launcher = _generated_portable_launcher(build_script)
+    launcher = _generated_portable_launcher(repo_root)
 
     assert "ConvertFrom-Json -ErrorAction Stop" in launcher
     assert "$bundleInfo -isnot [PSCustomObject]" in launcher
@@ -971,9 +916,6 @@ def test_windows_portable_generated_launcher_rejects_malformed_bundle_info_in_pr
     if os.name != "nt" or pwsh is None:
         pytest.skip("Windows with PowerShell is required for the generated launcher regression")
 
-    build_script = _read_text_or_fail(
-        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    )
     bundle = tmp_path / "portable-bundle"
     (bundle / "python").mkdir(parents=True)
     (bundle / "python" / "python.exe").write_bytes(b"")
@@ -983,7 +925,7 @@ def test_windows_portable_generated_launcher_rejects_malformed_bundle_info_in_pr
         encoding="utf-8",
     )
     launcher_path = bundle / "frame-compare.ps1"
-    launcher_path.write_text(_generated_portable_launcher(build_script), encoding="utf-8")
+    launcher_path.write_text(_generated_portable_launcher(repo_root), encoding="utf-8")
 
     result = subprocess.run(
         [pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(launcher_path)],
@@ -1269,11 +1211,15 @@ def _write_extracted_verifier_fixture(
             )
         ],
         "schema_version": 2,
+        "archive": {"files": [], "directories": []},
         "source_build_install_scripts": [
+            ".github/actions/windows-portable-build/action.yml",
+            ".github/actions/windows-portable-verify/action.yml",
             ".github/workflows/windows-portable-build.yml",
             ".github/workflows/windows-portable.yml",
             "tools/windows_portable/build_portable.ps1",
             "tools/windows_portable/path_safety.ps1",
+            "tools/windows_portable/portable_launchers.ps1",
             "tools/windows_portable/runtime_smoke.py",
             "tools/windows_portable/build_update.ps1",
             "tools/windows_portable/bundle_info.schema.json",
@@ -1811,9 +1757,7 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
 ) -> None:
     verifier_path = repo_root / "tools" / "windows_portable" / "verify_extracted_bundle.ps1"
     verifier = _read_text_or_fail(verifier_path)
-    workflow = _read_text_or_fail(
-        repo_root / ".github" / "workflows" / "windows-portable-build.yml"
-    )
+    workflow = _read_text_or_fail(repo_root / ".github/actions/windows-portable-build/action.yml")
     physical_checklist = _read_text_or_fail(
         repo_root / "docs" / "media-runtime-windows-validation.md"
     )
@@ -1900,20 +1844,11 @@ def test_physical_windows_validation_fetches_and_checks_out_exact_pr_head(
 def test_windows_portable_build_portable_updater_launcher_fails_closed_without_exit_code(
     repo_root: Path,
 ) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    assert "& $updater @args" in build_script
-    assert "if ($null -eq $LASTEXITCODE) {" in build_script
-    assert "exit 1" in build_script
-    assert "if ($?)" not in build_script
-
-
-def test_windows_portable_build_copies_dist_info_licenses_when_present(repo_root: Path) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    assert (
-        re.search(r"dist-info\\\\licenses", build_script) or "dist-info\\licenses" in build_script
-    )
+    launchers = _read_text_or_fail(repo_root / "tools/windows_portable/portable_launchers.ps1")
+    assert "& $updater @args" in launchers
+    assert "if ($null -eq $LASTEXITCODE) {" in launchers
+    assert "exit 1" in launchers
+    assert "if ($?)" not in launchers
 
 
 def test_windows_portable_build_uses_vendored_manifest_license_files(repo_root: Path) -> None:
@@ -2320,40 +2255,7 @@ def test_windows_portable_bundle_inventory_rejects_malformed_fingerprints(
     assert "must be a lowercase SHA-256 digest" in result.stderr
 
 
-def test_windows_portable_bundle_inventory_rejects_matching_stale_runtime_fingerprints(
-    tmp_path: Path,
-    repo_root: Path,
-    inventory_source_repo: Path,
-) -> None:
-    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
-    stale_fingerprints = dict.fromkeys(
-        ("analysis", "probe", "alignment", "index", "full"), "0" * 64
-    )
-    bundle_info_path = bundle / "bundle_info.json"
-    bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
-    bundle_info["media_runtime_fingerprint"] = stale_fingerprints["full"]
-    bundle_info["media_runtime_fingerprints"] = stale_fingerprints
-    bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
-
-    manifest = json.loads(
-        (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text(encoding="utf-8")
-    )
-    manifest["bundle"]["runtime_fingerprints"] = stale_fingerprints
-    manifest_path = tmp_path / "stale-manifest.json"
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-
-    result = _run_bundle_inventory(
-        bundle=bundle,
-        repo_root=repo_root,
-        source_repo=inventory_source_repo,
-        manifest=manifest_path,
-    )
-
-    assert result.returncode != 0
-    assert "do not match the canonical windows-x64 contract" in result.stderr
-
-
-def test_windows_portable_bundle_inventory_uses_packaged_runtime_contract(
+def test_windows_portable_bundle_inventory_never_imports_packaged_runtime_contract(
     tmp_path: Path,
     repo_root: Path,
     inventory_source_repo: Path,
@@ -2363,7 +2265,8 @@ def test_windows_portable_bundle_inventory_uses_packaged_runtime_contract(
         scope: str(index) * 64
         for index, scope in enumerate(("analysis", "probe", "alignment", "index", "full"), start=1)
     }
-    _write_packaged_runtime_contract(bundle=bundle, fingerprints=packaged_fingerprints)
+    contract = bundle / "app/src/frame_compare/vs/runtime_contract.py"
+    contract.write_text("raise RuntimeError('packaged runtime must never execute')\n")
 
     bundle_info_path = bundle / "bundle_info.json"
     bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
@@ -2488,20 +2391,15 @@ def test_windows_portable_builder_writes_inventory_and_cleans_runtime_index(
     assert "write_bundle_inventory.py" in build_script
     assert "bundle_inventory.json" in build_script
     assert "--require-clean-repo" in build_script
-    assert "Remove-Item -Force -LiteralPath $legacyMediaIndexPath" in build_script
-    assert (
-        "Get-ChildItem -LiteralPath $BundleRoot -Filter "
-        '"runtime-smoke*.mp4.frame-compare-*.lwi"' in build_script
-    )
+    assert "$legacyMediaIndexPath" not in build_script
+    assert "runtime-smoke*.mp4.frame-compare-*.lwi" not in build_script
     assert '"pyside6_addons-*.dist-info"' in build_script
     assert '"pyside6_essentials-*.dist-info"' in build_script
     assert '"pyside6_pdf-*.dist-info"' in build_script
     assert '"pyside6_webengine-*.dist-info"' in build_script
     assert "License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only" in build_script
     assert "$lgplNotices.Count -lt 6" in build_script
-    assert "git -C $RepoRoot archive" in build_script
-    assert "HEAD src/frame_compare" in build_script
     assert "Copy-Item -Recurse -Force -LiteralPath $pkgSrc" not in build_script
     assert 'Filter "__pycache__"' in build_script
     assert '$env:PYTHONDONTWRITEBYTECODE = "1"' in build_script
-    assert "& $python -B @arguments" in build_script
+    assert "& $HostPython -B -I -S @arguments" in build_script

@@ -15,6 +15,7 @@ import pytest
 
 _NATIVE_PREVIEW = r"""
 import json
+import subprocess
 import sys
 import types
 from fractions import Fraction
@@ -38,9 +39,10 @@ if not detect_plugins(vs.core).get("libplacebo") or not probe_libplacebo_runtime
 
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.render.prepare import resolve_tonemap_settings
+from frame_compare.vs import hdr_probe, source_admission
 from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.tonemap import apply_tonemap
-from frame_compare.vs.types import HDRMetadata, LibplaceboTonemap
+from frame_compare.vs.types import LibplaceboTonemap
 from frame_compare.vsview import session_runtime as runtime
 from frame_compare.vsview.session_script import write_vsview_session_script
 from frame_compare.vsview.alignment_review_contract import (
@@ -66,17 +68,26 @@ if mode == "sdr":
     source = core.std.SetFrameProps(source, _Transfer=1, _Primaries=1, _Matrix=2)
 if mode == "probe":
     source = core.std.RemoveFrameProps(source, props=["_Transfer", "_Primaries", "_Matrix"])
-    import frame_compare.vs.hdr_probe as hdr_probe
-    probes = []
-    def probe(path):
-        probes.append(path)
-        return HDRMetadata(None, 1000, None, 9, 16, 9)
-    hdr_probe.probe_hdr_metadata = probe
 
 ref = root / "ref.mkv"
 comparisons = [root / "zeta.mkv", root / "alpha.mkv"]
 for path in [ref, *comparisons]:
     path.touch()
+# Supply the headers for the injected source clips at the FFprobe boundary.
+probes = []
+def probe_headers(argv, **_kwargs):
+    probes.append(Path(argv[-1]))
+    stream = {"index": 0, "width": 64, "height": 32, "coded_width": 64, "coded_height": 32}
+    if mode == "probe":
+        stream.update(color_primaries="bt2020", color_transfer="smpte2084", color_space="bt2020nc")
+    return subprocess.CompletedProcess(argv, 0, json.dumps({"streams": [stream]}).encode(), b"")
+def scan_frames(argv, *, stdout_consumer, **_kwargs):
+    stdout_consumer(b"frame|stream_index=0|width=64|height=32|"
+                    b"crop_top=0|crop_bottom=0|crop_left=0|crop_right=0\n")
+    return subprocess.CompletedProcess(argv, 0, b"", b"")
+source_admission.resolve_optional_executable = lambda _name: sys.executable
+hdr_probe.run_subprocess = probe_headers
+source_admission.run_subprocess = scan_frames
 clips = {"ref": source, "zeta": core.std.AssumeFPS(source, fpsnum=25, fpsden=1),
          "alpha": core.std.AssumeFPS(source, fpsnum=30, fpsden=1)}
 class Loader:
@@ -170,8 +181,7 @@ for clip, index, name, metadata in outputs:
         assert props["_Primaries"] == 1
         assert props["_Matrix"] == 1
         assert clip.format.id == vs.YUV420P16
-if mode == "probe":
-    assert probes == [ref, *comparisons]
+assert probes == [ref, *comparisons]
 if mode in {"quality", "fast"}:
     with source.get_frame(0) as frame:
         _, metadata = detect_hdr(dict(frame.props))

@@ -104,7 +104,7 @@ rendering. Both are optional for a local comparison.
 | Probe cache | Reuse validated source properties for compatible sources and runtime identity |
 | Alignment reuse cache | Reuse accepted computed or confirmed offsets while sources and settings match |
 | `alignment_diagnostics/` | Record each comparison's alignment evidence for review; never changes trims |
-| Frame Compare-owned `.lwi` index | Isolate L-SMASH-Works indexes by selected runtime lineage instead of trusting ambiguous legacy sidecars |
+| Managed source index | Reuse L-SMASH-Works indexes under the generated root with the matching decoder lineage |
 | `run_info.toml` | Record the reserved run identity and runtime provenance |
 | `run_result.toml` | Record the completed or failed lifecycle result used by history commands |
 | `report.html` and `screenshots/` | Preserve the reviewable comparison |

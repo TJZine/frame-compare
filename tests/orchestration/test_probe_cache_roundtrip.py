@@ -20,7 +20,7 @@ from frame_compare.vs.types import HDRMetadata
 @pytest.fixture
 def hdr_snapshot() -> ClipProbeSnapshot:
     """Return a standard HDR snapshot."""
-    fp = ClipFingerprint(Path("hdr.mkv"), 2048, 6000)
+    fp = ClipFingerprint(Path("hdr.mkv"), 2048, 6000, source_token="a" * 64)
     metadata = HDRMetadata(
         mastering_display="G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)",
         max_cll=1000,
@@ -45,7 +45,7 @@ def hdr_snapshot() -> ClipProbeSnapshot:
 @pytest.fixture
 def sample_snapshot() -> ClipProbeSnapshot:
     """Return a standard SDR snapshot."""
-    fp = ClipFingerprint(Path("video.mkv"), 1024, 5000)
+    fp = ClipFingerprint(Path("video.mkv"), 1024, 5000, source_token="a" * 64)
     # Use cast to Any to bypass type checking for the test case that
     # intentionally provides "dirty" data for sanitization verification.
     return ClipProbeSnapshot(
@@ -142,7 +142,7 @@ def test_probe_cache_round_trip_preserves_int64_fps_components(
 
 def test_hdr_metadata_with_optional_fields_none_is_toml_serializable(tmp_path: Path):
     """Regression test: TOML writer must never see None values (tomli_w cannot serialize None)."""
-    fp = ClipFingerprint(Path("hdr_optional_none.mkv"), 1, 1)
+    fp = ClipFingerprint(Path("hdr_optional_none.mkv"), 1, 1, source_token="a" * 64)
     snapshot = ClipProbeSnapshot(
         fingerprint=fp,
         width=3840,
@@ -188,7 +188,7 @@ def test_save_clip_probe_cache_drops_bool_preserved_frame_props(tmp_path: Path) 
     """bool is an int subclass, but persisted frame props treat booleans as unsafe."""
     f = tmp_path / "bool_props.toml"
     snapshot = ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(Path("video.mkv"), 1024, 5000),
+        fingerprint=ClipFingerprint(Path("video.mkv"), 1024, 5000, source_token="a" * 64),
         width=1920,
         height=1080,
         num_frames=100,

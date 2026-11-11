@@ -12,7 +12,10 @@ Param(
   [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path,
 
   [Parameter(Mandatory = $false)]
-  [switch]$RequireReleasePublicKey
+  [switch]$RequireReleasePublicKey,
+
+  [switch]$AssemblyOnly,
+  [string]$RequirementsPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,9 +24,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 
 . (Join-Path $PSScriptRoot "version_utils.ps1")
 . (Join-Path $PSScriptRoot "path_safety.ps1")
-
-$DownloadMaxAttempts = 4
-$DownloadRetryDelaySeconds = 5
+. (Join-Path $PSScriptRoot "portable_launchers.ps1")
 
 # Convert caller-supplied relative paths once, before they are embedded in
 # runtime environment variables or passed across process working directories.
@@ -129,8 +130,13 @@ function Get-Manifest() {
 
 function Resolve-ManifestRelativePath([string]$RelativePath) {
   $manifestDir = Split-Path -Parent $ManifestPath
+  if ($RelativePath -cnotmatch '\Alicenses/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\z' -or
+      $RelativePath -match '(^|/)\.{1,2}(/|$)') {
+    throw "Unsafe vendored license path: $RelativePath"
+  }
   $candidate = Join-Path $manifestDir $RelativePath
-  if (!(Test-Path -LiteralPath $candidate)) {
+  Assert-NoReparsePointAncestor -Path $candidate -Label "Vendored license path"
+  if (!(Test-Path -LiteralPath $candidate -PathType Leaf)) {
     throw "Manifest-relative path not found: $RelativePath ($candidate)"
   }
   return (Resolve-Path -LiteralPath $candidate).Path
@@ -181,13 +187,6 @@ function Assert-Sha256([string]$FilePath, [string]$ExpectedHex) {
   }
 }
 
-function Assert-FileSize([string]$FilePath, [int64]$ExpectedBytes) {
-  $actualBytes = (Get-Item -LiteralPath $FilePath).Length
-  if ($actualBytes -ne $ExpectedBytes) {
-    throw "Byte-size mismatch for $FilePath`nExpected: $ExpectedBytes`nActual:   $actualBytes"
-  }
-}
-
 function Assert-LastExitCode([string]$CommandLabel) {
   if ($LASTEXITCODE -ne 0) {
     throw "$CommandLabel failed with exit code $LASTEXITCODE"
@@ -198,291 +197,6 @@ function Assert-ReleasePublicKey() {
   $validator = Join-Path $PSScriptRoot "validate_update_public_key.ps1"
   $publicKey = Join-Path $PSScriptRoot "update_public_key.xml"
   & $validator -PublicKeyPath $publicKey
-}
-
-function Download-Artifact([pscustomobject]$Artifact) {
-  $id = Get-RequiredStringProperty -Object $Artifact -Name "id" -Context "artifact"
-  $url = Get-RequiredStringProperty -Object $Artifact -Name "url" -Context "artifact '$id'"
-  $sha256 = Get-RequiredStringProperty -Object $Artifact -Name "sha256" -Context "artifact '$id'"
-  $expectedBytes = [int64](Get-RequiredProperty -Object $Artifact -Name "bytes" -Context "artifact '$id'")
-
-  $fileName = Split-Path -Leaf $url
-  $dest = Join-Path $CacheDir $fileName
-
-  if (Test-Path -LiteralPath $dest) {
-    Assert-FileSize -FilePath $dest -ExpectedBytes $expectedBytes
-    Assert-Sha256 -FilePath $dest -ExpectedHex $sha256
-    return $dest
-  }
-
-  Write-Host "Downloading $id -> $fileName"
-  $lastErrorMessage = ""
-  for ($attempt = 1; $attempt -le $DownloadMaxAttempts; $attempt++) {
-    try {
-      Invoke-WebRequest -Uri $url -OutFile $dest | Out-Null
-      Assert-FileSize -FilePath $dest -ExpectedBytes $expectedBytes
-      Assert-Sha256 -FilePath $dest -ExpectedHex $sha256
-      return $dest
-    } catch {
-      $lastErrorMessage = $_.Exception.Message
-      if (Test-Path -LiteralPath $dest) {
-        Remove-Item -Force -LiteralPath $dest
-      }
-      if ($attempt -lt $DownloadMaxAttempts) {
-        Write-Warning "Download attempt $attempt/$DownloadMaxAttempts failed for artifact '$id': $lastErrorMessage. Retrying in $DownloadRetryDelaySeconds seconds."
-        Start-Sleep -Seconds $DownloadRetryDelaySeconds
-      }
-    }
-  }
-  throw "Failed to download artifact '$id' from $url after $DownloadMaxAttempts attempts. The upstream artifact may have moved or expired; update $ManifestPath with a reachable URL and matching sha256. Original error: $lastErrorMessage"
-}
-
-function Expand-ArchiveFile([string]$ArchivePath, [string]$Destination) {
-  if (Test-Path -LiteralPath $Destination) {
-    Remove-Item -Recurse -Force -LiteralPath $Destination
-  }
-  Ensure-Directory -Path $Destination
-
-  $extension = [System.IO.Path]::GetExtension($ArchivePath).ToLowerInvariant()
-  if ($extension -eq ".zip" -or $extension -eq ".whl") {
-    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $Destination -Force
-    return
-  }
-  if ($extension -eq ".7z") {
-    if (Get-Command 7z -ErrorAction SilentlyContinue) {
-      7z x -y "-o$Destination" $ArchivePath | Out-Null
-      Assert-LastExitCode -CommandLabel "7z extract $ArchivePath"
-      return
-    }
-    if (Get-Command tar -ErrorAction SilentlyContinue) {
-      tar -xf $ArchivePath -C $Destination
-      Assert-LastExitCode -CommandLabel "tar extract $ArchivePath"
-      return
-    }
-    throw "7z or tar is required on PATH to extract .7z artifact: $ArchivePath"
-  }
-
-  throw "Unsupported archive extension '$extension' for $ArchivePath"
-}
-
-function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [string]$DownloadedPath) {
-  $artifactId = Get-RequiredStringProperty -Object $Artifact -Name "id" -Context "artifact"
-  $install = Get-RequiredProperty -Object $Artifact -Name "install" -Context "artifact '$artifactId'"
-
-  $type = Get-RequiredStringProperty -Object $install -Name "type" -Context "artifact '$artifactId' install"
-
-  if ($type -eq "python_wheel") {
-    return
-  }
-
-  $destRel = Get-RequiredStringProperty -Object $install -Name "destination" -Context "artifact '$artifactId' install"
-  $dest = Join-Path $BundleRoot $destRel
-
-  if ($type -eq "extract") {
-    $stripPrefix = Get-OptionalStringProperty -Object $install -Name "strip_prefix"
-    if ($stripPrefix -ne "") {
-      $tmp = Join-Path $CacheDir ("tmp_extract_" + $artifactId)
-      Expand-ArchiveFile -ArchivePath $DownloadedPath -Destination $tmp
-      $stripPrefixNorm = ($stripPrefix -replace "/", "\\").TrimEnd("\\")
-      $prefixPath = Join-Path $tmp $stripPrefixNorm
-      if (!(Test-Path -LiteralPath $prefixPath)) {
-        throw "strip_prefix path not found after extraction: $stripPrefix (artifact $artifactId)"
-      }
-      Ensure-Directory -Path $dest
-      Get-ChildItem -LiteralPath $prefixPath -Force | ForEach-Object {
-        Copy-Item -Recurse -Force -LiteralPath $_.FullName -Destination $dest
-      }
-      Remove-Item -Recurse -Force -LiteralPath $tmp
-    } else {
-      Expand-ArchiveFile -ArchivePath $DownloadedPath -Destination $dest
-    }
-    return
-  }
-
-  throw "Unknown install.type '$type' for artifact $artifactId"
-}
-
-function Write-LauncherFiles([string]$BundleRoot) {
-  $ps1Path = Join-Path $BundleRoot "frame-compare.ps1"
-  $cmdPath = Join-Path $BundleRoot "frame-compare.cmd"
-  $updatePs1Path = Join-Path $BundleRoot "frame-compare-update.ps1"
-  $updateCmdPath = Join-Path $BundleRoot "frame-compare-update.cmd"
-
-  $ps1 = @'
-$ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
-
-$bundleRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$python = Join-Path $bundleRoot "python\\python.exe"
-
-if (!(Test-Path -LiteralPath $python)) {
-  throw "Embedded python not found: $python"
-}
-
-function Get-FrameCompareLauncherEnvironmentValue([string]$Name) {
-  return [Environment]::GetEnvironmentVariable($Name, "Process")
-}
-
-function Restore-FrameCompareLauncherEnvironmentValue([string]$Name, [object]$Value) {
-  if ($null -eq $Value) {
-    Remove-Item -LiteralPath "Env:$Name" -ErrorAction SilentlyContinue
-    return
-  }
-  [Environment]::SetEnvironmentVariable($Name, [string]$Value, "Process")
-}
-
-$originalPath = Get-FrameCompareLauncherEnvironmentValue -Name "PATH"
-$originalPythonUtf8 = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONUTF8"
-$originalPythonDontWriteBytecode = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE"
-$originalPythonPath = Get-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH"
-$originalVsExtraPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH"
-$originalVsPluginPath = Get-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
-$originalMediaRuntimeFingerprint = Get-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"
-$originalRuntimeKind = Get-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_KIND"
-$originalRuntimeFfms2Required = Get-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"
-$originalFfmpegExecutable = Get-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE"
-$originalFfprobeExecutable = Get-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE"
-
-$exitCode = 1
-$locationPushed = $false
-try {
-  $bundleInfoPath = Join-Path $bundleRoot "bundle_info.json"
-  if (!(Test-Path -LiteralPath $bundleInfoPath -PathType Leaf)) {
-    throw "Bundle runtime identity not found: $bundleInfoPath"
-  }
-  try {
-    $bundleInfo = Get-Content -LiteralPath $bundleInfoPath -Raw |
-      ConvertFrom-Json -ErrorAction Stop
-    if ($bundleInfo -isnot [PSCustomObject]) {
-      throw "bundle_info.json must contain one JSON object"
-    }
-  } catch {
-    throw (
-      "The portable bundle is corrupt because bundle_info.json is invalid. " +
-      "Rebuild or reinstall the complete portable bundle."
-    )
-  }
-  $runtimeFingerprintProperty = $bundleInfo.PSObject.Properties["media_runtime_fingerprint"]
-  if ($null -eq $runtimeFingerprintProperty -or [string]::IsNullOrWhiteSpace([string]$runtimeFingerprintProperty.Value)) {
-    throw "Bundle runtime identity is missing media_runtime_fingerprint: $bundleInfoPath"
-  }
-
-  $env:PYTHONUTF8 = "1"
-  $env:PYTHONDONTWRITEBYTECODE = "1"
-  $env:PYTHONPATH = "$bundleRoot\app\src;$bundleRoot\app\site-packages"
-  Remove-Item Env:VAPOURSYNTH_EXTRA_PLUGIN_PATH -ErrorAction SilentlyContinue
-  Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
-  $env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT = [string]$runtimeFingerprintProperty.Value
-  $env:FRAME_COMPARE_RUNTIME_KIND = "windows-portable"
-  $env:FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED = "0"
-  $env:FRAME_COMPARE_FFMPEG_EXECUTABLE = "$bundleRoot\ffmpeg\bin\ffmpeg.exe"
-  $env:FRAME_COMPARE_FFPROBE_EXECUTABLE = "$bundleRoot\ffmpeg\bin\ffprobe.exe"
-
-  $sitePackages = Join-Path $bundleRoot "app\site-packages"
-  $vsPackage = Join-Path $sitePackages "vapoursynth"
-  $pathEntries = @(
-    (Join-Path $bundleRoot "python"),
-    $sitePackages,
-    $vsPackage,
-    (Join-Path $vsPackage "plugins"),
-    (Join-Path $sitePackages "vapoursynth.libs"),
-    (Join-Path $sitePackages "vs_placebo"),
-    (Join-Path $sitePackages "vs_placebo.libs")
-  )
-  $existingPathEntries = @(
-    $pathEntries |
-      Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } |
-      Select-Object -Unique
-  )
-  $env:PATH = (($existingPathEntries -join ";") + ";" + $env:PATH)
-
-  Push-Location $bundleRoot
-  $locationPushed = $true
-  & $python -m frame_compare.cli.entry @args
-  if ($null -eq $LASTEXITCODE) {
-    $exitCode = 1
-  } else {
-    $exitCode = $LASTEXITCODE
-  }
-} finally {
-  if ($locationPushed) {
-    Pop-Location
-  }
-  Restore-FrameCompareLauncherEnvironmentValue -Name "PATH" -Value $originalPath
-  Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONUTF8" -Value $originalPythonUtf8
-  Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONDONTWRITEBYTECODE" -Value $originalPythonDontWriteBytecode
-  Restore-FrameCompareLauncherEnvironmentValue -Name "PYTHONPATH" -Value $originalPythonPath
-  Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_EXTRA_PLUGIN_PATH" -Value $originalVsExtraPluginPath
-  Restore-FrameCompareLauncherEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
-  Restore-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT" -Value $originalMediaRuntimeFingerprint
-  Restore-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_KIND" -Value $originalRuntimeKind
-  Restore-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED" -Value $originalRuntimeFfms2Required
-  Restore-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE" -Value $originalFfmpegExecutable
-  Restore-FrameCompareLauncherEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE" -Value $originalFfprobeExecutable
-}
-exit $exitCode
-'@
-
-  $cmd = @'
-@echo off
-setlocal
-set SCRIPT_DIR=%~dp0
-set "POWERSHELL_EXE="
-where pwsh >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-  set "POWERSHELL_EXE=pwsh"
-)
-if not defined POWERSHELL_EXE if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "POWERSHELL_EXE=%ProgramFiles%\PowerShell\7\pwsh.exe"
-if not defined POWERSHELL_EXE if exist "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-if not defined POWERSHELL_EXE (
-  echo PowerShell was not found. Install PowerShell 7 or restore Windows PowerShell. 1>&2
-  exit /b 9009
-)
-"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%frame-compare.ps1" %*
-exit /b %ERRORLEVEL%
-'@
-
-  $updatePs1 = @'
-$ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
-
-$bundleRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$updater = Join-Path $bundleRoot "shim\\frame-compare-update.ps1"
-
-if (!(Test-Path -LiteralPath $updater)) {
-  throw "Updater shim not found: $updater"
-}
-
-& $updater @args
-if ($null -eq $LASTEXITCODE) {
-  exit 1
-}
-exit $LASTEXITCODE
-'@
-
-  $updateCmd = @'
-@echo off
-setlocal
-set SCRIPT_DIR=%~dp0
-set "POWERSHELL_EXE="
-where pwsh >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-  set "POWERSHELL_EXE=pwsh"
-)
-if not defined POWERSHELL_EXE if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "POWERSHELL_EXE=%ProgramFiles%\PowerShell\7\pwsh.exe"
-if not defined POWERSHELL_EXE if exist "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-if not defined POWERSHELL_EXE (
-  echo PowerShell was not found. Install PowerShell 7 or restore Windows PowerShell. 1>&2
-  exit /b 9009
-)
-"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%frame-compare-update.ps1" %*
-exit /b %ERRORLEVEL%
-'@
-
-  Set-Content -LiteralPath $ps1Path -Value $ps1 -Encoding UTF8
-  Set-Content -LiteralPath $cmdPath -Value $cmd -Encoding ASCII
-  Set-Content -LiteralPath $updatePs1Path -Value $updatePs1 -Encoding UTF8
-  Set-Content -LiteralPath $updateCmdPath -Value $updateCmd -Encoding ASCII
 }
 
 function Copy-InstallerFiles([string]$BundleRoot) {
@@ -536,260 +250,24 @@ function Copy-RepoApp([string]$BundleRoot) {
     Write-Warning $dirtySourceMessage
   }
 
-  $archivePath = Join-Path $CacheDir (
-    "frame_compare_source_$([System.Guid]::NewGuid().ToString('N')).tar"
-  )
-  try {
-    & git -C $RepoRoot archive --format=tar --output=$archivePath HEAD src/frame_compare
-    Assert-LastExitCode -CommandLabel "git archive Frame Compare source"
-    if (!(Get-Command tar -ErrorAction SilentlyContinue)) {
-      throw "tar is required on PATH to extract the committed Frame Compare source."
-    }
-    tar -xf $archivePath -C $appRoot
-    Assert-LastExitCode -CommandLabel "extract committed Frame Compare source"
-  } finally {
-    Remove-Item -Force -LiteralPath $archivePath -ErrorAction SilentlyContinue
-  }
-  if (!(Test-Path -LiteralPath (Join-Path $srcRoot "frame_compare\\__init__.py"))) {
-    throw "Committed Frame Compare source was not extracted into the bundle."
-  }
+  & $HostPython -B -I -S (Join-Path $PSScriptRoot "portable_bundle.py") install-project `
+    --repo $RepoRoot --root $BundleRoot
+  Assert-LastExitCode -CommandLabel "project source and metadata projection"
+  Write-Host "WINDOWS_BUNDLE_PROOF project_metadata=ok entry_point=frame-compare-alignment-review source=app/src"
 }
 
-function Configure-EmbeddedPython([string]$BundleRoot) {
-  $pythonDir = Join-Path $BundleRoot "python"
-  $pthCandidates = @(Get-ChildItem -LiteralPath $pythonDir -Filter "python*._pth" -File)
-  if ($pthCandidates.Count -ne 1) {
-    throw "Expected exactly one embedded Python ._pth file in $pythonDir, found $($pthCandidates.Count)"
-  }
-  $pth = $pthCandidates[0].FullName
-  $pthBase = [System.IO.Path]::GetFileNameWithoutExtension($pthCandidates[0].Name)
-  $pythonZip = "$pthBase.zip"
-
-  # The embeddable distribution uses python313._pth to define sys.path and typically ignores
-  # PYTHONPATH/environment. Make the bundle self-contained by pinning the app paths here.
-  $lines = @(
-    $pythonZip,
-    ".",
-    "..\\app\\site-packages",
-    "..\\app\\src",
-    "import site"
+function Initialize-PortableRuntime([string]$BundleRoot) {
+  $arguments = @(
+    "assemble", "--repo", $RepoRoot, "--cache", $CacheDir, "--output", $BundleRoot
   )
-  $content = ($lines -join "`r`n") + "`r`n"
-  Set-Content -LiteralPath $pth -Value $content -Encoding ASCII
-}
-
-function Install-ProjectDistributionMetadata([string]$BundleRoot) {
-  # Install only the repository wheel's distribution metadata into the bundle.
-  # The application code is copied from committed HEAD into app/src by
-  # Copy-RepoApp. The wheel is used here only for the standard
-  # importlib.metadata entry-point record; copying its frame_compare package
-  # would create a second application-code owner.
-  $appRoot = Join-Path $BundleRoot "app"
-  $sitePackages = Join-Path $appRoot "site-packages"
-  $sourcePackage = Join-Path $appRoot "src\frame_compare"
-  $duplicatePackage = Join-Path $sitePackages "frame_compare"
-  if (!(Test-Path -LiteralPath (Join-Path $sourcePackage "__init__.py") -PathType Leaf)) {
-    throw "Committed Frame Compare source is missing before metadata installation: $sourcePackage"
+  if ($ManifestPath -ne (Join-Path $PSScriptRoot "manifest.windows-x64.json")) {
+    $arguments += @("--manifest", $ManifestPath)
   }
-  if (Test-Path -LiteralPath $duplicatePackage) {
-    throw "Refusing to install project metadata over a duplicate app/site-packages/frame_compare package."
+  if ($RequirementsPath) {
+    $arguments += @("--requirements", $RequirementsPath)
   }
-
-  $wheelBuildDir = Join-Path $CacheDir (
-    "frame-compare-wheel-$([System.Guid]::NewGuid().ToString('N'))"
-  )
-  $wheelExtractDir = Join-Path $wheelBuildDir "extract"
-  Ensure-Directory -Path $wheelBuildDir
-  try {
-    Push-Location $RepoRoot
-    try {
-      uv build --wheel --out-dir $wheelBuildDir
-      Assert-LastExitCode -CommandLabel "uv build Frame Compare wheel"
-    } finally {
-      Pop-Location
-    }
-
-    $wheelCandidates = @(
-      Get-ChildItem -LiteralPath $wheelBuildDir -File |
-        Where-Object { $_.Extension -ieq ".whl" }
-    )
-    if (
-      $wheelCandidates.Count -ne 1 -or
-      $wheelCandidates[0].Name -notmatch "^frame_compare-[^\\/]+\.whl$"
-    ) {
-      throw "Expected exactly one Frame Compare project wheel in $wheelBuildDir, found $($wheelCandidates.Name -join ', ')"
-    }
-    Expand-ArchiveFile -ArchivePath $wheelCandidates[0].FullName -Destination $wheelExtractDir
-
-    $distInfoDirectories = @(
-      Get-ChildItem -LiteralPath $wheelExtractDir -Directory |
-        Where-Object { $_.Name -cmatch "^frame_compare-[^\\/]+\.dist-info$" }
-    )
-    if ($distInfoDirectories.Count -ne 1) {
-      throw "Expected exactly one top-level Frame Compare dist-info directory in $wheelExtractDir, found $($distInfoDirectories.Name -join ', ')"
-    }
-    $distInfoDirectory = $distInfoDirectories[0]
-    $entryPointsPath = Join-Path $distInfoDirectory.FullName "entry_points.txt"
-    if (!(Test-Path -LiteralPath $entryPointsPath -PathType Leaf)) {
-      throw "Frame Compare wheel is missing entry_points.txt: $entryPointsPath"
-    }
-    $entryPointsText = Get-Content -LiteralPath $entryPointsPath -Raw -Encoding UTF8
-    $expectedEntryPoint = "frame-compare-alignment-review = frame_compare.vsview.alignment_review_panel"
-    $inVsViewSection = $false
-    $entryPointMatches = 0
-    foreach ($line in ($entryPointsText -split "`r?`n")) {
-      $trimmedLine = $line.Trim()
-      if ($trimmedLine.StartsWith("[") -and $trimmedLine.EndsWith("]")) {
-        $inVsViewSection = $trimmedLine -ceq "[vsview]"
-        continue
-      }
-      if ($inVsViewSection -and $trimmedLine -ceq $expectedEntryPoint) {
-        $entryPointMatches++
-      }
-    }
-    if ($entryPointMatches -ne 1) {
-      throw "Frame Compare wheel entry_points.txt is missing the exact VSView registration: $expectedEntryPoint"
-    }
-
-    $destination = Join-Path $sitePackages $distInfoDirectory.Name
-    if (Test-Path -LiteralPath $destination) {
-      throw "Frame Compare dist-info destination already exists: $destination"
-    }
-    Copy-Item -Recurse -LiteralPath $distInfoDirectory.FullName -Destination $sitePackages
-    if (!(Test-Path -LiteralPath $destination -PathType Container)) {
-      throw "Frame Compare dist-info metadata was not copied to the bundle: $destination"
-    }
-
-    if (Test-Path -LiteralPath $duplicatePackage) {
-      throw "Project wheel metadata installation created an unexpected app/site-packages/frame_compare package."
-    }
-    Write-Host "WINDOWS_BUNDLE_PROOF project_metadata=ok entry_point=frame-compare-alignment-review source=app/src"
-  } finally {
-    if (Test-Path -LiteralPath $wheelBuildDir) {
-      Remove-Item -Recurse -Force -LiteralPath $wheelBuildDir
-    }
-  }
-}
-
-function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
-  if (!(Get-Command uv -ErrorAction SilentlyContinue)) {
-    throw "uv is required on PATH to build the portable bundle."
-  }
-
-  $appRoot = Join-Path $BundleRoot "app"
-  $sitePackages = Join-Path $appRoot "site-packages"
-  $reqFile = Join-Path $BundleRoot "requirements.lock.txt"
-
-  Push-Location $RepoRoot
-  try {
-    # Export pinned, hashed requirements from uv.lock (exclude project itself; we run from app/src via PYTHONPATH).
-    uv export --frozen --no-dev --no-emit-project --no-emit-package vapoursynth-lsmas --extra vsview --format requirements.txt --output-file $reqFile | Out-Null
-    Assert-LastExitCode -CommandLabel "uv export"
-  } finally {
-    Pop-Location
-  }
-
-  # Install project dependencies into app/site-packages.
-  uv pip install --reinstall --strict --exact --require-hashes --python-version 3.13 --python-platform windows --target $sitePackages -r $reqFile
-  Assert-LastExitCode -CommandLabel "uv pip install requirements"
-  $tomliWModule = Join-Path $sitePackages "tomli_w"
-  $tomliWDistInfo = @(Get-ChildItem -LiteralPath $sitePackages -Filter "tomli_w-*.dist-info" -Directory -ErrorAction SilentlyContinue)
-  if (!(Test-Path -LiteralPath $tomliWModule) -and $tomliWDistInfo.Count -eq 0) {
-    throw "tomli_w was not installed into bundle site-packages: $sitePackages"
-  }
-
-  # Install VapourSynth python module from the pinned VS portable distribution (no PyPI dependency).
-  $wheelDir = Join-Path $VsCoreRoot "wheel"
-  $vsWheelCandidates = @(Get-ChildItem -LiteralPath $wheelDir -Filter "vapoursynth-*-abi3-win_amd64.whl" -File)
-  if ($vsWheelCandidates.Count -ne 1) {
-    throw "Expected exactly one VapourSynth wheel in $wheelDir, found $($vsWheelCandidates.Count)"
-  }
-  $vsWheel = $vsWheelCandidates[0].FullName
-  uv pip install --no-deps --only-binary :all: --target $sitePackages $vsWheel
-  Assert-LastExitCode -CommandLabel "uv pip install vapoursynth wheel"
-
-  # R81 wheels carry the runtime DLL inside the vapoursynth package directory.
-  # The launcher and validation PATH include this directory for Windows DLL lookup.
-  $vsDllPackage = Join-Path $sitePackages "vapoursynth\\libvapoursynth.dll"
-  if (!(Test-Path -LiteralPath $vsDllPackage)) {
-    throw "libvapoursynth.dll not found after wheel install in expected R81 package layout: $vsDllPackage"
-  }
-
-  Install-ProjectDistributionMetadata -BundleRoot $BundleRoot
-}
-
-function Install-PythonWheelArtifacts([string]$BundleRoot, [pscustomobject[]]$Artifacts, [hashtable]$Downloaded) {
-  $sitePackages = Join-Path $BundleRoot "app\\site-packages"
-
-  foreach ($artifact in $Artifacts) {
-    $artifactId = Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact"
-    $install = Get-RequiredProperty -Object $artifact -Name "install" -Context "artifact '$artifactId'"
-    $type = Get-RequiredStringProperty -Object $install -Name "type" -Context "artifact '$artifactId' install"
-    if ($type -ne "python_wheel") {
-      continue
-    }
-    $wheelPath = [string]$Downloaded[$artifactId]
-    if (!(Test-Path -LiteralPath $wheelPath)) {
-      throw "Python wheel artifact was not downloaded: $artifactId"
-    }
-    $sha256 = Get-RequiredStringProperty -Object $artifact -Name "sha256" -Context "artifact '$artifactId'"
-    $expectedBytes = [int64](Get-RequiredProperty -Object $artifact -Name "bytes" -Context "artifact '$artifactId'")
-    Assert-FileSize -FilePath $wheelPath -ExpectedBytes $expectedBytes
-    Assert-Sha256 -FilePath $wheelPath -ExpectedHex $sha256
-    uv pip install --reinstall --strict --no-deps --target $sitePackages $wheelPath
-    Assert-LastExitCode -CommandLabel "uv pip install $artifactId"
-  }
-
-}
-
-function Remove-UnusedQtWebEngineRuntime([string]$BundleRoot) {
-  $sitePackages = Join-Path $BundleRoot "app\site-packages"
-  $pySideRoot = [System.IO.Path]::Combine($sitePackages, "PySide6")
-  if (!(Test-Path -LiteralPath $pySideRoot -PathType Container)) {
-    throw "PySide6 package directory not found: $pySideRoot"
-  }
-
-  $resolvedSitePackages = [System.IO.Path]::GetFullPath($sitePackages)
-  $resolvedPySideRoot = (Resolve-Path -LiteralPath $pySideRoot).Path
-  $sitePackagesPrefix = $resolvedSitePackages.TrimEnd(
-    [System.IO.Path]::DirectorySeparatorChar,
-    [System.IO.Path]::AltDirectorySeparatorChar
-  ) + [System.IO.Path]::DirectorySeparatorChar
-  if (!$resolvedPySideRoot.StartsWith($sitePackagesPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Refusing to trim Qt runtime outside bundle site-packages: $resolvedPySideRoot"
-  }
-
-  $chromiumRuntimeNames = @(
-    "icudtl.dat",
-    "v8_context_snapshot.bin",
-    "v8_context_snapshot.debug.bin"
-  )
-  $excludedFiles = @(
-    Get-ChildItem -LiteralPath $resolvedPySideRoot -Recurse -File |
-      Where-Object {
-        $_.FullName.Substring($resolvedPySideRoot.Length + 1) -match "(?i)webengine" -or
-        ($_.Directory.Name -eq "resources" -and $_.Name -in $chromiumRuntimeNames)
-      }
-  )
-  $excludedBytes = [int64](($excludedFiles | Measure-Object -Property Length -Sum).Sum)
-  if ($excludedFiles.Count -ne 125 -or $excludedBytes -ne 359295997) {
-    throw "Unexpected Qt WebEngine deployment surface: files=$($excludedFiles.Count) bytes=$excludedBytes"
-  }
-  foreach ($file in $excludedFiles) {
-    Remove-Item -Force -LiteralPath $file.FullName
-  }
-
-  $remainingFiles = @(
-    Get-ChildItem -LiteralPath $resolvedPySideRoot -Recurse -File |
-      Where-Object {
-        $_.FullName.Substring($resolvedPySideRoot.Length + 1) -match "(?i)webengine" -or
-        ($_.Directory.Name -eq "resources" -and $_.Name -in $chromiumRuntimeNames)
-      }
-  )
-  if ($remainingFiles.Count -ne 0) {
-    throw "Qt WebEngine deployment exclusion was incomplete: $($remainingFiles.FullName -join ', ')"
-  }
-  Write-Host "WINDOWS_BUNDLE_PROOF qt_webengine_deployment=excluded files=$($excludedFiles.Count) bytes=$excludedBytes"
+  & $HostPython -B -I -S (Join-Path $PSScriptRoot "portable_runtime.py") @arguments
+  Assert-LastExitCode -CommandLabel "portable runtime projection"
 }
 
 function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
@@ -995,7 +473,6 @@ function Assert-BundleRuntime([string]$BundleRoot) {
   $mediaPath = Join-Path $BundleRoot "runtime-smoke.mp4"
   $comparisonOneMediaPath = Join-Path $BundleRoot "runtime-smoke-comparison-1.mp4"
   $comparisonTwoMediaPath = Join-Path $BundleRoot "runtime-smoke-comparison-2.mp4"
-  $legacyMediaIndexPath = "$mediaPath.lwi"
   $smokePath = Join-Path $BundleRoot "runtime-smoke.py"
   $locationPushed = $false
   try {
@@ -1035,9 +512,6 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     Remove-Item -Force -LiteralPath $comparisonTwoMediaPath -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-vsview.stdout.log") -ErrorAction SilentlyContinue
     Remove-Item -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-vsview.stderr.log") -ErrorAction SilentlyContinue
-    Remove-Item -Force -LiteralPath $legacyMediaIndexPath -ErrorAction SilentlyContinue
-    Get-ChildItem -LiteralPath $BundleRoot -Filter "runtime-smoke*.mp4.frame-compare-*.lwi" -File -ErrorAction SilentlyContinue |
-      Remove-Item -Force -ErrorAction SilentlyContinue
     Remove-Item -Recurse -Force -LiteralPath (Join-Path $BundleRoot "runtime-smoke-cache") -ErrorAction SilentlyContinue
     if ($locationPushed) {
       Pop-Location
@@ -1054,29 +528,6 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE" -Value $originalFfmpegExecutable
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE" -Value $originalFfprobeExecutable
   }
-}
-
-function Copy-PythonDistLicenses([string]$SitePackages, [string]$LicensesPythonDir) {
-  Ensure-Directory -Path $LicensesPythonDir
-  $licensePatterns = @("LICENSE*", "COPYING*")
-  $distInfoDirs = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter "*.dist-info" -ErrorAction SilentlyContinue)
-  foreach ($distInfo in $distInfoDirs) {
-    # Some wheels ship license texts under *.dist-info\licenses (not just LICENSE* at dist-info root).
-    foreach ($pattern in $licensePatterns) {
-      $licenseFiles = @(Get-ChildItem -LiteralPath $distInfo.FullName -File -Filter $pattern -ErrorAction SilentlyContinue)
-      foreach ($match in $licenseFiles) {
-        $destName = "{0}__{1}" -f $distInfo.Name, $match.Name
-        Copy-Item -Force -LiteralPath $match.FullName -Destination (Join-Path $LicensesPythonDir $destName)
-      }
-    }
-
-    $distInfoLicenses = Join-Path $distInfo.FullName "licenses"
-    if (Test-Path -LiteralPath $distInfoLicenses -PathType Container) {
-      $destDir = Join-Path $LicensesPythonDir ("{0}__licenses" -f $distInfo.Name)
-      Copy-Item -Recurse -Force -LiteralPath $distInfoLicenses -Destination $destDir
-    }
-  }
-
 }
 
 function Remove-PythonBytecodeCaches([string]$BundleRoot) {
@@ -1117,51 +568,22 @@ function Copy-ManifestLicenseFiles(
       "{0}-{1}{2}" -f $ArtifactId, $Spdx, [System.IO.Path]::GetExtension($baseName)
     }
 
-    Copy-Item -Force -LiteralPath $resolvedPath -Destination (Join-Path $LicensesDir $destName)
+    if ($destName -cnotmatch '\A[A-Za-z0-9._+() -]+\z' -or $destName -match '[. ]$') {
+      throw "Unsafe bundle license filename: $destName"
+    }
+    $destination = Join-Path $LicensesDir $destName
+    if (Test-Path -LiteralPath $destination) { throw "Duplicate bundle license filename: $destName" }
+    Copy-Item -LiteralPath $resolvedPath -Destination $destination
   }
 }
 
 function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
   $licensesDir = Join-Path $BundleRoot "licenses"
   Ensure-Directory -Path $licensesDir
-  $pythonLicensesDir = Join-Path $licensesDir "python"
-  Ensure-Directory -Path $pythonLicensesDir
-
-  # Project license
-  Copy-Item -Force -LiteralPath (Join-Path $RepoRoot "LICENSE") -Destination (Join-Path $licensesDir "frame-compare-LICENSE.txt")
-  Copy-PythonDistLicenses -SitePackages (Join-Path $BundleRoot "app\\site-packages") -LicensesPythonDir $pythonLicensesDir
-
-  $sourceUrls = @(
-    "Qt source: https://download.qt.io/official_releases/qt/",
-    "FFmpeg source: https://ffmpeg.org/download.html",
-    "VapourSynth source: https://github.com/vapoursynth/vapoursynth",
-    "L-SMASH-Works source: https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works",
-    "vs-placebo source: https://github.com/Lypheo/vs-placebo"
-  )
-  Set-Content -LiteralPath (Join-Path $licensesDir "SOURCE_URLS.txt") -Value ($sourceUrls -join "`r`n") -Encoding ASCII
-
   foreach ($artifact in $Artifacts) {
     $id = Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact"
-    $url = Get-RequiredStringProperty -Object $artifact -Name "url" -Context "artifact '$id'"
-    $fileName = Split-Path -Leaf $url
     $license = Get-RequiredProperty -Object $artifact -Name "license" -Context "artifact '$id'"
     $spdx = Get-RequiredStringProperty -Object $license -Name "spdx" -Context "artifact '$id' license"
-
-    if ($fileName -like "*.zip") {
-      # Best-effort: copy LICENSE.txt if present in the zip.
-      if ($id -like "ffmpeg-*") {
-        $ffmpegLicense = Join-Path $BundleRoot "ffmpeg\\LICENSE.txt"
-        if (Test-Path -LiteralPath $ffmpegLicense) {
-          Copy-Item -Force -LiteralPath $ffmpegLicense -Destination (Join-Path $licensesDir "ffmpeg-LICENSE.txt")
-        }
-      }
-      if ($id -eq "python-embed-amd64") {
-        $pyLicense = Join-Path $BundleRoot "python\\LICENSE.txt"
-        if (Test-Path -LiteralPath $pyLicense) {
-          Copy-Item -Force -LiteralPath $pyLicense -Destination (Join-Path $licensesDir "python-LICENSE.txt")
-        }
-      }
-    }
 
     $manifestLicenseFiles = Get-OptionalProperty -Object $license -Name "files"
     if ($null -ne $manifestLicenseFiles) {
@@ -1201,7 +623,6 @@ function Assert-RequiredPySideLicenseMetadata([string]$BundleRoot) {
 }
 
 function Write-BundleInventory([string]$BundleRoot) {
-  $python = Join-Path $BundleRoot "python\\python.exe"
   $inventoryScript = Join-Path $RepoRoot "tools\\windows_portable\\write_bundle_inventory.py"
   if (!(Test-Path -LiteralPath $inventoryScript -PathType Leaf)) {
     throw "Bundle inventory owner not found: $inventoryScript"
@@ -1210,14 +631,14 @@ function Write-BundleInventory([string]$BundleRoot) {
   $arguments = @(
     $inventoryScript,
     "--bundle-root", $BundleRoot,
-    "--manifest", $ManifestPath,
+    "--manifest", (Join-Path $BundleRoot "manifest.json"),
     "--repo-root", $RepoRoot,
     "--output", (Join-Path $BundleRoot "bundle_inventory.json")
   )
   if ($RequireReleasePublicKey) {
     $arguments += "--require-clean-repo"
   }
-  & $python -B @arguments
+  & $HostPython -B -I -S @arguments
   Assert-LastExitCode -CommandLabel "Windows bundle inventory"
 }
 
@@ -1228,37 +649,22 @@ function Main() {
 
   $manifest = Get-Manifest
   Assert-BuildInputs -Manifest $manifest
+  if ($RequireReleasePublicKey -and @(
+    git -C $RepoRoot status --porcelain=v1 --untracked-files=all
+  ).Count -gt 0) {
+    throw "Portable release builds require a clean, exact source checkout."
+  }
   $artifacts = @(Get-RequiredProperty -Object $manifest -Name "artifacts" -Context "manifest")
   $reservedOutput = $null
   try {
     $reservedOutput = New-AtomicallyReservedDirectory -Path $OutDir -Label "OutDir"
     Ensure-Directory -Path $CacheDir
 
-    $downloaded = @{}
-    foreach ($artifact in $artifacts) {
-      $path = Download-Artifact -Artifact $artifact
-      $downloaded[(Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact")] = $path
-    }
-
-    # Copy pin manifest into the bundle root.
-    Copy-Item -Force -LiteralPath $ManifestPath -Destination (Join-Path $OutDir "manifest.json")
-
-    # Install artifacts per manifest mapping.
-    foreach ($artifact in $artifacts) {
-      $id = Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact"
-      $path = $downloaded[$id]
-      Install-Artifact -BundleRoot $OutDir -Artifact $artifact -DownloadedPath $path
-    }
-
-    # Layout: app/
+    $HostPython = (& uv python find --system --no-project --no-python-downloads 3.13).Trim()
+    Assert-LastExitCode -CommandLabel "find the host Python 3.13 interpreter"
+    Initialize-PortableRuntime -BundleRoot $OutDir
     Copy-RepoApp -BundleRoot $OutDir
-    Install-PythonDeps -BundleRoot $OutDir -VsCoreRoot (Join-Path $OutDir "vs\\core")
-    Install-PythonWheelArtifacts -BundleRoot $OutDir -Artifacts $artifacts -Downloaded $downloaded
-    Remove-UnusedQtWebEngineRuntime -BundleRoot $OutDir
     Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app"))
-    Configure-EmbeddedPython -BundleRoot $OutDir
-    Assert-BundleRuntime -BundleRoot $OutDir
-    Remove-PythonBytecodeCaches -BundleRoot $OutDir
 
     # Launchers
     Write-LauncherFiles -BundleRoot $OutDir
@@ -1275,6 +681,11 @@ function Main() {
     Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts
     Assert-RequiredPySideLicenseMetadata -BundleRoot $OutDir
     Write-BundleInventory -BundleRoot $OutDir
+
+    if (!$AssemblyOnly) {
+      Assert-BundleRuntime -BundleRoot $OutDir
+      Remove-PythonBytecodeCaches -BundleRoot $OutDir
+    }
 
     Write-Host "OK: portable bundle assembled at $OutDir"
   } catch {

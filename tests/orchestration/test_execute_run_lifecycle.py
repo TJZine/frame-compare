@@ -37,6 +37,7 @@ from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
+from frame_compare.vs.loader import DefaultVSLoader
 from frame_compare.vs.types import SourceInfo
 from tests.render_test_support import prepared_jobs
 from tests.run_request_support import make_run_request
@@ -211,9 +212,11 @@ def test_execute_run_propagates_collection_warning_once_through_result_summary_a
         run_warnings=[],
     )
     captured_collection: SlowpicsCollectionMetadata | None = None
+    prepared_loader = DefaultVSLoader()
 
     async def fake_execute_prep(request: RunRequest, deps: RunDependencies) -> PrepState:
         del request
+        deps.vs_loader = prepared_loader
         assert deps.capture_reserved_run is not None
         deps.capture_reserved_run(capture)
         return prep
@@ -223,8 +226,10 @@ def test_execute_run_propagates_collection_warning_once_through_result_summary_a
         *,
         frames: list[int],
         runner: object,
+        vs_loader: object,
     ) -> RenderPhaseOutput:
         del runner
+        assert vs_loader is prepared_loader
         screenshot_dir = workspace.screenshots_dir
         assert screenshot_dir is not None
         screenshot_dir.mkdir(parents=True, exist_ok=True)
@@ -1291,8 +1296,10 @@ async def test_confirmed_upload_facts_survive_cancellation(
         )
         return prep
 
-    def fake_render(_ctx: RunContext, *, frames: list[int], runner: object) -> RenderPhaseOutput:
-        del runner
+    def fake_render(
+        _ctx: RunContext, *, frames: list[int], runner: object, vs_loader: object
+    ) -> RenderPhaseOutput:
+        del runner, vs_loader
         screenshots = workspace.screenshots_dir
         assert screenshots is not None
         screenshots.mkdir()

@@ -426,39 +426,77 @@ never searches parent directories.
 - `generated/clip_probe.toml` or `<resolved paths.generated_dir>/clip_probe.toml`:
   shared clip probe cache used by `--from-cache-only` prevalidation before
   run-folder reservation. The file format remains version 1, while each probe key
-  uses key schema 3 and includes the scoped media-runtime probe fingerprint so a
+  uses key schema 4 and includes the scoped media-runtime probe fingerprint so a
   selected decoder or standalone FFmpeg/ffprobe lineage change in the managed Windows
   portable or Debian/Docker profiles misses without invalidating unrelated file-format
-  data. Probe keys use the resolved media path. Entries keyed by a discovered
+  data. Each reusable entry also binds the resolved source's device, inode, size,
+  mtime and change time to the verified ffprobe executable and reported runtime.
+  Sources without that strict identity or reusable probe authority remain usable
+  through a cold private open but are not persisted in this cache. Probe keys use
+  the resolved media path. Entries keyed by a discovered
   symlink miss and require a normal cold probe before cache-only reuse. Cold
-  probing opens the resolved target, so the probe's decoder index is adjacent
-  to that target. Pair names and report identity still use the discovered path.
+  probing opens the resolved target. Pair names and report identity still use the discovered path.
   Older probe keys miss so source stream admission runs again. Persisted probe
   dimensions and frame counts use bounded positive signed-32-bit decoder fields, while
   FPS numerator and denominator use positive signed-64-bit components matching R81's
   `VSVideoInfo` representation. Filesystem size/mtime and cache-safety bounds remain
   deliberate signed-64-bit limits rather than claims about decoder field widths;
   malformed entries are skipped individually.
-- `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`: Frame
-  Compare-owned L-SMASH-Works index. The token is profile scoped (currently
-  `lsw1310-f125953022b6` on managed/portable Windows,
-  `lsw1310-1ec4b81a7724` on unmanaged Windows, and `lsw1310-877219813395`
-  on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
-  their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
-  changes. Legacy adjacent `<media>.lwi` files are ignored,
-  not deleted. A corrupt owned index is removed and rebuilt once; removal/rebuild
-  failure is warned and an unusable index location falls back to a cache-free source
-  open. Generated VSView sessions reuse this exact owned path for reference and
-  comparison source loads, allowing L-SMASH-Works to create it there when missing.
-  The managed VSView preview runtime leaves rejected parent-owned indexes untouched and
-  retries only index-construction failures cache-free.
+- `<resolved paths.generated_dir>/cache/source-indexes/`: `ManagedSourceIndexCache`
+  owns persistent L-SMASH-Works indexes. The entry key binds the resolved media
+  path and the profile's decoder token: `lsw1310-f125953022b6` for managed Windows,
+  `lsw1310-1ec4b81a7724` for unmanaged Windows, and `lsw1310-877219813395` for
+  Debian/Docker. Managed Windows and Debian/Docker tokens isolate their
+  packaged decoder ABIs. Unmanaged profile tokens do not verify native ABI
+  changes. Under a per-entry lock, reuse checks the cache paths and matches the
+  source identity (device, inode, size, mtime and change time), geometry policy
+  version, geometry probe token, decoder runtime token, and index size and SHA-256.
+  The probe token binds the resolved ffprobe executable path and file identity
+  to its reported program and library versions. Windows reads NTFS change time
+  from the source handle. Sources without that Windows identity or a verifiable
+  probe token use a private cache-free open. POSIX uses ctime.
+  A miss or invalid entry builds with `cache=1` in an unpredictable private
+  staging directory beneath the cache root. Publication replaces the stable
+  index and commits its metadata last, after rechecking the same source identity
+  at the commit boundary. Older cache metadata is rebuilt on demand. A valid
+  stable index opens with `cache=0`. A generated VSView session may reuse a
+  validated parent-owned index with `cache=0`. The child checks its own probe
+  token and re-establishes cache authority under the lease through the native open.
+  Missing or rejected indexes use a private cache-free path. Cache-free opens
+  explicitly direct L-SMASH-Works
+  to a disposable private directory. The managed loader never reads,
+  writes, migrates, or deletes media-adjacent indexes, including old
+  `<media>.lwi` and `<media>.frame-compare-lsw1310-*.lwi` files.
 
-The subprocess executable resolver finds optional ffprobe, including the portable
-runtime's absolute override. When it resolves, source admission refuses files
-containing multiple video streams other than attached pictures. Native-only loading
-remains available when ffprobe is absent. Sources whose native frame properties leave
-the HDR signal unspecified still need ffprobe and fail with a typed source-load error
-without it. HDR probing and FFmpeg screenshots use the
+The subprocess executable resolver finds ffprobe, including the portable runtime's
+absolute override. On Windows it refuses `.cmd` and `.bat` executables after
+resolution, including configured overrides and resolved link targets, because the
+operating system can interpret batch arguments through a command shell even when
+Python requests direct process execution. Source and VSView admission begin with a
+bounded header probe and require exactly one non-attached video stream. The same probe reports the
+detected demuxer. Native opening requires a positively identified AVI,
+Matroska/WebM, MOV/MP4-family, MPEG-TS, or elementary MPEG-2 source. Only the first
+four single-file container families qualify for managed reuse with the packaged
+defaults, which disable MOV external tracks. Elementary MPEG-2 retains its full-scan
+private-open path. Manifests such as ffconcat and sources with missing, malformed,
+or unrecognized format information are refused before native code because a
+top-level file identity cannot cover independently changing referenced media. Cold
+opens and private cache-free opens, including the VSView fallback, scan the frame
+records emitted by ffprobe before native indexing or decoding. For each stream,
+the coded and visible dimensions must stay constant and within the canvas policy.
+The scan uses multiple decoder threads and runs once per admission, even if a
+managed build falls back to a private open. The scan stops if ffprobe produces no
+stdout for 120 seconds. Its total duration can exceed that interval while frames
+keep arriving. An explicit ffprobe pixel-limit rejection causes refusal even
+when ffprobe exits successfully. Ordinary decoder diagnostics within the output
+budget do not cause refusal on their own. Warm managed opens can reuse the scan
+proof under the cache checks above after the header probe. The cold scan remains
+because a real mixed-resolution H.264 transport stream reproduced a native
+L-SMASH heap abort when admitted without it. L-SMASH playback also receives an owned
+`max_pixels` option that caller-supplied decoder options cannot remove. Absent
+ffprobe, missing or changing frame dimensions, and multiple real video streams fail
+with a typed source-load error on the managed loader path.
+HDR probing and FFmpeg screenshots use the
 first video stream that is not an attached picture; extraction explicitly maps
 `0:V:0`. Selected-video
 identity is not persisted.
@@ -892,7 +930,15 @@ upstream worker stalls in the non-display Windows runtime; visible launches reta
 
 External runtime boundaries:
 
-- FFmpeg / ffprobe subprocess calls
+- FFmpeg / ffprobe subprocess calls. On Windows, the shared launcher starts the
+  process with normal `Popen` and immediately assigns it to a preconfigured
+  kill-on-close Job Object. A descendant started before assignment can escape
+  the job. An interrupt inside `Popen` can also prevent it from returning the
+  child handle for cleanup. Paired alignment and VSView use the same launcher.
+  The owner uses bounded cleanup on failure or cancellation. On leader exit,
+  capture closes the job so job-owned descendants cannot retain its pipes.
+  Resolved `.cmd` and `.bat` launch targets are refused before process creation;
+  supported media tools must resolve to native executables.
 - VapourSynth runtime and plugins
 - TMDB HTTP API
 - slow.pics HTTP API
@@ -939,6 +985,11 @@ Keep these integrations at their current owners:
 - VS loading, runtime-versioned Frame Compare-owned L-SMASH-Works index recovery,
   and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
+
+The CLI desktop adapters launch a credential-filtered Python broker with standard
+streams directed to the null device. The CLI waits up to 10 seconds for the broker
+and kills and reaps it on timeout. Desktop handlers and clipboard selection owners
+can outlive the broker, including after a broker failure or timeout.
 
 The default Docker behavior is intentionally narrower than the native Windows
 portable runtime: it preserves deterministic headless software Vulkan for backend

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -10,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from ._helpers import powershell_exe as _powershell_exe
-from ._helpers import read_text_or_fail as _read_text_or_fail
 from ._helpers import run_shim as _run_shim
 from ._helpers import setup_install_layout as _setup_install_layout
 from ._helpers import write_valid_config_json as _write_valid_config_json
@@ -555,13 +553,6 @@ def test_windows_portable_generated_bundle_launcher_restores_environment(
     if exe is None:
         pytest.skip("pwsh/powershell not available")
 
-    build_script = _read_text_or_fail(
-        repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    )
-    match = re.search(r"\$ps1 = @'\r?\n(?P<launcher>.*?)\r?\n'@", build_script, re.DOTALL)
-    if match is None:
-        pytest.fail("Generated bundle launcher is missing")
-
     bundle_dir = tmp_path / "bundle"
     python_dir = bundle_dir / "python"
     cli_dir = bundle_dir / "app" / "src" / "frame_compare" / "cli"
@@ -603,7 +594,27 @@ def test_windows_portable_generated_bundle_launcher_restores_environment(
         encoding="utf-8",
     )
     launcher_path = bundle_dir / "frame-compare.ps1"
-    launcher_path.write_text(match.group("launcher"), encoding="utf-8")
+    emitter = repo_root / "tools" / "windows_portable" / "portable_launchers.ps1"
+    generated = subprocess.run(
+        [
+            exe,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            '$ErrorActionPreference = "Stop"; '
+            ". $env:FC_TEST_LAUNCHER_EMITTER; "
+            "Write-LauncherFiles -BundleRoot $env:FC_TEST_BUNDLE_ROOT",
+        ],
+        env=os.environ
+        | {"FC_TEST_LAUNCHER_EMITTER": str(emitter), "FC_TEST_BUNDLE_ROOT": str(bundle_dir)},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert generated.returncode == 0, generated.stdout + generated.stderr
+    assert launcher_path.is_file()
 
     proof_script = tmp_path / "prove-generated-launcher-env-restore.ps1"
     proof_script.write_text(

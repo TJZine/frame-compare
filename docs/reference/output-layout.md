@@ -53,14 +53,11 @@ that rely only on documented artifacts.
 
 Files ending in `.lock` coordinate concurrent writers; leave them alone.
 
-Frame Compare writes its L-SMASH-Works `.lwi` indexes beside each source. Their filename
-includes a runtime-scoped token. Frame Compare does not adopt ambiguous legacy
-`<media>.lwi` files.
-
-When media is mounted read-only, as on the default Docker route, no index file can be
-written. A usable existing Frame Compare-owned index can still be reused. If no usable
-index is available and index construction fails, the cache-free fallback rebuilds it
-in memory each time the source loads; see [Docker](../getting-started/docker.md#the-index-warning).
+Frame Compare stores durable L-SMASH-Works indexes and their metadata in
+`cache/source-indexes/` under this generated-data root. The cache works with
+read-only media mounts when the generated root is writable. Legacy indexes beside
+media are left untouched. If the generated cache is unusable, the loader can fall
+back to indexing in memory. See [Docker](../getting-started/docker.md#the-index-warning).
 
 ## Portability
 

@@ -152,9 +152,8 @@ def test_docker_gui_source_has_required_markers_and_narrow_x11_permissions(repo_
     assert '"$service" -c \\' in script
     assert '"$service" -lc \\' not in script
     assert "outputs[index].clip.get_frame(0)" in script
-    assert "source_index_path(reference)" in script
-    assert "source_index_path(comparison)" in script
-    assert "source_index_path(comparison_2)" in script
+    assert "source_indexes={reference: reference_index}" in script
+    assert 'list(index_cache.root.glob("*.lwi")) != [reference_index]' in script
 
 
 @pytest.mark.parametrize("tooling", [False, True], ids=["absent", "uv-present"])

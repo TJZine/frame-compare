@@ -256,18 +256,13 @@ retaining its path, ordering, atomic-write behavior, and offset semantics. Older
 unsupported versions are recoverable cache misses without migration; the next
 manual save replaces them.
 
-Frame Compare-owned L-SMASH-Works indexes use a profile-scoped filename:
-
-```text
-<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi
-```
-
-The current managed/portable Windows token is `lsw1310-f125953022b6`; the unmanaged
-Windows token is `lsw1310-1ec4b81a7724`; and the Debian/Docker token is
-`lsw1310-877219813395`. Legacy `<media>.lwi` files adjacent to the media file
-are ignored rather than deleted. A corrupt Frame Compare-owned index is removed and
-rebuilt once, with a warning when removal or rebuilding fails and a cache-free source
-open as the last recovery path for an unusable index location.
+Frame Compare keys its managed L-SMASH-Works cache under
+`<resolved paths.generated_dir>/cache/source-indexes/` by resolved source path and
+profile-scoped decoder token. The current managed/portable Windows token is
+`lsw1310-f125953022b6`, the unmanaged Windows token is `lsw1310-1ec4b81a7724`, and the
+Debian/Docker token is `lsw1310-877219813395`. An unmanaged token does not attest to
+the installed decoder ABI. Legacy media-adjacent indexes remain inert. See
+[managed index behavior](current-architecture.md#shared-caches-and-decoder-indexes).
 
 ## Portable update boundary
 
@@ -319,7 +314,9 @@ therefore excludes the pinned wheel's WebEngine/Chromium files and verifies thei
 absence from both the built and extracted bundle. Release remains blocked until that
 absence is proved in the canonical ZIP and the deployed Qt subset has matching
 third-party notices and SBOM/provenance, complete Qt Multimedia FFmpeg lineage, a
-distributor-controlled corresponding-source offer, and legal adjudication.
+distributor-controlled corresponding-source offer, and legal adjudication. See the
+[final-artifact security evidence](ENGINEERING_RUNBOOK.md#final-artifact-security-evidence)
+release gate for native advisory coverage and the retained evidence.
 
 This classification follows [FFmpeg's GPL configuration rule](https://ffmpeg.org/doxygen/7.1/md_LICENSE.html)
 and the exact [Debian Trixie package copyright record](https://sources.debian.org/copyright/license/ffmpeg/7%3A7.1.5-0%2Bdeb13u1/).

@@ -50,6 +50,7 @@ from frame_compare.utils.alignment_review_projection import build_audio_review_p
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.paths import require_managed_immediate_child
 from frame_compare.vs.loader import DefaultVSLoader
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 
 SPEED_CHANGE_CATEGORY = "speed_change"
 NOT_APPLIED = "not_applied"
@@ -412,7 +413,7 @@ async def run_benchmark(labels: Path, output: Path) -> bool:
     """Run every labelled pair, print the sanitized summary, and write the JSON."""
     pairs = load_labels(labels)
     output.mkdir(parents=True, exist_ok=True)
-    loader = DefaultVSLoader()
+    loader = DefaultVSLoader(index_cache=ManagedSourceIndexCache(output.resolve()))
     started = time.monotonic()
     records: list[dict[str, object]] = []
     _print_table_header()

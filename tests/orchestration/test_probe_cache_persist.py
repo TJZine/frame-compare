@@ -16,6 +16,7 @@ from frame_compare.orchestration.preparation import (
 )
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
+    live_probe_fingerprint,
     load_clip_probe_cache,
     merge_shared_clip_probe_cache,
     save_clip_probe_cache,
@@ -42,7 +43,7 @@ def _snapshot(
     width: int = 1920,
 ) -> ClipProbeSnapshot:
     return ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(Path(name), size, mtime),
+        fingerprint=ClipFingerprint(Path(name), size, mtime, source_token="a" * 64),
         width=width,
         height=1080,
         num_frames=100,
@@ -205,9 +206,8 @@ def test_shared_merge_invalid_utf8_preserves_unreadable_existing_cache(tmp_path:
 
 
 def _snapshot_from_file(path: Path) -> ClipProbeSnapshot:
-    stats = path.stat()
     return ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(path, stats.st_size, stats.st_mtime_ns),
+        fingerprint=live_probe_fingerprint(path).fingerprint,
         width=1920,
         height=1080,
         num_frames=100,

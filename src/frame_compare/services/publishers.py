@@ -3,6 +3,7 @@
 import asyncio
 import math
 import random
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -24,13 +25,17 @@ from frame_compare.services.errors import (
     SlowpicsUnavailableError,
 )
 from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
+from frame_compare.services.slowpics_url import (
+    SLOWPICS_BASE_URL,
+    comparison_url,
+    is_slowpics_identifier,
+)
 from frame_compare.services.types import SlowpicsCollectionMetadata
 from frame_compare.utils.progress import UPLOAD_PRESENTATION
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 
 log = structlog.get_logger()
 
-SLOWPICS_BASE_URL = "https://slow.pics"
 SLOWPICS_COMPARISON_URL = f"{SLOWPICS_BASE_URL}/comparison"
 SLOWPICS_METADATA_UPLOAD_URL = f"{SLOWPICS_BASE_URL}/upload/comparison"
 SLOWPICS_IMAGE_UPLOAD_URL_TEMPLATE = f"{SLOWPICS_BASE_URL}/upload/image/{{image_uuid}}"
@@ -63,6 +68,9 @@ _SLOWPICS_REJECTION_REASONS = {
     "DAILY_LIMIT_UPLOAD": "the daily upload limit has been reached",
     "LIMIT_COMPARISON_UPLOAD": "the request contains more than 512 comparisons",
 }
+# XSRF is sent as a header, never interpolated into a path. Its percent-encoded
+# cookie can contain standard base64 punctuation after decoding.
+_XSRF_TOKEN = re.compile(r"[A-Za-z0-9_+/-]{1,2048}={0,2}")
 
 type _MultipartTextFields = list[tuple[str, tuple[None, str]]]
 
@@ -81,8 +89,7 @@ class PublishResult:
 class _SlowpicsMetadataResponse:
     """Validated slow.pics metadata response needed for image uploads."""
 
-    key: str
-    first_comparison_key: str | None
+    comparison_url: str
     collection_uuid: str
     image_uuids: tuple[tuple[str, ...], ...]
 
@@ -148,10 +155,8 @@ class SlowpicsPublisher:
                 xsrf_token=xsrf_token,
                 browser_id=browser_id,
             )
-            url_key = metadata_response.first_comparison_key or metadata_response.key
-            url = f"{SLOWPICS_BASE_URL}/c/{url_key}"
             log.debug("slowpics_upload_complete")
-            return url
+            return metadata_response.comparison_url
 
         except Exception as exc:
             if isinstance(
@@ -525,7 +530,12 @@ def _xsrf_token_from_cookies(client: httpx.AsyncClient) -> str:
     raw_token = client.cookies.get("XSRF-TOKEN")
     if raw_token is None or not raw_token:
         raise SlowpicsError("Missing slow.pics XSRF token")
-    return unquote(raw_token)
+    if len(raw_token) > 3 * 2050:
+        raise SlowpicsError("Invalid slow.pics XSRF token")
+    token = unquote(raw_token)
+    if _XSRF_TOKEN.fullmatch(token) is None:
+        raise SlowpicsError("Invalid slow.pics XSRF token")
+    return token
 
 
 def _browser_id_from_cookies(client: httpx.AsyncClient) -> str:
@@ -533,6 +543,8 @@ def _browser_id_from_cookies(client: httpx.AsyncClient) -> str:
     if browser_id is None or browser_id == SLOWPICS_BROWSER_ID_SENTINEL or not browser_id:
         browser_id = str(uuid4())
         client.cookies.set("BROWSER-ID", browser_id, domain="slow.pics", path="/")
+    elif not is_slowpics_identifier(browser_id):
+        raise SlowpicsError("Invalid slow.pics browser ID")
     return browser_id
 
 
@@ -659,30 +671,20 @@ def _parse_metadata_response(
         raise SlowpicsError("Invalid metadata response from slow.pics")
     response_payload = cast(dict[object, object], payload)
 
-    key = _required_response_string(response_payload, "key")
-    first_comparison_key = _optional_response_string(response_payload, "firstComparisonKey")
-    collection_uuid = _required_response_string(response_payload, "collectionUuid")
+    key = _response_identifier(response_payload.get("key"))
+    raw_first_key = response_payload.get("firstComparisonKey")
+    first_comparison_key = None if raw_first_key is None else _response_identifier(raw_first_key)
+    collection_uuid = _response_identifier(response_payload.get("collectionUuid"))
     image_uuids = _response_image_matrix(response_payload.get("images"), upload_plan)
     return _SlowpicsMetadataResponse(
-        key=key,
-        first_comparison_key=first_comparison_key,
+        comparison_url=comparison_url(first_comparison_key or key),
         collection_uuid=collection_uuid,
         image_uuids=image_uuids,
     )
 
 
-def _required_response_string(payload: dict[object, object], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value:
-        raise SlowpicsError("Invalid metadata response from slow.pics")
-    return value
-
-
-def _optional_response_string(payload: dict[object, object], key: str) -> str | None:
-    value = payload.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value:
+def _response_identifier(value: object) -> str:
+    if not isinstance(value, str) or not is_slowpics_identifier(value):
         raise SlowpicsError("Invalid metadata response from slow.pics")
     return value
 
@@ -697,18 +699,18 @@ def _response_image_matrix(
         raise SlowpicsError("Invalid metadata response from slow.pics")
 
     rows: list[tuple[str, ...]] = []
+    seen: set[str] = set()
     for raw_row, planned_row in zip(raw_rows, upload_plan.rows, strict=True):
         if not isinstance(raw_row, list):
             raise SlowpicsError("Invalid metadata response from slow.pics")
         raw_image_uuids = cast(list[object], raw_row)
         if len(raw_image_uuids) != len(planned_row.images):
             raise SlowpicsError("Invalid metadata response from slow.pics")
-        image_uuids: list[str] = []
-        for raw_image_uuid in raw_image_uuids:
-            if not isinstance(raw_image_uuid, str) or not raw_image_uuid:
-                raise SlowpicsError("Invalid metadata response from slow.pics")
-            image_uuids.append(raw_image_uuid)
-        rows.append(tuple(image_uuids))
+        row = tuple(_response_identifier(value) for value in raw_image_uuids)
+        if any(identifier in seen for identifier in row) or len(set(row)) != len(row):
+            raise SlowpicsError("Invalid metadata response from slow.pics")
+        seen.update(row)
+        rows.append(row)
     return tuple(rows)
 
 

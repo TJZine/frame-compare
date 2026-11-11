@@ -238,6 +238,7 @@ def render_screenshots_from_batch_detailed(
         overlay_mode=resolved_options.overlay_mode,
         renderer=target_renderer,
         ffmpeg_runner=resolved_ffmpeg_runner,
+        vs_loader=resolved_options.vs_loader,
     )
 
     return render_clip_jobs(

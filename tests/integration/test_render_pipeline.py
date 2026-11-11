@@ -3,6 +3,7 @@ import os
 import signal
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -18,7 +19,6 @@ from frame_compare.render.types import (
     OverlayMode,
     RenderRequest,
 )
-from frame_compare.utils import subproc
 from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
@@ -118,8 +118,10 @@ def test_ffmpeg_batch_resolves_relative_path_from_caller(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "ffmpeg").symlink_to(ffmpeg)
+    (bin_dir / "ffprobe").symlink_to(Path(resolve_executable("ffprobe")).absolute())
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_FFPROBE_EXECUTABLE", raising=False)
     monkeypatch.setenv("PATH", "bin")
 
     staging = Path("staging")
@@ -140,12 +142,12 @@ def test_ffprobe_count_handles_child_exit_with_cancellation_pending(
     returncodes: list[int] = []
 
     class CountProcess(subprocess.Popen[bytes]):
-        def wait(self, timeout: float | None = None) -> int:
+        def poll(self) -> int | None:
             if self.returncode is not None:
-                return super().wait(timeout)
+                return self.returncode
             if interrupt:
-                self.send_signal(signal.SIGINT)
-            # Queue cancellation before the real wait result reaches run_subprocess.
+                os.kill(self.pid, signal.SIGINT)
+            # Queue cancellation before the real exit status reaches run_subprocess.
             # This forces the race without relying on the scheduler or polling interval.
             try:
                 code = super().wait(timeout=5)
@@ -158,29 +160,23 @@ def test_ffprobe_count_handles_child_exit_with_cancellation_pending(
             task.cancel()
             return code
 
-    def start_count(
-        argv: list[str], *, cwd: Path | None, stdout: int, stderr: int, shell: bool
-    ) -> subprocess.Popen[bytes]:
-        return CountProcess(
-            argv,
-            cwd=cwd,
-            stdin=subprocess.DEVNULL if not interrupt else subprocess.PIPE,
-            stdout=stdout,
-            stderr=stderr,
-            shell=shell,
-        )
+    def start_count(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        assert kwargs["start_new_session"] is True
+        if interrupt:
+            kwargs["stdin"] = subprocess.PIPE
+        return CountProcess(argv, **kwargs)
 
-    monkeypatch.setattr(subproc, "Popen", start_count)
+    monkeypatch.setattr(subprocess, "Popen", start_count)
     runner = DefaultFFmpegRunner()
     source = Path("pipe:0") if interrupt else tmp_path / "absent.mkv"
 
     async def run_count() -> None:
         if interrupt:
             with pytest.raises(_RunInterrupt):
-                runner.validate_source_frame_count(source, 4, 1)
+                runner.validate_source(source, (100, 100), 4, 1)
         else:
             with pytest.raises(FrameExtractionError, match="Could not count") as exc:
-                runner.validate_source_frame_count(source, 4, 1)
+                runner.validate_source(source, (100, 100), 4, 1)
             assert isinstance(exc.value.__cause__, subprocess.CalledProcessError)
         await cancellation_checkpoint()
 
@@ -488,3 +484,52 @@ def test_ffmpeg_padding_preserves_lossless_rgb_samples(
         assert image.crop((0, 0, 16, 96)).getbbox() is None
         assert image.crop((16, 0, 80, 96)).tobytes() == source.tobytes()
         assert image.crop((80, 0, 96, 96)).getbbox() is None
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("batch", [False, True], ids=["single", "batch"])
+def test_equal_count_source_geometry_change_rejects_prepared_geometry(
+    mock_video_path: Path, tmp_path: Path, batch: bool
+) -> None:
+    from frame_compare.render.geometry import GeometryRect, SourceGeometry, plan_render_geometry
+
+    [plan] = plan_render_geometry(
+        (SourceGeometry(100, 100, GeometryRect(0, 0, 100, 100), "full_frame"),),
+        mode="native",
+    )
+    replacement = tmp_path / "replacement.mp4"
+    run_subprocess(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=blue:s=128x96:r=10",
+            "-frames:v",
+            "3",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(replacement),
+        ],
+        timeout_seconds=15,
+    )
+    replacement.replace(mock_video_path)
+    runner = DefaultFFmpegRunner()
+    # The replacement still agrees with the prepared timeline; only geometry changed.
+    runner.validate_source(mock_video_path, (128, 96), 3, 0)
+    with pytest.raises(FrameExtractionError, match="disagree with prepared"):
+        runner.validate_source(mock_video_path, (100, 100), 3, 0)
+    output = tmp_path / "existing.png"
+    output.write_bytes(b"existing image")
+    with pytest.raises(FrameExtractionError, match="disagree with prepared"):
+        if batch:
+            runner.extract_frames(mock_video_path, [0, 1], tmp_path / "batch", geometry_plan=plan)
+        else:
+            runner.extract_frame(mock_video_path, 0, output, geometry_plan=plan)
+    assert output.read_bytes() == b"existing image"
+    assert not (tmp_path / "batch").exists()
+    assert not list(tmp_path.glob(".frame-compare-ffmpeg-*"))

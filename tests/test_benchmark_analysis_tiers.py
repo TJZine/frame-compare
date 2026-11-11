@@ -492,38 +492,169 @@ def test_git_provenance_records_commit_and_dirty_state(
     }
 
 
-def test_frame_type_summary_records_distribution() -> None:
+def test_frame_type_scan_records_complete_distribution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     script = _load_script()
 
-    result = script._frame_type_summary(
-        {
-            "success": True,
-            "payload": {
-                "frames": [
-                    {
-                        "key_frame": 1,
-                        "pict_type": "I",
-                        "best_effort_timestamp_time": "0.000",
-                    },
-                    {
-                        "key_frame": 0,
-                        "pict_type": "B",
-                        "best_effort_timestamp_time": "0.042",
-                    },
-                    {
-                        "key_frame": 1,
-                        "pict_type": "P",
-                        "best_effort_timestamp_time": "0.083",
-                    },
-                ]
-            },
-        }
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        assert argv[-3:-1] == ["-of", "csv=p=0"]
+        assert kwargs["max_stdout_bytes"] == script._FRAME_SCAN_STDOUT_BYTES
+        assert kwargs["max_stderr_bytes"] == script._FFPROBE_STDERR_BYTES
+        consume = kwargs["stdout_consumer"]
+        consume(b"1,0.000000,I,\n0,0.042000,B\n0,")
+        consume(b"N/A,P\r\n1,0.125000,I\n")
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(script, "run_subprocess", run)
+    result = script._run_ffprobe_frame_scan(
+        ["-show_frames"], path=tmp_path / "clip.mkv", timeout_seconds=3
     )
 
-    assert result["available"] is True
-    assert result["type_counts"] == {"I": 1, "B": 1, "P": 1}
-    assert result["keyframe_count"] == 2
-    assert result["observed_timestamps_seconds"] == [0.0, 0.042, 0.083]
+    assert result == {
+        "available": True,
+        "frame_count": 4,
+        "type_counts": {"I": 2, "B": 1, "P": 1},
+        "keyframe_count": 2,
+        "observed_timestamps_seconds": [0.0, 0.042, 0.125],
+        "keyframe_gap_frames": {
+            "count": 1,
+            "min": 3.0,
+            "max": 3.0,
+            "mean": 3.0,
+            "median": 3.0,
+            "pstdev": 0.0,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        "malformed",
+        "row-limit",
+        "stdout-overflow",
+        "stderr-overflow",
+        "timeout",
+        "nonzero",
+        "stderr-on-success",
+    ],
+)
+def test_frame_type_scan_failures_never_return_partial_histograms(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    outcome: str,
+) -> None:
+    script = _load_script()
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        consume = kwargs["stdout_consumer"]
+        if outcome == "malformed":
+            consume(b"1,0.000000,I\nnot-a-frame\n")
+        if outcome == "row-limit":
+            monkeypatch.setattr(script, "_FRAME_SCAN_MAX_ROWS", 1)
+            consume(b"1,0.000000,I\n0,0.042000,P\n")
+        if outcome.endswith("overflow"):
+            stream = outcome.removesuffix("-overflow")
+            limit = kwargs[f"max_{stream}_bytes"]
+            raise script.SubprocessOutputLimitExceeded(stream, limit, limit + 1, b"bounded")
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, 3, output=b"", stderr=b"")
+        if outcome == "nonzero":
+            return subprocess.CompletedProcess(argv, 9, b"", b"decode failed")
+        if outcome == "stderr-on-success":
+            return subprocess.CompletedProcess(argv, 0, b"", b"partial decode")
+        raise AssertionError(f"unhandled synthetic outcome: {outcome}")
+
+    monkeypatch.setattr(script, "run_subprocess", run)
+    result = script._run_ffprobe_frame_scan(
+        ["-show_frames"], path=tmp_path / "clip.mkv", timeout_seconds=3
+    )
+
+    assert result["available"] is False
+    assert set(result) == {"available", "error"}
+    assert result["error"]
+
+
+def test_metadata_probe_is_bounded_and_rejects_malformed_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = _load_script()
+    calls: list[dict[str, Any]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(argv, 0, b"{not-json", b"")
+
+    monkeypatch.setattr(script, "run_subprocess", run)
+    result = script._run_ffprobe_json([], path=tmp_path / "clip.mkv", timeout_seconds=4)
+
+    assert result == {"success": False, "error": "invalid ffprobe JSON"}
+    assert calls == [
+        {
+            "check": False,
+            "timeout_seconds": 4,
+            "max_stdout_bytes": script._METADATA_STDOUT_BYTES,
+            "max_stderr_bytes": script._FFPROBE_STDERR_BYTES,
+        }
+    ]
+
+
+@pytest.mark.parametrize("outcome", ["stdout-overflow", "stderr-overflow", "timeout", "nonzero"])
+def test_metadata_probe_failures_are_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    outcome: str,
+) -> None:
+    script = _load_script()
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        if outcome.endswith("overflow"):
+            stream = outcome.removesuffix("-overflow")
+            limit = kwargs[f"max_{stream}_bytes"]
+            raise script.SubprocessOutputLimitExceeded(stream, limit, limit + 1, b"bounded")
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, 2, output=b"", stderr=b"")
+        return subprocess.CompletedProcess(argv, 7, b"", b"probe failed")
+
+    monkeypatch.setattr(script, "run_subprocess", run)
+    result = script._run_ffprobe_json([], path=tmp_path / "clip.mkv", timeout_seconds=2)
+
+    assert result["success"] is False
+    assert "payload" not in result
+
+
+def test_small_text_commands_use_independent_output_caps(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = _load_script()
+    calls: list[dict[str, Any]] = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(argv, 0, b"value\n", b"")
+
+    monkeypatch.setattr(script, "run_subprocess", run)
+
+    assert script._git_output(tmp_path, ["rev-parse", "HEAD"]) == "value"
+    assert script._command_version("ffprobe") == "value"
+    assert [call["max_stdout_bytes"] for call in calls] == [
+        script._GIT_STDOUT_BYTES,
+        script._VERSION_STDOUT_BYTES,
+    ]
+    assert all(call["max_stderr_bytes"] == script._TEXT_STDERR_BYTES for call in calls)
+
+
+def test_small_text_command_overflow_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    script = _load_script()
+
+    def run(_argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        limit = kwargs["max_stdout_bytes"]
+        raise script.SubprocessOutputLimitExceeded("stdout", limit, limit + 1, b"bounded")
+
+    monkeypatch.setattr(script, "run_subprocess", run)
+
+    assert script._command_version("ffprobe") is None
 
 
 def test_frame_type_probe_bounds_window_when_fps_is_known() -> None:
@@ -601,7 +732,8 @@ def test_main_rejects_unusable_owned_index(
     script = _load_script()
     video = tmp_path / "clip.mkv"
     video.write_bytes(b"video")
-    script.source_index_path(video).write_bytes(b"corrupt index")
+    index = _seed_index(script, tmp_path, video)
+    index.write_bytes(b"corrupt index")
     config_path = tmp_path / "config.toml"
     config_path.write_text("", encoding="utf-8")
     source = script.BenchmarkAnalysisSource(
@@ -621,14 +753,9 @@ def test_main_rejects_unusable_owned_index(
         source_fps=Fraction(24),
     )
 
-    def reject_index(_path: Path) -> None:
-        raise script.SourceLoadError(video, "Warm source index validation failed")
-
     monkeypatch.setattr(script, "load_config", lambda _path: get_default_config())
     monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
-    monkeypatch.setattr(script, "validate_source_index", reject_index)
-
-    with pytest.raises(SystemExit, match="required warm source index is not ready"):
+    with pytest.raises(SystemExit, match="warm source index was required"):
         script.main(
             [
                 "--root",
@@ -708,8 +835,7 @@ def test_main_writes_expected_production_report(
     script = _load_script()
     reference = tmp_path / "reference.mkv"
     reference.write_bytes(b"source")
-    expected_index = script.source_index_path(reference)
-    expected_index.write_bytes(b"index")
+    expected_index = _seed_index(script, tmp_path, reference)
     legacy_index = Path(f"{reference}.lwi")
     legacy_index.write_bytes(b"legacy")
     config_path = tmp_path / "config.toml"
@@ -761,7 +887,7 @@ def test_main_writes_expected_production_report(
     captured: dict[str, object] = {}
     monkeypatch.setattr(script, "load_config", lambda _path: config)
     monkeypatch.setattr(script, "_resolve_benchmark_analysis_source", lambda **_kwargs: source)
-    monkeypatch.setattr(script, "validate_source_index", lambda _path: None)
+    monkeypatch.setattr(script.DefaultVSLoader, "load", lambda _self, _path: None)
 
     def run_benchmark(**kwargs: object) -> tuple[dict[str, object], dict[str, object]]:
         captured.update(kwargs)
@@ -813,10 +939,10 @@ def test_main_writes_expected_production_report(
     assert index_facts == {
         "detected": True,
         "expected_path": expected_index.as_posix(),
-        "legacy_paths_ignored": [legacy_index.as_posix()],
         "paths": [expected_index.as_posix()],
         "sizes_bytes": [5],
     }
+    assert legacy_index.read_bytes() == b"legacy"
     assert set(report["comparisons"]) == {"performance"}
     comparison = report["comparisons"]["performance"]
     assert comparison["selected"]["frames"] == [10, 20]
@@ -826,6 +952,25 @@ def test_main_writes_expected_production_report(
     assert "quality_category_pool_retention" in comparison
     assert comparison["timing_comparison"]["speedup"] == pytest.approx(2.0)
     assert capsys.readouterr().out.strip() == output.as_posix()
+
+
+def _seed_index(script: ModuleType, root: Path, media: Path) -> Path:
+    from unittest.mock import MagicMock
+
+    from frame_compare.vs.source_admission import SourceAdmission
+
+    cache = script.ManagedSourceIndexCache(root.resolve() / "generated")
+
+    def build(_source: Path, mode: int, index: Path) -> bool:
+        assert mode == 1
+        index.write_bytes(b"index")
+        return True
+
+    admission = MagicMock(spec=SourceAdmission, geometry_probe_token="a" * 64)
+    assert cache.try_load(media, build, admission=admission)
+    index = cache.validated_index(media)
+    assert index is not None
+    return cast(Path, index)
 
 
 def _load_script() -> ModuleType:

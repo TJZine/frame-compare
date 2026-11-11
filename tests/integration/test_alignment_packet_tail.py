@@ -20,7 +20,6 @@ from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_audio import measure_selected_audio_duration, probe_streams
 from frame_compare.services.errors import AudioAlignmentCancellationError
 from frame_compare.services.types import AlignmentConfig
-from frame_compare.utils import subproc
 from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
     audio_attempt_payload,
@@ -412,16 +411,15 @@ def test_packet_tail_probe_lifecycle(
     processes: list[subprocess.Popen[bytes]] = []
     original_popen = subprocess.Popen
 
-    def popen(
-        argv: list[str], *, cwd: Path | None, stdout: Any, stderr: Any, shell: bool
-    ) -> subprocess.Popen[bytes]:
-        process = original_popen(argv, cwd=cwd, stdout=stdout, stderr=stderr, shell=shell)
-        processes.append(process)
-        if stop == "cancel":
-            cancellation.set()
+    def popen(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        process = cast("subprocess.Popen[bytes]", original_popen(argv, **kwargs))
+        if kwargs.get("stdout") == subprocess.PIPE:
+            processes.append(process)
+            if stop == "cancel":
+                cancellation.set()
         return process
 
-    monkeypatch.setattr(subproc, "Popen", popen)
+    monkeypatch.setattr(subprocess, "Popen", popen)
     if stop == "cap":
         monkeypatch.setattr(alignment_audio, "_PACKET_TAIL_MAX_BYTES", 16, raising=False)
     if stop == "timeout":

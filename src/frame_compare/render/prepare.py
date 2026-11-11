@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.render.backend.ffmpeg import FFmpegRunner
+    from frame_compare.vs.loader import VSLoader
     from frame_compare.vs.types import AppliedTonemap, SourceInfo, TonemapSettings
 
 log = structlog.get_logger()
@@ -167,6 +168,8 @@ def prepare_clip_for_render(
     config: ConfigSchema,
     ffmpeg_runner: FFmpegRunner | None = None,
     source_is_hdr: bool | None = None,
+    *,
+    vs_loader: VSLoader | None = None,
 ) -> PreparedRenderSource:
     from frame_compare.render.errors import RenderError
     from frame_compare.vs.errors import (
@@ -194,7 +197,7 @@ def prepare_clip_for_render(
         try:
             from frame_compare.vs.loader import DefaultVSLoader
 
-            loader = DefaultVSLoader(memory_limit_mb=config.runtime.memory_limit_mb)
+            loader = vs_loader or DefaultVSLoader(memory_limit_mb=config.runtime.memory_limit_mb)
             raise_if_cancelling()
             source_info = loader.load(clip_path)
             diagnostic_source = source_info.clip

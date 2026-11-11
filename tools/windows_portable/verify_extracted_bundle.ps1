@@ -528,6 +528,7 @@ function Assert-OptionalMatchingProperty(
 $inventoryPath = Join-Path $bundle "bundle_inventory.json"
 $inventory = Read-JsonObject -Path $inventoryPath -Label "Extracted bundle inventory"
 Assert-ExactProperties -Object $inventory -Expected @(
+  "archive",
   "bundle",
   "corresponding_sources",
   "licenses",
@@ -821,9 +822,12 @@ foreach ($source in $inventorySources) {
 }
 
 $requiredSourceScripts = @(
+  ".github/actions/windows-portable-build/action.yml",
+  ".github/actions/windows-portable-verify/action.yml",
   ".github/workflows/windows-portable-build.yml",
   "tools/windows_portable/build_portable.ps1",
   "tools/windows_portable/path_safety.ps1",
+  "tools/windows_portable/portable_launchers.ps1",
   "tools/windows_portable/shim/frame-compare-version.ps1",
   "tools/windows_portable/runtime_smoke.py",
   "tools/windows_portable/bundle_info.schema.json",
@@ -850,6 +854,7 @@ foreach ($sourceScript in $sourceScripts) {
     $sourceSegments -contains ".." -or
     (
       -not $sourceScript.StartsWith(".github/workflows/", [System.StringComparison]::Ordinal) -and
+      -not $sourceScript.StartsWith(".github/actions/", [System.StringComparison]::Ordinal) -and
       -not $sourceScript.StartsWith("tools/windows_portable/", [System.StringComparison]::Ordinal)
     )
   ) {

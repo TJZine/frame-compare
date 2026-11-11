@@ -57,3 +57,36 @@ config
 comparison_videos
 screenshots
 generated
+
+# Keep local credentials out of the build context at every depth.
+**/.env
+**/.env.*
+**/*.env
+**/.envrc
+**/.netrc
+**/.npmrc
+**/.pypirc
+**/.git-credentials
+**/.aws
+**/.azure
+**/.config/gcloud
+**/.docker/config.json
+**/.ssh
+**/id_rsa*
+**/id_ed25519*
+**/*private*key*
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*.kdbx
+**/credentials*.json
+**/secrets*.json
+**/secrets*.toml
+**/secrets*.yaml
+**/secrets*.yml
+**/config.local.*
+**/config.private.*
+
+# The updater's public verification key is safe to include.
+!tools/windows_portable/update_public_key.xml

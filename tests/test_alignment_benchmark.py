@@ -425,7 +425,7 @@ async def test_results_write_replaces_symlink_without_touching_referent(
         return record
 
     monkeypatch.setattr(script, "load_labels", lambda _path: [pair])
-    monkeypatch.setattr(script, "DefaultVSLoader", object)
+    monkeypatch.setattr(script, "DefaultVSLoader", lambda **_kwargs: object())
     monkeypatch.setattr(script, "align_pair", align_pair)
 
     assert await script.run_benchmark(tmp_path / "labels.json", output) is True

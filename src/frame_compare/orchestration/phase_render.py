@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from math import inf
+from typing import TYPE_CHECKING
 
 from frame_compare.orchestration.active_rect import active_picture_provenance_from_rect_source
 from frame_compare.orchestration.context import ClipProbeSnapshot, ClipState, RunContext
@@ -22,6 +23,9 @@ from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.props import range_label_from_props
 from frame_compare.vs.types import FallbackTonemap
 
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
+
 _MASTERING_LUMINANCE = re.compile(r"L\((\d+(?:\.\d+)?|\.\d+),(\d+(?:\.\d+)?|\.\d+)\)")
 
 
@@ -30,6 +34,7 @@ def run_render_phase(
     *,
     frames: list[int],
     runner: FFmpegRunner,
+    vs_loader: VSLoader | None = None,
 ) -> RenderPhaseOutput:
     from frame_compare.render.batch.orchestrator import render_screenshots_from_batch_detailed
     from frame_compare.render.types import (
@@ -77,6 +82,7 @@ def run_render_phase(
             ffmpeg_runner=runner,
             reporter=ctx.reporter,
             parallelism=2,
+            vs_loader=vs_loader,
         ),
     )
     for clip in rendered:

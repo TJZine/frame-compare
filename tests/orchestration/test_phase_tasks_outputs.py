@@ -202,7 +202,9 @@ def test_run_render_phase_maps_canonical_clip_facts(
     ctx = _context(tmp_path, comparisons=[comparison])
     probe = replace(
         ctx.reference.probe,
-        fingerprint=replace(ctx.reference.probe.fingerprint, size_bytes=5_368_709_120),
+        fingerprint=replace(
+            ctx.reference.probe.fingerprint, size_bytes=5_368_709_120, source_token="a" * 64
+        ),
         is_hdr=True,
         hdr_metadata=HDRMetadata(
             mastering_display="G(13250,34500)L(6000000,100)",

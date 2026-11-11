@@ -12,6 +12,9 @@ from pathlib import Path
 
 import numpy as np
 
+from frame_compare.utils.child_environment import diagnostic_secrets, sanitize_diagnostic
+from frame_compare.utils.subproc import SubprocessOutputLimitExceeded, run_subprocess
+
 ROOT = Path(__file__).resolve().parent
 
 
@@ -189,12 +192,32 @@ def main():
             "started_utc": datetime.now(UTC).isoformat(),
         }
         try:
-            process = subprocess.run(command, capture_output=True, timeout=150)
+            process = run_subprocess(
+                command,
+                check=False,
+                timeout_seconds=150,
+                max_stdout_bytes=64 * 1024,
+                max_stderr_bytes=256 * 1024,
+            )
             receipt["exit_code"] = process.returncode
-            stdout, stderr = process.stdout, process.stderr
+            stdout = sanitize_diagnostic(process.stdout, diagnostic_secrets())[: 64 * 1024]
+            stderr = process.stderr
         except subprocess.TimeoutExpired as exc:
             receipt.update(exit_code=None, timeout_seconds=150)
             stdout, stderr = exc.stdout or b"", exc.stderr or b""
+        except SubprocessOutputLimitExceeded as exc:
+            receipt.update(
+                exit_code=None,
+                output_limit={
+                    "stream": exc.stream,
+                    "limit": exc.limit,
+                    "observed": exc.observed,
+                    "truncated": exc.truncated,
+                },
+            )
+            stdout, stderr = (
+                (exc.diagnostics, b"") if exc.stream == "stdout" else (b"", exc.diagnostics)
+            )
         (args.output / (history + ".stdout.txt")).write_bytes(stdout)
         (args.output / (history + ".stderr.txt")).write_bytes(stderr)
         commands.append(receipt)

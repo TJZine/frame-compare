@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from threading import Event
-from typing import IO
+from typing import Any, cast
 
 import pytest
 
@@ -722,11 +722,10 @@ def resolver_children(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[subproce
     children: list[subprocess.Popen[bytes]] = []
     popen = subprocess.Popen
 
-    def start(
-        args: list[str], *, stdin: int, stdout: IO[bytes], stderr: int, env: dict[str, str]
-    ) -> subprocess.Popen[bytes]:
-        child = popen(args, stdin=stdin, stdout=stdout, stderr=stderr, env=env, text=False)
-        children.append(child)
+    def start(args: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        child = cast("subprocess.Popen[bytes]", popen(args, **kwargs))
+        if kwargs.get("stdout") == subprocess.PIPE:
+            children.append(child)
         return child
 
     monkeypatch.setattr(webhook.subprocess, "Popen", start)
@@ -917,7 +916,7 @@ def test_default_resolver_rejects_unbounded_input_before_starting_child(
     assert resolver_children == []
 
 
-async def test_default_resolution_termination_error_still_kills_and_reaps(
+async def test_default_resolution_tree_signal_error_still_kills_and_reaps(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     resolver_children: list[subprocess.Popen[bytes]],
@@ -943,7 +942,7 @@ async def test_default_resolution_termination_error_still_kills_and_reaps(
     waits: list[float | None] = []
     termination_attempts: list[bool] = []
 
-    def fail_terminate() -> None:
+    def fail_tree_signal(*_args: object, **_kwargs: object) -> None:
         termination_attempts.append(True)
         raise OSError("simulated signal failure")
 
@@ -951,7 +950,7 @@ async def test_default_resolution_termination_error_still_kills_and_reaps(
         waits.append(timeout)
         return wait(timeout=timeout)
 
-    monkeypatch.setattr(child, "terminate", fail_terminate)
+    monkeypatch.setattr("frame_compare.utils.subproc.signal_child_tree", fail_tree_signal)
     monkeypatch.setattr(child, "wait", observed_wait)
     task.cancel()
     done, pending = await asyncio.wait({task}, timeout=2)

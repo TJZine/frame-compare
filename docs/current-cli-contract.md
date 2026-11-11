@@ -930,8 +930,11 @@ recovery requirement.
   rather than silently validating a full-frame cache identity.
 - The full fingerprint remains inside the cache payload and is validated on load.
   Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
-- Probe-cache files remain on-disk format version 1, but key schema 3 includes the
-  scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint. In the managed
+- Probe-cache files remain on-disk format version 1, but key schema 4 includes the
+  scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint plus a strong
+  source/probe token. The token binds device, inode, size, mtime and change time to
+  the verified ffprobe executable and reported runtime. Sources without strict
+  identity or reusable probe authority are not persisted. In the managed
   Windows portable and Debian/Docker profiles, a cache created by another selected
   decoder or FFmpeg/ffprobe lineage is a normal miss, including under
   `--from-cache-only` validation. Entries keyed by a discovered symlink miss
@@ -963,21 +966,20 @@ recovery requirement.
   cached. Corrupt, unsupported, malformed, unreadable, unwritable, or lock-blocked
   cache state produces a sanitized warning and continues through the network path.
   Deleting this file clears durable TMDB history and forces fresh successful lookups.
-- Frame Compare-owned L-SMASH-Works indexes use
-  `<media>.frame-compare-lsw1310-<12-hex-index-fingerprint>.lwi`. The token is
-  profile scoped (currently `lsw1310-f125953022b6` on managed/portable Windows,
-  `lsw1310-1ec4b81a7724` on unmanaged Windows, and `lsw1310-877219813395`
-  on Debian/Docker). Managed Windows portable and Debian/Docker tokens isolate
-  their packaged decoder ABIs; unmanaged profile tokens do not verify native ABI
-  changes. Legacy adjacent `<media>.lwi` files are ignored rather than deleted. A
-  corrupt owned index is removed and rebuilt once; removal/rebuild failure produces
-  a warning and an unusable index location retries source loading without an index.
-  Generated VSView sessions pass this same owned, runtime-versioned path as the
-  `cachefile` for the reference and every comparison; a missing index may be created
-  there by L-SMASH-Works instead of creating a second adjacent index. When L-SMASH
-  rejects that index location during VSView loading, the managed VSView child does
-  not remove or rebuild the parent-owned index; it retries that source cache-free and
-  preserves the original construction error if the fallback also fails.
+- Persistent L-SMASH-Works indexes live under
+  `<resolved paths.generated_dir>/cache/source-indexes/`. The managed loader
+  may rebuild a missing or invalid entry in private staging and reuses stable
+  indexes with `cache=0`. When an index cache was supplied, source admission
+  produced a reusable geometry probe token, and the managed load returned no clip,
+  it logs
+  `Loading <path> without the managed L-SMASH index cache; indexing in memory for this run`
+  before opening the source cache-free. Sources without a
+  reusable geometry probe token do not log this warning. Generated VSView sessions
+  can reuse validated stable entries or open cache-free. The current profile tokens are
+  `lsw1310-f125953022b6` for managed Windows, `lsw1310-1ec4b81a7724` for unmanaged
+  Windows, and `lsw1310-877219813395` for Debian/Docker. All legacy media-adjacent
+  indexes remain inert.
+  See the [source-index transaction](current-architecture.md#shared-caches-and-decoder-indexes).
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
   user/random frames. Every run that proceeds reserves a fresh run folder beneath
@@ -1040,8 +1042,9 @@ recovery requirement.
   cache prevalidation succeeds. `--skip-metadata`, disabled TMDB, and a missing API
   key perform no TMDB cache reads or writes.
 - When the exact all-source selection-domain token requires probe data and the
-  probe cache is missing, `--from-cache-only` fails before metadata prefetch and
-  before run-folder reservation rather than validating a weaker fingerprint.
+  probe cache is missing, stale, or cannot be authorized by a current bounded
+  header probe, `--from-cache-only` fails before metadata prefetch and before
+  run-folder reservation rather than validating a weaker fingerprint.
 - `--from-cache-only` does not require cached alignment offsets from a previous run.
   Previous alignment reuse is not part of analysis cache-only prevalidation. A
   cache-only run may reuse previous alignment offsets when
@@ -1762,6 +1765,11 @@ dedicated `run` flags for them:
   uses BT.601 when the coded source is at most 1024 pixels wide and 576 pixels high,
   and BT.709 otherwise. The decision uses the prepared source dimensions before any
   crop, resize, padding, or display-aspect expansion.
+- FFmpeg validates the current selected stream dimensions against the prepared
+  source before extraction, including when a geometry plan is supplied. Batch
+  rendering performs its decoded frame-count and geometry check once per nonempty
+  clip before constructing render jobs; direct extraction repeats the bounded
+  header check before publishing output.
 - `png_compression` remains an integer from `0` through `9`. It is the public
   compression input for Pillow and VapourSynth fpng. Pillow receives the value
   directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;
@@ -2278,6 +2286,9 @@ Review outputs keep original frame positions/counts, reference FPS, ordering,
   though their JSON `category` remains `optional`: `success` is false and `doctor`
   exits with the dependency error code. On unmanaged profiles, FFMS2 and FFmpeg
   availability failures remain noncritical.
+- On Windows, executable resolution refuses `.cmd` and `.bat` FFmpeg/ffprobe paths,
+  including configured overrides and resolved link targets. An invalid configured
+  override fails closed and does not fall back to `PATH`.
 - If the `doctor` command hits a typed top-level failure before it can produce a
   `DoctorReport`, it uses the standard CLI error contract. In `--json` mode that means
   the standard error payload is written to stdout.

@@ -9,7 +9,8 @@ Param(
   [string]$CacheDir = "",
 
   [Parameter(Mandatory = $false)]
-  [switch]$SkipSync,
+  [Alias("SkipSync")]
+  [switch]$SkipPythonInstall,
 
   [ValidateSet("Move", "Leave")]
   [string]$UserData = "Move"
@@ -378,10 +379,10 @@ try {
   try {
     Update-ProcessPathFromRegistry
     Ensure-UvOnPath
-    if (-not $SkipSync) {
-      Write-Host "Syncing dev dependencies (frozen)..."
-      uv sync --group dev --frozen
-      Assert-LastExitCode -Label "uv sync"
+    if (-not $SkipPythonInstall) {
+      Write-Host "Installing Python 3.13 for the portable build..."
+      uv python install 3.13
+      Assert-LastExitCode -Label "uv python install 3.13"
     }
 
     Write-Host "Building portable bundle..."

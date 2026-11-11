@@ -93,7 +93,7 @@ uv sync --all-groups --extra vsview --frozen
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
 uv run --no-sync pyright --warnings
-uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+bash tools/check_python_security.sh
 uv run --no-sync lint-imports
 uv run --no-sync pytest
 uv run --no-sync zensical build --clean --strict
@@ -293,7 +293,7 @@ retain:
 
 Metric equality alone is not sufficient evidence of perceptual equivalence.
 
-## 7. Cache and index migration
+## 7. Cache and index isolation
 
 Use copies of media so test cleanup cannot damage a production library.
 
@@ -301,14 +301,49 @@ Use copies of media so test cleanup cannot damage a production library.
 
 Verify all of the following:
 
-- A legacy adjacent `<media>.lwi` is ignored and not deleted.
-- The candidate creates
-  `<media>.frame-compare-lsw1310-f125953022b6.lwi`.
-- A second run reuses the candidate-owned index.
-- A corrupt candidate-owned index is removed and regenerated once.
-- A missing index is created normally.
-- An unwritable index location falls back to the documented cache-free open.
-- Indexes from another runtime profile are not silently reused.
+- Use a read-only media directory containing both a legacy `<media>.lwi` and an
+  old runtime-token-named sidecar. Retain their original byte hashes and directory
+  listing. Run the installed CLI and a generated VSView session. Both legacy
+  files and the directory listing must remain unchanged. Deliberately invalid
+  sidecar bytes must have no effect on the decoded result.
+- A first run creates an index and commit metadata under
+  `<resolved paths.generated_dir>/cache/source-indexes/`. A second run opens it
+  with `cache=0` and leaves the committed bytes and modification times unchanged.
+  Confirm the warm open still probes headers and reuses the committed geometry
+  proof. Cold opens and the private fallback, including in VSView, scan complete
+  coded and visible frame geometry before the native open.
+- On NTFS, replace source bytes in place with the same byte length and restore the
+  original modification time. The next run must reject the old index because the
+  handle-reported ChangeTime changed. Repeat a normal cold write and warm hit to
+  prove the staged index flush succeeds with the Windows write-capable handle.
+- A missing or corrupt managed entry rebuilds in a private staging directory.
+  Invalid metadata, geometry policy or probe mismatches, runtime-token or digest
+  mismatches, and redirected entries cannot authorize stable reuse. An unwritable
+  cache falls back to a cache-free open.
+- Confirm cancellation and failures do not commit incomplete index metadata, and
+  the native plugin never creates or changes an index in the media directory.
+
+Run the focused process and cache cases from the exact candidate checkout on Windows:
+
+```powershell
+uv run --no-sync pytest -o addopts="" -q -ra `
+  tests/utils/test_subproc.py::test_windows_child_uses_kill_on_close_job `
+  tests/utils/test_subproc.py::test_windows_failed_assignment_stops_and_reaps_child `
+  tests/utils/test_subproc.py::test_windows_reports_job_close_failure_after_reaping_leader `
+  tests/utils/test_subproc.py::test_successful_leader_cannot_leave_a_capture_pipe_open `
+  tests/services/test_alignment_paired_streaming.py::test_paired_collection_finishes_when_descendant_inherits_pipe `
+  tests/vs/test_source_index_cache.py::test_cold_write_warm_hit_and_same_length_source_overwrite `
+  tests/vs/test_source_index_cache.py::test_source_overwrite_after_index_replace_prevents_metadata_commit
+```
+
+The application starts its children with normal `Popen` and immediately assigns
+them to a preconfigured kill-on-close Job Object. The focused assignment tests
+use a simulated Win32 API. On Windows, verify bounded cleanup and that a job-owned
+descendant retaining an inherited capture pipe stops after its leader exits. Also
+close or cancel an installed VSView review and a paired FFmpeg alignment run and
+check for leftover descendants. A descendant can escape if it starts in the small
+interval before assignment. An interrupt inside `Popen` can also prevent the
+application from receiving the handle needed for cleanup.
 
 ### Application caches
 

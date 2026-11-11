@@ -59,6 +59,20 @@ def test_write_vsview_session_script_removes_reserved_path_after_write_failure(
     assert list(sessions_dir.iterdir()) == []
 
 
+def test_write_vsview_session_script_requires_root_for_managed_indexes(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="source_index_generated_root"):
+        write_vsview_session_script(
+            reference=Path("ref.mkv"),
+            comparisons=[Path("comparison.mkv")],
+            suggested_offsets_by_key={"ref:comparison": 0},
+            audio_review_by_key={"ref:comparison": "{}"},
+            cache_dir=tmp_path,
+            source_indexes={Path("ref.mkv"): Path("ref.lwi")},
+        )
+
+
 def _session_console(*, stderr: io.TextIOBase) -> SessionConsole:
     with redirect_stderr(stderr):
         return SessionConsole()
@@ -199,6 +213,8 @@ def _execute_ready_block(
     class FakeClip:
         def __init__(self, stem: str) -> None:
             self.stem = stem
+            self.width = 1920
+            self.height = 1080
             self.num_frames = 20_000
             self.fps = SimpleNamespace(numerator=24, denominator=1)
 
@@ -222,6 +238,12 @@ def _execute_ready_block(
     fake_vsview.set_output = lambda *args, **kwargs: None  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vapoursynth)
     monkeypatch.setitem(sys.modules, "vsview", fake_vsview)
+    monkeypatch.setattr(
+        "frame_compare.vsview.session_runtime.admit_source",
+        lambda _path, **_kwargs: SimpleNamespace(
+            verify=lambda _source: None, scan=lambda _source, **_options: None
+        ),
+    )
     monkeypatch.setenv("NO_COLOR", "1")
 
     script = _build_script_content(
@@ -465,12 +487,9 @@ def test_session_output_names_pad_by_terminal_cells(monkeypatch: pytest.MonkeyPa
     stderr = _StubStderr()
     with redirect_stderr(stderr):
         console = SessionConsole()
-        reference = ReferenceSource(
-            label="ref", path="ref.mkv", index_path="ref.lwi", display_name="日本語"
-        )
+        reference = ReferenceSource(label="ref", path="ref.mkv", display_name="日本語")
         target = ComparisonSource(
             path="a.mkv",
-            index_path="a.lwi",
             display_name="Cafe\u0301",
             comparison_key="ref:a",
             suggested_offset=0,

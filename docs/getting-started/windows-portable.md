@@ -255,8 +255,17 @@ From the repository root:
 
 The root command delegates to the source installer, builds
 `dist\frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z` (UTC), and installs the same user-level shim as a
-published bundle. The source route refuses before bootstrap, dependency sync, or output
+published bundle. The source route refuses before bootstrap, Python provisioning, or output
 changes when PowerShell 7 is unavailable.
+
+The source installer ensures `uv` is on `PATH`, then runs `uv python install 3.13`
+before building. It provisions the build interpreter without creating a project
+environment or installing development dependencies. The builder requires a discoverable
+Python 3.13 and assembles the pinned portable runtime separately.
+
+Use `.\install.cmd -SkipPythonInstall` only when Python 3.13 is already discoverable.
+This skips interpreter provisioning; the builder still checks for Python 3.13 without
+downloading it. The legacy `-SkipSync` switch remains an alias with the same meaning.
 
 Run a direct source `.ps1` installer with
 `pwsh`; Windows PowerShell 5.1 remains supported for published-bundle installation,
@@ -269,7 +278,7 @@ previous active bundle with same-volume renames. Use `.\install.cmd -UserData Le
 to activate without moving them. Leave keeps data in the previous bundle and may
 select an older AppData fallback config if the new bundle has no `config/config.toml`.
 
-Before dependency sync and building, the source installer acquires an exclusive
+Before Python provisioning and building, the source installer acquires an exclusive
 activation lock and refuses a pending source-migration marker. It re-reads the active
 pointer as one byte snapshot after the build. A source install or current bundle
 installer already activating causes a refusal with the lock path and retry guidance.
