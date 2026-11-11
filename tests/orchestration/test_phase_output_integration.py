@@ -11,6 +11,8 @@ import pytest
 
 from frame_compare.analysis.selection import select_frames
 from frame_compare.orchestration import phase_alignment, phase_post_render, phase_render
+from frame_compare.orchestration.execution_types import ExecutionState, RunArtifacts
+from frame_compare.orchestration.phase_output_application import apply_phase_output
 from frame_compare.render.types import RenderedClip
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.slowpics_post_upload import (
@@ -28,8 +30,39 @@ from tests.orchestration.phase_task_helpers import (
 )
 
 
+@pytest.fixture
+def render_capture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    render_capture: dict[str, Any] = {}
+
+    def _fake_render_screenshots_from_batch(**kwargs: object) -> tuple[RenderedClip, ...]:
+        render_capture.update(kwargs)
+        requests = cast(list[Any], kwargs["batch_requests"])
+        screenshots = {
+            request.label: [
+                tmp_path / f"{request.label}-{frame}.png"
+                for frame in [selection.source_frame for selection in request.frames]
+            ]
+            for request in requests
+        }
+        artifacts = _render_artifacts(
+            screenshots_by_label=screenshots,
+            screenshot_dir=tmp_path / "screenshots",
+            source_frames_by_label={
+                request.label: [selection.source_frame for selection in request.frames]
+                for request in requests
+            },
+        )
+        return artifacts.clips
+
+    monkeypatch.setattr(
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch_detailed",
+        _fake_render_screenshots_from_batch,
+    )
+    return render_capture
+
+
 def test_output_phases_use_reselected_metric_metadata_after_real_initial_selection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, render_capture: dict[str, Any]
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
@@ -77,29 +110,8 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
             )
         )
 
-    render_capture: dict[str, Any] = {}
     report_capture: dict[str, Any] = {}
     expected_report_path = tmp_path / "run" / "report.html"
-
-    def _fake_render_screenshots_from_batch(**kwargs: object) -> tuple[RenderedClip, ...]:
-        render_capture.update(kwargs)
-        requests = cast(list[Any], kwargs["batch_requests"])
-        screenshots = {
-            request.label: [
-                tmp_path / f"{request.label}-{frame}.png"
-                for frame in [selection.source_frame for selection in request.frames]
-            ]
-            for request in requests
-        }
-        artifacts = _render_artifacts(
-            screenshots_by_label=screenshots,
-            screenshot_dir=tmp_path / "screenshots",
-            source_frames_by_label={
-                request.label: [selection.source_frame for selection in request.frames]
-                for request in requests
-            },
-        )
-        return artifacts.clips
 
     def _fake_generate_report(
         report_data: object, report_config: object, *, output_path: Path
@@ -110,51 +122,34 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
         return output_path
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
-    monkeypatch.setattr(
-        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch_detailed",
-        _fake_render_screenshots_from_batch,
-    )
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
     align_output = _run_align_phase(
         ctx,
         selected_frames=list(initial_selection.frames),
     )
-    ctx.reference = align_output.reference
-    ctx.comparisons = align_output.comparisons
-    ctx.selection = replace(ctx.selection, breakdown=align_output.selection_breakdown)
-    ctx.selection = replace(
-        ctx.selection, details_by_source_frame=align_output.selection_details_by_source_frame
-    )
+    state = ExecutionState(artifacts=RunArtifacts())
+    apply_phase_output(ctx=ctx, state=state, output=align_output)
 
-    phase_render.run_render_phase(
+    render_output = phase_render.run_render_phase(
         ctx,
-        frames=align_output.selected_frames,
+        frames=list(ctx.selection.frames),
         runner=cast(Any, _RenderRunner()),
     )
-    render = _render_artifacts(
-        screenshots_by_label={
-            "Reference": [
-                tmp_path / "screenshots" / "reference_1.png",
-                tmp_path / "screenshots" / "reference_2.png",
-            ],
-            "Encode 1": [
-                tmp_path / "screenshots" / "encode_1.png",
-                tmp_path / "screenshots" / "encode_2.png",
-            ],
-        },
-        screenshot_dir=tmp_path / "screenshots",
-        source_frames_by_label={"Reference": [98, 99], "Encode 1": [0, 1]},
-    )
+    apply_phase_output(ctx=ctx, state=state, output=render_output)
     report_output = phase_post_render.run_report_phase(
         ctx,
-        frames=align_output.selected_frames,
-        render=render,
+        frames=list(ctx.selection.frames),
+        render=state.artifacts.render,
         metadata=None,
         slowpics_url=None,
     )
 
-    assert align_output.selected_frames == [0, 1]
+    assert list(ctx.selection.frames) == [0, 1]
+    assert [
+        [selection.source_frame for selection in request.frames]
+        for request in render_capture["batch_requests"]
+    ] == [[98, 99], [0, 1]]
     assert [
         selection.selection_label for selection in render_capture["batch_requests"][0].frames
     ] == ["Dark", "Dark"]
@@ -263,7 +258,7 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
 
 
 def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_frame(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, render_capture: dict[str, Any]
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
@@ -303,29 +298,28 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
     align_output = _run_align_phase(ctx, selected_frames=[0, 66])
-    ctx.reference = align_output.reference
-    ctx.comparisons = align_output.comparisons
-    ctx.selection = replace(ctx.selection, breakdown=align_output.selection_breakdown)
-    ctx.selection = replace(
-        ctx.selection, details_by_source_frame=align_output.selection_details_by_source_frame
-    )
-    render = _render_artifacts(
-        screenshots_by_label={
-            "Reference": [tmp_path / "screenshots" / "reference.png"],
-            "Encode 1": [tmp_path / "screenshots" / "encode.png"],
-        },
-        screenshot_dir=tmp_path / "screenshots",
-        source_frames_by_label={"Reference": [96], "Encode 1": [16]},
-    )
+    state = ExecutionState(artifacts=RunArtifacts())
+    apply_phase_output(ctx=ctx, state=state, output=align_output)
 
+    render_output = phase_render.run_render_phase(
+        ctx,
+        frames=list(ctx.selection.frames),
+        runner=cast(Any, _RenderRunner()),
+    )
+    apply_phase_output(ctx=ctx, state=state, output=render_output)
     output = phase_post_render.run_report_phase(
         ctx,
-        frames=align_output.selected_frames,
-        render=render,
+        frames=list(ctx.selection.frames),
+        render=state.artifacts.render,
         metadata=None,
         slowpics_url=None,
     )
 
+    assert list(ctx.selection.frames) == [16]
+    assert [
+        [selection.source_frame for selection in request.frames]
+        for request in render_capture["batch_requests"]
+    ] == [[96], [16]]
     report_data = captured["report_data"]
     assert output.report_path == expected_path
     assert [

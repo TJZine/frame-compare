@@ -291,10 +291,12 @@ unchanged.
 - Entries sort newest first using persisted UTC completion/start time, with an
   exact folder-name tie-break. Unavailable records without valid lifecycle times
   sort after valid records.
-- If the selected generated-data root is missing, disconnected, unreadable, or not
-  a directory, history fails with `FC-3016` and an actionable reconnect/permissions
-  hint. History does not create the root, return a JSON success document, or fall
-  back to the workspace or portable bundle.
+- History fails with `FC-3016` and an actionable reconnect/permissions hint if
+  the selected generated-data root is missing, disconnected, unreadable, or not
+  a directory. On POSIX, history also fails with `FC-3016` if the root denies
+  search permission.
+  History does not create the root, return a JSON success document, or fall back
+  to the workspace or portable bundle.
 - Human `history list` output goes to stdout and exposes the exact run name,
   status, persisted time, and report availability. Diagnostics and warnings use
   stderr.
@@ -807,11 +809,10 @@ once the standalone CLI has completed its Python cleanup and selected exit 130,
 it ignores further Ctrl+C during interpreter/native-module teardown to preserve
 that exit status. This does not change repeated-interrupt behavior while the run
 or its cleanup is active, or the signal policy of the reusable Typer application.
-Its failure
-record retains a confirmed slow.pics upload outcome and URL if remote
-publishing completed before the interrupt, even when optional post-upload work
-did not finish. That does not make the run successful or permit new work after
-cancellation. The shared
+Its failure record retains a confirmed slow.pics upload outcome and URL once
+the final planned image has been accepted, even if the interrupt prevents the
+publish phase from returning. That does not make the run successful or permit
+new work after cancellation. The shared
 TMDB response cache is an exception to the publication rule: an already-in-flight
 validated upstream response may finish its locked, atomic worker publication.
 It carries no run, selection, alignment, or analysis-cache authority, and the
@@ -1012,9 +1013,10 @@ recovery requirement.
   original error. Both attempt best-effort cleanup.
 - A separate atomically written `<run-folder>/run_result.toml` V1 record captures
   the final outcome without modifying `run_info.toml`. Successful records are
-  written after all post-run phases settle and use `completed` or
-  `completed_with_warnings`; failures after reservation get one best-effort
-  `failed` record. Failures before reservation write no record. An ordinary
+  written after all post-run phases settle and the coordinator's HTTP client
+  closes. Their status is `completed` or `completed_with_warnings`. Failures
+  after reservation get one best-effort `failed` record. Failures before
+  reservation write no record. An ordinary
   completed-run result-write failure is warning-only and leaves the run successful;
   an ordinary failed-run result-write failure preserves the identical original
   exception and exit mapping. `KeyboardInterrupt` and `SystemExit` raised while
@@ -1278,7 +1280,8 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 - A run-folder reservation is required before shortcut creation; escaped or
   symlinked run aliases are rejected rather than redirected elsewhere.
 - The filename is derived from the same final collection title sent to
-  slow.pics, with a stable fallback from the slow.pics URL key.
+  slow.pics, with a stable fallback from the slow.pics URL key. Windows
+  reserved basenames are rewritten before adding `.url`.
 - Repeated writes overwrite the same deterministic shortcut path.
 - Shortcut files are not members of `slowpics.delete_after_upload` cleanup.
 - Shortcut write or path-selection failures are warning-only.

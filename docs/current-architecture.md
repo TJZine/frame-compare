@@ -632,7 +632,8 @@ orchestration; no report-specific output directory or fallback placement exists.
 
 Run-folder names are title-first and capped at 64 characters for Windows path
 headroom. The base name comes from resolved TMDB title/year, common parsed
-metadata, combined filename stems, or `unnamed_run`. Exact timestamps are not
+metadata, combined filename stems, or `unnamed_run`. Windows reserved basenames
+are rewritten before reservation. Exact timestamps are not
 part of folder names; collisions use compact numeric suffixes such as `_2` and
 `_3`, then a short random suffix if bounded numeric claiming cannot reserve a
 directory. Preparation validates the reserved immediate-child path and completes
@@ -643,12 +644,11 @@ transition, or the metadata write fails, the run fails immediately and cleanup
 attempts to remove the empty reserved directory as best effort.
 
 Preparation reports the reserved `WorkspacePaths` through an internal dependency
-capture immediately after `run_info.toml` succeeds, without changing the
-`execute_prep(request, deps)` call shape. The coordinator owns whole-run outcome
-timing and asks the run-result service to write success only after post-run phases
-settle, or to make one best-effort failure write while re-raising the original
-exception unchanged. Completed-run record failures add a stable warning and do
-not change successful media work into failure.
+capture after the workspace transition and before writing `run_info.toml`. The
+coordinator owns whole-run outcome timing and asks the run-result service to
+write success after post-run phases settle and its owned HTTP client closes, or
+to make one best-effort failure write while re-raising the original exception.
+Completed-run record failures add a stable warning and leave the run successful.
 
 ### Alignment requests and authority
 
@@ -1059,9 +1059,10 @@ upload ordering; the final upload path uses that plan and does not scan the
 screenshot directory for membership. Orchestration carries canonical clip labels as
 local screenshot lookup keys while assigning exact explicit labels or unique release
 descriptors as remote image names. Collection metadata, row names, membership,
-ordering, and multipart construction remain owned by their existing seams. After a
-successful upload, orchestration
-carries the exact uploaded planned local file paths into `post_report_cleanup`
+ordering, and multipart construction remain owned by their existing seams. The
+publisher passes the comparison URL and exact planned local file paths to
+orchestration synchronously when the final image is accepted. After a successful
+upload, orchestration passes those paths into `post_report_cleanup`
 and carries typed post-upload action results plus warnings returned by
 `frame_compare.services.slowpics_post_upload` into the final `RunResult`.
 Orchestration does not own clipboard, browser, shortcut, or webhook side-effect

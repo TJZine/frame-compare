@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import replace
 from datetime import datetime
 
@@ -132,7 +132,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             no_color=request.no_color,
         )
 
-    async def _execute_with_deps() -> RunResult:
+    async def _execute_with_deps() -> tuple[RunResult, datetime, datetime]:
         nonlocal artifacts, clip_count, phase_timings, preflight_warnings, run_start
         nonlocal current_preflight_warnings
         nonlocal run_timer_start
@@ -270,58 +270,73 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             duration_seconds=duration_seconds,
             vsview_review_seconds=state.vsview_review_seconds,
         )
-        await cancellation_checkpoint()
-        recorded_result = record_completed_run_result(
-            workspace=reserved_workspace,
-            result=result,
-            started_at=run_start,
-            completed_at=run_end,
-        )
-        await cancellation_checkpoint()
-        return recorded_result
+        return result, run_start, run_end
 
-    async def _execute_and_record_failure() -> RunResult:
+    try:
+        execution_error: Exception | asyncio.CancelledError | None = None
+        owns_client = local_deps.http_client is None
+        client_context = httpx.AsyncClient() if owns_client else nullcontext()
         try:
-            try:
-                return await _execute_with_deps()
-            except (_RunInterrupt, asyncio.CancelledError):
-                await cancellation_checkpoint()
-                raise asyncio.CancelledError() from None
-        except BaseException as original_error:
-            if isinstance(original_error, Exception) and is_cancelling():
-                # Deliver the queued interrupt before awaited client cleanup,
-                # without replacing a real failure already observed by its owner.
-                with suppress(asyncio.CancelledError):
+            async with client_context as owned_client:
+                if owned_client is not None:
+                    local_deps.http_client = owned_client
+                try:
+                    result, started_at, completed_at = await _execute_with_deps()
                     await cancellation_checkpoint()
-            duration_seconds = (
-                0.0
-                if run_timer_start is None
-                else max(0.0, local_deps.monotonic_timer() - run_timer_start)
-            )
-            record_failed_run_best_effort(
-                workspace=reserved_workspace,
-                error=original_error,
-                started_at=run_start,
-                completed_at=local_deps.clock,
-                duration_seconds=duration_seconds,
-                artifacts=artifacts,
-                clip_count=clip_count,
-                selected_frame_count=selected_frame_count,
-                phase_timings=phase_timings,
-                warnings=(
-                    preflight_warnings
-                    if current_preflight_warnings is None
-                    else list(current_preflight_warnings)
-                ),
-            )
+                except (_RunInterrupt, asyncio.CancelledError):
+                    # Deliver the queued interrupt before awaited client cleanup.
+                    with suppress(asyncio.CancelledError):
+                        await cancellation_checkpoint()
+                    execution_error = asyncio.CancelledError()
+                    raise execution_error from None
+                except Exception as exc:
+                    execution_error = exc
+                    if is_cancelling():
+                        with suppress(asyncio.CancelledError):
+                            await cancellation_checkpoint()
+                    raise
+        except (Exception, asyncio.CancelledError) as cleanup_error:
+            # Client close can fail while a run failure is already unwinding.
+            if execution_error is not None and cleanup_error is not execution_error:
+                raise execution_error from None
             raise
-
-    if local_deps.http_client is not None:
-        return await _execute_and_record_failure()
-
-    async with httpx.AsyncClient() as http_client:
-        local_deps.http_client = http_client
-        try:
-            return await _execute_and_record_failure()
         finally:
-            local_deps.http_client = None
+            if owns_client:
+                local_deps.http_client = None
+
+        try:
+            await cancellation_checkpoint()
+            recorded_result = record_completed_run_result(
+                workspace=reserved_workspace,
+                result=result,
+                started_at=started_at,
+                completed_at=completed_at,
+            )
+            await cancellation_checkpoint()
+        except _RunInterrupt:
+            await cancellation_checkpoint()
+            raise asyncio.CancelledError() from None
+        return recorded_result
+    except BaseException as original_error:
+        duration_seconds = (
+            0.0
+            if run_timer_start is None
+            else max(0.0, local_deps.monotonic_timer() - run_timer_start)
+        )
+        record_failed_run_best_effort(
+            workspace=reserved_workspace,
+            error=original_error,
+            started_at=run_start,
+            completed_at=local_deps.clock,
+            duration_seconds=duration_seconds,
+            artifacts=artifacts,
+            clip_count=clip_count,
+            selected_frame_count=selected_frame_count,
+            phase_timings=phase_timings,
+            warnings=(
+                preflight_warnings
+                if current_preflight_warnings is None
+                else list(current_preflight_warnings)
+            ),
+        )
+        raise
