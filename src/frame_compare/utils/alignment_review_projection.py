@@ -437,17 +437,17 @@ class AudioReviewPresentation:
                 )
         return tuple(lines)
 
-    def noted_line(self, *, panel: bool = False) -> str | None:
+    def noted_line(self, *, panel: bool = False, include_same_frame: bool = True) -> str | None:
         if self.same_frame_regions:
+            if not include_same_frame:
+                return None
             ranges = ", ".join(
                 _review_region_text(region, panel=panel) for region in self.same_frame_regions
             )
             return (
                 f"Noted: audio differed in {len(self.same_frame_regions)} section"
-                f"{'s' if len(self.same_frame_regions) != 1 else ''} ({ranges}); the video "
-                f"confirmed {self.suggested_offset:+d}f there."
-                if self.suggested_offset is not None
-                else None
+                f"{'s' if len(self.same_frame_regions) != 1 else ''} ({ranges}) "
+                "by less than a frame (sub-frame); not a disagreement."
             )
         if self.resolved_regions and self.suggested_offset is not None:
             ranges = ", ".join(
