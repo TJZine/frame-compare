@@ -127,12 +127,24 @@ runs:
             throw "Required VSView runtime proof marker missing: $marker"
           }
         }
-        if ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok ") {
-          Write-Host "Direct placebo frame proof completed."
-        } elseif ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable") {
-          Write-Warning "Hosted runner lacks a usable Vulkan runtime; direct placebo frame proof remains required in Phase 2."
-        } else {
-          throw "Direct placebo frame proof did not report a recognized result."
+        $directReceipts = @(
+          $proof -split '\r?\n' | Where-Object { $_ -cmatch '^WINDOWS_BUNDLE_PROOF placebo_direct_frame=' }
+        )
+        if ($directReceipts.Count -ne 2) {
+          throw "Expected exactly two direct placebo frame receipts."
+        }
+        foreach ($context in @("standalone", "post_qt")) {
+          $receipt = @($directReceipts | Where-Object { $_ -cmatch " context=$context$" })
+          if ($receipt.Count -ne 1) {
+            throw "Expected one direct placebo frame receipt for $context."
+          }
+          if ($receipt[0] -cmatch "^WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok format=[A-Za-z0-9_]+ bits=[0-9]+ context=$context$") {
+            Write-Host "Direct placebo frame proof completed ($context)."
+          } elseif ($receipt[0] -ceq "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable context=$context") {
+            Write-Warning "Hosted runner lacks a usable Vulkan runtime ($context); direct placebo frame proof remains required in Phase 2."
+          } else {
+            throw "Direct placebo frame proof did not report a recognized result for $context."
+          }
         }
 
     - name: Verify bundle workspace directories

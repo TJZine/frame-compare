@@ -319,12 +319,14 @@ def prove_placebo_tonemap_api() -> None:
     proof(f"placebo_tonemap_api=ok namespace=placebo functions={','.join(sorted(functions))}")
 
 
-def prove_placebo_tonemap_frame() -> bool:
-    from frame_compare.vs.tonemap_runtime import probe_libplacebo_runtime
+def prove_placebo_tonemap_frame(*, context: str = "standalone") -> None:
+    from frame_compare.vs.tonemap_runtime import LibplaceboProbeStatus, libplacebo_probe_status
 
-    if not probe_libplacebo_runtime():
-        proof("placebo_direct_frame=skipped reason=vulkan_runtime_unavailable")
-        return False
+    status = libplacebo_probe_status()
+    if status is LibplaceboProbeStatus.VULKAN_UNAVAILABLE:
+        proof(f"placebo_direct_frame=skipped reason=vulkan_runtime_unavailable context={context}")
+        return
+    assert_true(status is LibplaceboProbeStatus.USABLE, "libplacebo runtime probe failed")
 
     direct_out, _tonemap_clip = build_placebo_clip()
     direct_frame = direct_out.get_frame(0)
@@ -336,9 +338,9 @@ def prove_placebo_tonemap_frame() -> bool:
         "placebo unexpectedly reduced output below 10-bit",
     )
     proof(
-        f"placebo_direct_frame=ok format={direct_frame.format.name} bits={direct_frame.format.bits_per_sample}"
+        f"placebo_direct_frame=ok format={direct_frame.format.name} "
+        f"bits={direct_frame.format.bits_per_sample} context={context}"
     )
-    return True
 
 
 def prove_apply_tonemap_frame() -> None:
@@ -672,7 +674,7 @@ def prove_vsview_runtime(media_path: Path) -> None:
     prove_generated_vsview_session(media_path)
     prove_placebo_tonemap_api()
     prove_apply_tonemap_frame()
-    prove_placebo_tonemap_frame()
+    prove_placebo_tonemap_frame(context="post_qt")
     proof("vsview_runtime=ok")
 
 

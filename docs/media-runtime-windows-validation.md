@@ -144,6 +144,11 @@ Required evidence:
 - `bundle_info.schema_version` is 3, identifying a native-panel-capable full bundle;
   schema-2 pre-native-panel bundles are not eligible for code-only updates.
 - The recorded source SHA equals the tested pull-request SHA.
+- The direct libplacebo frame proof reports a separate result before and after
+  Qt initialization. The hosted skip is reserved for Windows exit code
+  `3221225477` with `VK_ERROR_INCOMPATIBLE_DRIVER` or `Failed creating instance`
+  in stderr. Other probe failures fail the build. Record a successful direct
+  frame on the physical Windows GPU.
 - The bundle runtime fingerprint equals the expected value above.
 - FFmpeg is the LGPL-only artifact; no GPL or nonfree build is present.
 - FFMS2 is not present in the Windows bundle or plugin manifests.

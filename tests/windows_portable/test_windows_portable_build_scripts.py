@@ -5,14 +5,18 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
 import tomllib
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+
+from frame_compare.vs import tonemap_runtime
 
 from ._helpers import normalized_process_output as _normalized_process_output
 from ._helpers import read_text_or_fail as _read_text_or_fail
@@ -374,17 +378,72 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
         assert artifact["bytes"] == wheel["size"]
 
 
+@pytest.mark.parametrize(
+    ("exit_code", "stderr", "error", "expected"),
+    [
+        (3221225477, b"\x1b[31mVK_ERROR_INCOMPATIBLE_DRIVER\x1b[0m", None, "unavailable"),
+        (3221225477, b"Failed creating instance", None, "unavailable"),
+        (1, b"VK_ERROR_INCOMPATIBLE_DRIVER", None, "probe failed"),
+        (3221225477, b"unexpected access violation", None, "probe failed"),
+        (1, b"filter error", None, "probe failed"),
+        (None, b"", subprocess.TimeoutExpired("probe", 5), "probe failed"),
+        (0, b"", None, "render failed"),
+    ],
+    ids=[
+        "incompatible-driver",
+        "instance-failure",
+        "wrong-exit-code",
+        "unexpected-crash",
+        "filter-error",
+        "timeout",
+        "render-error",
+    ],
+)
 def test_windows_portable_direct_placebo_smoke_respects_runtime_probe(
     repo_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    exit_code: int | None,
+    stderr: bytes,
+    error: subprocess.TimeoutExpired | None,
+    expected: str,
 ) -> None:
-    proof_source = _runtime_proof_source(repo_root)
-    direct_smoke = proof_source[
-        proof_source.index("def prove_placebo_tonemap_frame()") : proof_source.index(
-            "def prove_apply_tonemap_frame()"
-        )
-    ]
-    assert "placebo_direct_frame=skipped reason=vulkan_runtime_unavailable" in direct_smoke
-    assert "direct_out.get_frame(0)" in direct_smoke
+    def run_probe(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if error is not None:
+            raise error
+        assert exit_code is not None
+        return subprocess.CompletedProcess([], exit_code, b"", stderr)
+
+    def fail_render(_frame: int) -> None:
+        raise RuntimeError("render failed")
+
+    def blank_clip(**_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(std=SimpleNamespace(SetFrameProps=lambda **_: object()))
+
+    def tonemap(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(get_frame=fail_render)
+
+    monkeypatch.setattr(tonemap_runtime, "run_subprocess", run_probe)
+    monkeypatch.setitem(
+        sys.modules,
+        "vapoursynth",
+        SimpleNamespace(
+            core=SimpleNamespace(
+                std=SimpleNamespace(BlankClip=blank_clip), placebo=SimpleNamespace(Tonemap=tonemap)
+            ),
+            RGB48=0,
+        ),
+    )
+    smoke = repo_root / "tools/windows_portable/runtime_smoke.py"
+    monkeypatch.setattr(sys, "argv", [str(smoke), "placebo_tonemap_frame", "fixture.mp4"])
+    skip_receipt = "placebo_direct_frame=skipped reason=vulkan_runtime_unavailable"
+    if expected == "unavailable":
+        runpy.run_path(str(smoke))
+        assert skip_receipt in capsys.readouterr().out
+    else:
+        with pytest.raises((AssertionError, RuntimeError), match=expected):
+            runpy.run_path(str(smoke))
+        assert skip_receipt not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -464,6 +523,57 @@ def test_windows_portable_workflow_surfaces_direct_placebo_result(repo_root: Pat
         "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable"
     ) in workflow
     assert "direct placebo frame proof remains required in Phase 2" in workflow
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell required")
+@pytest.mark.parametrize(
+    ("variant", "accepted", "warns"),
+    [
+        ("both-ok", True, False),
+        ("post-qt-skip", True, True),
+        ("missing", False, False),
+        ("prefixed", False, False),
+        ("suffixed", False, False),
+        ("wrong-reason", False, False),
+        ("duplicate", False, False),
+    ],
+)
+def test_windows_portable_workflow_admits_exact_direct_placebo_receipts(
+    repo_root: Path, variant: str, accepted: bool, warns: bool
+) -> None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required")
+    action = _read_text_or_fail(repo_root / ".github/actions/windows-portable-build/action.yml")
+    block = action[
+        action.index("        $directReceipts = @(") : action.index(
+            "    - name: Verify bundle workspace directories"
+        )
+    ]
+    prefix = "WINDOWS_BUNDLE_PROOF placebo_direct_frame="
+    standalone = prefix + "ok format=RGB48 bits=16 context=standalone"
+    post_qt_ok = prefix + "ok format=RGB48 bits=16 context=post_qt"
+    post_qt_skip = prefix + "skipped reason=vulkan_runtime_unavailable context=post_qt"
+    post_qt = {
+        "both-ok": post_qt_ok,
+        "post-qt-skip": post_qt_skip,
+        "missing": "",
+        "prefixed": f"unrelated {post_qt_skip}",
+        "suffixed": f"{post_qt_skip} unrelated",
+        "wrong-reason": post_qt_skip.replace("vulkan_runtime_unavailable", "probe_failed"),
+        "duplicate": f"{standalone}\n{post_qt_ok}",
+    }[variant]
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", "$proof = $env:WB_RECEIPTS\n" + block],
+        env=os.environ | {"WB_RECEIPTS": f"{standalone}\r\n{post_qt}\r\n"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert (result.returncode == 0) is accepted, _normalized_process_output(result)
+    assert ("remains required in Phase 2" in result.stdout) is warns
 
 
 def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: Path) -> None:
@@ -739,7 +849,7 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
         "prove_generated_vsview_session(media_path)",
         "prove_placebo_tonemap_api()",
         "prove_apply_tonemap_frame()",
-        "prove_placebo_tonemap_frame()",
+        'prove_placebo_tonemap_frame(context="post_qt")',
     ):
         assert required_proof in combined_proof
     assert "vsview_runtime_preload=ok" in combined_proof
@@ -886,9 +996,7 @@ def test_windows_portable_workflow_requires_combined_vsview_proof(
     workflow = _read_text_or_fail(repo_root / ".github/actions/windows-portable-build/action.yml")
 
     required_phases = workflow[
-        workflow.index("foreach ($phase in @(") : workflow.index(
-            'if ($proof -match "WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok ")'
-        )
+        workflow.index("foreach ($phase in @(") : workflow.index("$directReceipts = @(")
     ]
     assert '"vsview_runtime"' in required_phases
     assert "WINDOWS_BUNDLE_PROOF vsview_runtime=ok" in required_phases
