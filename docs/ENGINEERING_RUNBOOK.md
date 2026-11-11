@@ -259,11 +259,12 @@ uv venv "$distribution_dir/venv" --python 3.13
 uv pip install --python "$distribution_dir/venv/bin/python" "$distribution_dir"/*.whl
 "$distribution_dir/venv/bin/frame-compare" version
 "$distribution_dir/venv/bin/frame-compare" --help
+"$distribution_dir/venv/bin/python" -c 'from frame_compare.services.report.viewer import get_css, get_js; assert get_css() and get_js()'
 ```
 
-The verifier requires exactly one wheel and sdist. Inspect the built artifacts and
-installed behavior affected by the task; the verifier and help/version smoke do not
-exercise every packaged feature. On Windows use the corresponding `Scripts`
+The verifier requires exactly one wheel and sdist, with the report viewer assets
+and `py.typed` present in both. CI also reads the report CSS and JavaScript from the
+freshly installed wheel. Inspect any other installed behavior affected by the task. On Windows use the corresponding `Scripts`
 executables or an observed matching-SHA CI package result. This route does not prove
 Windows portable layout, native plugins, updater behavior, or signing. Runtime
 dependency changes also need the matching dependency audit and deployment proof.
@@ -312,7 +313,11 @@ The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` wi
 10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
 It explicitly excludes `tests/integration/test_alignment_streaming_resources.py`.
 `tools/verify_docker_integration.sh` owns image builds, container invocation,
-cleanup, logs, and artifact handling. It invokes the repository-owned
+cleanup, logs, and artifact handling. It retains `pytest.xml` in each run's artifact
+directory. The gate requires a readable JUnit report with at least one test and
+zero skipped or xfailed tests. The verifier sets pytest's xfail default to strict,
+so an unexpected pass fails unless the test explicitly sets `xfail(strict=False)`.
+A Docker or log-writer failure fails the gate. The verifier invokes the repository-owned
 `tools/docker_runtime_smoke.py` from the test service's repository mount for
 native runtime, provenance, fixture, and application assertions. The tool remains
 in the workflow trigger paths.
@@ -945,8 +950,9 @@ has no in-band key rotation path.
 
 - `.github/workflows/sync-staging.yml` runs after each `main` push and can also be
   dispatched manually. It fast-forwards `staging` when possible, merges `main`
-  when the branches have diverged, and never force-pushes. A concurrent update or
-  merge conflict fails closed without changing the remote `staging` branch.
+  when the branches have diverged, and stops on a merge conflict. It rechecks
+  `main` before pushing and never force-pushes. The normal push is refused if it
+  would update `staging` without a fast-forward.
 - If a ruleset protects `staging`, it must allow this non-force update (or provide
   an explicit bypass for the workflow actor); a required pull request or required
   status check that blocks the bot will make the sync fail closed. Keep branch

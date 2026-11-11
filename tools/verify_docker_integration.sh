@@ -6,11 +6,12 @@ usage() {
 Usage: bash tools/verify_docker_integration.sh [--service NAME] [--no-build] [--no-cache] [--pytest-path PATH]
 
 Runs integration tests inside the Docker image where VapourSynth + FFmpeg are installed.
-Fails if any tests are skipped, xfailed, or xpassed (the “real deps work” gate).
+Fails if any tests are skipped or xfailed. Unexpected passes fail pytest under the
+strict default, which a test can override with an explicit xfail(strict=False).
 
 Defaults:
   --service frame-compare-test
-  Runs: pytest -n 10 --dist loadgroup -v --ignore=tests/integration/test_alignment_streaming_resources.py \
+  Runs: pytest -n 10 --dist loadgroup -v -o xfail_strict=true --ignore=tests/integration/test_alignment_streaming_resources.py \
     tests/e2e/ tests/integration/ tests/vs/
 
 Environment:
@@ -94,6 +95,17 @@ if ! docker info >/dev/null 2>&1; then
   exit 127
 fi
 
+host_python=""
+if command -v python3 >/dev/null 2>&1; then
+  host_python="$(command -v python3)"
+elif command -v python >/dev/null 2>&1; then
+  host_python="$(command -v python)"
+fi
+if [[ -z "$host_python" ]]; then
+  echo "ERROR: host Python is required to parse Docker-generated verification reports" >&2
+  exit 127
+fi
+
 # Ensure the host bind-mount source exists before Compose creates any container.
 # This keeps the generated-data proof writable by the invoking host user on
 # Linux daemons that otherwise create a missing bind source as root.
@@ -105,6 +117,7 @@ mkdir -p generated
 mkdir -p generated/e2e
 e2e_artifact_dir="$(mktemp -d generated/e2e/run.XXXXXX)"
 e2e_artifact_name="$(basename "$e2e_artifact_dir")"
+junit_report="$e2e_artifact_dir/pytest.xml"
 echo "Docker E2E artifacts: $e2e_artifact_dir"
 
 build_args=()
@@ -249,20 +262,41 @@ python -c "import pytest, pytest_mock, xdist" >/dev/null 2>&1 || {
 pytest_cache_dir="$(mktemp -d /tmp/frame-compare-pytest-cache.XXXXXX)"
 EOF
 )
-container_cmd+=$'\n'"python -m pytest -n 10 --dist loadgroup -v -o cache_dir=\"\$pytest_cache_dir\"${pytest_args}"
+container_cmd+=$'\n'"python -m pytest -n 10 --dist loadgroup -v -o xfail_strict=true -o cache_dir=\"\$pytest_cache_dir\" --junitxml=/workspace/$junit_report${pytest_args}"
 
 set +e
 "${docker_cmd[@]}" "$container_cmd" 2>&1 | tee "$tmp_log"
-exit_code="${PIPESTATUS[0]}"
+pipeline_status=("${PIPESTATUS[@]}")
 set -e
 
-if [[ "$exit_code" != "0" ]]; then
-  echo "ERROR: docker integration tests failed (exit $exit_code)" >&2
-  exit "$exit_code"
+if [[ "${pipeline_status[1]}" != "0" ]]; then
+  echo "ERROR: could not record Docker integration output (tee exit ${pipeline_status[1]})" >&2
+fi
+if [[ "${pipeline_status[0]}" != "0" ]]; then
+  echo "ERROR: docker integration tests failed (exit ${pipeline_status[0]})" >&2
+  exit "${pipeline_status[0]}"
+fi
+if [[ "${pipeline_status[1]}" != "0" ]]; then
+  exit "${pipeline_status[1]}"
 fi
 
-if grep -Eq '([1-9][0-9]* (skipped|xfailed|xpassed)|(skipped|xfailed|xpassed)=[1-9][0-9]*)' "$tmp_log"; then
-  echo "ERROR: docker integration tests reported skipped, xfailed, or xpassed tests; this gate requires zero non-passing outcomes" >&2
+if ! "$host_python" - "$junit_report" <<'PYTHON'
+import sys
+import xml.etree.ElementTree as ET
+
+report = sys.argv[1]
+try:
+    root = ET.parse(report).getroot()
+    suites = root.findall("testsuite")
+    if root.tag != "testsuites" or len(suites) != 1 or int(suites[0].attrib["tests"]) <= 0:
+        raise ValueError("expected a pytest suite with at least one test")
+except (OSError, ET.ParseError, KeyError, ValueError) as error:
+    raise SystemExit(f"ERROR: invalid pytest JUnit report {report}: {error}")
+
+if root.find(".//skipped") is not None:
+    raise SystemExit("ERROR: pytest reported skipped or xfailed tests; this gate requires zero non-passing outcomes")
+PYTHON
+then
   exit 3
 fi
 
@@ -455,17 +489,6 @@ fi
 if ! grep -Fq "DOCKER_PROOF production_tooling_absent=ok" "$production_log"; then
   echo "ERROR: production-image tooling proof marker missing" >&2
   exit 6
-fi
-
-host_python=""
-if command -v python3 >/dev/null 2>&1; then
-  host_python="$(command -v python3)"
-elif command -v python >/dev/null 2>&1; then
-  host_python="$(command -v python)"
-fi
-if [[ -z "$host_python" ]]; then
-  echo "ERROR: host Python is required to parse Docker-generated TOML and PNG proof files" >&2
-  exit 127
 fi
 
 export PYTHONPATH="${PWD}/src${PYTHONPATH:+:${PYTHONPATH}}"

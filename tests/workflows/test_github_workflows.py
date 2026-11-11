@@ -183,6 +183,8 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
         "pyproject.toml",
         "uv.lock",
         "Dockerfile",
+        "README.md",
+        "LICENSE",
         "docker-compose*.yml",
         "tools/verify_docker_*.sh",
         "tools/docker_runtime_smoke.py",

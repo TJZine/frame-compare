@@ -8,8 +8,11 @@ import csv
 import email.policy
 import hashlib
 import io
+import re
+import stat
 import tarfile
 import zipfile
+from collections import defaultdict
 from collections.abc import Iterable
 from email.message import Message
 from email.parser import BytesParser
@@ -22,9 +25,24 @@ EXPECTED_BUNDLED_FONT_SHA256 = "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdc
 EXPECTED_BUNDLED_LICENSE_SHA256 = "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a"
 _BUNDLED_FONT_WHEEL_PATH = "frame_compare/assets/fonts/Inter-Regular.ttf"
 _BUNDLED_LICENSE_WHEEL_PATH = "frame_compare/assets/fonts/Inter-OFL.txt"
-_BUNDLED_FONT_SDIST_SUFFIX = "/src/frame_compare/assets/fonts/Inter-Regular.ttf"
-_BUNDLED_LICENSE_SDIST_SUFFIX = "/src/frame_compare/assets/fonts/Inter-OFL.txt"
+_REPORT_ASSETS = (
+    "grid_view.js",
+    "inspector.js",
+    "lens.js",
+    "review_state.js",
+    "viewer.css",
+    "viewer.js",
+    "viewer_format.js",
+    "viewport.js",
+)
+_REQUIRED_PACKAGE_FILES = (
+    "frame_compare/py.typed",
+    *(f"frame_compare/services/report/assets/{name}" for name in _REPORT_ASSETS),
+)
 FORBIDDEN_PARTS = {
+    ".claude",
+    ".codex",
+    ".handoff",
     ".git",
     ".hg",
     ".mypy_cache",
@@ -72,7 +90,7 @@ def _validate_member_names(names: Iterable[str], *, artifact: Path) -> list[str]
         if "\\" in name:
             _fail(f"{artifact.name} contains a non-portable path: {name!r}")
         path = PurePosixPath(name)
-        if path.is_absolute() or ".." in path.parts:
+        if path.is_absolute() or ".." in path.parts or re.match(r"^[A-Za-z]:", path.as_posix()):
             _fail(f"{artifact.name} contains an unsafe path: {name!r}")
         if FORBIDDEN_PARTS.intersection(path.parts) or path.name in FORBIDDEN_NAMES:
             _fail(f"{artifact.name} contains local or sensitive state: {name!r}")
@@ -169,8 +187,16 @@ def _verify_wheel(wheel: Path) -> str:
             _fail(f"{wheel.name} RECORD is not in the METADATA dist-info directory")
         if PurePosixPath(license_names[0]).parent.parent != dist_info_dir:
             _fail(f"{wheel.name} LICENSE is not in the METADATA dist-info directory")
-        if not any(name.startswith("frame_compare/") for name in names):
-            _fail(f"{wheel.name} does not contain the frame_compare package")
+        # RECORD validation below rejects duplicate files. Check exact paths and
+        # the member type here, including Unix ZIP entries that encode symlinks.
+        wheel_members = {info.filename: info for info in archive.infolist()}
+        for path in _REQUIRED_PACKAGE_FILES:
+            member = wheel_members.get(path)
+            if member is None or member.is_dir() or member.external_attr & 0x10:
+                _fail(f"{wheel.name} must contain a regular file at {path!r}")
+            unix_type = stat.S_IFMT(member.external_attr >> 16) if member.create_system == 3 else 0
+            if unix_type not in (0, stat.S_IFREG):
+                _fail(f"{wheel.name} must contain a regular file at {path!r}")
         _verify_bundled_font(archive.read(bundled_font_names[0]), artifact=wheel)
         _verify_bundled_font_license(archive.read(bundled_license_names[0]), artifact=wheel)
         _verify_wheel_record(
@@ -185,7 +211,7 @@ def _verify_wheel(wheel: Path) -> str:
 def _verify_sdist(sdist: Path) -> str:
     with tarfile.open(sdist, "r:gz") as archive:
         members = archive.getmembers()
-        names = _validate_member_names((member.name for member in members), artifact=sdist)
+        _validate_member_names((member.name for member in members), artifact=sdist)
         linked = [member.name for member in members if member.issym() or member.islnk()]
         if linked:
             _fail(f"{sdist.name} contains links: {linked!r}")
@@ -194,55 +220,50 @@ def _verify_sdist(sdist: Path) -> str:
         ]
         if unsupported:
             _fail(f"{sdist.name} contains unsupported member types: {unsupported!r}")
-        metadata_names = [name for name in names if name.endswith("/PKG-INFO")]
-        if len(metadata_names) != 1:
-            _fail(f"{sdist.name} must contain exactly one PKG-INFO file")
-        sdist_root = PurePosixPath(metadata_names[0]).parent
-        required_suffixes = (
-            "/LICENSE",
-            "/README.md",
-            "/pyproject.toml",
-            "/src/frame_compare/__init__.py",
-        )
-        for suffix in required_suffixes:
-            if not any(name.endswith(suffix) for name in names):
-                _fail(f"{sdist.name} is missing required content ending in {suffix!r}")
-        bundled_font_path = f"{sdist_root}{_BUNDLED_FONT_SDIST_SUFFIX}"
-        bundled_license_path = f"{sdist_root}{_BUNDLED_LICENSE_SDIST_SUFFIX}"
-        bundled_font_names = [name for name in names if name == bundled_font_path]
-        bundled_license_names = [name for name in names if name == bundled_license_path]
-        required_assets = {
-            "bundled Inter font": bundled_font_names,
-            "bundled Inter OFL notice": bundled_license_names,
-        }
-        for label, matches in required_assets.items():
-            if len(matches) != 1:
-                _fail(f"{sdist.name} must contain exactly one {label} file")
+        by_path: dict[PurePosixPath, list[tarfile.TarInfo]] = defaultdict(list)
+        for member in members:
+            by_path[PurePosixPath(member.name)].append(member)
+        ancestors = {parent for path in by_path for parent in path.parents}
+        for path, entries in by_path.items():
+            if path in ancestors and any(not entry.isdir() for entry in entries):
+                _fail(f"{sdist.name} contains a non-directory ancestor {str(path)!r}")
 
-        bundled_font_member = next(
-            member for member in members if member.name == bundled_font_names[0]
-        )
-        if not bundled_font_member.isfile():
-            _fail(f"{sdist.name} bundled Inter font is not a regular file")
-        bundled_font_file = archive.extractfile(bundled_font_member)
-        if bundled_font_file is None:
-            _fail(f"{sdist.name} bundled Inter font is not a regular file")
-        _verify_bundled_font(bundled_font_file.read(), artifact=sdist)
+        metadata_paths = [
+            path for path in by_path if len(path.parts) == 2 and path.name == "PKG-INFO"
+        ]
+        if len(metadata_paths) != 1:
+            _fail(f"{sdist.name} must contain exactly one root-level PKG-INFO file")
+        sdist_root = metadata_paths[0].parent
 
-        bundled_license_member = next(
-            member for member in members if member.name == bundled_license_names[0]
-        )
-        if not bundled_license_member.isfile():
-            _fail(f"{sdist.name} bundled Inter OFL notice is not a regular file")
-        bundled_license_file = archive.extractfile(bundled_license_member)
-        if bundled_license_file is None:
-            _fail(f"{sdist.name} bundled Inter OFL notice is not a regular file")
-        _verify_bundled_font_license(bundled_license_file.read(), artifact=sdist)
+        def require_file(relative_path: str, label: str) -> tarfile.TarInfo:
+            path = sdist_root / relative_path
+            matches = by_path.get(path, [])
+            if len(matches) != 1 or not matches[0].isfile():
+                _fail(f"{sdist.name} must contain exactly one {label} file at {str(path)!r}")
+            return matches[0]
 
-        metadata_file = archive.extractfile(metadata_names[0])
-        if metadata_file is None:
-            _fail(f"{sdist.name} PKG-INFO is not a regular file")
-        metadata = _metadata_from_bytes(metadata_file.read(), artifact=sdist)
+        metadata_member = require_file("PKG-INFO", "PKG-INFO")
+        for path in ("LICENSE", "README.md", "pyproject.toml", "src/frame_compare/__init__.py"):
+            require_file(path, path)
+        for path in _REQUIRED_PACKAGE_FILES:
+            require_file(f"src/{path}", path)
+        bundled_font = require_file(f"src/{_BUNDLED_FONT_WHEEL_PATH}", "bundled Inter font")
+        bundled_license = require_file(
+            f"src/{_BUNDLED_LICENSE_WHEEL_PATH}", "bundled Inter OFL notice"
+        )
+        if any(not path.is_relative_to(sdist_root) for path in by_path):
+            _fail(f"{sdist.name} contains members outside its package root {str(sdist_root)!r}")
+
+        def read_file(member: tarfile.TarInfo) -> bytes:
+            file = archive.extractfile(member)
+            if file is None:
+                _fail(f"{sdist.name} could not read {member.name!r}")
+            with file:
+                return file.read()
+
+        _verify_bundled_font(read_file(bundled_font), artifact=sdist)
+        _verify_bundled_font_license(read_file(bundled_license), artifact=sdist)
+        metadata = _metadata_from_bytes(read_file(metadata_member), artifact=sdist)
     return str(metadata["Version"])
 
 
