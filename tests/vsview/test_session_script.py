@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import sys
 import types
@@ -124,7 +125,7 @@ def test_generated_diagnostics_use_legacy_stream_encoding(
             console = SessionConsole()
             console.safe_print(console.status_line("[FAIL]", "Épisode 映"))
         stderr.flush()
-        assert buffer.getvalue().decode("cp1252") == "  x Épisode ?\n"
+        assert buffer.getvalue() == f"  x Épisode ?{os.linesep}".encode("cp1252")
 
 
 def _decision_payload(*, state: str) -> dict[str, object]:
