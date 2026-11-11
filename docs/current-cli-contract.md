@@ -102,7 +102,8 @@ Commands exit with these codes (`src/frame_compare/cli/errors.py`,
 
 The first digit of an `FC-` code selects its family and exit code. Human output
 prints the code and message on stderr; `--json` prints the typed error document
-described under Output Modes.
+described under Output Modes. An unexpected error exits 1 and prints a fixed
+message to stderr. In `--json` mode it emits no stdout document.
 
 ## Shared Path Resolution Rules
 

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import typer
 
 from frame_compare.cli.cli_helpers import (
+    UNEXPECTED_ERROR_MESSAGE,
     FrameCompareTyperGroup,
     copy_text_to_clipboard,
     handle_error,
@@ -22,6 +23,7 @@ from frame_compare.cli.cli_helpers import (
     maybe_open_report as _maybe_open_report,
 )
 from frame_compare.cli.doctor_command import handle_doctor
+from frame_compare.cli.errors import ExitCode
 from frame_compare.cli.history_command import handle_history_list, handle_history_open
 from frame_compare.cli.preset_command import (
     handle_preset_apply,
@@ -585,6 +587,9 @@ def console_main() -> None:
             if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
                 signal.signal(signal.SIGINT, signal.SIG_IGN)
         raise
+    except Exception:
+        typer.echo(UNEXPECTED_ERROR_MESSAGE, err=True)
+        raise SystemExit(int(ExitCode.GENERAL_ERROR)) from None
 
 
 if __name__ == "__main__":

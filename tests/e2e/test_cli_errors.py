@@ -270,3 +270,24 @@ def test_cli_doctor_nonfinite_timeout_diagnostic_is_strict_json(
         for error in details["validation_errors"]
     )
     assert result.stderr == ""
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("json_mode", [False, True], ids=["human", "json"])
+def test_cli_sanitizes_unexpected_startup_failure(
+    json_mode: bool,
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = workspace()
+    monkeypatch.setenv("SSL_CERT_FILE", str(root.root / "missing-ca-cert.pem"))
+    arguments = ["run", "--skip-metadata", "--no-upload"]
+    if json_mode:
+        arguments.append("--json")
+    result = run_cli(root.root, arguments)
+
+    assert result.exit_code == 1, (result.stdout, result.stderr)
+    assert result.stderr == "Unexpected error: please report this bug.\n"
+    if json_mode:
+        assert result.stdout == ""
