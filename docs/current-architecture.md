@@ -1405,7 +1405,9 @@ filmstrip or Inspector changes.
 Restored custom zoom applies to the canvas and controls, and pan is clamped once
 image geometry is available. Diff lens images share the stage comparison transform and offset, while Single and Slider
 magnify each native source. Viewport preferences use the report-scoped
-`viewport-v2` key; older viewport state is ignored.
+`viewport-v2` key; older viewport state is ignored. When leaving Grid, the
+viewer saves the selected view mode and stores pending normalized pan separately
+until the destination image supplies the geometry for pixel conversion and clamping.
 `currentAlignment()` derives a normalized copy from the selected directional pair's
 `pairAlignments` entry; missing entries mean neutral. Offset edits write that map,
 while `rawAlignX`/`rawAlignY` remain transient input drafts. Visiting a pair or

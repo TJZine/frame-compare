@@ -1059,6 +1059,12 @@ const ReportViewer = {
         this.state.zoom = this.viewport.clampZoom(saved.zoom);
         this.state.panX = this.numberOrDefault(saved.panX, 0);
         this.state.panY = this.numberOrDefault(saved.panY, 0);
+        const pendingGridPan = saved.pendingGridPan;
+        if (mode !== 'grid' && Number.isFinite(pendingGridPan?.x) && Number.isFinite(pendingGridPan?.y)) {
+            this.viewport.pendingGridPan = { x: pendingGridPan.x, y: pendingGridPan.y };
+            this.state.panX = 0;
+            this.state.panY = 0;
+        }
         this.state.revealPercent = Math.max(0, Math.min(100, this.numberOrDefault(saved.revealPercent, 50)));
         if (typeof saved.overlaysHidden === 'boolean') {
             this.state.overlaysHidden = saved.overlaysHidden;
@@ -1102,18 +1108,17 @@ const ReportViewer = {
         const storage = this.localStorage();
         if (!this.state.storageKey || !storage) return false;
 
-        // Pending pan is still normalized, so restore it in Grid until conversion.
-        const gridPan = this.viewport.pendingGridPan;
         const payload = {
             currentFrameIdx: this.state.currentFrameIdx,
-            mode: gridPan ? 'grid' : this.state.mode,
+            mode: this.state.mode,
             leftClipIdx: this.state.leftClipIdx,
             rightClipIdx: this.state.rightClipIdx,
             activeClipIdx: this.state.activeClipIdx,
             fitMode: this.state.fitMode,
             zoom: this.state.zoom,
-            panX: gridPan?.x ?? this.state.panX,
-            panY: gridPan?.y ?? this.state.panY,
+            panX: this.state.panX,
+            panY: this.state.panY,
+            pendingGridPan: this.viewport.pendingGridPan,
             revealPercent: this.state.revealPercent,
             overlaysHidden: this.state.overlaysHidden,
             filmstripCollapsed: this.state.filmstripCollapsed,
