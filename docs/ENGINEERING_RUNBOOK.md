@@ -950,8 +950,9 @@ has no in-band key rotation path.
 
 - `.github/workflows/sync-staging.yml` runs after each `main` push and can also be
   dispatched manually. It fast-forwards `staging` when possible, merges `main`
-  when the branches have diverged, and never force-pushes. A concurrent update or
-  merge conflict fails closed without changing the remote `staging` branch.
+  when the branches have diverged, and stops on a merge conflict. It rechecks
+  `main` before pushing and never force-pushes. The normal push is refused if it
+  would update `staging` without a fast-forward.
 - If a ruleset protects `staging`, it must allow this non-force update (or provide
   an explicit bypass for the workflow actor); a required pull request or required
   status check that blocks the bot will make the sync fail closed. Keep branch
