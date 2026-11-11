@@ -26,6 +26,8 @@ DOCKER_TRIGGER_PATHS = (
     "pyproject.toml",
     "uv.lock",
     "Dockerfile",
+    "README.md",
+    "LICENSE",
     "docker-compose*.yml",
     "tools/verify_docker_*.sh",
     "tools/docker_runtime_smoke.py",
@@ -439,7 +441,8 @@ def test_workflow_triggers_all_docker_runtime_and_test_paths(repo_root: Path) ->
         ("tools/docker_runtime_smoke.py", True),
         (".dockerignore", True),
         ("docs/current-architecture.md", False),
-        ("README.md", False),
+        ("README.md", True),
+        ("LICENSE", True),
     ],
 )
 def test_workflow_path_filter_has_positive_and_negative_controls(
