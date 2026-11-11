@@ -521,6 +521,22 @@ def git_blob(repo: Path, commit: str, path: Path) -> bytes:
     )
 
 
+def snapshot_manifest(repo: Path, commit: str, root: Path) -> None:
+    """Project the selected manifest and its vendored notices as exact Git bytes."""
+    manifest = git_blob(repo, commit, MANIFEST)
+    artifacts = json.loads(manifest, object_pairs_hook=_unique_json_keys)["artifacts"]
+    layout = Layout(root)
+    layout.generate(MANIFEST.name, manifest)
+    for artifact in artifacts:
+        for notice in artifact["license"].get("files") or ():
+            source = notice["path"]
+            if not re.fullmatch(r"licenses/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+", source):
+                raise ValueError(f"Unsafe vendored license path: {source}")
+            check_path(source)
+            if source not in layout.records:
+                layout.generate(source, git_blob(repo, commit, OWNER / source))
+
+
 def export(repo: Path, commit: str, output: Path) -> bytes:
     # uv writes the output argument into the hashed requirements header.
     output = output.absolute()
@@ -541,7 +557,9 @@ def export(repo: Path, commit: str, output: Path) -> bytes:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("assemble", "export", "anitopy-wheel"))
+    parser.add_argument(
+        "mode", choices=("assemble", "export", "anitopy-wheel", "snapshot-manifest")
+    )
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--cache", type=Path)
@@ -553,6 +571,11 @@ def main() -> None:
     commit = args.commit_sha
     if not re.fullmatch(r"[a-f0-9]{40}", commit):
         parser.error("--commit-sha must be a complete lowercase 40-character commit SHA")
+    if args.mode == "snapshot-manifest":
+        if args.output is None or not args.output.is_dir() or any(args.output.iterdir()):
+            parser.error("snapshot-manifest requires an empty reserved output directory")
+        snapshot_manifest(repo, commit, args.output)
+        return
     if args.mode == "export":
         if args.output is None:
             parser.error("export requires --output")
@@ -575,12 +598,16 @@ def main() -> None:
         _convert_anitopy(download(pin, args.cache), args.output)
         return
 
-    manifest = (
-        git_blob(repo, commit, MANIFEST) if args.manifest is None else args.manifest.read_bytes()
-    )
     root = args.output
-    if args.cache is None or root is None or not root.is_dir() or any(root.iterdir()):
-        parser.error("assembly needs a cache and an empty reserved output directory")
+    if (
+        args.manifest is None
+        or args.cache is None
+        or root is None
+        or not root.is_dir()
+        or any(root.iterdir())
+    ):
+        parser.error("assembly needs a manifest, a cache and an empty reserved output directory")
+    manifest = args.manifest.read_bytes()
     requirement_file = root / "requirements.lock.txt"
     if args.requirements is None:
         requirements = export(repo, commit, requirement_file)

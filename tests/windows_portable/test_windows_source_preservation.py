@@ -41,6 +41,35 @@ def _snapshot(root: Path) -> dict[str, bytes]:
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
 
+def _initialize_builder_fixture_repo(root: Path) -> None:
+    if shutil.which("git") is None:
+        pytest.skip("git is required for the builder source commit lookup")
+    subprocess.run(
+        ["git", "init", "--quiet", str(root)], check=True, capture_output=True, timeout=30
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "fixture",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+
 @pytest.mark.parametrize(
     "scenario",
     [
@@ -119,6 +148,10 @@ def test_builder_preserves_existing_state(
         manifest["manifest_version"] = 1
     elif scenario == "fingerprints":
         del manifest["bundle"]["runtime_fingerprints"]
+    elif scenario == "reserved-failure":
+        _initialize_builder_fixture_repo(tmp_path / "repo")
+        cache.mkdir()
+        (cache / "sentinel").write_bytes(b"existing cache data")
     manifest_path.write_text("{" if scenario == "malformed" else json.dumps(manifest))
     if scenario == "missing":
         manifest_path.unlink()
@@ -127,7 +160,15 @@ def test_builder_preserves_existing_state(
     source = script.read_text()
     source = (
         source.rsplit("Main", 1)[0]
-        + "\nfunction uv { $global:LASTEXITCODE = 0; return 'fixture python' }\nfunction Initialize-PortableRuntime { throw \"injected download failure\" }\nMain\n"
+        + r"""
+function uv { $global:LASTEXITCODE = 0; return 'fixture python' }
+function Initialize-PortableRuntime {
+  param($BundleRoot)
+  Set-Content -LiteralPath (Join-Path $BundleRoot 'partial-runtime.txt') -Value 'partial download'
+  throw "injected download failure"
+}
+Main
+"""
     )
     script.write_text(source)
     before = _snapshot(tmp_path)
@@ -324,6 +365,7 @@ def test_source_install_skip_still_requires_builder_python_lookup(
         repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
         owner / "shim/frame-compare-version.ps1",
     )
+    _initialize_builder_fixture_repo(script.parents[2])
     before = _snapshot(previous)
     pointer_before = pointer.read_bytes()
     shims_before = _snapshot(pointer.parent.parent / "bin")
@@ -557,6 +599,7 @@ def test_builder_uses_committed_version_and_empty_workspace(
                 repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
                 owner / "shim/frame-compare-version.ps1",
             )
+    shutil.copytree(repo_root / "tools/windows_portable/licenses", owner / "licenses")
     init = root / "src/frame_compare/__init__.py"
     init.parent.mkdir(parents=True)
     init.write_text('__version__ = "1.2.3"\n')
