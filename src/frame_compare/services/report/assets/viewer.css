@@ -1205,10 +1205,6 @@ body:fullscreen .rv-inspector {
     color: var(--text-muted);
 }
 
-.rv-info-detail {
-    color: var(--text-secondary);
-}
-
 .rv-info-category {
     font-family: var(--font-mono);
     color: var(--text-secondary);
@@ -1771,14 +1767,6 @@ body:fullscreen .rv-inspector {
     color: var(--text-secondary);
     font-size: var(--text-xs);
     font-weight: 400;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.rv-filmstrip-detail {
-    color: var(--text-muted);
-    font-size: 0.65rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
