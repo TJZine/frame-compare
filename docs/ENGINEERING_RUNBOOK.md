@@ -259,11 +259,12 @@ uv venv "$distribution_dir/venv" --python 3.13
 uv pip install --python "$distribution_dir/venv/bin/python" "$distribution_dir"/*.whl
 "$distribution_dir/venv/bin/frame-compare" version
 "$distribution_dir/venv/bin/frame-compare" --help
+"$distribution_dir/venv/bin/python" -c 'from frame_compare.services.report.viewer import get_css, get_js; assert get_css() and get_js()'
 ```
 
-The verifier requires exactly one wheel and sdist. Inspect the built artifacts and
-installed behavior affected by the task; the verifier and help/version smoke do not
-exercise every packaged feature. On Windows use the corresponding `Scripts`
+The verifier requires exactly one wheel and sdist, with the report viewer assets
+and `py.typed` present in both. CI also reads the report CSS and JavaScript from the
+freshly installed wheel. Inspect any other installed behavior affected by the task. On Windows use the corresponding `Scripts`
 executables or an observed matching-SHA CI package result. This route does not prove
 Windows portable layout, native plugins, updater behavior, or signing. Runtime
 dependency changes also need the matching dependency audit and deployment proof.

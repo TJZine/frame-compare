@@ -56,6 +56,9 @@ frame-compare-alignment-review = "frame_compare.vsview.alignment_review_panel"
 requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.sdist]
+exclude = [".claude/", ".codex/", ".handoff/"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/frame_compare"]
 
