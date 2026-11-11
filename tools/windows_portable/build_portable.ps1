@@ -9,7 +9,7 @@ Param(
   [string]$CacheDir = (Join-Path $PWD ".portable_cache"),
 
   [Parameter(Mandatory = $false)]
-  [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path,
+  [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\\..")).Path,
 
   [Parameter(Mandatory = $false)]
   [switch]$RequireReleasePublicKey,
@@ -477,7 +477,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
   $locationPushed = $false
   try {
     Set-BundleRuntimeEnvironment -BundleRoot $BundleRoot
-    Push-Location $BundleRoot
+    Push-Location -LiteralPath $BundleRoot
     $locationPushed = $true
 
     if (!(Test-Path -LiteralPath $ffmpeg -PathType Leaf)) {

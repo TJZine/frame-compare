@@ -118,10 +118,8 @@ def _copy_keygen_owner(*, repo_root: Path, tmp_path: Path) -> tuple[Path, Path, 
     owner_dir.mkdir(parents=True)
     script = owner_dir / "generate_update_keypair.ps1"
     placeholder = owner_dir / "update_public_key.xml"
-    shutil.copy2(
-        repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1",
-        script,
-    )
+    for name in (script.name, "path_safety.ps1"):
+        shutil.copy2(repo_root / "tools" / "windows_portable" / name, owner_dir / name)
     placeholder.write_text(
         "\n".join(
             [
@@ -338,19 +336,51 @@ def test_windows_update_keygen_refuses_existing_outputs(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("junction_role", ["direct", "private-path", "repository-root"])
 def test_windows_update_keygen_rejects_repository_private_path(
     tmp_path: Path,
     repo_root: Path,
+    junction_role: str,
 ) -> None:
+    if junction_role != "direct" and os.name != "nt":
+        pytest.skip("Windows junction required")
     exe = _powershell_exe()
     if exe is None:
         pytest.skip("pwsh/powershell not available")
 
+    tmp_path = tmp_path.resolve()
     copied_repo, script, placeholder = _copy_keygen_owner(
         repo_root=repo_root,
         tmp_path=tmp_path,
     )
     private_path = copied_repo / "private.xml"
+    expected_error = "outside the repository"
+    if junction_role != "direct":
+        alias = tmp_path / "outside-junction"
+        junction = subprocess.run(
+            [
+                exe,
+                "-NoProfile",
+                "-Command",
+                '$ErrorActionPreference = "Stop"; '
+                "New-Item -ItemType Junction -Path $env:ALIAS -Target $env:TARGET | Out-Null",
+            ],
+            env=os.environ | {"ALIAS": str(alias), "TARGET": str(copied_repo)},
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert junction.returncode == 0, junction.stdout + junction.stderr
+        if junction_role == "private-path":
+            private_path = alias / "private.xml"
+            expected_error = "PrivateKeyPath has a reparse-point ancestor"
+        else:
+            script = alias / script.relative_to(copied_repo)
+            placeholder = alias / placeholder.relative_to(copied_repo)
+            private_path = tmp_path / "private.xml"
+            expected_error = "Repository root has a reparse-point ancestor"
+
     before = placeholder.read_bytes()
     proc = _run_keygen(
         exe=exe,
@@ -360,9 +390,10 @@ def test_windows_update_keygen_rejects_repository_private_path(
         replace_placeholder=True,
     )
     assert proc.returncode != 0
-    assert "outside the repository" in proc.stderr
+    assert expected_error in _normalized_powershell_output(proc.stderr)
     assert placeholder.read_bytes() == before
     assert not private_path.exists()
+    assert not list(private_path.parent.glob(".private.xml.*.tmp"))
 
 
 @pytest.mark.integration

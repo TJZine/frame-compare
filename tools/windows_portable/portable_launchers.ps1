@@ -92,7 +92,7 @@ try {
   )
   $env:PATH = (($existingPathEntries -join ";") + ";" + $env:PATH)
 
-  Push-Location $bundleRoot
+  Push-Location -LiteralPath $bundleRoot
   $locationPushed = $true
   & $python -m frame_compare.cli.entry @args
   if ($null -eq $LASTEXITCODE) {

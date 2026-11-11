@@ -28,6 +28,11 @@ windows_portable_launcher_e2e = pytest.mark.skipif(
         (("run", "--diagnose-paths"), ("run", "--config")),
         (("preset", "list"), ("preset", "list", "--config")),
         (("history", "list"), ("history", "list", "--config")),
+        pytest.param(
+            ("preset", "save", "--", "--config"),
+            ("preset", "save", "--config"),
+            id="config-after-option-terminator",
+        ),
     ),
 )
 def test_windows_portable_shim_routes_all_fallback_config_commands_to_one_file(
@@ -65,9 +70,8 @@ def test_windows_portable_shim_routes_all_fallback_config_commands_to_one_file(
     assert completed.returncode == 0, f"stdout:\n{completed.stdout}\n\nstderr:\n{completed.stderr}"
 
     forwarded = args_file.read_text(encoding="utf-8-sig").rstrip("\r\n").split("|")
-    assert tuple(forwarded[: len(expected_prefix)]) == expected_prefix
-    config_index = forwarded.index("--config")
-    assert forwarded[config_index + 1] == str(state_config_toml)
+    config_index = len(expected_prefix) - 1
+    assert tuple(forwarded) == (*expected_prefix, str(state_config_toml), *args[config_index:])
 
 
 @pytest.mark.integration
@@ -463,7 +467,7 @@ def test_windows_portable_shim_restores_environment_on_repeat_path_invocation(
     install_root = tmp_path / "install"
     bin_dir = install_root / "bin"
     state_dir = install_root / "state"
-    bundle_dir = install_root / "bundle"
+    bundle_dir = install_root / "bundle[1]"
     bin_dir.mkdir(parents=True)
     state_dir.mkdir(parents=True)
     bundle_dir.mkdir(parents=True)
@@ -482,8 +486,8 @@ def test_windows_portable_shim_restores_environment_on_repeat_path_invocation(
                 '$env:PYTHONPATH = "bundle-pythonpath"',
                 '$env:VAPOURSYNTH_EXTRA_PLUGIN_PATH = "bundle-extra-plugins"',
                 "Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue",
-                'Write-Output "bundle launcher ran"',
-                "exit 0",
+                'Write-Output "bundle launcher ran in $((Get-Location).Path)"',
+                "exit 23",
             ]
         ),
         encoding="utf-8",
@@ -510,8 +514,10 @@ def test_windows_portable_shim_restores_environment_on_repeat_path_invocation(
                 "$resolved = Get-Command frame-compare -All | Select-Object -First 1",
                 'Write-Output "COMMAND=$($resolved.CommandType):$($resolved.Source)"',
                 "frame-compare version",
+                'Write-Output "EXIT_1=$LASTEXITCODE"',
                 '$afterFirstPath = [Environment]::GetEnvironmentVariable("PATH", "Process")',
                 "frame-compare version",
+                'Write-Output "EXIT_2=$LASTEXITCODE"',
                 '$afterSecondPath = [Environment]::GetEnvironmentVariable("PATH", "Process")',
                 'Write-Output "PATH_UNCHANGED_1=$($beforePath -eq $afterFirstPath)"',
                 'Write-Output "PATH_UNCHANGED_2=$($beforePath -eq $afterSecondPath)"',
@@ -533,8 +539,10 @@ def test_windows_portable_shim_restores_environment_on_repeat_path_invocation(
         timeout=30,
     )
     assert proc.returncode == 0, f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+    assert proc.stdout.splitlines().count(f"bundle launcher ran in {bundle_dir}") == 2
     output = _parse_key_value_output(proc.stdout)
     assert output["COMMAND"] == f"ExternalScript:{shim_path}"
+    assert output["EXIT_1"] == output["EXIT_2"] == "23"
     assert output["PATH_UNCHANGED_1"] == "True"
     assert output["PATH_UNCHANGED_2"] == "True"
     assert output["PATH"] == f"{bin_dir};outer-path"
@@ -553,7 +561,7 @@ def test_windows_portable_generated_bundle_launcher_restores_environment(
     if exe is None:
         pytest.skip("pwsh/powershell not available")
 
-    bundle_dir = tmp_path / "bundle"
+    bundle_dir = tmp_path / "bundle[1]"
     python_dir = bundle_dir / "python"
     cli_dir = bundle_dir / "app" / "src" / "frame_compare" / "cli"
     python_dir.mkdir(parents=True)
@@ -587,8 +595,8 @@ def test_windows_portable_generated_bundle_launcher_restores_environment(
                 'os.environ["FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"] = "inner-ffms2"',
                 'os.environ["FRAME_COMPARE_FFMPEG_EXECUTABLE"] = "inner-ffmpeg"',
                 'os.environ["FRAME_COMPARE_FFPROBE_EXECUTABLE"] = "inner-ffprobe"',
-                'print("fake entry ran")',
-                "sys.exit(0)",
+                'print(f"fake entry ran in {os.getcwd()}")',
+                "sys.exit(23)",
             ]
         ),
         encoding="utf-8",
@@ -688,14 +696,16 @@ def test_windows_portable_generated_bundle_launcher_restores_environment(
 
     proc = subprocess.run(
         [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(proof_script)],
+        env=os.environ | {"PYTHONHOME": sys.base_prefix},
         capture_output=True,
         text=True,
         check=False,
         timeout=30,
     )
     assert proc.returncode == 0, f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+    assert f"fake entry ran in {bundle_dir}" in proc.stdout.splitlines()
     output = _parse_key_value_output(proc.stdout)
-    assert output["EXIT"] == "0"
+    assert output["EXIT"] == "23"
     assert output["PATH"] == "outer-path"
     assert output["PYTHONUTF8"] == "outer-utf8"
     assert output["PYTHONDONTWRITEBYTECODE"] == "outer-dontwrite"
