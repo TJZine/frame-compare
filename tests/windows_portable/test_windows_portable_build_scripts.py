@@ -64,6 +64,57 @@ def test_windows_portable_generated_cmd_launchers_have_absolute_powershell_fallb
         assert 'set "POWERSHELL_EXE="' in launcher
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows CMD required")
+@pytest.mark.parametrize("launcher", ["frame-compare", "frame-compare-update"])
+def test_windows_portable_generated_cmd_launchers_select_script_and_propagate_exit(
+    repo_root: Path, tmp_path: Path, launcher: str
+) -> None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required to generate portable launchers")
+    bundle = tmp_path / "Media & Tools"
+    bundle.mkdir()
+    owner = repo_root / "tools/windows_portable/portable_launchers.ps1"
+    system_root = Path(os.environ["SYSTEMROOT"])
+    env = os.environ | {"LAUNCHER_SOURCE": str(owner), "BUNDLE": str(bundle)}
+    subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-Command",
+            ". $env:LAUNCHER_SOURCE; Write-LauncherFiles -BundleRoot $env:BUNDLE",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    for index, name in enumerate(("frame-compare", "frame-compare-update"), start=23):
+        (bundle / f"{name}.ps1").write_text(
+            f'Write-Output "{name} $($args[0]) $PSHOME"\nexit {index}\n', encoding="ascii"
+        )
+    # Hide pwsh from both lookup locations so the absolute PS 5.1 fallback is used.
+    fallback = system_root / "System32/WindowsPowerShell/v1.0"
+    env = env | {
+        "PATH": str(system_root / "System32"),
+        "PROGRAMFILES": str(tmp_path / "missing-program-files"),
+    }
+    result = subprocess.run(
+        [str(system_root / "System32/cmd.exe"), "/d", "/c", f"{launcher}.cmd", "test-argument"],
+        cwd=bundle,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    expected_exit = 23 if launcher == "frame-compare" else 24
+    assert result.returncode == expected_exit, _normalized_process_output(result)
+    prefix = f"{launcher} test-argument "
+    assert result.stdout.startswith(prefix)
+    assert Path(result.stdout.removeprefix(prefix).strip()) == fallback
+
+
 def test_windows_portable_build_resolves_relative_paths_from_provider_location(
     repo_root: Path,
     tmp_path: Path,
