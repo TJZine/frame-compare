@@ -291,10 +291,12 @@ unchanged.
 - Entries sort newest first using persisted UTC completion/start time, with an
   exact folder-name tie-break. Unavailable records without valid lifecycle times
   sort after valid records.
-- If the selected generated-data root is missing, disconnected, unreadable, or not
-  a directory, history fails with `FC-3016` and an actionable reconnect/permissions
-  hint. History does not create the root, return a JSON success document, or fall
-  back to the workspace or portable bundle.
+- History fails with `FC-3016` and an actionable reconnect/permissions hint if
+  the selected generated-data root is missing, disconnected, unreadable, or not
+  a directory. On POSIX, history also fails with `FC-3016` if the root denies
+  search permission.
+  History does not create the root, return a JSON success document, or fall back
+  to the workspace or portable bundle.
 - Human `history list` output goes to stdout and exposes the exact run name,
   status, persisted time, and report availability. Diagnostics and warnings use
   stderr.
