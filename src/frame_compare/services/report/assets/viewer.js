@@ -1087,16 +1087,18 @@ const ReportViewer = {
         const storage = this.localStorage();
         if (!this.state.storageKey || !storage) return false;
 
+        // Pending pan is still normalized, so restore it in Grid until conversion.
+        const gridPan = this.viewport.pendingGridPan;
         const payload = {
             currentFrameIdx: this.state.currentFrameIdx,
-            mode: this.state.mode,
+            mode: gridPan ? 'grid' : this.state.mode,
             leftClipIdx: this.state.leftClipIdx,
             rightClipIdx: this.state.rightClipIdx,
             activeClipIdx: this.state.activeClipIdx,
             fitMode: this.state.fitMode,
             zoom: this.state.zoom,
-            panX: this.state.panX,
-            panY: this.state.panY,
+            panX: gridPan?.x ?? this.state.panX,
+            panY: gridPan?.y ?? this.state.panY,
             revealPercent: this.state.revealPercent,
             overlaysHidden: this.state.overlaysHidden,
             filmstripCollapsed: this.state.filmstripCollapsed,
@@ -1637,12 +1639,7 @@ const ReportViewer = {
 
     setMode(mode) {
         if (!this.validMode(mode)) return;
-        const previousMode = this.state.mode;
-        if (previousMode !== 'grid' && mode === 'grid') {
-            const base = this.viewport.baseCanvasSize();
-            this.state.panX = base.width > 0 ? this.state.panX / base.width : 0;
-            this.state.panY = base.height > 0 ? this.state.panY / base.height : 0;
-        }
+        this.viewport.prepareModePan(mode);
         this.selectPair({ mode }, { render: false });
 
         if (this.state.blinkInterval && mode !== 'blink') {
@@ -1674,11 +1671,6 @@ const ReportViewer = {
         );
         this.dom.stage.classList.add(`rv-mode-${mode}`);
         this.gridView?.setActive(mode === 'grid');
-        if (previousMode === 'grid' && mode !== 'grid') {
-            const base = this.viewport.baseCanvasSize();
-            this.state.panX = base.width > 0 ? this.state.panX * base.width : 0;
-            this.state.panY = base.height > 0 ? this.state.panY * base.height : 0;
-        }
         this.updateModeControls();
         this.updateBlinkControls();
         this.render();

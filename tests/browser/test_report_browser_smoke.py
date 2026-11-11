@@ -1978,6 +1978,116 @@ def test_report_restores_custom_zoom_and_pan_after_reload(tmp_path: Path) -> Non
 
 
 @pytest.mark.integration
+def test_grid_to_single_preserves_pan_for_destination_image_size(tmp_path: Path) -> None:
+    from PIL import Image
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    for name, size in [("reference", (1920, 1080)), ("encode", (1080, 1920))]:
+        Image.new("RGB", size).save(tmp_path / "screenshots" / name / "10.png")
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1280, height: 768, deviceScaleFactor: 1, mobile: false,
+        });
+        await evaluate('document.querySelector(\'[data-mode="overlay"]\').click()');
+        await waitFor(
+            'ReportViewer.dom.sizerImg.complete && ReportViewer.dom.sizerImg.naturalWidth === 1920',
+            'reference Single image did not load',
+        );
+        await evaluate('document.querySelector(\'[data-mode="grid"]\').click()');
+        await waitFor(
+            `document.querySelector('.rv-grid-image[data-clip-index="1"]')?.naturalHeight === 1920`,
+            'portrait Grid image did not load',
+        );
+        const portrait = path.join(
+            path.dirname(require('node:url').fileURLToPath(report)), 'screenshots', 'encode', '10.png',
+        );
+        const body = (await fs.readFile(portrait)).toString('base64');
+        const destination = 'https://frame-compare-fixture.invalid/portrait.png';
+        const held = [];
+        let phase = 'hold';
+        const respond = requestId => phase === 'fail'
+            ? command('Fetch.failRequest', { requestId, errorReason: 'Failed' })
+            : command('Fetch.fulfillRequest', {
+                requestId, responseCode: 200,
+                responseHeaders: [{ name: 'Content-Type', value: 'image/png' }], body,
+            });
+        socket.addEventListener('message', event => {
+            const { method, params } = JSON.parse(event.data);
+            if (method !== 'Fetch.requestPaused') return;
+            if (phase === 'hold') held.push(params.requestId);
+            else void respond(params.requestId);
+        });
+        await command('Fetch.enable', { patterns: [{ urlPattern: destination }] });
+        const savedViewport = async () => evaluate(`(() => {
+            const { mode, panX, panY, overlaysHidden } = JSON.parse(
+                localStorage.getItem(ReportViewer.state.storageKey),
+            );
+            return { mode, panX, panY, overlaysHidden };
+        })()`);
+        const savedGrid = { mode: 'grid', panX: 0.2, panY: 0.1, overlaysHidden: false };
+        await evaluate(`(() => {
+            document.querySelector('.rv-grid-cell[data-clip-index="1"]').focus();
+            ReportViewer.viewport.setZoom(4);
+            ReportViewer.viewport.setPan(0.2, 0.1);
+            // Use a fresh URL so the browser cannot reuse the already loaded Grid image.
+            ReportViewer.currentFrame().images[1].src = ${JSON.stringify(destination)};
+            document.querySelector('[data-mode="overlay"]').click();
+        })()`);
+        for (let attempt = 0; !held.length && attempt < 100; attempt += 1) await pause();
+        assert.ok(held.length, 'destination image request was not intercepted');
+        assert.equal(await evaluate('ReportViewer.state.mode'), 'overlay');
+        assert.equal(await evaluate('ReportViewer.dom.sizerImg.complete'), false);
+        assert.deepEqual(await savedViewport(), savedGrid, 'pending load changed the saved viewport');
+
+        phase = 'fail';
+        await Promise.all(held.map(respond));
+        await waitFor(
+            "ReportViewer.dom.leftLayer.dataset.status === 'error' && ReportViewer.dom.sizerImg.complete",
+            'failed destination did not expose the retry state',
+        );
+        assert.deepEqual(await savedViewport(), savedGrid, 'failed load changed the saved viewport');
+        await evaluate("document.getElementById('btn-overlays').click()");
+        assert.deepEqual(
+            await savedViewport(), { ...savedGrid, overlaysHidden: true },
+            'source label preference was not saved while the destination was unavailable',
+        );
+
+        phase = 'recover';
+        await evaluate(`(() => {
+            ReportViewer.dom.sizerImg.addEventListener('load', () => {
+                globalThis.retrySizerLoaded = true;
+            }, { once: true });
+            document.querySelector('[data-empty-state] button').click();
+        })()`);
+        await waitFor(
+            `globalThis.retrySizerLoaded && ReportViewer.dom.sizerImg.naturalWidth === 1080
+                && ReportViewer.dom.leftLayer.dataset.status === 'ready'`,
+            'portrait Single image did not load on retry',
+        );
+        assert.deepEqual(await savedViewport(), {
+            mode: 'overlay', panX: 216, panY: 192, overlaysHidden: true,
+        });
+        const pan = await evaluate(`(() => {
+            const { canvas } = ReportViewer.dom;
+            const style = getComputedStyle(canvas);
+            return {
+                x: parseFloat(style.getPropertyValue('--pan-x')),
+                y: parseFloat(style.getPropertyValue('--pan-y')),
+            };
+        })()`);
+        console.log(JSON.stringify(pan));
+"""
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-grid-to-single", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert json.loads(completed.stdout) == pytest.approx({"x": 216, "y": 192})
+
+
+@pytest.mark.integration
 def test_report_can_pan_to_bottom_of_taller_right_image_at_actual_size(tmp_path: Path) -> None:
     from PIL import Image
 
