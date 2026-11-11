@@ -69,7 +69,7 @@ def test_windows_portable_generated_cmd_launchers_have_absolute_powershell_fallb
 def test_windows_portable_generated_cmd_launchers_select_script_and_propagate_exit(
     repo_root: Path, tmp_path: Path, launcher: str
 ) -> None:
-    pwsh = shutil.which("pwsh")
+    pwsh = shutil.which("pwsh.exe")
     if pwsh is None:
         pytest.skip("PowerShell 7 is required to generate portable launchers")
     bundle = tmp_path / "Media & Tools"
@@ -91,13 +91,13 @@ def test_windows_portable_generated_cmd_launchers_select_script_and_propagate_ex
     )
     for index, name in enumerate(("frame-compare", "frame-compare-update"), start=23):
         (bundle / f"{name}.ps1").write_text(
-            f'Write-Output "{name} $($args[0]) $PSHOME"\nexit {index}\n', encoding="ascii"
+            f'Write-Output "{name} $($args[0]) $($PSVersionTable.PSEdition)"\nexit {index}\n',
+            encoding="ascii",
         )
-    # Hide pwsh from both lookup locations so the absolute PS 5.1 fallback is used.
-    fallback = system_root / "System32/WindowsPowerShell/v1.0"
+    # Supply the same pwsh on PATH for the CMD's first discovery branch.
     env = env | {
-        "PATH": str(system_root / "System32"),
-        "PROGRAMFILES": str(tmp_path / "missing-program-files"),
+        "PATH": os.pathsep.join((str(Path(pwsh).parent), str(system_root / "System32"))),
+        "PATHEXT": ".EXE",
     }
     result = subprocess.run(
         [str(system_root / "System32/cmd.exe"), "/d", "/c", f"{launcher}.cmd", "test-argument"],
@@ -110,9 +110,7 @@ def test_windows_portable_generated_cmd_launchers_select_script_and_propagate_ex
     )
     expected_exit = 23 if launcher == "frame-compare" else 24
     assert result.returncode == expected_exit, _normalized_process_output(result)
-    prefix = f"{launcher} test-argument "
-    assert result.stdout.startswith(prefix)
-    assert Path(result.stdout.removeprefix(prefix).strip()) == fallback
+    assert result.stdout.strip() == f"{launcher} test-argument Core"
 
 
 def test_windows_portable_build_resolves_relative_paths_from_provider_location(
@@ -2587,7 +2585,9 @@ Main
     )
     selected = commit("selected manifest and notices")
     newer_notice = b"changed live notice\r\n"
-    notice.write_bytes(newer_notice)
+    # Give this artifact its own notice so other pins for the common file still agree.
+    pin["path"] = f"licenses/fixture-notice{notice.suffix}"
+    (owner / pin["path"]).write_bytes(newer_notice)
     pin["sha256"] = hashlib.sha256(newer_notice).hexdigest()
     manifest["bundle"]["runtime_fingerprints"]["full"] = "b" * 64
     newer_manifest = json.dumps(manifest).encode()
