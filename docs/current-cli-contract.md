@@ -861,7 +861,8 @@ CLI drains the executor before exit. No new TMDB request starts after the interr
   guidance to reduce selector counts, use a longer clip, or reduce exclusions. It
   does not prompt again, substitute the deterministic uniform fallback, render,
   report success, publish, or upload.
-- No, default No, EOF, interruption, and prompt failure all fail through typed
+- Ctrl+C at the prompt cancels a Runner-owned run and exits 130.
+- No, default No, EOF, and prompt failure all fail through typed
   `FC-4012` without retry or downstream success side effects. The hint directs users
   to reduce `analysis.ignore_lead_seconds` / `analysis.ignore_trail_seconds` or use a
   clip-specific config.
