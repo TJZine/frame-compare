@@ -14,6 +14,8 @@ Param(
   [Parameter(Mandatory = $false)]
   [switch]$RequireReleasePublicKey,
 
+  [string]$ExpectedCommitSha,
+
   [switch]$AssemblyOnly,
   [string]$RequirementsPath
 )
@@ -21,6 +23,7 @@ Param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $true
+$hasExpectedCommitSha = $PSBoundParameters.ContainsKey("ExpectedCommitSha")
 
 . (Join-Path $PSScriptRoot "version_utils.ps1")
 . (Join-Path $PSScriptRoot "path_safety.ps1")
@@ -226,7 +229,7 @@ function Copy-InstallerFiles([string]$BundleRoot) {
   Copy-Item -Force -LiteralPath $publicKeySource -Destination (Join-Path $shimDest "update_public_key.xml")
 }
 
-function Copy-RepoApp([string]$BundleRoot) {
+function Copy-RepoApp([string]$BundleRoot, [string]$CommitSha) {
   $appRoot = Join-Path $BundleRoot "app"
   $srcRoot = Join-Path $appRoot "src"
   $sitePackages = Join-Path $appRoot "site-packages"
@@ -242,7 +245,7 @@ function Copy-RepoApp([string]$BundleRoot) {
   if ($sourceStatus.Count -gt 0) {
     $dirtySourceMessage = (
       "Uncommitted changes exist under src/frame_compare or pyproject.toml; the portable bundle " +
-      "packages committed HEAD and builds wheel dist-info metadata from it, so it will exclude them."
+      "packages commit $CommitSha and builds wheel dist-info metadata from it, so it will exclude them."
     )
     if ($RequireReleasePublicKey) {
       throw $dirtySourceMessage
@@ -251,14 +254,15 @@ function Copy-RepoApp([string]$BundleRoot) {
   }
 
   & $HostPython -B -I -S (Join-Path $PSScriptRoot "portable_bundle.py") install-project `
-    --repo $RepoRoot --root $BundleRoot
+    --repo $RepoRoot --root $BundleRoot --commit-sha $CommitSha
   Assert-LastExitCode -CommandLabel "project source and metadata projection"
   Write-Host "WINDOWS_BUNDLE_PROOF project_metadata=ok entry_point=frame-compare-alignment-review source=app/src"
 }
 
-function Initialize-PortableRuntime([string]$BundleRoot) {
+function Initialize-PortableRuntime([string]$BundleRoot, [string]$CommitSha) {
   $arguments = @(
-    "assemble", "--repo", $RepoRoot, "--cache", $CacheDir, "--output", $BundleRoot
+    "assemble", "--repo", $RepoRoot, "--cache", $CacheDir, "--output", $BundleRoot,
+    "--commit-sha", $CommitSha
   )
   if ($ManifestPath -ne (Join-Path $PSScriptRoot "manifest.windows-x64.json")) {
     $arguments += @("--manifest", $ManifestPath)
@@ -622,7 +626,7 @@ function Assert-RequiredPySideLicenseMetadata([string]$BundleRoot) {
   }
 }
 
-function Write-BundleInventory([string]$BundleRoot) {
+function Write-BundleInventory([string]$BundleRoot, [string]$CommitSha) {
   $inventoryScript = Join-Path $RepoRoot "tools\\windows_portable\\write_bundle_inventory.py"
   if (!(Test-Path -LiteralPath $inventoryScript -PathType Leaf)) {
     throw "Bundle inventory owner not found: $inventoryScript"
@@ -633,6 +637,7 @@ function Write-BundleInventory([string]$BundleRoot) {
     "--bundle-root", $BundleRoot,
     "--manifest", (Join-Path $BundleRoot "manifest.json"),
     "--repo-root", $RepoRoot,
+    "--commit-sha", $CommitSha,
     "--output", (Join-Path $BundleRoot "bundle_inventory.json")
   )
   if ($RequireReleasePublicKey) {
@@ -649,10 +654,24 @@ function Main() {
 
   $manifest = Get-Manifest
   Assert-BuildInputs -Manifest $manifest
-  if ($RequireReleasePublicKey -and @(
-    git -C $RepoRoot status --porcelain=v1 --untracked-files=all
-  ).Count -gt 0) {
-    throw "Portable release builds require a clean, exact source checkout."
+  $commitSha = $ExpectedCommitSha
+  if (!$hasExpectedCommitSha -or $RequireReleasePublicKey) {
+    $headSha = & git -C $RepoRoot rev-parse HEAD
+    Assert-LastExitCode -CommandLabel "resolve portable source commit"
+    if (!$hasExpectedCommitSha) {
+      $commitSha = $headSha
+    }
+  }
+  if ($commitSha -cnotmatch '\A[a-f0-9]{40}\z') {
+    throw "Expected a complete lowercase 40-character source commit SHA."
+  }
+  if ($RequireReleasePublicKey) {
+    if ($commitSha -cne $headSha) {
+      throw "Portable release source commit must match the live checkout: expected=$commitSha actual=$headSha"
+    }
+    if (@(git -C $RepoRoot status --porcelain=v1 --untracked-files=all).Count -gt 0) {
+      throw "Portable release builds require a clean, exact source checkout."
+    }
   }
   $artifacts = @(Get-RequiredProperty -Object $manifest -Name "artifacts" -Context "manifest")
   $reservedOutput = $null
@@ -662,8 +681,8 @@ function Main() {
 
     $HostPython = (& uv python find --system --no-project --no-python-downloads 3.13).Trim()
     Assert-LastExitCode -CommandLabel "find the host Python 3.13 interpreter"
-    Initialize-PortableRuntime -BundleRoot $OutDir
-    Copy-RepoApp -BundleRoot $OutDir
+    Initialize-PortableRuntime -BundleRoot $OutDir -CommitSha $commitSha
+    Copy-RepoApp -BundleRoot $OutDir -CommitSha $commitSha
     Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app"))
 
     # Launchers
@@ -680,7 +699,7 @@ function Main() {
     # Licenses
     Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts
     Assert-RequiredPySideLicenseMetadata -BundleRoot $OutDir
-    Write-BundleInventory -BundleRoot $OutDir
+    Write-BundleInventory -BundleRoot $OutDir -CommitSha $commitSha
 
     if (!$AssemblyOnly) {
       Assert-BundleRuntime -BundleRoot $OutDir

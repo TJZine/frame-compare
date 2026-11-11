@@ -122,7 +122,7 @@ exit $exitCode
   $cmd = @'
 @echo off
 setlocal
-set SCRIPT_DIR=%~dp0
+set "SCRIPT_DIR=%~dp0"
 set "POWERSHELL_EXE="
 where pwsh >nul 2>nul
 if %ERRORLEVEL% EQU 0 (
@@ -159,7 +159,7 @@ exit $LASTEXITCODE
   $updateCmd = @'
 @echo off
 setlocal
-set SCRIPT_DIR=%~dp0
+set "SCRIPT_DIR=%~dp0"
 set "POWERSHELL_EXE="
 where pwsh >nul 2>nul
 if %ERRORLEVEL% EQU 0 (

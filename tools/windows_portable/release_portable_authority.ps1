@@ -66,7 +66,7 @@ function Get-PortableAuthority([string]$ExpectedSha, [hashtable]$Source) {
 }
 
 function Write-IndependentPortableZip(
-  [string]$Candidate, [string]$Target, [string]$RequirementsPath
+  [string]$Candidate, [string]$Target, [string]$RequirementsPath, [string]$ExpectedSha
 ) {
   $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
   $scratch = Join-Path $tempRoot ("fc-" + [guid]::NewGuid().ToString("N"))
@@ -74,7 +74,7 @@ function Write-IndependentPortableZip(
   try {
     & (Join-Path $PSScriptRoot "build_portable.ps1") `
       -OutDir $root -CacheDir (Join-Path $scratch "pins") -RequirementsPath $RequirementsPath `
-      -AssemblyOnly -RequireReleasePublicKey | Out-Host
+      -ExpectedCommitSha $ExpectedSha -AssemblyOnly -RequireReleasePublicKey | Out-Host
     $hostPython = (& uv python find --system --no-project --no-python-downloads 3.13).Trim()
     & $hostPython -B -I -S (Join-Path $PSScriptRoot "portable_bundle.py") verify-and-pack `
       --root $root --candidate $Candidate --output $Target | Out-Host
