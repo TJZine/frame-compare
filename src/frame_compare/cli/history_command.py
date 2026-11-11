@@ -71,6 +71,7 @@ def handle_history_list(
                 json.dumps(
                     {"runs": [history_entry_json(entry) for entry in entries]},
                     separators=(",", ":"),
+                    allow_nan=False,
                 )
             )
         else:

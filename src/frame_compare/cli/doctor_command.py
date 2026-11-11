@@ -72,7 +72,11 @@ def handle_doctor(
         report = run_doctor(checks=None, reporter=None, selection=selection)
     except FrameCompareError as error:
         if json_output:
-            typer.echo(json.dumps(format_error_json(error), sort_keys=True, separators=(",", ":")))
+            typer.echo(
+                json.dumps(
+                    format_error_json(error), sort_keys=True, separators=(",", ":"), allow_nan=False
+                )
+            )
             raise typer.Exit(code=int(get_exit_code(error))) from error
         raise typer.Exit(
             code=handle_error(
@@ -85,7 +89,7 @@ def handle_doctor(
 
     if json_output:
         payload = doctor_report_json(report)
-        typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False))
     else:
         print_doctor_report(report, no_color=no_color)
 

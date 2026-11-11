@@ -5,11 +5,16 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Never
 
 import pytest
 
 from tests.e2e.harness import CommandResult, Workspace
+
+
+def _reject_nonfinite_json(token: str) -> Never:
+    raise ValueError(f"Nonstandard JSON constant: {token}")
+
 
 ERROR_CASES = (
     pytest.param(
@@ -239,9 +244,29 @@ def test_cli_rejects_nonfinite_exclusions_as_typed_config_errors(
         ],
     )
 
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout, parse_constant=_reject_nonfinite_json)
     assert result.exit_code == 2
     assert payload["error"]["code"] == "FC-1003"
     assert payload["error"]["name"] == "CONFIG_VALIDATION_ERROR"
     assert result.stderr == ""
     assert root.config_path.read_bytes() == before
+
+
+@pytest.mark.e2e
+def test_cli_doctor_nonfinite_timeout_diagnostic_is_strict_json(
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+) -> None:
+    root = workspace({"screenshots": {"ffmpeg_timeout_seconds": float("inf")}})
+    result = run_cli(root.root, ["doctor", "--json"])
+
+    payload = json.loads(result.stdout, parse_constant=_reject_nonfinite_json)
+    check = next(entry for entry in payload["doctor"]["checks"] if entry["id"] == "tmdb_api_key")
+    assert check["status"] == "fail"
+    details = check["details"]
+    assert details["exception_type"] == "ConfigValidationError"
+    assert any(
+        error["loc"] == ["screenshots", "ffmpeg_timeout_seconds"] and error["input"] == "inf"
+        for error in details["validation_errors"]
+    )
+    assert result.stderr == ""
