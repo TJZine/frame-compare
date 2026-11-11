@@ -79,11 +79,14 @@ def _merge_parser_metadata(
             current.title,
             _first_text(parser_result, "anime_title", "title"),
         ),
-        year=_keep_existing(current.year, _first_int(parser_result, "year")),
-        season=_keep_existing(current.season, _first_int(parser_result, "season")),
+        year=_keep_existing(current.year, _first_int(parser_result, "anime_year", "year")),
+        season=_keep_existing(
+            current.season,
+            _first_int(parser_result, "anime_season", "season"),
+        ),
         episode=_keep_existing(
             current.episode,
-            _first_int(parser_result, "anime_episode", "episode"),
+            _first_int(parser_result, "episode_number", "episode"),
         ),
         episode_title=_keep_existing(
             current.episode_title,

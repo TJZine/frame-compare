@@ -1,3 +1,5 @@
+import pytest
+
 import frame_compare.services.metadata_parsing as metadata_parsing
 from frame_compare.services.metadata import parse_filename
 from frame_compare.services.types import ParsedMetadata
@@ -35,7 +37,7 @@ def test_metadata_parsing_direct_module_merges_guessit_and_anitopy_fallback(mock
         "frame_compare.services.metadata_parsing.anitopy.parse",
         return_value={
             "anime_title": "Alternate Title",
-            "anime_episode": "07",
+            "episode_number": "07",
             "release_group": "SubsPlease",
         },
     )
@@ -59,7 +61,7 @@ def test_metadata_parsing_direct_module_uses_anitopy_first_for_bracketed_names(
         assert filename == "[Group] Anime_Title - 03.mkv"
         return {
             "anime_title": "Anime_Title",
-            "anime_episode": 3,
+            "episode_number": 3,
             "release_group": "Group",
         }
 
@@ -93,7 +95,7 @@ def test_metadata_parsing_fallback_policy_stops_after_successful_primary(mocker)
         calls.append("anitopy")
         return {
             "anime_title": "Anime",
-            "anime_episode": 4,
+            "episode_number": 4,
             "episode_title": "The Arrival",
         }
 
@@ -133,7 +135,7 @@ def test_metadata_parsing_fallback_policy_uses_alternate_for_missing_primary_tit
 
     def fake_anitopy(_filename: str) -> dict[str, object]:
         calls.append("anitopy")
-        return {"anime_episode": 4}
+        return {"episode_number": 4}
 
     def fake_guessit(_filename: str) -> dict[str, object]:
         calls.append("guessit")
@@ -157,7 +159,7 @@ def test_metadata_parsing_fallback_policy_uses_alternate_for_missing_primary_tit
 def test_metadata_parsing_fallback_policy_replaces_unusable_primary_title(mocker) -> None:
     mocker.patch(
         "frame_compare.services.metadata_parsing.anitopy.parse",
-        return_value={"anime_title": "---", "anime_episode": 4},
+        return_value={"anime_title": "---", "episode_number": 4},
     )
     mocker.patch(
         "frame_compare.services.metadata_parsing.guessit",
@@ -181,7 +183,7 @@ def test_metadata_parsing_fallback_policy_rejects_malformed_primary_fields(mocke
         calls.append("anitopy")
         return {
             "anime_title": {"unexpected": "mapping"},
-            "anime_episode": True,
+            "episode_number": True,
             "release_group": {"unexpected": "mapping"},
         }
 
@@ -202,6 +204,53 @@ def test_metadata_parsing_fallback_policy_rejects_malformed_primary_fields(mocke
     assert result.title == "Fallback"
     assert result.episode == 2
     assert result.release_group == "Group"
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        (
+            "[SubsPlease] Show - 03 (1080p) [ABC].mkv",
+            ParsedMetadata(
+                title="Show",
+                episode=3,
+                release_group="SubsPlease",
+                resolution="1080p",
+            ),
+        ),
+        (
+            "[Group] Show S02E03 [1080p].mkv",
+            ParsedMetadata(
+                title="Show",
+                season=2,
+                episode=3,
+                release_group="Group",
+                resolution="1080p",
+            ),
+        ),
+        (
+            "[Group] Movie (2024) [1080p].mkv",
+            ParsedMetadata(
+                title="Movie",
+                year=2024,
+                release_group="Group",
+                resolution="1080p",
+            ),
+        ),
+    ],
+)
+def test_metadata_parsing_direct_module_reads_real_anitopy_fields(
+    filename: str,
+    expected: ParsedMetadata,
+) -> None:
+    assert (
+        metadata_parsing.parse_filename(
+            filename,
+            parser_priority="anitopy",
+            alternate_policy="fallback",
+        )
+        == expected
+    )
 
 
 def test_metadata_parsing_fallback_policy_recovers_from_primary_exception(mocker) -> None:
