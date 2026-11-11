@@ -207,7 +207,7 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   }
   $locationPushed = $false
   try {
-    Push-Location $bundlePath
+    Push-Location -LiteralPath $bundlePath
     $locationPushed = $true
     $global:LASTEXITCODE = $null
     & $bundleLauncher @forwardArgs
