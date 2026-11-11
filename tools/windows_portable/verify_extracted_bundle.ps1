@@ -1263,6 +1263,32 @@ try {
 if ($ffmpegStatus -cne "pass") {
   throw $ffmpegCheckFailure
 }
+$python = Join-Path $bundle "python/python.exe"
+$vsviewProbe = @'
+import os
+from importlib.metadata import entry_points
+
+for name in ('VAPOURSYNTH_HOME', 'VAPOURSYNTH_PLUGIN_PATH', 'VAPOURSYNTH_EXTRA_PLUGIN_PATH'):
+    os.environ.pop(name, None)
+
+from frame_compare.vsview.launcher import preload_vapoursynth_runtime
+
+preload_vapoursynth_runtime()
+import vsview
+
+panel = [
+    entry_point for entry_point in entry_points(group='vsview', name='frame-compare-alignment-review')
+    if entry_point.value == 'frame_compare.vsview.alignment_review_panel'
+]
+if len(panel) != 1 or not hasattr(panel[0].load(), 'AlignmentReviewPanel'):
+    raise RuntimeError('Frame Compare VSView alignment panel entry point is unavailable')
+'@
+$null = Invoke-BoundedCommand `
+  -Label "candidate_vsview_entrypoint" `
+  -FilePath $python `
+  -ArgumentList @("-B", "-I", "-c", $vsviewProbe)
+Write-Host "WINDOWS_EXTRACTED_PROOF vsview_entrypoint=ok"
+
 $installer = Join-Path $bundle "install.cmd"
 $null = Invoke-BoundedCommand -Label "candidate_install" -FilePath $installer
 

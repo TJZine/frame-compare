@@ -173,7 +173,8 @@ not a globally installed Frame Compare environment.
 The focused verifier below is also invoked by the hosted workflow's
 `Verify extracted portable bundle` step. It owns ZIP containment/layout, extraction,
 default workspace directories, candidate launcher and doctor checks, installation,
-and installed-shim parity. Every command it reports must exit `0`; a thrown assertion
+and installed-shim parity. Before installation, the extracted Python must import
+VSView and load the registered Frame Compare alignment panel. Every command it reports must exit `0`; a thrown assertion
 is a failed check. The verifier atomically reserves the fresh extraction root, writes
 without overwrite, and retains extracted evidence after any later failure. Its
 expected commit argument must be the recorded detached pull-request head used to build

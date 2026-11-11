@@ -243,6 +243,7 @@ runs:
         foreach ($marker in @(
           "WINDOWS_EXTRACTED_PROOF license_inventory=ok",
           "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok",
+          "WINDOWS_EXTRACTED_PROOF vsview_entrypoint=ok",
           "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded",
           "WINDOWS_EXTRACTED_PROOF result=ok"
         )) {

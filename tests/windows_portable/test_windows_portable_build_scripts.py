@@ -1222,6 +1222,7 @@ def _write_extracted_verifier_fixture(
     tmp_path: Path,
     candidate_launcher: str,
     installer: str = "exit 0\n",
+    with_vsview: bool = False,
 ) -> Path:
     bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
     (bundle / "config").mkdir(parents=True)
@@ -1399,11 +1400,50 @@ def _write_extracted_verifier_fixture(
     }
     (bundle / "bundle_inventory.json").write_text(json.dumps(inventory), encoding="utf-8")
 
-    zip_path = tmp_path / "fixture.zip"
-    with zipfile.ZipFile(zip_path, "w") as archive:
-        for path in sorted(bundle.rglob("*")):
-            archive.write(path, path.relative_to(bundle.parent).as_posix())
-    return zip_path
+    if with_vsview:
+        _add_extracted_vsview_fixture(bundle)
+    return _rewrite_extracted_verifier_fixture_zip(tmp_path, "fixture.zip")
+
+
+def _add_extracted_vsview_fixture(bundle: Path) -> None:
+    # Use a real isolated Windows interpreter with fixture packages and registration.
+    base = Path(sys.base_prefix)
+    embedded = bundle / "python"
+    embedded.mkdir()
+    shutil.copyfile(base / "python.exe", embedded / "python.exe")
+    dll_stem = f"python{sys.version_info.major}{sys.version_info.minor}"
+    shutil.copyfile(base / f"{dll_stem}.dll", embedded / f"{dll_stem}.dll")
+    for dll in base.glob("vcruntime*.dll"):
+        shutil.copyfile(dll, embedded / dll.name)
+    (embedded / f"{dll_stem}._pth").write_text(
+        "\n".join((str(base / "Lib"), str(base / "DLLs"), "../app/site-packages", "")),
+        encoding="utf-8",
+    )
+    site = bundle / "app" / "site-packages"
+    vsview = site / "vsview"
+    vsview.mkdir()
+    (vsview / "__init__.py").write_text("", encoding="utf-8")
+    app = site / "frame_compare" / "vsview"
+    app.mkdir(parents=True)
+    (app / "launcher.py").write_text(
+        """import os
+
+def preload_vapoursynth_runtime():
+    for name in ("VAPOURSYNTH_HOME", "VAPOURSYNTH_PLUGIN_PATH", "VAPOURSYNTH_EXTRA_PLUGIN_PATH"):
+        if name in os.environ:
+            raise RuntimeError(f"extracted probe inherited {name}")
+""",
+        encoding="utf-8",
+    )
+    (app / "alignment_review_panel.py").write_text(
+        "class AlignmentReviewPanel: pass\n", encoding="utf-8"
+    )
+    dist = site / "frame_compare-1.2.3.dist-info"
+    dist.mkdir()
+    (dist / "entry_points.txt").write_text(
+        "[vsview]\nframe-compare-alignment-review = frame_compare.vsview.alignment_review_panel\n",
+        encoding="utf-8",
+    )
 
 
 def _rewrite_extracted_verifier_fixture_zip(tmp_path: Path, name: str) -> Path:
@@ -1846,6 +1886,7 @@ exit 0
         tmp_path=tmp_path,
         candidate_launcher=candidate_launcher,
         installer=installer,
+        with_vsview=True,
     )
 
     result = _run_extracted_bundle_verifier(
@@ -1895,6 +1936,7 @@ exit 0
         tmp_path=tmp_path,
         candidate_launcher=candidate_launcher,
         installer=installer,
+        with_vsview=True,
     )
 
     result = _run_extracted_bundle_verifier(
@@ -1909,6 +1951,58 @@ exit 0
         "Installed shim version output does not match the candidate launcher"
         in _normalized_process_output(result)
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
+@pytest.mark.parametrize("damage", ["missing-vsview", "missing-entrypoint", "missing-panel"])
+def test_extracted_bundle_verifier_requires_vsview_entrypoint(
+    repo_root: Path, tmp_path: Path, damage: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if shutil.which("pwsh") is None:
+        pytest.skip("PowerShell 7 is required")
+    for name in ("VAPOURSYNTH_HOME", "VAPOURSYNTH_PLUGIN_PATH", "VAPOURSYNTH_EXTRA_PLUGIN_PATH"):
+        monkeypatch.setenv(name, str(tmp_path / name))
+    intact_zip = _write_extracted_verifier_fixture(
+        repo_root=repo_root,
+        tmp_path=tmp_path,
+        candidate_launcher="""
+if ($args[0] -eq "--help") { exit 0 }
+if ($args[0] -eq "version") { Write-Output "frame-compare 1.2.3"; exit 0 }
+if ($args[0] -eq "doctor") { Write-Output '{"success":true,"doctor":{"checks":[{"id":"ffmpeg","status":"pass"}]}}'; exit 0 }
+exit 1
+""",
+        installer="exit 77\n",
+        with_vsview=True,
+    )
+    bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
+    good = _run_extracted_bundle_verifier(
+        repo_root=repo_root,
+        zip_path=intact_zip,
+        extract_root=tmp_path / "intact",
+        local_app_data=tmp_path / "local-app-data",
+    )
+    assert "WINDOWS_EXTRACTED_PROOF vsview_entrypoint=ok" in good.stdout
+    assert "candidate_install failed with exit code 77" in _normalized_process_output(good)
+
+    site = bundle / "app" / "site-packages"
+    if damage == "missing-vsview":
+        shutil.rmtree(site / "vsview")
+    elif damage == "missing-entrypoint":
+        (site / "frame_compare-1.2.3.dist-info" / "entry_points.txt").unlink()
+    else:
+        (site / "frame_compare" / "vsview" / "alignment_review_panel.py").unlink()
+    result = _run_extracted_bundle_verifier(
+        repo_root=repo_root,
+        zip_path=_rewrite_extracted_verifier_fixture_zip(tmp_path, "damaged.zip"),
+        extract_root=tmp_path / "damaged",
+        local_app_data=tmp_path / "local-app-data",
+    )
+
+    assert result.returncode != 0
+    assert "candidate_vsview_entrypoint failed with exit code 1" in _normalized_process_output(
+        result
+    )
+    assert "vsview_entrypoint=ok" not in result.stdout
 
 
 def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parity(
