@@ -73,6 +73,7 @@ def _unexpected_connector(_request: WebhookDeliveryRequest) -> WebhookResponse:
         "https://localhost/path",
         "https://worker.localhost/path",
         "https://hooks.example.test/path#secret-token",
+        "https://hooks.example.test:0/path",
     ],
 )
 async def test_rejects_non_https_and_localhost_names(url: str) -> None:
@@ -203,7 +204,7 @@ async def test_delivery_connects_to_resolved_ip_preserving_hostname_sni_and_host
         return WebhookResponse(status_code=204)
 
     result = await _deliver(
-        "https://hooks.example.test:8443/webhook/token?secret=value",
+        "https://hooks.example.test:8443/webhook/token;params?secret=value",
         connector=_connector,
     )
 
@@ -214,7 +215,7 @@ async def test_delivery_connects_to_resolved_ip_preserving_hostname_sni_and_host
     assert request.hostname == "hooks.example.test"
     assert request.port == 8443
     assert request.host_header == "hooks.example.test:8443"
-    assert request.target == "/webhook/token?secret=value"
+    assert request.target == "/webhook/token;params?secret=value"
     assert request.timeout_seconds == WEBHOOK_TIMEOUT_SECONDS
     assert request.body == b'{"content":"https://slow.pics/c/example"}'
     assert dict(request.headers) == {
