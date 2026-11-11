@@ -632,7 +632,8 @@ orchestration; no report-specific output directory or fallback placement exists.
 
 Run-folder names are title-first and capped at 64 characters for Windows path
 headroom. The base name comes from resolved TMDB title/year, common parsed
-metadata, combined filename stems, or `unnamed_run`. Exact timestamps are not
+metadata, combined filename stems, or `unnamed_run`. Windows reserved basenames
+are rewritten before reservation. Exact timestamps are not
 part of folder names; collisions use compact numeric suffixes such as `_2` and
 `_3`, then a short random suffix if bounded numeric claiming cannot reserve a
 directory. Preparation validates the reserved immediate-child path and completes

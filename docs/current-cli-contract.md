@@ -1280,7 +1280,8 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 - A run-folder reservation is required before shortcut creation; escaped or
   symlinked run aliases are rejected rather than redirected elsewhere.
 - The filename is derived from the same final collection title sent to
-  slow.pics, with a stable fallback from the slow.pics URL key.
+  slow.pics, with a stable fallback from the slow.pics URL key. Windows
+  reserved basenames are rewritten before adding `.url`.
 - Repeated writes overwrite the same deterministic shortcut path.
 - Shortcut files are not members of `slowpics.delete_after_upload` cleanup.
 - Shortcut write or path-selection failures are warning-only.
