@@ -42,10 +42,13 @@ $CacheDir = [System.IO.Path]::TrimEndingDirectorySeparator($CacheDir)
 $RepoRoot = [System.IO.Path]::TrimEndingDirectorySeparator($RepoRoot)
 $currentLocation = [System.IO.Path]::TrimEndingDirectorySeparator($currentLocation)
 
-function Assert-BuildPaths() {
+function Assert-BuildPathAncestry() {
   foreach ($path in @($OutDir, $CacheDir, $RepoRoot, $currentLocation, $PSScriptRoot, (Split-Path -Parent $ManifestPath))) {
     Assert-NoReparsePointAncestor -Path $path -Label "Build path"
   }
+}
+
+function Assert-BuildOutputPath() {
   if ($null -ne (Get-Item -LiteralPath $OutDir -Force -ErrorAction SilentlyContinue)) {
     throw "OutDir must not already exist: $OutDir (CacheDir: $CacheDir)"
   }
@@ -651,13 +654,14 @@ function Main() {
     Assert-ReleasePublicKey
   }
 
-  Assert-BuildPaths
+  Assert-BuildPathAncestry
   $useCommittedManifest = $ManifestPath -eq (Join-Path $PSScriptRoot "manifest.windows-x64.json")
   $selectedManifestPath = $ManifestPath
   if (!$useCommittedManifest) {
     $manifest = Get-Manifest -Path $selectedManifestPath
     Assert-BuildManifest -Manifest $manifest
   }
+  Assert-BuildOutputPath
   $commitSha = $ExpectedCommitSha
   if (!$hasExpectedCommitSha -or $RequireReleasePublicKey) {
     $headSha = & git -C $RepoRoot rev-parse HEAD
