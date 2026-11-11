@@ -1,6 +1,6 @@
 const Viewport = {
     create(viewer) {
-        return { viewer, ...this.controller };
+        return { viewer, pendingGridPan: null, ...this.controller };
     },
 
     controller: {
@@ -327,7 +327,23 @@ const Viewport = {
         );
     },
 
+    prepareModePan(mode) {
+        const { state } = this.viewer;
+        if (state.mode === mode) return;
+        if (mode === 'grid') {
+            const base = this.baseCanvasSize();
+            state.panX = this.pendingGridPan?.x ?? (base.width > 0 ? state.panX / base.width : 0);
+            state.panY = this.pendingGridPan?.y ?? (base.height > 0 ? state.panY / base.height : 0);
+            this.pendingGridPan = null;
+        } else if (state.mode === 'grid') {
+            this.pendingGridPan = { x: state.panX, y: state.panY };
+            state.panX = 0;
+            state.panY = 0;
+        }
+    },
+
     setPan(x, y, options = {}) {
+        this.pendingGridPan = null;
         this.viewer.state.panX = this.viewer.numberOrDefault(x, 0);
         this.viewer.state.panY = this.viewer.numberOrDefault(y, 0);
         this.clampPan();
@@ -351,8 +367,23 @@ const Viewport = {
         const awaitingRight = !single && rightRequest && (
             rightRequest.status === 'loading' || rightRequest.token !== state.imageRequestToken
         );
-        if (dom.sizerImg.complete !== false && !awaitingRight
+        const leftRequest = state.mainImageRequests?.left;
+        const gridPan = this.pendingGridPan;
+        // Diff can defer committing the new pair. Ignore the previous sizer until
+        // the current request has installed its image and that image has loaded.
+        const awaitingGridDestination = gridPan && (
+            !leftRequest || leftRequest.token !== state.imageRequestToken
+            || dom.sizerImg.getAttribute('src') !== leftRequest.src
+        );
+        let convertedGridPan = false;
+        if (dom.sizerImg.complete !== false && !awaitingRight && !awaitingGridDestination
             && stage.width > 0 && stage.height > 0 && base.width > 0 && base.height > 0) {
+            if (gridPan) {
+                state.panX = gridPan.x * base.width;
+                state.panY = gridPan.y * base.height;
+                this.pendingGridPan = null;
+                convertedGridPan = true;
+            }
             const zoom = state.zoom;
             const { alignX, alignY } = this.currentAlignment();
             const rightX = alignX * zoom;
@@ -384,6 +415,7 @@ const Viewport = {
             state.panY = clampAxis(state.panY, top, bottom, height, stage.height);
         }
         this.applyPan();
+        if (convertedGridPan) this.viewer.persistViewerState();
     },
 
     applyPan() {
@@ -400,6 +432,7 @@ const Viewport = {
         this.updateFitButtons();
 
         if (options.updateZoom === false) return;
+        this.pendingGridPan = null;
         this.applyFitMode({ resetPan: true });
         this.viewer.persistViewerState();
     },

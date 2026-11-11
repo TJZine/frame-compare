@@ -143,6 +143,7 @@ const ReportViewer = {
             this.inspector.updateTabs();
             this.inspector.updateVisibility();
             this.inspector.renderReportInformation();
+            this.observeToolbar();
 
             if (!this.hasRenderableData()) {
                 this.renderEmptyState(this.emptyStateMessage());
@@ -717,6 +718,20 @@ const ReportViewer = {
         this.dom.stage.addEventListener('wheel', (e) => this.handleViewportWheel(e), { passive: false });
     },
 
+    observeToolbar() {
+        const toolbar = document.querySelector('.rv-controls');
+        const header = document.querySelector('.rv-header');
+        const update = () => document.body.style.setProperty(
+            '--rv-toolbar-bottom',
+            `${toolbar.getBoundingClientRect().bottom}px`,
+        );
+        update();
+        const observer = new ResizeObserver(update);
+        observer.observe(toolbar);
+        observer.observe(header);
+        observer.observe(this.dom.status);
+    },
+
     isViewerChromeEvent(e) {
         return Boolean(e.target?.closest?.('.rv-viewport-palette, .rv-lens, .rv-lens-settings, .rv-empty-state'));
     },
@@ -1087,16 +1102,18 @@ const ReportViewer = {
         const storage = this.localStorage();
         if (!this.state.storageKey || !storage) return false;
 
+        // Pending pan is still normalized, so restore it in Grid until conversion.
+        const gridPan = this.viewport.pendingGridPan;
         const payload = {
             currentFrameIdx: this.state.currentFrameIdx,
-            mode: this.state.mode,
+            mode: gridPan ? 'grid' : this.state.mode,
             leftClipIdx: this.state.leftClipIdx,
             rightClipIdx: this.state.rightClipIdx,
             activeClipIdx: this.state.activeClipIdx,
             fitMode: this.state.fitMode,
             zoom: this.state.zoom,
-            panX: this.state.panX,
-            panY: this.state.panY,
+            panX: gridPan?.x ?? this.state.panX,
+            panY: gridPan?.y ?? this.state.panY,
             revealPercent: this.state.revealPercent,
             overlaysHidden: this.state.overlaysHidden,
             filmstripCollapsed: this.state.filmstripCollapsed,
@@ -1637,12 +1654,7 @@ const ReportViewer = {
 
     setMode(mode) {
         if (!this.validMode(mode)) return;
-        const previousMode = this.state.mode;
-        if (previousMode !== 'grid' && mode === 'grid') {
-            const base = this.viewport.baseCanvasSize();
-            this.state.panX = base.width > 0 ? this.state.panX / base.width : 0;
-            this.state.panY = base.height > 0 ? this.state.panY / base.height : 0;
-        }
+        this.viewport.prepareModePan(mode);
         this.selectPair({ mode }, { render: false });
 
         if (this.state.blinkInterval && mode !== 'blink') {
@@ -1674,11 +1686,6 @@ const ReportViewer = {
         );
         this.dom.stage.classList.add(`rv-mode-${mode}`);
         this.gridView?.setActive(mode === 'grid');
-        if (previousMode === 'grid' && mode !== 'grid') {
-            const base = this.viewport.baseCanvasSize();
-            this.state.panX = base.width > 0 ? this.state.panX * base.width : 0;
-            this.state.panY = base.height > 0 ? this.state.panY * base.height : 0;
-        }
         this.updateModeControls();
         this.updateBlinkControls();
         this.render();

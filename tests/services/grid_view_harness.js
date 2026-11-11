@@ -16,6 +16,7 @@ async function gridContracts() {
     );
     const formatPath = path.join(assetsPath, 'viewer_format.js');
     const assetPath = path.join(assetsPath, 'grid_view.js');
+    const viewportPath = path.join(assetsPath, 'viewport.js');
     // The common fixture must preserve listener lifecycle and nested focus semantics.
     {
         const document = { activeElement: null };
@@ -46,9 +47,10 @@ async function gridContracts() {
     }
 
     const context = {};
-    const source = `${fs.readFileSync(formatPath, 'utf8')}\n${fs.readFileSync(assetPath, 'utf8')}\nglobalThis.__GridView = GridView;`;
+    const source = [formatPath, assetPath, viewportPath]
+        .map(file => fs.readFileSync(file, 'utf8')).join('\n');
     vm.runInNewContext(source, context, { filename: assetPath });
-    const grid = context.__GridView;
+    const { grid, viewport } = vm.runInContext('({ grid: GridView, viewport: Viewport })', context);
 
     assert.equal(grid.layoutName(2, 769, 2), 'two');
     assert.equal(grid.layoutName(3, 1200, 3), 'three-wide');
@@ -80,8 +82,8 @@ async function gridContracts() {
             disabled: false,
             textContent: '',
             className: '',
-            naturalWidth: tagName === 'img' ? 1920 : 0,
-            naturalHeight: tagName === 'img' ? 1080 : 0,
+            naturalWidth: 0,
+            naturalHeight: 0,
             style: {
                 values: {},
                 setProperty(name, value) { this.values[name] = value; },
@@ -199,6 +201,7 @@ async function gridContracts() {
     const viewer = {
         state: {
             data: { clips, default_selection: { left_clip_index: 0 } },
+            mode: 'grid',
             currentFrameIdx: 0,
             zoom: 1,
             panX: 0,
@@ -206,16 +209,17 @@ async function gridContracts() {
             leftClipIdx: 3,
             activeClipIdx: 1,
         },
-        dom: { stage: gridRoot },
+        dom: { stage: gridRoot, canvas: fakeElement() },
         currentFrame() { return frame; },
         referenceClipIndex() { return 0; },
-        viewport: { clampPan() {} },
         updateInspectorData() {},
         updateCurrentFrameMetadata() {},
         announce(message) { announcements.push(message); },
         lens: { refresh() {}, sync() {} },
     };
     const owner = grid.create(viewer);
+    viewer.gridView = owner;
+    viewer.viewport = viewport.create(viewer);
     owner.bind();
     owner.setActive(true);
     owner.render();
@@ -288,6 +292,18 @@ async function gridContracts() {
     focusedCell.focus();
     assert.equal(viewer.state.activeClipIdx, 2);
     owner.render();
+    const [croppedImage, portraitImage] = cells.querySelectorAll('.rv-grid-image');
+    assert.equal(croppedImage.naturalWidth, 0);
+    assert.equal(portraitImage.naturalWidth, 0);
+    const panY = image => Number.parseFloat(image.style.values['--grid-pan-y']);
+    assert.equal(panY(croppedImage), -0.05 * 225);
+    [croppedImage.naturalWidth, croppedImage.naturalHeight] = [1920, 804];
+    croppedImage.dispatch('load');
+    assert.equal(Number.parseFloat(croppedImage.style.height), 167.5);
+    assert.equal(panY(croppedImage), -0.05 * 167.5);
+    [portraitImage.naturalWidth, portraitImage.naturalHeight] = clips[1].resolution;
+    portraitImage.dispatch('load');
+    assert.equal(panY(portraitImage), -0.05 * 240);
     assert.equal(context.document.activeElement.dataset.clipIndex, '2');
     assert.equal(context.document.activeElement.dataset.active, 'true');
     mediaQuery.matches = true;

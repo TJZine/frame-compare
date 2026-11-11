@@ -1164,10 +1164,12 @@ reordering. Frame arrow shortcuts select the adjacent visible frame while suppre
 native document and filmstrip scrolling; the selected filmstrip item owns its roving
 tab stop. Custom view-mode, fit, filmstrip-size, and lens-option radio groups use
 standard arrow and Home/End selection. The header Help dialog is the single persistent
-shortcut reference; the filmstrip is the final visible report region. One responsive
-Inspector width token owns both desktop drawer width and
-stage reservation; the existing tablet/phone overlay boundary keeps stage margin at
-zero.
+shortcut reference, and the filmstrip is the final visible report region. The
+desktop Inspector starts at the measured toolbar bottom, including shifts caused
+by the viewer status banner. One responsive Inspector width token controls both
+drawer width and desktop stage reservation. At 992 px and below, the drawer
+overlays the stage from the top of the viewport and reserves no stage space.
+The drawer also starts at the top in fullscreen.
 
 Help and Report Information share the local `HelpInfoDialog` owner in
 `assets/viewer.js` for visibility, focus restoration, Tab trapping, and Escape

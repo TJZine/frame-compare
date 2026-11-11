@@ -184,7 +184,7 @@ async function reviewControllerContracts() {
             data: {
                 report_id: reportId,
                 version: '1.4',
-                frames: [{}, {}, {}, {}],
+                frames: Array.from({ length: 1001 }, () => ({})),
                 clips: [clipDisplay('Reference'), clipDisplay('Encode')],
             },
         },
@@ -333,6 +333,36 @@ async function reviewControllerContracts() {
             assert.equal(storage.value, saved);
             dom.reviewImportCancel.click();
         }
+
+        // A refused 1,001st record still cancels a Replace waiting for the lock.
+        const fullReview = Array.from({ length: 1000 }, (_, ordinal) => record(ordinal));
+        await dom.reviewImport.fire('change', { files: [file('full.json', exported(fullReview))] });
+        await dom.reviewImportApply.click();
+        assert.equal(controller.model.all().length, 1000);
+        const savedFullReview = storage.value;
+        assert.equal(JSON.parse(savedFullReview).reviews.length, 1000);
+        const fullRecords = JSON.stringify(controller.model.all());
+        await dom.reviewImport.fire('change', { files: [file('empty.json', exported([]))] });
+        modeMerge.checked = false;
+        modeReplace.checked = true;
+        dom.reviewPreview.fire('change');
+        assert.match(dom.reviewPreviewCounts.textContent, /Remove 1000/);
+        let release;
+        lockGate = new Promise(resolve => { release = resolve; });
+        const lockRequested = new Promise(resolve => { onLockRequest = resolve; });
+        const replacing = dom.reviewImportApply.click();
+        await lockRequested;
+        onLockRequest = null;
+        viewer.state.currentFrameIdx = 1000;
+        controller.render();
+        dom.reviewBookmark.checked = true;
+        await dom.reviewBookmark.fire('change');
+        assert.equal(dom.reviewBookmark.checked, false);
+        assert.match(announcements.at(-1), /record limit of 1,000 reached/);
+        release();
+        await replacing;
+        assert.equal(storage.value, savedFullReview);
+        assert.equal(JSON.stringify(controller.model.all()), fullRecords);
 
         const unavailable = warningViewer(null);
         const unavailableController = ReviewState.createController(unavailable.viewer);

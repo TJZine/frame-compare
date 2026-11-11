@@ -1205,10 +1205,6 @@ body:fullscreen .rv-inspector {
     color: var(--text-muted);
 }
 
-.rv-info-detail {
-    color: var(--text-secondary);
-}
-
 .rv-info-category {
     font-family: var(--font-mono);
     color: var(--text-secondary);
@@ -1776,18 +1772,10 @@ body:fullscreen .rv-inspector {
     white-space: nowrap;
 }
 
-.rv-filmstrip-detail {
-    color: var(--text-muted);
-    font-size: 0.65rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 /* 10. Inspector Drawer */
 .rv-inspector {
     position: fixed;
-    top: calc(52px + 42px);
+    top: var(--rv-toolbar-bottom, 0px);
     right: 0;
     bottom: 0;
     z-index: 60;
