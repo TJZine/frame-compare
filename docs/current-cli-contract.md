@@ -237,7 +237,8 @@ resampling, dropping, interpolating, or duplicating source frames. Mixed-FPS
 validation compares effective FPS values after explicit overrides and after
 `match_fps = "assume_reference"` or
 `match_fps = "majority"` matching. Explicit per-source `effective_fps` values
-take precedence over `match_fps`.
+take precedence over `match_fps`. Source preparation rejects an effective rate
+whose value or resulting clip duration exceeds the floating-point range.
 
 Explicit labels are trimmed. They reject control characters and bidirectional
 formatting controls U+202A–U+202E and U+2066–U+2069. Derived labels replace control
