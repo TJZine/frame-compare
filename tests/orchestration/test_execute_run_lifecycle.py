@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
 from typing import Never, cast
@@ -36,6 +37,7 @@ from frame_compare.services.types import SlowpicsCollectionMetadata, TmdbMetadat
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.loader import DefaultVSLoader
 from frame_compare.vs.types import SourceInfo
@@ -1114,6 +1116,89 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
         assert observed["calls"] in ([0], [0, 1])
     else:
         assert observed["close_completed"] == [True]
+
+
+async def test_first_cancellation_during_owned_client_close_records_only_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_config(tmp_path)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
+    records_at_close: list[list[Path]] = []
+
+    class InterruptingCloseTransport(httpx.AsyncBaseTransport):
+        async def aclose(self) -> None:
+            records_at_close.append(list(tmp_path.glob("generated/*/run_result.toml")))
+            task = asyncio.current_task()
+            assert task is not None
+            task.cancel()
+            await asyncio.sleep(0)
+
+    client = httpx.AsyncClient(transport=InterruptingCloseTransport())
+    monkeypatch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
+    worker = asyncio.create_task(
+        execute_run(
+            make_run_request(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                overrides=CLIConfigOverrides(no_upload=True),
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+        )
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(worker, 3)
+
+    assert records_at_close == [[]]
+    records = list(tmp_path.glob("generated/*/run_result.toml"))
+    assert len(records) == 1
+    assert read_run_result(records[0]).status == "failed"
+
+
+async def test_cancellation_at_completed_record_guard_records_only_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_config(tmp_path)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
+    client = httpx.AsyncClient()
+    monkeypatch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
+    real_record_completed = coordinator.record_completed_run_result
+    client_closed_at_publication: list[bool] = []
+
+    def cancel_before_publication(
+        *,
+        workspace: WorkspacePaths | None,
+        result: RunResult,
+        started_at: datetime,
+        completed_at: datetime,
+    ) -> RunResult:
+        client_closed_at_publication.append(client.is_closed)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        return real_record_completed(
+            workspace=workspace, result=result, started_at=started_at, completed_at=completed_at
+        )
+
+    monkeypatch.setattr(coordinator, "record_completed_run_result", cancel_before_publication)
+    worker = asyncio.create_task(
+        execute_run(
+            make_run_request(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                overrides=CLIConfigOverrides(no_upload=True),
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+        )
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(worker, 3)
+
+    assert client_closed_at_publication == [True]
+    records = list(tmp_path.glob("generated/*/run_result.toml"))
+    assert len(records) == 1
+    assert read_run_result(records[0]).status == "failed"
 
 
 def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failure(

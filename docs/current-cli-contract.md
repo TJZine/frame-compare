@@ -1012,9 +1012,10 @@ recovery requirement.
   original error. Both attempt best-effort cleanup.
 - A separate atomically written `<run-folder>/run_result.toml` V1 record captures
   the final outcome without modifying `run_info.toml`. Successful records are
-  written after all post-run phases settle and use `completed` or
-  `completed_with_warnings`; failures after reservation get one best-effort
-  `failed` record. Failures before reservation write no record. An ordinary
+  written after all post-run phases settle and the coordinator's HTTP client
+  closes. Their status is `completed` or `completed_with_warnings`. Failures
+  after reservation get one best-effort `failed` record. Failures before
+  reservation write no record. An ordinary
   completed-run result-write failure is warning-only and leaves the run successful;
   an ordinary failed-run result-write failure preserves the identical original
   exception and exit mapping. `KeyboardInterrupt` and `SystemExit` raised while

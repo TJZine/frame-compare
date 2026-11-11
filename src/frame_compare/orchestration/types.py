@@ -93,7 +93,7 @@ class FullWindowRetryConfirmationFn(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ReservedRunCapture:
-    """Facts known immediately after a run folder's identity is durable."""
+    """Facts captured after reserving the workspace and before writing run_info.toml."""
 
     workspace: WorkspacePaths
     clip_count: int

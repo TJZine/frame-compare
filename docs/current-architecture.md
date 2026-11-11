@@ -643,12 +643,11 @@ transition, or the metadata write fails, the run fails immediately and cleanup
 attempts to remove the empty reserved directory as best effort.
 
 Preparation reports the reserved `WorkspacePaths` through an internal dependency
-capture immediately after `run_info.toml` succeeds, without changing the
-`execute_prep(request, deps)` call shape. The coordinator owns whole-run outcome
-timing and asks the run-result service to write success only after post-run phases
-settle, or to make one best-effort failure write while re-raising the original
-exception unchanged. Completed-run record failures add a stable warning and do
-not change successful media work into failure.
+capture after the workspace transition and before writing `run_info.toml`. The
+coordinator owns whole-run outcome timing and asks the run-result service to
+write success after post-run phases settle and its owned HTTP client closes, or
+to make one best-effort failure write while re-raising the original exception.
+Completed-run record failures add a stable warning and leave the run successful.
 
 ### Alignment requests and authority
 
