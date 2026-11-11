@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Mapping
+from contextlib import suppress
 from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any, cast
@@ -39,9 +41,7 @@ class EnvironmentSettingsSource(EnvSettingsSource):
 
     Pydantic-settings explodes ``FRAME_COMPARE_*__*`` variables into nested
     dictionaries, but leaves the resulting scalar values as strings.  The
-    runtime memory limit is strict by design for TOML and constructor inputs;
-    decode its environment representation here, at the source boundary, so
-    that the strict model still rejects non-integer strings, floats, and bools.
+    runtime and slow.pics models remain strict for TOML and constructor inputs.
     """
 
     def decode_complex_value(self, field_name: str, field: FieldInfo, value: Any) -> Any:
@@ -62,17 +62,31 @@ class EnvironmentSettingsSource(EnvSettingsSource):
         if field_name != "runtime" or not isinstance(prepared, dict):
             return prepared
 
-        prepared_values = cast(dict[str, object], prepared)
-        memory_limit = prepared_values.get("memory_limit_mb")
-        if isinstance(memory_limit, str):
-            try:
-                decoded_memory_limit = int(memory_limit)
-            except ValueError:
-                # Keep an overlong decimal as a string so strict model
-                # validation reports the ordinary typed configuration error.
-                return prepared_values
-            prepared_values = {**prepared_values, "memory_limit_mb": decoded_memory_limit}
+        prepared_values = cast(dict[str, object], prepared).copy()
+        _decode_integer_fields(prepared_values, "memory_limit_mb")
         return prepared_values
+
+    def explode_env_vars(
+        self, field_name: str, field: FieldInfo, env_vars: Mapping[str, str | None]
+    ) -> dict[str, Any]:
+        values = super().explode_env_vars(field_name, field, env_vars)
+        if field_name == "slowpics":
+            # Decode only individual environment keys, before pydantic-settings
+            # merges them over any whole-section JSON value.
+            _decode_integer_fields(values, "tmdb_id", "remove_after_days")
+            is_hentai = values.get("is_hentai")
+            if is_hentai in ("true", "false"):
+                values["is_hentai"] = is_hentai == "true"
+        return values
+
+
+def _decode_integer_fields(values: dict[str, object], *keys: str) -> None:
+    for key in keys:
+        raw_value = values.get(key)
+        if isinstance(raw_value, str):
+            # Let the strict model report invalid or overlong integers.
+            with suppress(ValueError):
+                values[key] = int(raw_value)
 
 
 __all__ = ["EnvironmentSettingsSource", "TomlConfigSettingsSourceNoBOM"]
