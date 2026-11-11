@@ -294,8 +294,8 @@ imports belong in focused protocol modules such as
 `frame_compare.utils.terminal_sections` owns the shared open-rail renderer used by
 Rich human panels, rules, and prompts. `frame_compare.utils.artifact_paths` owns
 human artifact-path display and terminal hyperlinks. The VSView `SessionConsole`
-implements the same section rules in its separate process because Rich is not
-available there. `progress_protocol.AlignmentSummary` and
+uses the shared Rich renderer for its session instructions and output rows.
+`progress_protocol.AlignmentSummary` and
 `AlignmentSummaryEntry` are memory-only final alignment facts carried through
 phase output, artifacts, `RunResult`, and completion presentation; they do not
 change JSON or persistence projections.
