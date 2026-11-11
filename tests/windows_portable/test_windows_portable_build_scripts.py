@@ -2055,13 +2055,22 @@ def inventory_source_repo(repo_root: Path, tmp_path_factory: pytest.TempPathFact
     return source_repo
 
 
+def _source_commit(repo: Path) -> str:
+    return subprocess.check_output(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True, timeout=10
+    ).strip()
+
+
 def _run_bundle_inventory(
     *,
     bundle: Path,
     repo_root: Path,
     source_repo: Path,
     manifest: Path | None = None,
+    commit_sha: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    if commit_sha is None:
+        commit_sha = _source_commit(source_repo)
     return subprocess.run(
         [
             sys.executable,
@@ -2072,6 +2081,8 @@ def _run_bundle_inventory(
             str(manifest or repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"),
             "--repo-root",
             str(source_repo),
+            "--commit-sha",
+            commit_sha,
             "--output",
             str(bundle / "bundle_inventory.json"),
         ],
@@ -2158,6 +2169,132 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     assert "Inter 4.1: https://github.com/rsms/inter/releases/tag/v4.1" in source_urls
     notices = (bundle / "licenses" / "THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8")
     assert "Inter 4.1 (OFL-1.1)" in notices
+
+
+def test_windows_portable_inventory_records_the_captured_commit(
+    tmp_path: Path, repo_root: Path, inventory_source_repo: Path
+) -> None:
+    bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    captured = _source_commit(inventory_source_repo)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(inventory_source_repo),
+            "-c",
+            "user.name=Portable test",
+            "-c",
+            "user.email=portable@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "later checkout",
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    assert _source_commit(inventory_source_repo) != captured
+
+    result = _run_bundle_inventory(
+        bundle=bundle, repo_root=repo_root, source_repo=inventory_source_repo, commit_sha=captured
+    )
+
+    assert result.returncode == 0, _normalized_process_output(result)
+    inventory = json.loads((bundle / "bundle_inventory.json").read_text(encoding="utf-8"))
+    assert inventory["bundle"]["commit_sha"] == captured
+    assert inventory["bundle"]["source_archive_url"].endswith(f"/{captured}.tar.gz")
+    assert captured in (bundle / "licenses/SOURCE_URLS.txt").read_text(encoding="utf-8")
+
+
+def test_windows_portable_requirements_export_uses_the_captured_commit(
+    tmp_path: Path, repo_root: Path
+) -> None:
+    if shutil.which("uv") is None:
+        pytest.skip("uv is required to export the committed dependency lock")
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in ("pyproject.toml", "uv.lock"):
+        (source / name).write_bytes(
+            subprocess.check_output(
+                ["git", "-C", str(repo_root), "show", f"HEAD:{name}"], timeout=15
+            )
+        )
+    for args in (
+        ("init", "--quiet"),
+        ("add", "pyproject.toml", "uv.lock"),
+        (
+            "-c",
+            "user.name=Portable test",
+            "-c",
+            "user.email=portable@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--quiet",
+            "-m",
+            "locked inputs",
+        ),
+    ):
+        subprocess.run(
+            ["git", "-C", str(source), *args], check=True, capture_output=True, timeout=30
+        )
+    captured = _source_commit(source)
+    output = tmp_path / "requirements.lock.txt"
+    subprocess.run(
+        [
+            "uv",
+            "export",
+            "--frozen",
+            "--no-dev",
+            "--no-emit-project",
+            "--no-emit-package",
+            "vapoursynth-lsmas",
+            "--extra",
+            "vsview",
+            "--format",
+            "requirements.txt",
+            "--output-file",
+            str(output),
+        ],
+        cwd=source,
+        env=os.environ | {"UV_OFFLINE": "1", "UV_NO_CONFIG": "1"},
+        check=True,
+        capture_output=True,
+        timeout=45,
+    )
+    expected = output.read_bytes()
+    output.unlink()
+    # Exporting from the live checkout would now fail to parse the lock.
+    (source / "uv.lock").write_text("corrupt live lock", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-I",
+            "-S",
+            str(repo_root / "tools/windows_portable/portable_runtime.py"),
+            "export",
+            "--repo",
+            str(source),
+            "--commit-sha",
+            captured,
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+
+    assert result.returncode == 0, _normalized_process_output(result)
+    assert b"vsview==0.13.0" in expected
+    assert output.read_bytes() == expected
 
 
 def test_windows_portable_inventory_requires_committed_python_proof(

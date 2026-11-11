@@ -36,11 +36,13 @@ runs:
 
     - name: Install dev dependencies (frozen)
       shell: pwsh
+      env:
+        EXPECTED_SHA: ${{ inputs.expected_sha }}
       run: |
         $PSNativeCommandUseErrorActionPreference = $true
         $wheelhouse = Join-Path $env:RUNNER_TEMP "anitopy-wheel"
         python -B -I -S tools/windows_portable/portable_runtime.py anitopy-wheel `
-          --cache .portable_cache --output $wheelhouse
+          --cache .portable_cache --output $wheelhouse --commit-sha "$env:EXPECTED_SHA"
         uv sync --all-groups --extra vsview --frozen --no-build --no-install-package anitopy
         uv --offline --no-config pip install --no-index --no-deps --no-build --no-python-downloads `
           (Join-Path $wheelhouse "anitopy-2.1.1-py3-none-any.whl")
@@ -60,6 +62,7 @@ runs:
       shell: pwsh
       env:
         REQUIRE_SIGNING: ${{ inputs.require_signing }}
+        EXPECTED_SHA: ${{ inputs.expected_sha }}
       run: |
         $ErrorActionPreference = "Stop"
         $PSNativeCommandUseErrorActionPreference = $true
@@ -72,6 +75,8 @@ runs:
           "Bypass",
           "-File",
           "tools/windows_portable/build_portable.ps1",
+          "-ExpectedCommitSha",
+          $env:EXPECTED_SHA,
           "-ManifestPath",
           "tools/windows_portable/manifest.windows-x64.json",
           "-OutDir",

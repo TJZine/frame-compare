@@ -123,12 +123,15 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File `
   tools\windows_portable\build_portable.ps1 `
   -ManifestPath $Manifest `
   -RepoRoot $Repo `
+  -ExpectedCommitSha $ExpectedPrHeadSha `
   -OutDir $Candidate `
   -CacheDir $Cache
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ```
 
-This is the canonical manifest-based build command. For a release run, add
+This is the canonical manifest-based build command. The builder uses the supplied
+commit for the projected application source, dependency lock and source inventory.
+A local invocation without `-ExpectedCommitSha` resolves `HEAD` once at the start. For a release run, add
 `-RequireReleasePublicKey` to this same invocation; do not rebuild a second candidate.
 All evidence, packaging, and digest verification must use this exact `$Candidate`.
 

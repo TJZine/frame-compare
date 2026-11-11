@@ -77,6 +77,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--bundle-root", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--require-clean-repo", action="store_true")
     return parser.parse_args()
@@ -449,9 +450,9 @@ def main() -> int:
         raise NotADirectoryError(packaged_src)
     media_runtime_scopes = ("analysis", "probe", "alignment", "index", "full")
 
-    commit_sha = _run_git(repo_root, "rev-parse", "HEAD")
+    commit_sha = args.commit_sha
     if not re.fullmatch(r"[a-f0-9]{40}", commit_sha):
-        raise ValueError("git HEAD is not a full commit SHA")
+        raise ValueError("--commit-sha must be a complete lowercase 40-character commit SHA")
     if args.require_clean_repo and _run_git(
         repo_root, "status", "--porcelain", "--untracked-files=all"
     ):

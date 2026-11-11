@@ -298,7 +298,7 @@ if ($Stage -eq "Verify") {
     Assert-ReleaseFileDigest $RequirementsPath $RequirementsDigest 4MB
     $verifiedBundle = Join-Path $OutputDir "verified-portable.zip"
     $verifiedUpdate = Join-Path $OutputDir "verified-update.zip"
-    Write-IndependentPortableZip $bundlePath $verifiedBundle $RequirementsPath
+    Write-IndependentPortableZip $bundlePath $verifiedBundle $RequirementsPath $ExpectedSha
     Write-CanonicalUpdateArchive $updatePath $verifiedUpdate $source $canonical
     Assert-UpdateArchive $verifiedUpdate $source $canonical
     $BundleDigest = Get-ReleaseFileDigest $verifiedBundle

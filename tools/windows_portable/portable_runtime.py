@@ -521,35 +521,42 @@ def git_blob(repo: Path, commit: str, path: Path) -> bytes:
     )
 
 
-def export(repo: Path, output: Path | None = None) -> bytes:
-    command = [*EXPORT]
-    if output is not None:
-        command.extend(("--output-file", str(output)))
-    data = subprocess.check_output(
-        command, cwd=repo, timeout=90, env=os.environ | {"UV_OFFLINE": "1", "UV_NO_CONFIG": "1"}
-    )
-    return data if output is None else output.read_bytes()
+def export(repo: Path, commit: str, output: Path) -> bytes:
+    # uv writes the output argument into the hashed requirements header.
+    output = output.absolute()
+    with tempfile.TemporaryDirectory(prefix="portable-lock-") as directory:
+        snapshot = Path(directory)
+        for name in ("pyproject.toml", "uv.lock"):
+            (snapshot / name).write_bytes(git_blob(repo, commit, Path(name)))
+        subprocess.run(
+            [*EXPORT, "--output-file", str(output)],
+            cwd=snapshot,
+            stdout=subprocess.DEVNULL,
+            timeout=90,
+            env=os.environ | {"UV_OFFLINE": "1", "UV_NO_CONFIG": "1"},
+            check=True,
+        )
+    return output.read_bytes()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("assemble", "export", "anitopy-wheel"))
     parser.add_argument("--repo", type=Path, default=Path.cwd())
+    parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--requirements", type=Path)
     args = parser.parse_args()
     repo = args.repo.resolve(strict=True)
-    commit = (
-        subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, timeout=30).decode().strip()
-    )
+    commit = args.commit_sha
     if not re.fullmatch(r"[a-f0-9]{40}", commit):
-        raise ValueError("Cannot determine exact source commit")
+        parser.error("--commit-sha must be a complete lowercase 40-character commit SHA")
     if args.mode == "export":
         if args.output is None:
             parser.error("export requires --output")
-        export(repo, args.output)
+        export(repo, commit, args.output)
         return
 
     lock = git_blob(repo, commit, Path("uv.lock"))
@@ -576,7 +583,7 @@ def main() -> None:
         parser.error("assembly needs a cache and an empty reserved output directory")
     requirement_file = root / "requirements.lock.txt"
     if args.requirements is None:
-        requirements = export(repo, requirement_file)
+        requirements = export(repo, commit, requirement_file)
     else:
         requirements = args.requirements.read_bytes()
         requirement_file.write_bytes(requirements)
