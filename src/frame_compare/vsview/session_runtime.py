@@ -3,20 +3,31 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import shutil
 import sys
-import unicodedata
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping
+from contextlib import suppress
 from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING, NotRequired, Protocol, TextIO, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, NotRequired, Protocol, TextIO, TypedDict, cast
 
 from pydantic import TypeAdapter
+from rich.cells import cell_len
+from rich.color import Color
+from rich.text import Text
 
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.canvas import validate_canvas_size
+from frame_compare.utils.terminal_sections import Section
+from frame_compare.utils.terminal_theme import (
+    ACCENT,
+    FAIL,
+    GLYPHS_ASCII,
+    MUTED,
+    WARN,
+    glyphs_for_console,
+    human_console,
+)
 from frame_compare.vs.source_admission import SourceAdmission, admit_source, bounded_decoder_options
 from frame_compare.vs.source_index_cache import ManagedSourceIndexCache, private_index_directory
 from frame_compare.vs.types import TonemapSettings
@@ -38,31 +49,6 @@ from frame_compare.vsview.alignment_review_contract import (
 
 if TYPE_CHECKING:
     import vapoursynth as vs
-
-
-_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def _cell_width(text: str) -> int:
-    """Measure terminal cells using only the VSView runtime's standard library."""
-    return sum(
-        0
-        if unicodedata.category(character) in {"Mn", "Me", "Cf"}
-        else 2
-        if unicodedata.east_asian_width(character) in {"W", "F"}
-        else 1
-        for character in text
-    )
-
-
-def _pad_cells(text: str, width: int) -> str:
-    return text + " " * max(0, width - _cell_width(text))
-
-
-@dataclass(frozen=True, slots=True)
-class _SectionKeyValue:
-    key: str
-    value: str
 
 
 class ReferenceSource(TypedDict):
@@ -140,164 +126,38 @@ def install_workspace_log_filter() -> None:
 
 class SessionConsole:
     def __init__(self) -> None:
-        self._original_stderr_encoding = getattr(sys.stderr, "encoding", "") or ""
-        self.reconfigure_text_stream(sys.stdout)
-        self.reconfigure_text_stream(sys.stderr)
+        self._reconfigure_text_stream(sys.stdout, encoding="utf-8")
+        # Keep the terminal's encoding so Rich selects the correct rail glyphs.
+        self._reconfigure_text_stream(sys.stderr)
+        width, height = shutil.get_terminal_size(fallback=(120, 24))
+        self._accent = WARN
+        color_system: Literal["standard", "256", "truecolor"] | None = None
+        if "NO_COLOR" not in os.environ and sys.stderr.isatty():
+            if os.environ.get("COLORTERM") in ("truecolor", "24bit") or "WT_SESSION" in os.environ:
+                color_system = "truecolor"
+                # Rich caches ANSI codes by style. Reserve the RGB spelling for
+                # truecolor so it cannot reuse the shared hex style's downgrade.
+                self._accent = Color.parse(ACCENT).get_truecolor().rgb
+            elif "256color" in os.environ.get("TERM", ""):
+                color_system, self._accent = "256", "color(180)"
+            else:
+                color_system = "standard"
+        self._console = human_console(
+            stderr=True,
+            color_system=color_system,
+            width=width,
+            height=height,
+        )
+        self._glyphs = glyphs_for_console(self._console)
 
-    def reconfigure_text_stream(self, stream: TextIO) -> bool:
+    @staticmethod
+    def _reconfigure_text_stream(stream: TextIO, *, encoding: str | None = None) -> None:
         reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is None:
-            return False
-        try:
-            reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, LookupError, OSError, TypeError, UnicodeError, ValueError):
-            return False
-        return True
-
-    def ansi_enabled(self) -> bool:
-        return "NO_COLOR" not in os.environ and getattr(sys.stderr, "isatty", lambda: False)()
-
-    def use_ascii(self) -> bool:
-        return not str(self._original_stderr_encoding).lower().startswith("utf")
-
-    def glyph(self, kind: str) -> str:
-        table = {"warning": ("!", "!"), "failed": ("✗", "x"), "waiting": ("›", ">")}
-        glyph, fallback = table[kind]
-        return fallback if self.use_ascii() else glyph
-
-    def arrow(self) -> str:
-        return "->" if self.use_ascii() else "→"
-
-    def accent_code(self) -> str:
-        colorterm = os.environ.get("COLORTERM", "")
-        if colorterm in ("truecolor", "24bit") or "WT_SESSION" in os.environ:
-            return "38;2;210;172;107"
-        if "256color" in os.environ.get("TERM", ""):
-            return "38;5;180"
-        return "33"
-
-    def style(self, text: str, code: str) -> str:
-        if not self.ansi_enabled():
-            return text
-        return f"\x1b[{code}m{text}\x1b[0m"
-
-    def dim(self, text: str) -> str:
-        return self.style(text, "2")
-
-    def header(self, text: str) -> str:
-        return self.style(text, self.accent_code())
-
-    def key(self, text: str) -> str:
-        return self.style(text, "2")
-
-    def hint(self, text: str) -> str:
-        return self.style(text, "2")
-
-    def ascii_fallback(self, text: str) -> str:
-        if not self.use_ascii():
-            return text
-        return text.translate(
-            str.maketrans(
-                {
-                    "╭": "+",
-                    "─": "-",
-                    "│": "|",
-                    "╰": "+",
-                    "·": "|",
-                    "›": ">",
-                    "…": "...",
-                    "×": "x",
-                    "●": "*",
-                    "○": "o",
-                }
-            )
-        )
-
-    def _section_border(self, side: str) -> str:
-        if self.use_ascii():
-            return "+-" if side in {"top", "bottom"} else "|"
-        return {"top": "╭─", "body": "│", "bottom": "╰─"}[side]
-
-    def _section_title(self, text: str) -> str:
-        heading, separator, detail = text.partition(" · ")
-        title = self.style(self.ascii_fallback(heading), f"{self.accent_code()};1")
-        if separator:
-            title += self.dim(self.ascii_fallback(separator + detail))
-        return title
-
-    def _section_body(self, text: str) -> str:
-        text = self.ascii_fallback(text)
-        rail = self.style(self._section_border("body"), self.accent_code())
-        return rail if not text else f"{rail} {text}"
-
-    def terminal_width(self) -> int:
-        return max(1, min(shutil.get_terminal_size(fallback=(120, 24)).columns, 120))
-
-    def _wrap_ansi(self, text: str, width: int) -> list[str]:
-        """Fold an ANSI-styled string without counting SGR sequences as width."""
-        lines: list[str] = []
-        current: list[str] = []
-        visible_width = 0
-        active_style = ""
-        for token_match in re.finditer(r"\x1b\[[0-9;]*m|.", text, re.DOTALL):
-            token = token_match.group()
-            ansi_match = _ANSI_SGR_RE.fullmatch(token)
-            if ansi_match is not None:
-                current.append(token)
-                active_style = "" if token == "\x1b[0m" else token
-                continue
-            for character in token:
-                if character == "\n":
-                    lines.append("".join(current))
-                    current = [active_style] if active_style else []
-                    visible_width = 0
-                    continue
-                character_width = _cell_width(character)
-                if character_width and visible_width + character_width > width and visible_width:
-                    if active_style:
-                        current.append("\x1b[0m")
-                    lines.append("".join(current))
-                    current = [active_style] if active_style else []
-                    visible_width = 0
-                current.append(character)
-                visible_width += character_width
-        if current or not lines:
-            lines.append("".join(current))
-        return lines
-
-    def _section_lines(self, line: str | _SectionKeyValue, body_width: int) -> list[str]:
-        if isinstance(line, _SectionKeyValue):
-            key = self.ascii_fallback(line.key)
-            value = self.ascii_fallback(line.value)
-            value_width = max(1, body_width - 16)
-            value_lines = self._wrap_ansi(value, value_width)
-            return [
-                f"{key}  {value_lines[0]}",
-                *(f"{' ' * 16}{value_line}" for value_line in value_lines[1:]),
-            ]
-        return self._wrap_ansi(self.ascii_fallback(line), body_width)
-
-    def section(self, title: str, body: Sequence[str | _SectionKeyValue]) -> None:
-        """Print one G1 section with the VSView console's ANSI styling."""
-        rail_code = self.accent_code()
-        body_width = max(1, self.terminal_width() - 2)
-        self.safe_print()
-        self.safe_print(
-            self.style(self._section_border("top") + " ", rail_code) + self._section_title(title)
-        )
-        for line in body:
-            for wrapped_line in self._section_lines(line, body_width):
-                self.safe_print(self._section_body(wrapped_line))
-        self.safe_print(self.style(self._section_border("bottom"), rail_code))
-        self.safe_print()
-
-    def key_value(self, key: str, value: str) -> _SectionKeyValue:
-        return _SectionKeyValue(self.key(_pad_cells(key, 14)), value)
-
-    def note(self, kind: str, text: str) -> str:
-        glyph = self.glyph(kind)
-        code = "33" if kind == "warning" else "2"
-        return f"{self.style(glyph, code)} {text}"
+        if reconfigure is not None:
+            with suppress(
+                AttributeError, LookupError, OSError, TypeError, UnicodeError, ValueError
+            ):
+                reconfigure(encoding=encoding, errors="replace")
 
     def _audio_output_state(self, audio_review: AudioReviewPayload) -> tuple[str, bool]:
         authority = audio_review["current_authority"]
@@ -328,84 +188,98 @@ class SessionConsole:
             return f"audio {candidate_offset:+d}f · not applied", True
         return "no audio match", True
 
-    def _output_table_rows(
+    def _add_output_rows(
         self,
+        section: Section,
         reference: ReferenceSource,
         targets: Mapping[str, ComparisonSource],
         short_names: Mapping[str, str],
-    ) -> list[_SectionKeyValue]:
+    ) -> None:
         source_names = [short_names.get(reference["label"], reference["display_name"])]
         source_names.extend(
             short_names.get(label, target["display_name"]) for label, target in targets.items()
         )
-        name_width = max(map(_cell_width, source_names))
-        rows = [
-            self.key_value(
-                "outputs",
-                f"0  {_pad_cells(source_names[0], name_width)}  {self.dim('reference')}",
-            )
-        ]
-        for index, ((_label, target), name) in enumerate(
-            zip(targets.items(), source_names[1:], strict=True), start=1
+        name_width = max(map(cell_len, source_names))
+        ref_name = source_names[0]
+        ref_padding = " " * (name_width - cell_len(ref_name) + 2)
+        section.add_row(
+            "outputs",
+            Text.assemble(f"0  {ref_name}{ref_padding}", ("reference", MUTED)),
+        )
+        for index, (name, target) in enumerate(
+            zip(source_names[1:], targets.values(), strict=True), start=1
         ):
             audio_review = cast(AudioReviewPayload, json.loads(target["audio_review"]))
             state, warning = self._audio_output_state(audio_review)
-            state_text = self.style(state, "33") if warning else self.dim(state)
-            rows.append(
-                self.key_value(
-                    "",
-                    f"{index}  {_pad_cells(name, name_width)}  {state_text}",
-                )
+            if self._glyphs is GLYPHS_ASCII:
+                state = state.replace(" · ", " | ")
+            padding = " " * (name_width - cell_len(name) + 2)
+            section.add_row(
+                "",
+                Text.assemble(f"{index}  {name}{padding}", (state, WARN if warning else MUTED)),
             )
-        return rows
 
-    def vsview_section_body(
+    def print_ready(
         self,
         reference: ReferenceSource,
         targets: Mapping[str, ComparisonSource],
         short_names: Mapping[str, str],
         preview_assumptions: list[dict[str, str]],
-    ) -> list[str | _SectionKeyValue]:
-        body: list[str | _SectionKeyValue] = [
-            "1  Open Tool Panel " + self.arrow() + " Frame Compare Alignment Review.",
-            "2  Browse each source to the same visual moment; original frames update automatically.",
-            "3  Confirm matching frames in the panel, then close VSView to continue Frame Compare.",
-            "",
-            *self._output_table_rows(reference, targets, short_names),
-        ]
+    ) -> None:
+        ascii_only = self._glyphs is GLYPHS_ASCII
+        arrow = "->" if ascii_only else "→"
+        separator = "|" if ascii_only else "·"
+        title = f"[bold {self._accent}]{self._glyphs.waiting} VSView is open[/]"
+        section = Section(f"{title} [dim]{separator} waiting for you[/]", rail_style=self._accent)
+        section.add_line(Text(f"1  Open Tool Panel {arrow} Frame Compare Alignment Review."))
+        section.add_line(
+            Text(
+                "2  Browse each source to the same visual moment; original frames update automatically."
+            )
+        )
+        section.add_line(
+            Text(
+                "3  Confirm matching frames in the panel, then close VSView to continue Frame Compare."
+            )
+        )
+        section.add_row("")
+        self._add_output_rows(section, reference, targets, short_names)
         if preview_assumptions:
-            body.extend(("", self.note("warning", "VSView display assumptions")))
+            section.add_row("")
+            section.add_note("VSView display assumptions")
             for assumption_number, assumption in enumerate(preview_assumptions):
                 if assumption_number:
-                    body.append("")
-                body.append(self.key_value("source", assumption["source"]))
+                    section.add_row("")
+                section.add_row("source", Text(assumption["source"]))
                 if "preview" in assumption:
-                    body.append(self.key_value("preview", self.hint(assumption["preview"])))
+                    section.add_row("preview", Text(assumption["preview"], style=MUTED))
                 if "range" in assumption:
-                    body.append(self.key_value("range", self.hint(assumption["range"])))
-                body.append(
-                    self.key_value(
-                        "impact",
-                        self.hint("Preview only; source, render, and report unchanged"),
-                    )
+                    section.add_row("range", Text(assumption["range"], style=MUTED))
+                section.add_row(
+                    "impact",
+                    Text("Preview only; source, render, and report unchanged", style=MUTED),
                 )
-        return body
+        self.safe_print(section)
 
-    def status(self, marker: str) -> str:
-        kinds = {"[WARN]": ("warning", "33"), "[FAIL]": ("failed", "31")}
-        kind, code = kinds[marker]
-        return self.style(self.glyph(kind), code)
+    def status_line(self, marker: str, text: str) -> Text:
+        glyph, style = {
+            "[WARN]": (self._glyphs.warning, WARN),
+            "[FAIL]": (self._glyphs.failed, FAIL),
+        }[marker]
+        return Text.assemble("  ", (glyph, style), " ", text)
 
-    def status_line(self, marker: str, text: str) -> str:
-        return f"  {self.status(marker)} {text}"
-
-    def safe_print(self, *args: object) -> None:
+    def safe_print(self, renderable: Section | Text) -> None:
+        with self._console.capture() as capture:
+            if isinstance(renderable, Section):
+                renderable.print(self._console)
+            else:
+                self._console.print(renderable, soft_wrap=True)
+        text = capture.get()
         try:
-            print(*args, file=sys.stderr)
+            sys.stderr.write(text)
         except UnicodeEncodeError:
             # Preserve diagnostics on legacy consoles that cannot be reconfigured.
-            text = " ".join(str(arg) for arg in args)
-            print(text.encode("ascii", errors="replace").decode("ascii"), file=sys.stderr)
+            sys.stderr.write(text.encode("ascii", errors="replace").decode("ascii"))
 
 
 def resolve_lwlibavsource(core: vs.Core) -> PreviewSourceLoader:
@@ -783,7 +657,4 @@ def run_session(data: SessionData, script_path: Path) -> None:
         )
         sys.exit(1)
 
-    console.section(
-        f"{console.glyph('waiting')} VSView is open · waiting for you",
-        console.vsview_section_body(reference, targets, short_names, preview_assumptions),
-    )
+    console.print_ready(reference, targets, short_names, preview_assumptions)
