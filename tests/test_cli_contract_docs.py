@@ -100,3 +100,14 @@ def test_commands_reference_exit_codes_match_contract() -> None:
 
     assert len(contract_rows) == 8
     assert commands_rows == contract_rows
+
+
+def test_commands_reference_describes_tonemap_speed() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    commands = (repo_root / "docs" / "reference" / "commands.md").read_text(encoding="utf-8")
+    section = commands.split("#### `--tm-speed`", 1)
+    assert len(section) == 2
+    entry = section[1].split("\n#### ", 1)[0]
+    assert "`quality`, `fast`" in entry
+    assert "`color.tonemap_speed`" in entry
+    assert "source metadata or the resolved static peak hint" in entry

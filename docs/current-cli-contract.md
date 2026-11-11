@@ -86,8 +86,8 @@ Help uses the current terminal width; it does not impose a routine 200-column wi
 ## Exit Codes And Error Families
 
 Commands exit with these codes (`src/frame_compare/cli/errors.py`,
-`src/frame_compare/cli/run_command.py:346-354`,
-`src/frame_compare/cli/cli_helpers.py:130-139`):
+`run_command.handle_run`, `run_command.handle_json_output`,
+and `cli_helpers.handle_error`):
 
 | Code | Meaning |
 | --- | --- |

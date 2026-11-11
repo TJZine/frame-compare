@@ -43,7 +43,7 @@ exits without running.
 
 Runs and dry runs reject `--no-cache` combined with `--from-cache-only`
 ([`--no-cache` and `--from-cache-only`](../current-cli-contract.md#run-command-contract)).
-An invalid `--overlay`, `--tm-preset`, or `--tm-curve` value names the option and
+An invalid `--overlay`, `--tm-preset`, `--tm-speed`, or `--tm-curve` value names the option and
 lists its choices before any work starts. Preset names are `reference`, `contrast`,
 `spline`, `bright_lift`, and `highlight_guard`. The default `reference` uses BT.2390 at 100 nits with knee 1.0.
 An explicit curve override that changes the preset curve uses that curve's default
@@ -160,6 +160,17 @@ Saved by `--write-config`
 :   `color.preset`
 
 Tonemap preset.
+
+#### `--tm-speed` { #run-tm-speed .fc-key }
+
+Value
+:   `quality`, `fast`
+
+Saved by `--write-config`
+:   `color.tonemap_speed`
+
+Choose the source-peak policy for tonemapping. The default `quality` measures
+source peaks, while `fast` uses source metadata or the resolved static peak hint.
 
 #### `--tm-target` { #run-tm-target .fc-key }
 
