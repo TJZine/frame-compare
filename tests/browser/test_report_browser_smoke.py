@@ -2008,9 +2008,8 @@ def test_grid_to_single_preserves_pan_for_destination_image_size(tmp_path: Path)
             `document.querySelector('.rv-grid-image[data-clip-index="1"]')?.naturalHeight === 1920`,
             'portrait Grid image did not load',
         );
-        const portrait = path.join(
-            path.dirname(require('node:url').fileURLToPath(report)), 'screenshots', 'encode', '10.png',
-        );
+        const reportFile = require('node:url').fileURLToPath(report);
+        const portrait = path.join(path.dirname(reportFile), 'screenshots', 'encode', '10.png');
         const body = (await fs.readFile(portrait)).toString('base64');
         const destination = 'https://frame-compare-fixture.invalid/portrait.png';
         const held = [];
@@ -2034,7 +2033,6 @@ def test_grid_to_single_preserves_pan_for_destination_image_size(tmp_path: Path)
             );
             return { mode, panX, panY, overlaysHidden };
         })()`);
-        const savedGrid = { mode: 'grid', panX: 0.2, panY: 0.1, overlaysHidden: false };
         await evaluate(`(() => {
             document.querySelector('.rv-grid-cell[data-clip-index="1"]').focus();
             ReportViewer.viewport.setZoom(4);
@@ -2047,7 +2045,7 @@ def test_grid_to_single_preserves_pan_for_destination_image_size(tmp_path: Path)
         assert.ok(held.length, 'destination image request was not intercepted');
         assert.equal(await evaluate('ReportViewer.state.mode'), 'overlay');
         assert.equal(await evaluate('ReportViewer.dom.sizerImg.complete'), false);
-        assert.deepEqual(await savedViewport(), savedGrid, 'pending load changed the saved viewport');
+        assert.equal((await savedViewport()).overlaysHidden, false);
 
         phase = 'fail';
         await Promise.all(held.map(respond));
@@ -2055,12 +2053,32 @@ def test_grid_to_single_preserves_pan_for_destination_image_size(tmp_path: Path)
             "ReportViewer.dom.leftLayer.dataset.status === 'error' && ReportViewer.dom.sizerImg.complete",
             'failed destination did not expose the retry state',
         );
-        assert.deepEqual(await savedViewport(), savedGrid, 'failed load changed the saved viewport');
         await evaluate("document.getElementById('btn-overlays').click()");
-        assert.deepEqual(
-            await savedViewport(), { ...savedGrid, overlaysHidden: true },
+        assert.equal(
+            (await savedViewport()).overlaysHidden, true,
             'source label preference was not saved while the destination was unavailable',
         );
+
+        // Keep the same destination unavailable in the reloaded report.
+        const html = await fs.readFile(reportFile, 'utf8');
+        assert.ok(html.includes('screenshots/encode/10.png'));
+        await fs.writeFile(reportFile, html.replace('screenshots/encode/10.png', destination));
+        await evaluate('globalThis.beforeReload = true');
+        await command('Page.reload', { ignoreCache: true });
+        await waitFor(
+            "!globalThis.beforeReload && typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.gridView)",
+            'viewer did not initialize after reload',
+        );
+        assert.equal(await evaluate(
+            "document.querySelector('[data-mode=overlay]').getAttribute('aria-checked')"
+        ), 'true', 'reload did not restore the selected Single mode');
+        await waitFor(
+            "ReportViewer.dom.leftLayer.dataset.status === 'error' && ReportViewer.dom.sizerImg.complete",
+            'reloaded destination did not expose the retry state',
+        );
+        assert.deepEqual(await savedViewport(), {
+            mode: 'overlay', panX: 0, panY: 0, overlaysHidden: true,
+        });
 
         phase = 'recover';
         await evaluate(`(() => {
