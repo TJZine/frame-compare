@@ -227,6 +227,7 @@ const GridView = (() => {
             setCellStatus(cell, 'ready');
             image.hidden = false;
             sizeImage(image);
+            viewer.viewport.clampPan();
             updateFrameError();
             viewer.lens?.sync?.();
         }
