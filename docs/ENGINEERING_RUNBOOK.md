@@ -113,9 +113,11 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update
 The Windows commands require a Windows host with PowerShell and the expected
 toolchain. In non-Windows environments, treat them as documented-only unless a
 compatible runner is available. `build_portable.ps1` uses one commit for the
-application source, wheel metadata, dependency lock, and recorded provenance.
-Use `-ExpectedCommitSha` to select it, or let the builder capture `HEAD` once.
-The installer, shims, and public key come from the live worktree. An unsigned
+application source, wheel metadata, dependency lock, default portable manifest,
+vendored notices, and recorded provenance. Use `-ExpectedCommitSha` to select
+it, or let the builder capture `HEAD` once. A custom `-ManifestPath` supplies
+its own manifest and adjacent notices. The installer, shims, and public key
+come from the live worktree. An unsigned
 local build can select an older commit, so record the selected SHA and relevant
 worktree differences with the result. Release mode requires a clean worktree
 whose `HEAD` matches the selected commit before reserving the bundle output.

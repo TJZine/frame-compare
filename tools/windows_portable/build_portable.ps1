@@ -42,10 +42,30 @@ $CacheDir = [System.IO.Path]::TrimEndingDirectorySeparator($CacheDir)
 $RepoRoot = [System.IO.Path]::TrimEndingDirectorySeparator($RepoRoot)
 $currentLocation = [System.IO.Path]::TrimEndingDirectorySeparator($currentLocation)
 
-function Assert-BuildInputs([object]$Manifest) {
+function Assert-BuildPaths() {
   foreach ($path in @($OutDir, $CacheDir, $RepoRoot, $currentLocation, $PSScriptRoot, (Split-Path -Parent $ManifestPath))) {
     Assert-NoReparsePointAncestor -Path $path -Label "Build path"
   }
+  if ($null -ne (Get-Item -LiteralPath $OutDir -Force -ErrorAction SilentlyContinue)) {
+    throw "OutDir must not already exist: $OutDir (CacheDir: $CacheDir)"
+  }
+  if ($OutDir -eq [IO.Path]::GetPathRoot($OutDir)) { throw "Unsafe OutDir: $OutDir" }
+  $manifestDir = [IO.Path]::TrimEndingDirectorySeparator((Split-Path -Parent $ManifestPath))
+  foreach ($protected in @($currentLocation, $RepoRoot, $CacheDir, $PSScriptRoot, $manifestDir)) {
+    if ($OutDir -eq $protected -or (Test-PathWithin $protected $OutDir)) {
+      throw "Unsafe OutDir $OutDir contains protected path $protected"
+    }
+  }
+  foreach ($protected in @($CacheDir, $PSScriptRoot, $manifestDir)) {
+    if (Test-PathWithin $OutDir $protected) { throw "Unsafe OutDir $OutDir inside $protected" }
+  }
+  if ((Test-PathWithin $OutDir $RepoRoot) -and
+      !(Test-PathWithin $OutDir (Join-Path $RepoRoot "dist"))) {
+    throw "OutDir $OutDir inside RepoRoot $RepoRoot must be beneath dist."
+  }
+}
+
+function Assert-BuildManifest([object]$Manifest) {
   $manifestVersion = Get-RequiredProperty $Manifest "manifest_version" "manifest"
   if (($manifestVersion -isnot [int] -and $manifestVersion -isnot [long]) -or $manifestVersion -ne 2) {
     throw "Unsupported portable manifest version (expected 2)."
@@ -99,23 +119,6 @@ function Assert-BuildInputs([object]$Manifest) {
       }
     }
   }
-  if ($null -ne (Get-Item -LiteralPath $OutDir -Force -ErrorAction SilentlyContinue)) {
-    throw "OutDir must not already exist: $OutDir (CacheDir: $CacheDir)"
-  }
-  if ($OutDir -eq [IO.Path]::GetPathRoot($OutDir)) { throw "Unsafe OutDir: $OutDir" }
-  $manifestDir = [IO.Path]::TrimEndingDirectorySeparator((Split-Path -Parent $ManifestPath))
-  foreach ($protected in @($currentLocation, $RepoRoot, $CacheDir, $PSScriptRoot, $manifestDir)) {
-    if ($OutDir -eq $protected -or (Test-PathWithin $protected $OutDir)) {
-      throw "Unsafe OutDir $OutDir contains protected path $protected"
-    }
-  }
-  foreach ($protected in @($CacheDir, $PSScriptRoot, $manifestDir)) {
-    if (Test-PathWithin $OutDir $protected) { throw "Unsafe OutDir $OutDir inside $protected" }
-  }
-  if ((Test-PathWithin $OutDir $RepoRoot) -and
-      !(Test-PathWithin $OutDir (Join-Path $RepoRoot "dist"))) {
-    throw "OutDir $OutDir inside RepoRoot $RepoRoot must be beneath dist."
-  }
 }
 
 function Ensure-Directory([string]$Path) {
@@ -124,15 +127,14 @@ function Ensure-Directory([string]$Path) {
   }
 }
 
-function Get-Manifest() {
-  if (!(Test-Path -LiteralPath $ManifestPath)) {
-    throw "Manifest not found: $ManifestPath"
+function Get-Manifest([string]$Path) {
+  if (!(Test-Path -LiteralPath $Path)) {
+    throw "Manifest not found: $Path"
   }
-  return (Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json)
+  return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
 }
 
-function Resolve-ManifestRelativePath([string]$RelativePath) {
-  $manifestDir = Split-Path -Parent $ManifestPath
+function Resolve-ManifestRelativePath([string]$ManifestDir, [string]$RelativePath) {
   if ($RelativePath -cnotmatch '\Alicenses/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\z' -or
       $RelativePath -match '(^|/)\.{1,2}(/|$)') {
     throw "Unsafe vendored license path: $RelativePath"
@@ -259,14 +261,11 @@ function Copy-RepoApp([string]$BundleRoot, [string]$CommitSha) {
   Write-Host "WINDOWS_BUNDLE_PROOF project_metadata=ok entry_point=frame-compare-alignment-review source=app/src"
 }
 
-function Initialize-PortableRuntime([string]$BundleRoot, [string]$CommitSha) {
+function Initialize-PortableRuntime([string]$BundleRoot, [string]$CommitSha, [string]$SelectedManifestPath) {
   $arguments = @(
     "assemble", "--repo", $RepoRoot, "--cache", $CacheDir, "--output", $BundleRoot,
-    "--commit-sha", $CommitSha
+    "--commit-sha", $CommitSha, "--manifest", $SelectedManifestPath
   )
-  if ($ManifestPath -ne (Join-Path $PSScriptRoot "manifest.windows-x64.json")) {
-    $arguments += @("--manifest", $ManifestPath)
-  }
   if ($RequirementsPath) {
     $arguments += @("--requirements", $RequirementsPath)
   }
@@ -327,13 +326,12 @@ function Restore-ProcessEnvironmentValue([string]$Name, [AllowNull()][string]$Va
   Set-Item -Path "Env:$Name" -Value $Value
 }
 
-function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion) {
+function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion, [object]$Manifest) {
   $requirementsLockPath = Join-Path $BundleRoot "requirements.lock.txt"
   if (!(Test-Path -LiteralPath $requirementsLockPath)) {
     throw "requirements.lock.txt not found for bundle info: $requirementsLockPath"
   }
 
-  $manifest = Get-Manifest
   $manifestVersion = [int](Get-RequiredProperty -Object $manifest -Name "manifest_version" -Context "manifest")
   if ($manifestVersion -ne 2) {
     throw "Unsupported portable manifest version '$manifestVersion' (expected 2)."
@@ -555,6 +553,7 @@ function Copy-ManifestLicenseFiles(
   [string]$LicensesDir,
   [string]$ArtifactId,
   [string]$Spdx,
+  [string]$ManifestDir,
   [object[]]$LicenseFiles
 ) {
   $multipleFiles = $LicenseFiles.Count -gt 1
@@ -562,7 +561,7 @@ function Copy-ManifestLicenseFiles(
   foreach ($licenseFile in $LicenseFiles) {
     $relativePath = Get-RequiredStringProperty -Object $licenseFile -Name "path" -Context "artifact '$ArtifactId' license file"
     $expectedSha256 = Get-RequiredStringProperty -Object $licenseFile -Name "sha256" -Context "artifact '$ArtifactId' license file '$relativePath'"
-    $resolvedPath = Resolve-ManifestRelativePath -RelativePath $relativePath
+    $resolvedPath = Resolve-ManifestRelativePath -ManifestDir $ManifestDir -RelativePath $relativePath
     Assert-Sha256 -FilePath $resolvedPath -ExpectedHex $expectedSha256
 
     $baseName = [System.IO.Path]::GetFileName($resolvedPath)
@@ -581,7 +580,7 @@ function Copy-ManifestLicenseFiles(
   }
 }
 
-function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
+function Copy-Licenses([string]$BundleRoot, [string]$ManifestDir, [pscustomobject[]]$Artifacts) {
   $licensesDir = Join-Path $BundleRoot "licenses"
   Ensure-Directory -Path $licensesDir
   foreach ($artifact in $Artifacts) {
@@ -591,7 +590,7 @@ function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
 
     $manifestLicenseFiles = Get-OptionalProperty -Object $license -Name "files"
     if ($null -ne $manifestLicenseFiles) {
-      Copy-ManifestLicenseFiles -LicensesDir $licensesDir -ArtifactId $id -Spdx $spdx -LicenseFiles @($manifestLicenseFiles)
+      Copy-ManifestLicenseFiles -LicensesDir $licensesDir -ArtifactId $id -Spdx $spdx -ManifestDir $ManifestDir -LicenseFiles @($manifestLicenseFiles)
     }
   }
 }
@@ -652,8 +651,13 @@ function Main() {
     Assert-ReleasePublicKey
   }
 
-  $manifest = Get-Manifest
-  Assert-BuildInputs -Manifest $manifest
+  Assert-BuildPaths
+  $useCommittedManifest = $ManifestPath -eq (Join-Path $PSScriptRoot "manifest.windows-x64.json")
+  $selectedManifestPath = $ManifestPath
+  if (!$useCommittedManifest) {
+    $manifest = Get-Manifest -Path $selectedManifestPath
+    Assert-BuildManifest -Manifest $manifest
+  }
   $commitSha = $ExpectedCommitSha
   if (!$hasExpectedCommitSha -or $RequireReleasePublicKey) {
     $headSha = & git -C $RepoRoot rev-parse HEAD
@@ -673,17 +677,27 @@ function Main() {
       throw "Portable release builds require a clean, exact source checkout."
     }
   }
-  $artifacts = @(Get-RequiredProperty -Object $manifest -Name "artifacts" -Context "manifest")
+  $manifestSnapshot = $null
   $reservedOutput = $null
   try {
-    $reservedOutput = New-AtomicallyReservedDirectory -Path $OutDir -Label "OutDir"
-    Ensure-Directory -Path $CacheDir
-
     $HostPython = (& uv python find --system --no-project --no-python-downloads 3.13).Trim()
     Assert-LastExitCode -CommandLabel "find the host Python 3.13 interpreter"
-    Initialize-PortableRuntime -BundleRoot $OutDir -CommitSha $commitSha
+    if ($useCommittedManifest) {
+      $snapshotPath = Join-Path ([IO.Path]::GetTempPath()) ("frame-compare-manifest-" + [guid]::NewGuid())
+      $manifestSnapshot = New-AtomicallyReservedDirectory -Path $snapshotPath -Label "Manifest snapshot"
+      & $HostPython -B -I -S (Join-Path $PSScriptRoot "portable_runtime.py") snapshot-manifest `
+        --repo $RepoRoot --commit-sha $commitSha --output $manifestSnapshot
+      Assert-LastExitCode -CommandLabel "project portable manifest and notices"
+      $selectedManifestPath = Join-Path $manifestSnapshot "manifest.windows-x64.json"
+      $manifest = Get-Manifest -Path $selectedManifestPath
+      Assert-BuildManifest -Manifest $manifest
+    }
+
+    $reservedOutput = New-AtomicallyReservedDirectory -Path $OutDir -Label "OutDir"
+    Ensure-Directory -Path $CacheDir
+    Initialize-PortableRuntime -BundleRoot $OutDir -CommitSha $commitSha -SelectedManifestPath $selectedManifestPath
     Copy-RepoApp -BundleRoot $OutDir -CommitSha $commitSha
-    Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app"))
+    Write-BundleInfo -BundleRoot $OutDir -Manifest $manifest -AppVersion (Get-AppVersionFromSource -RepoRootPath (Join-Path $OutDir "app"))
 
     # Launchers
     Write-LauncherFiles -BundleRoot $OutDir
@@ -697,7 +711,8 @@ function Main() {
     Ensure-Directory -Path $bundleInputDir
 
     # Licenses
-    Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts
+    $artifacts = @(Get-RequiredProperty -Object $manifest -Name "artifacts" -Context "manifest")
+    Copy-Licenses -BundleRoot $OutDir -ManifestDir (Split-Path -Parent $selectedManifestPath) -Artifacts $artifacts
     Assert-RequiredPySideLicenseMetadata -BundleRoot $OutDir
     Write-BundleInventory -BundleRoot $OutDir -CommitSha $commitSha
 
@@ -712,6 +727,10 @@ function Main() {
       Remove-Item -Recurse -Force -LiteralPath $reservedOutput
     }
     throw
+  } finally {
+    if ($null -ne $manifestSnapshot) {
+      Remove-Item -Recurse -Force -LiteralPath $manifestSnapshot
+    }
   }
 }
 

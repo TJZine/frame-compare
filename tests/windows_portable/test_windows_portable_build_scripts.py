@@ -2506,6 +2506,147 @@ def test_windows_portable_inventory_requires_each_manifest_notice(
     assert not (bundle / "bundle_inventory.json").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell build semantics required")
+@pytest.mark.parametrize("custom", [False, True], ids=["committed-default", "explicit-custom"])
+def test_windows_portable_builder_uses_one_manifest_for_notices_and_inventory(
+    tmp_path: Path, repo_root: Path, inventory_source_repo: Path, custom: bool
+) -> None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required")
+    source = inventory_source_repo
+    owner = source / "tools/windows_portable"
+    original = repo_root / "tools/windows_portable"
+    shutil.copytree(original / "licenses", owner / "licenses")
+    for relative in ("version_utils.ps1", "shim/frame-compare-version.ps1"):
+        shutil.copyfile(original / relative, owner / relative)
+
+    manifest_path = owner / "manifest.windows-x64.json"
+    committed_manifest = manifest_path.read_bytes()
+    manifest = json.loads(committed_manifest)
+    artifact = next(
+        item for item in manifest["artifacts"] if len(item["license"].get("files", [])) == 1
+    )
+    pin = artifact["license"]["files"][0]
+    notice = owner / pin["path"]
+    committed_notice = notice.read_bytes()
+    destination = f"{artifact['id']}-{artifact['license']['spdx']}{notice.suffix}"
+
+    seed = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
+    for path in (seed / "licenses").iterdir():
+        if path.name != "frame-compare-LICENSE.txt":
+            path.unlink()
+    (seed / "requirements.lock.txt").write_text("fixture requirements", encoding="utf-8")
+    (seed / "app/src/frame_compare/__init__.py").write_text(
+        '__version__ = "0.1.0"\n', encoding="utf-8"
+    )
+    script = owner / "build_portable.ps1"
+    script.write_text(
+        script.read_text(encoding="utf-8").rsplit("\nMain", 1)[0]
+        + r"""
+function uv { $global:LASTEXITCODE = 0; return $env:FIXTURE_PYTHON }
+function Initialize-PortableRuntime {
+  param($BundleRoot, $CommitSha, $SelectedManifestPath)
+  Get-ChildItem -LiteralPath $env:FIXTURE_LAYOUT | Copy-Item -Destination $BundleRoot -Recurse
+  Copy-Item -LiteralPath $SelectedManifestPath -Destination (Join-Path $BundleRoot "manifest.json")
+}
+function Copy-RepoApp {}
+function Copy-InstallerFiles {}
+function Assert-RequiredPySideLicenseMetadata {}
+Main
+""",
+        encoding="utf-8",
+    )
+
+    def commit(message: str) -> str:
+        for args in (
+            ("add", "."),
+            (
+                "-c",
+                "user.name=Portable test",
+                "-c",
+                "user.email=portable@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--quiet",
+                "-m",
+                message,
+            ),
+        ):
+            subprocess.run(
+                ["git", "-C", str(source), *args], check=True, capture_output=True, timeout=30
+            )
+        return _source_commit(source)
+
+    subprocess.run(
+        ["git", "-C", str(source), "config", "core.autocrlf", "false"],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    selected = commit("selected manifest and notices")
+    newer_notice = b"changed live notice\r\n"
+    notice.write_bytes(newer_notice)
+    pin["sha256"] = hashlib.sha256(newer_notice).hexdigest()
+    manifest["bundle"]["runtime_fingerprints"]["full"] = "b" * 64
+    newer_manifest = json.dumps(manifest).encode()
+    manifest_path.write_bytes(newer_manifest)
+    assert commit("newer manifest and notices") != selected
+
+    command = [
+        pwsh,
+        "-NoProfile",
+        "-File",
+        str(script),
+        "-ExpectedCommitSha",
+        selected,
+        "-AssemblyOnly",
+        "-RepoRoot",
+        str(source),
+        "-CacheDir",
+        str(tmp_path / "cache"),
+        "-OutDir",
+        str(tmp_path / "out"),
+    ]
+    expected_manifest = committed_manifest
+    expected_notice = committed_notice
+    if custom:
+        custom_dir = tmp_path / "custom-manifest"
+        shutil.copytree(owner / "licenses", custom_dir / "licenses")
+        expected_notice = b"custom manifest notice\n"
+        (custom_dir / pin["path"]).write_bytes(expected_notice)
+        pin["sha256"] = hashlib.sha256(expected_notice).hexdigest()
+        manifest["bundle"]["runtime_fingerprints"]["full"] = "c" * 64
+        expected_manifest = json.dumps(manifest).encode()
+        custom_path = custom_dir / "custom.json"
+        custom_path.write_bytes(expected_manifest)
+        command.extend(("-ManifestPath", str(custom_path)))
+    result = subprocess.run(
+        command,
+        env=os.environ | {"FIXTURE_PYTHON": sys.executable, "FIXTURE_LAYOUT": str(seed)},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+
+    assert result.returncode == 0, _normalized_process_output(result)
+    out = tmp_path / "out"
+    assert (out / "manifest.json").read_bytes() == expected_manifest
+    assert (out / "licenses" / destination).read_bytes() == expected_notice
+    inventory = json.loads((out / "bundle_inventory.json").read_text(encoding="utf-8"))
+    assert inventory["bundle"]["commit_sha"] == selected
+    assert (
+        inventory["bundle"]["media_runtime_fingerprints"]
+        == json.loads(expected_manifest)["bundle"]["runtime_fingerprints"]
+    )
+    assert {
+        "path": f"licenses/{destination}",
+        "sha256": hashlib.sha256(expected_notice).hexdigest(),
+    } in inventory["licenses"]
+
+
 def test_windows_portable_inventory_uses_dotfile_notice_extension(
     tmp_path: Path, repo_root: Path, inventory_source_repo: Path
 ) -> None:
