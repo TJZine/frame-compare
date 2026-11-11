@@ -2319,7 +2319,8 @@ Review outputs keep original frame positions/counts, reference FPS, ordering,
   optional GUI dependency classes and TMDB
   configuration/credential classes without guessing a package-manager command or
   install mode; when setup mode is unknown, they point to the repository's current
-  setup documentation.
+  setup documentation. Config acquisition failures identify the selected file and
+  ask for readable, valid TOML.
 - If an unexpected check function raises, the generic fallback uses stable failure
   wording and may expose only the exception type in JSON `details`; raw exception
   messages are not emitted in human or JSON doctor output.

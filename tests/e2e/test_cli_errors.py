@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
+import sys
 from collections.abc import Callable
 from typing import Any, Never
 
@@ -326,3 +329,75 @@ def test_cli_toml_syntax_diagnostic_omits_duplicate_secret_key(
         assert check["details"]["exception_type"] == "ConfigParseError"
         message = check["details"]["exception"]
     assert "invalid TOML syntax (at line 2, column " in message
+
+
+@pytest.mark.e2e
+def test_doctor_generic_check_failure_sanitizes_json_details(
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = workspace()
+    sentinel = "SECRET_DOCTOR_EXCEPTION"
+    result = _run_doctor_with_permission_failure(root, sentinel, run_cli, monkeypatch)
+    if result is None:
+        # Some hosts permit directory traversal, and Python 3.14+ suppresses
+        # stat errors in Path.is_file(). Replace only the check in a fresh CLI.
+        script = """
+import sys
+
+from frame_compare.cli.entry import console_main
+from frame_compare.orchestration import doctor_checks
+
+sentinel = sys.argv.pop()
+
+def fail():
+    raise PermissionError(sentinel)
+
+doctor_checks._check_ffmpeg = fail
+console_main()
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script, "doctor", "--json", sentinel],
+            cwd=root.root,
+            capture_output=True,
+            encoding="utf-8",
+            timeout=30,
+            check=False,
+        )
+        result = CommandResult(completed.returncode, completed.stdout, completed.stderr)
+
+    payload = json.loads(result.stdout, parse_constant=_reject_nonfinite_json)
+    check = next(entry for entry in payload["doctor"]["checks"] if entry["id"] == "ffmpeg")
+    assert check["status"] == "fail"
+    assert check["message"] == "ffmpeg check failed"
+    assert check["details"] == {"exception_type": "PermissionError"}
+    assert sentinel not in result.stdout
+    assert sentinel not in result.stderr
+    assert result.stderr == ""
+
+
+def _run_doctor_with_permission_failure(
+    root: Workspace,
+    sentinel: str,
+    run_cli: Callable[..., CommandResult],
+    monkeypatch: pytest.MonkeyPatch,
+) -> CommandResult | None:
+    if os.name != "posix":
+        return None
+
+    denied = root.root / sentinel
+    denied.mkdir()
+    executable = denied / "ffmpeg"
+    executable.touch()
+    denied.chmod(0)
+    try:
+        # This is the predicate used by the real executable resolver.
+        try:
+            executable.is_file()
+        except PermissionError:
+            monkeypatch.setenv("FRAME_COMPARE_FFMPEG_EXECUTABLE", str(executable))
+            return run_cli(root.root, ["doctor", "--json"])
+        return None
+    finally:
+        denied.chmod(0o700)

@@ -35,7 +35,6 @@ class DoctorReport:
     """Complete diagnostic report."""
 
     checks: list[tuple[DoctorCheck, CheckResult]]
-    all_passed: bool
     critical_failures: list[str]
 
 

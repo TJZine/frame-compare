@@ -58,7 +58,6 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
-    from frame_compare.utils.progress_protocol import ProgressReporter
 
 
 class _RunnerProxy:
@@ -75,13 +74,12 @@ runner = _RunnerProxy()
 
 def run_doctor(
     checks: list[DoctorCheck] | None = None,
-    reporter: ProgressReporter | None = None,
     selection: DoctorConfigSelection | None = None,
 ) -> DoctorReport:
     """Lazy doctor entry point to keep CLI import VS-independent."""
     from frame_compare.orchestration.doctor import run_doctor as runtime_run_doctor
 
-    return runtime_run_doctor(checks=checks, reporter=reporter, selection=selection)
+    return runtime_run_doctor(checks=checks, selection=selection)
 
 
 app = typer.Typer(
