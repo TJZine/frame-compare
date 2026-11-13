@@ -454,7 +454,11 @@ never searches parent directories.
   The probe token binds the resolved ffprobe executable path and file identity
   to its reported program and library versions. Windows reads NTFS change time
   from the source handle. Sources without that Windows identity or a verifiable
-  probe token use a private cache-free open. POSIX uses ctime.
+  probe token use a private cache-free open. POSIX uses ctime. Change times
+  advance once per clock interval (up to 15.625 ms on NTFS), so an identity is
+  read only after its change time is at least 32 ms old. A later overwrite that
+  keeps the size and mtime then still records a newer change time. A change time
+  ahead of the system clock gives no reusable identity.
   A miss or invalid entry builds with `cache=1` in an unpredictable private
   staging directory beneath the cache root. Publication replaces the stable
   index and commits its metadata last, after rechecking the same source identity

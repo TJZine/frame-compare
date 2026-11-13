@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from pathlib import Path
 from subprocess import CalledProcessError
-from time import monotonic
+from time import monotonic, sleep, time_ns
 from typing import cast
 
 from frame_compare.utils.canvas import MAX_CANVAS_PIXELS, validate_canvas_size
@@ -47,6 +47,14 @@ _MISSING_FRAME_DIMENSIONS = "Source video frame dimensions could not be verified
 # file with the packaged defaults, including MOV with external tracks disabled.
 _SINGLE_FILE_FORMAT_NAMES = frozenset({"avi", "matroska,webm", "mov,mp4,m4a,3gp,3g2,mj2", "mpegts"})
 _NATIVE_FORMAT_NAMES = _SINGLE_FILE_FORMAT_NAMES | {"mpegvideo"}
+# NTFS takes change times from the system clock, which advances once per timer
+# interrupt (at most every 15.625 ms). Linux filesystems without multigrain
+# timestamps use the once-per-jiffy clock (at most every 10 ms). Two changes
+# within one of those intervals can share a change time. Twice the longest
+# interval guarantees that clock has moved past a change time.
+_CHANGE_TIME_SETTLE_NS = 32_000_000
+# FILETIME counts 100 ns intervals from 1601-01-01; this value is 1970-01-01.
+_FILETIME_UNIX_EPOCH = 116_444_736_000_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,10 +63,16 @@ class SourceIdentity:
     inode: int
     size: int
     mtime_ns: int
-    change_time: int
+    change_time: int  # Nanoseconds since the Unix epoch.
 
 
 def source_identity(path: Path) -> SourceIdentity:
+    """Return a live file identity that no later change to the file can share.
+
+    The identity is returned only once the clock that stamps change times has
+    moved past its change time. Any later data or metadata change then records a
+    newer change time, even when it restores the file's size and modification time.
+    """
     if os.name == "nt":
         with path.open("rb") as handle:
             info = os.fstat(handle.fileno())
@@ -66,7 +80,17 @@ def source_identity(path: Path) -> SourceIdentity:
     else:
         info = path.stat()
         change_time = info.st_ctime_ns
+    _wait_for_distinct_change_time(change_time)
     return SourceIdentity(info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, change_time)
+
+
+def _wait_for_distinct_change_time(change_time: int) -> None:
+    pending_ns = change_time + _CHANGE_TIME_SETTLE_NS - time_ns()
+    if pending_ns > _CHANGE_TIME_SETTLE_NS:
+        # Until the clock passes this change time, a later change could reuse it.
+        raise OSError("Source change time is ahead of the system clock")
+    if pending_ns > 0:
+        sleep(pending_ns / 1_000_000_000)
 
 
 def _windows_change_time(fd: int) -> int:
@@ -112,7 +136,7 @@ def _windows_change_time(fd: int) -> int:
         raise ctypes.WinError(ctypes.get_last_error())
     if basic.change_time <= 0:
         raise OSError("Source change time is unavailable")
-    return basic.change_time
+    return (basic.change_time - _FILETIME_UNIX_EPOCH) * 100
 
 
 def _source_stamp(path: Path) -> SourceIdentity:
