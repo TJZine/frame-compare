@@ -56,6 +56,8 @@ def _vs_needs_mock() -> bool:
 if _vs_needs_mock():
     _global_mock_vs = MagicMock()
     _global_mock_vs.__spec__ = MagicMock()
+    # Store core explicitly so monkeypatch restores it after a test replaces it.
+    _global_mock_vs.core = MagicMock()
     _global_mock_vs.RGBS = 0
     _global_mock_vs.RGB24 = 0
     # Mock format identity only; distinct from RGBS so YUV conversion is exercised.

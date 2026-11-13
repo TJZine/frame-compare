@@ -640,7 +640,7 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         assert expected in build_script
 
     for expected in (
-        "version_major == 81",
+        "version_major == 82",
         "api_minor == 3",
         "LWLibavSource",
         "LibavSMASHSource",

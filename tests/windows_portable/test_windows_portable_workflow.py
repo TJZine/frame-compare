@@ -325,8 +325,8 @@ def test_windows_portable_security_gate_scans_exact_verified_artifact(repo_root:
     assert '--expected-artifact-id "$VERIFIED_BUNDLE_ID"' in stage["run"]
     install = _step_by_name(job, "Install checksum-pinned scanners")["run"]
     for digest in (
-        "1c2493cfcf52d3367d6cb25780d9190c111c2219c34c820574c43e8bae15c528",
-        "64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519",
+        "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c",
+        "e9da18cc1429e786722e32161288103600efffd8e483c90761f90485bd1bec85",
     ):
         assert digest in install
     scan = _step_by_name(job, "Generate SBOMs and unsuppressed advisory evidence")
