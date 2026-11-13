@@ -75,6 +75,7 @@ class SessionData(TypedDict):
     memory_limit_mb: int | None
     preview_tonemap: NotRequired[dict[str, object] | None]
     source_index_generated_root: NotRequired[str]
+    scan_frame_geometry: NotRequired[bool]
 
 
 class AudioReviewAuthority(TypedDict):
@@ -293,6 +294,8 @@ def load_preview_source(
     path: Path,
     managed_index_path: str | None,
     source_index_generated_root: str | None = None,
+    *,
+    scan_frame_geometry: bool = False,
 ) -> tuple[vs.VideoNode, SourceAdmission]:
     if path.suffix.lower() == ".lwi":
         raise ValueError("An L-SMASH index cannot be used as source media")
@@ -312,11 +315,16 @@ def load_preview_source(
     if managed_index_path is not None and source_index_generated_root is not None:
         cache = ManagedSourceIndexCache(Path(source_index_generated_root))
         clip = cache.try_open_validated(
-            path, Path(managed_index_path), open_source, admission=admission
+            path,
+            Path(managed_index_path),
+            open_source,
+            admission=admission,
+            scan_frame_geometry=scan_frame_geometry,
         )
         if clip is not None:
             return clip, admission
-    admission.scan(path, abort_check=raise_if_cancelling)
+    if scan_frame_geometry:
+        admission.scan(path, abort_check=raise_if_cancelling)
     with private_index_directory() as directory:
         return open_source(path, 0, directory / "disabled.lwi"), admission
 
@@ -525,6 +533,7 @@ def run_session(data: SessionData, script_path: Path) -> None:
             ref_path,
             reference.get("managed_index_path"),
             data.get("source_index_generated_root"),
+            scan_frame_geometry=data.get("scan_frame_geometry", False),
         )
         validate_canvas_size(ref_clip.width, ref_clip.height, label="Source video")
     except Exception as e:
@@ -567,6 +576,7 @@ def run_session(data: SessionData, script_path: Path) -> None:
                 comp_path,
                 target.get("managed_index_path"),
                 data.get("source_index_generated_root"),
+                scan_frame_geometry=data.get("scan_frame_geometry", False),
             )
             validate_canvas_size(comp_clip.width, comp_clip.height, label="Source video")
         except Exception as e:

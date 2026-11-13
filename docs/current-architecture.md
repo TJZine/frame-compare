@@ -450,7 +450,9 @@ never searches parent directories.
   packaged decoder ABIs. Unmanaged profile tokens do not verify native ABI
   changes. Under a per-entry lock, reuse checks the cache paths and matches the
   source identity (device, inode, size, mtime and change time), geometry policy
-  version, geometry probe token, decoder runtime token, and index size and SHA-256.
+  version when a full scan ran, geometry probe token, decoder runtime token, and
+  index size and SHA-256. The default accepts a matching entry with or without
+  scan evidence. An opt-in open requires matching scan evidence.
   The probe token binds the resolved ffprobe executable path and file identity
   to its reported program and library versions. Windows reads NTFS change time
   from the source handle. Sources without that Windows identity or a verifiable
@@ -481,12 +483,13 @@ bounded header probe and require exactly one non-attached video stream. The same
 detected demuxer. Native opening requires a positively identified AVI,
 Matroska/WebM, MOV/MP4-family, MPEG-TS, or elementary MPEG-2 source. Only the first
 four single-file container families qualify for managed reuse with the packaged
-defaults, which disable MOV external tracks. Elementary MPEG-2 retains its full-scan
-private-open path. Manifests such as ffconcat and sources with missing, malformed,
+defaults, which disable MOV external tracks. Elementary MPEG-2 opens privately.
+Manifests such as ffconcat and sources with missing, malformed,
 or unrecognized format information are refused before native code because a
 top-level file identity cannot cover independently changing referenced media. Cold
 opens and private cache-free opens, including the VSView fallback, scan the frame
-records emitted by ffprobe before native indexing or decoding. For each stream,
+records emitted by ffprobe before native indexing or decoding when
+`sources.scan_frame_geometry` is enabled. For each stream,
 the coded and visible dimensions must stay constant and within the canvas policy.
 The scan uses multiple decoder threads and runs once per admission, even if a
 managed build falls back to a private open. The scan stops if ffprobe produces no
@@ -494,12 +497,14 @@ stdout for 120 seconds. Its total duration can exceed that interval while frames
 keep arriving. An explicit ffprobe pixel-limit rejection causes refusal even
 when ffprobe exits successfully. Ordinary decoder diagnostics within the output
 budget do not cause refusal on their own. Warm managed opens can reuse the scan
-proof under the cache checks above after the header probe. The cold scan remains
-because a real mixed-resolution H.264 transport stream reproduced a native
-L-SMASH heap abort when admitted without it. L-SMASH playback also receives an owned
-`max_pixels` option that caller-supplied decoder options cannot remove. Absent
-ffprobe, missing or changing frame dimensions, and multiple real video streams fail
-with a typed source-load error on the managed loader path.
+proof under the cache checks above after the header probe. The scan is off by
+default because it adds a full decode on cold opens. A mixed-resolution H.264
+transport stream reproduced a native L-SMASH heap abort without it. L-SMASH
+playback always receives an owned `max_pixels` option that caller-supplied
+decoder options cannot remove. Absent
+ffprobe, invalid header dimensions, and multiple real video streams fail with a
+typed source-load error on the managed loader path. A requested scan also
+rejects missing or changing frame dimensions.
 HDR probing and FFmpeg screenshots use the
 first video stream that is not an attached picture; extraction explicitly maps
 `0:V:0`. Selected-video

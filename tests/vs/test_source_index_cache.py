@@ -41,7 +41,7 @@ def _create_index(_source: Path, cache: int, index: Path) -> bool:
 
 
 def _committed_index(cache: ManagedSourceIndexCache, source: Path, admission: MagicMock) -> Path:
-    assert cache.try_load(source, _create_index, admission=admission)
+    assert cache.try_load(source, _create_index, admission=admission, scan_frame_geometry=True)
     path = cache.validated_index(source)
     assert path is not None
     return path
@@ -192,17 +192,17 @@ def test_cold_write_warm_hit_and_same_length_source_overwrite(
         modes.append(mode)
         return _create_index(path, mode, index)
 
-    assert cache.try_load(source, open_source, admission=admission)
+    assert cache.try_load(source, open_source, admission=admission, scan_frame_geometry=True)
     stable = cache.validated_index(source)
     assert stable is not None and stable.read_bytes() == b"native index"
-    assert cache.try_load(source, open_source, admission=admission)
+    assert cache.try_load(source, open_source, admission=admission, scan_frame_geometry=True)
     assert modes == [1, 0]
     assert admission.scan.call_count == 1
 
     _overwrite_with_restored_mtime(source)
     assert cache.validated_index(source) is None
     assert cache.try_open_validated(source, stable, open_source, admission=admission) is None
-    assert cache.try_load(source, open_source, admission=admission)
+    assert cache.try_load(source, open_source, admission=admission, scan_frame_geometry=True)
     assert modes == [1, 0, 1]
     assert admission.scan.call_count == 2
     assert cache.validated_index(source) == stable
@@ -306,11 +306,35 @@ def test_incomplete_scan_never_opens_or_publishes_an_index(
     admission.scan.side_effect = failure
     loader = MagicMock()
     with pytest.raises(failure if isinstance(failure, type) else type(failure)):
-        cache.try_load(source, loader, admission=admission)
+        cache.try_load(source, loader, admission=admission, scan_frame_geometry=True)
     loader.assert_not_called()
     assert not list(cache.root.glob("*.json"))
     assert not list(cache.root.glob("*.lwi"))
     assert not list(cache.root.glob(".stage-*"))
+
+
+def test_opt_in_open_requires_scan_evidence_from_managed_index(
+    cache: ManagedSourceIndexCache, source: Path, admission: MagicMock
+) -> None:
+    assert cache.try_load(source, _create_index, admission=admission)
+    stable = cache.validated_index(source)
+    assert stable is not None
+    admission.scan.assert_not_called()
+    assert cache.validated_index(source, scan_frame_geometry=True) is None
+    native_open = MagicMock()
+    assert (
+        cache.try_open_validated(
+            source, stable, native_open, admission=admission, scan_frame_geometry=True
+        )
+        is None
+    )
+    native_open.assert_not_called()
+
+    assert cache.try_load(source, _create_index, admission=admission, scan_frame_geometry=True)
+    assert cache.validated_index(source, scan_frame_geometry=True) == stable
+    assert cache.try_load(source, _create_index, admission=admission, scan_frame_geometry=True)
+    assert cache.try_load(source, _create_index, admission=admission)
+    admission.scan.assert_called_once()
 
 
 def test_lock_contention_times_out_without_calling_native_cache(

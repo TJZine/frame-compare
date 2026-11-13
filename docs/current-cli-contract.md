@@ -207,6 +207,10 @@ Current fields:
 - `label_parser`: parsed-label parser priority. `auto` keeps bracket-aware
   Anitopy/GuessIt ordering; `guessit` and `anitopy` select the primary parser
   while retaining the alternate fallback.
+- `scan_frame_geometry`: defaults to `false`. Set to `true` to require a full
+  ffprobe frame-geometry scan before a native open unless the managed index
+  already records a valid completed scan. Applies to CLI and VSView native opens.
+  Source header checks and decoder pixel limits apply in both modes.
 - `overrides`: mapping from source selector to per-source override table.
   Current override fields are `trim_start_frames`, `trim_end_frames`,
   `active_rect = { x, y, width, height }`, `effective_fps = "num/den"`, and an

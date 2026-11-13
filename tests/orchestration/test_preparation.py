@@ -103,9 +103,15 @@ def test_execute_prep_reuses_probe_cache_with_lazy_managed_loader(
         memory_limit_mb: int | None = None,
         *,
         index_cache: ManagedSourceIndexCache | None = None,
+        scan_frame_geometry: bool = False,
     ) -> None:
         constructed.append(index_cache)
-        original_init(loader, memory_limit_mb, index_cache=index_cache)
+        original_init(
+            loader,
+            memory_limit_mb,
+            index_cache=index_cache,
+            scan_frame_geometry=scan_frame_geometry,
+        )
 
     monkeypatch.setattr(DefaultVSLoader, "__init__", observe_init)
     deps = RunDependencies()

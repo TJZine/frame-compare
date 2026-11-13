@@ -379,7 +379,7 @@ def admit_source(path: Path, *, abort_check: Callable[[], None]) -> SourceAdmiss
             raise ValueError("Coded source video dimensions could not be verified before decoding")
         if stream is video_stream and (width, height) == (0, 0):
             # Elementary streams can report unknown coded dimensions until decoding.
-            # Without a reuse token both native callers must scan before a private open.
+            # Without a reuse token both native callers open privately.
             coded_header_known = False
             continue
         validate_canvas_size(width, height, label="Coded source video")

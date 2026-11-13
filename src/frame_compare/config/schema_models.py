@@ -196,6 +196,7 @@ class SourcesConfig(BaseModel):
     match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED
     label_mode: Literal["stem", "filename", "parsed"] = "stem"
     label_parser: Literal["auto", "guessit", "anitopy"] = "auto"
+    scan_frame_geometry: bool = False
     overrides: dict[str, SourceOverrideConfig] = Field(default_factory=dict)
 
 

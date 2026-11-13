@@ -29,6 +29,8 @@ def write_vsview_session_script(
     preview_tonemap: TonemapSettings | None = None,
     source_indexes: dict[Path, Path] | None = None,
     source_index_generated_root: Path | None = None,
+    *,
+    scan_frame_geometry: bool = False,
 ) -> Path:
     if source_indexes and source_index_generated_root is None:
         raise ValueError("source_index_generated_root is required when source_indexes are provided")
@@ -48,6 +50,7 @@ def write_vsview_session_script(
         preview_tonemap=preview_tonemap,
         source_indexes=source_indexes,
         source_index_generated_root=source_index_generated_root,
+        scan_frame_geometry=scan_frame_geometry,
     )
 
     # Leave room for the result sidecar and its atomic-write sibling.
@@ -119,6 +122,8 @@ def _build_script_content(
     preview_tonemap: TonemapSettings | None = None,
     source_indexes: dict[Path, Path] | None = None,
     source_index_generated_root: Path | None = None,
+    *,
+    scan_frame_geometry: bool = False,
 ) -> str:
     presentation_names = presentation_names_by_stem or {}
     indexes = source_indexes or {}
@@ -153,6 +158,8 @@ def _build_script_content(
         data["reference"]["managed_index_path"] = str(indexes[reference])
     if indexes and source_index_generated_root is not None:
         data["source_index_generated_root"] = str(source_index_generated_root)
+    if scan_frame_geometry:
+        data["scan_frame_geometry"] = True
     # Encode JSON as a Python string literal so filenames and JSON null/booleans
     # remain data rather than source.
     payload = json.dumps(data, ensure_ascii=True, allow_nan=False, indent=4)

@@ -144,6 +144,20 @@ Default
 
 Release-name parser for `parsed` labels.
 
+#### `sources.scan_frame_geometry` { #sources.scan_frame_geometry .fc-key }
+
+Values
+:   `true` or `false`
+
+Default
+:   `false`
+
+Require a full ffprobe scan for changing or out-of-bounds frame dimensions before
+opening a video with L-SMASH-Works, including in VSView. A managed index that
+records a valid completed scan can be reused. The scan decodes the entire video
+and can add substantial time on the first open. Header checks and decoder pixel
+limits apply in either mode.
+
 #### `sources.overrides` { #sources.overrides .fc-key }
 
 Values

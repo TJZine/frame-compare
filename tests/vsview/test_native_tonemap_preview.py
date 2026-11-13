@@ -75,13 +75,16 @@ for path in [ref, *comparisons]:
     path.touch()
 # Supply the headers for the injected source clips at the FFprobe boundary.
 probes = []
+scans = []
 def probe_headers(argv, **_kwargs):
     probes.append(Path(argv[-1]))
     stream = {"index": 0, "width": 64, "height": 32, "coded_width": 64, "coded_height": 32}
     if mode == "probe":
         stream.update(color_primaries="bt2020", color_transfer="smpte2084", color_space="bt2020nc")
-    return subprocess.CompletedProcess(argv, 0, json.dumps({"streams": [stream]}).encode(), b"")
+    payload = {"streams": [stream], "format": {"format_name": "matroska,webm"}}
+    return subprocess.CompletedProcess(argv, 0, json.dumps(payload).encode(), b"")
 def scan_frames(argv, *, stdout_consumer, **_kwargs):
+    scans.append(Path(argv[-1]))
     stdout_consumer(b"frame|stream_index=0|width=64|height=32|"
                     b"crop_top=0|crop_bottom=0|crop_left=0|crop_right=0\n")
     return subprocess.CompletedProcess(argv, 0, b"", b"")
@@ -132,6 +135,7 @@ script = write_vsview_session_script(
     suggested_offsets_by_key={"ref:zeta": 1, "ref:alpha": None},
     audio_review_by_key=audio, cache_dir=root,
     preview_tonemap=settings, frame_props_by_stem=snapshots,
+    scan_frame_geometry=mode == "probe",
 )
 text = script.read_text(encoding="utf-8")
 if mode == "legacy":
@@ -182,6 +186,7 @@ for clip, index, name, metadata in outputs:
         assert props["_Matrix"] == 1
         assert clip.format.id == vs.YUV420P16
 assert probes == [ref, *comparisons]
+assert scans == ([ref, *comparisons] if mode == "probe" else [])
 if mode in {"quality", "fast"}:
     with source.get_frame(0) as frame:
         _, metadata = detect_hdr(dict(frame.props))

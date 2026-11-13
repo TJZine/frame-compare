@@ -379,7 +379,7 @@ def test_load_source_retries_cache_failures_using_controlled_nonexistent_leaf(
 
     core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
     with caplog.at_level(logging.WARNING, logger=source_module.__name__), lock:
-        load_source(video, cast(Core, core), index_cache=cache)
+        load_source(video, cast(Core, core), index_cache=cache, scan_frame_geometry=True)
     assert [call["cache"] for call in calls] == ([1, 0] if failure == "construction" else [0])
     _assert_cache_free(calls[-1])
     assert not list(cache.root.glob(".stage-*"))
@@ -1018,11 +1018,11 @@ def test_self_contained_mp4_reuses_managed_geometry_proof(
     video = tmp_path / "input.mp4"
     encode_source(video, 64)
     cache = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
-    assert load_source(video, index_cache=cache).num_frames == 4
-    assert cache.validated_index(video) is not None
+    assert load_source(video, index_cache=cache, scan_frame_geometry=True).num_frames == 4
+    assert cache.validated_index(video, scan_frame_geometry=True) is not None
 
     def unexpected_scan(*_args: object, **_kwargs: object) -> None:
         pytest.fail("The warm managed open repeated the full scan")
 
     monkeypatch.setattr(admission_module.SourceAdmission, "scan", unexpected_scan)
-    assert load_source(video, index_cache=cache).num_frames == 4
+    assert load_source(video, index_cache=cache, scan_frame_geometry=True).num_frames == 4
