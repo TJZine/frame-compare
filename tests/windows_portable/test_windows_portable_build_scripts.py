@@ -1361,11 +1361,11 @@ def _write_extracted_verifier_fixture(
                 ("PySide6_Pdf", "6.12.0.140"),
                 ("PySide6_WebEngine", "6.12.0.140"),
                 ("shiboken6", "6.12.0"),
-                ("vapoursynth-bestsource", "22"),
+                ("vapoursynth-bestsource", "23"),
                 ("vspackrgb", "2.0.0"),
-                ("VSView", "0.13.0"),
-                ("cyclopts", "5.3.0"),
-                ("vsjetengine", "1.8.1"),
+                ("VSView", "0.14.0"),
+                ("cyclopts", "5.4.2"),
+                ("vsjetengine", "2.0.0"),
             )
         ],
         "schema_version": 2,
@@ -2247,14 +2247,14 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         "PySide6-Pdf": ("6.12.0.140", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "PySide6-WebEngine": ("6.12.0.140", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "shiboken6": ("6.12.0", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
-        "VapourSynth": ("81", "LGPL-2.1-or-later"),
-        "vapoursynth-bestsource": ("22", "MIT"),
+        "VapourSynth": ("82", "LGPL-2.1-or-later"),
+        "vapoursynth-bestsource": ("23", "MIT"),
         "vapoursynth-lsmas": ("1310.0.0.0", "ISC AND LGPL-2.1-or-later"),
-        "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
+        "vs-placebo": ("2.0.5", "LGPL-2.1-only"),
         "vspackrgb": ("2.0.0", "MIT"),
-        "VSView": ("0.13.0", "EUPL-1.2"),
-        "cyclopts": ("5.3.0", "Apache-2.0"),
-        "vsjetengine": ("1.8.1", "EUPL-1.2"),
+        "VSView": ("0.14.0", "EUPL-1.2"),
+        "cyclopts": ("5.4.2", "Apache-2.0"),
+        "vsjetengine": ("2.0.0", "EUPL-1.2"),
     }
     for index, (name, (version, license_expression)) in enumerate(distributions.items()):
         dist_info = site_packages / f"package_{index}-{version}.dist-info"
@@ -2813,7 +2813,7 @@ def test_windows_portable_requirements_export_uses_the_captured_commit(
     )
 
     assert result.returncode == 0, _normalized_process_output(result)
-    assert b"vsview==0.13.0" in expected
+    assert b"vsview==0.14.0" in expected
     assert output.read_bytes() == expected
 
 
