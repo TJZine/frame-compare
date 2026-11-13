@@ -200,10 +200,10 @@ def test_windows_portable_child_env_relies_on_managed_embedded_path(
     assert child_env["FRAME_COMPARE_RUNTIME_KIND"] == "windows-portable"
     assert child_env["FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"] == "managed-fingerprint"
     assert "PYTHONPATH" not in child_env
-    from tools.windows_portable.portable_runtime import EMBEDDED_SEARCH_PATH
+    from tools.windows_portable.portable_runtime import embedded_search_path
 
-    assert EMBEDDED_SEARCH_PATH.splitlines() == [
-        b"python313.zip",
+    assert embedded_search_path("314").splitlines() == [
+        b"python314.zip",
         b".",
         rb"..\app\site-packages",
         rb"..\app\src",

@@ -15,18 +15,18 @@ def test_vsview_extra_pins_supported_native_windows_media_stack(repo_root: Path)
     dependencies = set(project["optional-dependencies"]["vsview"])
 
     assert {dependency for dependency in dependencies if dependency.startswith("vsview==")} == {
-        "vsview==0.13.0"
+        "vsview==0.14.0"
     }
     assert "pyside6==6.12.0" in dependencies
-    assert "vapoursynth==81" in dependencies
+    assert "vapoursynth==82" in dependencies
     assert "vapoursynth-lsmas==1310.0.0.0; sys_platform == 'win32'" in dependencies
-    assert "vs-placebo==2.0.4; sys_platform == 'win32'" in dependencies
+    assert "vs-placebo==2.0.5; sys_platform == 'win32'" in dependencies
 
     native_install = _read_text_or_fail(repo_root / "docs" / "getting-started" / "native.md")
-    assert "The `vsview` extra pins VSView 0.13.0" in native_install
-    assert "package to R81" in native_install
+    assert "The `vsview` extra pins VSView 0.14.0" in native_install
+    assert "package to R82" in native_install
     assert "`vapoursynth-lsmas 1310.0.0.0`" in native_install
-    assert "`vs-placebo 2.0.4`" in native_install
+    assert "`vs-placebo 2.0.5`" in native_install
 
 
 def test_default_compose_separates_wizard_config_writes_from_normal_runs(

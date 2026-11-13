@@ -29,18 +29,18 @@ The expected candidate profile is:
 
 | Component | Expected Windows identity |
 | --- | --- |
-| Python | 3.13.17 |
-| VapourSynth | R81, API R4.3 |
+| Python | 3.14.10 |
+| VapourSynth | R82, API R4.3 |
 | L-SMASH-Works | `vapoursynth-lsmas` 1310.0.0.0 / native lineage 1310.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
-| vs-placebo | 2.0.4 |
-| BestSource (VSView/UI only) | 22 |
-| VSView / CLI parser | 0.13.0 / Cyclopts 5.3.0 |
+| vs-placebo | 2.0.5 |
+| BestSource (VSView/UI only) | 23 |
+| VSView / CLI parser | 0.14.0 / Cyclopts 5.4.2 |
 | vspackrgb | 2.0.0 (Rust extension) |
 | PySide6 family | 6.12.0; WebEngine/PDF distribution metadata 6.12.0.140 |
-| FFmpeg | `n8.1.3-9-g29e619e767`, BtbN win64 LGPL 8.1 build `autobuild-2026-09-30-13-08` |
-| Full runtime fingerprint | `3ba680493a218e486baabbff812ad5047c50b471be742d420e721579fc8eaad0` |
-| L-SMASH index token | `lsw1310-f125953022b6` |
+| FFmpeg | `n8.1.3-27-g8dca1586f4`, BtbN win64 LGPL 8.1 build `autobuild-2026-10-31-12-59` |
+| Full runtime fingerprint | `50c72cd2078e6909b28b0ea9bcf576c4c06899f186a78d62435dda7f2a199db4` |
+| L-SMASH index token | `lsw1310-47d07506e489` |
 
 ## 1. Exact source and repository gates
 
@@ -214,7 +214,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Inspect `doctor-candidate.json`. Required results:
 
 - The observed and expected media-runtime fingerprints match.
-- VapourSynth reports R81 independently from API R4.3.
+- VapourSynth reports R82 independently from API R4.3.
 - `lsmas` registers both `LibavSMASHSource` and `LWLibavSource`.
 - `placebo` registers `Tonemap`.
 - FFMS2 is reported as intentionally absent on Windows, not as a missing requirement.
@@ -374,10 +374,10 @@ Verify with old and newly generated data:
 
 ## 8. Portable update boundary
 
-Keep one untouched installation of the immediate predecessor to this R81 candidate:
-the R80 / VSView 0.11.0 / vspackrgb 1.4.0 / August 2026 FFmpeg bundle with
+Keep one untouched installation of the immediate predecessor to this R82 candidate.
+Use the R81 / VSView 0.13.0 / CPython 3.13.17 / September 2026 FFmpeg bundle with
 full runtime fingerprint
-`a17abda6b032c5568e557f881c018d2220230c832c612b75c7461e03d0eb4ba8`.
+`3ba680493a218e486baabbff812ad5047c50b471be742d420e721579fc8eaad0`.
 Retain an older schema-2 installation separately when available for the
 pre-native-panel refusal case.
 

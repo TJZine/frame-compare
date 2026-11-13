@@ -38,12 +38,12 @@ def prove_vsview_distribution_contract() -> None:
         "pyside6-pdf": "6.12.0.140",
         "pyside6-webengine": "6.12.0.140",
         "shiboken6": "6.12.0",
-        "vapoursynth-bestsource": "22",
+        "vapoursynth-bestsource": "23",
         "vapoursynth-lsmas": "1310.0.0.0",
         "vspackrgb": "2.0.0",
-        "vsview": "0.13.0",
-        "cyclopts": "5.3.0",
-        "vsjetengine": "1.8.1",
+        "vsview": "0.14.0",
+        "cyclopts": "5.4.2",
+        "vsjetengine": "2.0.0",
     }
     observed = {name: importlib.metadata.version(name) for name in expected}
     assert_true(observed == expected, f"VSView distribution mismatch: {observed}")
@@ -204,7 +204,7 @@ def prove_vapoursynth_environment() -> None:
     plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
 
     assert_true(
-        version_major == 81 and version_minor == 0, f"expected VapourSynth R81, got {version!r}"
+        version_major == 82 and version_minor == 0, f"expected VapourSynth R82, got {version!r}"
     )
     assert_true(api_major == 4, f"expected VapourSynth API 4, got {api_version!r}")
     assert_true(api_minor == 3, f"expected VapourSynth API minor 3, got {api_version!r}")

@@ -213,6 +213,7 @@ session, _wait_seconds = launch_alignment_verification_session(
         audio_review_by_key=audio_review_by_key,
         cache_dir=proof_dir / "cache",
         source_indexes={reference: reference_index},
+        source_index_generated_root=index_cache.generated_root,
         frame_props_by_stem={
             reference.stem: unspecified_color_props,
             comparison.stem: unspecified_color_props,

@@ -438,14 +438,14 @@ never searches parent directories.
   probing opens the resolved target. Pair names and report identity still use the discovered path.
   Older probe keys miss so source stream admission runs again. Persisted probe
   dimensions and frame counts use bounded positive signed-32-bit decoder fields, while
-  FPS numerator and denominator use positive signed-64-bit components matching R81's
+  FPS numerator and denominator use positive signed-64-bit components matching R82's
   `VSVideoInfo` representation. Filesystem size/mtime and cache-safety bounds remain
   deliberate signed-64-bit limits rather than claims about decoder field widths;
   malformed entries are skipped individually.
 - `<resolved paths.generated_dir>/cache/source-indexes/`: `ManagedSourceIndexCache`
   owns persistent L-SMASH-Works indexes. The entry key binds the resolved media
-  path and the profile's decoder token: `lsw1310-f125953022b6` for managed Windows,
-  `lsw1310-1ec4b81a7724` for unmanaged Windows, and `lsw1310-877219813395` for
+  path and the profile's decoder token: `lsw1310-47d07506e489` for managed Windows,
+  `lsw1310-7a882880f599` for unmanaged Windows, and `lsw1310-9129a4cbb35a` for
   Debian/Docker. Managed Windows and Debian/Docker tokens isolate their
   packaged decoder ABIs. Unmanaged profile tokens do not verify native ABI
   changes. Under a per-entry lock, reuse checks the cache paths and matches the
@@ -904,7 +904,7 @@ result write, and fail-closed parse/validation boundary. `frame_compare.vsview.a
 is the sole human review surface inside VSView: it stays inert for rejected/ordinary
 sessions and presents entry authority/evidence separately from original frame drafts
 and saved outcomes. `vsview.workspace_positions` is the sole private integration
-with explicitly version-gated VSView 0.13.0: it reads the owning workspace’s retained
+with explicitly version-gated VSView 0.14.0: it reads the owning workspace’s retained
 `VideoOutput.last_frame` values by validated output identity and sets that generated
 workspace’s own playhead control to Unlink. It never changes global preferences or
 patches dependency hooks. The panel exists and receives workspace-load hooks even
@@ -1031,10 +1031,11 @@ owners. Its explicit X11 contract is:
 - optional host `XAUTHORITY` cookie file mount when required by the desktop
 - container process UID/GID aligned to the host user for narrow local-user X11 permission flows
 
-The optional GUI proof is non-CI and non-default. Its verifier contract requires the
+CI runs the optional GUI image's offscreen proof on native AMD64 and ARM64.
+The visible X11 launch remains a separate host check. The verifier requires the
 `gui-linux` image to discover and load the exact Frame Compare VSView entry point,
 construct the panel in its inert ordinary-session state, load a production-generated
-L-SMASH session with VSView 0.13.0, register one `Reference` and ordered comparison
+L-SMASH session with VSView 0.14.0, register one `Reference` and ordered comparison
 outputs, render frame 0 for each output, exercise complete source readiness plus the
 whole-set positions and keep-current actions, and round-trip/validate the sibling
 result sidecar. The 2026-10-07 dependency-refresh handoff records a reported

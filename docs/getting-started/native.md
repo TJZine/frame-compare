@@ -9,11 +9,11 @@ Install these host prerequisites first:
 
 - Python 3.13 or newer;
 - FFmpeg available on `PATH`;
-- VapourSynth R81;
+- VapourSynth R82;
 - L-SMASH-Works 1310 available to the VapourSynth runtime;
-- vs-placebo 2.0.4 and a compatible Vulkan implementation for HDR tonemapping;
+- vs-placebo 2.0.5 and a compatible Vulkan implementation for HDR tonemapping;
 - `uv` (recommended for the repository's locked environment) or pip;
-- optionally VSView 0.13.0 with the native Frame Compare panel for alignment review.
+- optionally VSView 0.14.0 with the native Frame Compare panel for alignment review.
 
 The default renderer requires VapourSynth. Setting
 `screenshots.use_ffmpeg = true` selects the FFmpeg screenshot path, but HDR frames
@@ -27,20 +27,24 @@ From a clone of the repository:
 uv sync --no-dev --extra vsview --frozen
 ```
 
-The `vsview` extra pins VSView 0.13.0, PySide6 6.12.0, the native Frame Compare alignment panel, and
-the repository-managed VapourSynth Python package to R81.
+The `vsview` extra pins VSView 0.14.0, PySide6 6.12.0, the native Frame Compare alignment panel, and
+the repository-managed VapourSynth Python package to R82.
 
 It uses VSView's base
 dependency graph, including its documented PySide6 backend; the upstream `recommended`
 and `full` extras are intentionally not selected. Its current resolution includes
-vsjetengine 1.8.1, BestSource 22, vspackrgb, and jetpytools 3.2.0. Install and run
+vsjetengine 2.0.0, BestSource 23, vspackrgb, and jetpytools 3.2.0. Install and run
 Frame Compare and VSView from this same environment: a PATH-only VSView executable
 does not provide the panel contract and is unsupported.
 
 On Windows it also installs the selected `vapoursynth-lsmas 1310.0.0.0` and
-`vs-placebo 2.0.4` plugin wheels so the locked environment matches the supported native
+`vs-placebo 2.0.5` plugin wheels so the locked environment matches the supported native
 media stack. Linux and macOS still require host-managed L-SMASH-Works and vs-placebo
 installations.
+
+On macOS, the BestSource 23 wheels used by the viewer require macOS 15 or newer
+on Intel and Apple Silicon. Check the native plugin prerequisites when building
+from source on an older system.
 
 If you do not need native panel review, omit `--extra vsview` while
 retaining the required native renderer dependencies. BestSource is owned by VSView's
@@ -66,7 +70,7 @@ python -m pip install ".[vsview]"
 
 For a pip-managed installation, run `frame-compare wizard`, `doctor`, and `run`
 directly, without the `uv run --no-sync` prefix. The pip installation still relies
-on your native FFmpeg, VapourSynth R81, and L-SMASH-Works 1310 setup.
+on your native FFmpeg, VapourSynth R82, and L-SMASH-Works 1310 setup.
 
 Put at least two supported video files in `comparison_videos/`, then follow
 [Your first comparison](first-comparison.md).

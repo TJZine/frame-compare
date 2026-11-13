@@ -131,7 +131,7 @@ $AnimeComparison = (Resolve-Path -LiteralPath `
 Prepare probe data and warm the L-SMASH-Works indexes through a normal application
 run before timing. Use the same resolved source paths, generated root and runtime
 for the benchmark so it can reuse `cache/source-indexes/`; the managed Windows
-decoder token for this recipe is `lsw1310-f125953022b6`. Legacy adjacent indexes are
+decoder token for this recipe is `lsw1310-47d07506e489`. Legacy adjacent indexes are
 inert. Point `--input` at a directory containing only the fixed case under test:
 
 ```powershell
