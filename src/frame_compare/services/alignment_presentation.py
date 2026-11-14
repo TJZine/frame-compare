@@ -1,4 +1,4 @@
-"""Terminal presentation for audio alignment evidence."""
+"""Terminal and panel presentation for audio alignment evidence."""
 
 from __future__ import annotations
 
@@ -16,9 +16,11 @@ from frame_compare.services.types import (
 )
 from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
+    AudioAlignmentDecision,
     audio_unavailable_phrase,
 )
 from frame_compare.utils.alignment_review_projection import (
+    AudioReviewPresentation,
     EvidenceRow,
     audio_evidence_rows,
     build_audio_review_presentation,
@@ -37,6 +39,7 @@ from frame_compare.utils.terminal_theme import (
     human_console,
 )
 from frame_compare.utils.types import AlignmentRequest
+from frame_compare.vsview.alignment_review_contract import MANUAL_AUTHORITY_ORIGINS
 
 log = structlog.get_logger()
 
@@ -143,6 +146,98 @@ def _normal_evidence_rows(
     elif not review_pending:
         rows.append(Text("Align manually or keep the current alignment.", style=MUTED))
     return tuple(rows)
+
+
+def panel_audio_review_lines(
+    resolution: ComparisonResolution,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    attempt = resolution.result.audio_attempt
+    review = build_audio_review_presentation(attempt) if attempt is not None else None
+    return _audio_summary(resolution, review), _audio_details(attempt, review)
+
+
+def _audio_summary(
+    resolution: ComparisonResolution, review: AudioReviewPresentation | None
+) -> tuple[str, ...]:
+    result = resolution.result
+    origin = resolution.origin if result.applied else "none"
+    frame_offset = resolution.accepted_offset
+    lines: list[str] = []
+    attempt = result.audio_attempt
+    if origin in MANUAL_AUTHORITY_ORIGINS and frame_offset is not None:
+        lines.extend(
+            (
+                f"Manually confirmed alignment: {frame_offset:+d}f — APPLIED",
+                "No additional confirmation needed.",
+            )
+        )
+    elif origin == "shared_computed_offsets" and frame_offset is not None:
+        lines.extend(
+            (
+                f"Accepted audio alignment reused: {frame_offset:+d}f — APPLIED",
+                "No additional confirmation needed.",
+            )
+        )
+    elif origin == "computed_this_run" and frame_offset is not None:
+        lines.extend(
+            (
+                f"Accepted audio alignment: {frame_offset:+d}f — APPLIED",
+                "No additional confirmation needed.",
+            )
+        )
+    elif attempt is not None and attempt.decision.state in {"provisional", "unavailable"}:
+        assert review is not None
+        candidate = review.suggested_offset
+        if candidate is not None:
+            lines.extend((f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED",))
+            lines.extend(
+                row.value
+                for row in review.normal_review_rows(
+                    panel=True,
+                    action_line="Visual confirmation required to use this hint.",
+                )
+            )
+    if not lines:
+        reason = attempt.decision.primary_reason if attempt is not None else "no_usable_audio"
+        lines.append(_unavailable_summary_line_for_reason(reason))
+    if origin in MANUAL_AUTHORITY_ORIGINS and attempt is not None:
+        original = _original_audio_summary(attempt.decision)
+        if original is not None:
+            lines.append(f"Original evidence: {original}")
+    elif origin == "computed_this_run" and attempt is not None:
+        assert review is not None
+        noted = review.noted_line(panel=True)
+        if noted is not None:
+            lines.append(noted)
+    return tuple(lines)
+
+
+def _original_audio_summary(decision: AudioAlignmentDecision) -> str | None:
+    state = decision.state
+    candidate = decision.candidate.frame_offset if decision.candidate is not None else None
+    if state == "trusted_automatic" and candidate is not None:
+        return f"Accepted audio alignment: {candidate:+d}f — APPLIED"
+    if state == "provisional" and candidate is not None:
+        return f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED"
+    if state == "unavailable":
+        return _unavailable_summary_line_for_reason(decision.primary_reason)
+    return None
+
+
+def _unavailable_summary_line_for_reason(reason: str) -> str:
+    return f"No usable audio candidate ({audio_unavailable_phrase(reason)}) — NOT APPLIED"
+
+
+def _audio_details(
+    attempt: AudioAlignmentAttempt | None, review: AudioReviewPresentation | None
+) -> tuple[str, ...]:
+    if attempt is None:
+        return ("Historical audio details unavailable.",)
+    assert review is not None
+    return (
+        *review.verbose_lines(panel=True),
+        *(f"{row.key}: {row.value}" for row in audio_evidence_rows(attempt)),
+    )
 
 
 def _original_audio_attempt_line(attempt: AudioAlignmentAttempt) -> str:

@@ -12,11 +12,9 @@ import pytest
 
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services import alignment_audio, alignment_diagnostics
-from frame_compare.services.alignment import _build_audio_review_map
-from frame_compare.services.alignment_keys import alignment_key
+from frame_compare.services.alignment_diagnostics import _MAX_DIAGNOSTIC_BYTES
 from frame_compare.services.types import AlignmentResult, ComparisonResolution
 from frame_compare.utils.alignment_evidence import (
-    MAX_ALIGNMENT_EVIDENCE_BYTES,
     MAX_AUDIO_CHUNKS,
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
@@ -526,7 +524,7 @@ def _maximum_shape_attempt(shape: str) -> tuple[AudioAlignmentAttempt, tuple[int
 
 
 @pytest.mark.parametrize("shape", ("runs", "same-frame", "run-targets", "mixed"))
-def test_maximum_evidence_shapes_fit_full_and_native_envelopes(tmp_path: Path, shape: str) -> None:
+def test_maximum_evidence_shapes_fit_diagnostic_envelope(tmp_path: Path, shape: str) -> None:
     attempt, populations = _maximum_shape_attempt(shape)
     result = _result(attempt)
 
@@ -540,42 +538,10 @@ def test_maximum_evidence_shapes_fit_full_and_native_envelopes(tmp_path: Path, s
         resolution=ComparisonResolution(result, "diagnostic", "computed_this_run"),
     )
     diagnostic_payload = json.loads(path.read_text(encoding="utf-8"))
-    assert diagnostic_size <= MAX_ALIGNMENT_EVIDENCE_BYTES, (shape, populations, diagnostic_size)
+    assert diagnostic_size <= _MAX_DIAGNOSTIC_BYTES, (shape, populations, diagnostic_size)
     assert (
         evidence_from_payload(AudioAlignmentAttempt, diagnostic_payload["original_audio_attempt"])
         == attempt
-    )
-
-    reference = Path("reference.mkv")
-    comparison = Path("comparison.mkv")
-    key = alignment_key(reference, comparison)
-    native = _build_audio_review_map(
-        reference=reference,
-        comparisons=[comparison],
-        resolutions={
-            key: ComparisonResolution(
-                result=result,
-                comparison_cache_key="key",
-                origin="computed_this_run",
-            )
-        },
-    )[key]
-    native_size = len(native.encode("utf-8"))
-    assert native_size <= MAX_ALIGNMENT_EVIDENCE_BYTES, (shape, populations, native_size)
-    projected = json.loads(native)["audio_attempt"]
-    assert evidence_from_payload(AudioAlignmentAttempt, projected) == replace(
-        attempt,
-        chunks=replace(
-            attempt.chunks,
-            starts=(),
-            counts=(),
-            active=(),
-            lags=(),
-            psrs=(),
-            credible=(),
-            agrees=(),
-            rows_omitted=True,
-        ),
     )
 
 

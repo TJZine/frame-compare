@@ -64,7 +64,6 @@ type VideoTargetWinner = Literal["confirmed", "alternative", "neither"]
 
 AUDIO_ANALYSIS_SAMPLE_RATE = 8000
 MAX_AUDIO_CHUNKS = 4096
-MAX_ALIGNMENT_EVIDENCE_BYTES = 2 * 1024 * 1024
 _MAX_TEXT = 256
 _MAX_VERSION_TEXT = 512
 MAX_VIDEO_POSITIONS = 48
@@ -959,7 +958,6 @@ __all__ = [
     "MAX_VIDEO_POSITIONS",
     "MAX_VIDEO_TARGET_POSITIONS",
     "MAX_AUDIO_CHUNKS",
-    "MAX_ALIGNMENT_EVIDENCE_BYTES",
     "SelectedAudioStreamEvidence",
     "AudioSameFrameContext",
     "VideoCheckPoint",

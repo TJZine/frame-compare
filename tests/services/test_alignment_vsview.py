@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -12,19 +11,15 @@ from unittest.mock import MagicMock
 import pytest
 
 import frame_compare.services.alignment_vsview as alignment_vsview
-from frame_compare.services.alignment import align_clips_from_request
+from frame_compare.services.alignment import _build_audio_review_map, align_clips_from_request
+from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.alignment_vsview import (
     AlignmentVSViewOutcome,
     maybe_launch_alignment_vsview,
 )
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
-from frame_compare.utils.alignment_evidence import (
-    MAX_ALIGNMENT_EVIDENCE_BYTES,
-    AudioAlignmentAttempt,
-    evidence_from_payload,
-)
+from frame_compare.services.types import AlignmentConfig, AlignmentResult, ComparisonResolution
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from frame_compare.vsview.alignment_review_contract import (
@@ -81,6 +76,16 @@ def _set_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(alignment_vsview, "check_vsview_availability", _available)
 
 
+def _cached_resolution(reference: Path, comparison: Path) -> ComparisonResolution:
+    return ComparisonResolution(
+        AlignmentResult(
+            reference.name, comparison.name, 3, 3 / 24, 1.0, "cross_correlation", "cached"
+        ),
+        "fixture",
+        "shared_computed_offsets",
+    )
+
+
 def _call(
     tmp_path: Path,
     *,
@@ -89,68 +94,75 @@ def _call(
 ) -> AlignmentVSViewOutcome:
     reference = _clip(tmp_path / "ref.mkv")
     resolved_comparisons = comparisons or [_clip(tmp_path / "comparison.mkv", frame_count=150)]
-    offsets: dict[str, int | None] = {
-        f"ref:{comparison.path.stem}": 3 for comparison in resolved_comparisons
-    }
+    paths = [comparison.path for comparison in resolved_comparisons]
     return maybe_launch_alignment_vsview(
         reference=reference,
         comparisons=resolved_comparisons,
-        offsets_by_key=offsets,
-        audio_review_by_key={
-            key: json.dumps(
-                {
-                    "current_authority": {
-                        "origin": "shared_computed_offsets",
-                        "frame_offset": offset,
-                    },
-                    "evidence_availability": "historical_details_unavailable",
-                    "audio_attempt": None,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            for key, offset in offsets.items()
-        },
+        audio_review_by_key=_build_audio_review_map(
+            reference=reference.path,
+            comparisons=paths,
+            resolutions={
+                alignment_key(reference.path, path): _cached_resolution(reference.path, path)
+                for path in paths
+            },
+        ),
         cache_dir=tmp_path,
         config=config,
         progress=None,
     )
 
 
-def test_constructed_audio_review_envelope_round_trips_attempt_parser() -> None:
-    """The VSView audio-review envelope embeds the v4 attempt validated by one parser."""
+def test_audio_review_envelopes_distinguish_current_attempt_and_reused_offset() -> None:
+    reference = Path("ref")
+    fresh = Path("fresh")
+    reused = Path("reused")
     attempt = audio_attempt()
-    envelope = {
-        "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
-        "evidence_availability": "current_attempt",
-        "audio_attempt": asdict(attempt),
-    }
-    encoded = json.dumps(envelope, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    assert len(encoded.encode("utf-8")) <= MAX_ALIGNMENT_EVIDENCE_BYTES
-
-    decoded = json.loads(encoded)
-    assert set(decoded) == {"current_authority", "evidence_availability", "audio_attempt"}
-    parsed = evidence_from_payload(AudioAlignmentAttempt, decoded["audio_attempt"])
-    assert parsed == attempt
-    assert parsed.comparison_ordinal == 1
-    assert parsed.decision.state == "provisional"
-    assert parsed.decision.candidate is not None
-    assert parsed.decision.candidate.frame_offset == 0
-
-    historical = json.loads(
-        json.dumps(
-            {
-                "current_authority": {
-                    "origin": "shared_computed_offsets",
-                    "frame_offset": 3,
-                },
-                "evidence_availability": "historical_details_unavailable",
-                "audio_attempt": None,
-            }
-        )
+    fresh_result = AlignmentResult(
+        reference.name,
+        fresh.name,
+        None,
+        None,
+        0.0,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        audio_attempt=attempt,
     )
-    assert set(historical) == {"current_authority", "evidence_availability", "audio_attempt"}
-    assert historical["audio_attempt"] is None
+    fresh_key = alignment_key(reference, fresh)
+    reused_key = alignment_key(reference, reused)
+    reviews = _build_audio_review_map(
+        reference=reference,
+        comparisons=[fresh, reused],
+        resolutions={
+            fresh_key: ComparisonResolution(fresh_result, "fixture", "computed_this_run"),
+            reused_key: _cached_resolution(reference, reused),
+        },
+    )
+
+    assert set(reviews) == {fresh_key, reused_key}
+    current = json.loads(reviews[fresh_key])
+    historical = json.loads(reviews[reused_key])
+    assert (
+        set(current)
+        == set(historical)
+        == {
+            "current_authority",
+            "decision_state",
+            "candidate_offset",
+            "summary_lines",
+            "detail_lines",
+        }
+    )
+    assert current["current_authority"] == {"origin": "none", "frame_offset": None}
+    assert current["decision_state"] == "provisional"
+    assert current["candidate_offset"] == 0
+    assert historical["current_authority"] == {
+        "origin": "shared_computed_offsets",
+        "frame_offset": 3,
+    }
+    assert historical["decision_state"] is None
+    assert historical["candidate_offset"] is None
+    assert historical["detail_lines"] == ["Historical audio details unavailable."]
 
 
 def test_disabled_review_has_no_runtime_side_effects(

@@ -422,10 +422,6 @@ def prove_generated_vsview_session(media_path: Path) -> None:
     script_path = write_vsview_session_script(
         reference=media_path,
         comparisons=[comparison_one_media_path, comparison_two_media_path],
-        suggested_offsets_by_key={
-            f"{media_path.stem}:{comparison_one_media_path.stem}": 0,
-            f"{media_path.stem}:{comparison_two_media_path.stem}": 0,
-        },
         audio_review_by_key={
             key: json.dumps(
                 {
@@ -433,8 +429,10 @@ def prove_generated_vsview_session(media_path: Path) -> None:
                         "origin": "shared_computed_offsets",
                         "frame_offset": 0,
                     },
-                    "evidence_availability": "historical_details_unavailable",
-                    "audio_attempt": None,
+                    "decision_state": None,
+                    "candidate_offset": None,
+                    "summary_lines": ["Accepted audio alignment reused: +0f — APPLIED"],
+                    "detail_lines": ["Historical audio details unavailable."],
                 },
                 sort_keys=True,
                 separators=(",", ":"),
@@ -496,7 +494,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
                 "generated VSView output omitted BT.709 preview properties",
             )
 
-        session = alignment_review_session_from_script(script_path, require_result_absent=True)
+        session = alignment_review_session_from_script(script_path)
         candidates = tuple(
             AlignmentReviewOutputCandidate(
                 output_id=output_id,

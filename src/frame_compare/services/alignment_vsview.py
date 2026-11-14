@@ -313,7 +313,6 @@ def maybe_launch_alignment_vsview(
     *,
     reference: AlignmentClipRequest,
     comparisons: list[AlignmentClipRequest],
-    offsets_by_key: dict[str, int | None],
     audio_review_by_key: dict[str, str],
     cache_dir: Path,
     config: AlignmentConfig,
@@ -378,7 +377,6 @@ def maybe_launch_alignment_vsview(
             request=VSViewSessionRequest(
                 reference=reference_path,
                 comparisons=comparison_paths,
-                suggested_offsets_by_key=offsets_by_key,
                 audio_review_by_key=audio_review_by_key,
                 cache_dir=cache_dir,
                 source_indexes=source_indexes,

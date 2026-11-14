@@ -1608,12 +1608,8 @@ def test_nested_alternative_confirmed_chunk_splits_wide_run(
 def test_authoritative_nested_targets_match_compact_native_projection(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
     attempt = _production_nested_targets_attempt()
-    compact = _project_audio_attempt_for_review(attempt)
     full_review = build_audio_review_presentation(attempt)
-    compact_review = build_audio_review_presentation(compact)
     expected_reasons = (
         "Audio in 0:00-1:00 points to +250f, and the video could not settle which offset is right there.",
         "Audio in 1:00-1:30 points to +246f, and the video could not rule that out.",
@@ -1624,16 +1620,9 @@ def test_authoritative_nested_targets_match_compact_native_projection(
         "+250f  1:30-2:00  confirmed by video",
     )
 
-    assert compact.chunks.rows_omitted is True
-    assert compact.chunks.total_samples == attempt.chunks.total_samples
-    assert full_review.attempt.video_check.targets == compact_review.attempt.video_check.targets
-    assert full_review.suggested_offset == compact_review.suggested_offset == 146
-    assert full_review.reason_lines() == compact_review.reason_lines() == expected_reasons
-    assert full_review.region_lines() == compact_review.region_lines() == expected_regions
-    assert full_review.context_lines() == compact_review.context_lines()
-    assert full_review.noted_line() == compact_review.noted_line()
-    assert full_review.verbose_rows() == compact_review.verbose_rows()
-    assert full_review.verbose_rows(panel=True) == compact_review.verbose_rows(panel=True)
+    assert full_review.suggested_offset == 146
+    assert full_review.reason_lines() == expected_reasons
+    assert full_review.region_lines() == expected_regions
 
     unexamined = _unexamined_attempt()
     unexamined_target = replace(
@@ -1645,13 +1634,10 @@ def test_authoritative_nested_targets_match_compact_native_projection(
         unexamined,
         video_check=replace(unexamined.video_check, targets=(unexamined_target,)),
     )
-    compact_unexamined = _project_audio_attempt_for_review(unexamined)
-    assert build_audio_review_presentation(unexamined).region_lines() == (
-        build_audio_review_presentation(compact_unexamined).region_lines()
-    )
+
     assert (
         "+250f  1:00-1:30  not checked"
-        in build_audio_review_presentation(compact_unexamined).region_lines()
+        in build_audio_review_presentation(unexamined).region_lines()
     )
 
     config = AlignmentConfig(cache_results=False, no_color=True)
@@ -1747,29 +1733,14 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
     expected_context: tuple[str, ...],
     expected_noted: str | None,
 ) -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
     attempt = _producer_target_context_attempt(credible=credible, resolution=resolution)
-    compact = _project_audio_attempt_for_review(attempt)
     full_review = build_audio_review_presentation(attempt)
-    compact_review = build_audio_review_presentation(compact)
 
     assert attempt.decision.state == expected_state
     assert attempt.decision.primary_reason == expected_reason
-    assert compact.decision == attempt.decision
-    assert compact.chunks.rows_omitted is True
-    assert compact.chunks.total_samples == attempt.chunks.total_samples
-    assert full_review.context_lines() == compact_review.context_lines() == expected_context
-    assert full_review.context_lines(panel=True) == compact_review.context_lines(panel=True)
-    assert full_review.noted_line() == compact_review.noted_line() == expected_noted
-    assert full_review.noted_line(panel=True) == compact_review.noted_line(panel=True)
-    assert full_review.normal_review_rows(
-        panel=False, action_line="Align manually or keep the current alignment."
-    ) == compact_review.normal_review_rows(
-        panel=False, action_line="Align manually or keep the current alignment."
-    )
-    assert full_review.verbose_rows() == compact_review.verbose_rows()
-    assert full_review.verbose_rows(panel=True) == compact_review.verbose_rows(panel=True)
+
+    assert full_review.context_lines() == expected_context
+    assert full_review.noted_line() == expected_noted
     expected_offset = 0 if resolution == "resolved" else 2
     expected_status = {
         "resolved": "confirmed by video",
@@ -1780,9 +1751,7 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
     target_region = f"{expected_offset:+d}f  1:00-1:30  {expected_status}"
     panel_target_region = f"{expected_offset:+d}f  1:00–1:30  {expected_status}"
     assert target_region in full_review.region_lines()
-    assert full_review.region_lines() == compact_review.region_lines()
     assert panel_target_region in full_review.region_lines(panel=True)
-    assert full_review.region_lines(panel=True) == compact_review.region_lines(panel=True)
     expected_check_offset = 0 if resolution in {"resolved", "unexamined"} else 2
     expected_check = (
         "1:15  reference 1,800 <-> comparison "
@@ -1791,7 +1760,6 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
         else "0:50  reference 1,200 <-> comparison 1,200 (+0f)"
     )
     assert expected_check in full_review.check_point_lines(include_label=False)
-    assert full_review.check_point_lines() == compact_review.check_point_lines()
     if resolution == "resolved":
         assert "+2f  1:00-1:30  confirmed by video" not in full_review.region_lines()
         assert "comparison 1,798 (+2f)" not in full_review.check_point_lines()
@@ -1812,11 +1780,10 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
         stability=attempt.stability,
         audio_attempt=attempt,
     )
-    compact_result = replace(result, audio_attempt=compact)
+
     _present(request, result, config)
     full_terminal = capsys.readouterr().err
-    _present(request, compact_result, config)
-    assert capsys.readouterr().err == full_terminal
+
     assert "Picture differs" not in full_terminal
     assert "the picture differs" not in full_terminal
     assert (" · applied" in full_terminal) is applied
@@ -1845,8 +1812,6 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
 
 
 def test_nonzero_reference_start_shifts_full_and_compact_region_times() -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
     attempt = _producer_target_context_attempt(credible=True, resolution="unresolved")
     reference, comparison = attempt.selected_streams
     attempt = replace(
@@ -1856,12 +1821,10 @@ def test_nonzero_reference_start_shifts_full_and_compact_region_times() -> None:
             comparison,
         ),
     )
-    compact = _project_audio_attempt_for_review(attempt)
 
-    for candidate in (attempt, compact):
-        review = build_audio_review_presentation(candidate)
-        assert "+2f  1:10-1:40  not settled" in review.region_lines()
-        assert "+2f  1:10–1:40  not settled" in review.region_lines(panel=True)
+    review = build_audio_review_presentation(attempt)
+    assert "+2f  1:10-1:40  not settled" in review.region_lines()
+    assert "+2f  1:10–1:40  not settled" in review.region_lines(panel=True)
 
 
 def test_zero_is_retained_as_the_actual_alternative_winner() -> None:
@@ -1927,12 +1890,8 @@ def test_distinct_position_winners_use_the_selected_checkpoint_offset() -> None:
 def test_resolved_credible_run_context_matches_full_and_compact_terminal(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
     attempt = _producer_run_context_attempt()
-    compact = _project_audio_attempt_for_review(attempt)
     full_review = build_audio_review_presentation(attempt)
-    compact_review = build_audio_review_presentation(compact)
     expected_context = ("Audio differed in 1:00-2:00; the video confirmed the offset there.",)
     expected_noted = (
         "Noted: audio differed in 2 sections (1:00-2:00); the video confirmed +0f there."
@@ -1944,8 +1903,8 @@ def test_resolved_credible_run_context_matches_full_and_compact_terminal(
         attempt.video_check.targets[0].first_chunk_index,
         attempt.video_check.targets[0].last_chunk_index,
     ) == (2, 3)
-    assert full_review.context_lines() == compact_review.context_lines() == expected_context
-    assert full_review.noted_line() == compact_review.noted_line() == expected_noted
+    assert full_review.context_lines() == expected_context
+    assert full_review.noted_line() == expected_noted
     assert full_review.noted_line(panel=True) == (
         "Noted: audio differed in 2 sections (1:00–2:00); the video confirmed +0f there."
     )
@@ -1953,11 +1912,10 @@ def test_resolved_credible_run_context_matches_full_and_compact_terminal(
     config = AlignmentConfig(cache_results=False, no_color=True)
     reference, comparison, request = _request_for(tmp_path, config)
     result = _applied_result(reference, comparison, attempt)
-    compact_result = replace(result, audio_attempt=compact)
+
     _present(request, result, config)
     full_terminal = capsys.readouterr().err
-    _present(request, compact_result, config)
-    assert capsys.readouterr().err == full_terminal
+
     assert full_terminal == (
         "comparison: +0f · applied\n"
         "  8 of 10 sections agree · video check +0f · stable\n"
@@ -1966,8 +1924,7 @@ def test_resolved_credible_run_context_matches_full_and_compact_terminal(
 
     _present(request, result, config, verbose=True)
     full_verbose = capsys.readouterr().err
-    _present(request, compact_result, config, verbose=True)
-    assert capsys.readouterr().err == full_verbose
+
     assert f"Context: {expected_context[0]}" in full_verbose
     assert (
         "Decision: state=trusted_automatic; reason=audio_video_confirmed; also=none" in full_verbose
@@ -2050,28 +2007,17 @@ def test_resolved_chunk_and_run_count_their_authoritative_members() -> None:
 
 
 def test_partial_final_target_bounds_match_compact_native_projection() -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
     attempt = _partial_final_target_attempt()
-    compact = _project_audio_attempt_for_review(attempt)
     full_review = build_audio_review_presentation(attempt)
-    compact_review = build_audio_review_presentation(compact)
 
-    assert (
-        full_review.reason_lines()
-        == compact_review.reason_lines()
-        == (
-            "Audio in 1:00-1:45 points to +243f, and the video could not settle which offset is right there.",
-        )
+    assert full_review.reason_lines() == (
+        "Audio in 1:00-1:45 points to +243f, and the video could not settle which offset is right there.",
     )
-    assert full_review.region_lines() == compact_review.region_lines()
-    assert "+243f  1:00-1:45  not settled" in compact_review.region_lines()
-    assert all("1:00-2:00" not in line for line in compact_review.region_lines())
+    assert "+243f  1:00-1:45  not settled" in full_review.region_lines()
+    assert all("1:00-2:00" not in line for line in full_review.region_lines())
 
 
 def test_partial_final_base_regions_match_compact_native_projection() -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
     partial = _partial_final_target_attempt()
     run_attempt = replace(partial, video_check=replace(partial.video_check, targets=()))
     full_attempt = replace(run_attempt, runs=())
@@ -2080,20 +2026,13 @@ def test_partial_final_base_regions_match_compact_native_projection() -> None:
         (run_attempt, "+243f  1:00-1:45  not settled"),
         (full_attempt, "+146f  0:00-1:45  confirmed by video"),
     ):
-        compact = _project_audio_attempt_for_review(attempt)
         full_regions = build_audio_review_presentation(attempt).region_lines()
-        compact_regions = build_audio_review_presentation(compact).region_lines()
 
-        assert compact.chunks.rows_omitted is True
-        assert compact.chunks.total_samples == attempt.chunks.total_samples
-        assert full_regions == compact_regions
-        assert expected in compact_regions
-        assert all("2:00" not in line for line in compact_regions)
+        assert expected in full_regions
+        assert all("2:00" not in line for line in full_regions)
 
 
 def test_partial_final_same_frame_context_matches_compact_native_projection() -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
     partial = _partial_final_target_attempt()
     attempt = replace(
         partial,
@@ -2102,15 +2041,11 @@ def test_partial_final_same_frame_context_matches_compact_native_projection() ->
             same_frame_context=(AudioSameFrameContext(3, 1177, 146.23, 146),),
         ),
     )
-    compact = _project_audio_attempt_for_review(attempt)
-    full_review = build_audio_review_presentation(attempt)
-    compact_review = build_audio_review_presentation(compact)
 
-    assert compact.chunks.rows_omitted is True
-    assert compact.chunks.total_samples == attempt.chunks.total_samples
-    assert full_review.same_frame_regions == compact_review.same_frame_regions
+    full_review = build_audio_review_presentation(attempt)
+
     assert tuple(
-        (region.start_seconds, region.end_seconds) for region in compact_review.same_frame_regions
+        (region.start_seconds, region.end_seconds) for region in full_review.same_frame_regions
     ) == ((90.0, 105.0),)
 
 
@@ -2419,21 +2354,16 @@ def test_established_audio_counts_distinguish_weak_active_from_inactive(
     agreeing: int,
     expected: str,
 ) -> None:
-    from frame_compare.services.alignment import _project_audio_attempt_for_review
-
     attempt = _producer_count_attempt(
         planned=planned,
         active=active,
         credible=credible,
         agreeing=agreeing,
     )
-    compact = _project_audio_attempt_for_review(attempt)
+
     full_review = build_audio_review_presentation(attempt)
-    compact_review = build_audio_review_presentation(compact)
 
     assert full_review.established_audio_line() == expected
-    assert compact_review.established_audio_line() == expected
-    assert full_review.verbose_rows() == compact_review.verbose_rows()
 
     config = AlignmentConfig(cache_results=False, no_color=True)
     reference, comparison, request = _request_for(tmp_path, config)
@@ -2452,8 +2382,7 @@ def test_established_audio_counts_distinguish_weak_active_from_inactive(
     )
     _present(request, result, config, verbose=True)
     full_terminal = capsys.readouterr().err
-    _present(request, replace(result, audio_attempt=compact), config, verbose=True)
-    assert capsys.readouterr().err == full_terminal
+
     assert f"Established: {expected}" in full_terminal
     assert " quiet)." not in full_terminal
 

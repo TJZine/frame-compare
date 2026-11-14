@@ -126,13 +126,14 @@ audio = {
     key: json.dumps({
         "current_authority": {"origin": "shared_computed_offsets" if offset is not None else "none",
                               "frame_offset": offset},
-        "evidence_availability": "historical_details_unavailable" if offset is not None else "not_computed",
-        "audio_attempt": None,
+        "decision_state": None,
+        "candidate_offset": None,
+        "summary_lines": [],
+        "detail_lines": [],
     }) for key, offset in {"ref:zeta": 1, "ref:alpha": None}.items()
 }
 script = write_vsview_session_script(
     reference=ref, comparisons=comparisons,
-    suggested_offsets_by_key={"ref:zeta": 1, "ref:alpha": None},
     audio_review_by_key=audio, cache_dir=root,
     preview_tonemap=settings, frame_props_by_stem=snapshots,
     scan_frame_geometry=mode == "probe",
@@ -166,11 +167,11 @@ if mode in {"quality", "fast", "probe"}:
         assert facts.requested.dynamic_peak_detection is (mode != "fast")
 else:
     assert applied == []
-assert outputs[1][3]["frame_compare_suggested_offset"] == 1
-assert outputs[2][3]["frame_compare_suggested_offset"] is None
+assert json.loads(outputs[1][3]["frame_compare_audio_review"])["current_authority"]["frame_offset"] == 1
+assert json.loads(outputs[2][3]["frame_compare_audio_review"])["current_authority"]["frame_offset"] is None
 assert outputs[1][3]["frame_compare_alignment_key"] == "ref:zeta"
 assert outputs[2][3]["frame_compare_alignment_key"] == "ref:alpha"
-assert all(output[3]["frame_compare_contract_version"] == 5 for output in outputs)
+assert all(output[3]["frame_compare_contract_version"] == 6 for output in outputs)
 for clip, index, name, metadata in outputs:
     assert clip.num_frames == 3
     assert clip.fps == Fraction(24000, 1001)

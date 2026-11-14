@@ -44,21 +44,7 @@ def test_write_vsview_session_script_removes_reserved_path_after_write_failure(
         write_vsview_session_script(
             reference=Path("ref.mkv"),
             comparisons=[Path("comparison.mkv")],
-            suggested_offsets_by_key={"ref:comparison": 0},
-            audio_review_by_key={
-                "ref:comparison": json.dumps(
-                    {
-                        "current_authority": {
-                            "origin": "shared_computed_offsets",
-                            "frame_offset": 0,
-                        },
-                        "evidence_availability": "historical_details_unavailable",
-                        "audio_attempt": None,
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-            },
+            audio_review_by_key={"ref:comparison": _accepted_review()},
             cache_dir=tmp_path,
         )
 
@@ -74,7 +60,6 @@ def test_write_vsview_session_script_requires_root_for_managed_indexes(
         write_vsview_session_script(
             reference=Path("ref.mkv"),
             comparisons=[Path("comparison.mkv")],
-            suggested_offsets_by_key={"ref:comparison": 0},
             audio_review_by_key={"ref:comparison": "{}"},
             cache_dir=tmp_path,
             source_indexes={Path("ref.mkv"): Path("ref.lwi")},
@@ -128,26 +113,14 @@ def test_generated_diagnostics_use_legacy_stream_encoding(
         assert buffer.getvalue() == f"  x Épisode ?{os.linesep}".encode("cp1252")
 
 
-def _decision_payload(*, state: str) -> dict[str, object]:
-    return {
-        "state": state,
-        "candidate": {
-            "frame_offset": 0,
-            "time_offset_seconds": 0.0,
-            "subframe_estimate": 0.0,
-            "basis": "audio_only",
-        },
-        "primary_reason": "test",
-        "failed_gates": [],
-    }
-
-
 def _accepted_review() -> str:
     return json.dumps(
         {
             "current_authority": {"origin": "shared_computed_offsets", "frame_offset": 0},
-            "evidence_availability": "historical_details_unavailable",
-            "audio_attempt": {"decision": _decision_payload(state="trusted_automatic")},
+            "decision_state": None,
+            "candidate_offset": None,
+            "summary_lines": [],
+            "detail_lines": [],
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -158,8 +131,10 @@ def _provisional_review() -> str:
     return json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "not_computed",
-            "audio_attempt": {"decision": _decision_payload(state="provisional")},
+            "decision_state": "provisional",
+            "candidate_offset": 0,
+            "summary_lines": [],
+            "detail_lines": [],
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -170,8 +145,10 @@ def _malformed_review() -> str:
     return json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "not_computed",
-            "audio_attempt": {"decision": {"state": "provisional"}},
+            "decision_state": "provisional",
+            "candidate_offset": None,
+            "summary_lines": [],
+            "detail_lines": [],
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -234,7 +211,6 @@ def _execute_ready_block(
     script = _build_script_content(
         reference=reference,
         comparisons=comparisons,
-        suggested_offsets_by_key={"ref:a": 0, "ref:b": None},
         audio_review_by_key=audio_review_by_key
         if audio_review_by_key is not None
         else {"ref:a": _accepted_review(), "ref:b": _provisional_review()},
@@ -451,19 +427,15 @@ def test_audio_output_state_preserves_authority_and_candidate_state(
     expected: str,
     warning: bool,
 ) -> None:
-    attempt: dict[str, object] | None = None
-    if decision is not None:
-        candidate: dict[str, object] | None = (
-            {"frame_offset": 4 if decision == "trusted_automatic" else 6}
-            if decision != "unavailable"
-            else None
-        )
-        attempt = {"decision": {"state": decision, "candidate": candidate}}
+    candidate = {"trusted_automatic": 4, "provisional": 6}.get(decision) if decision else None
     payload = cast(
         AudioReviewPayload,
         {
             "current_authority": {"origin": origin, "frame_offset": offset},
-            "audio_attempt": attempt,
+            "decision_state": decision,
+            "candidate_offset": candidate,
+            "summary_lines": [],
+            "detail_lines": [],
         },
     )
     console = _session_console(stderr=_StubStderr())
@@ -477,7 +449,6 @@ def test_short_names_by_stem_defaults_to_display_names(tmp_path: Path) -> None:
     kwargs: dict[str, Any] = {
         "reference": reference,
         "comparisons": comparisons,
-        "suggested_offsets_by_key": {"ref:a": 0},
         "audio_review_by_key": {"ref:a": _accepted_review()},
         "presentation_names_by_stem": {"ref": "REF", "a": "A"},
     }
@@ -513,7 +484,6 @@ def test_session_script_optional_frame_cache_limit(
     script = _build_script_content(
         reference=tmp_path / "ref.mkv",
         comparisons=[tmp_path / "cmp.mkv"],
-        suggested_offsets_by_key={"ref:cmp": 0},
         audio_review_by_key={"ref:cmp": _accepted_review()},
         memory_limit_mb=memory_limit_mb,
     )
@@ -533,7 +503,6 @@ def test_session_output_names_pad_by_terminal_cells(monkeypatch: pytest.MonkeyPa
             path="a.mkv",
             display_name="Cafe\u0301",
             comparison_key="ref:a",
-            suggested_offset=0,
             audio_review=_accepted_review(),
         )
         console.print_ready(reference, {"a": target}, {}, [])
@@ -559,7 +528,6 @@ def test_generated_settings_roundtrip_preserves_enums(speed: str) -> None:
     script = _build_script_content(
         reference=Path("ref.mkv"),
         comparisons=[Path("comparison.mkv")],
-        suggested_offsets_by_key={"ref:comparison": 0},
         audio_review_by_key={"ref:comparison": "{}"},
         preview_tonemap=settings,
     )

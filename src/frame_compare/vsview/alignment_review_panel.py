@@ -32,17 +32,9 @@ from vsview.api import (
     run_in_loop,
 )
 
-from frame_compare.utils.alignment_evidence import (
-    AudioAlignmentDecision,
-    audio_unavailable_phrase,
-)
-from frame_compare.utils.alignment_review_projection import (
-    AudioReviewPresentation,
-    audio_evidence_rows,
-    build_audio_review_presentation,
-)
 from frame_compare.vsview.alignment_overlay import PANEL_LABEL_EXPLANATION
 from frame_compare.vsview.alignment_review_contract import (
+    MANUAL_AUTHORITY_ORIGINS,
     AlignmentReviewComparisonMetadata,
     AlignmentReviewContractError,
     AlignmentReviewDecision,
@@ -60,13 +52,6 @@ from frame_compare.vsview.alignment_selection import opening_hint
 from frame_compare.vsview.workspace_positions import WorkspacePositions
 
 type _InputBasis = Literal["positions", "offsets"]
-_MANUAL_AUTHORITY_ORIGINS = frozenset(
-    {
-        "interactive_confirmed_this_run",
-        "shared_previous_offsets",
-        "preexisting_manual_override",
-    }
-)
 _POSITIONS_GUIDANCE = (
     "Browse each source to the same visual moment, then confirm matching frames once. "
     "Original frame numbers update even while this panel is closed."
@@ -88,7 +73,6 @@ _WAITING_GUIDANCE = (
 
 @dataclass(frozen=True, slots=True)
 class _ComparisonPresentation:
-    review: AudioReviewPresentation | None
     summary: str
     details: str
 
@@ -373,15 +357,15 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
         self._session = session
         presentations: list[_ComparisonPresentation] = []
         for comparison in workspace.comparisons:
-            attempt = comparison.audio_review.audio_attempt
-            review = build_audio_review_presentation(attempt) if attempt is not None else None
+            audio_review = comparison.audio_review
+            detail_lines = list(audio_review.detail_lines)
+            _append_origin_bounds_detail(
+                detail_lines, comparison, workspace.reference.source_frame_count
+            )
             presentations.append(
                 _ComparisonPresentation(
-                    review=review,
-                    summary=_audio_summary(comparison, review),
-                    details=_audio_details(
-                        comparison, workspace.reference.source_frame_count, review
-                    ),
+                    summary="\n".join(audio_review.summary_lines),
+                    details="\n".join(detail_lines),
                 )
             )
         self._presentations = tuple(presentations)
@@ -924,109 +908,6 @@ def _parse_offset(
     return offset, None
 
 
-def _candidate_offset(comparison: AlignmentReviewComparisonMetadata) -> int | None:
-    attempt = comparison.audio_review.audio_attempt
-    if attempt is None or attempt.decision.candidate is None:
-        return None
-    return attempt.decision.candidate.frame_offset
-
-
-def _unavailable_summary_line(comparison: AlignmentReviewComparisonMetadata) -> str:
-    attempt = comparison.audio_review.audio_attempt
-    reason = attempt.decision.primary_reason if attempt is not None else "no_usable_audio"
-    return _unavailable_summary_line_for_reason(reason)
-
-
-def _audio_summary(
-    comparison: AlignmentReviewComparisonMetadata, review: AudioReviewPresentation | None
-) -> str:
-    authority = comparison.audio_review.current_authority
-    lines: list[str] = []
-    attempt = comparison.audio_review.audio_attempt
-    if authority.origin in _MANUAL_AUTHORITY_ORIGINS and authority.frame_offset is not None:
-        lines.extend(
-            (
-                f"Manually confirmed alignment: {authority.frame_offset:+d}f — APPLIED",
-                "No additional confirmation needed.",
-            )
-        )
-    elif authority.origin == "shared_computed_offsets" and authority.frame_offset is not None:
-        lines.extend(
-            (
-                f"Accepted audio alignment reused: {authority.frame_offset:+d}f — APPLIED",
-                "No additional confirmation needed.",
-            )
-        )
-    elif authority.origin == "computed_this_run" and authority.frame_offset is not None:
-        lines.extend(
-            (
-                f"Accepted audio alignment: {authority.frame_offset:+d}f — APPLIED",
-                "No additional confirmation needed.",
-            )
-        )
-    elif attempt is not None and attempt.decision.state in {"provisional", "unavailable"}:
-        assert review is not None
-        candidate = review.suggested_offset
-        if candidate is not None:
-            lines.extend((f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED",))
-            lines.extend(
-                row.value
-                for row in review.normal_review_rows(
-                    panel=True,
-                    action_line="Visual confirmation required to use this hint.",
-                )
-            )
-    if not lines:
-        lines.append(_unavailable_summary_line(comparison))
-    if authority.origin in _MANUAL_AUTHORITY_ORIGINS and attempt is not None:
-        original = _original_audio_summary(attempt.decision)
-        if original is not None:
-            lines.append(f"Original evidence: {original}")
-    elif authority.origin == "computed_this_run" and attempt is not None:
-        assert review is not None
-        noted = review.noted_line(panel=True)
-        if noted is not None:
-            lines.append(noted)
-    return "\n".join(lines)
-
-
-def _original_audio_summary(decision: AudioAlignmentDecision) -> str | None:
-    state = decision.state
-    candidate = decision.candidate.frame_offset if decision.candidate is not None else None
-    if state == "trusted_automatic" and candidate is not None:
-        return f"Accepted audio alignment: {candidate:+d}f — APPLIED"
-    if state == "provisional" and candidate is not None:
-        return f"Provisional audio candidate: {candidate:+d}f — NOT APPLIED"
-    if state == "unavailable":
-        return _unavailable_summary_line_for_reason(decision.primary_reason)
-    return None
-
-
-def _unavailable_summary_line_for_reason(reason: str) -> str:
-    return f"No usable audio candidate ({audio_unavailable_phrase(reason)}) — NOT APPLIED"
-
-
-def _audio_details(
-    comparison: AlignmentReviewComparisonMetadata,
-    reference_source_frame_count: int,
-    review: AudioReviewPresentation | None,
-) -> str:
-    attempt = comparison.audio_review.audio_attempt
-    if attempt is None:
-        lines = ["Historical audio details unavailable."]
-        _append_origin_bounds_detail(
-            lines,
-            comparison,
-            reference_source_frame_count,
-        )
-        return "\n".join(lines)
-    assert review is not None
-    lines = list(review.verbose_lines(panel=True))
-    lines.extend(f"{row.key}: {row.value}" for row in audio_evidence_rows(attempt))
-    _append_origin_bounds_detail(lines, comparison, reference_source_frame_count)
-    return "\n".join(lines)
-
-
 def _append_origin_bounds_detail(
     lines: list[str],
     comparison: AlignmentReviewComparisonMetadata,
@@ -1048,13 +929,12 @@ def _append_origin_bounds_detail(
 
 def _keep_saved_text(comparison: AlignmentReviewComparisonMetadata) -> str:
     authority = comparison.audio_review.current_authority
-    attempt = comparison.audio_review.audio_attempt
-    if authority.origin in _MANUAL_AUTHORITY_ORIGINS and authority.frame_offset is not None:
+    if authority.origin in MANUAL_AUTHORITY_ORIGINS and authority.frame_offset is not None:
         return f"Current alignment retained: {authority.frame_offset:+d}f — manually confirmed"
     if authority.frame_offset is not None:
         return f"Accepted alignment retained: {authority.frame_offset:+d}f"
-    candidate = _candidate_offset(comparison)
-    if attempt is not None and attempt.decision.state == "provisional" and candidate is not None:
+    candidate = comparison.audio_review.candidate_offset
+    if comparison.audio_review.decision_state == "provisional" and candidate is not None:
         return (
             f"Current alignment retained. Provisional candidate {candidate:+d}f not confirmed "
             "— NOT APPLIED. Comparison unresolved."

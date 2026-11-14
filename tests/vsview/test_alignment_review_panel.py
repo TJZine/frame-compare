@@ -23,7 +23,12 @@ from vsview.vsenv import QtEventLoop
 
 from frame_compare.services.alignment import _build_audio_review_map
 from frame_compare.services.alignment_keys import alignment_key
-from frame_compare.services.types import AlignmentResult, ComparisonResolution
+from frame_compare.services.types import (
+    AlignmentResult,
+    AlignmentSource,
+    AlignmentWriteProvenance,
+    ComparisonResolution,
+)
 from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
 )
@@ -37,7 +42,6 @@ from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
     ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
     ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
-    ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
     ALIGNMENT_REVIEW_METADATA_VERSION,
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
 )
@@ -60,7 +64,6 @@ from tests.alignment_review_test_support import (
     audio_review as _audio_review,
 )
 from tests.alignment_review_test_support import (
-    native_attempt_payload,
     provisional_audio_attempt,
     trusted_audio_attempt,
     unavailable_audio_attempt,
@@ -71,94 +74,82 @@ _SESSION_ID = "12345678123456781234567812345678"
 _APP = QApplication.instance() or QApplication([])
 
 
-def _attempt_audio_review(attempt: AudioAlignmentAttempt, *, applied: bool = False) -> str:
-    return json.dumps(
-        {
-            "current_authority": {
-                "origin": "computed_this_run" if applied else "none",
-                "frame_offset": 0 if applied else None,
-            },
-            "evidence_availability": "current_attempt",
-            "audio_attempt": native_attempt_payload(attempt),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+def _attempt_audio_review(
+    attempt: AudioAlignmentAttempt | None,
+    *,
+    applied: bool = False,
+    origin: AlignmentWriteProvenance = "computed_this_run",
+    frame_offset: int = 0,
+) -> str:
+    ref = Path("reference")
+    cmp = Path("comparison")
+    key = alignment_key(ref, cmp)
+    source = {
+        "computed_this_run": "computed",
+        "shared_computed_offsets": "cached",
+        "interactive_confirmed_this_run": "manual",
+        "shared_previous_offsets": "manual",
+        "preexisting_manual_override": "manual",
+    }[origin]
+    candidate = attempt.decision.candidate if attempt is not None else None
+    seconds = frame_offset / 24 if applied else None
+    if applied and origin == "computed_this_run" and candidate is not None:
+        frame_offset = candidate.frame_offset
+        seconds = candidate.time_offset_seconds
+    result = AlignmentResult(
+        reference_clip=ref.name,
+        comparison_clip=cmp.name,
+        frame_offset=frame_offset if applied else None,
+        time_offset_seconds=seconds,
+        correlation_score=1.0,
+        algorithm="cross_correlation" if source != "manual" else None,
+        source=cast(AlignmentSource, source),
+        applied=applied,
+        diagnostic=attempt.decision.primary_reason if attempt is not None else None,
+        stability=attempt.stability if attempt is not None else None,
+        audio_attempt=attempt,
     )
+    return _build_audio_review_map(
+        reference=ref,
+        comparisons=[cmp],
+        resolutions={key: ComparisonResolution(result, "key", origin)},
+    )[key]
 
 
 def _provisional_audio_review(ordinal: int = 1, frame_offset: int = 0) -> str:
-    return json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": native_attempt_payload(
-                provisional_audio_attempt(ordinal=ordinal, frame_offset=frame_offset)
-            ),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+    return _attempt_audio_review(
+        provisional_audio_attempt(ordinal=ordinal, frame_offset=frame_offset)
     )
 
 
 def _accepted_audio_review(ordinal: int = 1, frame_offset: int = 0) -> str:
-    return json.dumps(
-        {
-            "current_authority": {"origin": "computed_this_run", "frame_offset": frame_offset},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": native_attempt_payload(
-                trusted_audio_attempt(ordinal=ordinal, frame_offset=frame_offset)
-            ),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+    return _attempt_audio_review(
+        trusted_audio_attempt(ordinal=ordinal, frame_offset=frame_offset), applied=True
     )
 
 
 def _unavailable_audio_review(ordinal: int = 1) -> str:
-    return json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": native_attempt_payload(unavailable_audio_attempt(ordinal=ordinal)),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    return _attempt_audio_review(unavailable_audio_attempt(ordinal=ordinal))
 
 
 def _manual_audio_review(offset: int = 0) -> str:
-    payload = {
-        "current_authority": {
-            "origin": "preexisting_manual_override",
-            "frame_offset": offset,
-        },
-        "evidence_availability": "historical_details_unavailable",
-        "audio_attempt": None,
-    }
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return _attempt_audio_review(
+        None, applied=True, origin="preexisting_manual_override", frame_offset=offset
+    )
 
 
 def _manual_with_provisional_audio_review() -> str:
-    payload = cast(dict[str, Any], json.loads(_provisional_audio_review()))
-    payload["current_authority"] = {
-        "origin": "interactive_confirmed_this_run",
-        "frame_offset": 0,
-    }
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return _attempt_audio_review(
+        provisional_audio_attempt(frame_offset=0),
+        applied=True,
+        origin="interactive_confirmed_this_run",
+    )
 
 
-def _authority_audio_review(origin: str) -> str:
+def _authority_audio_review(origin: AlignmentWriteProvenance) -> str:
     if origin == "computed_this_run":
         return _accepted_audio_review()
-    return json.dumps(
-        {
-            "current_authority": {"origin": origin, "frame_offset": 0},
-            "evidence_availability": "historical_details_unavailable",
-            "audio_attempt": None,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    return _attempt_audio_review(None, applied=True, origin=origin)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -206,7 +197,6 @@ def _comparison_output(
             ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY: ordinal,
             ALIGNMENT_REVIEW_METADATA_ROLE_KEY: "comparison",
             ALIGNMENT_REVIEW_METADATA_NAME_KEY: f"Comparison {ordinal} source",
-            ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY: suggestion,
             ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY: (
                 _audio_review(suggestion) if audio_review is None else audio_review
             ),
@@ -342,7 +332,7 @@ def test_panel_reports_invalid_workspace_metadata(tmp_path: Path, problem: str) 
     elif problem == "old-version":
         assert "newly generated session" in message
         assert "metadata v1" in message
-        assert "requires v5" in message
+        assert "requires v6" in message
         assert not panel.keep_button.isEnabled()
     else:
         assert (
@@ -430,7 +420,7 @@ def test_panel_summary_preserves_target_boundary_copy(tmp_path: Path, boundary: 
         )
 
 
-def test_actual_native_payload_omits_rows_and_preserves_panel_copy(
+def test_actual_v6_native_payload_preserves_panel_copy(
     tmp_path: Path,
 ) -> None:
     attempt = production_nested_targets_attempt()
@@ -461,13 +451,20 @@ def test_actual_native_payload_omits_rows_and_preserves_panel_copy(
             )
         },
     )[key]
-    native_attempt = json.loads(native_review)["audio_attempt"]
-    assert native_attempt["chunks"]["rows_omitted"] is True
-    assert all(
-        native_attempt["chunks"][name] == []
-        for name in ("starts", "counts", "active", "lags", "psrs", "credible", "agrees")
-    )
-    assert native_attempt["chunks"]["total_samples"] == attempt.chunks.total_samples
+    review = json.loads(native_review)
+    assert set(review) == {
+        "current_authority",
+        "decision_state",
+        "candidate_offset",
+        "summary_lines",
+        "detail_lines",
+    }
+    assert review["current_authority"] == {"origin": "none", "frame_offset": None}
+    assert review["decision_state"] == "provisional"
+    assert review["candidate_offset"] == 146
+    for field in ("summary_lines", "detail_lines"):
+        assert isinstance(review[field], list)
+        assert all(isinstance(line, str) for line in review[field])
 
     panel, _api, _script = _panel(tmp_path, suggestion=None, audio_review=native_review)
     summary = panel.audio_summary_labels[0].text()
@@ -857,7 +854,7 @@ def test_manual_authority_stays_distinct_from_retained_provisional_attempt(
 )
 def test_authority_origin_consistently_drives_alignment_presentation(
     tmp_path: Path,
-    origin: str,
+    origin: AlignmentWriteProvenance,
     manual: bool,
     summary_prefix: str,
 ) -> None:
@@ -1066,15 +1063,7 @@ def test_p4a_panel_shows_review_copy_without_prefilling_provisional_values(
     tmp_path: Path,
 ) -> None:
     attempt = review_attempt("competing_offset_confirmed_by_video")
-    audio_review = json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": native_attempt_payload(attempt),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    audio_review = _attempt_audio_review(attempt)
     panel, _api, _script = _panel(
         tmp_path,
         suggestion=None,
@@ -1181,15 +1170,7 @@ def test_p4a_panel_covers_each_non_applied_reason(
         if reason == "no_single_offset"
         else review_attempt(reason)
     )
-    audio_review = json.dumps(
-        {
-            "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "current_attempt",
-            "audio_attempt": native_attempt_payload(attempt),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    audio_review = _attempt_audio_review(attempt)
     panel, _api, _script = _panel(
         tmp_path,
         suggestion=None,
@@ -1203,20 +1184,9 @@ def test_p4a_panel_covers_each_non_applied_reason(
     assert not panel.use_positions_button.isEnabled()
 
 
-def test_evidence_is_built_once_per_comparison_and_replaced_with_workspace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_audio_review_stays_stable_during_navigation_and_refreshes_with_workspace(
+    tmp_path: Path,
 ) -> None:
-    builds = 0
-    original = build_audio_review_presentation
-
-    def build(attempt: AudioAlignmentAttempt) -> Any:
-        nonlocal builds
-        builds += 1
-        return original(attempt)
-
-    monkeypatch.setattr(
-        "frame_compare.vsview.alignment_review_panel.build_audio_review_presentation", build
-    )
     panel, api, _script = _panel(
         tmp_path,
         comparison_count=2,
@@ -1226,12 +1196,10 @@ def test_evidence_is_built_once_per_comparison_and_replaced_with_workspace(
             _provisional_audio_review(ordinal=2, frame_offset=7),
         ),
     )
-    assert builds == 2
     summaries = [label.text() for label in panel.audio_summary_labels]
     for frame in range(5):
         _visit(panel, api, 0, frame)
         _visit(panel, api, 1, frame + 1)
-    assert builds == 2
     assert [label.text() for label in panel.audio_summary_labels] == summaries
     assert panel.frame_inputs[0].text() == ""
 
@@ -1239,11 +1207,9 @@ def test_evidence_is_built_once_per_comparison_and_replaced_with_workspace(
         frame_offset=9
     )
     _call_hook(panel.on_workspace_loaded)
-    assert builds == 4
     assert "+9f" in panel.audio_summary_labels[0].text()
     assert panel.source_status_labels[0].text() == "Original frame unavailable"
     _visit(panel, api, 0, 12)
-    assert builds == 4
 
 
 @pytest.mark.parametrize("text", ["", "-1", "x", "200"])

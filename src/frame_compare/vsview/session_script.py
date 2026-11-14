@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 def write_vsview_session_script(
     reference: Path,
     comparisons: list[Path],
-    suggested_offsets_by_key: dict[str, int | None],
     audio_review_by_key: dict[str, str],
     cache_dir: Path,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
@@ -41,7 +40,6 @@ def write_vsview_session_script(
     script_content = _build_script_content(
         reference=reference,
         comparisons=comparisons,
-        suggested_offsets_by_key=suggested_offsets_by_key,
         audio_review_by_key=audio_review_by_key,
         frame_props_by_stem=frame_props_by_stem,
         presentation_names_by_stem=presentation_names_by_stem,
@@ -113,7 +111,6 @@ def _preview_frame_props_for_script(
 def _build_script_content(
     reference: Path,
     comparisons: list[Path],
-    suggested_offsets_by_key: dict[str, int | None],
     audio_review_by_key: dict[str, str],
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
     presentation_names_by_stem: dict[str, str] | None = None,
@@ -134,7 +131,6 @@ def _build_script_content(
             "path": str(comparison),
             "display_name": presentation_names.get(comparison.stem, comparison.stem),
             "comparison_key": key,
-            "suggested_offset": suggested_offsets_by_key.get(key),
             "audio_review": audio_review_by_key[key],
         }
         if comparison in indexes:

@@ -194,8 +194,10 @@ audio_review_by_key = {
     key: json.dumps(
         {
             "current_authority": {"origin": "shared_computed_offsets", "frame_offset": 0},
-            "evidence_availability": "historical_details_unavailable",
-            "audio_attempt": None,
+            "decision_state": None,
+            "candidate_offset": None,
+            "summary_lines": ["Accepted audio alignment reused: +0f — APPLIED"],
+            "detail_lines": ["Historical audio details unavailable."],
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -206,10 +208,6 @@ session, _wait_seconds = launch_alignment_verification_session(
     VSViewSessionRequest(
         reference=reference,
         comparisons=[comparison, comparison_2],
-        suggested_offsets_by_key={
-            "reference:comparison": 0,
-            "reference:comparison_2": 0,
-        },
         audio_review_by_key=audio_review_by_key,
         cache_dir=proof_dir / "cache",
         source_indexes={reference: reference_index},
