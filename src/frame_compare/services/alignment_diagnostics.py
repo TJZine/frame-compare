@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import Literal
 
 from frame_compare.errors import PathEscapesRootError
-from frame_compare.services.types import ComparisonResolution
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AudioAlignmentAttempt,
     audio_attempt_payload,
 )
+from frame_compare.services.types import ComparisonResolution
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.paths import require_managed_immediate_child

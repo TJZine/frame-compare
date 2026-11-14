@@ -18,9 +18,9 @@ import pytest
 from frame_compare.services import alignment_audio
 from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_audio import measure_selected_audio_duration, probe_streams
+from frame_compare.services.alignment_review_projection import audio_evidence_rows
 from frame_compare.services.errors import AudioAlignmentCancellationError
 from frame_compare.services.types import AlignmentConfig
-from frame_compare.utils.alignment_review_projection import audio_evidence_rows
 from frame_compare.vs.env import detect_plugins, ensure_vs_environment
 from frame_compare.vs.loader import DefaultVSLoader
 from tests.integration.alignment_u4_media_store import open_u4_media

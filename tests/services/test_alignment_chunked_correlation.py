@@ -14,12 +14,12 @@ from frame_compare.services.alignment_correlation import (
     _chunk_psr,
     plan_audio_chunks,
 )
-from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
     MAX_AUDIO_CHUNKS,
     AudioOutcomeStatus,
 )
+from frame_compare.services.errors import AudioAlignmentError
 from tests.services.alignment_synthetic_audio import (
     downmix_program,
     drift_program,

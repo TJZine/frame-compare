@@ -46,7 +46,7 @@ from frame_compare.orchestration.context import ClipActiveRect, RunContext
 from frame_compare.orchestration.phase_alignment import run_align_phase
 from frame_compare.orchestration.run_inputs import build_run_request
 from frame_compare.orchestration.types import RunDependencies
-from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
+from frame_compare.services.alignment_review_projection import build_audio_review_presentation
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.paths import require_managed_immediate_child
 from frame_compare.vs.loader import DefaultVSLoader

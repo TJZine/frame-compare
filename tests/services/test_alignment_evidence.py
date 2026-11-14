@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, replace
 
-from frame_compare.utils.alignment_evidence import audio_attempt_payload
+from frame_compare.services.alignment_evidence import audio_attempt_payload
 from tests.services.alignment_evidence_test_support import attempt_with_chunks
 
 

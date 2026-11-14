@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from frame_compare.utils.alignment_evidence import AUDIO_ANALYSIS_SAMPLE_RATE
+from frame_compare.services.alignment_evidence import AUDIO_ANALYSIS_SAMPLE_RATE
 
 SAMPLE_RATE = AUDIO_ANALYSIS_SAMPLE_RATE
 

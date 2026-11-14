@@ -22,18 +22,18 @@ from vsengine.loops import get_loop, set_loop
 from vsview.vsenv import QtEventLoop
 
 from frame_compare.services.alignment import _build_audio_review_map
+from frame_compare.services.alignment_evidence import (
+    AudioAlignmentAttempt,
+)
 from frame_compare.services.alignment_keys import alignment_key
+from frame_compare.services.alignment_review_projection import (
+    build_audio_review_presentation,
+)
 from frame_compare.services.types import (
     AlignmentResult,
     AlignmentSource,
     AlignmentWriteProvenance,
     ComparisonResolution,
-)
-from frame_compare.utils.alignment_evidence import (
-    AudioAlignmentAttempt,
-)
-from frame_compare.utils.alignment_review_projection import (
-    build_audio_review_presentation,
 )
 from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,

@@ -15,7 +15,7 @@ from frame_compare.services.alignment_correlation import (
     ChunkPlan,
     ChunkRun,
 )
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
     AlignmentStabilitySummary,
     AudioAlignmentDecision,
@@ -32,12 +32,12 @@ from frame_compare.utils.alignment_evidence import (
     VideoCheckObservation,
     VideoTargetEvidence,
 )
-from frame_compare.utils.alignment_policy import (
+from frame_compare.services.alignment_policy import (
     compensated_lag_to_frame,
     compensated_offset_seconds,
     start_compensation_seconds,
 )
-from frame_compare.utils.alignment_policy import (
+from frame_compare.services.alignment_policy import (
     rounded_frame as _rounded_frame,
 )
 

@@ -28,15 +28,15 @@ from frame_compare.services.alignment_decision import (
     decide_after_video,
     decide_completed_stage,
 )
-from frame_compare.services.alignment_video import VideoClipRequest
-from frame_compare.services.types import AlignmentConfig
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AudioAlignmentAttempt,
     AudioChunkColumns,
     AudioStageOutcome,
     VideoCheckObservation,
     VideoTargetResolution,
 )
+from frame_compare.services.alignment_video import VideoClipRequest
+from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader

@@ -5,11 +5,11 @@ from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from frame_compare.services.types import AlignmentSource
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
 )
+from frame_compare.services.types import AlignmentSource
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.types import HDRMetadata
 

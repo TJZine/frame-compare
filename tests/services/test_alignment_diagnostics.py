@@ -13,8 +13,7 @@ import pytest
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services import alignment_audio, alignment_diagnostics
 from frame_compare.services.alignment_diagnostics import _MAX_DIAGNOSTIC_BYTES
-from frame_compare.services.types import AlignmentResult, ComparisonResolution
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     MAX_AUDIO_CHUNKS,
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
@@ -30,6 +29,7 @@ from frame_compare.utils.alignment_evidence import (
     VideoCheckObservation,
     VideoTargetEvidence,
 )
+from frame_compare.services.types import AlignmentResult, ComparisonResolution
 
 _CHUNK_SAMPLES = 40000
 _LAG_SAMPLES = 240000

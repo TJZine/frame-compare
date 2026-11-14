@@ -15,8 +15,8 @@ import numpy.typing as npt
 import pytest
 
 from frame_compare.services import alignment_video
+from frame_compare.services.alignment_evidence import AudioAlignmentAttempt
 from frame_compare.services.alignment_video import VideoClipRequest
-from frame_compare.utils.alignment_evidence import AudioAlignmentAttempt
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.loader import VSLoader
 from tests.services.alignment_evidence_test_support import attempt_with_chunks

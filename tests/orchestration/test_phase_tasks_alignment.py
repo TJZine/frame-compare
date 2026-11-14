@@ -29,9 +29,9 @@ from frame_compare.orchestration.full_window_retry import (
     compute_selection_window_with_recovery,
 )
 from frame_compare.orchestration.phases import PhaseStatus, execute_phases
+from frame_compare.services.alignment_evidence import AlignmentStabilitySummary
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentOperationOutcome, AlignmentResult
-from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.types import AlignmentRequest
 from tests.orchestration.execute_run_helpers import FakeFFmpegRunner

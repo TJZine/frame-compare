@@ -19,7 +19,7 @@ from frame_compare.services.alignment_decision import (
     classify_audio_observations,
     competing_run_center,
 )
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     MAX_VIDEO_TARGET_POSITIONS,
     AudioAlignmentAttempt,
     AudioSameFrameContext,
@@ -29,17 +29,17 @@ from frame_compare.utils.alignment_evidence import (
     VideoTargetEvidence,
     VideoTargetPosition,
 )
-from frame_compare.utils.alignment_policy import (
+from frame_compare.services.alignment_policy import (
     CONFIRMATION_MARGIN,
     MIN_VIDEO_SCORE_SEPARATION,
     compensated_lag_to_frame,
     sample_to_reference_frame,
     selected_start_compensation_seconds,
 )
-from frame_compare.utils.alignment_policy import (
+from frame_compare.services.alignment_policy import (
     confirmed_offset as _confirmed_offset,
 )
-from frame_compare.utils.alignment_policy import (
+from frame_compare.services.alignment_policy import (
     position_winner as _position_winner,
 )
 from frame_compare.utils.types import AlignmentClipIdentity

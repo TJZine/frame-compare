@@ -17,6 +17,9 @@ import pytest
 import tomli_w
 
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
+from frame_compare.services.alignment_evidence import (
+    AlignmentStabilitySummary,
+)
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME,
 )
@@ -36,9 +39,6 @@ from frame_compare.services.types import (
     ReusableAlignmentEntry,
 )
 from frame_compare.utils import file_lock
-from frame_compare.utils.alignment_evidence import (
-    AlignmentStabilitySummary,
-)
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import (
     AlignmentCacheSettings,

@@ -9,21 +9,21 @@ import structlog
 from rich.markup import escape
 from rich.text import Text
 
-from frame_compare.services.alignment_keys import alignment_key
-from frame_compare.services.types import (
-    AlignmentConfig,
-    ComparisonResolution,
-)
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AudioAlignmentAttempt,
     AudioAlignmentDecision,
     audio_unavailable_phrase,
 )
-from frame_compare.utils.alignment_review_projection import (
+from frame_compare.services.alignment_keys import alignment_key
+from frame_compare.services.alignment_review_projection import (
     AudioReviewPresentation,
     EvidenceRow,
     audio_evidence_rows,
     build_audio_review_presentation,
+)
+from frame_compare.services.types import (
+    AlignmentConfig,
+    ComparisonResolution,
 )
 from frame_compare.utils.artifact_paths import artifact_link
 from frame_compare.utils.progress import RichProgressReporter

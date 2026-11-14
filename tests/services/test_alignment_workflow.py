@@ -29,6 +29,7 @@ from frame_compare.services.alignment_audio import (
     ProbedStreams,
     VideoStreamStart,
 )
+from frame_compare.services.alignment_evidence import MAX_AUDIO_CHUNKS
 from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
 from frame_compare.services.alignment_streaming import (
     CollectionCleanup,
@@ -41,7 +42,6 @@ from frame_compare.services.errors import (
     AudioAlignmentCleanupError,
 )
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
-from frame_compare.utils.alignment_evidence import MAX_AUDIO_CHUNKS
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.alignment_synthetic_audio import (
     insert_program,

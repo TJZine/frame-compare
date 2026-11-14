@@ -6,7 +6,7 @@ from dataclasses import replace
 from fractions import Fraction
 
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,

@@ -33,16 +33,7 @@ from frame_compare.services.alignment_decision import (
     decide_after_video,
     decide_completed_stage,
 )
-from frame_compare.services.alignment_keys import alignment_key
-from frame_compare.services.alignment_presentation import (
-    present_alignment_evidence,
-)
-from frame_compare.services.types import (
-    AlignmentConfig,
-    AlignmentResult,
-    ComparisonResolution,
-)
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AudioChunkRun,
     AudioSameFrameContext,
     VideoCheckObservation,
@@ -51,7 +42,16 @@ from frame_compare.utils.alignment_evidence import (
     VideoTargetEvidence,
     VideoTargetPosition,
 )
-from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
+from frame_compare.services.alignment_keys import alignment_key
+from frame_compare.services.alignment_presentation import (
+    present_alignment_evidence,
+)
+from frame_compare.services.alignment_review_projection import build_audio_review_presentation
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentResult,
+    ComparisonResolution,
+)
 from frame_compare.utils.logging import configure_logging
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import AlignmentRequest
@@ -1112,7 +1112,7 @@ def test_verbose_provisional_shows_retimed_context(
 
 
 def test_verbose_unavailable_shows_runs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from frame_compare.utils.alignment_evidence import AudioChunkRun
+    from frame_compare.services.alignment_evidence import AudioChunkRun
 
     config = AlignmentConfig(cache_results=False, no_color=True)
     reference, comparison, request = _request_for(tmp_path, config)
@@ -1156,7 +1156,7 @@ def test_verbose_unavailable_shows_runs(tmp_path: Path, capsys: pytest.CaptureFi
 def test_verbose_stability_scope_names_unassessed_chunks(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
+    from frame_compare.services.alignment_evidence import AlignmentStabilitySummary
 
     config = AlignmentConfig(cache_results=False, no_color=True)
     reference, comparison, request = _request_for(tmp_path, config)
@@ -2466,7 +2466,7 @@ def test_normal_audio_evidence_reports_observation_and_stability(
 ) -> None:
     from typing import cast
 
-    from frame_compare.utils.alignment_evidence import (
+    from frame_compare.services.alignment_evidence import (
         AlignmentStabilityClassification,
         AudioAuthorityRecount,
     )

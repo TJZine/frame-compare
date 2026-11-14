@@ -5,7 +5,7 @@ Producer parity tests in services keep these fixtures aligned with real output.
 
 from dataclasses import replace
 
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,

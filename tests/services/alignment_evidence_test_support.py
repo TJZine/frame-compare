@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,

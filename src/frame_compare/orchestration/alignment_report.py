@@ -11,13 +11,13 @@ from rich.text import Text
 
 from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.presentation import report_console_width
+from frame_compare.services.alignment_evidence import AlignmentStabilitySummary
 from frame_compare.services.release_identity import (
     ShortNameSource,
     format_release_descriptor,
     short_source_names,
 )
 from frame_compare.services.types import AlignmentSource
-from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.terminal_sections import Section, section_title
 from frame_compare.utils.terminal_theme import human_console

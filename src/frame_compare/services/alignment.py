@@ -33,6 +33,16 @@ from frame_compare.services.alignment_diagnostics import (
     AlignmentReviewOutcome,
     write_alignment_diagnostic,
 )
+from frame_compare.services.alignment_evidence import (
+    AUDIO_ANALYSIS_SAMPLE_RATE,
+    AudioAlignmentAttempt,
+    AudioCollectionFacts,
+    AudioCollectionFailure,
+    AudioCollectionObservation,
+    AudioPairSide,
+    VideoCheckObservation,
+    analysis_stream_start,
+)
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.alignment_presentation import (
@@ -78,16 +88,6 @@ from frame_compare.services.types import (
     AlignmentOperationOutcome,
     AlignmentResult,
     ComparisonResolution,
-)
-from frame_compare.utils.alignment_evidence import (
-    AUDIO_ANALYSIS_SAMPLE_RATE,
-    AudioAlignmentAttempt,
-    AudioCollectionFacts,
-    AudioCollectionFailure,
-    AudioCollectionObservation,
-    AudioPairSide,
-    VideoCheckObservation,
-    analysis_stream_start,
 )
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
