@@ -6,7 +6,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -104,8 +104,57 @@ def test_classify_outcome(
             applied=applied,
             frame_offset=frame_offset,
             state=state,
+            attempt_status="complete",
+            collection_failure=None,
+            decision_reason="audio_video_confirmed",
         )
         == outcome
+    )
+
+
+@pytest.mark.parametrize(
+    ("attempt_status", "collection_failure", "decision_reason"),
+    [
+        pytest.param("aborted", object(), "no_usable_audio", id="aborted-decode"),
+        pytest.param("complete", object(), "no_usable_audio", id="timeout"),
+        pytest.param("complete", None, "video_check_unavailable", id="video-check-unavailable"),
+    ],
+)
+def test_classify_outcome_rejects_operational_failures(
+    attempt_status: str, collection_failure: object | None, decision_reason: str
+) -> None:
+    script = _load_script()
+
+    assert (
+        script.classify_outcome(
+            expected_frame=None,
+            expected_automatic="not_applied",
+            applied=False,
+            frame_offset=None,
+            state="unavailable",
+            attempt_status=attempt_status,
+            collection_failure=collection_failure,
+            decision_reason=decision_reason,
+        )
+        == "unavailable"
+    )
+
+
+def test_classify_outcome_keeps_completed_inconclusive_control_valid() -> None:
+    script = _load_script()
+
+    assert (
+        script.classify_outcome(
+            expected_frame=None,
+            expected_automatic="not_applied",
+            applied=False,
+            frame_offset=None,
+            state="unavailable",
+            attempt_status="complete",
+            collection_failure=None,
+            decision_reason="video_check_inconclusive",
+        )
+        == "correctly_withheld"
     )
 
 
@@ -376,13 +425,48 @@ async def test_results_write_replaces_symlink_without_touching_referent(
         return record
 
     monkeypatch.setattr(script, "load_labels", lambda _path: [pair])
-    monkeypatch.setattr(script, "DefaultVSLoader", object)
+    monkeypatch.setattr(script, "DefaultVSLoader", lambda **_kwargs: object())
     monkeypatch.setattr(script, "align_pair", align_pair)
 
     assert await script.run_benchmark(tmp_path / "labels.json", output) is True
     assert not results_file.is_symlink()
     assert json.loads(results_file.read_text(encoding="utf-8"))["summary"]["passed"] is True
     assert outside_results.read_text(encoding="utf-8") == "unchanged"
+
+
+async def test_align_pair_refuses_stale_prepared_source_before_measurement(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = _load_script()
+    pair = _labelled_pair(script, tmp_path)
+    pair.reference.write_bytes(b"reference bytes")
+    pair.comparison.write_bytes(b"comparison bytes")
+    stale_reference = tmp_path / "source-a.stale.mkv"
+    stale_reference.write_bytes(b"stale bytes")
+    prepared = SimpleNamespace(
+        clips=[
+            SimpleNamespace(path=stale_reference, active_rect=None),
+            SimpleNamespace(path=pair.comparison, active_rect=None),
+        ],
+        config=object(),
+        workspace=object(),
+        selection_domain=object(),
+    )
+
+    async def prepare(*_args: object, **_kwargs: object) -> object:
+        return prepared
+
+    async def unexpected_measurement(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("stale prepared source must be rejected before measurement")
+
+    monkeypatch.setattr(script, "_prepare_pair", prepare)
+    monkeypatch.setattr(script, "run_align_phase", unexpected_measurement)
+
+    with pytest.raises(RuntimeError, match="prepared source order"):
+        await script.align_pair(pair, tmp_path / "output", object())
+
+    assert pair.reference.read_bytes() == b"reference bytes"
+    assert pair.comparison.read_bytes() == b"comparison bytes"
 
 
 def test_pair_config_uses_production_fps_at_pure_defaults(tmp_path: Path) -> None:
@@ -453,22 +537,76 @@ def test_media_link_rerun_accepts_same_target_and_rejects_stale_target(tmp_path:
         script._ensure_media_link(link, stale)
 
 
-def test_main_exits_nonzero_when_benchmark_gate_fails(
+def test_main_exits_nonzero_for_production_failed_attempt(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     script = _load_script()
+    reference = tmp_path / "reference.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.write_bytes(b"reference")
+    comparison.write_bytes(b"comparison")
+    labels = tmp_path / "labels.json"
+    labels.write_text(
+        json.dumps(
+            {
+                "pairs": [
+                    {
+                        "id": "failed-1",
+                        "category": "synthetic",
+                        "reference": reference.name,
+                        "comparison": comparison.name,
+                        "expected_automatic": "not_applied",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
 
-    async def fail_benchmark(*_args: object, **_kwargs: object) -> bool:
-        return False
+    async def prepare(pair: Any, *_args: object, **_kwargs: object) -> object:
+        return SimpleNamespace(
+            clips=[
+                SimpleNamespace(path=pair.reference, active_rect=None),
+                SimpleNamespace(path=pair.comparison, active_rect=None),
+            ],
+            config=object(),
+            workspace=object(),
+            selection_domain=object(),
+        )
 
-    monkeypatch.setattr(script, "run_benchmark", fail_benchmark)
+    attempt = SimpleNamespace(
+        status="aborted",
+        collection_failure=SimpleNamespace(category="nonzero_exit"),
+        selected_streams=[],
+        audio=SimpleNamespace(subframe_estimate=None, rounded_frame=None),
+        video_check=SimpleNamespace(confirmed_offset=None, targets=[]),
+        decision=SimpleNamespace(state="unavailable", primary_reason="no_usable_audio"),
+    )
+
+    async def align(*_args: object, **_kwargs: object) -> object:
+        return SimpleNamespace(comparisons=[SimpleNamespace(audio_attempt=attempt, alignment=None)])
+
+    monkeypatch.setattr(script, "_prepare_pair", prepare)
+    monkeypatch.setattr(script, "run_align_phase", align)
+    monkeypatch.setattr(
+        script,
+        "build_audio_review_presentation",
+        lambda _attempt: SimpleNamespace(reasons=(), video_wins=(), video_margin=None),
+    )
     monkeypatch.setattr(
         sys,
         "argv",
-        ["alignment_benchmark.py", "--labels", str(tmp_path), "--output", str(tmp_path)],
+        ["alignment_benchmark.py", "--labels", str(labels), "--output", str(output)],
     )
 
     with pytest.raises(SystemExit) as exc_info:
         script.main()
 
     assert exc_info.value.code == 1
+    result = json.loads((output / "pair-results.json").read_text(encoding="utf-8"))
+    record = result["pairs"][0]
+    assert record["attempt_status"] == "aborted"
+    assert record["failure_reason"] == "nonzero_exit"
+    assert record["outcome"] == "unavailable"
+    assert result["summary"]["passed"] is False

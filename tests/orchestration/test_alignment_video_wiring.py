@@ -27,7 +27,7 @@ def test_align_phase_passes_loader_and_active_rect_primitives(
         y=10,
         width=1920,
         height=1040,
-        source="metadata",
+        source="explicit",
         detection_mode="provided",
     )
     ctx.reference = replace(ctx.reference, active_rect=rect)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -154,7 +155,7 @@ def _align(
         fps_num=FPS.numerator,
         fps_den=FPS.denominator,
     )
-    return run_request(request, config, reference_fps=FPS)
+    return run_request(request, config)
 
 
 def test_shifted_pair_candidate_matches_frame_truth(
@@ -302,7 +303,6 @@ def test_planning_budget_rejects_before_decode(
 def _failure_facts() -> tuple[CollectionFacts, CollectionFacts]:
     def facts(role: str) -> CollectionFacts:
         return CollectionFacts(
-            planned_end_sample=100,
             emitted_sample_count=10,
             emitted_byte_count=40,
             retained_sample_count=10,
@@ -462,7 +462,7 @@ def test_pre_collection_identity_change_is_aborted_per_comparison(
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
     with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
-        run_request(request, config, reference_fps=FPS)
+        run_request(request, config)
     by_name = {result.comparison_clip: result for result in computed_results}
 
     changed = by_name[mutated.name]
@@ -497,7 +497,7 @@ def test_no_computed_cache_write_without_video_loader(
         fps_num=FPS.numerator,
         fps_den=FPS.denominator,
     )
-    (result,) = run_request(request, config, reference_fps=FPS)
+    (result,) = run_request(request, config)
 
     assert result.applied is False
     assert result.diagnostic == "video_check_unavailable"
@@ -524,21 +524,34 @@ def test_manual_override_wins_without_decoding(
         "collect_paired_audio_chunks",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("manual wins; no decode")),
     )
+    monkeypatch.setattr(
+        alignment_audio,
+        "probe_streams",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("manual wins; no probe")),
+    )
+    monkeypatch.setattr(
+        alignment_audio,
+        "run_subprocess",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("manual wins; no fallback transport probe")
+        ),
+    )
     config = _config()
+    request_fps = Fraction(25, 1)
 
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
         generated_dir=generated,
-        fps_num=FPS.numerator,
-        fps_den=FPS.denominator,
+        fps_num=request_fps.numerator,
+        fps_den=request_fps.denominator,
     )
-    (result,) = run_request(request, config, reference_fps=FPS)
+    (result,) = run_request(request, config)
 
     assert result.applied is True
     assert result.source == "manual"
     assert result.frame_offset == 3
-    assert result.time_offset_seconds == pytest.approx(3 / float(FPS))
+    assert result.time_offset_seconds == pytest.approx(3 / float(request_fps))
 
 
 def test_entry_identity_mismatch_has_no_attempt(
@@ -566,7 +579,7 @@ def test_entry_identity_mismatch_has_no_attempt(
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
     with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
-        run_request(request, config, reference_fps=FPS)
+        run_request(request, config)
 
     (result,) = computed_results
     assert result.applied is False
@@ -606,3 +619,42 @@ def test_cancelled_collection_raises(tmp_path: Path, monkeypatch: pytest.MonkeyP
             reference_request=request.reference,
             comparison_request=request.comparisons[0],
         )
+
+
+def test_unsupported_retime_rejected_before_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reference, comparison = _media(tmp_path)
+    monkeypatch.setattr(alignment_audio, "probe_streams", lambda path: _probe())
+
+    def exploding_collect(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("decode must not run for unsupported retime")
+
+    monkeypatch.setattr(alignment, "collect_paired_audio_chunks", exploding_collect)
+    request = alignment_request(
+        reference=reference, comparisons=[comparison], generated_dir=tmp_path / "generated"
+    )
+    request = replace(
+        request,
+        comparisons=[
+            replace(
+                request.comparisons[0],
+                source_fps_num=1288001,
+                source_fps_den=53667,
+                effective_fps_num=1288000,
+                effective_fps_den=53667,
+            )
+        ],
+    )
+    (result,) = run_request(request, _config())
+    assert result.applied is False
+    assert result.frame_offset is None
+    assert result.diagnostic == "retime_rate_unsupported"
+    attempt = result.audio_attempt
+    assert attempt is not None
+    assert attempt.status == "preanalysis_rejection"
+    assert attempt.collection_observation == "not_observed"
+    assert attempt.decision.state == "unavailable"
+    assert attempt.decision.primary_reason == "retime_rate_unsupported"
+    assert attempt.decision.failed_gates == ("retime_rate_unsupported",)
+    assert attempt.decision.candidate is None

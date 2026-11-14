@@ -26,6 +26,7 @@ from frame_compare.config.schema_enums import (
     ScreenshotAlignedScalePolicy,
     ScreenshotGeometryMode,
     SourceMatchFpsMode,
+    TonemapSpeed,
     Visibility,
     VsScreenshotWriter,
 )
@@ -41,6 +42,31 @@ from frame_compare.config.schema_models import (
     TmdbConfig,
 )
 from frame_compare.config.schema_sources import TomlConfigSettingsSourceNoBOM
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "accepted"),
+    [
+        (7680, 4320, True),
+        (4320, 7680, True),
+        (7681, 2, False),
+        (7680, 4322, False),
+        (10**1000, 2, False),
+    ],
+)
+def test_aligned_canvas_size_limits(width: int, height: int, accepted: bool) -> None:
+    config = {
+        "geometry_mode": "aligned",
+        "aligned_scale_policy": "explicit_size",
+        "aligned_target_width": width,
+        "aligned_target_height": height,
+    }
+    if accepted:
+        validated = ScreenshotsConfig.model_validate(config)
+        assert (validated.aligned_target_width, validated.aligned_target_height) == (width, height)
+    else:
+        with pytest.raises(ValidationError, match="7,680 pixels per axis and 33,177,600"):
+            ScreenshotsConfig.model_validate(config)
 
 
 @pytest.mark.parametrize(
@@ -99,6 +125,20 @@ def test_color_target_nits_rejects_out_of_bounds(value: int, message: str) -> No
     with pytest.raises(ValidationError) as exc:
         ColorConfig(target_nits=value)
     assert message in str(exc.value)
+
+
+@pytest.mark.parametrize("value", ["quality", "fast"])
+def test_color_tonemap_speed_accepts_supported_values(value: str) -> None:
+    assert ColorConfig.model_validate({"tonemap_speed": value}).tonemap_speed is TonemapSpeed(value)
+
+
+def test_color_tonemap_speed_defaults_to_quality() -> None:
+    assert ColorConfig().tonemap_speed is TonemapSpeed.QUALITY
+
+
+def test_color_tonemap_speed_rejects_unknown_value() -> None:
+    with pytest.raises(ValidationError):
+        ColorConfig.model_validate({"tonemap_speed": "turbo"})
 
 
 @pytest.mark.parametrize(
@@ -220,9 +260,11 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert color.enable_tonemap is True
     assert color.contrast_recovery == 0.3
     assert color.preset == "reference"
+    assert color.tonemap_speed is TonemapSpeed.QUALITY
     assert sources.reference is None
     assert sources.analysis_source == "reference"
     assert sources.match_fps == SourceMatchFpsMode.DISABLED
+    assert sources.scan_frame_geometry is False
     assert sources.overrides == {}
     assert tmdb.enabled is True
     assert tmdb.api_key is None
@@ -632,3 +674,18 @@ def test_runtime_memory_limit_defaults_and_integer_boundaries() -> None:
 def test_runtime_memory_limit_rejects_invalid_values(value: object) -> None:
     with pytest.raises(ValidationError):
         RuntimeConfig.model_validate({"memory_limit_mb": value})
+
+
+@pytest.mark.parametrize(
+    "model, field",
+    [
+        (ScreenshotsConfig, "ffmpeg_timeout_seconds"),
+        (SlowpicsConfig, "timeout_seconds"),
+        (SlowpicsConfig, "image_upload_timeout_seconds"),
+        (TmdbConfig, "timeout_seconds"),
+    ],
+)
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_operation_timeouts_require_finite_values(model, field: str, value: float) -> None:
+    with pytest.raises(ValidationError):
+        model(**{field: value})

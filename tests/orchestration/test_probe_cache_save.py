@@ -20,7 +20,7 @@ from frame_compare.vs.types import HDRMetadata
 
 def test_save_clip_probe_cache_raises_when_is_hdr_true_but_hdr_metadata_missing(tmp_path: Path):
     """Invariant: is_hdr=True requires metadata."""
-    fp = ClipFingerprint(Path("bad.mkv"), 0, 0)
+    fp = ClipFingerprint(Path("bad.mkv"), 0, 0, source_token="a" * 64)
     bad_snap = ClipProbeSnapshot(
         fingerprint=fp,
         width=1,
@@ -38,7 +38,7 @@ def test_save_clip_probe_cache_raises_when_is_hdr_true_but_hdr_metadata_missing(
 @pytest.fixture
 def hdr_snapshot() -> ClipProbeSnapshot:
     """Return a standard HDR snapshot."""
-    fp = ClipFingerprint(Path("hdr.mkv"), 2048, 6000)
+    fp = ClipFingerprint(Path("hdr.mkv"), 2048, 6000, source_token="a" * 64)
     metadata = HDRMetadata(
         mastering_display="G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)",
         max_cll=1000,
@@ -63,7 +63,7 @@ def hdr_snapshot() -> ClipProbeSnapshot:
 @pytest.fixture
 def sample_snapshot() -> ClipProbeSnapshot:
     """Return a standard SDR snapshot."""
-    fp = ClipFingerprint(Path("video.mkv"), 1024, 5000)
+    fp = ClipFingerprint(Path("video.mkv"), 1024, 5000, source_token="a" * 64)
     # Use cast to Any to bypass type checking for the test case that
     # intentionally provides "dirty" data for sanitization verification.
     return ClipProbeSnapshot(
@@ -118,7 +118,7 @@ def test_probe_cache_write_failure_preserves_existing_cache(
 ) -> None:
     path = tmp_path / "cache.toml"
     existing = ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(Path("existing.mkv"), 2048, 6000),
+        fingerprint=ClipFingerprint(Path("existing.mkv"), 2048, 6000, source_token="a" * 64),
         width=1280,
         height=720,
         num_frames=50,
@@ -145,7 +145,7 @@ def test_merge_shared_clip_probe_cache_read_failure_aborts_without_replacing(
 ) -> None:
     f = tmp_path / "cache.toml"
     existing = ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(Path("existing.mkv"), 2048, 6000),
+        fingerprint=ClipFingerprint(Path("existing.mkv"), 2048, 6000, source_token="a" * 64),
         width=1280,
         height=720,
         num_frames=50,
@@ -176,6 +176,8 @@ def test_merge_shared_clip_probe_cache_read_failure_aborts_without_replacing(
     "existing_content",
     [
         pytest.param("invalid [ toml", id="malformed-toml"),
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
     ],
 )
 def test_merge_shared_clip_probe_cache_invalid_state_aborts_without_replacing(

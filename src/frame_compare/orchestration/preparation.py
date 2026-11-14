@@ -11,16 +11,11 @@ import frame_compare.analysis.cache_io as cache_io
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import MetricCacheRequest
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.effective import (
-    build_preflight_input_dir_override,
-    resolve_effective_config,
-)
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration.active_rect import (
-    metric_cache_request_for_clip,
     propagate_resolved_aspect_ratio_evidence,
 )
 from frame_compare.orchestration.active_rect_content import (
@@ -35,11 +30,11 @@ from frame_compare.orchestration.analysis_policy import (
 )
 from frame_compare.orchestration.analysis_source import resolve_analysis_source
 from frame_compare.orchestration.context import (
-    ClipFingerprint,
     ClipProbeSnapshot,
     ClipState,
 )
 from frame_compare.orchestration.errors import (
+    DirectoryNotFoundError,
     FastestAnalysisSourceCacheOnlyError,
     MixedSourceFpsError,
 )
@@ -50,9 +45,10 @@ from frame_compare.orchestration.execution_types import (
 )
 from frame_compare.orchestration.full_window_retry import compute_selection_window_with_recovery
 from frame_compare.orchestration.phase_post_render import resolve_run_metadata
-from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
+from frame_compare.orchestration.preflight import discover_inputs
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
+    live_probe_fingerprint,
     load_clip_probe_cache,
     merge_shared_clip_probe_cache,
     save_clip_probe_cache,
@@ -61,9 +57,12 @@ from frame_compare.orchestration.probing.probe_props import (
     compute_preserved_frame_props,
     compute_tonemap_prop_keys,
 )
+from frame_compare.orchestration.run_inputs import resolve_run_workspace
 from frame_compare.orchestration.selection_domain import (
-    build_analysis_selection_domain_token,
+    PreparedSelectionDomain,
+    build_prepared_selection_domain,
     build_selection_domain_clips_with_diagnostics,
+    metric_request_for_domain,
 )
 from frame_compare.orchestration.source_labels import resolve_source_label_details
 from frame_compare.orchestration.source_selection import resolve_source_selection
@@ -89,7 +88,6 @@ from frame_compare.services.run_info import (
 )
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import ParsedMetadata, TmdbMetadata
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.cancellation import cancellation_checkpoint, raise_if_cancelling
 from frame_compare.utils.paths import (
     require_managed_descendant,
@@ -97,6 +95,7 @@ from frame_compare.utils.paths import (
 )
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
+from frame_compare.vs.errors import SourceLoadError
 
 log = structlog.get_logger()
 
@@ -294,31 +293,13 @@ def _validate_cache_state(
         )
 
     if request.from_cache_only and not request.skip_analysis:
-        fingerprint = cache_io.compute_cache_key(
-            input_videos,
-            config.analysis,
+        cache_io.acquire_required_metrics(
+            metric_request,
+            video_paths=input_videos,
+            config=config.analysis,
+            cache_dir=workspace.cache_dir,
             selection_domain=selection_domain,
-            metric_request=metric_request,
         )
-        cache_result = cache_io.load_cached_metrics_for_request(
-            workspace.cache_dir,
-            fingerprint,
-            request=metric_request,
-        )
-        if not cache_result.success:
-            cache_path = cache_io.find_metrics_cache_file(workspace.cache_dir, fingerprint)
-            expected_cache_path = workspace.cache_dir / cache_io.metrics_cache_filename(
-                input_videos, fingerprint
-            )
-            error_cache_path = cache_path or expected_cache_path
-            if cache_result.reason == "corrupted":
-                raise CacheCorruptionError(error_cache_path)
-            if cache_result.reason == "version_mismatch":
-                found = cache_io.read_cache_version(error_cache_path) or "unknown"
-                raise CacheVersionMismatchError(found, str(cache_io.CACHE_VERSION))
-            raise MetricsCalculationError(
-                f"Cached metrics missing or mismatched ({cache_result.reason})."
-            )
 
 
 def _cached_probe_snapshots_for_cache_only(
@@ -332,13 +313,18 @@ def _cached_probe_snapshots_for_cache_only(
     snapshots: dict[Path, ClipProbeSnapshot] = {}
     for path in input_videos:
         raise_if_cancelling()
-        stats = path.stat()
-        fingerprint = ClipFingerprint(
-            path=path,
-            size_bytes=stats.st_size,
-            mtime_ns=stats.st_mtime_ns,
+        try:
+            fingerprint = live_probe_fingerprint(path).fingerprint
+        except SourceLoadError as error:
+            raise MetricsCalculationError(
+                "Cached clip probe data is required to validate --from-cache-only "
+                "analysis cache: current source authority could not be verified."
+            ) from error
+        snapshot = (
+            entries_by_key.get(compute_probe_cache_key(fingerprint))
+            if fingerprint.source_token is not None
+            else None
         )
-        snapshot = entries_by_key.get(compute_probe_cache_key(fingerprint))
         if snapshot is None:
             raise MetricsCalculationError(
                 "Cached clip probe data is required to validate --from-cache-only "
@@ -376,6 +362,7 @@ def _persist_probe_snapshots_for_run(
     current_entries = {
         compute_probe_cache_key(snapshot.fingerprint): snapshot
         for snapshot in snapshots_by_path.values()
+        if snapshot.fingerprint.source_token is not None
     }
     run_cache_path = workspace.generated_dir / "clip_probe.toml"
     shared_cache_path = _shared_probe_cache_path(workspace)
@@ -406,18 +393,23 @@ def _probe_input_videos(
 
     for path in input_videos:
         raise_if_cancelling()
-        stats = path.stat()
-        fingerprint = ClipFingerprint(
-            path=path,
-            size_bytes=stats.st_size,
-            mtime_ns=stats.st_mtime_ns,
-        )
+        live = live_probe_fingerprint(path)
+        fingerprint = live.fingerprint
+        resolved_path = fingerprint.path
         cache_key = compute_probe_cache_key(fingerprint)
-        snapshot = entries_by_key.get(cache_key)
+        snapshot = entries_by_key.get(cache_key) if fingerprint.source_token is not None else None
         if snapshot is None:
             if deps.vs_loader is None:
                 raise RuntimeError("VS loader must be initialized before probing clips.")
-            source_info = deps.vs_loader.load(path)
+            source_info = deps.vs_loader.load(resolved_path)
+            verified = live_probe_fingerprint(resolved_path)
+            if (
+                verified.fingerprint != fingerprint
+                or verified.admission.stamp != live.admission.stamp
+            ):
+                raise SourceLoadError(
+                    resolved_path, "Source video changed while probing native source facts"
+                )
             tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
             preserved_props = compute_preserved_frame_props(source_info.frame_props)
             snapshot = ClipProbeSnapshot(
@@ -538,20 +530,22 @@ async def execute_prep(
         from_cache_only=request.from_cache_only,
     )
 
-    preflight = prepare_preflight(
-        root=request.root,
-        config_path=request.config_path,
-        overrides=build_preflight_input_dir_override(request.config_overrides.input_dir),
-    )
+    workspace = resolve_run_workspace(request.inputs)
+    config = request.inputs.config
+    if not workspace.input_dir.exists():
+        raise DirectoryNotFoundError(workspace.input_dir)
     preflight_duration = max(0.0, deps.monotonic_timer() - preflight_start)
 
     load_sources_start = deps.monotonic_timer()
-    workspace = preflight.workspace
-    config = resolve_effective_config(preflight.config, request.config_overrides)
     if deps.vs_loader is None:
         from frame_compare.vs.loader import DefaultVSLoader
+        from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 
-        deps.vs_loader = DefaultVSLoader(memory_limit_mb=config.runtime.memory_limit_mb)
+        deps.vs_loader = DefaultVSLoader(
+            memory_limit_mb=config.runtime.memory_limit_mb,
+            index_cache=ManagedSourceIndexCache(workspace.generated_root),
+            scan_frame_geometry=config.sources.scan_frame_geometry,
+        )
     validate_skip_analysis_frame_selection_contract(
         skip_analysis=request.skip_analysis,
         config=config.analysis,
@@ -596,7 +590,7 @@ async def execute_prep(
     prevalidated_clips: list[ClipState] | None = None
     prevalidated_analysis_clip: ClipState | None = None
     prevalidated_selection_window: SelectionWindow | None = None
-    prevalidated_selection_domain: str | None = None
+    prevalidated_selection_domain: PreparedSelectionDomain | None = None
     prevalidated_snapshots_by_path: dict[Path, ClipProbeSnapshot] | None = None
     full_window_retry_override = None
     load_source_diagnostics: list[str] = []
@@ -647,23 +641,20 @@ async def execute_prep(
         prevalidated_analysis_clip = prevalidated_analysis_selection.clip
         if prevalidated_analysis_selection.warning is not None:
             load_source_diagnostics.append(prevalidated_analysis_selection.warning.text)
-        prevalidated_selection_domain = build_analysis_selection_domain_token(
+        prevalidated_selection_domain = build_prepared_selection_domain(
             clips=prevalidated_clips,
             analysis_clip=prevalidated_analysis_clip,
             config=config,
             selection_window=prevalidated_selection_window,
+            override=full_window_retry_override,
         )
         _validate_cache_state(
             request=request,
             workspace=workspace,
             config=config,
             input_videos=input_videos,
-            selection_domain=prevalidated_selection_domain,
-            metric_request=metric_cache_request_for_clip(
-                prevalidated_analysis_clip,
-                selection_window=prevalidated_selection_window,
-                fallback_detection_mode=config.screenshots.active_rect_detection.value,
-            ),
+            selection_domain=prevalidated_selection_domain.token,
+            metric_request=metric_request_for_domain(prevalidated_selection_domain, config),
         )
 
     workspace, metadata_prefetch = await _resolve_run_directory(
@@ -673,7 +664,7 @@ async def execute_prep(
         input_videos=input_videos,
         deps=deps,
         preflight_duration=preflight_duration,
-        preflight_warnings=list(preflight.warnings),
+        preflight_warnings=[],
         run_warnings=artifacts.warnings,
     )
 
@@ -733,40 +724,32 @@ async def execute_prep(
             analysis_clip = analysis_selection.clip
             if analysis_selection.warning is not None:
                 load_source_diagnostics.append(analysis_selection.warning.text)
-            selection_domain = build_analysis_selection_domain_token(
-                clips=clips,
-                analysis_clip=analysis_clip,
-                config=config,
-                selection_window=selection_window,
-            )
-        else:
-            selection_domain = ""
+        selection_domain = build_prepared_selection_domain(
+            clips=clips,
+            analysis_clip=analysis_clip,
+            config=config,
+            selection_window=selection_window,
+            override=full_window_retry_override,
+        )
         if request.no_cache:
             _validate_cache_state(
                 request=request,
                 workspace=workspace,
                 config=config,
                 input_videos=input_videos,
-                selection_domain=selection_domain,
-                metric_request=metric_cache_request_for_clip(
-                    analysis_clip,
-                    selection_window=selection_window,
-                    fallback_detection_mode=config.screenshots.active_rect_detection.value,
-                ),
+                selection_domain=selection_domain.token,
+                metric_request=metric_request_for_domain(selection_domain, config),
             )
 
     return PrepState(
         workspace=workspace,
         config=config,
         input_videos=input_videos,
-        analysis_selection_domain=selection_domain,
-        analysis_clip=analysis_clip,
-        full_window_retry_override=full_window_retry_override,
-        selection_window=selection_window,
+        selection_domain=selection_domain,
         clips=clips,
         artifacts=artifacts,
         metadata_prefetch=metadata_prefetch,
-        preflight_warnings=[*preflight.warnings, *source_warnings],
+        preflight_warnings=list(source_warnings),
         preflight_duration=preflight_duration,
         load_sources_start=load_sources_start,
         load_source_diagnostics=load_source_diagnostics,

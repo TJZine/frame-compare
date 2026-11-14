@@ -382,6 +382,36 @@ def test_history_inaccessible_root_is_actionable(
     assert "Reconnect" in error.hint
 
 
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX directory search permissions")
+@pytest.mark.parametrize(
+    "child_name", [None, "cache", "run"], ids=["empty", "cache-only", "populated"]
+)
+def test_history_listable_but_unsearchable_root_is_actionable(
+    tmp_path: Path, child_name: str | None
+) -> None:
+    generated = tmp_path / "generated"
+    generated.mkdir()
+    children = [] if child_name is None else [generated / child_name]
+    for child in children:
+        child.mkdir()
+    generated.chmod(0o400)
+    try:
+        if os.access(generated, os.X_OK):
+            pytest.skip("directory search permissions are bypassed for this user")
+        assert list(generated.iterdir()) == children
+        with pytest.raises(HistoryAccessError) as raised:
+            list_history(generated)
+    finally:
+        generated.chmod(0o700)
+
+    error = raised.value
+    assert error.code == "FC-3016"
+    assert str(generated.resolve()) in str(error)
+    assert error.hint is not None
+    assert "Reconnect" in error.hint
+    assert "permissions" in error.hint
+
+
 @pytest.mark.parametrize("name", ["", ".", "..", "a/b", "a\\b", "/tmp/x", "C:\\x"])
 def test_exact_run_name_validation_rejects_paths(tmp_path: Path, name: str) -> None:
     generated = tmp_path / "generated"
@@ -613,3 +643,27 @@ def test_warning_record_bytes_preserve_count_cap_and_sanitization(
     assert record.warning_count == count
     assert len(record.warning_summaries) == summary_count
     assert parse_run_result(tomllib.loads(expected)) == record
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+    ],
+)
+def test_parser_limits_isolate_history_and_refuse_open(tmp_path: Path, content: str) -> None:
+    generated = tmp_path / "generated"
+    valid = generated / "valid"
+    broken = generated / "broken"
+    valid.mkdir(parents=True)
+    broken.mkdir()
+    write_run_result(valid, _record(tmp_path, valid))
+    path = broken / "run_result.toml"
+    path.write_text(content, encoding="utf-8")
+    entries = {entry.name: entry for entry in list_history(generated)}
+    assert entries["valid"].report_available
+    assert entries["broken"].status == "unavailable"
+    with pytest.raises(HistoryOpenError):
+        resolve_history_report(generated, "broken")
+    assert path.read_text(encoding="utf-8") == content

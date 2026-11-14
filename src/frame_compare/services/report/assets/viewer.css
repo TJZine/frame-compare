@@ -503,9 +503,19 @@ select optgroup {
     transition: margin-right 0.18s ease;
 }
 
-.rv-viewer-stage:fullscreen {
-    width: 100vw;
-    height: 100vh;
+body:fullscreen .rv-header,
+body:fullscreen .rv-controls,
+body:fullscreen .rv-bottom-panel {
+    display: none;
+}
+
+body:fullscreen .rv-viewer-stage {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+body:fullscreen .rv-inspector {
+    top: 0;
 }
 
 .rv-viewer-stage.is-panning {
@@ -558,14 +568,15 @@ select optgroup {
 .rv-canvas {
     position: relative;
     display: inline-block;
+    flex: 0 0 auto;
     transform-origin: center center;
     transform: translate(var(--pan-x, 0px), var(--pan-y, 0px)) scale(var(--zoom-level, 1));
 }
 
 .rv-sizer {
     display: block;
-    max-width: 96vw;
-    max-height: 100%;
+    max-width: none;
+    max-height: none;
     width: auto;
     height: auto;
     opacity: 0;
@@ -916,7 +927,7 @@ select optgroup {
     --lens-size: 240px;
     position: absolute;
     z-index: 17;
-    width: var(--lens-size);
+    width: var(--lens-window-width, 242px);
     overflow: visible;
     border: 1px solid var(--border-hover);
     border-radius: 4px;
@@ -931,6 +942,7 @@ select optgroup {
     position: relative;
     width: var(--lens-size);
     height: var(--lens-size);
+    margin-inline: auto;
     overflow: hidden;
     background: #000;
     cursor: default;
@@ -997,7 +1009,8 @@ select optgroup {
 }
 
 .rv-lens-caption {
-    max-width: var(--lens-size);
+    max-height: var(--lens-caption-max-height, none);
+    overflow: auto;
     padding: 3px 5px;
     border-top: 1px solid var(--border);
     background: var(--bg-floating);
@@ -1005,6 +1018,16 @@ select optgroup {
     font-family: var(--font-sans);
     font-size: var(--text-xs);
     overflow-wrap: anywhere;
+}
+
+.rv-lens-caption--scrollable {
+    pointer-events: auto;
+    touch-action: pan-y;
+}
+
+.rv-lens-caption--scrollable:focus-visible {
+    outline: 2px solid var(--text-primary);
+    outline-offset: -2px;
 }
 
 .rv-lens-caption[hidden] {
@@ -1180,10 +1203,6 @@ select optgroup {
 
 .rv-info-divider {
     color: var(--text-muted);
-}
-
-.rv-info-detail {
-    color: var(--text-secondary);
 }
 
 .rv-info-category {
@@ -1753,18 +1772,10 @@ select optgroup {
     white-space: nowrap;
 }
 
-.rv-filmstrip-detail {
-    color: var(--text-muted);
-    font-size: 0.65rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 /* 10. Inspector Drawer */
 .rv-inspector {
     position: fixed;
-    top: calc(52px + 42px);
+    top: var(--rv-toolbar-bottom, 0px);
     right: 0;
     bottom: 0;
     z-index: 60;
@@ -2349,7 +2360,7 @@ body.rv-inspector-open .rv-viewer-stage {
         min-height: 18rem;
     }
 
-    .rv-viewer-stage:fullscreen {
+    body:fullscreen .rv-viewer-stage {
         flex: 1 1 auto;
         min-height: 0;
     }

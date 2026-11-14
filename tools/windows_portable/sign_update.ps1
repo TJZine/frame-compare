@@ -71,14 +71,14 @@ function Get-Sha256Hex([byte[]]$Bytes) {
 }
 
 function Get-RsaParameterBytes([xml]$KeyXml, [string]$Name, [bool]$Required) {
-  $node = $KeyXml.RSAKeyValue.$Name
-  if ($null -eq $node -or [string]::IsNullOrWhiteSpace([string]$node)) {
+  $node = $KeyXml.DocumentElement.SelectSingleNode($Name)
+  if ($null -eq $node -or [string]::IsNullOrWhiteSpace($node.InnerText)) {
     if ($Required) {
       throw "RSA key XML is missing required '$Name' value."
     }
     return $null
   }
-  return [System.Convert]::FromBase64String([string]$node)
+  return [System.Convert]::FromBase64String($node.InnerText)
 }
 
 function New-RsaFromXml([string]$KeyXmlText) {
@@ -108,7 +108,7 @@ function New-RsaFromXml([string]$KeyXmlText) {
     $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
     $rsa.PersistKeyInCsp = $false
     try {
-      $rsa.FromXmlString($KeyXmlText)
+      $rsa.FromXmlString(([xml]$KeyXmlText).DocumentElement.OuterXml)
       return $rsa
     } catch {
       $rsa.Clear()

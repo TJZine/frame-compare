@@ -85,6 +85,11 @@ class WorkspacePaths:
         return self.generated_root / "cache" / "tmdb.toml"
 
     @property
+    def shared_source_index_cache_dir(self) -> Path:
+        """Workspace-level decoder indexes shared across runs."""
+        return self.generated_root / "cache" / "source-indexes"
+
+    @property
     def alignment_diagnostics_dir(self) -> Path | None:
         """Run-local directory for diagnostic-only alignment evidence."""
         if self.run_dir is None:
@@ -120,6 +125,7 @@ class WorkspacePaths:
             resolved_run_dir / "generated",
             self.shared_analysis_cache_dir,
             self.shared_alignment_cache_dir,
+            self.shared_source_index_cache_dir,
             self.shared_tmdb_cache_path,
             self.generated_root / "clip_probe.toml",
             resolved_run_dir / "alignment_diagnostics",
@@ -140,7 +146,7 @@ class WorkspacePaths:
 
 @dataclass(frozen=True, slots=True)
 class AlignmentClipIdentity:
-    """Layer-neutral stat identity for performance-first cache validation.
+    """Resolved path and stat facts frozen at preparation.
 
     Media contents are intentionally not hashed, so a same-path, same-size,
     same-mtime replacement retains identity.
@@ -172,7 +178,6 @@ class AlignmentClipRequest:
     active_rect_height: int | None = None
     preserved_frame_props: PreservedFrameProps = field(default_factory=dict[str, str | int | float])
     presentation_name: str | None = None
-    compact_name: str | None = None
     short_name: str | None = None
 
     def __post_init__(self) -> None:
@@ -203,9 +208,10 @@ class AlignmentClipRequest:
     def identity_is_current(self) -> bool:
         """Check prepared path/size/mtime without refreshing the frozen identity."""
         try:
-            stat = self.path.stat()
+            resolved_path = self.path.resolve(strict=True)
+            stat = resolved_path.stat()
             return (
-                self.path.resolve() == self.identity.path.resolve()
+                resolved_path == self.identity.path
                 and stat.st_size == self.identity.size_bytes
                 and stat.st_mtime_ns == self.identity.mtime_ns
             )
@@ -248,6 +254,7 @@ class AlignmentRequest:
     generated_dir: Path
     shared_alignment_cache_dir: Path
     settings: AlignmentCacheSettings
+    workspace_root: Path | None = None
     presentation_content: str | None = None
     alignment_diagnostics_dir: Path | None = None
     alignment_diagnostics_root: Path | None = None

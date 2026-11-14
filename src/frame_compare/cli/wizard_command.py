@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shlex
 import sys
 from pathlib import Path
@@ -27,9 +26,10 @@ from frame_compare.errors import FrameCompareError
 from frame_compare.orchestration.errors import NoVideosFoundError, SourceSelectionError
 from frame_compare.orchestration.preflight import (
     discover_inputs,
-    resolve_selected_config_path,
+    resolve_input_path,
     validate_and_normalize_config_paths,
 )
+from frame_compare.orchestration.run_inputs import select_run_config_path
 from frame_compare.orchestration.source_selection import (
     resolve_source_selection,
     resolve_source_selector,
@@ -112,7 +112,7 @@ class WizardTerminalRequiredError(InputError):
 
 def handle_wizard(
     root: Path,
-    config_path: Path,
+    config_path: Path | None,
     *,
     prompt_input_dir: PromptInputDirFn,
     prompt_generated_dir: PromptGeneratedDirFn,
@@ -127,7 +127,7 @@ def handle_wizard(
 ) -> None:
     """Run the approved guided editor and persist only one confirmed candidate."""
     try:
-        selected_path = resolve_selected_config_path(config_path, root)
+        root, selected_path = select_run_config_path(config_path, root)
         if not stdin_is_tty or not stdout_is_tty:
             raise WizardTerminalRequiredError
 
@@ -152,7 +152,7 @@ def handle_wizard(
         if generated_changed:
             set_table_values(candidate, "paths", {"generated_dir": generated_value})
 
-        input_dir = _resolve_input_dir(input_value, root)
+        input_dir = resolve_input_path(input_value, root)
         discovered = _discover_for_wizard(input_dir)
         reference_change, stale_reference = _prompt_reference(
             prompt=prompt,
@@ -230,7 +230,7 @@ def prompt_input_dir(default: str, *, base_dir: Path) -> str:
     """Prompt for an existing input directory, resolving relative values from root."""
     while True:
         value = typer.prompt("Input directory", default=default)
-        path = _resolve_input_dir(value, base_dir)
+        path = resolve_input_path(value, base_dir)
         if path.exists() and path.is_dir():
             return value
         typer.echo("Input directory does not exist or is not a directory.")
@@ -240,11 +240,6 @@ def prompt_generated_dir(default: str) -> str:
     """Prompt for the authored generated-data location without checking availability."""
     typer.echo("Generated data location contains durable comparison folders and reusable caches.")
     return str(typer.prompt("Generated data location", default=default))
-
-
-def _resolve_input_dir(value: str, root: Path) -> Path:
-    path = Path(os.path.expandvars(value))
-    return path.resolve() if path.is_absolute() else (root / path).resolve()
 
 
 def _discover_for_wizard(input_dir: Path) -> list[Path]:
@@ -477,12 +472,14 @@ def _quote_powershell(value: str) -> str:
     return f"'{escaped}'"
 
 
-def _format_suggested_run_command(
-    root: Path, config_path: Path, *, is_windows: bool, dry_run: bool
+def _format_suggested_command(
+    root: Path, config_path: Path, *, command: str, is_windows: bool, dry_run: bool = False
 ) -> str:
-    """Build one never-executed ``run`` suggestion pinned to this exact workspace/config."""
+    """Build one never-executed suggestion pinned to this exact workspace/config."""
     quote = _quote_powershell if is_windows else shlex.quote
-    command = f"frame-compare run --root {quote(str(root))} --config {quote(str(config_path))}"
+    command = (
+        f"frame-compare {command} --root {quote(str(root))} --config {quote(str(config_path))}"
+    )
     if dry_run:
         command += " --dry-run"
     return command
@@ -491,13 +488,14 @@ def _format_suggested_run_command(
 def _print_next_steps(*, root: Path, config_path: Path, is_windows: bool, no_color: bool) -> None:
     """Suggest the verified diagnose/preview/execute commands for this exact selection."""
     _print_heading("Next steps:", err=True, no_color=no_color)
-    typer.echo("  1. Diagnose the runtime: frame-compare doctor", err=True)
-    preview_command = _format_suggested_run_command(
-        root, config_path, is_windows=is_windows, dry_run=True
+    preview_command = _format_suggested_command(
+        root, config_path, command="run", is_windows=is_windows, dry_run=True
     )
-    run_command = _format_suggested_run_command(
-        root, config_path, is_windows=is_windows, dry_run=False
+    run_command = _format_suggested_command(root, config_path, command="run", is_windows=is_windows)
+    doctor_command = _format_suggested_command(
+        root, config_path, command="doctor", is_windows=is_windows
     )
+    typer.echo(f"  1. Diagnose the runtime: {doctor_command}", err=True)
     typer.echo(f"  2. Preview this configuration (dry run): {preview_command}", err=True)
     typer.echo(f"  3. Run it: {run_command}", err=True)
     typer.echo(

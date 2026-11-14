@@ -34,9 +34,11 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
+    live_probe_fingerprint,
     save_clip_probe_cache,
 )
 from frame_compare.orchestration.selection_domain import (
+    PreparedSelectionDomain,
     build_analysis_selection_domain_token,
     build_selection_domain_clips_with_diagnostics,
     compute_selection_window_for_clips,
@@ -294,8 +296,7 @@ def _is_relative_to(path: Path, base: Path) -> bool:
 
 
 def _clip_fingerprint_for_path(path: Path) -> ClipFingerprint:
-    stat = path.stat()
-    return ClipFingerprint(path=path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
+    return live_probe_fingerprint(path).fingerprint
 
 
 def clip_state(
@@ -405,6 +406,9 @@ def execution_context(
         workspace=workspace,
         reference=reference,
         comparisons=comparisons,
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=None,
+        ),
     )

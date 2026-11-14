@@ -14,6 +14,7 @@ from frame_compare.config.errors import (
     PresetInvalidError,
     PresetNameInvalidError,
     PresetNotFoundError,
+    format_toml_syntax_error,
 )
 from frame_compare.config.loader import validate_raw_config_payload
 from frame_compare.config.persistence import (
@@ -23,6 +24,7 @@ from frame_compare.config.persistence import (
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.utils import deep_merge
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
 DEFAULT_PRESETS_DIR = Path("config/presets")
 
@@ -52,11 +54,19 @@ def load_preset(name: str, presets_dir: Path | None = None) -> dict[str, object]
     try:
         if not stat.S_ISREG(preset_path.stat().st_mode):
             raise PresetInvalidError(preset_path, "preset must be a regular file")
-        payload = tomllib.loads(preset_path.read_text(encoding="utf-8-sig"))
+        text = preset_path.read_text(encoding="utf-8-sig")
+        try:
+            payload = tomllib.loads(text)
+        except tomllib.TOMLDecodeError:
+            raise
+        except SERIALIZED_DECODE_FAILURES:
+            raise PresetInvalidError(
+                preset_path, "configuration exceeds TOML parser limits"
+            ) from None
     except FileNotFoundError:
         raise PresetNotFoundError(name) from None
     except tomllib.TOMLDecodeError as exc:
-        raise PresetInvalidError(preset_path, str(exc)) from None
+        raise PresetInvalidError(preset_path, format_toml_syntax_error(exc)) from None
     except UnicodeDecodeError:
         raise PresetInvalidError(preset_path, "preset is not valid UTF-8") from None
     except OSError:

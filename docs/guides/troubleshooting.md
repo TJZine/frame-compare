@@ -104,7 +104,9 @@ entry.
 
 ### `--no-cache` and `--from-cache-only` are rejected together
 
-Choose one: the first disables cache use, the second requires it.
+`--no-cache` deletes and recomputes the matching analysis cache entry, while
+`--from-cache-only` requires an existing entry, so they cannot be combined. See
+[Cache Mode Semantics](../current-cli-contract.md#cache-mode-semantics).
 
 ### Docker prints `without an L-SMASH index cache`
 
@@ -212,7 +214,7 @@ Clear only the state related to the problem:
 | Analysis cache entry | Metric identity or source freshness is known to be stale outside normal detection |
 | Probe cache entry | Source properties were cached under an unmanaged runtime that changed |
 | Alignment reuse entry | A previously accepted offset is no longer valid for the source relationship |
-| Frame Compare-owned `.lwi` | The unmanaged decoder/plugin ABI changed or the owned index is known to be unusable |
+| Managed source index (`cache/source-indexes/`) | With Frame Compare and VSView stopped, clear the managed cache if an unmanaged decoder ABI changed or the index is known to be unusable. Leave media-adjacent files alone. |
 | Browser-local report state | Viewer preferences or notes are corrupt; the run folder itself is still valid |
 
 Do not delete the complete generated-data root as a first response.

@@ -12,6 +12,7 @@ import pytest
 import structlog
 
 import frame_compare.vs.tonemap_runtime as tonemap_runtime_module
+from frame_compare.utils.subproc import prepare_python_child
 from frame_compare.vs.tonemap_runtime import (
     LibplaceboRuntimeState,
     libplacebo_runtime_override,
@@ -24,6 +25,57 @@ def _clear_libplacebo_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", raising=False)
     monkeypatch.delenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", raising=False)
     monkeypatch.delenv("FRAME_COMPARE_LIBPLACEBO_PROBE", raising=False)
+
+
+@pytest.mark.parametrize("runtime", ["absent", "mocked"])
+@pytest.mark.parametrize("required", [False, True], ids=["optional", "required"])
+def test_native_integration_import_honors_required_runtime(
+    tmp_path: Path, runtime: str, required: bool
+) -> None:
+    """Collecting native proof cannot disguise a missing runtime as a required pass."""
+    integration_module = Path(__file__).with_name("test_integration.py")
+    environment = os.environ.copy()
+    environment["FRAME_COMPARE_REQUIRE_LIBPLACEBO"] = "1" if required else "0"
+    script = textwrap.dedent(
+        """
+        import runpy
+        import sys
+        from unittest.mock import MagicMock
+
+        import pytest
+
+        # Override availability before loading the real module, independently of
+        # the installed runtime and the parent test suite's collection mocks.
+        sys.modules["vapoursynth"] = None if sys.argv[2] == "absent" else MagicMock()
+        try:
+            runpy.run_path(sys.argv[1])
+        except pytest.skip.Exception as exc:
+            print(f"SKIPPED: {exc}")
+            raise SystemExit(5)
+        except pytest.fail.Exception as exc:
+            print(f"FAILED: {exc}")
+            raise SystemExit(1)
+        raise SystemExit("Native integration module unexpectedly loaded")
+        """
+    )
+    argv, environment = prepare_python_child(
+        [sys.executable, "-c", script, str(integration_module), runtime], env=environment
+    )
+    result = subprocess.run(
+        argv,
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert result.returncode == (1 if required else 5), result.stdout + result.stderr
+    assert result.stdout.startswith("FAILED:" if required else "SKIPPED:")
+    assert "VapourSynth" in result.stdout
+    expected_reason = "required" if required else "unavailable" if runtime == "absent" else "mocked"
+    assert expected_reason in result.stdout
 
 
 def test_libplacebo_runtime_usable_caches_probe_result_for_state_lifetime(
@@ -89,11 +141,11 @@ def test_libplacebo_probe_uses_current_vapoursynth_range_property(
     def fake_run(
         argv: list[str],
         **_kwargs: object,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> subprocess.CompletedProcess[bytes]:
         captured["script"] = argv[-1]
-        return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
 
-    monkeypatch.setattr(tonemap_runtime_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(tonemap_runtime_module, "run_subprocess", fake_run)
 
     assert probe_libplacebo_runtime() is True
     assert "_Range=1" in captured["script"]
@@ -138,16 +190,18 @@ def test_libplacebo_probe_launches_an_isolated_child_with_runtime_environment(
 ) -> None:
     captured: dict[str, object] = {}
 
-    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         captured["argv"] = argv
         captured.update(kwargs)
-        return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, b"", b"")
 
     monkeypatch.setenv("PYTHONPATH", "/caller/python-path")
     monkeypatch.setenv("PYTHONUSERBASE", "/caller/user-base")
     monkeypatch.setenv("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "/runtime/plugins")
     monkeypatch.setenv("FRAME_COMPARE_RUNTIME_KIND", "docker")
-    monkeypatch.setattr(tonemap_runtime_module.subprocess, "run", fake_run)
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "fixture-api-secret")
+    monkeypatch.setenv("SOURCE_SIGNING_KEY", "fixture-migration-secret")
+    monkeypatch.setattr(tonemap_runtime_module, "run_subprocess", fake_run)
 
     assert probe_libplacebo_runtime() is True
 
@@ -162,6 +216,10 @@ def test_libplacebo_probe_launches_an_isolated_child_with_runtime_environment(
     assert child_env["PYTHONSAFEPATH"] == "1"
     assert child_env["VAPOURSYNTH_EXTRA_PLUGIN_PATH"] == "/runtime/plugins"
     assert child_env["FRAME_COMPARE_RUNTIME_KIND"] == "docker"
+    assert "FRAME_COMPARE_TMDB__API_KEY" not in child_env
+    assert "SOURCE_SIGNING_KEY" not in child_env
+    assert captured["max_stdout_bytes"] == 16 * 1024
+    assert captured["max_stderr_bytes"] == 32 * 1024
     if site.ENABLE_USER_SITE and not sys.flags.no_user_site:
         assert "-s" not in child_argv
         assert child_env["PYTHONUSERBASE"] == "/caller/user-base"

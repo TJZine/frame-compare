@@ -8,16 +8,18 @@ import pytest
 
 import frame_compare.vs.loader as vs_loader_module
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.render.geometry import RenderGeometryPlan
 from frame_compare.render.types import RenderedFrameResult
 from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.vs.types import HDRMetadata, SourceInfo
+from tests.render_test_support import paths_by_label
 
 from .execute_run_helpers import clip_state
 from .phase_task_helpers import _workspace
@@ -56,6 +58,7 @@ class FakeFFmpegRunner:
         output: Path,
         *,
         geometry_plan: RenderGeometryPlan | None = None,
+        **_kwargs: object,
     ) -> RenderedFrameFacts:
         _, _, _ = video, frame_num, output
         raise AssertionError("FFmpeg extraction path is not exercised in this test")
@@ -88,9 +91,14 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
     monkeypatch.setattr(
         "frame_compare.render.batch.orchestrator.render_frame_detailed", _fake_render_frame
     )
-    monkeypatch.setattr(vs_loader_module, "DefaultVSLoader", FakeVSLoader)
+    loader = FakeVSLoader()
 
-    config = ConfigSchema()
+    def unexpected_loader(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("render constructed a separate source loader")
+
+    monkeypatch.setattr(vs_loader_module, "DefaultVSLoader", unexpected_loader)
+
+    config = get_default_config()
 
     workspace = _workspace(
         tmp_path.resolve(),
@@ -117,20 +125,24 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         workspace=workspace,
         reference=reference,
         comparisons=[],
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
         reporter=None,
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=190),
+            analysis_clip=None,
+        ),
     )
 
     output = run_render_phase(
         ctx=ctx,
         frames=[10],
         runner=FakeFFmpegRunner(),
+        vs_loader=loader,
     )
 
     assert output.render.screenshot_dir == workspace.screenshots_dir
-    assert "Reference" in output.render.screenshots_by_label
-    assert output.render.screenshots_by_label["Reference"][0].name == "10 - ref.png"
+    assert "Reference" in paths_by_label(output.render.clips)
+    assert paths_by_label(output.render.clips)["Reference"][0].name == "10 - ref.png"
 
     req = cast(Any, captured[0])
     assert req.frame_number == 20

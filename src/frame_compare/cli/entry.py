@@ -11,17 +11,18 @@ from typing import TYPE_CHECKING
 import typer
 
 from frame_compare.cli.cli_helpers import (
+    UNEXPECTED_ERROR_MESSAGE,
     FrameCompareTyperGroup,
     copy_text_to_clipboard,
     handle_error,
     open_url_in_browser,
-    resolve_root_and_config,
     write_config_to,
 )
 from frame_compare.cli.cli_helpers import (
     maybe_open_report as _maybe_open_report,
 )
 from frame_compare.cli.doctor_command import handle_doctor
+from frame_compare.cli.errors import ExitCode
 from frame_compare.cli.history_command import handle_history_list, handle_history_open
 from frame_compare.cli.preset_command import (
     handle_preset_apply,
@@ -43,7 +44,8 @@ from frame_compare.cli.wizard_command import (
 )
 from frame_compare.config.loader import TomlPayload, load_config
 from frame_compare.config.presets import apply_preset, list_presets, save_preset
-from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset
+from frame_compare.config.schema_enums import OverlayMode, ToneCurve, TonemapPreset, TonemapSpeed
+from frame_compare.orchestration.doctor_types import DoctorConfigSelection
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging
 from frame_compare.utils.terminal import no_color_requested, stream_is_tty
@@ -56,7 +58,6 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
-    from frame_compare.utils.progress_protocol import ProgressReporter
 
 
 class _RunnerProxy:
@@ -72,12 +73,13 @@ runner = _RunnerProxy()
 
 
 def run_doctor(
-    checks: list[DoctorCheck] | None = None, reporter: ProgressReporter | None = None
+    checks: list[DoctorCheck] | None = None,
+    selection: DoctorConfigSelection | None = None,
 ) -> DoctorReport:
     """Lazy doctor entry point to keep CLI import VS-independent."""
     from frame_compare.orchestration.doctor import run_doctor as runtime_run_doctor
 
-    return runtime_run_doctor(checks=checks, reporter=reporter)
+    return runtime_run_doctor(checks=checks, selection=selection)
 
 
 app = typer.Typer(
@@ -100,7 +102,6 @@ app = typer.Typer(
 )
 
 
-_resolve_root_and_config = resolve_root_and_config
 _copy_text_to_clipboard = copy_text_to_clipboard
 _open_url_in_browser = open_url_in_browser
 _prompt_input_dir = prompt_input_dir
@@ -261,6 +262,13 @@ def run(
         help=f"Override the tonemap curve. Choose one of: {format_enum_choices(ToneCurve)}.",
         rich_help_panel="Rendering and alignment",
     ),
+    tm_speed: str | None = _option(
+        None,
+        "--tm-speed",
+        metavar="SPEED",
+        help=f"Override the tonemap speed. Choose one of: {format_enum_choices(TonemapSpeed)}.",
+        rich_help_panel="Rendering and alignment",
+    ),
     overlay: str | None = _option(
         None,
         "--overlay",
@@ -350,7 +358,8 @@ def run(
     ),
 ) -> None:
     """Compare video sources and generate screenshots and an optional report."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
+    resolved_root = root.resolve()
+    config_path = config if config is not None else Path("config/config.toml")
     args = RunCliRawArgs(
         resolved_root=resolved_root,
         config_path=config_path,
@@ -361,6 +370,7 @@ def run(
         tm_preset=tm_preset,
         tm_target=tm_target,
         tm_curve=tm_curve,
+        tm_speed=tm_speed,
         frames=frames,
         random_frame_count=random_frame_count,
         dark_frame_count=dark_frame_count,
@@ -408,11 +418,10 @@ def wizard(
     ),
 ) -> None:
     """Interactively configure input, reference, and frame selection."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
     effective_no_color = no_color_requested()
     handle_wizard(
-        resolved_root,
-        config_path,
+        root,
+        config,
         prompt_input_dir=_prompt_input_dir,
         prompt_generated_dir=_prompt_generated_dir,
         prompt=_prompt_text,
@@ -428,11 +437,15 @@ def wizard(
 
 @app.command()
 def doctor(
+    root: Path = _option(Path("."), "--root", "-r", help="Workspace root."),
+    config: Path | None = _option(None, "--config", "-c", help="Selected configuration file."),
     json_output: bool = _option(False, "--json", help="Emit the diagnostic report as JSON."),
 ) -> None:
     """Check required runtimes and optional integrations."""
     handle_doctor(
         json_output,
+        root=root,
+        config_path=config,
         run_doctor=run_doctor,
         handle_error=handle_error,
         no_color=no_color_requested(),
@@ -455,10 +468,9 @@ def history_list(
     json_output: bool = _option(False, "--json", help="Emit the run list as JSON."),
 ) -> None:
     """List recorded runs newest first."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_history_list(
-        resolved_root,
-        config_path,
+        root,
+        config,
         json_output=json_output,
         handle_error=handle_error,
         no_color=no_color_requested(),
@@ -474,11 +486,10 @@ def history_open(
     ),
 ) -> None:
     """Open one exact-name recorded report."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_history_open(
         run_name,
-        resolved_root,
-        config_path,
+        root,
+        config,
         open_report=_maybe_open_report,
         handle_error=handle_error,
         no_color=no_color_requested(),
@@ -494,13 +505,13 @@ def preset_list(
         None,
         "--config",
         "-c",
-        help="Accepted for consistency; ignored here. Presets are located under --root.",
+        help="Validate the config path. Presets are located under --root.",
     ),
 ) -> None:
     """List available configuration presets."""
-    resolved_root, _ = _resolve_root_and_config(root, config)
     handle_preset_list(
-        resolved_root,
+        root,
+        config,
         list_presets=list_presets,
         handle_error=handle_error,
         no_color=no_color_requested(),
@@ -518,11 +529,10 @@ def preset_apply(
     ),
 ) -> None:
     """Apply a named preset to the selected config file."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_preset_apply(
         name,
-        resolved_root,
-        config_path,
+        root,
+        config,
         load_config=load_config,
         apply_preset=apply_preset,
         write_config_to=_write_config_to,
@@ -542,11 +552,10 @@ def preset_save(
     ),
 ) -> None:
     """Save the selected config as a named preset."""
-    resolved_root, config_path = _resolve_root_and_config(root, config)
     handle_preset_save(
         name,
-        resolved_root,
-        config_path,
+        root,
+        config,
         load_config=load_config,
         save_preset=save_preset,
         handle_error=handle_error,
@@ -554,5 +563,25 @@ def preset_save(
     )
 
 
+def console_main() -> None:
+    """Run the standalone CLI, retaining its interrupted exit during native teardown."""
+    try:
+        app()
+    except SystemExit as error:
+        if sys.platform == "win32" and error.code == 130:
+            import signal
+
+            # Python resets callable handlers before native module destruction.
+            # Ignore survives that reset, keeping a late console event from
+            # replacing the selected 130 with Windows STATUS_CONTROL_C_EXIT.
+            # Apply only after CLI cleanup, and preserve caller-owned handlers.
+            if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
+        raise
+    except Exception:
+        typer.echo(UNEXPECTED_ERROR_MESSAGE, err=True)
+        raise SystemExit(int(ExitCode.GENERAL_ERROR)) from None
+
+
 if __name__ == "__main__":
-    app()
+    console_main()

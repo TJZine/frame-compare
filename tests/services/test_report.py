@@ -1,4 +1,4 @@
-"""Tests for the v1.2 report generation service."""
+"""Tests for the v1.4 report generation service."""
 
 from __future__ import annotations
 
@@ -38,7 +38,9 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
     SourceSignalFacts,
 )
-from frame_compare.vs.types import TonemapSettings
+from frame_compare.vs.types import AppliedTonemap, TonemapSettings
+from tests.services.report_viewer_contracts import SelectParser
+from tests.tonemap_test_support import libplacebo_tonemap
 
 
 def _geometry(active: ActivePictureFacts | None = None) -> RenderedGeometryFacts:
@@ -66,7 +68,7 @@ def _clip(
     source_frame_offset: int = 0,
 ) -> ClipInfo:
     images: list[ReportImageInfo] = []
-    active = ActivePictureFacts(0, 276, 1920, 804, "dolby_vision_l5", False)
+    active = ActivePictureFacts(0, 276, 1920, 804, "explicit", False)
     for index in range(image_count):
         path = tmp_path / "screens" / name / f"{index}.png"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -101,7 +103,7 @@ def _clip(
             if hdr
             else PresentationState.SDR
         ),
-        tonemap_settings=TonemapSettings() if tonemapped else None,
+        tonemap=libplacebo_tonemap(TonemapSettings()) if tonemapped else None,
         active_picture=active if dolby_vision else _geometry().active_picture,
         images=images,
         display=ReportClipDisplayInfo(
@@ -139,7 +141,6 @@ def report_data(tmp_path: Path) -> ReportData:
         rendering=ReportRenderingInfo(
             overlay_mode=OverlayMode.DIAGNOSTIC,
             include_frame_number=True,
-            tonemap_settings=TonemapSettings(),
             geometry_by_label=geometry_by_label,
         ),
         metadata=TmdbMetadata(
@@ -219,11 +220,11 @@ def test_generate_report_embed_images_and_relative_paths(
     assert 'src="clip1/0.png"' in relative.read_text(encoding="utf-8")
 
 
-def test_report_payload_v12_raw_values_and_comparison_semantics(
+def test_report_payload_v14_raw_values_and_comparison_semantics(
     report_data: ReportData, tmp_path: Path
 ) -> None:
     payload = build_report_payload(report_data, ReportConfig(), report_dir=tmp_path)
-    assert payload["version"] == "1.2"
+    assert payload["version"] == "1.4"
     assert payload["clips"][0]["size_bytes"] == 17 * 1024**3
     assert payload["clips"][1]["signal"]["primaries"] == 9
     assert payload["clips"][1]["signal"]["dolby_vision_rpu"] is True
@@ -235,7 +236,7 @@ def test_report_payload_v12_raw_values_and_comparison_semantics(
     assert payload["frames"][0]["images"][0]["dolby_vision_rpu"] is None
     assert payload["frames"][0]["images"][1]["source_frame"] == 11
     assert payload["frames"][0]["images"][1]["dolby_vision_rpu"] is None
-    assert payload["rendering"]["tonemap"]["applied"] is True
+    assert payload["rendering"]["tonemap"]["ran"] is True
     assert payload["rendering"]["geometry_by_label"]["CLIP2"] == {
         "source_size": (1920, 1080),
         "active_picture": {
@@ -243,7 +244,7 @@ def test_report_payload_v12_raw_values_and_comparison_semantics(
             "y": 276,
             "width": 1920,
             "height": 804,
-            "provenance": "dolby_vision_l5",
+            "provenance": "explicit",
             "is_full_frame": False,
         },
         "cropped_size": (1920, 804),
@@ -279,6 +280,47 @@ def test_payload_rejects_frame_detail_cardinality(report_data: ReportData, tmp_p
             ReportConfig(),
             report_dir=tmp_path,
         )
+
+
+def test_report_shows_bidi_formatting_in_filename_without_changing_identity(
+    tmp_path: Path, report_data: ReportData
+) -> None:
+    filename = "מקור \u202eCBA\u202c.mkv"
+    visible_filename = "מקור [U+202E]CBA[U+202C].mkv"
+    original = report_data.clips[0]
+    assert original.label is not None
+    clip = replace(original, name=filename, label=filename, path=tmp_path / filename)
+    geometry_by_label = dict(report_data.rendering.geometry_by_label)
+    geometry_by_label[filename] = geometry_by_label.pop(original.label)
+    report = replace(
+        report_data,
+        clips=[clip, report_data.clips[1]],
+        rendering=replace(report_data.rendering, geometry_by_label=geometry_by_label),
+        metadata=None,
+    )
+    baseline = build_report_payload(report, ReportConfig(), report_dir=tmp_path)
+    report.clips[0] = replace(
+        clip,
+        display=ReportClipDisplayInfo(
+            primary=filename, release=filename, control=filename, micro=filename, filename=filename
+        ),
+    )
+    output = generate_report(report, ReportConfig(), output_path=tmp_path / "report.html")
+    payload = _json_payload_from_report(output)
+    assert payload["clips"][0]["display"]["filename"] == filename
+    assert payload["title"] == visible_filename
+    for profile in ("primary", "release", "control", "micro"):
+        assert payload["clips"][0]["display"][profile] == visible_filename
+    assert payload["clips"][0]["name"] == payload["clips"][0]["label"] == filename
+    assert payload["frames"][0]["images"][0]["clip"] == filename
+    assert payload["report_id"] == baseline["report_id"]
+    html = output.read_text(encoding="utf-8")
+    assert f"<title>{visible_filename} - Frame Compare Report</title>" in html
+    selects = SelectParser()
+    selects.feed(html)
+    assert selects.selects["left-select"].options[0].attrs["title"] == (
+        f"{visible_filename} — {visible_filename}"
+    )
 
 
 def test_report_id_identity_excludes_paths_and_timestamps(
@@ -346,7 +388,10 @@ def test_report_id_identity_excludes_paths_and_timestamps(
     )
     changed = replace(
         report_data,
-        rendering=replace(report_data.rendering, tonemap_settings=TonemapSettings(target_nits=203)),
+        clips=[
+            replace(clip, tonemap=libplacebo_tonemap(TonemapSettings(target_nits=203)))
+            for clip in report_data.clips
+        ],
     )
     assert (
         build_report_payload(changed, ReportConfig(), report_dir=tmp_path)["report_id"]
@@ -389,7 +434,7 @@ def test_report_id_identity_excludes_paths_and_timestamps(
             replace(
                 report_data.clips[1],
                 presentation_state=PresentationState.HDR_TONEMAP_OFF,
-                tonemap_settings=None,
+                tonemap=None,
             ),
         ],
     )
@@ -465,15 +510,140 @@ def test_image_src_for_report_encodes_url_path_characters(
     assert image_src_for_report(screenshot, report_dir=report_dir, embed_images=False) == expected
 
 
-def test_generate_report_json_contains_v12_rendering(
+def test_generate_report_json_contains_v14_rendering(
     report_data: ReportData, tmp_path: Path
 ) -> None:
     output = generate_report(report_data, ReportConfig(), output_path=tmp_path / "report.html")
     payload = _json_payload_from_report(output)
-    assert payload["version"] == "1.2"
+    assert payload["version"] == "1.4"
     assert payload["rendering"]["overlay_mode"] == "diagnostic"
     assert payload["frames"][0]["detail"] == "Selected comparison frame"
     geometry = payload["rendering"]["geometry_by_label"]["CLIP2"]
-    assert geometry["active_picture"]["provenance"] == "dolby_vision_l5"
+    assert geometry["active_picture"]["provenance"] == "explicit"
     assert geometry["active_picture"]["width"] == 1920
     assert geometry["active_picture"]["height"] == 804
+
+
+def test_applied_tonemap_identity_and_shared_projection(
+    report_data: ReportData, tmp_path: Path
+) -> None:
+    from frame_compare.vs.types import (
+        AppliedTonemap,
+        FallbackTonemap,
+        LibplaceboTonemap,
+        ResolvedSourcePeak,
+        TonemapFallbackCause,
+    )
+
+    settings = TonemapSettings(target_nits=203)
+    placebo = libplacebo_tonemap(settings)
+    assert isinstance(placebo.transform, LibplaceboTonemap)
+    fallback = AppliedTonemap(
+        settings,
+        FallbackTonemap(
+            "frame_compare_peak_scaled_rational_v1",
+            203,
+            False,
+            ResolvedSourcePeak(1000, "default"),
+            TonemapFallbackCause.RUNTIME_CALL_FAILED,
+        ),
+    )
+
+    def payload(first: AppliedTonemap, second: AppliedTonemap) -> ReportPayload:
+        return build_report_payload(
+            replace(
+                report_data,
+                clips=[
+                    replace(
+                        clip, presentation_state=PresentationState.HDR_TONEMAPPED, tonemap=tonemap
+                    )
+                    for clip, tonemap in zip(report_data.clips, [first, second], strict=True)
+                ],
+            ),
+            ReportConfig(),
+            report_dir=tmp_path,
+        )
+
+    mixed = payload(placebo, fallback)
+    assert mixed["version"] == "1.4"
+    assert mixed["rendering"]["tonemap"]["shared"] is None
+    requested = mixed["rendering"]["tonemap"]["requested"]
+    assert requested is not None
+    assert requested["target_nits"] == 203
+    left = mixed["clips"][0]["presentation"]
+    right = mixed["clips"][1]["presentation"]
+    assert set(left) == set(right) == {"state", "tonemap"}
+    assert left["tonemap"] is not None
+    assert right["tonemap"] is not None
+    assert left["tonemap"]["implementation"] == "libplacebo"
+    assert left["tonemap"]["effective_controls"]["output_encoding"] == "srgb"
+    assert left["tonemap"]["effective_controls"]["frame_policy"] == "sequence"
+    independent = replace(
+        placebo, transform=replace(placebo.transform, frame_policy="independent_frames")
+    )
+    assert payload(independent, independent)["report_id"] != payload(placebo, placebo)["report_id"]
+    assert right["tonemap"]["algorithm"] == "frame_compare_peak_scaled_rational_v1"
+    assert right["tonemap"]["fallback_cause"] == "runtime_call_failed"
+    assert right["tonemap"]["effective_controls"] == {"target_nits": 203, "gamma_lift": False}
+    assert set(mixed["rendering"]["tonemap"]) == {"ran", "requested", "shared"}
+    assert mixed["report_id"] != payload(placebo, placebo)["report_id"]
+    # Requested-only controls and failure reasons cannot alter identical output identity.
+    changed_cause = replace(
+        fallback,
+        transform=replace(fallback.transform, cause=TonemapFallbackCause.PLUGIN_UNAVAILABLE),
+    )
+    assert payload(placebo, changed_cause)["report_id"] == mixed["report_id"]
+    changed_request = replace(fallback, requested=replace(settings, smoothing_period=99))
+    assert payload(placebo, changed_request)["report_id"] == mixed["report_id"]
+    peak_changed = replace(
+        placebo,
+        transform=replace(placebo.transform, source_peak=ResolvedSourcePeak(2000, "max_cll")),
+    )
+    peaks = payload(placebo, peak_changed)
+    assert peaks["rendering"]["tonemap"]["shared"] is not None
+    second_peak = peaks["clips"][1]["presentation"]["tonemap"]
+    assert second_peak is not None
+    assert second_peak["source_peak_nits"] == 2000
+    assert peaks["report_id"] != payload(placebo, placebo)["report_id"]
+    control_changed = replace(fallback, transform=replace(fallback.transform, gamma_lift=True))
+    assert payload(placebo, control_changed)["report_id"] != mixed["report_id"]
+
+
+def test_fast_tonemap_speed_is_disclosed_and_changes_report_identity(
+    report_data: ReportData, tmp_path: Path
+) -> None:
+    from frame_compare.config.schema_enums import TonemapSpeed
+
+    quality = libplacebo_tonemap(TonemapSettings())
+    fast_settings = TonemapSettings(tonemap_speed=TonemapSpeed.FAST, dynamic_peak_detection=False)
+    fast = libplacebo_tonemap(fast_settings)
+
+    def payload(tonemap: AppliedTonemap) -> ReportPayload:
+        return build_report_payload(
+            replace(
+                report_data,
+                clips=[
+                    replace(
+                        clip,
+                        presentation_state=PresentationState.HDR_TONEMAPPED,
+                        tonemap=tonemap,
+                    )
+                    for clip in report_data.clips
+                ],
+            ),
+            ReportConfig(),
+            report_dir=tmp_path,
+        )
+
+    fast_payload = payload(fast)
+    requested = fast_payload["rendering"]["tonemap"]["requested"]
+    shared = fast_payload["rendering"]["tonemap"]["shared"]
+    assert requested is not None
+    assert requested["tonemap_speed"] == "fast"
+    assert shared is not None
+    assert shared["effective_controls"]["tonemap_speed"] == "fast"
+    assert shared["effective_controls"]["frame_policy"] == "sequence"
+    applied = fast_payload["clips"][0]["presentation"]["tonemap"]
+    assert applied is not None
+    assert applied["source_peak_origin"] == "default"
+    assert fast_payload["report_id"] != payload(quality)["report_id"]

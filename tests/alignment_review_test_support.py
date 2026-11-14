@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import replace
+from dataclasses import asdict, replace
 from fractions import Fraction
+from typing import Any
 
+from frame_compare.services.alignment import _project_audio_attempt_for_review
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
 from frame_compare.utils.alignment_evidence import (
     AlignmentStabilitySummary,
@@ -49,6 +51,10 @@ def audio_review(suggestion: int | None) -> str:
     )
 
 
+def native_attempt_payload(attempt: AudioAlignmentAttempt) -> dict[str, Any]:
+    return asdict(_project_audio_attempt_for_review(attempt))
+
+
 def frame_lag(frame_offset: int) -> int:
     """Return the nearest 8 kHz lag for a whole-frame offset at the fixture FPS."""
     return round(Fraction(frame_offset * 8_000 * _FPS_DEN, _FPS_NUM))
@@ -60,7 +66,7 @@ def subframe_estimate(lag: int) -> float:
 
 def stream(role: str, digest: str) -> SelectedAudioStreamEvidence:
     return SelectedAudioStreamEvidence(
-        role="reference" if role == "reference" else "comparison",  # type: ignore[arg-type]
+        role="reference" if role == "reference" else "comparison",
         source_identity_digest=digest,
         audio_stream_index=0,
         absolute_stream_index=1,
@@ -169,7 +175,7 @@ def attempt_shell(
     return AudioAlignmentAttempt(
         reference_identity_digest=REFERENCE_DIGEST,
         comparison_identity_digest=COMPARISON_DIGEST,
-        comparison_ordinal=ordinal,  # type: ignore[arg-type]
+        comparison_ordinal=ordinal,
         status=status,  # type: ignore[arg-type]
         estimator_policy=ALIGNMENT_ESTIMATOR_POLICY,
         diagnostic_policy=_DIAGNOSTIC_POLICY,

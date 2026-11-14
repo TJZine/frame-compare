@@ -16,6 +16,7 @@ from frame_compare.utils.alignment_evidence import (
     evidence_from_payload,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
 ALIGNMENT_REVIEW_METADATA_VERSION = 5
 ALIGNMENT_REVIEW_RESULT_VERSION = 1
@@ -296,7 +297,9 @@ def read_alignment_review_result(
         )
     except FileNotFoundError as exc:
         raise AlignmentReviewContractError("alignment review result is missing") from exc
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except AlignmentReviewContractError:
+        raise
+    except (OSError, *SERIALIZED_DECODE_FAILURES) as exc:
         raise AlignmentReviewContractError("alignment review result is unreadable") from exc
     result = _parse_result(raw)
     validate_alignment_review_result(result, session, expected_comparisons)
@@ -445,7 +448,7 @@ def _parse_audio_review(
         decoded = json.loads(raw, object_pairs_hook=_json_object_without_duplicates)
     except AlignmentReviewContractError:
         raise
-    except (RecursionError, ValueError) as exc:
+    except SERIALIZED_DECODE_FAILURES as exc:
         raise AlignmentReviewContractError("alignment review audio evidence is invalid") from exc
     root = _strict_dict(
         decoded,
@@ -500,13 +503,17 @@ def _parse_audio_attempt(
     authority_origin: _AuthorityOrigin,
     comparison_ordinal: int,
 ) -> AudioAlignmentAttempt:
-    """Parse the embedded v4 attempt through the shared evidence parser."""
+    """Parse v4 evidence and enforce the native metadata v5 projection."""
     try:
         attempt = evidence_from_payload(AudioAlignmentAttempt, raw)
     except ValueError as exc:
         raise AlignmentReviewContractError(
             f"alignment review audio attempt is invalid: {exc}"
         ) from exc
+    if not attempt.chunks.rows_omitted:
+        raise AlignmentReviewContractError(
+            "alignment review audio attempt must omit per-chunk rows"
+        )
     if attempt.comparison_ordinal != comparison_ordinal:
         raise AlignmentReviewContractError("alignment review attempt ordinal is inconsistent")
     state = attempt.decision.state

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Verify Frame Compare"
+  short_description: "Drive Frame Compare and capture scoped proof"
+  default_prompt: "Use $verify-frame-compare to verify the affected user journey and report the observed behavior and remaining runtime gaps."
+policy:
+  allow_implicit_invocation: true

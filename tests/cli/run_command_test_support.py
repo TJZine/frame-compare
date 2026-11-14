@@ -130,7 +130,7 @@ def deps(options: DepsOptions | None = None, opened: list[Path] | None = None) -
         load_config=opts.load_config,
         write_config_to=opts.write_config_to,
         handle_error=opts.handle_error,
-        configure_logging=lambda *, level, log_format: None,
+        configure_logging=lambda *, level, log_format, rich_output, no_color: None,
         console_factory=_console_factory,
         open_report=cast(OpenReportFn, opts.open_report)
         if opts.open_report is not None

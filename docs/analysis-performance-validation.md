@@ -100,6 +100,16 @@ The benchmark JSON records the Git commit, dirty state, and porcelain status
 under `provenance`. Preserve the separate `git rev-parse HEAD` output as an
 independent check when a run will support a product decision.
 
+The tier benchmark refuses an output path that resolves to an input video or the
+selected config file. It also uses the prepared reference and analysis FPS and
+trim facts for cache identity and frame selection; keep those preparation facts
+stable across comparable runs.
+
+`--window-start` and `--window-end-exclusive` are offsets in the prepared
+analysis clip after source trims. The benchmark maps those offsets back to
+source-frame coordinates for the metric request, JSON `selection_window`, and
+selected frame numbers; those reported values remain source coordinates.
+
 ## Prepare the fixed corpus
 
 Use the same ordered reference/comparison pair for every rerun. The examples
@@ -118,11 +128,11 @@ $AnimeComparison = (Resolve-Path -LiteralPath `
   'comparison_videos\DAN.DA.DAN.S02E01.Like.This.Is.the.Legend.of.the.Giant.Snake.REPACK.1080p.CR.WEB-DL.DUAL.DDP2.0.H.264-Kitsune.mkv').Path
 ```
 
-Prepare probe data and warm Frame Compare-owned, runtime-versioned L-SMASH-Works
-`.lwi` source indexes through a normal application run before timing. The current
-filename suffix is `.frame-compare-lsw1310-f125953022b6.lwi`; an unrelated legacy
-adjacent `<media>.lwi` is intentionally not a warm-cache input. Point `--input` at a directory containing
-only the fixed case under test:
+Prepare probe data and warm the L-SMASH-Works indexes through a normal application
+run before timing. Use the same resolved source paths, generated root and runtime
+for the benchmark so it can reuse `cache/source-indexes/`; the managed Windows
+decoder token for this recipe is `lsw1310-47d07506e489`. Legacy adjacent indexes are
+inert. Point `--input` at a directory containing only the fixed case under test:
 
 ```powershell
 uv run --no-sync frame-compare run `
@@ -178,8 +188,11 @@ uv run --no-sync python tools/benchmark_analysis_tiers.py `
 
 Cold runs are the primary algorithm-performance evidence. Confirm every quality
 and performance trial reports a cache miss and a successful cache write. Frame
-type inspection runs after timed trials and is diagnostic only. The benchmark
-fails closed if a cold trial does not observe both the miss and successful write.
+type inspection runs after timed trials and is diagnostic only. When FPS is
+available, its `read_interval` is a seek hint and the resulting frame-type scope
+is marked approximate; the report records the observed frame timestamps. The
+benchmark fails closed if a cold trial does not observe both the miss and
+successful cache write.
 
 ## Shipped-default quantile control
 

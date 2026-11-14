@@ -14,7 +14,7 @@ from frame_compare.errors import PathEscapesRootError
 from frame_compare.services import alignment_audio, alignment_diagnostics
 from frame_compare.services.alignment import _build_audio_review_map
 from frame_compare.services.alignment_keys import alignment_key
-from frame_compare.services.types import AlignmentProvenance, AlignmentResult
+from frame_compare.services.types import AlignmentResult, ComparisonResolution
 from frame_compare.utils.alignment_evidence import (
     MAX_ALIGNMENT_EVIDENCE_BYTES,
     MAX_AUDIO_CHUNKS,
@@ -334,11 +334,8 @@ def test_diagnostic_is_bounded_pathless_and_preserves_original_digest(tmp_path: 
         comparison_ordinal=1,
         reference_label="Reference",
         comparison_label="Comparison 1",
-        attempt=attempt,
-        evidence_availability="current_attempt",
         review_outcome="pending",
-        final_result=_result(attempt),
-        final_origin="none",
+        resolution=ComparisonResolution(_result(attempt), "diagnostic", "computed_this_run"),
     )
     _, after_digest, _ = alignment_diagnostics.write_alignment_diagnostic(
         generated_root=tmp_path.parent,
@@ -346,11 +343,10 @@ def test_diagnostic_is_bounded_pathless_and_preserves_original_digest(tmp_path: 
         comparison_ordinal=1,
         reference_label="Reference",
         comparison_label="Comparison 1",
-        attempt=attempt,
-        evidence_availability="current_attempt",
         review_outcome="confirmed",
-        final_result=_result(attempt, manual=True),
-        final_origin="interactive_confirmed_this_run",
+        resolution=ComparisonResolution(
+            _result(attempt, manual=True), "diagnostic", "interactive_confirmed_this_run"
+        ),
     )
 
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -377,11 +373,8 @@ def test_diagnostic_artifact_is_compact_json_with_stable_canonical_digest(
         comparison_ordinal=1,
         reference_label="Reference",
         comparison_label="Comparison 1",
-        attempt=attempt,
-        evidence_availability="current_attempt",
         review_outcome="not_requested",
-        final_result=_result(attempt),
-        final_origin="none",
+        resolution=ComparisonResolution(_result(attempt), "diagnostic", "computed_this_run"),
     )
 
     content = path.read_text(encoding="utf-8")
@@ -411,11 +404,8 @@ def test_failed_final_replacement_preserves_last_valid_snapshot(
         comparison_ordinal=1,
         reference_label="Reference",
         comparison_label="Comparison 1",
-        attempt=attempt,
-        evidence_availability="current_attempt",
         review_outcome="pending",
-        final_result=_result(attempt),
-        final_origin="none",
+        resolution=ComparisonResolution(_result(attempt), "diagnostic", "computed_this_run"),
     )
     original = path.read_bytes()
     monkeypatch.setattr(
@@ -431,11 +421,10 @@ def test_failed_final_replacement_preserves_last_valid_snapshot(
             comparison_ordinal=1,
             reference_label="Reference",
             comparison_label="Comparison 1",
-            attempt=attempt,
-            evidence_availability="current_attempt",
             review_outcome="confirmed",
-            final_result=_result(attempt, manual=True),
-            final_origin="interactive_confirmed_this_run",
+            resolution=ComparisonResolution(
+                _result(attempt, manual=True), "diagnostic", "interactive_confirmed_this_run"
+            ),
         )
 
     assert path.read_bytes() == original
@@ -547,11 +536,8 @@ def test_maximum_evidence_shapes_fit_full_and_native_envelopes(tmp_path: Path, s
         comparison_ordinal=1,
         reference_label="Reference",
         comparison_label="Comparison",
-        attempt=attempt,
-        evidence_availability="current_attempt",
         review_outcome="not_requested",
-        final_result=result,
-        final_origin="none",
+        resolution=ComparisonResolution(result, "diagnostic", "computed_this_run"),
     )
     diagnostic_payload = json.loads(path.read_text(encoding="utf-8"))
     assert diagnostic_size <= MAX_ALIGNMENT_EVIDENCE_BYTES, (shape, populations, diagnostic_size)
@@ -566,13 +552,11 @@ def test_maximum_evidence_shapes_fit_full_and_native_envelopes(tmp_path: Path, s
     native = _build_audio_review_map(
         reference=reference,
         comparisons=[comparison],
-        results_map={key: result},
-        provenances={
-            key: AlignmentProvenance(
+        resolutions={
+            key: ComparisonResolution(
                 result=result,
                 comparison_cache_key="key",
-                provenance="computed_this_run",
-                evidence_availability="current_attempt",
+                origin="computed_this_run",
             )
         },
     )[key]
@@ -654,11 +638,10 @@ def test_pending_interrupt_prevents_diagnostic_publication(
                 comparison_ordinal=1,
                 reference_label="Reference",
                 comparison_label="Comparison",
-                attempt=attempt,
-                evidence_availability="current_attempt",
                 review_outcome="pending",
-                final_result=_result(attempt),
-                final_origin="none",
+                resolution=ComparisonResolution(
+                    _result(attempt), "diagnostic", "computed_this_run"
+                ),
             )
         await cancellation_checkpoint()
 

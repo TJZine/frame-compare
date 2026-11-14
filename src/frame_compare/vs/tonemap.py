@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 from frame_compare.utils.cancellation import raise_if_cancelling
@@ -13,7 +14,7 @@ from frame_compare.vs import (
     tonemap_runtime,
 )
 from frame_compare.vs.tonemap_presets import get_preset_settings
-from frame_compare.vs.types import HDRMetadata, TonemapSettings
+from frame_compare.vs.types import HDRMetadata, TonemapFallbackCause, TonemapResult, TonemapSettings
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -23,6 +24,16 @@ _LIBPLACEBO_RUNTIME_STATE = tonemap_runtime.LibplaceboRuntimeState()
 
 def _libplacebo_runtime_usable() -> bool:
     """Return whether libplacebo is safe to call in this process."""
+    if tonemap_runtime.experimental_native_stills_enabled():
+        import vapoursynth as vs
+
+        identity = tonemap_runtime.experimental_native_still_plugin(vs.core)
+        if identity is not None:
+            return tonemap_runtime.libplacebo_runtime_usable(
+                _LIBPLACEBO_RUNTIME_STATE,
+                partial(tonemap_runtime.probe_libplacebo_runtime, plugin_identity=identity),
+                plugin_identity=identity,
+            )
     return tonemap_runtime.libplacebo_runtime_usable(
         _LIBPLACEBO_RUNTIME_STATE,
         tonemap_runtime.probe_libplacebo_runtime,
@@ -33,12 +44,15 @@ def apply_tonemap(
     clip: vs.VideoNode,
     settings: TonemapSettings,
     hdr_metadata: HDRMetadata | None = None,
-) -> vs.VideoNode:
+    *,
+    still_image: bool = False,
+) -> TonemapResult:
     """Apply HDR to SDR tonemapping."""
     if not settings.enabled:
-        return clip
+        return TonemapResult(clip, None)
     raise_if_cancelling()
     tonemap_conversion.validate_target_nits(settings)
+    tonemap_runtime.experimental_native_stills_enabled()
 
     import vapoursynth as vs
 
@@ -47,13 +61,20 @@ def apply_tonemap(
     plugins = env.detect_plugins(core)
 
     raise_if_cancelling()
-    if plugins.get("libplacebo", False) and _libplacebo_runtime_usable():
+    if not plugins.get("libplacebo", False):
+        cause = TonemapFallbackCause.PLUGIN_UNAVAILABLE
+    elif not _libplacebo_runtime_usable():
+        cause = TonemapFallbackCause.RUNTIME_UNUSABLE
+    else:
         raise_if_cancelling()
-        result = tonemap_libplacebo.apply_libplacebo(clip, settings, core, hdr_metadata)
-        if result is not None:
+        result = tonemap_libplacebo.apply_libplacebo(
+            clip, settings, core, hdr_metadata, still_image=still_image
+        )
+        if isinstance(result, TonemapResult):
             return result
+        cause = result
     raise_if_cancelling()
-    return tonemap_fallback.fallback_tonemap(clip, settings, hdr_metadata)
+    return tonemap_fallback.fallback_tonemap(clip, settings, hdr_metadata, cause=cause)
 
 
 __all__ = [

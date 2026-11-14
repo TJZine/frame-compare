@@ -15,6 +15,8 @@ from tests.workflow_helpers import load_workflow
 from ._helpers import SCRIPT_SUBPROCESS_TIMEOUT_SECONDS
 from ._helpers import bash_executable_or_skip as _bash_executable_or_skip
 from ._helpers import bash_path_or_skip as _bash_path_or_skip
+from ._helpers import with_bash_env as _with_bash_env
+from ._helpers import write_bash_env as _write_bash_env
 
 RESOURCE_TEST = "tests/integration/test_alignment_streaming_resources.py"
 
@@ -24,6 +26,8 @@ DOCKER_TRIGGER_PATHS = (
     "pyproject.toml",
     "uv.lock",
     "Dockerfile",
+    "README.md",
+    "LICENSE",
     "docker-compose*.yml",
     "tools/verify_docker_*.sh",
     "tools/docker_runtime_smoke.py",
@@ -46,12 +50,12 @@ if [ "$1" = info ]; then
 fi
 if [ "$1" = compose ] && [ "$2" = run ]; then
   printf '%s\\n' "$@" >> "$FRAME_COMPARE_DOCKER_INVOCATION"
-  case "${FRAME_COMPARE_DOCKER_MODE:-fail}" in
-    skip) printf '1 skipped\\n'; exit 0 ;;
-    xfailed) printf '1 xfailed\\n'; exit 0 ;;
-    xpassed) printf '1 xpassed\\n'; exit 0 ;;
-    success)
+  mode="$FRAME_COMPARE_DOCKER_MODE"
+  case "$mode" in
+    fail) exit 17 ;;
+    *)
       if printf '%s' "$*" | grep -q 'frame-compare-test'; then
+        for container_command do :; done
         artifact_arg="$(grep 'FRAME_COMPARE_E2E_ARTIFACTS=' "$FRAME_COMPARE_DOCKER_INVOCATION" | tail -n 1 | cut -d= -f2-)"
         artifact_path="$PWD/$(printf '%s' "$artifact_arg" | sed 's#^/workspace/##')"
         mkdir -p "$artifact_path"
@@ -59,13 +63,13 @@ if [ "$1" = compose ] && [ "$2" = run ]; then
         cat <<'MARKERS'
 DOCKER_PROOF cli=ok version_output=0.6.0
 DOCKER_PROOF non_root=ok uid=1000
-DOCKER_PROOF vapoursynth_import=ok version=R81 api=4.3
+DOCKER_PROOF vapoursynth_import=ok version=R82 api=4.3
 DOCKER_PROOF plugin_dir=/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth
 DOCKER_PROOF extra_plugin_path=/opt/vapoursynth-extra-plugins
 DOCKER_PROOF core_plugins=lsmas,ffms2,vs_placebo
 DOCKER_PROOF lsmash_works=ok release=1310.0.0.0 functions=LibavSMASHSource,LWLibavSource index=proof.ffindex
 DOCKER_PROOF ffms2=ok release=5.0 runtime=5.0.0.0 functions=Source,index index=proof.ffindex
-DOCKER_PROOF vs_placebo=ok version=2.0.4 functions=Tonemap output=RGBS
+DOCKER_PROOF vs_placebo=ok version=2.0.5 functions=Tonemap output=RGBS
 DOCKER_PROOF debian_ffmpeg=7:7.1.5-0+deb13u1
 DOCKER_PROOF ffmpeg_version=ffmpeg version 7.1.5
 DOCKER_PROOF ffprobe_version=ffprobe version 7.1.5
@@ -77,6 +81,27 @@ DOCKER_PROOF doctor_json=ok
 DOCKER_PROOF generated_fixture_matrix=ok fixtures=h264_limited
 DOCKER_PROOF real_frame_render=ok frames=lwlibavsource,ffms2,placebo
 MARKERS
+        case "$mode" in
+          missing) ;;
+          unreadable) mkdir "$artifact_path/pytest.xml" ;;
+          malformed) printf '<testsuites' > "$artifact_path/pytest.xml" ;;
+          empty)
+            printf '<testsuites><testsuite tests="0"/></testsuites>' > "$artifact_path/pytest.xml"
+            ;;
+          skip|xfail|xpass)
+            # Run the emitted pytest command with local paths, a tiny supplied
+            # fixture and a quiet summary. Keep the actual report/strict options.
+            pytest_cache_dir="$artifact_path/cache"
+            export pytest_cache_dir PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+            pytest_command="$(printf '%s\\n' "$container_command" | tail -n 1 |
+              sed 's#^python -m pytest -n 10 --dist loadgroup -v #python3 -m pytest -qq #; s#--junitxml=/workspace/#--junitxml=#')"
+            exec bash -c "$pytest_command"
+            ;;
+          success|late-tee)
+            printf '<testsuites><testsuite tests="1"><testcase name="example"/></testsuite></testsuites>' > "$artifact_path/pytest.xml"
+            ;;
+          *) exit 99 ;;
+        esac
         exit 0
       fi
       if printf '%s' "$*" | grep -q 'frame-compare-run'; then
@@ -88,7 +113,7 @@ MARKERS
 version = 2
 
 [media_runtime.fingerprints]
-full = "916760dd9ca2156521326493fbe92c395118d6f1ee36cc421d9bb9e2f66a8697"
+full = "89803760b74dd956d6ab2290c5845cc7ff1614b0005bd982cb2b3980cd658649"
 RECORD
         cat > "$run_dir/run_result.toml" <<'RECORD'
 version = 1
@@ -146,6 +171,29 @@ def _run_verifier(
     (script_root / "tools").mkdir(parents=True)
     for name in ("verify_docker_integration.sh", "docker_runtime_smoke.py"):
         shutil.copy2(repo_root / "tools" / name, script_root / "tools")
+    if mode in {"skip", "xfail", "xpass"}:
+        fixture = {
+            "skip": "pytest.skip('controlled skip')",
+            "xfail": "pytest.xfail('controlled xfail')",
+            "xpass": "assert True",
+        }[mode]
+        marker = "@pytest.mark.xfail(reason='controlled xpass')\n" if mode == "xpass" else ""
+        (script_root / "test_outcome.py").write_text(
+            f"import pytest\n\n{marker}def test_outcome():\n    {fixture}\n",
+            encoding="utf-8",
+        )
+    if mode == "late-tee":
+        bash_env = tmp_path / "tee.env"
+        _write_bash_env(
+            bash_env,
+            """tee() {
+  command tee "$@"
+  if grep -Fq 'DOCKER_PROOF cli=ok' "$1"; then
+    return 23
+  fi
+}""",
+        )
+        environment = _with_bash_env(environment, bash_env)
     if seed_previous:
         generated_root = (
             tmp_path / "foreign-generated" if symlink_generated else script_root / "generated"
@@ -204,7 +252,10 @@ def test_verifier_selects_pytest_paths_and_default_exclusion(
         repo_root, tmp_path, extra_args=["--pytest-path", RESOURCE_TEST] if explicit else None
     )
     assert result.returncode == 17
+    assert "docker integration tests failed (exit 17)" in result.stderr
     command = shlex.split(invocation.splitlines()[-1])
+    environment = _docker_environment_args(invocation)
+    assert ("FRAME_COMPARE_U4_MEDIA_FULL=1" in environment) is not explicit
     if explicit:
         assert command[-1] == RESOURCE_TEST
         assert "--ignore=" + RESOURCE_TEST not in command
@@ -217,16 +268,44 @@ def test_verifier_selects_pytest_paths_and_default_exclusion(
         ]
 
 
-def test_verifier_rejects_skipped_xfailed_and_xpassed_tests(
-    repo_root: Path, tmp_path: Path
+@pytest.mark.parametrize(
+    ("mode", "status", "diagnostic"),
+    [
+        ("missing", 3, "invalid pytest JUnit report"),
+        ("unreadable", 3, "invalid pytest JUnit report"),
+        ("malformed", 3, "invalid pytest JUnit report"),
+        ("empty", 3, "expected a pytest suite with at least one test"),
+        ("late-tee", 23, "tee exit 23"),
+    ],
+)
+def test_verifier_rejects_invalid_or_incomplete_proof(
+    repo_root: Path, tmp_path: Path, mode: str, status: int, diagnostic: str
 ) -> None:
-    for mode in ("skip", "xfailed", "xpassed"):
-        mode_tmp = tmp_path / mode
-        mode_tmp.mkdir()
-        result, _ = _run_verifier(repo_root, mode_tmp, mode=mode)
+    result, _ = _run_verifier(repo_root, tmp_path, mode=mode)
 
-        assert result.returncode == 3
-        assert "zero non-passing outcomes" in result.stderr
+    assert result.returncode == status, result.stderr
+    assert diagnostic in result.stderr
+    assert "passed with zero skips" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("mode", "status", "diagnostic"),
+    [
+        ("skip", 3, "zero non-passing outcomes"),
+        ("xfail", 3, "zero non-passing outcomes"),
+        ("xpass", 1, "docker integration tests failed (exit 1)"),
+    ],
+)
+def test_verifier_rejects_skipped_xfailed_and_xpassed_tests(
+    repo_root: Path, tmp_path: Path, mode: str, status: int, diagnostic: str
+) -> None:
+    result, _ = _run_verifier(
+        repo_root, tmp_path, mode=mode, extra_args=["--pytest-path", "test_outcome.py"]
+    )
+
+    assert result.returncode == status, result.stdout + result.stderr
+    assert diagnostic in result.stderr
+    assert "passed with zero skips" not in result.stdout
 
 
 def test_verifier_passes_host_user_media_environment_and_artifacts(
@@ -295,6 +374,7 @@ def test_verifier_preserves_previous_artifacts_and_owns_fresh_invocation_directo
         assert (artifact_path / "current.txt").read_text(encoding="utf-8") == (
             "current verifier artifacts\n"
         )
+        assert (artifact_path / "pytest.xml").is_file()
 
 
 def test_workflow_runs_opt_in_resources_after_canonical_gate_without_rebuild(
@@ -361,7 +441,8 @@ def test_workflow_triggers_all_docker_runtime_and_test_paths(repo_root: Path) ->
         ("tools/docker_runtime_smoke.py", True),
         (".dockerignore", True),
         ("docs/current-architecture.md", False),
-        ("README.md", False),
+        ("README.md", True),
+        ("LICENSE", True),
     ],
 )
 def test_workflow_path_filter_has_positive_and_negative_controls(
@@ -382,12 +463,15 @@ def test_dockerignore_excludes_local_residue_without_excluding_image_inputs(
     }
     assert {
         ".tmp",
+        ".codex",
+        ".claude",
         ".handoff",
         ".codanna",
         ".desloppify",
         ".agent",
         ".hypothesis",
         ".uv_cache",
+        ".portable_cache",
         "site",
         "tools/old_*.py",
     } <= patterns
@@ -428,7 +512,7 @@ def test_workflow_uploads_e2e_artifacts_after_verification(repo_root: Path) -> N
         "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
     )
     assert upload_step["with"] == {
-        "name": "docker-e2e-artifacts",
+        "name": "${{ matrix.artifact }}",
         "path": "generated/e2e",
         "if-no-files-found": "warn",
         "retention-days": "14",

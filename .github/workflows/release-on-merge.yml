@@ -51,6 +51,7 @@ jobs:
                 any(.[][];
                   .merged_at != null and .merge_commit_sha == $sha and
                   .base.ref == "main" and .base.repo.full_name == $repo and
+                  .head.ref == "pre-release" and .head.repo.full_name == $repo and
                   (.title == ("chore(release): " + $version) or
                    .title == ("chore(release): prepare Frame Compare v" + $version) or
                    .title == ("chore(release)!: prepare Frame Compare v" + $version))
@@ -71,6 +72,7 @@ jobs:
       attestations: write
       contents: write
       id-token: write
+      pull-requests: read
     concurrency:
       group: frame-compare-release-${{ needs.identify_release.outputs.tag }}
       cancel-in-progress: false

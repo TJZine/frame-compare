@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import tomllib
 from dataclasses import dataclass, field
@@ -530,7 +531,11 @@ def parse_run_result(payload: object) -> RunResultRecord:
 def read_run_result(path: Path) -> RunResultRecord:
     """Read and validate one result record."""
     with path.open("rb") as handle:
-        return parse_run_result(tomllib.load(handle))
+        try:
+            payload = tomllib.load(handle)
+        except RecursionError:
+            raise ValueError("run result exceeds TOML parser limits") from None
+    return parse_run_result(payload)
 
 
 def _report_path(record: RunResultRecord, run_dir: Path) -> Path | None:
@@ -634,36 +639,42 @@ def _history_entry(
 def list_history(generated_root: Path) -> list[HistoryEntry]:
     """List contained immediate run-folder children newest first."""
     root = _require_history_root(generated_root)
+    if os.name == "posix" and not os.access(root, os.X_OK):
+        raise _history_root_unavailable(root)
     try:
         children = list(root.iterdir())
     except (OSError, RuntimeError) as exc:
         raise _history_root_unavailable(root) from exc
     entries: list[HistoryEntry] = []
     for child in children:
-        if (
-            child.is_symlink()
-            or child.is_junction()
-            or child.name == "cache"
-            or any(ord(character) < 32 or ord(character) == 127 for character in child.name)
+        if child.name == "cache" or any(
+            ord(character) < 32 or ord(character) == 127 for character in child.name
         ):
             continue
         try:
+            if child.is_symlink() or child.is_junction():
+                continue
             resolved = child.resolve(strict=True)
             if not resolved.is_relative_to(root) or not resolved.is_dir():
                 continue
-        except (OSError, RuntimeError):
-            if not child.is_symlink():
-                entries.append(
-                    HistoryEntry(
-                        child.name,
-                        "unavailable",
-                        None,
-                        None,
-                        None,
-                        False,
-                        warning="A run folder could not be inspected.",
-                    )
+        except (OSError, RuntimeError) as exc:
+            if (
+                os.name == "posix"
+                and isinstance(exc, PermissionError)
+                and not os.access(root, os.X_OK)
+            ):
+                raise _history_root_unavailable(root) from exc
+            entries.append(
+                HistoryEntry(
+                    child.name,
+                    "unavailable",
+                    None,
+                    None,
+                    None,
+                    False,
+                    warning="A run folder could not be inspected.",
                 )
+            )
             continue
         entry = _history_entry(resolved)
         if entry is not None:

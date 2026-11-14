@@ -79,11 +79,14 @@ def _merge_parser_metadata(
             current.title,
             _first_text(parser_result, "anime_title", "title"),
         ),
-        year=_keep_existing(current.year, _first_int(parser_result, "year")),
-        season=_keep_existing(current.season, _first_int(parser_result, "season")),
+        year=_keep_existing(current.year, _first_int(parser_result, "anime_year", "year")),
+        season=_keep_existing(
+            current.season,
+            _first_int(parser_result, "anime_season", "season"),
+        ),
         episode=_keep_existing(
             current.episode,
-            _first_int(parser_result, "anime_episode", "episode"),
+            _first_int(parser_result, "episode_number", "episode"),
         ),
         episode_title=_keep_existing(
             current.episode_title,
@@ -399,6 +402,12 @@ def _service_alias_hit(tokens: tuple[str, ...], code: str, alias: tuple[str, ...
     size = len(alias)
     for index in range(len(tokens) - size + 1):
         if tokens[index : index + size] != alias:
+            continue
+        # The DTS-HD Master Audio suffix uses the same abbreviation as Movies Anywhere.
+        if alias == ("MA",) and (
+            (index >= 2 and tokens[index - 2 : index] == ("DTS", "HD"))
+            or (index > 0 and tokens[index - 1] == "DTSHD")
+        ):
             continue
         if code == "HBO" and index + size < len(tokens) and tokens[index + size] == "MAX":
             continue

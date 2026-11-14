@@ -25,7 +25,11 @@ from frame_compare.utils.cancellation import (
     cancellation_checkpoint,
 )
 from frame_compare.utils.progress import LogProgressReporter
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.utils.progress_protocol import (
+    AlignmentSummary,
+    ProgressPhaseStatus,
+    ProgressReporter,
+)
 
 log = structlog.get_logger()
 
@@ -42,6 +46,7 @@ class PhaseStatus(StrEnum):
 
 
 PhaseExecute = Callable[[RunContext], Awaitable[None]]
+PhaseWarnOnly = bool | Callable[[RunContext], bool]
 PhaseSkipCondition = Callable[[ConfigSchema], bool]
 PhaseSkipDetail = str | Callable[[ConfigSchema], str | None]
 
@@ -56,15 +61,19 @@ class Phase:
     progress_total: int = 1
     display_label: str | None = None
     status: PhaseStatus = PhaseStatus.PENDING
-    warn_only: bool = False
+    warn_only: PhaseWarnOnly = False
     fatal_exceptions: tuple[type[BaseException], ...] = ()
     retain_on_success: bool | None = None
     skip_detail: PhaseSkipDetail | None = None
     success_summary: str | None = None
+    alignment_summary: AlignmentSummary | None = None
     duration_text: str | None = None
     # Overrides the completion status only on the success path (for example an
     # Align phase whose review never ran completes as WARNED, not COMPLETED).
     success_status: ProgressPhaseStatus | None = None
+
+    def warns_on_error(self, context: RunContext) -> bool:
+        return self.warn_only(context) if callable(self.warn_only) else self.warn_only
 
     @property
     def progress_label(self) -> str:
@@ -132,7 +141,7 @@ async def execute_phases(
                 raise asyncio.CancelledError() from None
             await cancellation_checkpoint()
         except Exception as exc:
-            if not phase.warn_only or isinstance(exc, phase.fatal_exceptions):
+            if not phase.warns_on_error(context) or isinstance(exc, phase.fatal_exceptions):
                 phase.status = PhaseStatus.FAILED
                 phase_progress_status = ProgressPhaseStatus.FAILED
                 raise
@@ -164,7 +173,18 @@ async def execute_phases(
                 and uses_rich_progress(reporter)
             ):
                 resolved_status = phase.success_status
-            if phase.retain_on_success is None:
+            retain = phase.retain_on_success
+            if phase.name == "align" and uses_rich_progress(reporter):
+                retain = True
+            if phase.alignment_summary is not None:
+                reporter.complete_phase(
+                    resolved_status,
+                    retain=retain,
+                    summary=phase.success_summary,
+                    duration_text=phase.duration_text,
+                    alignment_summary=phase.alignment_summary,
+                )
+            elif retain is None:
                 reporter.complete_phase(
                     resolved_status,
                     summary=phase.success_summary,
@@ -173,7 +193,7 @@ async def execute_phases(
             else:
                 reporter.complete_phase(
                     resolved_status,
-                    retain=phase.retain_on_success,
+                    retain=retain,
                     summary=phase.success_summary,
                     duration_text=phase.duration_text,
                 )

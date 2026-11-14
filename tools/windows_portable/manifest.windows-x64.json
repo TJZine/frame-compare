@@ -3,29 +3,29 @@
   "bundle": {
     "platform": "windows",
     "arch": "x64",
-    "vs_ref": "R81",
-    "python_version": "3.13.16",
+    "vs_ref": "R82",
+    "python_version": "3.14.10",
     "ffmpeg_policy": "lgpl-only",
     "plugin_layout": "R74+ site-packages/vapoursynth/plugins only",
     "notes": "Deterministic Windows media runtime contract. VapourSynth plugins are installed only in the canonical site-packages/vapoursynth/plugins directory; native media components are not present in code-only update ZIPs, so installations crossing this runtime fingerprint require a complete portable bundle refresh. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
     "runtime_fingerprints": {
-      "analysis": "3155ae5b289b291dd4455618b90933bcd883548129686c33d036d9d7f71e36e3",
-      "probe": "da4ce68ddc665bbbb5b3afcbfcd07891b06139ab413f421027beb1af609f79fa",
-      "alignment": "4bee154435c566f007fa948c609ed6926ea3bdbf6cbe468c3c9b660503c3e858",
-      "index": "f125953022b6d62dd6aaf53f4b85bee51d206878100a51cf40c9e9e4afa879b1",
-      "full": "b47d64de188aab069cf3c3b9d51add6d0b3416c5ee175b4c0646b72436219320"
+      "analysis": "b9c8c9d3c7937e1e3219d6b3c22d323b89e8ecd277606be26fe94e3fcfffda28",
+      "probe": "b411643a70b6777974e141274614df896cf742d932fe02038e26e247dc846982",
+      "alignment": "1da95673a8315f0be8d14ded7b889b0c6ec3ae55618e4c1bc75b96315da4b324",
+      "index": "47d07506e489fb708e6a6baf07eed55d50f241e91c7a011b6dbd5074aae024c3",
+      "full": "50c72cd2078e6909b28b0ea9bcf576c4c06899f186a78d62435dda7f2a199db4"
     }
   },
   "artifacts": [
     {
-      "id": "ffmpeg-btbn-win64-lgpl-8.1-2026-09-30",
+      "id": "ffmpeg-btbn-win64-lgpl-8.1-2026-10-31",
       "name": "FFmpeg (BtbN build, win64, LGPL-only)",
-      "version": "n8.1.3-9-g29e619e767 (autobuild-2026-09-30-13-08)",
-      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-win64-lgpl-8.1.zip",
-      "source_url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/29e619e767cde9045a75c29bc9a8278ae7b3a98b",
-      "build_source_url": "https://codeload.github.com/BtbN/FFmpeg-Builds/tar.gz/6c9aec5fc9a72ec3abedd1fa84db141fa18cf52b",
-      "sha256": "4a7642b2264c03e8a0ce8a3825b933ee5580656f45695a086fe7e294045ffc0a",
-      "bytes": 170611883,
+      "version": "n8.1.3-27-g8dca1586f4 (autobuild-2026-10-31-12-59)",
+      "url": "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n8.1.3-27-g8dca1586f4-win64-lgpl-8.1.zip",
+      "source_url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/8dca1586f468bfcbb78ae3ed618af1361d9f140a",
+      "build_source_url": "https://codeload.github.com/FFmpeg-Builds/FFmpeg-Builds/tar.gz/5031c6f1082414e53688d39e521849905071070d",
+      "sha256": "d4c2a42673917b4a97104a3e9f082729a9730796b98664e37c0b7eba6c6c613d",
+      "bytes": 167778744,
       "license": {
         "spdx": "LGPL-2.1-or-later",
         "url": "https://ffmpeg.org/legal.html",
@@ -34,27 +34,27 @@
       "install": {
         "type": "extract",
         "destination": "ffmpeg",
-        "strip_prefix": "ffmpeg-n8.1.3-9-g29e619e767-win64-lgpl-8.1/"
+        "strip_prefix": "ffmpeg-n8.1.3-27-g8dca1586f4-win64-lgpl-8.1/"
       },
-      "release_date": "2026-09-30",
+      "release_date": "2026-10-31",
       "source_kind": "release",
-      "source_ref": "autobuild-2026-09-30-13-08",
-      "source_sha256": "8e4699bcb6a311772e8f513cc72ce27328891b82a598b82e7cff3dfe580875a0",
-      "source_bytes": 16922506,
-      "build_source_commit": "6c9aec5fc9a72ec3abedd1fa84db141fa18cf52b",
-      "build_source_sha256": "81da4f7c878dc0f60e6b8d0049a112e32178e20f025d468fe4e99e77b2dfe0ec",
-      "build_source_bytes": 107893,
+      "source_ref": "autobuild-2026-10-31-12-59",
+      "source_sha256": "5ce832c43ca0a336c747db9dcd448655c64c25e33cb9868e1cc5b24abb04dbaa",
+      "source_bytes": 16923274,
+      "build_source_commit": "5031c6f1082414e53688d39e521849905071070d",
+      "build_source_sha256": "3d82bbb1dd436116034bb4d945245e5550dff0d89db0094e9af90382527c2c17",
+      "build_source_bytes": 116910,
       "notes": "Retained end-of-month BtbN Windows x64 LGPL-only artifact from FFmpeg's stable 8.1 release branch; no GPL or nonfree profile is permitted.",
-      "source_commit": "29e619e767cde9045a75c29bc9a8278ae7b3a98b"
+      "source_commit": "8dca1586f468bfcbb78ae3ed618af1361d9f140a"
     },
     {
       "id": "python-embed-amd64",
       "name": "Python embeddable package (amd64)",
-      "version": "3.13.16",
-      "url": "https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip",
-      "source_url": "https://www.python.org/ftp/python/3.13.16/Python-3.13.16.tgz",
-      "sha256": "97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297",
-      "bytes": 11439094,
+      "version": "3.14.10",
+      "url": "https://www.python.org/ftp/python/3.14.10/python-3.14.10-embed-amd64.zip",
+      "source_url": "https://www.python.org/ftp/python/3.14.10/Python-3.14.10.tgz",
+      "sha256": "90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159",
+      "bytes": 12619664,
       "license": {
         "spdx": "Python-2.0",
         "url": "https://docs.python.org/3/license.html"
@@ -63,28 +63,28 @@
         "type": "extract",
         "destination": "python"
       },
-      "release_date": "2026-09-30",
+      "release_date": "2026-10-25",
       "source_kind": "release",
-      "source_ref": "3.13.16",
-      "source_sha256": "cfac63bddf956deafb1172ca131ae5dcaafd6f95056086e233fca205593ed427",
-      "source_bytes": 30191781
+      "source_ref": "3.14.10",
+      "source_sha256": "9e4996c19ae5a3df31f10c37723661f71d3455d73bd005f79df7098e5cc13192",
+      "source_bytes": 31671453
     },
     {
-      "id": "vapoursynth-portable-r81",
+      "id": "vapoursynth-portable-r82",
       "name": "VapourSynth 64-bit portable",
-      "version": "R81",
-      "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R81/VapourSynth64-Portable-R81.zip",
-      "source_url": "https://codeload.github.com/vapoursynth/vapoursynth/tar.gz/dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a",
-      "sha256": "6d625bd3b4d68697a7664a886f3a5e2f1df1a4744b4811bf77bd944baed63436",
-      "bytes": 31797504,
+      "version": "R82",
+      "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R82/VapourSynth64-Portable-R82.zip",
+      "source_url": "https://codeload.github.com/vapoursynth/vapoursynth/tar.gz/e0fadcc1c8977e99b11ce2e478996a867a939874",
+      "sha256": "f97ea50c4c9f778eeac4bc4e3e43f86fb3b71787371d06e584e0c47f396874ca",
+      "bytes": 31801679,
       "license": {
         "spdx": "LGPL-2.1-or-later",
-        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a/COPYING.LESSER",
+        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/e0fadcc1c8977e99b11ce2e478996a867a939874/COPYING.LESSER",
         "files": [
           {
             "path": "licenses/common/LGPL-2.1.txt",
             "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
-            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a/COPYING.LESSER"
+            "source_url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/e0fadcc1c8977e99b11ce2e478996a867a939874/COPYING.LESSER"
           }
         ]
       },
@@ -92,13 +92,13 @@
         "type": "extract",
         "destination": "vs/core"
       },
-      "notes": "R81 stable portable runtime with core API R4.3, GPU transfer and memory-model fixes, Matroska muxer and logging fixes. Frame Compare keeps its CPU-frame path. The selected CPython 3.12 ABI3 wheel supports CPython 3.13; native builds require a C++20 compiler.",
-      "release_date": "2026-10-04",
+      "notes": "R82 stable portable runtime with core API R4.3. The archive contains the same CPython 3.12 ABI3 wheel as the frozen lock and supports the selected CPython 3.14 runtime.",
+      "release_date": "2026-11-01",
       "source_kind": "release",
-      "source_ref": "R81",
-      "source_sha256": "8b539506bba0fce6794d905da771a1b88a5cf2288a99ae0d32b8acd675240391",
-      "source_bytes": 1134224,
-      "source_commit": "dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a"
+      "source_ref": "R82",
+      "source_sha256": "d908d2c7a9278918658db0f2e3e46ac11c78cfb365d265616c41e648bc561900",
+      "source_bytes": 1140334,
+      "source_commit": "e0fadcc1c8977e99b11ce2e478996a867a939874"
     },
     {
       "id": "vs-plugin-lsmas-1310.0.0.0-win-amd64-wheel",
@@ -192,31 +192,31 @@
       "source_commit": "7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67"
     },
     {
-      "id": "vs-plugin-vs-placebo-2.0.4-win-amd64-wheel",
+      "id": "vs-plugin-vs-placebo-2.0.5-win-amd64-wheel",
       "name": "vs-placebo (VapourSynth plugin wheel)",
-      "version": "2.0.4",
-      "url": "https://files.pythonhosted.org/packages/12/ee/74abc0bad6ebc107e6182749837cb2e2ddcf70617a72a23aa245bb46888d/vs_placebo-2.0.4-py3-none-win_amd64.whl",
-      "source_url": "https://github.com/Lypheo/vs-placebo/archive/3cfd23f257ecb62b0cbd81eaaca092e18ae8e579.tar.gz",
-      "sha256": "3715ee44db698a52334a9a4be61ef29bd6d06d3d491eb905b2af7a4193d27411",
-      "bytes": 6274904,
+      "version": "2.0.5",
+      "url": "https://files.pythonhosted.org/packages/8f/ba/b502f5c07e4c81ef6cbf725ceb01232dc2f803936bdaf68dfafee5ece320/vs_placebo-2.0.5-py3-none-win_amd64.whl",
+      "source_url": "https://github.com/Lypheo/vs-placebo/archive/e965afc70167b27924585737477fcd587942824d.tar.gz",
+      "sha256": "9fb49e137ca5240f24a588f3dfec85bd5e711974608a916fc8cbf398dff99a38",
+      "bytes": 6382433,
       "license": {
         "spdx": "LGPL-2.1-only AND LGPL-2.1-or-later AND MIT",
-        "url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/3cfd23f257ecb62b0cbd81eaaca092e18ae8e579/COPYING",
+        "url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/e965afc70167b27924585737477fcd587942824d/COPYING",
         "files": [
           {
             "path": "licenses/vs-placebo/COPYING.txt",
             "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
-            "source_url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/3cfd23f257ecb62b0cbd81eaaca092e18ae8e579/COPYING"
+            "source_url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/e965afc70167b27924585737477fcd587942824d/COPYING"
           },
           {
             "path": "licenses/vs-placebo/libplacebo-LICENSE.txt",
             "sha256": "b3aa400aca6d2ba1f0bd03bd98d03d1fe7489a3bbb26969d72016360af8a5c9d",
-            "source_url": "https://raw.githubusercontent.com/haasn/libplacebo/a7a18af88ff0a17c04840dcb3246047bb6b46df3/LICENSE"
+            "source_url": "https://raw.githubusercontent.com/haasn/libplacebo/275f7dea27924cdd34ab2e6c20e448b6bc4fab65/LICENSE"
           },
           {
             "path": "licenses/vs-placebo/libdovi-LICENSE.txt",
-            "sha256": "f35d4515dd8d81c7996af2b20e9605561d1af0c21bc12ba7cc4fa4c60aed2178",
-            "source_url": "https://raw.githubusercontent.com/quietvoid/dovi_tool/4fd2b2235c9f93582dd4a00e65ee34a07800afd7/LICENSE"
+            "sha256": "e9d76c149b1176de4aa0202cfb6a4a266a0c4cb71959f429d670c3a857f95e52",
+            "source_url": "https://raw.githubusercontent.com/quietvoid/dovi_tool/d1abe0e27ff2c7ab3339614d06db9f8a058af6b2/LICENSE"
           }
         ],
         "notes": "The wheel bundles the selected libplacebo and libdovi lineages; all three upstream notices are included."
@@ -225,167 +225,224 @@
         "type": "python_wheel"
       },
       "notes": "Latest non-yanked stable wheel. Requires Python 3.12+ and VapourSynth R74+; bundles the selected libplacebo and libdovi lineages.",
-      "release_date": "2026-07-14",
+      "release_date": "2026-11-05",
       "source_kind": "tag",
-      "source_ref": "2.0.4",
-      "source_sha256": "b1c3e6eab7e7c722aa1e5706aef70b5365f4a4c881b4573a6121e4c9572a8fbe",
-      "source_bytes": 37902,
-      "source_commit": "3cfd23f257ecb62b0cbd81eaaca092e18ae8e579"
+      "source_ref": "2.0.5",
+      "source_sha256": "50e5dd424180a31c1362dc616f5463ac30f1d60adf8aca06fe8914414f4314a7",
+      "source_bytes": 38183,
+      "source_commit": "e965afc70167b27924585737477fcd587942824d"
     },
     {
-      "id": "vsview-0.12.1-wheel",
+      "id": "vsview-0.14.0-wheel",
       "name": "VSView",
-      "version": "0.12.1",
-      "url": "https://files.pythonhosted.org/packages/a4/e1/9179b6da07cb4153ec6818ee4ba256cf5fca15ccc1f6e3bdf6e4fd27e8cf/vsview-0.12.1-py3-none-any.whl",
-      "source_url": "https://files.pythonhosted.org/packages/e4/1c/e1eac58c9a8df00de8a91235e00921dbbd6116a0c68c50e4949c9e0d9081/vsview-0.12.1.tar.gz",
-      "sha256": "984b3cdce0e8743ada9e5b7677b91b4540c69f6790098579b13e0260766aeb64",
-      "bytes": 2279401,
+      "version": "0.14.0",
+      "url": "https://files.pythonhosted.org/packages/dc/f2/cebb61ec85f6331579f8d44cc1eeaf6b905037f06e4a5ebcc530eac7992a/vsview-0.14.0-py3-none-any.whl",
+      "source_url": "https://files.pythonhosted.org/packages/20/16/7c51c29133cba6d01f9aae9708b1e9055ad8c94d32747620a4300828a96a/vsview-0.14.0.tar.gz",
+      "sha256": "b2486856c8f5047428b97e95c948f283b0b44b88e5be146fcfb56888e5d8ae57",
+      "bytes": 2377037,
       "license": {
-        "spdx": "EUPL-1.2 AND MIT AND Apache-2.0 AND ISC AND OFL-1.1",
-        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.12.1/LICENSE",
+        "spdx": "EUPL-1.2 AND (MIT AND Apache-2.0 AND ISC AND OFL-1.1)",
+        "url": "https://github.com/Jaded-Encoding-Thaumaturgy/vs-view/blob/vsview/v0.14.0/LICENSE",
         "notes": "The wheel carries the application and bundled font/icon license texts under dist-info/licenses."
       },
       "install": { "type": "python_wheel" },
-      "release_date": "2026-10-09",
+      "release_date": "2026-10-26",
       "source_kind": "release",
-      "source_ref": "vsview/v0.12.1",
-      "source_sha256": "0c00a25539488fd059786c762ffec022c9e3c8dbf9ec5d1a1afac912b6963afc",
-      "source_bytes": 13883419
+      "source_ref": "vsview/v0.14.0",
+      "source_sha256": "c1f5c8a5d6d71e77460eda52c043081cce793f4911bf1dac613b82e56c1603e6",
+      "source_bytes": 2319033
     },
     {
-      "id": "cyclopts-5.2.0-wheel",
+      "id": "cyclopts-5.4.2-wheel",
       "name": "Cyclopts",
-      "version": "5.2.0",
-      "url": "https://files.pythonhosted.org/packages/d4/dd/3f73d04c95f6acc6a54700011637e49362e337139b518be895edf4786f87/cyclopts-5.2.0-py3-none-any.whl",
-      "source_url": "https://files.pythonhosted.org/packages/28/c1/3debeeb6e0eb74a51d6f8cf1f273ed7c479e3321631cbf89fb9700e65e28/cyclopts-5.2.0.tar.gz",
-      "sha256": "5da2a5d65164e03008621fc4795946b88a722b881398b5dfa58afa6218342cff",
-      "bytes": 289196,
+      "version": "5.4.2",
+      "url": "https://files.pythonhosted.org/packages/68/03/9347dfa31741d38a02f365a5cca5b76fd1288e8f9ee0fa8120eb301e9876/cyclopts-5.4.2-py3-none-any.whl",
+      "source_url": "https://files.pythonhosted.org/packages/49/a2/34a66cdd2c2a5ffcfb15c195091bb944cf25bc8c1c0faeb4726ecb906c18/cyclopts-5.4.2.tar.gz",
+      "sha256": "f8a07bf41d14447960fb75d07b564b13faea1b9a7530cb669db08e43134bbff9",
+      "bytes": 300704,
       "license": {
         "spdx": "Apache-2.0",
-        "url": "https://github.com/BrianPugh/cyclopts/blob/v5.2.0/LICENSE"
+        "url": "https://github.com/BrianPugh/cyclopts/blob/v5.4.2/LICENSE"
       },
       "install": { "type": "python_wheel" },
       "source_kind": "release",
-      "source_ref": "5.2.0",
-      "source_sha256": "b63c1b1beaadf3ead19214385a0f90b990f152c4107c174e1724c45dc71e9541",
-      "source_bytes": 246542,
-      "release_date": "2026-10-06"
+      "source_ref": "5.4.2",
+      "source_sha256": "f0374ffae32bba180db7eae1d17a97a1bcd656455a3b7436f2133c4132f7c5b5",
+      "source_bytes": 257872,
+      "release_date": "2026-11-12"
     },
     {
-      "id": "pyside6-6.11.2-win-amd64-wheel",
+      "id": "pyside6-6.12.0-win-amd64-wheel",
       "name": "PySide6",
-      "version": "6.11.2",
-      "url": "https://files.pythonhosted.org/packages/94/fe/4aea9d30300fff4cda9bb729c1363b9e1095a8544e0d6b57065465e16599/pyside6-6.11.2-cp310-abi3-win_amd64.whl",
-      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz",
-      "sha256": "3201d67e3c10be2eaedd3910ff0f02351eca7e88c95a291cde5e7f2f55ef207f",
-      "bytes": 578382,
+      "version": "6.12.0",
+      "url": "https://files.pythonhosted.org/packages/a1/da/8e8514fc29ea916c3cd71a524480b77409e19ed12d709e8a5d73be089b81/pyside6-6.12.0-cp310-abi3-win_amd64.whl",
+      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz",
+      "sha256": "31a8d2893f2f28ab483b1534dde0438f27af6e234593de30425cb4729052d8f8",
+      "bytes": 578958,
       "license": {
         "spdx": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
         "url": "https://doc.qt.io/qtforpython-6/licenses.html",
         "files": [{
           "path": "licenses/common/LGPL-3.0.txt",
           "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
-          "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz"
+          "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz"
         }]
       },
       "install": { "type": "python_wheel" },
       "source_kind": "release",
-      "source_ref": "6.11.2",
-      "source_sha256": "cba47efbaad1bedd529725cbc14e21f156c7a19366f07b3edfbb076ffd7afdf8",
-      "source_bytes": 18053248
+      "source_ref": "6.12.0",
+      "source_sha256": "099c1a597cf33c1b000e11cf68a0b82d216fb802bf81726efc720394f10c7751",
+      "source_bytes": 18211772
     },
     {
-      "id": "pyside6-addons-6.11.2-win-amd64-wheel",
+      "id": "pyside6-addons-6.12.0-win-amd64-wheel",
       "name": "PySide6 Addons",
-      "version": "6.11.2",
-      "url": "https://files.pythonhosted.org/packages/fb/c1/08bf6594101b42fc88834009f1dac59a983c5b6805c62c5081f077d09b4a/pyside6_addons-6.11.2-cp310-abi3-win_amd64.whl",
-      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz",
-      "sha256": "f449ea4431da20e7b86752cca8d166f93434516fe417f981c27e5f8e1b554407",
-      "bytes": 168208836,
+      "version": "6.12.0",
+      "url": "https://files.pythonhosted.org/packages/02/41/ba3d52fe2acd942ebf71eb02b3bdf0897f7f6f4ce8f52289cb50228e48d3/pyside6_addons-6.12.0-cp310-abi3-win_amd64.whl",
+      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz",
+      "sha256": "98d8d62010da6605344cee83e5c96fb846170a1f2d924523f10f5d92078b02b0",
+      "bytes": 40522402,
       "license": {
         "spdx": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
         "url": "https://doc.qt.io/qtforpython-6/licenses.html",
         "files": [{
           "path": "licenses/common/LGPL-3.0.txt",
           "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
-          "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz"
+          "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz"
         },
         {
           "path": "licenses/lsmash-works/dependencies/FFmpeg-COPYING.LGPLv2.1.txt",
           "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
-          "source_url": "https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz"
+          "source_url": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz"
         }],
-        "notes": "The Windows wheel bundles Qt 6.11.2 multimedia and FFmpeg 7.1.5 DLLs; both corresponding sources and license texts are inventoried."
+        "notes": "The Windows wheel bundles Qt 6.12.0 multimedia and FFmpeg 9.0.1 DLLs; both corresponding sources and license texts are inventoried."
       },
       "install": { "type": "python_wheel" },
       "source_kind": "release",
-      "source_ref": "6.11.2",
-      "source_sha256": "cba47efbaad1bedd529725cbc14e21f156c7a19366f07b3edfbb076ffd7afdf8",
-      "source_bytes": 18053248
+      "source_ref": "6.12.0",
+      "source_sha256": "099c1a597cf33c1b000e11cf68a0b82d216fb802bf81726efc720394f10c7751",
+      "source_bytes": 18211772
     },
     {
-      "id": "pyside6-essentials-6.11.2-win-amd64-wheel",
+      "id": "pyside6-essentials-6.12.0-win-amd64-wheel",
       "name": "PySide6 Essentials",
-      "version": "6.11.2",
-      "url": "https://files.pythonhosted.org/packages/dc/09/d2662684aee4d3f027ff9b1e965f22301bc28ffc5b7f167658508e4475dc/pyside6_essentials-6.11.2-cp310-abi3-win_amd64.whl",
-      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz",
-      "sha256": "c8a29def77032773a30879f7f24415b5395ad08592d147c170824ef4c735dfc1",
-      "bytes": 76913043,
+      "version": "6.12.0",
+      "url": "https://files.pythonhosted.org/packages/03/61/9a7e32a37b224f68506785bfb0f288d516098ec71681782d72b695a6c95d/pyside6_essentials-6.12.0-cp310-abi3-win_amd64.whl",
+      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz",
+      "sha256": "c9a95102aa23c1f86516a30d5a9be37552d324eee7e567eb7508973f1218cb42",
+      "bytes": 82153795,
       "license": {
         "spdx": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
         "url": "https://doc.qt.io/qtforpython-6/licenses.html",
         "files": [{
           "path": "licenses/common/LGPL-3.0.txt",
           "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
-          "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz"
+          "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz"
         }]
       },
       "install": { "type": "python_wheel" },
       "source_kind": "release",
-      "source_ref": "6.11.2",
-      "source_sha256": "cba47efbaad1bedd529725cbc14e21f156c7a19366f07b3edfbb076ffd7afdf8",
-      "source_bytes": 18053248
+      "source_ref": "6.12.0",
+      "source_sha256": "099c1a597cf33c1b000e11cf68a0b82d216fb802bf81726efc720394f10c7751",
+      "source_bytes": 18211772
     },
     {
-      "id": "shiboken6-6.11.2-win-amd64-wheel",
+      "id": "shiboken6-6.12.0-win-amd64-wheel",
       "name": "Shiboken6",
-      "version": "6.11.2",
-      "url": "https://files.pythonhosted.org/packages/ce/6b/fee1b4814317e4664e318644c9c007676c65a71e5b2b9d3ac4121a94dc0a/shiboken6-6.11.2-cp310-abi3-win_amd64.whl",
-      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz",
-      "sha256": "6ab0eba1c904455df621f9a6df3ca2bb896bab8670572d2bc4e37804ae91f19a",
-      "bytes": 1226578,
+      "version": "6.12.0",
+      "url": "https://files.pythonhosted.org/packages/2a/b6/bee97e7a2edeab72aafabb46ee5adc939790a638d107860b4cad7a20e407/shiboken6-6.12.0-cp310-abi3-win_amd64.whl",
+      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz",
+      "sha256": "a1906cb8116869178c64b6bab52623bbc8b4ceed7b30bfc3c9aa0f6e67f6438e",
+      "bytes": 1265476,
       "license": {
         "spdx": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
         "url": "https://doc.qt.io/qtforpython-6/licenses.html",
         "files": [{
           "path": "licenses/common/LGPL-3.0.txt",
           "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
-          "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz"
+          "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz"
         }]
       },
       "install": { "type": "python_wheel" },
       "source_kind": "release",
-      "source_ref": "6.11.2",
-      "source_sha256": "cba47efbaad1bedd529725cbc14e21f156c7a19366f07b3edfbb076ffd7afdf8",
-      "source_bytes": 18053248
+      "source_ref": "6.12.0",
+      "source_sha256": "099c1a597cf33c1b000e11cf68a0b82d216fb802bf81726efc720394f10c7751",
+      "source_bytes": 18211772
     },
     {
-      "id": "vapoursynth-bestsource-22-win-amd64-wheel",
+      "id": "pyside6-pdf-6.12.0.140-win-amd64-wheel",
+      "name": "PySide6 Pdf",
+      "version": "6.12.0.140",
+      "url": "https://files.pythonhosted.org/packages/0e/8a/3f5eab9eb9e6486f0334b100322bbd0aff432dd90ad7977a3910979a163f/pyside6_pdf-6.12.0.140-cp310-abi3-win_amd64.whl",
+      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz",
+      "sha256": "4971ba1a0ca15e7c29cfd808e9600aeb46b2305dad01456eb09fa3197166268e",
+      "bytes": 2983516,
+      "license": {
+        "spdx": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+        "url": "https://doc.qt.io/qtforpython-6/licenses.html",
+        "files": [
+          {
+            "path": "licenses/common/LGPL-3.0.txt",
+            "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+            "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz"
+          }
+        ]
+      },
+      "install": {
+        "type": "python_wheel"
+      },
+      "source_kind": "release",
+      "source_ref": "6.12.0",
+      "source_sha256": "099c1a597cf33c1b000e11cf68a0b82d216fb802bf81726efc720394f10c7751",
+      "source_bytes": 18211772,
+      "notes": "Qt Python bindings for the separately versioned Qt 6.140.0 modules. The portable profile retains PDF and removes WebEngine/Chromium runtime payload after installation."
+    },
+    {
+      "id": "pyside6-webengine-6.12.0.140-win-amd64-wheel",
+      "name": "PySide6 WebEngine",
+      "version": "6.12.0.140",
+      "url": "https://files.pythonhosted.org/packages/21/0d/260c7c286f2d4e8a49c099152a385414a872f022117f937824ca0a3f38e5/pyside6_webengine-6.12.0.140-cp310-abi3-win_amd64.whl",
+      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz",
+      "sha256": "f9b61b1d457a591ee590a6b80515f25a3e61e2576a2a0a70566380f9d9de4ab0",
+      "bytes": 131697708,
+      "license": {
+        "spdx": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+        "url": "https://doc.qt.io/qtforpython-6/licenses.html",
+        "files": [
+          {
+            "path": "licenses/common/LGPL-3.0.txt",
+            "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+            "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz"
+          }
+        ]
+      },
+      "install": {
+        "type": "python_wheel"
+      },
+      "source_kind": "release",
+      "source_ref": "6.12.0",
+      "source_sha256": "099c1a597cf33c1b000e11cf68a0b82d216fb802bf81726efc720394f10c7751",
+      "source_bytes": 18211772,
+      "notes": "Qt Python bindings for the separately versioned Qt 6.140.0 modules. The portable profile retains PDF and removes WebEngine/Chromium runtime payload after installation."
+    },
+    {
+      "id": "vapoursynth-bestsource-23-win-amd64-wheel",
       "name": "BestSource for VapourSynth",
-      "version": "22",
-      "url": "https://files.pythonhosted.org/packages/e1/01/8b65d43d73d6d3a5dab3aa79a65e98cf8fac33cfe24e94bdcad46ded390e/vapoursynth_bestsource-22-py3-none-win_amd64.whl",
-      "source_url": "https://files.pythonhosted.org/packages/a4/19/c0f06506a49815e79d6ab95193986686969531755ebccbb81e06bb99b541/vapoursynth_bestsource-22.tar.gz",
-      "sha256": "4dc2275d145128a2a86fa32efaab9fbab8e22582bfdf173b460f2ff33858c230",
-      "bytes": 15890493,
+      "version": "23",
+      "url": "https://files.pythonhosted.org/packages/dd/c1/878c1b873c25b1ca6da2ff66fc0968a0fb795f0778446142b4bc0b3ef0bb/vapoursynth_bestsource-23-py3-none-win_amd64.whl",
+      "source_url": "https://files.pythonhosted.org/packages/6e/cb/cb022175c376cc8eca4392791cd493844def6bc6684d57ecbc61937b4e38/vapoursynth_bestsource-23.tar.gz",
+      "sha256": "b9fe5a88aa0e6501e45320049f9cf8d2d6978e77d8e75ee84ea6090e9ecca2fa",
+      "bytes": 16086999,
       "license": {
         "spdx": "MIT",
-        "url": "https://github.com/vapoursynth/bestsource/blob/R22/LICENSE"
+        "url": "https://github.com/vapoursynth/bestsource/blob/R23/LICENSE"
       },
       "install": { "type": "python_wheel" },
       "source_kind": "release",
-      "source_ref": "R22",
-      "source_sha256": "0a8ab1b06fb4df050a5d8943f48a69b85306781aeb91e81a340761a417107ba3",
-      "source_bytes": 126296
+      "source_ref": "R23",
+      "source_sha256": "af19148ed250cc3a5533e391f60508b76c0a8db65243af28c263ec3522734d6e",
+      "source_bytes": 132129,
+      "release_date": "2026-10-28"
     },
     {
       "id": "vspackrgb-2.0.0-win-amd64-wheel",
@@ -445,29 +502,29 @@
     },
     {
       "name": "libdovi",
-      "version": "3.3.2",
+      "version": "3.4.0",
       "selection_kind": "tag",
-      "source_ref": "libdovi-3.3.2",
+      "source_ref": "libdovi-3.4.0",
       "license": "MIT",
-      "source_url": "https://codeload.github.com/quietvoid/dovi_tool/tar.gz/refs/tags/libdovi-3.3.2",
-      "notes": "Tag libdovi-3.3.2 at commit 4fd2b2235c9f93582dd4a00e65ee34a07800afd7, selected by the vs-placebo 2.0.4 build metadata.",
-      "release_date": "2025-06-04",
-      "sha256": "8ccb1922d7dbb57bc4f2c15c10b90c462f7a5f292efe317c116db923728dd3f1",
-      "bytes": 489628,
-      "source_commit": "4fd2b2235c9f93582dd4a00e65ee34a07800afd7"
+      "source_url": "https://codeload.github.com/quietvoid/dovi_tool/tar.gz/refs/tags/libdovi-3.4.0",
+      "notes": "The upstream Windows wheel workflow uses the MSYS2 UCRT64 libdovi package. MSYS2 selected libdovi 3.4.0 when that wheel was built.",
+      "release_date": "2026-07-12",
+      "sha256": "8eac4d1c3134f53e8eb216db6450307a737425844113e480d1e9713c142a9fa2",
+      "bytes": 494710,
+      "source_commit": "d1abe0e27ff2c7ab3339614d06db9f8a058af6b2"
     },
     {
       "name": "libplacebo",
-      "version": "commit a7a18af88ff0a17c04840dcb3246047bb6b46df3",
-      "selection_kind": "commit",
-      "source_ref": "a7a18af88ff0a17c04840dcb3246047bb6b46df3",
+      "version": "7.387.0",
+      "selection_kind": "tag",
+      "source_ref": "v7.387.0",
       "license": "LGPL-2.1-or-later",
-      "source_url": "https://codeload.github.com/haasn/libplacebo/tar.gz/a7a18af88ff0a17c04840dcb3246047bb6b46df3",
-      "sha256": "ba0c8c011c19cb74bcee26646d2d6070447151da89a9abdd01c9034e768de8b2",
-      "bytes": 873993,
-      "notes": "Revision selected by the vs-placebo 2.0.4 build metadata.",
-      "source_commit": "a7a18af88ff0a17c04840dcb3246047bb6b46df3",
-      "release_date": "2026-07-08"
+      "source_url": "https://codeload.github.com/haasn/libplacebo/tar.gz/275f7dea27924cdd34ab2e6c20e448b6bc4fab65",
+      "sha256": "adbca47395410ada01414bc527e0103c716b9b758be857464c40e5ff0ec695be",
+      "bytes": 973669,
+      "notes": "Tag selected by the vs-placebo 2.0.5 Meson wrap.",
+      "source_commit": "275f7dea27924cdd34ab2e6c20e448b6bc4fab65",
+      "release_date": "2026-10-25"
     },
     {
       "name": "libvpx",
@@ -524,35 +581,47 @@
     },
     {
       "name": "Qt",
-      "version": "6.11.2",
+      "version": "6.12.0",
       "selection_kind": "release",
-      "source_ref": "6.11.2",
+      "source_ref": "6.12.0",
       "license": "LGPL-3.0-only",
-      "source_url": "https://download.qt.io/official_releases/qt/6.11/6.11.2/single/qt-everywhere-src-6.11.2.tar.xz",
-      "sha256": "6dcfbca271d76a6502741a2c0dc6fc98ef7dd0b7b4cfd0abcebb285a86a26f33",
-      "bytes": 1019661552,
-      "notes": "Corresponding source for the Qt libraries bundled in the PySide6 6.11.2 wheels."
+      "source_url": "https://download.qt.io/official_releases/qt/6.12/6.12.0/single/qt-everywhere-src-6.12.0.tar.xz",
+      "sha256": "98ff4f44bac6ec3e1e62ee2a4316ae0e3d15badb015d753cc0268a20db52f165",
+      "bytes": 443394020,
+      "notes": "Corresponding source for the Qt 6.12.0 libraries bundled in the PySide6 wheels. The separately versioned Qt PDF 6.140.0 source is inventoried independently."
+    },
+    {
+      "name": "Qt PDF (Qt WebEngine source tree)",
+      "version": "6.140.0",
+      "selection_kind": "commit",
+      "source_ref": "d505fc23640d2bd6345e6483eb73daf4e19f5829",
+      "source_commit": "d505fc23640d2bd6345e6483eb73daf4e19f5829",
+      "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+      "source_url": "https://download.qt.io/online/qtsdkrepository/all_os/extensions/qtwebengine/6120/61400/src_doc_examples/extensions.qtwebengine.6120.61400.src/6.12.0-0-202609281005qtwebengine-everywhere-src-6.140.0.tar.xz",
+      "sha256": "141e9b230e5ec9ee65a7357ca4b87d702e4badc515289eeade1047a788bb96e7",
+      "bytes": 584649116,
+      "notes": "Exact source archive paired with Qt installer build 6.12.0-0-202609281005. Its Windows Qt PDF SDK SBOM identifies commit d505fc23640d2bd6345e6483eb73daf4e19f5829 (also tagged v6.140.0-rc), not a final public source tag. The Qt6Pdf, Qt6PdfQuick, and Qt6PdfWidgets DLL images match the PySide6 Pdf 6.12.0.140 wheel byte-for-byte outside Authenticode certificates and signing fields. PDF runtime and its third-party code remain included; WebEngine runtime is excluded. Third-party notices and distributor-controlled corresponding-source offer remain release obligations."
     },
     {
       "name": "Qt for Python",
-      "version": "6.11.2",
+      "version": "6.12.0",
       "selection_kind": "release",
-      "source_ref": "6.11.2",
+      "source_ref": "6.12.0",
       "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
-      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz",
-      "sha256": "cba47efbaad1bedd529725cbc14e21f156c7a19366f07b3edfbb076ffd7afdf8",
-      "bytes": 18053248
+      "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz",
+      "sha256": "099c1a597cf33c1b000e11cf68a0b82d216fb802bf81726efc720394f10c7751",
+      "bytes": 18211772
     },
     {
-      "name": "FFmpeg (Qt Multimedia 6.11.2 build)",
-      "version": "7.1.5",
+      "name": "FFmpeg (Qt Multimedia 6.12.0 build)",
+      "version": "9.0.1",
       "selection_kind": "release",
-      "source_ref": "n7.1.5",
+      "source_ref": "n9.0.1",
       "license": "LGPL-2.1-or-later",
-      "source_url": "https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz",
-      "sha256": "de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f",
-      "bytes": 11050340,
-      "notes": "The PySide6 Addons Windows wheel contains avcodec-61.dll, avformat-61.dll, avutil-59.dll, and Qt's FFmpeg multimedia plugin; embedded build paths identify FFmpeg n7.1.5."
+      "source_url": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz",
+      "sha256": "cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635",
+      "bytes": 12036420,
+      "notes": "The PySide6 Addons Windows wheel contains avcodec-63.dll, avformat-63.dll, avutil-61.dll, and Qt's FFmpeg multimedia plugin; embedded build paths identify FFmpeg n9.0.1."
     },
     {
       "name": "xxHash",

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from frame_compare.config.schema import ColorConfig, ConfigSchema
+from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode
 from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.orchestrator import (
     render_screenshots_from_batch_detailed,
@@ -11,6 +11,7 @@ from frame_compare.render.batch.orchestrator import (
 from frame_compare.render.types import BatchRenderOptions, ScreenshotBatchRequest
 from frame_compare.utils.media_facts import ActivePictureFacts, SourceSignalFacts
 from frame_compare.utils.subproc import run_subprocess
+from tests.render_test_support import facts_by_label, paths_by_label, selections
 
 
 class _NonBatchingFFmpegRunner(DefaultFFmpegRunner):
@@ -31,15 +32,14 @@ def _request(
     frames: list[int],
     *,
     is_hdr: bool = False,
+    size: tuple[int, int] = (100, 100),
 ) -> ScreenshotBatchRequest:
     return ScreenshotBatchRequest(
         clip_path=clip_path,
         label=label,
-        source_frames=frames,
-        comparison_frames=frames,
-        selection_labels=[None] * len(frames),
+        frames=selections(frames, frames, [None] * len(frames)),
         size_bytes=clip_path.stat().st_size,
-        source_resolution=(100, 100),
+        source_resolution=size,
         source_total_frames=3,
         signal=SourceSignalFacts(
             is_hdr=is_hdr,
@@ -47,7 +47,7 @@ def _request(
             transfer=16 if is_hdr else 1,
             matrix=9 if is_hdr else 1,
         ),
-        active_picture=ActivePictureFacts(0, 0, 100, 100, "full_frame", True),
+        active_picture=ActivePictureFacts(0, 0, *size, "full_frame", True),
         filename_label=clip_path.stem,
     )
 
@@ -60,12 +60,14 @@ def test_render_screenshots_naming_and_output(
     frames = [0, 1]
     output_dir = integration_output_dir
 
-    results = render_screenshots_from_batch_detailed(
-        [_request(mock_video_path, "TestLabel", frames)],
-        output_dir,
-        integration_config,
-        BatchRenderOptions(renderer="ffmpeg"),
-    ).screenshots_by_label
+    results = paths_by_label(
+        render_screenshots_from_batch_detailed(
+            [_request(mock_video_path, "TestLabel", frames)],
+            output_dir,
+            integration_config,
+            BatchRenderOptions(renderer="ffmpeg"),
+        )
+    )
 
     assert "TestLabel" in results
     assert len(results["TestLabel"]) == 2
@@ -101,12 +103,12 @@ def test_ffmpeg_one_pass_batch_matches_per_frame_pixels_and_facts(
         ),
     )
 
-    batched_paths = batched.screenshots_by_label["TestLabel"]
-    per_frame_paths = per_frame.screenshots_by_label["TestLabel"]
+    batched_paths = paths_by_label(batched)["TestLabel"]
+    per_frame_paths = paths_by_label(per_frame)["TestLabel"]
     assert [path.read_bytes() for path in batched_paths] == [
         path.read_bytes() for path in per_frame_paths
     ]
-    assert batched.frame_facts_by_label == per_frame.frame_facts_by_label
+    assert facts_by_label(batched) == facts_by_label(per_frame)
 
 
 @pytest.mark.integration
@@ -121,7 +123,7 @@ def test_ffmpeg_one_pass_batch_matches_per_frame_hdr_pixels_and_facts(
             "-f",
             "lavfi",
             "-i",
-            "testsrc2=size=100x100:rate=10",
+            "testsrc2=size=320x240:rate=10",
             "-frames:v",
             "3",
             "-c:v",
@@ -138,7 +140,7 @@ def test_ffmpeg_one_pass_batch_matches_per_frame_hdr_pixels_and_facts(
         ],
         timeout_seconds=20,
     )
-    request = _request(fixture, "HDR", [0, 1, 2], is_hdr=True)
+    request = _request(fixture, "HDR", [0, 1, 2], is_hdr=True, size=(320, 240))
     batched = render_screenshots_from_batch_detailed(
         [request],
         tmp_path / "hdr-batched",
@@ -154,24 +156,39 @@ def test_ffmpeg_one_pass_batch_matches_per_frame_hdr_pixels_and_facts(
         ),
     )
 
-    batched_paths = batched.screenshots_by_label["HDR"]
-    per_frame_paths = per_frame.screenshots_by_label["HDR"]
+    batched_paths = paths_by_label(batched)["HDR"]
+    per_frame_paths = paths_by_label(per_frame)["HDR"]
     assert [path.read_bytes() for path in batched_paths] == [
         path.read_bytes() for path in per_frame_paths
     ]
-    assert batched.frame_facts_by_label == per_frame.frame_facts_by_label
+    assert facts_by_label(batched) == facts_by_label(per_frame)
+
+    clean = render_screenshots_from_batch_detailed(
+        [request],
+        tmp_path / "hdr-clean",
+        integration_config,
+        BatchRenderOptions(renderer="ffmpeg", overlay_mode=OverlayMode.NONE),
+    )
+    for baked_path, clean_path in zip(batched_paths, paths_by_label(clean)["HDR"], strict=True):
+        assert clean_path.read_bytes()[24:26] == baked_path.read_bytes()[24:26] == bytes((8, 2))
+        with Image.open(baked_path) as baked, Image.open(clean_path) as plain:
+            bottom_row = (0, plain.height - 1, plain.width, plain.height)
+            assert baked.crop(bottom_row).tobytes() == plain.crop(bottom_row).tobytes()
+            assert baked.tobytes() != plain.tobytes()
 
 
 @pytest.mark.integration
 def test_render_screenshots_empty_frames_returns_label_with_empty_list(
     mock_video_path: Path, integration_output_dir: Path, integration_config: ConfigSchema
 ):
-    results = render_screenshots_from_batch_detailed(
-        [_request(mock_video_path, "EmptyFrames", [])],
-        integration_output_dir,
-        integration_config,
-        BatchRenderOptions(renderer="ffmpeg"),
-    ).screenshots_by_label
+    results = paths_by_label(
+        render_screenshots_from_batch_detailed(
+            [_request(mock_video_path, "EmptyFrames", [])],
+            integration_output_dir,
+            integration_config,
+            BatchRenderOptions(renderer="ffmpeg"),
+        )
+    )
 
     assert results == {"EmptyFrames": []}
 
@@ -180,9 +197,9 @@ def test_render_screenshots_empty_frames_returns_label_with_empty_list(
 def test_render_screenshots_from_batch_empty_clips_returns_empty_dict(
     integration_output_dir: Path, integration_config: ConfigSchema
 ):
-    results = render_screenshots_from_batch_detailed(
-        [], integration_output_dir, integration_config
-    ).screenshots_by_label
+    results = paths_by_label(
+        render_screenshots_from_batch_detailed([], integration_output_dir, integration_config)
+    )
 
     assert results == {}
 
@@ -191,11 +208,13 @@ def test_render_screenshots_from_batch_empty_clips_returns_empty_dict(
 def test_render_screenshots_from_batch_uses_supplied_label(
     mock_video_path: Path, integration_output_dir: Path, integration_config: ConfigSchema
 ):
-    results = render_screenshots_from_batch_detailed(
-        [_request(mock_video_path, mock_video_path.stem, [])],
-        integration_output_dir,
-        integration_config,
-        BatchRenderOptions(renderer="ffmpeg"),
-    ).screenshots_by_label
+    results = paths_by_label(
+        render_screenshots_from_batch_detailed(
+            [_request(mock_video_path, mock_video_path.stem, [])],
+            integration_output_dir,
+            integration_config,
+            BatchRenderOptions(renderer="ffmpeg"),
+        )
+    )
 
     assert results == {mock_video_path.stem: []}

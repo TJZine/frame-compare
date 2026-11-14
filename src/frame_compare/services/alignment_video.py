@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -31,9 +31,10 @@ from frame_compare.utils.alignment_evidence import (
 )
 from frame_compare.utils.alignment_policy import (
     CONFIRMATION_MARGIN,
-    compensated_offset_seconds,
-    rounded_frame,
+    MIN_VIDEO_SCORE_SEPARATION,
+    compensated_lag_to_frame,
     sample_to_reference_frame,
+    selected_start_compensation_seconds,
 )
 from frame_compare.utils.alignment_policy import (
     confirmed_offset as _confirmed_offset,
@@ -42,7 +43,8 @@ from frame_compare.utils.alignment_policy import (
     position_winner as _position_winner,
 )
 from frame_compare.utils.types import AlignmentClipIdentity
-from frame_compare.vs.loader import VSLoader
+from frame_compare.vs.loader import DefaultVSLoader, VSLoader
+from frame_compare.vs.luma import luma_plane
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -95,8 +97,14 @@ class _CheckPointTarget:
     points: tuple[tuple[int, int], ...]
 
 
-def _load_source(loader: VSLoader, path: Path) -> SourceInfo:
+def _load_source(loader: VSLoader, path: Path, cancellation: Event | None) -> SourceInfo:
+    def abort_check() -> None:
+        if _is_cancelled(cancellation):
+            raise InterruptedError("Video alignment cancelled")
+
     try:
+        if isinstance(loader, DefaultVSLoader):
+            return loader.load(path, abort_check=abort_check)
         return loader.load(path)
     except Exception as exc:
         raise RuntimeError("video source loading failed") from exc
@@ -110,6 +118,7 @@ def check_video_alignment(
     fps_reference: Fraction,
     loader: VSLoader | None,
     cancellation: Event | None = None,
+    on_stage: Callable[[str], None] | None = None,
 ) -> VideoCheckObservation:
     """Run V1-V5 and return bounded W0 evidence without throwing runtime failures."""
     global_lag = attempt.audio.global_lag
@@ -123,15 +132,17 @@ def check_video_alignment(
     if not _identities_match(reference) or not _identities_match(comparison):
         return _failed()
 
+    if on_stage is not None:
+        on_stage("indexing video")
     try:
         load_started = time.monotonic()
-        reference_source = _load_source(loader, reference.path)
+        reference_source = _load_source(loader, reference.path, cancellation)
         if _is_cancelled(cancellation):
             return _failed()
         if not _identities_match(reference):
             return _failed()
 
-        comparison_source = _load_source(loader, comparison.path)
+        comparison_source = _load_source(loader, comparison.path, cancellation)
         if _is_cancelled(cancellation):
             return _failed()
         if not _identities_match(reference) or not _identities_match(comparison):
@@ -140,6 +151,8 @@ def check_video_alignment(
     except RuntimeError:
         return _failed()
 
+    if on_stage is not None:
+        on_stage("checking video")
     try:
         reference_node = _prepare_luma(reference_source.clip, reference.active_rect)
         comparison_node = _prepare_luma(comparison_source.clip, comparison.active_rect)
@@ -202,9 +215,9 @@ def check_video_alignment(
                 ),
             )
 
-        starts = _stream_start(attempt, role="reference", video=False)
-        video_starts = _stream_start(attempt, role="reference", video=True)
-        reference_audio_start, reference_video_start = starts, video_starts
+        reference_stream = attempt.selected_streams[0]
+        reference_audio_start = reference_stream.analysis_audio_start
+        reference_video_start = reference_stream.analysis_video_start
         chunks = _chunks(attempt)
         targets, same_frame = _build_targets(
             attempt,
@@ -368,16 +381,7 @@ def _prepare_luma(clip: vs.VideoNode, active_rect: ActiveRect | None) -> vs.Vide
         x, y, width, height = active_rect
         crop = (x, y, width, height)
     try:
-        import vapoursynth as vs
-
-        runtime_vs = cast(Any, vs)
-        runtime_clip = cast(Any, clip)
-        if clip.format.color_family != vs.YUV:
-            runtime_clip = runtime_clip.resize.Bicubic(format=runtime_vs.YUV444P8)
-        luma = cast(
-            "vs.VideoNode",
-            runtime_clip.std.ShufflePlanes(planes=0, colorfamily=runtime_vs.GRAY),
-        )
+        luma = luma_plane(clip)
         if crop is not None:
             x, y, width, height = crop
             luma = cast(Any, luma).std.CropAbs(width=width, height=height, left=x, top=y)
@@ -414,7 +418,7 @@ def _motion_positions(
     cancellation: Event | None,
     retained_frames: dict[int, FloatFrame] | None = None,
 ) -> tuple[int, ...] | None:
-    """One reference frame per equal slot of [start, end]: the candidate with the most motion.
+    """Select the highest-motion measurable candidate in each slot of [start, end].
 
     Motion is the mean absolute luma difference between frames ``n`` and
     ``n + _MOTION_STEP``. Retains only selected luma when requested.
@@ -428,9 +432,8 @@ def _motion_positions(
         if _is_cancelled(cancellation):
             return None
         slot_start = start + slot * index
-        best_frame = round(slot_start + slot / 2)
         best_motion = -1.0
-        best_image: FloatFrame | None = None
+        best_candidate: tuple[int, FloatFrame] | None = None
         for candidate_index in range(_MOTION_CANDIDATES):
             frame = round(slot_start + slot * (candidate_index + 0.5) / _MOTION_CANDIDATES)
             if frame < 0 or frame + _MOTION_STEP >= node.num_frames:
@@ -442,8 +445,12 @@ def _motion_positions(
                 return None
             motion = float(np.mean(np.abs(image - next_image)))
             if motion > best_motion:
-                best_frame, best_motion, best_image = frame, motion, image
-        if retained_frames is not None and best_image is not None:
+                best_motion = motion
+                best_candidate = (frame, image)
+        if best_candidate is None:
+            continue
+        best_frame, best_image = best_candidate
+        if retained_frames is not None:
             retained_frames[best_frame] = best_image
         chosen.append(best_frame)
     return tuple(dict.fromkeys(chosen))
@@ -541,18 +548,6 @@ def _average_ranks(values: FloatFrame) -> FloatFrame:
     return np.asarray((ranks[inverse] / flat.size).reshape(values.shape), dtype=np.float32)
 
 
-def _stream_start(
-    attempt: AudioAlignmentAttempt,
-    *,
-    role: Literal["reference", "comparison"],
-    video: bool,
-) -> Fraction:
-    stream = next(item for item in attempt.selected_streams if item.role == role)
-    if video:
-        return stream.analysis_video_start
-    return stream.analysis_audio_start
-
-
 def _chunks(attempt: AudioAlignmentAttempt) -> tuple[ChunkObservation, ...]:
     columns = attempt.chunks
     return tuple(
@@ -574,15 +569,10 @@ def _chunks(attempt: AudioAlignmentAttempt) -> tuple[ChunkObservation, ...]:
 def _lag_to_frame(
     lag: int | float, *, attempt: AudioAlignmentAttempt, fps_reference: Fraction
 ) -> int:
-    return rounded_frame(
-        compensated_offset_seconds(
-            global_lag=lag,
-            reference_audio_start=_stream_start(attempt, role="reference", video=False),
-            reference_video_start=_stream_start(attempt, role="reference", video=True),
-            comparison_audio_start=_stream_start(attempt, role="comparison", video=False),
-            comparison_video_start=_stream_start(attempt, role="comparison", video=True),
-        ),
-        fps_reference,
+    return compensated_lag_to_frame(
+        lag,
+        compensation_seconds=selected_start_compensation_seconds(attempt.selected_streams),
+        fps_reference=fps_reference,
     )
 
 
@@ -602,13 +592,7 @@ def _build_targets(
         global_lag=attempt.audio.global_lag,
         confirmed_offset=confirmed,
         fps_reference=fps_reference,
-        compensation_seconds=compensated_offset_seconds(
-            global_lag=0,
-            reference_audio_start=_stream_start(attempt, role="reference", video=False),
-            reference_video_start=_stream_start(attempt, role="reference", video=True),
-            comparison_audio_start=_stream_start(attempt, role="comparison", video=False),
-            comparison_video_start=_stream_start(attempt, role="comparison", video=True),
-        ),
+        compensation_seconds=selected_start_compensation_seconds(attempt.selected_streams),
     )
     run_targets: list[_Target] = []
     for run in classification.competing_runs:
@@ -761,12 +745,12 @@ def _hypothesis_winner(
     confirmed_score: float,
     alternative_score: float,
 ) -> Literal["confirmed", "alternative", "neither"]:
-    if confirmed_score == alternative_score:
+    if abs(confirmed_score - alternative_score) < MIN_VIDEO_SCORE_SEPARATION:
         return "neither"
     if confirmed_score == 0.0:
-        return "confirmed" if alternative_score > 0.0 else "neither"
+        return "confirmed"
     if alternative_score == 0.0:
-        return "alternative" if confirmed_score > 0.0 else "neither"
+        return "alternative"
     if (
         confirmed_score < alternative_score
         and alternative_score / confirmed_score >= CONFIRMATION_MARGIN

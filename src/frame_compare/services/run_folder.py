@@ -1,12 +1,7 @@
-"""Run folder naming utilities for Frame Compare.
-
-This module provides functions for deriving filesystem-safe run folder names
-from video metadata (TMDB, guessit) with collision handling.
-"""
-
 from __future__ import annotations
 
 import logging
+import ntpath
 import re
 import uuid
 from contextlib import suppress
@@ -23,18 +18,9 @@ from frame_compare.utils.paths import require_managed_immediate_child
 _UNNAMED_RUN_BASE = "unnamed_run"
 _MAX_FOLDER_NAME_LENGTH = 64
 _NUMERIC_COLLISION_ATTEMPTS = 100
-_WINDOWS_RESERVED_FILENAMES = {
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    *(f"COM{index}" for index in range(1, 10)),
-    *(f"LPT{index}" for index in range(1, 10)),
-}
 
 # Characters illegal in Windows filenames (also avoid on Unix for portability)
 _ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-# Collapse multiple spaces/underscores
 _MULTI_SPACE = re.compile(r"[\s_]+")
 
 log = logging.getLogger(__name__)
@@ -51,7 +37,6 @@ class RunFolderReservation:
 
 
 def sanitize_folder_name(name: str) -> str:
-    """Remove/replace characters illegal in Windows/Unix paths."""
     if not name:
         return _UNNAMED_RUN_BASE
 
@@ -62,7 +47,6 @@ def sanitize_folder_name(name: str) -> str:
     if not sanitized:
         return _UNNAMED_RUN_BASE
 
-    # Limit length (Windows MAX_PATH considerations)
     if len(sanitized) > _MAX_FOLDER_NAME_LENGTH:
         truncated = sanitized[:_MAX_FOLDER_NAME_LENGTH]
         sanitized = truncated.rstrip(". ")
@@ -76,26 +60,16 @@ def sanitize_folder_name(name: str) -> str:
 
 
 def _avoid_windows_reserved_filename(name: str) -> str:
-    if _windows_reserved_filename(name):
+    if ntpath.isreserved(name):
         safe_name = f"{name.replace('.', ' ')} run"
         safe_name = _MULTI_SPACE.sub(" ", safe_name).strip().rstrip(". ")
         if len(safe_name) > _MAX_FOLDER_NAME_LENGTH:
             safe_name = safe_name[:_MAX_FOLDER_NAME_LENGTH].rstrip(". ")
-        return (
-            safe_name
-            if safe_name and not _windows_reserved_filename(safe_name)
-            else _UNNAMED_RUN_BASE
-        )
+        return safe_name if safe_name and not ntpath.isreserved(safe_name) else _UNNAMED_RUN_BASE
     return name
 
 
-def _windows_reserved_filename(name: str) -> bool:
-    stem = name.split(".", maxsplit=1)[0].upper()
-    return stem in _WINDOWS_RESERVED_FILENAMES
-
-
 def find_common_metadata(filenames: list[str]) -> tuple[str | None, int | None]:
-    """Find title/year shared by all non-empty parsed values."""
     if not filenames:
         return None, None
 
@@ -112,7 +86,6 @@ def find_common_metadata(filenames: list[str]) -> tuple[str | None, int | None]:
     if titles and len(set(titles)) == 1:
         common_title = next(p.title for p in parsed_results if p.title)
 
-    # Find common year
     years = [p.year for p in parsed_results if p.year is not None]
     common_year: int | None = None
     if years and len(set(years)) == 1:
@@ -122,19 +95,16 @@ def find_common_metadata(filenames: list[str]) -> tuple[str | None, int | None]:
 
 
 def _combine_filename_stems(filenames: list[str]) -> str:
-    """Create a combined name from filename stems."""
     if not filenames:
         return _UNNAMED_RUN_BASE
 
     stems: list[str] = []
     for filename in filenames:
         stem = Path(filename).stem
-        # Truncate long stems
         if len(stem) > 30:
             stem = stem[:30]
         stems.append(sanitize_folder_name(stem))
 
-    # Deduplicate while preserving order
     seen: set[str] = set()
     unique_stems: list[str] = []
     for stem in stems:
@@ -142,7 +112,6 @@ def _combine_filename_stems(filenames: list[str]) -> str:
             seen.add(stem.lower())
             unique_stems.append(stem)
 
-    # Limit to first 2 stems to avoid excessively long names
     combined = " + ".join(unique_stems[:2])
     if len(unique_stems) > 2:
         combined += f" +{len(unique_stems) - 2} more"
@@ -151,7 +120,6 @@ def _combine_filename_stems(filenames: list[str]) -> str:
 
 
 def _append_collision_suffix(folder_name: str, suffix: str) -> str:
-    """Append a suffix while keeping the result inside the path length budget."""
     allowed = _MAX_FOLDER_NAME_LENGTH - (len(suffix) + 1)
     if allowed < 1:
         allowed = 1
@@ -165,7 +133,6 @@ def _derive_base_folder_name(
     filenames: list[str],
     tmdb_metadata: TmdbMetadata | None = None,
 ) -> tuple[str, RunFolderNamingSource]:
-    """Derive the canonical base run-folder name before collision handling."""
     if not filenames:
         return _UNNAMED_RUN_BASE, "unnamed"
 
@@ -194,20 +161,6 @@ def reserve_run_folder(
     filenames: list[str],
     tmdb_metadata: TmdbMetadata | None = None,
 ) -> RunFolderReservation:
-    """Derive and atomically reserve a unique run folder name by creating it.
-
-    It derives the base folder name, prepares the already-resolved generated-data
-    root, then atomically claims one immediate child. Numeric suffixes resolve
-    candidate collisions.
-
-    Args:
-        generated_root: Resolved generated-data root that owns run folders
-        filenames: List of video filenames (not full paths)
-        tmdb_metadata: Optional TMDB metadata from lookup
-
-    Returns:
-        Reservation facts for the reserved run folder
-    """
     base_name, naming_source = _derive_base_folder_name(filenames, tmdb_metadata)
 
     def _reservation(candidate_name: str) -> RunFolderReservation:
@@ -220,7 +173,6 @@ def reserve_run_folder(
 
     reservation = _reservation(base_name)
 
-    # Try creating base folder name
     try:
         _reserve_candidate(generated_root, reservation.path)
         return reservation
@@ -230,7 +182,6 @@ def reserve_run_folder(
             reservation.path,
         )
 
-    # Loop over compact numeric suffix candidates to resolve collisions.
     for attempt in range(2, _NUMERIC_COLLISION_ATTEMPTS + 2):
         suffix_name = _append_collision_suffix(base_name, str(attempt))
         suffix_reservation = _reservation(suffix_name)
@@ -240,7 +191,6 @@ def reserve_run_folder(
         except FileExistsError:
             continue
 
-    # Ultimate fallback with uuid
     random_suffix = uuid.uuid4().hex[:8]
     fallback_name = _append_collision_suffix(base_name, random_suffix)
     fallback_reservation = _reservation(fallback_name)
@@ -249,7 +199,6 @@ def reserve_run_folder(
 
 
 def _reserve_candidate(owner: Path, candidate: Path) -> None:
-    """Validate and atomically claim one immediate child of ``owner``."""
     resolved_owner = _prepare_reservation_owner(owner)
     try:
         resolved_candidate = require_managed_immediate_child(resolved_owner, candidate)
@@ -261,7 +210,6 @@ def _reserve_candidate(owner: Path, candidate: Path) -> None:
 
 
 def _prepare_reservation_owner(owner: Path) -> Path:
-    """Create and validate the real directory chain for a resolved owner path."""
     try:
         if not owner.is_absolute():
             raise RuntimeError("generated-data root must be an absolute resolved path")
@@ -276,8 +224,6 @@ def _prepare_reservation_owner(owner: Path) -> Path:
             if directory.is_symlink() or directory.is_junction():
                 raise RuntimeError(f"generated-data root ancestor is redirected: {directory}")
             if not directory.exists():
-                # A concurrent creator is acceptable only when it produced the
-                # same real directory validated immediately below.
                 with suppress(FileExistsError):
                     directory.mkdir()
             if directory.is_symlink() or directory.is_junction() or not directory.is_dir():

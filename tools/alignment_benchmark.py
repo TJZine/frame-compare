@@ -1,9 +1,10 @@
 """Production-path audio-alignment benchmark over a labelled pair file.
 
 Reads a maintainer-supplied label file, prepares each pair through the normal
-orchestration path, runs production alignment once (result cache disabled),
-prints a sanitized summary (pair ids and categories only; no media paths or
-titles), and writes the full per-pair JSON to the output directory.
+orchestration path, verifies that preparation preserved the labelled pair order,
+runs production alignment once (result cache disabled), prints a sanitized
+summary (pair ids and categories only; no media paths or titles), and writes the
+full per-pair JSON to the output directory.
 
 Label schema (media paths are relative to the label file's directory)::
 
@@ -43,11 +44,13 @@ from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.context import ClipActiveRect, RunContext
 from frame_compare.orchestration.phase_alignment import run_align_phase
-from frame_compare.orchestration.types import RunDependencies, RunRequest
+from frame_compare.orchestration.run_inputs import build_run_request
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.paths import require_managed_immediate_child
 from frame_compare.vs.loader import DefaultVSLoader
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 
 SPEED_CHANGE_CATEGORY = "speed_change"
 NOT_APPLIED = "not_applied"
@@ -81,8 +84,22 @@ def classify_outcome(
     applied: bool,
     frame_offset: int | None,
     state: str,
+    attempt_status: str,
+    collection_failure: object | None,
+    decision_reason: str,
 ) -> str:
-    """Classify visual correctness independently from expected automation."""
+    """Classify visual correctness while failing operational benchmark errors.
+
+    A completed no-signal or inconclusive attempt is a valid negative control.
+    An aborted/preanalysis attempt or an operational failure is not evidence
+    that automatic alignment was correctly withheld.
+    """
+    if (
+        attempt_status != "complete"
+        or collection_failure is not None
+        or decision_reason == "video_check_unavailable"
+    ):
+        return "unavailable"
     if expected_automatic == NOT_APPLIED:
         if applied:
             return "wrong_applied"
@@ -263,14 +280,26 @@ async def _prepare_pair(
     _ensure_media_link(comparison_link, pair.comparison)
     write_text_atomic(config_dir / "config.toml", _pair_config(pair), encoding="utf-8")
     return await preparation.execute_prep(
-        RunRequest(
+        build_run_request(
             root=workspace_root,
             skip_analysis=True,
             skip_metadata=True,
-            config_overrides=CLIConfigOverrides(no_upload=True),
+            overrides=CLIConfigOverrides(no_upload=True),
         ),
         RunDependencies(vs_loader=loader),
     )
+
+
+def _require_prepared_pair(pair: LabelledPair, prep: preparation.PrepState) -> None:
+    """Ensure the pair measured below is the pair named by the label file."""
+    expected = (pair.reference.resolve(), pair.comparison.resolve())
+    actual = tuple(clip.path.resolve() for clip in prep.clips)
+    if actual != expected:
+        raise RuntimeError(
+            "prepared source order does not match the labelled pair: "
+            f"expected={[path.as_posix() for path in expected]}, "
+            f"actual={[path.as_posix() for path in actual]}"
+        )
 
 
 async def align_pair(
@@ -283,14 +312,13 @@ async def align_pair(
     pair_root = require_managed_immediate_child(pairs_root, pairs_root / pair.pair_id)
     started = time.monotonic()
     prep = await _prepare_pair(pair, pair_root, loader)
+    _require_prepared_pair(pair, prep)
     ctx = RunContext(
         config=prep.config,
         workspace=prep.workspace,
         reference=prep.clips[0],
         comparisons=prep.clips[1:],
-        analysis_selection_domain=prep.analysis_selection_domain,
-        selection_window=prep.selection_window,
-        analysis_clip=prep.analysis_clip,
+        selection_domain=prep.selection_domain,
     )
     phase = await run_align_phase(
         ctx,
@@ -308,6 +336,15 @@ async def align_pair(
         None if comparison.alignment is None else comparison.alignment.relative_offset_frames
     )
     applied = comparison.alignment is not None
+    collection_failure = attempt.collection_failure
+    decision_reason = attempt.decision.primary_reason
+    failure_reason = (
+        collection_failure.category
+        if collection_failure is not None
+        else "video_check_unavailable"
+        if decision_reason == "video_check_unavailable"
+        else None
+    )
     return {
         "pair_id": pair.pair_id,
         "category": pair.category,
@@ -323,7 +360,9 @@ async def align_pair(
         "c_video_confirmed": attempt.video_check.confirmed_offset,
         "applied_frame": applied_frame,
         "state": attempt.decision.state,
-        "primary_reason": attempt.decision.primary_reason,
+        "primary_reason": decision_reason,
+        "attempt_status": attempt.status,
+        "failure_reason": failure_reason,
         "reasons": list(review.reasons),
         "video_wins": review.video_wins,
         "video_margin": review.video_margin,
@@ -335,6 +374,9 @@ async def align_pair(
             applied=applied,
             frame_offset=applied_frame,
             state=attempt.decision.state,
+            attempt_status=attempt.status,
+            collection_failure=collection_failure,
+            decision_reason=decision_reason,
         ),
     }
 
@@ -371,7 +413,7 @@ async def run_benchmark(labels: Path, output: Path) -> bool:
     """Run every labelled pair, print the sanitized summary, and write the JSON."""
     pairs = load_labels(labels)
     output.mkdir(parents=True, exist_ok=True)
-    loader = DefaultVSLoader()
+    loader = DefaultVSLoader(index_cache=ManagedSourceIndexCache(output.resolve()))
     started = time.monotonic()
     records: list[dict[str, object]] = []
     _print_table_header()

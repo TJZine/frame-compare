@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal
+from typing import assert_never
 
 from frame_compare.analysis.types import MetricActiveRect, MetricCacheRequest, MetricFrameRange
 from frame_compare.analysis.window import SelectionWindow
@@ -19,19 +19,11 @@ from frame_compare.orchestration.context import (
     ClipState,
 )
 from frame_compare.orchestration.errors import SourceSelectionError
+from frame_compare.utils.media_facts import ActivePictureProvenance
 
 ASPECT_RATIO_MATCH_REL_TOLERANCE = 0.005
 ASPECT_RATIO_MIN_CROP_REL_DELTA = 0.005
 ASPECT_RATIO_MAX_HEIGHT_REMOVAL_FRACTION = 0.35
-
-type _L5MarginName = Literal["left", "right", "top", "bottom"]
-
-_DOLBY_VISION_L5_MARGIN_KEYS: dict[str, _L5MarginName] = {
-    "dolbyvision_l5_left": "left",
-    "dolbyvision_l5_right": "right",
-    "dolbyvision_l5_top": "top",
-    "dolbyvision_l5_bottom": "bottom",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +45,6 @@ def resolve_active_rects_for_clips(
         _explicit_active_rect_for_clip(clip, overrides_by_path.get(clip.path), mode)
         for clip in clips
     )
-    metadata_rects = tuple(_metadata_active_rect_for_clip(clip, mode) for clip in clips)
     dimension_rects = (
         _dimension_derived_active_rects(clips, mode)
         if detection
@@ -66,17 +57,14 @@ def resolve_active_rects_for_clips(
     )
 
     resolved: list[ClipActiveRect] = []
-    for clip, explicit, metadata, dimension in zip(
+    for clip, explicit, dimension in zip(
         clips,
         explicit_rects,
-        metadata_rects,
         dimension_rects,
         strict=True,
     ):
         if explicit is not None:
             resolved.append(explicit)
-        elif metadata is not None:
-            resolved.append(metadata)
         elif dimension is not None:
             resolved.append(dimension)
         else:
@@ -230,72 +218,6 @@ def _explicit_active_rect_for_clip(
     )
 
 
-def _metadata_active_rect_for_clip(
-    clip: ClipState,
-    mode: ClipActiveRectDetectionMode,
-) -> ClipActiveRect | None:
-    margins = _dolby_vision_l5_margins(clip.probe.preserved_frame_props)
-    if margins is None:
-        return None
-    left, top, right, bottom = margins
-    if left == 0 and top == 0 and right == 0 and bottom == 0:
-        return None
-
-    active_width = clip.probe.width - left - right
-    active_height = clip.probe.height - top - bottom
-    if active_width <= 0 or active_height <= 0:
-        return None
-    return _rect(
-        x=left,
-        y=top,
-        width=active_width,
-        height=active_height,
-        source="metadata",
-        mode=mode,
-    )
-
-
-def _dolby_vision_l5_margins(
-    preserved_props: Mapping[str, str | int | float],
-) -> tuple[int, int, int, int] | None:
-    margins: dict[_L5MarginName, int] = {}
-    for key, value in preserved_props.items():
-        normalized = _normalize_preserved_prop_key(key)
-        margin_name = _DOLBY_VISION_L5_MARGIN_KEYS.get(normalized)
-        if margin_name is None:
-            continue
-        if margin_name in margins:
-            return None
-        coerced = _coerce_int(value)
-        if coerced is None or coerced < 0:
-            return None
-        margins[margin_name] = coerced
-    if set(margins) != {"left", "right", "top", "bottom"}:
-        return None
-    return margins["left"], margins["top"], margins["right"], margins["bottom"]
-
-
-def _normalize_preserved_prop_key(key: str) -> str:
-    return key.lstrip("_").lower()
-
-
-def _coerce_int(value: str | int | float) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value) if value.is_integer() else None
-    text = value.strip()
-    if not text:
-        return None
-    try:
-        parsed = float(text)
-    except ValueError:
-        return None
-    return int(parsed) if parsed.is_integer() else None
-
-
 def _dimension_derived_active_rects(
     clips: Sequence[ClipState],
     mode: ClipActiveRectDetectionMode,
@@ -402,17 +324,16 @@ def _select_aspect_ratio_candidate(resolved: tuple[ClipActiveRect, ...]) -> floa
 
 def _aspect_ratio_candidates(resolved: tuple[ClipActiveRect, ...]) -> tuple[_AspectCandidate, ...]:
     raw_candidates: list[_AspectCandidate] = []
-    for evidence_rank, source_kind in ((0, "explicit"), (1, "metadata")):
-        for index, rect in enumerate(resolved):
-            if rect.source == source_kind:
-                raw_candidates.append(_AspectCandidate(_rect_ratio(rect), index, evidence_rank))
+    for index, rect in enumerate(resolved):
+        if rect.source == "explicit":
+            raw_candidates.append(_AspectCandidate(_rect_ratio(rect), index, 0))
 
     for index, rect in enumerate(resolved):
         if rect.source not in ("dimension-derived", "full-frame", "content-derived"):
             continue
         ratio = _rect_ratio(rect)
         if _aspect_candidate_support_count(ratio, resolved) >= 2:
-            raw_candidates.append(_AspectCandidate(ratio, index, 2))
+            raw_candidates.append(_AspectCandidate(ratio, index, 1))
 
     merged: list[_AspectCandidate] = []
     for candidate in raw_candidates:
@@ -472,3 +393,21 @@ def _rect(
         detection_mode=mode,
         algorithm_id=ACTIVE_RECT_RESOLUTION_ALGORITHM,
     )
+
+
+def active_picture_provenance_from_rect_source(
+    source: ClipActiveRectSource,
+) -> ActivePictureProvenance:
+    """Project orchestration's cache-stable source vocabulary to canonical facts."""
+    match source:
+        case "explicit":
+            return "explicit"
+        case "dimension-derived":
+            return "dimension_derived"
+        case "aspect-ratio-derived":
+            return "aspect_ratio_derived"
+        case "content-derived":
+            return "content_derived"
+        case "full-frame":
+            return "full_frame"
+    assert_never(source)

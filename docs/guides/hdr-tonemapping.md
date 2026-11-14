@@ -19,7 +19,50 @@ HDR tonemapping.
 3. Decide whether the frame requires HDR-to-SDR conversion.
 4. Convert to the working color representation without unnecessary 8-bit reduction.
 5. Apply the configured vs-placebo tonemapping preset and target luminance.
-6. Render the screenshot and selected overlay.
+6. Convert the native SDR destination's BT.1886 samples to full-range sRGB before
+   reducing to RGB8, then render the screenshot and selected overlay.
+
+Screenshot rendering gives each source frame its own native mapper state. Random
+access, helper reads of frame zero, parallel requests and cache eviction cannot
+carry peak-detector history from another frame into a screenshot. Preset controls
+remain unchanged; the report records `independent_frames` as the applied frame
+policy. This policy renders still images independently of chronological playback and
+temporal smoothing.
+
+## Fast screenshots
+
+For a large still-image batch, set `color.tonemap_speed = "fast"` or pass
+`--tm-speed fast`. Fast mode turns off dynamic peak detection and lets libplacebo use
+per-frame stream metadata when available, then static HDR metadata, then the resolved
+source-peak default. Still preparation can therefore share one stateless native
+mapper, and the report records `shared_stateless` as
+**Shared (metadata peak, no per-frame measurement)**. This is faster and reproducible,
+but it can look different from `quality`, which measures each frame independently;
+inspect scenes where the source peak changes. If no HDR peak metadata is available,
+the report calls out use of the default 1000-nit peak and the run log warns about it.
+The setting is independent of the tone curve, target, and preset, and the degraded
+fallback continues to ignore it.
+
+VSView alignment previews also use these configured tone settings for HDR sources
+when tonemapping is enabled. Fast previews use the same metadata peak policy as
+fast screenshots. Quality previews retain temporal sequence measurement; quality
+screenshots measure each still independently, so their appearance can differ.
+Mapping occurs before alignment labels and preserves sRGB output properties.
+SDR sources, disabled tonemapping and older sessions without tone settings keep
+their existing preview handling. Source frame positions and alignment decisions
+are unchanged.
+
+The sRGB conversion uses the native destination's configured black and white
+endpoints: the selected black maps to sRGB zero and white to one. It preserves
+BT.709 primaries and D65. It changes the representation for browser images while preserving
+the tone curve and source grade. The monitor controls physical luminance. Pillow PNGs declare sRGB; an untagged PNG from the fpng writer also
+contains sRGB samples. Original source metadata remains available in diagnostics;
+converted SDR frames no longer claim PQ/BT.2020 or carry source HDR metadata.
+
+This conversion applies only to the known vs-placebo SDR destination. Existing SDR
+sources and the separately identified degraded fallback keep their existing
+interpretation; they are not assigned the native mapper's black point or passed
+through this conversion.
 
 The FFmpeg fallback leaves ambiguous transfer or primaries metadata unknown. It does
 not treat that metadata as ordinary SDR.
@@ -45,29 +88,48 @@ VapourSynth, source-plugin, or vs-placebo change.
 The wizard does not configure tonemapping. Choose a preset in `[color]`, save it in a
 preset, or override it for one run with `--tm-preset`, `--tm-target`, and `--tm-curve`.
 
-The preset sets every value; `target_nits`, `tone_curve`, `gamma_lift`, and
-`contrast_recovery` override it only when explicitly supplied in the configuration file
-or environment variables. `--tm-target` and `--tm-curve` take precedence for one run;
+The preset sets every value. Explicit `[color]` values for `target_nits`,
+`tone_curve`, `gamma_lift`, and `contrast_recovery` override any preset when
+supplied in the configuration file or environment variables. `--tm-target` and
+`--tm-curve` take precedence for one run;
 `--tm-preset` replaces only the preset, and explicitly supplied configuration values
-still override it (source: `src/frame_compare/render/prepare.py:37-74`).
+still override it (source: `render.prepare.resolve_tonemap_settings`).
 
-| Preset | Curve | Target | Gamma lift |
-| --- | --- | --- | --- |
-| `reference` (default) | `bt2390` | 100 nits | Off |
-| `bt2390_spec` | `bt2390` | 100 nits | Off |
-| `filmic` | `spline` | 203 nits | Off |
-| `spline` | `spline` | 203 nits | Off |
-| `contrast` | `reinhard` | 203 nits | Off |
-| `highlight_guard` | `spline` | 180 nits | Off |
-| `bright_lift` | `bt2390` | 250 nits | On |
+| Preset | Curve | Target | Gamma lift | Curve parameter (`knee_offset`) |
+| --- | --- | --- | --- | --- |
+| `reference` (default) | `bt2390` | 100 nits | Off | 1.0 |
+| `contrast` | `reinhard` | 203 nits | Off | 0.5 |
+| `spline` | `spline` | 203 nits | Off | 0.5 |
+| `bright_lift` | `bt2390` | 250 nits | On | 1.0 |
+| `highlight_guard` | `spline` | 180 nits | Off | 0.5 |
+
+`reference` uses BT.2390 knee offset 1.0. This keeps more separation in bright
+areas than the earlier 0.5 default, so HDR screenshots can look slightly different.
+Clipping can still occur, and the transform cannot restore detail already lost in
+the source. Perceptual gamut mapping and contrast recovery remain unchanged.
+Softclip remains experimental and is unavailable through these presets.
+
+An explicit curve override that changes the preset's curve uses the new curve's
+default parameter: BT.2390 1.0, spline 0.5, or Reinhard 0.5. An explicit curve equal
+to the preset's curve keeps the preset's parameter. For example, `highlight_guard`
+with `--tm-curve bt2390` uses knee 1.0. The field name `knee_offset` describes
+BT.2390's knee offset; the same field controls contrast for spline and Reinhard.
+
+To select a preset for one run:
+
+```bash
+frame-compare run --tm-preset spline
+```
+
+Or set the preset and an explicit target in `[color]`:
 
 ```toml
 [color]
-preset = "filmic"
+preset = "spline"
 target_nits = 160
 ```
 
-This keeps the `filmic` curve and replaces only its target.
+This keeps the `spline` curve and replaces only its target.
 
 `enable_tonemap = false` renders HDR sources without conversion; the FFmpeg screenshot
 path (`screenshots.use_ffmpeg = true`) requires it for HDR sources (source:
@@ -94,9 +156,9 @@ Frame Compare's report presents SDR screenshots for browser review.
 
 ## Dolby Vision considerations
 
-Frame Compare records source-level DV RPU presence on the **Signal** line. The **Frame**
-tab in the **Inspector** records exact selected-frame RPU presence when the VapourSynth
-source exposes it. Geometry shows a DV L5-derived active picture as `DV L5`.
+The diagnostic **Signal** line labels source-level RPU presence as `DV RPU (clip)`.
+When VapourSynth confirms RPU presence on the selected frame, the overlay adds
+`DV RPU (frame)` and the **Frame** tab in the **Inspector** also records it.
 Frame Compare does not present L1, L2, or L6 values from a frame-0 probe snapshot as
 though they came from the selected frame.
 
@@ -113,20 +175,28 @@ For publication-bound comparisons:
 - check for raised blacks, clipped highlights, hue shifts, and range mistakes;
 - validate the result on the physical Windows/GPU environment intended for release.
 
+## Applied transforms and fallback
+
+The pre-run preview shows your requested preset and settings. Reports disclose the
+transform that actually ran for each source, including its resolved source peak and
+origin. If vs-placebo is missing, unusable, or fails at runtime, Frame Compare uses
+its existing peak-scaled fallback and emits one render warning naming the affected
+sources and causes. The fallback is labeled **fallback (peak-scaled)**. It uses source peak, target nits,
+and gamma lift; other requested plugin controls do not become effective fallback
+controls. Configuration and signature errors still fail the run.
+
 ## Overlays and measurements
 
 `diagnostic` overlays can include observed mastering metadata, MaxCLL/MaxFALL, source
-color evidence, source-level RPU presence, DV L5 geometry provenance, applied tonemap
-settings, and selection context. Exact-frame RPU presence stays in the **Frame** tab of
-the
-**Inspector** to keep baked overlays concise.
+color evidence, labeled RPU presence, active-picture geometry, applied tonemap
+settings, and selection context.
 
 Dynamic Dolby Vision values require exact selected-frame provenance. Frame Compare omits
 missing values without placeholders or fabricated defaults.
 
 <figure class="fc-figure">
   <img src="../images/hdr-diagnostic-overlay.webp" alt="Diagnostic overlay on the EBU DVB HLG10 comparison at frame 1000, listing the source, geometry, HLG BT.2020 signal, and BT.2390 tonemap at 100 nits." width="1920" height="1080" loading="lazy">
-  <figcaption>A diagnostic overlay bakes the observed signal and the applied tonemap into the screenshot. The target nits describe the output transform, not measured luminance. Footage © EBU, CC BY 4.0.</figcaption>
+  <figcaption>A diagnostic overlay bakes the observed signal and the applied tonemap into the screenshot. The target nits describe the output transform. Luminance requires separate measurement. Footage © EBU, CC BY 4.0.</figcaption>
 </figure>
 
 Selection scores explain why Frame Compare chose a frame. Use calibrated luminance

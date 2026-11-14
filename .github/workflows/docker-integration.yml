@@ -8,6 +8,8 @@ on:
       - pyproject.toml
       - uv.lock
       - Dockerfile
+      - README.md
+      - LICENSE
       - docker-compose*.yml
       - tools/verify_docker_*.sh
       - tools/docker_runtime_smoke.py
@@ -25,12 +27,27 @@ concurrency:
 
 jobs:
   docker-integration:
-    name: Docker Integration Tests
-    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            name: Docker Integration Tests
+            artifact: docker-e2e-artifacts
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            name: Docker Integration Tests (ARM64)
+            artifact: docker-e2e-artifacts-arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Prove secret exclusion and runtime application inputs
+        run: bash tools/verify_docker_context.sh
 
       - name: Run canonical Docker verification
         run: bash tools/verify_docker_integration.sh --no-cache
@@ -39,12 +56,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: docker-e2e-artifacts
+          name: ${{ matrix.artifact }}
           path: generated/e2e
           if-no-files-found: warn
           retention-days: 14
 
       - name: Run opt-in alignment resource proof
+        if: matrix.arch == 'amd64'
         run: >-
           docker compose run --rm --no-deps
           -e FRAME_COMPARE_CONTINUOUS_ALIGNMENT_RESOURCES=1
@@ -53,3 +71,15 @@ jobs:
           -m pytest
           -o cache_dir=/tmp/frame-compare-resource-pytest-cache
           tests/integration/test_alignment_streaming_resources.py -rsx -s
+
+      - name: Verify the Docker GUI runtime offscreen
+        run: |
+          docker build --target gui-linux --tag frame-compare:gui-linux .
+          docker run --rm \
+            -e QT_QPA_PLATFORM=offscreen \
+            -e HOME=/tmp/framecompare-home \
+            -e PYTHONUSERBASE=/home/framecompare/.local \
+            -e XDG_RUNTIME_DIR=/tmp/framecompare-runtime \
+            --mount "type=bind,source=$PWD/tools/verify_docker_gui.sh,target=/tmp/verify_docker_gui.sh,readonly" \
+            --entrypoint /bin/bash frame-compare:gui-linux \
+            /tmp/verify_docker_gui.sh --inside-container

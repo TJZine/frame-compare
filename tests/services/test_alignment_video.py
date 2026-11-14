@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import shutil
 from collections.abc import Callable
 from dataclasses import replace
 from fractions import Fraction
@@ -15,6 +17,7 @@ import pytest
 import vapoursynth as vs
 
 from frame_compare.services import alignment_video
+from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_correlation import (
     ChunkedAudioEstimate,
     ChunkObservation,
@@ -26,6 +29,7 @@ from frame_compare.services.alignment_decision import (
     decide_completed_stage,
 )
 from frame_compare.services.alignment_video import VideoClipRequest
+from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.alignment_evidence import (
     AudioAlignmentAttempt,
     AudioChunkColumns,
@@ -33,9 +37,12 @@ from frame_compare.utils.alignment_evidence import (
     VideoCheckObservation,
     VideoTargetResolution,
 )
+from frame_compare.utils.subproc import run_subprocess
 from frame_compare.utils.types import AlignmentClipIdentity
+from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.types import SourceInfo
-from tests.services.test_alignment_evidence import attempt_with_chunks
+from tests.services.alignment_evidence_test_support import attempt_with_chunks
+from tests.services.alignment_request_test_support import alignment_request
 
 if isinstance(cast(object, vs), MagicMock):
     pytest.skip("VapourSynth is not installed", allow_module_level=True)
@@ -44,6 +51,8 @@ if isinstance(cast(object, vs), MagicMock):
 class _FloatFormats(Protocol):
     GRAYS: int
     YUV444PS: int
+    GRAY: int
+    GRAY8: int
 
 
 # The repo VS stub omits these real runtime constants.
@@ -65,7 +74,7 @@ def _moving_clip(
                     width=8,
                     height=9,
                     length=1,
-                    format=_FLOAT_FORMATS.GRAYS,
+                    format=_FLOAT_FORMATS.GRAY8,
                     color=(transform(value) if transform is not None else value),
                 )
             )
@@ -449,7 +458,7 @@ def test_average_ranks_match_hand_computed_oracle(
         pytest.param((range(90, 100),), 40, 100, 1, (92,), id="fourth-candidate"),
         pytest.param((), 10, 70, 3, (12, 32, 52), id="static-ties-pick-first"),
         pytest.param((), 176, 180, 1, (176,), id="skip-candidates-past-end"),
-        pytest.param((), 179, 179, 1, (179,), id="midpoint-fallback"),
+        pytest.param((), 179, 179, 1, (), id="midpoint-fallback"),
         pytest.param((), 40, 100, 0, (), id="empty-count"),
     ],
 )
@@ -467,9 +476,31 @@ def test_motion_positions_pick_the_moving_frame(
     assert positions == expected
 
 
+@pytest.mark.vs_required
+def test_prepare_luma_converts_odd_rgb_with_bt709_luma() -> None:
+    clip = vs.core.std.BlankClip(
+        width=17,
+        height=15,
+        length=1,
+        format=vs.RGBS,
+        color=[1.0, 0.0, 0.0],
+    )
+
+    luma = alignment_video._prepare_luma(clip, None)
+    frame = luma.get_frame(0)
+    try:
+        assert luma.format.color_family == _FLOAT_FORMATS.GRAY
+        assert (luma.width, luma.height) == (320, 180)
+        assert float(np.asarray(frame[0], dtype=np.float32).mean()) == pytest.approx(
+            0.2126, abs=0.001
+        )
+    finally:
+        del frame
+
+
 def test_monotonic_tone_curve_preserves_confirmation(tmp_path: Path) -> None:
     reference = _moving_clip()
-    comparison = _shifted_clip(_moving_clip(transform=lambda value: min(255, value * 2)), 1)
+    comparison = _shifted_clip(_moving_clip(transform=lambda value: min(255, value + 32)), 1)
     result = _run(tmp_path, truth=1, reference_clip=reference, comparison_clip=comparison)
     assert result.confirmed_offset == 1
 
@@ -691,6 +722,8 @@ def test_out_of_range_overlap_is_unavailable(tmp_path: Path) -> None:
         (1.0, 1.5, "confirmed"),
         (1.5, 1.0, "alternative"),
         (1.0, 1.49, "neither"),
+        pytest.param(0.0, 1 / (320 * 180), "neither", id="one-pixel-confirmed"),
+        pytest.param(1 / (320 * 180), 0.0, "neither", id="one-pixel-alternative"),
     ],
 )
 def test_v5a_relative_hypothesis_margin_rules(
@@ -728,7 +761,7 @@ def test_tied_alternative_frames_block_through_video_and_decision(tmp_path: Path
         reference_audio_start=Fraction(1, 24),
     )
     # Fixture-derived first-chunk motion winners; no production selector computes this oracle.
-    target_frames = (6, 13, 15, 19)
+    target_frames = (5, 12, 14, 19)
     remap = {
         comparison_frame: reference_frame
         for reference_frame in target_frames
@@ -945,6 +978,122 @@ def test_real_cadence_aliases_do_not_confirm_a_wrong_offset(tmp_path: Path, cade
     decided = _decide_video(attempt, result)
     assert decided.decision.state == "provisional"
     assert decided.decision.primary_reason == "video_check_inconclusive"
+
+
+@pytest.mark.parametrize(
+    ("duration", "truth", "audio_candidate"),
+    [
+        pytest.param(30, 0, 6, id="advanced-audio"),
+        pytest.param(4, -6, 0, id="delayed-slate"),
+    ],
+)
+def test_real_six_frame_cadence_aliases_do_not_confirm_a_wrong_offset(
+    tmp_path: Path, duration: int, truth: int, audio_candidate: int
+) -> None:
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        pytest.skip("FFmpeg and FFprobe are required for real cadence aliases")
+    plugins = {plugin.namespace for plugin in vs.core.plugins()}
+    if not plugins.intersection({"lsmas", "bs"}):
+        pytest.skip("L-SMASH or BestSource is required to decode real cadence aliases")
+
+    width, height, sample_rate = 320, 180, 48_000
+    frame_count = duration * 24
+    # One luma code moves through six positions on black. Hold neutral chroma.
+    frames = np.full((frame_count, height * 3 // 2, width), 128, dtype=np.uint8)
+    frames[:, :height] = 16
+    frames[np.arange(frame_count), 80, 100 + np.arange(frame_count) % 6] = 17
+    audio = np.full(duration * sample_rate, 12_000, dtype="<i2")
+    if truth < 0:
+        # The visible slate, followed by the repeating picture, arrives six frames late.
+        frames[:6, 40:120, 80:240] = 180
+        comparison_frames = np.concatenate((frames[6:12], frames[:-6]))
+        comparison_audio = audio
+    else:
+        comparison_frames = frames
+        advance_samples = sample_rate // 4
+        noise = np.random.default_rng(317).integers(
+            -16_000, 16_001, size=audio.size + advance_samples, dtype=np.int16
+        )
+        audio = noise[:-advance_samples]
+        comparison_audio = noise[advance_samples:]
+
+    video_path, audio_path = tmp_path / "video.yuv", tmp_path / "audio.s16le"
+    reference, comparison = tmp_path / "reference.mkv", tmp_path / "comparison.mkv"
+    for path, picture, pcm in (
+        (reference, frames, audio),
+        (comparison, comparison_frames, comparison_audio),
+    ):
+        picture.tofile(video_path)
+        pcm.tofile(audio_path)
+        run_subprocess(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "rawvideo",
+                "-pixel_format",
+                "yuv420p",
+                "-video_size",
+                f"{width}x{height}",
+                "-framerate",
+                "24",
+                "-i",
+                str(video_path),
+                "-f",
+                "s16le",
+                "-ar",
+                str(sample_rate),
+                "-ac",
+                "1",
+                "-i",
+                str(audio_path),
+                "-c:v",
+                "ffv1",
+                "-c:a",
+                "pcm_s16le",
+                str(path),
+            ],
+            timeout_seconds=60,
+        )
+    loader: VSLoader = DefaultVSLoader()
+    if "lsmas" not in plugins:
+        # The native macOS test host has BestSource. Docker uses the production L-SMASH loader.
+        loader = _Loader(
+            {
+                path: cast(Any, vs.core).bs.VideoSource(source=str(path), cachemode=0)
+                for path in (reference, comparison)
+            }
+        )
+    request = alignment_request(
+        reference=reference,
+        comparisons=[comparison],
+        generated_dir=tmp_path / "generated",
+        max_offset_seconds=1.0,
+    )
+    request = replace(
+        request,
+        reference=replace(request.reference, source_frame_count=frame_count),
+        comparisons=[replace(request.comparisons[0], source_frame_count=frame_count)],
+    )
+    outcome = asyncio.run(
+        align_clips_from_request(request, AlignmentConfig(cache_results=False), vs_loader=loader)
+    )
+
+    (result,) = outcome.results
+    attempt = result.audio_attempt
+    assert attempt is not None
+    assert attempt.status == "complete"
+    assert attempt.audio.status == "agreed"
+    assert attempt.audio.rounded_frame == audio_candidate
+    assert attempt.video_check.observation == "observed"
+    assert truth not in attempt.video_check.scored_offsets
+    assert attempt.decision.state == "provisional"
+    assert attempt.decision.primary_reason == "video_check_inconclusive"
+    assert attempt.video_check.confirmed_offset is None
+    assert result.applied is False
+    assert result.frame_offset is None
 
 
 def test_real_minority_position_edit_does_not_confirm_the_edit_offset(
@@ -1383,11 +1532,11 @@ def test_budget_exhaustion_keeps_planned_point_without_scoring(
         _comparison_node: object,
         reference_frame: int,
         _confirmed: int,
-        _alternative_offsets: object,
+        alternative_offsets: tuple[int, ...],
         **_kwargs: object,
     ) -> tuple[float, float, int]:
         scored_frames.append(reference_frame)
-        return 0.1, 1.0, 1
+        return 0.1, 1.0, alternative_offsets[0]
 
     monkeypatch.setattr(alignment_video, "_score_hypotheses", score_hypotheses)
 

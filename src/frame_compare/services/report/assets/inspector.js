@@ -374,10 +374,11 @@ const Inspector = {
                     );
                 }
 
+                const alignment = viewer.viewport.currentAlignment();
                 viewer.setText(viewer.dom.inspectorAlignPair, `${viewer.currentPairLabel()} (${viewer.viewport.currentPairAlignmentKey()})`);
-                viewer.setText(viewer.dom.inspectorAlignPreset, viewer.viewport.alignmentPresetLabel(viewer.state.alignmentPreset));
-                viewer.setText(viewer.dom.inspectorAlignX, viewer.viewport.formatSignedPixels(viewer.state.alignX, 'x'));
-                viewer.setText(viewer.dom.inspectorAlignY, viewer.viewport.formatSignedPixels(viewer.state.alignY, 'y'));
+                viewer.setText(viewer.dom.inspectorAlignPreset, viewer.viewport.alignmentPresetLabel(alignment.alignmentPreset));
+                viewer.setText(viewer.dom.inspectorAlignX, viewer.viewport.formatSignedPixels(alignment.alignX, 'x'));
+                viewer.setText(viewer.dom.inspectorAlignY, viewer.viewport.formatSignedPixels(alignment.alignY, 'y'));
                 viewer.reviewController?.render();
             },
         };

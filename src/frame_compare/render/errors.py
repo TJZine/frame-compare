@@ -8,13 +8,23 @@ from frame_compare.errors import ErrorContext, ErrorDetails, ProcessingError
 class FrameExtractionError(ProcessingError):
     """Failed to extract specific frame (FC-4001)."""
 
-    def __init__(self, frame_number: int, clip_name: str) -> None:
+    def __init__(
+        self,
+        frame_number: int,
+        clip_name: str,
+        *,
+        reason: str | None = None,
+        hint: str = "Check source reliability/seekability",
+    ) -> None:
+        message = f"Failed to extract frame {frame_number} from {clip_name}"
+        if reason:
+            message = f"{message}: {reason}"
         super().__init__(
             ErrorContext(
                 code="FC-4001",
                 name="FRAME_EXTRACTION_ERROR",
-                message=f"Failed to extract frame {frame_number} from {clip_name}",
-                hint="Check source reliability/seekability",
+                message=message,
+                hint=hint,
                 details={"frame": frame_number, "clip": clip_name},
             )
         )

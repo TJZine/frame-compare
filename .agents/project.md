@@ -13,7 +13,8 @@ baseline records this profile's provenance; it does not choose future task branc
 
 Frame Compare is a Python 3.13+ CLI-first packaged application for deterministic
 video-frame comparison, alignment, tonemapping, reports, and optional publishing.
-The installed command is `frame-compare`, owned by `frame_compare.cli.entry:app`.
+The installed command is `frame-compare`, owned by `frame_compare.cli.entry:console_main`;
+the reusable Typer application remains `frame_compare.cli.entry:app`.
 
 The supported public surfaces are documented CLI/config behavior, streams, exit
 codes, persisted/output contracts, distribution contents, and installer/update
@@ -82,6 +83,12 @@ boundary deliberately if the design requires it rather than adding suppressions.
 
 ## Environment and verification
 
+The repository-local [verify-frame-compare](skills/verify-frame-compare/SKILL.md)
+skill owns the application user-journey map and launch/doctor/drive/evidence/cleanup
+entrypoint. Use relevant journeys for a task; it does not replace required gates
+below or imply full-map maintenance. Its native, report-transfer and Windows gaps
+remain explicit. Claude's project launcher points at this same canonical body.
+
 Use the checked-in lockfile and existing tools. Bootstrap the contributor environment
 with `uv sync --group dev --extra vsview --frozen`. Native-media availability is a
 separate capability check. A docs-only environment can be restored with
@@ -96,7 +103,7 @@ the current runbook's applicable gates; do not run every route on every edit.
 | Type analysis (`src` and `tests`) | `uv run --no-sync pyright --warnings` |
 | Lint | `uv run --no-sync ruff check .` |
 | Formatting | `uv run --no-sync ruff format --check .` |
-| Static security gate | `uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium` |
+| Maintained Python security gate | `bash tools/check_python_security.sh` |
 | Import contracts | `uv run --no-sync lint-imports --config importlinter.ini` |
 | Focused behavioral check | `uv run --no-sync pytest -q <existing-test-path-or-selection>`; replace the placeholder with the actual affected tests |
 | Full native suite | `uv run --no-sync pytest -q -n4 --dist loadgroup` |
@@ -172,6 +179,8 @@ platform checks, so report relevant capability gaps explicitly.
 Shared skill bodies own general design, implementation, review, diagnosis, and
 evidence procedure. This profile owns local facts and common command entry points.
 The runbook owns specialist deployment/runtime verification and release procedures.
+The local application verification skill owns its user-journey map; the shared
+creation/maintenance skills own that map's deliberate lifecycle, not app facts.
 Architecture and CLI documents own their product contracts. Keep each rule in one
 authoritative place and replace duplicate prose with a direct pointer.
 

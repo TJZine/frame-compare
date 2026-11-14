@@ -2,16 +2,26 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import re
 import sys
 import types
 from contextlib import redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from rich.cells import cell_len
 
-from frame_compare.vsview.session_runtime import SessionConsole
+from frame_compare.utils.terminal_sections import Section, section_title
+from frame_compare.utils.terminal_theme import ACCENT, human_console
+from frame_compare.vsview.session_runtime import (
+    AudioReviewPayload,
+    ComparisonSource,
+    ReferenceSource,
+    SessionConsole,
+)
 from frame_compare.vsview.session_script import (
     _build_script_content,
     write_vsview_session_script,
@@ -57,6 +67,20 @@ def test_write_vsview_session_script_removes_reserved_path_after_write_failure(
     assert list(sessions_dir.iterdir()) == []
 
 
+def test_write_vsview_session_script_requires_root_for_managed_indexes(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="source_index_generated_root"):
+        write_vsview_session_script(
+            reference=Path("ref.mkv"),
+            comparisons=[Path("comparison.mkv")],
+            suggested_offsets_by_key={"ref:comparison": 0},
+            audio_review_by_key={"ref:comparison": "{}"},
+            cache_dir=tmp_path,
+            source_indexes={Path("ref.mkv"): Path("ref.lwi")},
+        )
+
+
 def _session_console(*, stderr: io.TextIOBase) -> SessionConsole:
     with redirect_stderr(stderr):
         return SessionConsole()
@@ -73,61 +97,35 @@ class _AsciiStderr(_StubStderr):
     encoding = "ascii"
 
 
-@pytest.mark.parametrize(
-    ("env", "expected"),
-    [
-        ({"COLORTERM": "truecolor"}, "38;2;210;172;107"),
-        ({"COLORTERM": "24bit"}, "38;2;210;172;107"),
-        ({"WT_SESSION": "1"}, "38;2;210;172;107"),
-        ({"WT_SESSION": ""}, "38;2;210;172;107"),
-        ({"TERM": "xterm-256color"}, "38;5;180"),
-        ({"TERM": "xterm"}, "33"),
-        ({}, "33"),
-    ],
-)
-def test_generated_accent_colour_tiers(
-    monkeypatch: pytest.MonkeyPatch, env: dict[str, str], expected: str
+@pytest.mark.parametrize("no_color", [False, True])
+def test_generated_diagnostics_honour_no_color(
+    monkeypatch: pytest.MonkeyPatch, no_color: bool
 ) -> None:
-    for key in ("COLORTERM", "WT_SESSION", "TERM", "NO_COLOR"):
-        monkeypatch.delenv(key, raising=False)
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    helpers = _session_console(stderr=_StubStderr())
+    monkeypatch.setenv("TERM", "xterm")
+    if no_color:
+        monkeypatch.setenv("NO_COLOR", "")
+    else:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+    stderr = _StubStderr()
+    with redirect_stderr(stderr):
+        console = SessionConsole()
+        console.safe_print(console.status_line("[FAIL]", "Test diagnostic"))
 
-    assert helpers.accent_code() == expected
+    output = stderr.getvalue()
+    assert re.sub(r"\x1b\[[0-9;]*m", "", output) == "  ✗ Test diagnostic\n"
+    assert ("\x1b[" in output) is not no_color
 
 
-def test_generated_helpers_honour_no_color(
+def test_generated_diagnostics_use_legacy_stream_encoding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    for key in ("COLORTERM", "WT_SESSION", "TERM"):
-        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("NO_COLOR", "1")
-    helpers = _session_console(stderr=_StubStderr())
-
-    with redirect_stderr(_StubStderr()):
-        assert helpers.header("text") == "text"
-        assert helpers.style("text", "33") == "text"
-
-
-def test_generated_glyph_and_arrow_ascii_fallback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("NO_COLOR", raising=False)
-    ascii_stderr = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
-    helpers = _session_console(stderr=ascii_stderr)
-
-    assert helpers.glyph("waiting") == ">"
-    assert helpers.glyph("failed") == "x"
-    assert helpers.glyph("warning") == "!"
-    assert helpers.arrow() == "->"
-    ascii_stderr.close()
-
-    helpers = _session_console(stderr=_StubStderr())
-
-    assert helpers.glyph("waiting") == "\u203a"
-    assert helpers.glyph("failed") == "\u2717"
-    assert helpers.arrow() == "\u2192"
+    with io.BytesIO() as buffer, io.TextIOWrapper(buffer, encoding="cp1252") as stderr:
+        with redirect_stderr(stderr):
+            console = SessionConsole()
+            console.safe_print(console.status_line("[FAIL]", "Épisode 映"))
+        stderr.flush()
+        assert buffer.getvalue() == f"  x Épisode ?{os.linesep}".encode("cp1252")
 
 
 def _decision_payload(*, state: str) -> dict[str, object]:
@@ -184,8 +182,11 @@ def _execute_ready_block(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    stderr_encoding: str,
+    stderr_encoding: str = "utf-8",
     audio_review_by_key: dict[str, str] | None = None,
+    frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
+    stderr: io.StringIO | None = None,
+    no_color: bool = True,
 ) -> str:
     reference = tmp_path / "ref.mkv"
     comparisons = [tmp_path / "a.mkv", tmp_path / "b.mkv"]
@@ -196,6 +197,9 @@ def _execute_ready_block(
     class FakeClip:
         def __init__(self, stem: str) -> None:
             self.stem = stem
+            self.width = 1920
+            self.height = 1080
+            self.num_frames = 20_000
             self.fps = SimpleNamespace(numerator=24, denominator=1)
 
     clips = {path.stem: FakeClip(path.stem) for path in (reference, *comparisons)}
@@ -204,11 +208,6 @@ def _execute_ready_block(
         def LWLibavSource(self, path: str, **_kwargs: object) -> FakeClip:
             return clips[Path(path).stem]
 
-    class FakeText:
-        def Text(self, clip: FakeClip, _text: str, *, alignment: int) -> FakeClip:
-            assert alignment == 7
-            return clip
-
     class FakeStd:
         def AssumeFPS(self, clip: FakeClip, **_kwargs: object) -> FakeClip:
             return clip
@@ -216,14 +215,21 @@ def _execute_ready_block(
         def SetFrameProps(self, clip: FakeClip, **_kwargs: object) -> FakeClip:
             return clip
 
-    core = SimpleNamespace(lsmas=FakeLsmas(), text=FakeText(), std=FakeStd())
+    core = SimpleNamespace(lsmas=FakeLsmas(), std=FakeStd())
     fake_vapoursynth = types.ModuleType("vapoursynth")
     fake_vapoursynth.core = core  # pyright: ignore[reportAttributeAccessIssue]
     fake_vsview = types.ModuleType("vsview")
     fake_vsview.set_output = lambda *args, **kwargs: None  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vapoursynth)
     monkeypatch.setitem(sys.modules, "vsview", fake_vsview)
-    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(
+        "frame_compare.vsview.session_runtime.admit_source",
+        lambda _path, **_kwargs: SimpleNamespace(
+            verify=lambda _source: None, scan=lambda _source, **_options: None
+        ),
+    )
+    if no_color:
+        monkeypatch.setenv("NO_COLOR", "1")
 
     script = _build_script_content(
         reference=reference,
@@ -232,7 +238,9 @@ def _execute_ready_block(
         audio_review_by_key=audio_review_by_key
         if audio_review_by_key is not None
         else {"ref:a": _accepted_review(), "ref:b": _provisional_review()},
-        frame_props_by_stem={
+        frame_props_by_stem=frame_props_by_stem
+        if frame_props_by_stem is not None
+        else {
             stem: {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_Range": 0}
             for stem in ("ref", "a", "b")
         },
@@ -241,9 +249,10 @@ def _execute_ready_block(
             "a": "2160p \u00b7 A",
             "b": "2160p \u00b7 B",
         },
-        short_names_by_stem={"a": "ShortA", "b": "LongerB"},
+        short_names_by_stem={"ref": "Ref", "a": "ShortA", "b": "LongerB"},
     )
-    stderr: io.StringIO = _AsciiStderr() if stderr_encoding == "ascii" else _StubStderr()
+    if stderr is None:
+        stderr = _AsciiStderr() if stderr_encoding == "ascii" else _StubStderr()
     with redirect_stderr(stderr):
         exec(
             compile(script, "<vsview-ready>", "exec"),
@@ -267,25 +276,199 @@ def test_generated_ready_block_output_cases(
     if case == "utf8":
         assert "VSView is open \u00b7 waiting for you" in output
         assert "Open Tool Panel \u2192 Frame Compare Alignment Review." in output
-        assert "Unlink playheads, then position every source on the same visible moment." in output
         assert (
-            "Save the alignment in the panel, then close VSView to continue Frame Compare."
+            "Browse each source to the same visual moment; original frames update automatically."
             in output
         )
-        assert "2160p \u00b7 REF" in output
-        assert "2160p \u00b7 A" in output
-        assert "2160p \u00b7 B" in output
-        lines = output.splitlines()
-        assert any("ShortA" in line and "Audio alignment accepted: +0f" in line for line in lines)
-        assert any("LongerB" in line and "Provisional +0f - NOT APPLIED" in line for line in lines)
+        assert (
+            "Confirm matching frames in the panel, then close VSView to continue Frame Compare."
+            in output
+        )
+        assert "outputs" in output
+        assert "Ref" in output
+        assert "ShortA" in output
+        assert "LongerB" in output
+        assert "audio +0f · reused" in output
+        assert "audio +0f · not applied" in output
+        assert "hints" not in output
     elif case == "ascii":
-        assert "> VSView is open \u00b7 waiting for you" in output.splitlines()
-        assert "  1  Open Tool Panel -> Frame Compare Alignment Review." in output.splitlines()
-        assert "  hints    ShortA   Audio alignment accepted: +0f" in output.splitlines()
+        assert "+- > VSView is open | waiting for you" in output.splitlines()
+        assert "| 1  Open Tool Panel -> Frame Compare Alignment Review." in output.splitlines()
+        assert "audio +0f | reused" in output
+        assert "hints" not in output
     else:
-        lines = output.splitlines()
-        assert any("ShortA" in line and "Audio alignment accepted: +0f" in line for line in lines)
-        assert any("LongerB" in line and "No usable audio candidate" in line for line in lines)
+        assert "ShortA" in output and "audio +0f · reused" in output
+        assert "LongerB" in output and "no audio match" in output
+        assert "hints" not in output
+
+
+def test_generated_ready_block_keeps_display_assumptions_inside_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = _execute_ready_block(
+        tmp_path,
+        monkeypatch,
+        stderr_encoding="utf-8",
+        frame_props_by_stem={
+            "ref": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
+            "a": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_Range": 0},
+            "b": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_Range": 0},
+        },
+    )
+
+    lines = output.splitlines()
+    assert "│ ! VSView display assumptions" in lines
+    note_index = lines.index("│ ! VSView display assumptions")
+    assert lines[note_index + 1].startswith("│ source")
+    assert "│ range" in lines[note_index + 2]
+    assert "│ impact" in lines[note_index + 3]
+    assert lines[-2] == "╰─"
+    assert "VSView Display Assumptions" not in output
+
+
+@pytest.mark.parametrize(
+    "value", ["very-long-source-name-" * 4, "日本語映像" * 9, "Cafe\u0301" * 20]
+)
+@pytest.mark.parametrize("no_color", [False, True])
+def test_session_section_wraps_key_values_and_list_rows_at_terminal_width(
+    monkeypatch: pytest.MonkeyPatch, value: str, no_color: bool
+) -> None:
+    if no_color:
+        monkeypatch.setenv("NO_COLOR", "1")
+    else:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("COLUMNS", "40")
+    stderr = _StubStderr()
+    with redirect_stderr(stderr):
+        console = SessionConsole()
+        console.print_ready(
+            ReferenceSource(label="ref", path="ref.mkv", display_name="Ref"),
+            {},
+            {},
+            [{"source": value}],
+        )
+
+    output = stderr.getvalue()
+    lines = output.splitlines()
+    visible_lines = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in lines]
+    assert all(cell_len(line) <= 40 for line in visible_lines)
+    assert any(line.startswith("│                 ") for line in visible_lines)
+    assert any(
+        line.startswith("│ ") and not line.startswith("│                 ")
+        for line in visible_lines[2:-2]
+    )
+    source_start = next(
+        index for index, line in enumerate(visible_lines) if line.startswith("│ source")
+    )
+    source_lines = []
+    for line in visible_lines[source_start:]:
+        if source_lines and not line.startswith("│                 "):
+            break
+        source_lines.append(line[18:])
+    assert "".join(source_lines) == value
+    assert "VSView display assumptions" in output
+
+
+@pytest.mark.parametrize(
+    ("environment", "sgr"),
+    [
+        pytest.param({"COLORTERM": "truecolor"}, "38;2;210;172;107", id="truecolor"),
+        pytest.param({"COLORTERM": "24bit"}, "38;2;210;172;107", id="24bit"),
+        pytest.param({"WT_SESSION": ""}, "38;2;210;172;107", id="windows-terminal"),
+        pytest.param({"TERM": "xterm-256color"}, "38;5;180", id="256color"),
+        pytest.param({"TERM": "xterm"}, "33", id="standard"),
+    ],
+)
+def test_generated_ready_block_preserves_accent_tiers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: dict[str, str], sgr: str
+) -> None:
+    for name in ("COLORTERM", "WT_SESSION", "TERM", "NO_COLOR", "FORCE_COLOR"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+
+    # The parent process can render a shared section in a different color system first.
+    standard = human_console(file=io.StringIO(), color_system="standard")
+    Section(section_title("Shared section"), rail_style=ACCENT).print(standard)
+
+    output = _execute_ready_block(tmp_path, monkeypatch, no_color=False)
+
+    assert f"\x1b[{sgr}m╭─" in output
+    assert f"\x1b[{sgr}m│" in output
+    assert f"\x1b[{sgr}m╰─" in output
+    heading = re.search(r"\x1b\[([0-9;]+)m› VSView is open", output)
+    assert heading is not None and sgr in heading[1]
+
+
+@pytest.mark.parametrize("tty", [False, True], ids=["redirected", "no-color"])
+def test_generated_ready_block_guards_against_forced_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tty: bool
+) -> None:
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    if tty:
+        monkeypatch.setenv("NO_COLOR", "")
+    stderr = _StubStderr() if tty else io.StringIO()
+
+    output = _execute_ready_block(tmp_path, monkeypatch, stderr=stderr, no_color=False)
+
+    assert "VSView is open" in output
+    assert "\x1b[" not in output
+
+
+def test_generated_ready_block_fits_narrow_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    width = 20
+    monkeypatch.setenv("COLUMNS", str(width))
+
+    output = _execute_ready_block(tmp_path, monkeypatch, stderr_encoding="utf-8")
+
+    section = output[output.index("╭─") :].splitlines()
+    assert all(cell_len(line) <= width for line in section)
+    assert "waiting for you" in " ".join(section[:2])
+    assert any(line.startswith("│ outputs") for line in section)
+    assert section[-2] == "╰─"
+
+
+@pytest.mark.parametrize(
+    ("origin", "offset", "decision", "expected", "warning"),
+    [
+        ("computed_this_run", 4, "trusted_automatic", "audio +4f", False),
+        ("shared_computed_offsets", -2, None, "audio -2f · reused", False),
+        ("interactive_confirmed_this_run", 3, None, "previously confirmed +3f", False),
+        ("shared_previous_offsets", 5, None, "previously confirmed +5f", False),
+        ("preexisting_manual_override", -1, None, "manual offset -1f", False),
+        ("none", None, "provisional", "audio +6f · not applied", True),
+        ("none", None, "unavailable", "no audio match", True),
+    ],
+)
+def test_audio_output_state_preserves_authority_and_candidate_state(
+    origin: str,
+    offset: int | None,
+    decision: str | None,
+    expected: str,
+    warning: bool,
+) -> None:
+    attempt: dict[str, object] | None = None
+    if decision is not None:
+        candidate: dict[str, object] | None = (
+            {"frame_offset": 4 if decision == "trusted_automatic" else 6}
+            if decision != "unavailable"
+            else None
+        )
+        attempt = {"decision": {"state": decision, "candidate": candidate}}
+    payload = cast(
+        AudioReviewPayload,
+        {
+            "current_authority": {"origin": origin, "frame_offset": offset},
+            "audio_attempt": attempt,
+        },
+    )
+    console = _session_console(stderr=_StubStderr())
+
+    assert console._audio_output_state(payload) == (expected, warning)
 
 
 def test_short_names_by_stem_defaults_to_display_names(tmp_path: Path) -> None:
@@ -338,3 +521,65 @@ def test_session_script_optional_frame_cache_limit(
         exec(compile(script, "session.py", "exec"), {"__file__": "session_x.py"})
     assert caught.value.code == 1
     assert observed == [(321 if memory_limit_mb is None else memory_limit_mb, memory_limit_mb)]
+
+
+def test_session_output_names_pad_by_terminal_cells(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+    stderr = _StubStderr()
+    with redirect_stderr(stderr):
+        console = SessionConsole()
+        reference = ReferenceSource(label="ref", path="ref.mkv", display_name="日[red]")
+        target = ComparisonSource(
+            path="a.mkv",
+            display_name="Cafe\u0301",
+            comparison_key="ref:a",
+            suggested_offset=0,
+            audio_review=_accepted_review(),
+        )
+        console.print_ready(reference, {"a": target}, {}, [])
+    lines = stderr.getvalue().splitlines()
+    reference_line = next(line for line in lines if "reference" in line)
+    comparison_line = next(line for line in lines if "audio +0f" in line)
+    assert cell_len(reference_line[: reference_line.index("reference")]) == 30
+    assert cell_len(comparison_line[: comparison_line.index("audio")]) == 30
+    assert "日[red]" in reference_line
+    assert "Cafe\u0301" in comparison_line
+
+
+@pytest.mark.parametrize("speed", ["quality", "fast"])
+def test_generated_settings_roundtrip_preserves_enums(speed: str) -> None:
+    from pydantic import TypeAdapter
+
+    from frame_compare.config.schema import ConfigSchema
+    from frame_compare.render.prepare import resolve_tonemap_settings
+    from frame_compare.vs.types import TonemapSettings
+
+    config = ConfigSchema.model_validate({"color": {"tonemap_speed": speed, "target_nits": 120}})
+    settings = resolve_tonemap_settings(config)
+    script = _build_script_content(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("comparison.mkv")],
+        suggested_offsets_by_key={"ref:comparison": 0},
+        audio_review_by_key={"ref:comparison": "{}"},
+        preview_tonemap=settings,
+    )
+    import ast
+
+    assignment = next(
+        node
+        for node in ast.parse(script).body
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "SESSION_DATA"
+    )
+    # Read the literal JSON embedded in the real generated script without starting VSView.
+    payload = next(
+        node.value
+        for node in ast.walk(assignment)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
+    restored = TypeAdapter(TonemapSettings).validate_python(json.loads(payload)["preview_tonemap"])
+    assert restored == settings
+    assert restored.tonemap_speed is settings.tonemap_speed
+    assert restored.preset is settings.preset
+    assert restored.tone_curve is settings.tone_curve

@@ -11,7 +11,6 @@ import socket
 import ssl
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Callable
 from contextlib import suppress
@@ -19,14 +18,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from threading import Event
 from typing import Protocol, cast
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 from frame_compare import __version__
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.subproc import run_subprocess
 
 WEBHOOK_TIMEOUT_SECONDS = 10.0
-WEBHOOK_RESOLUTION_POLL_SECONDS = 0.05
-WEBHOOK_RESOLUTION_SHUTDOWN_SECONDS = 1.0
 WEBHOOK_RESOLUTION_MAX_ADDRESSES = 64
 WEBHOOK_RESOLUTION_MAX_BYTES = 8192
 WEBHOOK_ATTEMPTS = 3
@@ -243,48 +241,29 @@ def resolve_webhook_addresses(
         return ()
     stop = cancellation_event if cancellation_event is not None else Event()
     _raise_if_cancelled(stop)
-    deadline = time.monotonic() + WEBHOOK_TIMEOUT_SECONDS
-    # A temporary file avoids pipe deadlocks and requires no reader thread. The
-    # fixed child bounds its output; the parent separately bounds and validates it.
+
+    def abort() -> bool:
+        _raise_if_cancelled(stop)
+        return False
+
     try:
-        with tempfile.TemporaryFile() as output:
-            process = subprocess.Popen(
-                [sys.executable, "-I", "-S", "-c", _WEBHOOK_RESOLVER_CODE, hostname, str(port)],
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.DEVNULL,
-                env=_webhook_resolver_environment(),
-            )
-            try:
-                while True:
-                    _raise_if_cancelled(stop)
-                    remaining = _remaining_timeout_seconds(deadline)
-                    try:
-                        process.wait(timeout=min(WEBHOOK_RESOLUTION_POLL_SECONDS, remaining))
-                    except subprocess.TimeoutExpired:
-                        continue
-                    _raise_if_cancelled(stop)
-                    if process.returncode != 0:
-                        return ()
-                    output.seek(0)
-                    data = output.read(WEBHOOK_RESOLUTION_MAX_BYTES + 1)
-                    break
-            finally:
-                original_error = sys.exception()
-                try:
-                    _reap_webhook_resolver(process)
-                except OSError:
-                    if original_error is None:
-                        raise
-                    # Cleanup must not replace the deadline/cancellation that
-                    # caused it. Record a safe secondary failure on that error.
-                    original_error.add_note("Webhook resolver shutdown failed")
-    except TimeoutError:
-        raise
-    except (OSError, UnicodeError, ValueError):
+        result = run_subprocess(
+            [sys.executable, "-I", "-S", "-c", _WEBHOOK_RESOLVER_CODE, hostname, str(port)],
+            env=_webhook_resolver_environment(),
+            timeout_seconds=WEBHOOK_TIMEOUT_SECONDS,
+            abort=abort,
+            check=False,
+            max_stdout_bytes=WEBHOOK_RESOLUTION_MAX_BYTES,
+            max_stderr_bytes=8192,
+        )
+    except subprocess.TimeoutExpired:
+        raise TimeoutError("Webhook address resolution timed out") from None
+    except (OSError, subprocess.SubprocessError, ValueError):
         return ()
-    if len(data) > WEBHOOK_RESOLUTION_MAX_BYTES:
+    _raise_if_cancelled(stop)
+    if result.returncode != 0:
         return ()
+    data = result.stdout
     try:
         addresses = json.loads(data)
     except (UnicodeError, ValueError):
@@ -313,27 +292,6 @@ def _webhook_resolver_environment() -> dict[str, str]:
         if key.casefold() == "systemroot" and value:
             return {"SystemRoot": value}
     return {}
-
-
-def _reap_webhook_resolver(process: subprocess.Popen[bytes]) -> None:
-    """Attempt graceful shutdown, forced shutdown, and bounded reaping."""
-    if process.poll() is not None:
-        return
-    # A failed signal is not evidence of exit. Still attempt wait, escalation,
-    # and reap. The final wait determines whether cleanup actually completed.
-    with suppress(OSError):
-        process.terminate()
-    try:
-        process.wait(timeout=WEBHOOK_RESOLUTION_POLL_SECONDS)
-        return
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    with suppress(OSError):
-        process.kill()
-    try:
-        process.wait(timeout=WEBHOOK_RESOLUTION_SHUTDOWN_SECONDS)
-    except (OSError, subprocess.TimeoutExpired):
-        raise OSError("Webhook resolver shutdown failed") from None
 
 
 def send_pinned_https_webhook_request(request: WebhookDeliveryRequest) -> WebhookResponse:
@@ -507,7 +465,7 @@ def _validate_webhook_url(
     resolver: WebhookResolver,
 ) -> _ValidatedWebhookTarget | None:
     try:
-        parsed = urlparse(webhook_url)
+        parsed = urlsplit(webhook_url)
     except ValueError:
         return None
 
@@ -532,7 +490,7 @@ def _validate_webhook_url(
     if _is_localhost_name(hostname):
         return None
 
-    port = parsed_port or 443
+    port = parsed_port if parsed_port is not None else 443
     if not 1 <= port <= 65535:
         return None
     host_header = _host_header(hostname, port)

@@ -3,26 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+import ntpath
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
 from frame_compare.errors import PathEscapesRootError
+from frame_compare.services.slowpics_url import require_comparison_url
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.paths import require_managed_descendant
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
-_WINDOWS_RESERVED_FILENAMES = {
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    *(f"COM{index}" for index in range(1, 10)),
-    *(f"LPT{index}" for index in range(1, 10)),
-}
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _WHITESPACE_RE = re.compile(r"\s+")
 
@@ -44,6 +38,15 @@ def create_slowpics_url_shortcut(
 ) -> SlowpicsShortcutResult:
     """Create a deterministic Windows InternetShortcut-style file."""
     raise_if_cancelling()
+    try:
+        slowpics_url = require_comparison_url(slowpics_url)
+    except ValueError:
+        return SlowpicsShortcutResult(
+            success=False,
+            warning=RunWarning(
+                "slow.pics", "warning", "slow.pics shortcut:", "invalid comparison URL"
+            ),
+        )
     try:
         output_dir = _select_shortcut_directory(workspace)
     except (OSError, RuntimeError, PathEscapesRootError) as exc:
@@ -119,8 +122,8 @@ def _safe_filename_stem(value: str) -> str | None:
     stem = _WHITESPACE_RE.sub(" ", stem).strip(" .")
     if not stem:
         return None
-    if stem.upper() in _WINDOWS_RESERVED_FILENAMES:
-        stem = f"{stem}-slowpics"
+    if ntpath.isreserved(stem):
+        stem = f"{stem.replace('.', ' ')}-slowpics"
     return stem
 
 

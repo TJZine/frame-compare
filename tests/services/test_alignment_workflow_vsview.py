@@ -4,20 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tomllib
 from dataclasses import replace
-from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+import tomli_w
 
 import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
+from frame_compare.services.alignment_reuse_cache import (
+    CACHE_FILE_NAME,
+    comparison_cache_key,
+    source_set_cache_key,
+)
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.services.types import AlignmentConfig, AlignmentResult, ComparisonResolution
 from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from frame_compare.vsview.alignment_review_contract import (
@@ -33,6 +39,7 @@ from tests.services.alignment_request_test_support import (
 from tests.services.alignment_request_test_support import (
     vsview_session as _session,
 )
+from tests.services.alignment_resolution_test_support import save_resolutions
 from tests.services.test_alignment_diagnostics import audio_attempt
 
 
@@ -61,9 +68,6 @@ def _trusted_computed_result(
 
 
 def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, frame_offset: int = 3) -> None:
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_audio.probe_fps", lambda _path: Fraction(24, 1)
-    )
     monkeypatch.setattr(
         "frame_compare.services.alignment._estimate_audio_pair",
         lambda reference, comparison, **_kwargs: _trusted_computed_result(
@@ -152,10 +156,6 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
     )
     initial_snapshot: dict[str, object] = {}
     monkeypatch.setattr(
-        "frame_compare.services.alignment_audio.probe_fps",
-        lambda _path: Fraction(24, 1),
-    )
-    monkeypatch.setattr(
         "frame_compare.services.alignment._estimate_audio_pair",
         lambda *_args, **_kwargs: unapplied,
     )
@@ -175,7 +175,7 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
 
     def launch(*args: object, **_kwargs: object):
         prelaunch = capsys.readouterr().err
-        assert "Provisional audio candidate: +0f - NOT APPLIED" in prelaunch
+        assert "comparison: +0f · not applied · confirm in VSView" in prelaunch
         initial_payload = json.loads(
             (tmp_path / "alignment_diagnostics" / "comparison-1.json").read_text(encoding="utf-8")
         )
@@ -203,7 +203,7 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
     comparison = tmp_path / "comparison.mkv"
     reference.touch()
     comparison.touch()
-    config = AlignmentConfig(use_vsview=True, cache_results=False)
+    config = AlignmentConfig(use_vsview=True, cache_results=True)
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
@@ -217,6 +217,7 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
 
     result = align_clips_from_request(request, config)[0]
 
+    assert result.audio_attempt is attempt
     assert result.source == "manual"
     assert result.frame_offset == 0
     artifact = tmp_path / "alignment_diagnostics" / "comparison-1.json"
@@ -228,6 +229,15 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
     assert payload["original_audio_attempt"] == initial_snapshot["attempt"]
     assert payload["original_attempt_digest"] == initial_snapshot["digest"]
     assert payload["original_audio_attempt"]["decision"]["state"] == "provisional"
+
+    cache = tomllib.loads(
+        (request.shared_alignment_cache_dir / "alignment_reuse.toml").read_text(encoding="utf-8")
+    )
+    source_set = next(iter(cache["source_sets"].values()))
+    entry = next(iter(source_set["entries"].values()))
+    assert entry["origin"] == "interactive_confirmed"
+    assert entry["frame_offset"] == 0
+    assert "computed_result" not in entry
 
 
 @pytest.mark.parametrize("keep_current", [True, False], ids=["keep-current", "missing-result"])
@@ -280,16 +290,20 @@ def test_forced_missing_result_stops_alignment(
 def test_alignment_passes_complete_native_session_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from frame_compare.vs.types import TonemapSettings
+
+    settings = TonemapSettings(target_nits=120)
     launch = MagicMock(side_effect=lambda *_args, **_kwargs: (_session(tmp_path), 0.0))
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
     _run(
         tmp_path,
         monkeypatch,
-        config=AlignmentConfig(use_vsview=True, cache_results=False),
+        config=AlignmentConfig(use_vsview=True, cache_results=False, preview_tonemap=settings),
     )
 
     request = launch.call_args.kwargs["request"]
+    assert request.preview_tonemap is settings
     assert request.reference == tmp_path / "ref.mkv"
     assert request.comparisons == [tmp_path / "comparison.mkv"]
     assert request.suggested_offsets_by_key == {"ref:comparison": 3}
@@ -304,3 +318,148 @@ def test_alignment_passes_complete_native_session_request(
     }
     assert review["evidence_availability"] == "current_attempt"
     assert review["audio_attempt"]["decision"]["candidate"]["frame_offset"] == 3
+
+
+@pytest.mark.parametrize("payload", ["[" * 10000, "1" * 5000])
+@pytest.mark.parametrize("forced", [False, True])
+def test_decode_limits_retain_computed_authority_or_fail_forced_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: str, forced: bool
+) -> None:
+    def launch(*_args: object, **_kwargs: object):
+        session = _session(tmp_path)
+        session.result_path.write_text(payload, encoding="utf-8")
+        return session, 0.0
+
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
+    config = AlignmentConfig(use_vsview=True, force_interactive=forced, cache_results=False)
+    if forced:
+        with pytest.raises(AudioAlignmentError, match="valid VSView review result"):
+            _run(tmp_path, monkeypatch, config=config)
+    else:
+        results = _run(tmp_path, monkeypatch, config=config)
+        assert results[0].frame_offset == 3
+        assert results[0].source == "computed"
+        assert results[0].applied
+    assert load_manual_overrides(tmp_path) == {}
+
+
+def test_trusted_manual_confirmation_keeps_original_computed_fallback_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    _configure_computed_alignment(monkeypatch)
+    original = _trusted_computed_result(reference, comparison, 42)
+    monkeypatch.setattr(
+        "frame_compare.services.alignment._estimate_audio_pair", lambda *_args, **_kwargs: original
+    )
+
+    def launch(*_args: object, **_kwargs: object):
+        session = _session(tmp_path)
+        write_alignment_review_result(
+            session,
+            AlignmentReviewResult(
+                session_id=session.session_id,
+                decisions=(ConfirmedAlignmentReviewDecision("ref:comparison", 80, 33),),
+            ),
+        )
+        return session, 0.0
+
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
+    request = alignment_request(
+        reference=reference, comparisons=[comparison], generated_dir=tmp_path
+    )
+    (result,) = align_clips_from_request(
+        request, AlignmentConfig(use_vsview=True, cache_results=True)
+    )
+    assert result.frame_offset == 47
+    assert result.time_offset_seconds == 47 / 24
+    assert result.audio_attempt is original.audio_attempt
+    assert result.audio_attempt is not None
+    assert result.audio_attempt.decision.candidate is not None
+    assert result.audio_attempt.decision.candidate.frame_offset == 42
+    cache = tomllib.loads(
+        (request.shared_alignment_cache_dir / "alignment_reuse.toml").read_text(encoding="utf-8")
+    )
+    entry = next(iter(next(iter(cache["source_sets"].values()))["entries"].values()))
+    assert entry["origin"] == "interactive_confirmed"
+    assert entry["frame_offset"] == 47
+    assert entry["computed_result"]["frame_offset"] == 42
+    assert entry["computed_result"]["time_offset_seconds"] == original.time_offset_seconds
+
+
+@pytest.mark.parametrize("existing_alias_set", [False, True], ids=["publish", "lookup"])
+def test_aliased_comparisons_keep_distinct_run_local_confirmations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing_alias_set: bool
+) -> None:
+    reference = tmp_path / "ref.mkv"
+    target = tmp_path / "encode.mkv"
+    first, second = tmp_path / "first.mkv", tmp_path / "second.mkv"
+    reference.touch()
+    target.touch()
+    first.symlink_to(target)
+    second.symlink_to(target)
+    _configure_computed_alignment(monkeypatch)
+    request = alignment_request(
+        reference=reference,
+        comparisons=[first, second],
+        generated_dir=tmp_path,
+        previous_offsets="always",
+    )
+    key = comparison_cache_key(request.comparisons[0])
+    assert key == comparison_cache_key(request.comparisons[1])
+    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    existing_bytes = None
+    if existing_alias_set:
+        # A prior writer collapsed both confirmations onto the same cache entry.
+        single = replace(request, comparisons=[request.comparisons[1]])
+        save_resolutions(
+            single,
+            [
+                ComparisonResolution(
+                    AlignmentResult(reference.name, second.name, 4, 4 / 24, 1.0, None, "manual"),
+                    key,
+                    "interactive_confirmed_this_run",
+                )
+            ],
+        )
+        data = tomllib.loads(cache_file.read_text(encoding="utf-8"))
+        source_sets = data["source_sets"]
+        alias_set = source_sets.pop(source_set_cache_key(single))
+        identity = alias_set["identity"]
+        identity["comparisons"] *= 2
+        source_sets[source_set_cache_key(request)] = alias_set
+        existing_bytes = tomli_w.dumps(data).encode()
+        cache_file.write_bytes(existing_bytes)
+
+    def launch(*_args: object, **_kwargs: object):
+        session = _session(tmp_path)
+        write_alignment_review_result(
+            session,
+            AlignmentReviewResult(
+                session_id=session.session_id,
+                decisions=(
+                    ConfirmedAlignmentReviewDecision("ref:first", 80, 80),
+                    ConfirmedAlignmentReviewDecision("ref:second", 80, 76),
+                ),
+            ),
+        )
+        return session, 0.0
+
+    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
+    results = align_clips_from_request(request, AlignmentConfig(use_vsview=True))
+    assert [(item.comparison_clip, item.frame_offset) for item in results] == [
+        (first.name, 0),
+        (second.name, 4),
+    ]
+    assert {key: row.frame_offset for key, row in load_manual_overrides(tmp_path).items()} == {
+        "ref:first": 0,
+        "ref:second": 4,
+    }
+    if existing_bytes is None:
+        assert not cache_file.exists()
+        assert not cache_file.with_suffix(".toml.lock").exists()
+    else:
+        assert cache_file.read_bytes() == existing_bytes

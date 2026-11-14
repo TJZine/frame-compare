@@ -28,9 +28,10 @@ For exact output streams and JSON fields, see the
 the config file; relative paths resolve from `--root`, and the default is
 `config/config.toml`.
 
-`run`, `wizard`, `preset apply`, `preset save`, `history list`, and `history open`
-accept both options. `preset list` accepts `--config` but ignores it and reads
-presets from `<root>/config/presets`. `doctor` and `version` accept neither option.
+`run`, `doctor`, `wizard`, `preset list`, `preset apply`, `preset save`,
+`history list`, and `history open` accept both options. `preset list` validates the selected config path and reads
+presets from `<root>/config/presets` without loading the config file.
+`version` accepts neither option.
 
 The installed Windows shim supplies the bundle or AppData config when you omit
 `--config`; see the contract's [shared path rules](../current-cli-contract.md#shared-path-resolution-rules).
@@ -42,9 +43,14 @@ exits without running.
 
 Runs and dry runs reject `--no-cache` combined with `--from-cache-only`
 ([`--no-cache` and `--from-cache-only`](../current-cli-contract.md#run-command-contract)).
-An invalid `--overlay`, `--tm-preset`, or `--tm-curve` value names the option and
-lists its choices before any work starts. Preset names are `reference`, `filmic`,
-`contrast`, `bt2390_spec`, `spline`, `bright_lift`, and `highlight_guard`.
+An invalid `--overlay`, `--tm-preset`, `--tm-speed`, or `--tm-curve` value names the option and
+lists its choices before any work starts. Preset names are `reference`, `contrast`,
+`spline`, `bright_lift`, and `highlight_guard`. The default `reference` uses BT.2390 at 100 nits with knee 1.0.
+An explicit curve override that changes the preset curve uses that curve's default
+parameter: BT.2390 1.0, spline 0.5, or Reinhard 0.5. An explicit curve equal to the
+preset curve keeps its parameter. See the
+[preset table](../guides/hdr-tonemapping.md#configure-the-result) for targets,
+gamma lift, and parameters.
 
 `frame-compare run --help` groups the options under the same six headings as this
 section.
@@ -155,6 +161,17 @@ Saved by `--write-config`
 
 Tonemap preset.
 
+#### `--tm-speed` { #run-tm-speed .fc-key }
+
+Value
+:   `quality`, `fast`
+
+Saved by `--write-config`
+:   `color.tonemap_speed`
+
+Choose the source-peak policy for tonemapping. The default `quality` measures
+source peaks, while `fast` uses source metadata or the resolved static peak hint.
+
 #### `--tm-target` { #run-tm-target .fc-key }
 
 Value
@@ -222,7 +239,10 @@ Skip the TMDB lookup.
 Saved by `--write-config`
 :   No
 
-Do not read or write the analysis cache.
+Refresh the matching shared analysis cache entry: remove it during preparation,
+recompute analysis, and persist a fresh entry. Unrelated analysis entries,
+alignment reuse, and TMDB caches are preserved. See the
+[run command contract](../current-cli-contract.md#run-command-contract).
 
 #### `--from-cache-only` { #run-from-cache-only .fc-key }
 
@@ -294,10 +314,19 @@ commands. See
 
 ## Doctor
 
-Doctor checks VapourSynth, L-SMASH-Works, vs-placebo, FFMS2, FFmpeg, VSView, and the
-optional slow.pics and TMDB integrations. `--json` emits the report as JSON. Doctor
-exits with the dependency error code when a required check fails. The slow.pics check
-contacts the service.
+`--root`/`-r` and `--config`/`-c` select the same configuration as `run`.
+The root defaults to `.`; doctor does not search parent directories. The installed
+Windows shim injects its selected bundle or AppData config for doctor too.
+An absent default config uses defaults and environment; an explicit config load
+failure appears in the TMDB diagnostic. Invalid or escaping paths fail through the
+normal typed command error.
+
+Doctor checks VapourSynth, L-SMASH-Works, vs-placebo, FFMS2, FFmpeg/ffprobe, and
+VSView. Its TMDB check validates local configuration and credential format only.
+Doctor makes no network requests; slow.pics connectivity is exercised when
+publishing. `--json` emits the report as JSON. Doctor exits with the dependency
+error code when a required check fails. See the
+[doctor command contract](../current-cli-contract.md#doctor-command-contract).
 
 ## Preset
 

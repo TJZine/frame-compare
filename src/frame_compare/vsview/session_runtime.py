@@ -1,18 +1,37 @@
-"""Executable owner for generated VSView sessions; native imports stay at launch."""
-
 from __future__ import annotations
 
 import json
 import logging
 import os
+import shutil
 import sys
 from collections.abc import Mapping
+from contextlib import suppress
 from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, TextIO, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, NotRequired, Protocol, TextIO, TypedDict, cast
 
-from frame_compare.utils.alignment_evidence import AudioAlignmentDecision, evidence_from_payload
-from frame_compare.vs.source import INDEX_CONSTRUCTION_FAILURE_MARKER
+from pydantic import TypeAdapter
+from rich.cells import cell_len
+from rich.color import Color
+from rich.text import Text
+
+from frame_compare.utils.cancellation import raise_if_cancelling
+from frame_compare.utils.canvas import validate_canvas_size
+from frame_compare.utils.terminal_sections import Section
+from frame_compare.utils.terminal_theme import (
+    ACCENT,
+    FAIL,
+    GLYPHS_ASCII,
+    MUTED,
+    WARN,
+    glyphs_for_console,
+    human_console,
+)
+from frame_compare.vs.source_admission import SourceAdmission, admit_source, bounded_decoder_options
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache, private_index_directory
+from frame_compare.vs.types import TonemapSettings
+from frame_compare.vsview.alignment_overlay import apply_alignment_overlay, build_launch_overlays
 from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY,
     ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
@@ -23,6 +42,9 @@ from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
     ALIGNMENT_REVIEW_METADATA_VERSION,
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
+    AlignmentReviewContractError,
+    AlignmentReviewOutputCandidate,
+    parse_alignment_review_workspace_metadata,
 )
 
 if TYPE_CHECKING:
@@ -32,13 +54,13 @@ if TYPE_CHECKING:
 class ReferenceSource(TypedDict):
     label: str
     path: str
-    index_path: str
+    managed_index_path: NotRequired[str]
     display_name: str
 
 
 class ComparisonSource(TypedDict):
     path: str
-    index_path: str
+    managed_index_path: NotRequired[str]
     display_name: str
     comparison_key: str
     suggested_offset: int | None
@@ -51,6 +73,9 @@ class SessionData(TypedDict):
     frame_props_by_label: dict[str, dict[str, str | int]]
     short_names: dict[str, str]
     memory_limit_mb: int | None
+    preview_tonemap: NotRequired[dict[str, object] | None]
+    source_index_generated_root: NotRequired[str]
+    scan_frame_geometry: NotRequired[bool]
 
 
 class AudioReviewAuthority(TypedDict):
@@ -68,7 +93,9 @@ class _VideoNodeWithFps(Protocol):
 
 
 class OutputRegistrar(Protocol):
-    def __call__(self, clip: vs.VideoNode, index: int, name: str, **metadata: object) -> None: ...
+    def __call__(
+        self, clip: vs.VideoNode, index: int, name: str, *, hdr: bool, **metadata: object
+    ) -> None: ...
 
 
 class PreviewSourceLoader(Protocol):
@@ -99,81 +126,164 @@ def install_workspace_log_filter() -> None:
 
 
 class SessionConsole:
-    """Per-session stream setup and presentation without mutable module state."""
-
     def __init__(self) -> None:
-        self._original_stderr_encoding = getattr(sys.stderr, "encoding", "") or ""
-        self.reconfigure_text_stream(sys.stdout)
-        self.reconfigure_text_stream(sys.stderr)
+        self._reconfigure_text_stream(sys.stdout, encoding="utf-8")
+        # Keep the terminal's encoding so Rich selects the correct rail glyphs.
+        self._reconfigure_text_stream(sys.stderr)
+        width, height = shutil.get_terminal_size(fallback=(120, 24))
+        self._accent = WARN
+        color_system: Literal["standard", "256", "truecolor"] | None = None
+        if "NO_COLOR" not in os.environ and sys.stderr.isatty():
+            if os.environ.get("COLORTERM") in ("truecolor", "24bit") or "WT_SESSION" in os.environ:
+                color_system = "truecolor"
+                # Rich caches ANSI codes by style. Reserve the RGB spelling for
+                # truecolor so it cannot reuse the shared hex style's downgrade.
+                self._accent = Color.parse(ACCENT).get_truecolor().rgb
+            elif "256color" in os.environ.get("TERM", ""):
+                color_system, self._accent = "256", "color(180)"
+            else:
+                color_system = "standard"
+        self._console = human_console(
+            stderr=True,
+            color_system=color_system,
+            width=width,
+            height=height,
+        )
+        self._glyphs = glyphs_for_console(self._console)
 
-    def reconfigure_text_stream(self, stream: TextIO) -> bool:
+    @staticmethod
+    def _reconfigure_text_stream(stream: TextIO, *, encoding: str | None = None) -> None:
         reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is None:
-            return False
+        if reconfigure is not None:
+            with suppress(
+                AttributeError, LookupError, OSError, TypeError, UnicodeError, ValueError
+            ):
+                reconfigure(encoding=encoding, errors="replace")
+
+    def _audio_output_state(self, audio_review: AudioReviewPayload) -> tuple[str, bool]:
+        authority = audio_review["current_authority"]
+        origin = authority["origin"]
+        offset = authority["frame_offset"]
+        attempt = audio_review["audio_attempt"]
+        decision_raw = attempt.get("decision") if isinstance(attempt, dict) else None
+        decision = cast(dict[str, object], decision_raw) if isinstance(decision_raw, dict) else None
+        state = decision.get("state") if decision is not None else None
+        candidate_raw = decision.get("candidate") if decision is not None else None
+        candidate = (
+            cast(dict[str, object], candidate_raw) if isinstance(candidate_raw, dict) else None
+        )
+        candidate_offset = candidate.get("frame_offset") if candidate is not None else None
+
+        if origin == "computed_this_run" and state == "trusted_automatic" and offset is not None:
+            return f"audio {offset:+d}f", False
+        if origin == "shared_computed_offsets" and offset is not None:
+            return f"audio {offset:+d}f · reused", False
+        if (
+            origin in {"interactive_confirmed_this_run", "shared_previous_offsets"}
+            and offset is not None
+        ):
+            return f"previously confirmed {offset:+d}f", False
+        if origin == "preexisting_manual_override" and offset is not None:
+            return f"manual offset {offset:+d}f", False
+        if state == "provisional" and isinstance(candidate_offset, int):
+            return f"audio {candidate_offset:+d}f · not applied", True
+        return "no audio match", True
+
+    def _add_output_rows(
+        self,
+        section: Section,
+        reference: ReferenceSource,
+        targets: Mapping[str, ComparisonSource],
+        short_names: Mapping[str, str],
+    ) -> None:
+        source_names = [short_names.get(reference["label"], reference["display_name"])]
+        source_names.extend(
+            short_names.get(label, target["display_name"]) for label, target in targets.items()
+        )
+        name_width = max(map(cell_len, source_names))
+        ref_name = source_names[0]
+        ref_padding = " " * (name_width - cell_len(ref_name) + 2)
+        section.add_row(
+            "outputs",
+            Text.assemble(f"0  {ref_name}{ref_padding}", ("reference", MUTED)),
+        )
+        for index, (name, target) in enumerate(
+            zip(source_names[1:], targets.values(), strict=True), start=1
+        ):
+            audio_review = cast(AudioReviewPayload, json.loads(target["audio_review"]))
+            state, warning = self._audio_output_state(audio_review)
+            if self._glyphs is GLYPHS_ASCII:
+                state = state.replace(" · ", " | ")
+            padding = " " * (name_width - cell_len(name) + 2)
+            section.add_row(
+                "",
+                Text.assemble(f"{index}  {name}{padding}", (state, WARN if warning else MUTED)),
+            )
+
+    def print_ready(
+        self,
+        reference: ReferenceSource,
+        targets: Mapping[str, ComparisonSource],
+        short_names: Mapping[str, str],
+        preview_assumptions: list[dict[str, str]],
+    ) -> None:
+        ascii_only = self._glyphs is GLYPHS_ASCII
+        arrow = "->" if ascii_only else "→"
+        separator = "|" if ascii_only else "·"
+        title = f"[bold {self._accent}]{self._glyphs.waiting} VSView is open[/]"
+        section = Section(f"{title} [dim]{separator} waiting for you[/]", rail_style=self._accent)
+        section.add_line(Text(f"1  Open Tool Panel {arrow} Frame Compare Alignment Review."))
+        section.add_line(
+            Text(
+                "2  Browse each source to the same visual moment; original frames update automatically."
+            )
+        )
+        section.add_line(
+            Text(
+                "3  Confirm matching frames in the panel, then close VSView to continue Frame Compare."
+            )
+        )
+        section.add_row("")
+        self._add_output_rows(section, reference, targets, short_names)
+        if preview_assumptions:
+            section.add_row("")
+            section.add_note("VSView display assumptions")
+            for assumption_number, assumption in enumerate(preview_assumptions):
+                if assumption_number:
+                    section.add_row("")
+                section.add_row("source", Text(assumption["source"]))
+                if "preview" in assumption:
+                    section.add_row("preview", Text(assumption["preview"], style=MUTED))
+                if "range" in assumption:
+                    section.add_row("range", Text(assumption["range"], style=MUTED))
+                section.add_row(
+                    "impact",
+                    Text("Preview only; source, render, and report unchanged", style=MUTED),
+                )
+        self.safe_print(section)
+
+    def status_line(self, marker: str, text: str) -> Text:
+        glyph, style = {
+            "[WARN]": (self._glyphs.warning, WARN),
+            "[FAIL]": (self._glyphs.failed, FAIL),
+        }[marker]
+        return Text.assemble("  ", (glyph, style), " ", text)
+
+    def safe_print(self, renderable: Section | Text) -> None:
+        with self._console.capture() as capture:
+            if isinstance(renderable, Section):
+                renderable.print(self._console)
+            else:
+                self._console.print(renderable, soft_wrap=True)
+        text = capture.get()
         try:
-            reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, LookupError, OSError, TypeError, UnicodeError, ValueError):
-            return False
-        return True
-
-    def ansi_enabled(self) -> bool:
-        return "NO_COLOR" not in os.environ and getattr(sys.stderr, "isatty", lambda: False)()
-
-    def use_ascii(self) -> bool:
-        return not str(self._original_stderr_encoding).lower().startswith("utf")
-
-    def glyph(self, kind: str) -> str:
-        table = {"warning": ("!", "!"), "failed": ("✗", "x"), "waiting": ("›", ">")}
-        glyph, fallback = table[kind]
-        return fallback if self.use_ascii() else glyph
-
-    def arrow(self) -> str:
-        return "->" if self.use_ascii() else "→"
-
-    def accent_code(self) -> str:
-        colorterm = os.environ.get("COLORTERM", "")
-        if colorterm in ("truecolor", "24bit") or "WT_SESSION" in os.environ:
-            return "38;2;210;172;107"
-        if "256color" in os.environ.get("TERM", ""):
-            return "38;5;180"
-        return "33"
-
-    def style(self, text: str, code: str) -> str:
-        if not self.ansi_enabled():
-            return text
-        return f"\x1b[{code}m{text}\x1b[0m"
-
-    def header(self, text: str) -> str:
-        return self.style(text, self.accent_code())
-
-    def key(self, text: str) -> str:
-        return self.style(text, "2")
-
-    def value(self, text: str) -> str:
-        return text
-
-    def hint(self, text: str) -> str:
-        return self.style(text, "2")
-
-    def status(self, marker: str) -> str:
-        kinds = {"[WARN]": ("warning", "33"), "[FAIL]": ("failed", "31")}
-        kind, code = kinds[marker]
-        return self.style(self.glyph(kind), code)
-
-    def status_line(self, marker: str, text: str) -> str:
-        return f"  {self.status(marker)} {text}"
-
-    def safe_print(self, *args: object) -> None:
-        try:
-            print(*args, file=sys.stderr)
+            sys.stderr.write(text)
         except UnicodeEncodeError:
             # Preserve diagnostics on legacy consoles that cannot be reconfigured.
-            text = " ".join(str(arg) for arg in args)
-            print(text.encode("ascii", errors="replace").decode("ascii"), file=sys.stderr)
+            sys.stderr.write(text.encode("ascii", errors="replace").decode("ascii"))
 
 
 def resolve_lwlibavsource(core: vs.Core) -> PreviewSourceLoader:
-    """Resolve LWLibavSource from the VapourSynth R81 core.lsmas namespace."""
     if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
         return cast(PreviewSourceLoader, core.lsmas)
     raise RuntimeError("LWLibavSource not found on core.lsmas")
@@ -182,26 +292,41 @@ def resolve_lwlibavsource(core: vs.Core) -> PreviewSourceLoader:
 def load_preview_source(
     loader: PreviewSourceLoader,
     path: Path,
-    index_path: Path,
-    display_name: str,
-    console: SessionConsole,
-) -> vs.VideoNode:
-    try:
-        return loader.LWLibavSource(str(path), cachefile=str(index_path))
-    except Exception as original_error:
-        if INDEX_CONSTRUCTION_FAILURE_MARKER not in str(original_error).casefold():
-            raise
+    managed_index_path: str | None,
+    source_index_generated_root: str | None = None,
+    *,
+    scan_frame_geometry: bool = False,
+) -> tuple[vs.VideoNode, SourceAdmission]:
+    if path.suffix.lower() == ".lwi":
+        raise ValueError("An L-SMASH index cannot be used as source media")
+    admission = admit_source(path, abort_check=raise_if_cancelling)
+    ff_options = bounded_decoder_options()
 
-        console.safe_print(
-            console.status_line(
-                "[WARN]",
-                f"Retrying {display_name} without an L-SMASH index cache after index construction failed",
-            )
+    def open_source(source: Path, mode: int, index: Path) -> vs.VideoNode:
+        if source.suffix.lower() == ".lwi":
+            raise ValueError("An L-SMASH index cannot be used as source media")
+        admission.verify(source)
+        clip = loader.LWLibavSource(
+            str(source), cache=mode, cachefile=str(index), ff_options=ff_options
         )
-        try:
-            return loader.LWLibavSource(str(path), cache=0)
-        except Exception as fallback_error:
-            raise original_error from fallback_error
+        admission.verify(source)
+        return clip
+
+    if managed_index_path is not None and source_index_generated_root is not None:
+        cache = ManagedSourceIndexCache(Path(source_index_generated_root))
+        clip = cache.try_open_validated(
+            path,
+            Path(managed_index_path),
+            open_source,
+            admission=admission,
+            scan_frame_geometry=scan_frame_geometry,
+        )
+        if clip is not None:
+            return clip, admission
+    if scan_frame_geometry:
+        admission.scan(path, abort_check=raise_if_cancelling)
+    with private_index_directory() as directory:
+        return open_source(path, 0, directory / "disabled.lwi"), admission
 
 
 FRAME_PROP_ALIASES = {
@@ -303,7 +428,36 @@ def apply_preview_defaults(
     return core.std.SetFrameProps(clip, **defaults)
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+def prepare_preview_clip(
+    core: vs.Core,
+    clip: vs.VideoNode,
+    path: Path,
+    label: str,
+    display_name: str,
+    frame_props_by_label: Mapping[str, Mapping[str, str | int]],
+    settings: TonemapSettings | None,
+    *,
+    admission: SourceAdmission,
+) -> tuple[vs.VideoNode, dict[str, str] | None]:
+    """Map original HDR evidence before any preview assumptions or overlays."""
+    if settings is not None and settings.enabled:
+        from frame_compare.vs.hdr_probe import probe_hdr_metadata
+        from frame_compare.vs.props import detect_hdr, hdr_signal_is_unspecified
+        from frame_compare.vs.tonemap import apply_tonemap
+
+        props = dict(clip.get_frame(0).props)
+        metadata = None
+        if hdr_signal_is_unspecified(props):
+            metadata = probe_hdr_metadata(path, streams=(admission.video_stream,))
+        is_hdr, metadata = detect_hdr(props, metadata)
+        if is_hdr:
+            return apply_tonemap(clip, settings, metadata, still_image=False).clip, None
+    return (
+        apply_preview_defaults(core, clip, label, frame_props_by_label),
+        collect_preview_assumption(label, display_name, frame_props_by_label),
+    )
+
+
 def _reference_metadata(session_id: str, reference: ReferenceSource) -> dict[str, str | int]:
     return {
         REVIEW_METADATA_KEYS["version"]: REVIEW_METADATA_VERSION,
@@ -329,13 +483,18 @@ def _comparison_metadata(
 
 
 def run_session(data: SessionData, script_path: Path) -> None:
-    """Load all sources before registering the native review workspace outputs."""
     console = SessionConsole()
     install_workspace_log_filter()
     reference = data["reference"]
     targets = data["targets"]
     frame_props_by_label = data["frame_props_by_label"]
     short_names = data["short_names"]
+    raw_tonemap = data.get("preview_tonemap")
+    preview_tonemap = (
+        TypeAdapter(TonemapSettings).validate_python(raw_tonemap)
+        if raw_tonemap is not None
+        else None
+    )
     if not targets:
         console.safe_print(
             console.status_line("[FAIL]", "Alignment review requires every comparison")
@@ -369,13 +528,14 @@ def run_session(data: SessionData, script_path: Path) -> None:
         sys.exit(1)
 
     try:
-        ref_clip = load_preview_source(
+        ref_clip, ref_admission = load_preview_source(
             load_source,
             ref_path,
-            Path(reference["index_path"]),
-            reference["display_name"],
-            console,
+            reference.get("managed_index_path"),
+            data.get("source_index_generated_root"),
+            scan_frame_geometry=data.get("scan_frame_geometry", False),
         )
+        validate_canvas_size(ref_clip.width, ref_clip.height, label="Source video")
     except Exception as e:
         console.safe_print(
             console.status_line("[FAIL]", f"Reference source could not be loaded: {e}")
@@ -386,27 +546,20 @@ def run_session(data: SessionData, script_path: Path) -> None:
     ref_fps_num = ref_fps.numerator
     ref_fps_den = ref_fps.denominator
     preview_assumptions: list[dict[str, str]] = []
-    ref_assumption = collect_preview_assumption(
-        reference["label"], reference["display_name"], frame_props_by_label
+    ref_clip, ref_assumption = prepare_preview_clip(
+        core,
+        ref_clip,
+        ref_path,
+        reference["label"],
+        reference["display_name"],
+        frame_props_by_label,
+        preview_tonemap,
+        admission=ref_admission,
     )
     if ref_assumption is not None:
         preview_assumptions.append(ref_assumption)
-    ref_clip = apply_preview_defaults(core, ref_clip, reference["label"], frame_props_by_label)
-
-    # Apply overlay to reference (best-effort)
-    try:
-        ref_clip = core.text.Text(
-            ref_clip,
-            f"REF: {reference['display_name']}\n"
-            "Open Tool Panel -> Frame Compare Alignment Review.\n"
-            "Unlink playheads, then position every source on the same visible moment.",
-            alignment=7,
-        )
-    except Exception:
-        console.safe_print(console.status_line("[WARN]", "Could not apply reference text overlay"))
 
     prepared_comparisons: list[tuple[int, str, ComparisonSource, vs.VideoNode]] = []
-    ready_hints: list[tuple[str, str]] = []
 
     for comparison_number, (label, target) in enumerate(targets.items(), start=1):
         comp_path = Path(target["path"])
@@ -418,112 +571,94 @@ def run_session(data: SessionData, script_path: Path) -> None:
             sys.exit(1)
 
         try:
-            comp_clip = load_preview_source(
+            comp_clip, comp_admission = load_preview_source(
                 load_source,
                 comp_path,
-                Path(target["index_path"]),
-                display_name,
-                console,
+                target.get("managed_index_path"),
+                data.get("source_index_generated_root"),
+                scan_frame_geometry=data.get("scan_frame_geometry", False),
             )
+            validate_canvas_size(comp_clip.width, comp_clip.height, label="Source video")
         except Exception as e:
             console.safe_print(
                 console.status_line("[FAIL]", f"Comparison source could not be loaded: {e}")
             )
             sys.exit(1)
 
-        comp_assumption = collect_preview_assumption(label, display_name, frame_props_by_label)
+        comp_clip, comp_assumption = prepare_preview_clip(
+            core,
+            comp_clip,
+            comp_path,
+            label,
+            display_name,
+            frame_props_by_label,
+            preview_tonemap,
+            admission=comp_admission,
+        )
         if comp_assumption is not None:
             preview_assumptions.append(comp_assumption)
 
-        # FPS harmonization: apply AssumeFPS to match reference
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
-        comp_clip = apply_preview_defaults(core, comp_clip, label, frame_props_by_label)
-
-        suggested_offset = target["suggested_offset"]
-        audio_review = cast(AudioReviewPayload, json.loads(target["audio_review"]))
-        audio_attempt = audio_review["audio_attempt"]
-        raw_decision = audio_attempt.get("decision") if isinstance(audio_attempt, dict) else None
-        try:
-            audio_decision = (
-                None
-                if raw_decision is None
-                else evidence_from_payload(AudioAlignmentDecision, raw_decision)
-            )
-        except ValueError:
-            audio_decision = None
-        candidate_offset = (
-            None
-            if audio_decision is None or audio_decision.candidate is None
-            else audio_decision.candidate.frame_offset
-        )
-        audio_attempt_unusable = audio_attempt is not None and (
-            audio_decision is None or candidate_offset is None
-        )
-        authority = audio_review["current_authority"]
-        if (
-            audio_decision is not None
-            and audio_decision.state == "provisional"
-            and candidate_offset is not None
-        ):
-            audio_hint = f"Provisional {candidate_offset:+d}f - NOT APPLIED"
-            hint_pair = "Verify manually; this candidate is not a confirmed alignment"
-            trim_hint = f"Reason: {audio_decision.primary_reason}"
-        elif audio_decision is not None and audio_decision.state == "trusted_automatic":
-            # U4 video-confirm seam: U3 decisions never reach trusted_automatic.
-            accepted_offset = cast(int, suggested_offset)
-            audio_hint = f"Audio alignment accepted: {accepted_offset:+d}f"
-            hint_pair = (
-                "No relative audio correction required"
-                if accepted_offset == 0
-                else f"Accepted origin pair: REF {max(accepted_offset, 0)} <-> "
-                f"CMP {max(-accepted_offset, 0)}"
-            )
-            trim_hint = "Accepted by the recorded automatic policy"
-        elif authority["origin"] in {
-            "interactive_confirmed_this_run",
-            "shared_previous_offsets",
-            "preexisting_manual_override",
-        }:
-            audio_hint = f"Current alignment: {suggested_offset:+d}f — manually confirmed"
-            hint_pair = "Historical audio details unavailable"
-            trim_hint = "Manual authority is separate from audio evidence"
-        elif audio_attempt_unusable or suggested_offset is None:
-            audio_hint = "No usable audio candidate"
-            hint_pair = "No automatic correction applied"
-            trim_hint = "Enter known offsets or align the sources manually"
-        else:
-            audio_hint = f"Reused accepted audio alignment: {suggested_offset:+d}f"
-            hint_pair = "Historical chunk and selected-stream details unavailable"
-            trim_hint = "No audio analysis ran this time"
-
-        ready_hints.append((label, audio_hint))
-
-        # Apply comparison identity, hint, and review guidance (best-effort)
-        try:
-            overlay_text = (
-                f"CMP: {display_name}\n"
-                f"Audio hint: {audio_hint}\n"
-                f"{hint_pair}\n"
-                f"{trim_hint}\n"
-                "Open Tool Panel -> Frame Compare Alignment Review.\n"
-                "Unlink playheads, then position every source on the same visible moment."
-            )
-            comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
-        except Exception:
-            console.safe_print(
-                console.status_line("[WARN]", "Could not apply comparison text overlay")
-            )
 
         prepared_comparisons.append((comparison_number, label, target, comp_clip))
 
     session_id = script_path.stem.rpartition("_")[2]
+    # Parse the same metadata-v5 workspace the panel will consume, with actual
+    # untrimmed frame counts, before deriving immutable display-only launch facts.
+    candidates = (
+        AlignmentReviewOutputCandidate(
+            0, ref_clip.num_frames, _reference_metadata(session_id, reference)
+        ),
+        *(
+            AlignmentReviewOutputCandidate(
+                number, clip.num_frames, _comparison_metadata(session_id, target, number)
+            )
+            for number, _label, target, clip in prepared_comparisons
+        ),
+    )
     try:
-        set_output(ref_clip, 0, "Reference", **_reference_metadata(session_id, reference))
+        workspace = parse_alignment_review_workspace_metadata(candidates)
+        names = {0: data["short_names"].get(reference["label"], reference["display_name"])}
+        names.update(
+            {
+                number: data["short_names"].get(label, target["display_name"])
+                for number, label, target, _clip in prepared_comparisons
+            }
+        )
+        models = build_launch_overlays(workspace, names)
+    except (AlignmentReviewContractError, ValueError):
+        models = {}
+        console.safe_print(
+            console.status_line(
+                "[WARN]",
+                "Alignment video labels unavailable: invalid session evidence; using raw preview.",
+            )
+        )
+
+    def overlay_warning(message: str) -> None:
+        console.safe_print(console.status_line("[WARN]", message))
+
+    if models:
+        ref_clip = apply_alignment_overlay(core, ref_clip, models[0], warn=overlay_warning)
+        prepared_comparisons = [
+            (
+                number,
+                label,
+                target,
+                apply_alignment_overlay(core, clip, models[number], warn=overlay_warning),
+            )
+            for number, label, target, clip in prepared_comparisons
+        ]
+    try:
+        set_output(
+            ref_clip, 0, "Reference", hdr=False, **_reference_metadata(session_id, reference)
+        )
         for comparison_number, _label, target, comparison_clip in prepared_comparisons:
             set_output(
                 comparison_clip,
                 comparison_number,
                 f"Comparison {comparison_number}",
+                hdr=False,
                 **_comparison_metadata(session_id, target, comparison_number),
             )
     except Exception as e:
@@ -532,53 +667,4 @@ def run_session(data: SessionData, script_path: Path) -> None:
         )
         sys.exit(1)
 
-    if preview_assumptions:
-        console.safe_print("\n" + console.status_line("[WARN]", "VSView Display Assumptions"))
-        for assumption_number, assumption in enumerate(preview_assumptions):
-            if assumption_number:
-                console.safe_print()
-            console.safe_print(
-                f"    {console.key('source')}      {console.value(assumption['source'])}"
-            )
-            if "preview" in assumption:
-                console.safe_print(
-                    f"    {console.key('preview')}     {console.hint(assumption['preview'])}"
-                )
-            if "range" in assumption:
-                console.safe_print(
-                    f"    {console.key('range')}       {console.hint(assumption['range'])}"
-                )
-            console.safe_print(
-                f"    {console.key('impact')}      "
-                f"{console.hint('Preview only; source, render, and report unchanged')}"
-            )
-
-    ready_prefix = "\n" if preview_assumptions else ""
-    console.safe_print(
-        ready_prefix
-        + console.header(f"{console.glyph('waiting')} VSView is open \u00b7 waiting for you")
-    )
-    console.safe_print(
-        "  1  Open Tool Panel " + console.arrow() + " Frame Compare Alignment Review."
-    )
-    console.safe_print(
-        "  2  Unlink playheads, then position every source on the same visible moment."
-    )
-    console.safe_print(
-        "  3  Save the alignment in the panel, then close VSView to continue Frame Compare."
-    )
-    console.safe_print("")
-    console.safe_print("  outputs  0  " + reference["display_name"])
-    for comparison_number, _label, target, _comparison_clip in prepared_comparisons:
-        console.safe_print("           " + str(comparison_number) + "  " + target["display_name"])
-    ready_hint_rows: list[tuple[str, str]] = []
-    for label, audio_hint in ready_hints:
-        ready_hint_rows.append((short_names.get(label, targets[label]["display_name"]), audio_hint))
-    if ready_hint_rows:
-        hint_width = max(len(name) for name, _hint_text in ready_hint_rows)
-        first_hint_name, first_hint_text = ready_hint_rows[0]
-        console.safe_print(
-            "  hints    " + first_hint_name.ljust(hint_width) + "  " + first_hint_text
-        )
-        for hint_name, hint_text in ready_hint_rows[1:]:
-            console.safe_print("           " + hint_name.ljust(hint_width) + "  " + hint_text)
+    console.print_ready(reference, targets, short_names, preview_assumptions)

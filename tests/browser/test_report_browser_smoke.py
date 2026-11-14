@@ -10,9 +10,11 @@ import subprocess
 from dataclasses import replace
 from html.parser import HTMLParser
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, cast
 
 import pytest
+from tests.tonemap_test_support import libplacebo_tonemap
 
 from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.config.schema_enums import ViewerMode
@@ -34,7 +36,7 @@ from frame_compare.utils.media_facts import (
 )
 from frame_compare.vs.types import TonemapSettings
 
-# Chrome launches share a profile; keep this module on one xdist worker.
+# Keep the browser acceptance module on one xdist worker for bounded host load.
 pytestmark = pytest.mark.xdist_group("browser")
 
 _ONE_PIXEL_PNG = base64.b64decode(
@@ -99,6 +101,8 @@ def _run_browser_dump(
     command = [
         browser,
         "--headless=new",
+        # Let our subprocess timeout bound teardown, not Chrome's shorter macOS watchdog.
+        "--test-type",
         "--disable-background-networking",
         "--disable-default-apps",
         "--disable-gpu",
@@ -109,6 +113,12 @@ def _run_browser_dump(
         "--dump-dom",
         report_path.as_uri(),
     ]
+    with TemporaryDirectory(prefix="chrome-dump-", dir=report_path.parent) as profile:
+        command.insert(1, f"--user-data-dir={profile}")
+        return _run_browser_dump_command(command)
+
+
+def _run_browser_dump_command(command: list[str]) -> subprocess.CompletedProcess[str]:
     for attempt in range(2):
         try:
             return subprocess.run(
@@ -203,6 +213,8 @@ def _generated_report(
     *,
     tonemapped: bool = False,
     encoded_image_paths: bool = False,
+    frames: tuple[int, ...] = (10,),
+    comparison_micro: str = "ATV HDR10",
 ) -> Path:
     clips: list[ClipInfo] = []
     geometry_by_name = {
@@ -228,13 +240,17 @@ def _generated_report(
         ("encode", _COMPARISON_LABEL),
     ):
         geometry = geometry_by_name[name]
-        screenshot = (
-            tmp_path / "screenshots # %20 Ü" / f"{name} # %20 Ü.png"
-            if encoded_image_paths
-            else tmp_path / "screenshots" / name / "10.png"
-        )
-        screenshot.parent.mkdir(parents=True, exist_ok=True)
-        screenshot.write_bytes(_ONE_PIXEL_PNG)
+        screenshots = [
+            (
+                tmp_path / "screenshots # %20 Ü" / f"{name} {frame} # %20 Ü.png"
+                if encoded_image_paths
+                else tmp_path / "screenshots" / name / "10.png"
+            )
+            for frame in frames
+        ]
+        for screenshot in screenshots:
+            screenshot.parent.mkdir(parents=True, exist_ok=True)
+            screenshot.write_bytes(_ONE_PIXEL_PNG)
         clips.append(
             ClipInfo(
                 name=name,
@@ -254,20 +270,21 @@ def _generated_report(
                 presentation_state=(
                     PresentationState.HDR_TONEMAPPED if tonemapped else PresentationState.SDR
                 ),
-                tonemap_settings=TonemapSettings() if tonemapped else None,
+                tonemap=libplacebo_tonemap(TonemapSettings()) if tonemapped else None,
                 active_picture=geometry.active_picture,
                 images=[
                     ReportImageInfo(
                         screenshot,
-                        10 if name == "reference" else 12,
-                        RenderedFrameFacts(10 if name == "reference" else 12, "B"),
+                        frame if name == "reference" else frame + 2,
+                        RenderedFrameFacts(frame if name == "reference" else frame + 2, "B"),
                     )
+                    for frame, screenshot in zip(frames, screenshots, strict=True)
                 ],
                 display=ReportClipDisplayInfo(
                     primary=(_REFERENCE_PRIMARY if name == "reference" else _COMPARISON_PRIMARY),
                     release=(_REFERENCE_RELEASE if name == "reference" else _COMPARISON_RELEASE),
                     control=(_REFERENCE_RELEASE if name == "reference" else _COMPARISON_RELEASE),
-                    micro="PMTP DV" if name == "reference" else "ATV HDR10",
+                    micro="PMTP DV" if name == "reference" else comparison_micro,
                     filename=f"{label}.mkv",
                 ),
             )
@@ -276,11 +293,10 @@ def _generated_report(
     return generate_report(
         ReportData(
             clips=[replace(clip) for clip in clips],
-            frames=[10],
+            frames=list(frames),
             rendering=ReportRenderingInfo(
                 overlay_mode=OverlayMode.DIAGNOSTIC,
                 include_frame_number=True,
-                tonemap_settings=TonemapSettings() if tonemapped else None,
                 geometry_by_label={
                     clip.label or clip.name: geometry_by_name[clip.name] for clip in clips
                 },
@@ -295,42 +311,48 @@ def _generated_report(
     )
 
 
-def _append_encoded_image_load_probe(report_path: Path) -> None:
-    html = report_path.read_text(encoding="utf-8")
-    probe = """
-<img id="encoded-screenshot-probe" src="screenshots%20%23%20%2520%20%C3%9C/reference%20%23%20%2520%20%C3%9C.png" alt="" hidden>
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    const image = document.getElementById('encoded-screenshot-probe');
-    const mark = () => {
-        document.documentElement.dataset.encodedImagesLoaded = String(
-            image.complete && image.naturalWidth > 0
-        );
-    };
-    image.addEventListener('load', mark, { once: true });
-    image.addEventListener('error', mark, { once: true });
-    mark();
-});
-</script>
-"""
-    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
-
-
 @pytest.mark.integration
 def test_generated_report_loads_percent_encoded_screenshot_paths(tmp_path: Path) -> None:
+    from PIL import Image
+
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
 
-    report_path = _generated_report(tmp_path, encoded_image_paths=True)
-    _append_encoded_image_load_probe(report_path)
-    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
-    parser = _InitializedViewerParser()
-    parser.feed(completed.stdout)
+    report_path = _generated_report(tmp_path, encoded_image_paths=True, frames=(10, 11))
+    expected_frames: list[list[dict[str, str | int]]] = []
+    for index, frame in enumerate((10, 11)):
+        expected = []
+        for side, source in enumerate(("reference", "encode")):
+            image_path = tmp_path / "screenshots # %20 Ü" / f"{source} {frame} # %20 Ü.png"
+            width = 2 * index + side + 1
+            Image.new("RGB", (width, 1)).save(image_path)
+            expected.append({"url": image_path.as_uri(), "width": width})
+        expected_frames.append(expected)
 
-    assert "screenshots%20%23%20%2520%20%C3%9C" in completed.stdout
-    assert parser.document_attributes is not None
-    assert parser.document_attributes["data-encoded-images-loaded"] == "true"
+    script = _viewer_input_script(
+        r"""
+        const expectedFrames = EXPECTED_FRAMES;
+        for (const [index, expected] of expectedFrames.entries()) {
+            if (index) {
+                await evaluate(`(() => {
+                    const select = document.getElementById('frame-select');
+                    select.value = '${index}';
+                    select.dispatchEvent(new Event('change'));
+                })()`);
+            }
+            await waitFor(`(() => {
+                const expected = ${JSON.stringify(expected)};
+                return [ReportViewer.dom.leftImg, ReportViewer.dom.rightImg]
+                    .every((image, i) => image.complete && !image.hidden
+                        && image.currentSrc === expected[i].url
+                        && image.naturalWidth === expected[i].width);
+            })()`, `stage images did not decode their encoded URLs for frame index ${index}`);
+        }
+""".replace("EXPECTED_FRAMES", json.dumps(expected_frames))
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-encoded", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def _append_screenshot_load_probe(report_path: Path) -> None:
@@ -800,13 +822,14 @@ document.addEventListener('DOMContentLoaded', () => {
             bookmark.dispatchEvent(new Event('change', { bubbles: true }));
             note.value = 'Browser integration proof';
             note.dispatchEvent(new Event('input', { bubbles: true }));
+            // dump-dom's virtual-time clock cannot establish asynchronous lock
+            // completion. The CDP editor test below proves the durable save.
             reviewTabUsable = Boolean(
                 ReportViewer.reviewController
                 && bookmark.checked
                 && note.value === 'Browser integration proof'
-                && document.querySelector('[data-review-status]')?.textContent.includes(
-                    'saved in this browser'
-                )
+                && ReportViewer.reviewController.model.get(0).note === note.value
+                && document.querySelector('[data-review-status]')?.textContent === 'Unsaved changes.'
             );
         } catch (error) {
             document.documentElement.dataset.reviewTabError = String(error);
@@ -859,7 +882,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const summary = disclosure?.querySelector('summary');
     const settings = disclosure?.querySelector('dl');
     const advancedLabels = [
-        'Dynamic peak detection', 'Contrast recovery', 'Gamma lift', 'Source peak',
+        'Dynamic peak detection', 'Contrast recovery', 'Gamma lift',
         'Destination minimum', 'Knee offset', 'Smoothing period', 'Percentile',
         'Scene thresholds', 'Gamut mapping',
         'Metadata mode', 'Dolby Vision metadata use',
@@ -877,7 +900,7 @@ document.addEventListener('DOMContentLoaded', () => {
     );
     document.documentElement.dataset.tonemapSummary = String(
         document.querySelector('[data-rendering-tonemap-summary]')?.textContent
-        === 'Reference · BT.2390 · 100 nits'
+        === 'BT.2390 · 100 nits'
     );
     document.documentElement.dataset.tonemapDisclosureInitial = String(
         Boolean(
@@ -952,6 +975,107 @@ def test_applied_tonemap_disclosure_is_focusable_toggleable_and_scrollable(
         )
 
 
+def _append_pair_offset_mode_transition_probe(report_path: Path) -> None:
+    html = report_path.read_text(encoding="utf-8")
+    probe = """
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const viewer = ReportViewer;
+    const storageKey = viewer.viewerStorageKey();
+    const results = [];
+    const clickMode = mode => document.querySelector(`[data-mode="${mode}"]`).click();
+    const selectRight = index => {
+        const select = document.getElementById('right-select');
+        select.value = String(index);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const typeOffset = (x, y) => {
+        for (const [axis, value] of [['x', x], ['y', y]]) {
+            const input = document.getElementById(`align-${axis}`);
+            input.value = String(value);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('blur'));
+        }
+    };
+    for (const mode of ['diff', 'blink']) {
+        for (const savedOffset of [false, true]) {
+            for (const sameSourceOffset of [false, true]) {
+                localStorage.removeItem(storageKey);
+                viewer.restorePersistedState();
+                clickMode('slider');
+                selectRight(1);
+                if (savedOffset) typeOffset(7, 3);
+                selectRight(0);
+                if (sameSourceOffset) typeOffset(2, 2);
+                clickMode(mode);
+                const canvas = getComputedStyle(viewer.dom.canvas);
+                const saved = JSON.parse(localStorage.getItem(storageKey));
+                const current = viewer.viewport.currentAlignment();
+                const result = {
+                    mode, savedOffset, sameSourceOffset,
+                    pair: viewer.viewport.currentPairAlignmentKey(),
+                    current,
+                    stored: saved.pairAlignments['0:1'] || null,
+                    storedSameSource: saved.pairAlignments['0:0'] || null,
+                    x: canvas.getPropertyValue('--align-x').trim(),
+                    y: canvas.getPropertyValue('--align-y').trim(),
+                    transform: getComputedStyle(document.querySelector('.rv-right')).transform,
+                    status: document.getElementById('alignment-status').textContent.trim(),
+                };
+                viewer.restorePersistedState();
+                result.restored = viewer.viewport.currentAlignment();
+                results.push(result);
+            }
+        }
+    }
+    document.documentElement.dataset.pairOffsetTransitions = JSON.stringify(results);
+});
+</script>
+"""
+    report_path.write_text(html.replace("</body>", f"{probe}</body>"), encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_pair_offsets_survive_same_source_slider_mode_repair(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable; CI preflight makes this a required proof")
+    report_path = _generated_report(tmp_path)
+    _append_pair_offset_mode_transition_probe(report_path)
+    completed = _run_browser_dump(browser, report_path, width=1024, height=768)
+    parser = _InitializedViewerParser()
+    parser.feed(completed.stdout)
+    assert parser.document_attributes is not None
+    encoded = parser.document_attributes.get("data-pair-offset-transitions")
+    assert encoded is not None, parser.document_attributes
+    cases = json.loads(encoded)
+    assert len(cases) == 8
+    for case in cases:
+        expected = {
+            "alignmentPreset": "custom" if case["savedOffset"] else "none",
+            "alignX": 7 if case["savedOffset"] else 0,
+            "alignY": 3 if case["savedOffset"] else 0,
+        }
+        assert case["pair"] == "0:1", case
+        assert case["current"] == expected, case
+        assert case["restored"] == expected, case
+        assert case["stored"] == (expected if case["savedOffset"] else None), case
+        assert case["storedSameSource"] == (
+            {"alignmentPreset": "custom", "alignX": 2, "alignY": 2}
+            if case["sameSourceOffset"]
+            else None
+        ), case
+        assert case["x"] == f"{expected['alignX']}px", case
+        assert case["y"] == f"{expected['alignY']}px", case
+        assert case["status"] == (
+            "Offset: custom +7x +3y" if case["savedOffset"] else "Offset: none"
+        ), case
+        if case["mode"] == "diff":
+            assert case["transform"] == (
+                "matrix(1, 0, 0, 1, 7, 3)" if case["savedOffset"] else "matrix(1, 0, 0, 1, 0, 0)"
+            ), case
+
+
 def _append_width_fit_restore_probe(report_path: Path) -> None:
     """Prove the removed Fit width control, its restored-state fallback, and H.
 
@@ -1020,7 +1144,7 @@ def _append_saved_fit_mode_init_probe(report_path: Path, fit_mode: str) -> None:
 <script>
 const savedFitReportId = JSON.parse(document.getElementById('report-data').textContent).report_id;
 localStorage.setItem(
-    `frame-compare:report-viewer:${{savedFitReportId}}:viewport`,
+    `frame-compare:report-viewer:${{savedFitReportId}}:viewport-v2`,
     JSON.stringify({{ fitMode: '{fit_mode}' }}),
 );
 document.addEventListener('DOMContentLoaded', () => {{
@@ -1200,6 +1324,8 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     slider_attributes = parser.mode_attributes["slider"]
     assert "active" not in (slider_attributes.get("class") or "").split()
     assert slider_attributes["aria-checked"] == "false"
+    if width == 1024:
+        _assert_inspector_clears_toolbar_during_image_retry(browser, tmp_path / "status-banner")
 
 
 @pytest.mark.integration
@@ -1289,6 +1415,7 @@ def _run_browser_input(
         [
             browser,
             "--headless=new",
+            "--test-type",
             "--disable-background-networking",
             "--disable-default-apps",
             "--disable-gpu",
@@ -1328,68 +1455,7 @@ def test_review_note_native_insertion_uses_unicode_scalar_limit(tmp_path: Path) 
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable")
     report_path = _generated_report(tmp_path)
-    script = r"""
-const assert = require('node:assert/strict');
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const [report, profile] = process.argv.slice(1);
-let socket;
-let nextId = 0;
-const pending = new Map();
-const pause = () => new Promise(resolve => setTimeout(resolve, 100));
-async function command(method, params = {}) {
-    const id = ++nextId;
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-            pending.delete(id);
-            reject(new Error(`CDP ${method} timed out`));
-        }, 5000);
-        pending.set(id, { resolve, reject, timer });
-        socket.send(JSON.stringify({ id, method, params }));
-    });
-}
-async function evaluate(expression) {
-    const result = await command('Runtime.evaluate', { expression, returnByValue: true });
-    assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
-    return result.result.value;
-}
-(async () => {
-    try {
-        let port;
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-            try {
-                port = (await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
-                break;
-            } catch { await pause(); }
-        }
-        assert.ok(port, 'Chrome did not expose a debugging port');
-        const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`, {
-            signal: AbortSignal.timeout(5000),
-        })).json();
-        const target = targets.find(target => target.type === 'page' && target.url === report);
-        assert.ok(target, 'generated report page is missing');
-        socket = new WebSocket(target.webSocketDebuggerUrl);
-        await new Promise((resolve, reject) => {
-            const timer = setTimeout(() => reject(new Error('CDP socket timed out')), 5000);
-            socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
-            socket.addEventListener('error', error => { clearTimeout(timer); reject(error); }, { once: true });
-        });
-        socket.addEventListener('message', event => {
-            const message = JSON.parse(event.data);
-            const request = pending.get(message.id);
-            if (!request) return;
-            pending.delete(message.id);
-            clearTimeout(request.timer);
-            if (message.error) request.reject(new Error(JSON.stringify(message.error)));
-            else request.resolve(message.result);
-        });
-        let initialized = false;
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-            initialized = await evaluate("typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)");
-            if (initialized) break;
-            await pause();
-        }
-        assert.ok(initialized, 'viewer did not initialize');
+    script = _viewer_input_script(r"""
         await evaluate(`(() => {
             ReportViewer.inspector.setOpen(true, { save: false });
             ReportViewer.inspector.setTab('review', { save: false });
@@ -1421,12 +1487,15 @@ async function evaluate(expression) {
             assert.equal(await evaluate('document.activeElement === note'), true);
         }
         assert.equal(await evaluate('trustedInputs'), 12);
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            if (!await evaluate('ReportViewer.reviewController.model.status().unsaved')) break;
+            await pause();
+        }
+        assert.equal(await evaluate('ReportViewer.reviewController.model.status().unsaved'), false);
+        assert.equal(await evaluate('JSON.parse(localStorage.getItem(ReportViewer.reviewController.model.storageKey)).reviews[0].note'), 'leftéright');
+        assert.match(await evaluate("document.querySelector('[data-review-status]').textContent"), /saved in this browser/);
         console.log('Native BMP, supplementary, mixed, bounds, selection, focus and export passed');
-    } finally {
-        socket?.close();
-    }
-})().catch(error => { console.error(error); process.exitCode = 1; });
-"""
+""")
     result = _run_browser_input(browser, report_path, tmp_path / "chrome-input-profile", script)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Native BMP, supplementary, mixed" in result.stdout
@@ -1492,3 +1561,814 @@ const profile = process.argv[2];
     assert len(processes) == 1
     assert processes[0].poll() is not None
     assert processes[0].wait(timeout=0) == processes[0].returncode
+
+
+@pytest.mark.integration
+def test_review_tabs_preserve_saved_notes_and_local_drafts(tmp_path: Path) -> None:
+    """Same-file tabs serialize writes and retain conflicts through the real editor."""
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path, frames=(10, 11))
+    script = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const [report, profile] = process.argv.slice(1);
+const pause = () => new Promise(resolve => setTimeout(resolve, 30));
+const sessions = [];
+async function connect(target, waitForViewer = true) {
+    const socket = new WebSocket(target.webSocketDebuggerUrl);
+    let nextId = 0;
+    const pending = new Map();
+    await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(Error('socket timeout')), 5000);
+        socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+        socket.addEventListener('error', error => { clearTimeout(timer); reject(error); }, { once: true });
+    });
+    socket.addEventListener('message', event => {
+        const message = JSON.parse(event.data);
+        const request = pending.get(message.id);
+        if (!request) return;
+        pending.delete(message.id);
+        clearTimeout(request.timer);
+        if (message.error) request.reject(Error(JSON.stringify(message.error)));
+        else request.resolve(message.result);
+    });
+    const command = (method, params = {}) => new Promise((resolve, reject) => {
+        const id = ++nextId;
+        const timer = setTimeout(() => { pending.delete(id); reject(Error(method + ' timeout: ' + (params.expression || ''))); }, 5000);
+        pending.set(id, { resolve, reject, timer });
+        socket.send(JSON.stringify({ id, method, params }));
+    });
+    const evaluate = async expression => {
+        const result = await command('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
+        assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
+        return result.result.value;
+    };
+    const session = { command, evaluate, close: () => socket.close() };
+    sessions.push(session);
+    if (waitForViewer) await until(session, "typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)");
+    return session;
+}
+async function until(session, expression) {
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+        if (await session.evaluate(expression)) return;
+        await pause();
+    }
+    throw Error('Timed out: ' + expression + ' state: ' + await session.evaluate('JSON.stringify({status: globalThis.model?.status(), records: globalThis.model?.all(), stored: globalThis.model && localStorage.getItem(model.storageKey)})'));
+}
+const initialize = `
+    ReportViewer.inspector.setOpen(true, { save: false });
+    ReportViewer.inspector.setTab('review', { save: false });
+    globalThis.model = ReportViewer.reviewController.model;
+    globalThis.note = document.querySelector('[data-review-note]');
+    globalThis.trustedInputs = 0;
+    note.addEventListener('input', event => { if (event.isTrusted) trustedInputs += 1; });
+`;
+const stored = 'JSON.parse(localStorage.getItem(model.storageKey))?.reviews || []';
+async function edit(session, frame, text) {
+    await session.evaluate(`ReportViewer.setFrame(${frame}); note.focus(); note.select();`);
+    await session.command('Input.insertText', { text });
+    assert.equal(await session.evaluate('document.activeElement === note'), true);
+    assert.equal(await session.evaluate('note.value'), text);
+}
+(async () => {
+    try {
+        let port;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            try {
+                port = (await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
+                break;
+            } catch { await pause(); }
+        }
+        assert.ok(port, 'Chrome did not expose a debugging port');
+        const request = async (uri, method = 'GET') => (await fetch(`http://127.0.0.1:${port}${uri}`, {
+            method, signal: AbortSignal.timeout(5000),
+        })).json();
+        const open = async (withoutLocks = false) => {
+            const session = await connect(await request('/json/new?' + encodeURIComponent(withoutLocks ? 'about:blank' : report), 'PUT'), !withoutLocks);
+            if (withoutLocks) {
+                await session.command('Page.enable');
+                await session.command('Page.addScriptToEvaluateOnNewDocument', {
+                    source: "Object.defineProperty(navigator, 'locks', { value: undefined })",
+                });
+                await session.command('Page.navigate', { url: report });
+                await until(session, "typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)");
+            }
+            await session.evaluate(initialize);
+            return session;
+        };
+        const a = await open();
+        const b = await open();
+        assert.equal(await a.evaluate("typeof navigator.locks.request"), 'function');
+        await edit(a, 0, 'Saved A 😀');
+        await until(a, '!model.status().unsaved');
+        await edit(b, 1, 'Draft B é');
+        await until(b, 'model.status().warning.includes("another tab")');
+        assert.deepEqual((await b.evaluate(stored)).map(row => row.note), ['Saved A 😀']);
+        assert.equal(await b.evaluate('model.get(1).note'), 'Draft B é');
+        assert.match(await b.evaluate("document.querySelector('[data-review-status]').textContent"), /another tab/);
+        await edit(b, 0, 'Same-frame draft');
+        assert.deepEqual((await b.evaluate(stored)).map(row => row.note), ['Saved A 😀']);
+        assert.equal(await b.evaluate('JSON.parse(model.exportText()).reviews[0].note'), 'Same-frame draft');
+        const fresh = await open();
+        assert.equal(await fresh.evaluate('model.get(0).note'), 'Saved A 😀');
+        assert.equal(await fresh.evaluate('model.get(1).note'), '');
+
+        // External deletion invalidates both Merge and Replace previews, including Apply.
+        for (const mode of ['merge', 'replace']) {
+            const importer = await open();
+            const deleter = await open();
+            await importer.evaluate(`(() => {
+                const incoming = JSON.parse(model.exportText());
+                incoming.reviews = [{ frame_ordinal: 1, bookmark: true, tag: null, note: 'imported', preferred_clip_id: null }];
+                const transfer = new DataTransfer();
+                transfer.items.add(new File([JSON.stringify(incoming)], 'review.json', { type: 'application/json' }));
+                const input = document.querySelector('[data-review-import]');
+                input.files = transfer.files;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+            await until(importer, "!document.querySelector('[data-review-preview]').hidden");
+            await importer.evaluate(`document.querySelector('input[name="review-import-mode"][value="${mode}"]').click()`);
+            await edit(deleter, 0, '');
+            await until(deleter, '!model.status().unsaved');
+            await until(importer, 'model.status().warning.includes("another tab")');
+            await importer.evaluate("document.querySelector('[data-review-import-apply]').click()");
+            assert.deepEqual(await importer.evaluate(stored), []);
+            assert.equal(await importer.evaluate('model.get(0).note'), 'Saved A 😀');
+            await edit(importer, 1, 'Draft after deletion');
+            assert.deepEqual(await importer.evaluate(stored), []);
+            // Restore through a fresh snapshot for the next independent import mode.
+            const restore = await open();
+            await edit(restore, 0, 'Saved A 😀');
+            await until(restore, '!model.status().unsaved');
+        }
+
+        // Hold the actual browser lock, then enqueue writes from both tabs.
+        const owner = await open();
+        await owner.evaluate('localStorage.removeItem(model.storageKey)');
+        const left = await open();
+        const right = await open();
+        const hold = async () => {
+            await owner.evaluate(`globalThis.lockHeld = false;
+                globalThis.holding = navigator.locks.request(model.storageKey, () => new Promise(resolve => {
+                    globalThis.releaseLock = resolve; globalThis.lockHeld = true;
+                })); void 0;`);
+            await until(owner, 'lockHeld');
+        };
+        await hold();
+        await edit(left, 0, 'first queued');
+        await edit(left, 0, 'latest queued 😀');
+        await edit(right, 1, 'simultaneous draft');
+        assert.equal(await left.evaluate('model.status().unsaved'), true);
+        assert.equal(await right.evaluate('model.status().unsaved'), true);
+        assert.deepEqual(await left.evaluate(stored), []);
+        await owner.evaluate('releaseLock(); void 0;');
+        for (const session of [left, right]) {
+            await until(session, '!model.status().unsaved || model.status().warning.includes("another tab")');
+        }
+        const saved = await left.evaluate(stored);
+        assert.equal(saved.length, 1);
+        assert.ok(['latest queued 😀', 'simultaneous draft'].includes(saved[0].note));
+        assert.equal(await left.evaluate('model.status().unsaved'), saved[0].note !== 'latest queued 😀');
+        assert.equal(await right.evaluate('model.status().unsaved'), saved[0].note !== 'simultaneous draft');
+        assert.equal(await right.evaluate('model.get(1).note'), 'simultaneous draft');
+        assert.equal(await left.evaluate('note.selectionStart === note.value.length && document.activeElement === note'), true);
+
+        console.log('Cross-tab conflicts, deletes, stale imports and queued writes passed');
+        const memory = await open(true);
+        assert.equal(await memory.evaluate('typeof navigator.locks'), 'undefined');
+        const durable = await memory.evaluate('localStorage.getItem(model.storageKey)');
+        await edit(memory, 1, 'exportable without locks');
+        assert.equal(await memory.evaluate('model.status().memoryOnly'), true);
+        assert.match(await memory.evaluate("document.querySelector('[data-review-status]').textContent"), /only for this session/);
+        assert.equal(await memory.evaluate('localStorage.getItem(model.storageKey)'), durable);
+        assert.equal(await memory.evaluate('JSON.parse(model.exportText()).reviews.find(row => row.frame_ordinal === 1).note'), 'exportable without locks');
+        assert.equal(await left.evaluate('trustedInputs'), 2);
+        assert.equal(await right.evaluate('trustedInputs'), 1);
+        console.log('Real two-tab conflicts, deletions, stale Merge/Replace Apply, queued writes, drafts and missing-lock export passed');
+    } finally {
+        for (const session of sessions) session.close();
+    }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    result = _run_browser_input(browser, report_path, tmp_path / "chrome-tabs-profile", script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Real two-tab conflicts" in result.stdout
+
+
+def _viewer_input_script(actions: str) -> str:
+    """Use the trusted-input CDP driver for loaded-viewer assertions."""
+    return (
+        r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const [report, profile] = process.argv.slice(1);
+let socket;
+let nextId = 0;
+const pending = new Map();
+const pause = () => new Promise(resolve => setTimeout(resolve, 100));
+async function command(method, params = {}) {
+    const id = ++nextId;
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            pending.delete(id);
+            reject(new Error(`CDP ${method} timed out`));
+        }, 5000);
+        pending.set(id, { resolve, reject, timer });
+        socket.send(JSON.stringify({ id, method, params }));
+    });
+}
+async function evaluate(expression) {
+    const result = await command('Runtime.evaluate', { expression, returnByValue: true });
+    assert.equal(result.exceptionDetails, undefined, JSON.stringify(result.exceptionDetails));
+    return result.result.value;
+}
+(async () => {
+    try {
+        let port;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+            try {
+                port = (await fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0];
+                break;
+            } catch { await pause(); }
+        }
+        assert.ok(port, 'Chrome did not expose a debugging port');
+        const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`, {
+            signal: AbortSignal.timeout(5000),
+        })).json();
+        const target = targets.find(target => target.type === 'page' && target.url === report);
+        assert.ok(target, 'generated report page is missing');
+        socket = new WebSocket(target.webSocketDebuggerUrl);
+        await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('CDP socket timed out')), 5000);
+            socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+            socket.addEventListener('error', error => { clearTimeout(timer); reject(error); }, { once: true });
+        });
+        socket.addEventListener('message', event => {
+            const message = JSON.parse(event.data);
+            const request = pending.get(message.id);
+            if (!request) return;
+            pending.delete(message.id);
+            clearTimeout(request.timer);
+            if (message.error) request.reject(new Error(JSON.stringify(message.error)));
+            else request.resolve(message.result);
+        });
+        async function waitFor(expression, message) {
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+                if (await evaluate(expression)) return;
+                await pause();
+            }
+            assert.fail(message);
+        }
+        await waitFor(
+            "typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.inspector)",
+            'viewer did not initialize',
+        );
+
+"""
+        + actions
+        + r"""
+    } finally {
+        socket?.close();
+    }
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
+def _assert_inspector_clears_toolbar_during_image_retry(browser: str, tmp_path: Path) -> None:
+    report_path = _generated_report(tmp_path, frames=(10, 12), encoded_image_paths=True)
+    missing_image = next(tmp_path.glob("screenshots*/encode 12*.png"))
+    missing_image.rename(missing_image.with_suffix(".held"))
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1024, height: 768, deviceScaleFactor: 1, mobile: false,
+        });
+        await evaluate(`(() => {
+            document.querySelector('[data-mode="slider"]').click();
+            document.getElementById('rv-inspector').style.transition = 'none';
+            document.getElementById('btn-inspector').click();
+        })()`);
+        const toolbarBottom = "document.querySelector('.rv-controls').getBoundingClientRect().bottom";
+        const toolbarReachable = `(() => {
+            const drawer = document.getElementById('rv-inspector');
+            return Math.abs(drawer.getBoundingClientRect().top - ${toolbarBottom}) <= 0.5
+                && ['left-select', 'btn-swap-clips', 'right-select', 'alignment-status'].every(id => {
+                    const control = document.getElementById(id);
+                    const { x, y, width, height } = control.getBoundingClientRect();
+                    return control.contains(document.elementFromPoint(x + width / 2, y + height / 2));
+                });
+        })()`;
+        await waitFor(toolbarReachable, 'open Inspector obscures the toolbar before image failure');
+        const before = await evaluate(toolbarBottom);
+        await evaluate("document.getElementById('btn-next').click()");
+        await waitFor(
+            "!document.getElementById('viewer-status').hidden && ReportViewer.dom.rightLayer.dataset.status === 'error'",
+            'missing screenshot did not show the status banner',
+        );
+        assert.ok(await evaluate(toolbarBottom) > before, 'status banner did not move the toolbar');
+        await waitFor(toolbarReachable, 'open Inspector obscures the toolbar after image failure');
+        await fs.rename(HELD_IMAGE, MISSING_IMAGE);
+        await evaluate("document.querySelector('[data-empty-state] button').click()");
+        await waitFor(
+            "document.getElementById('viewer-status').hidden && ReportViewer.dom.rightLayer.dataset.status === 'ready'",
+            'retry did not load the restored screenshot and clear the status banner',
+        );
+        assert.equal(await evaluate(toolbarBottom), before);
+        await waitFor(toolbarReachable, 'open Inspector obscures the toolbar after image recovery');
+""".replace("HELD_IMAGE", json.dumps(str(missing_image.with_suffix(".held")))).replace(
+            "MISSING_IMAGE", json.dumps(str(missing_image))
+        )
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-status-banner", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("source_width", "window_width"), [(1920, 1024), (3840, 640)])
+def test_report_actual_pixels_fit_and_diff_lens_share_coordinates(
+    tmp_path: Path, source_width: int, window_width: int
+) -> None:
+    from PIL import Image, ImageDraw
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    for name, width in [("reference", source_width), ("encode", source_width // 2)]:
+        image = Image.new("RGB", (width, width * 9 // 16), "black")
+        ImageDraw.Draw(image).rectangle((int(width * 0.5125), 0, width, image.height), fill="white")
+        image.save(tmp_path / "screenshots" / name / "10.png")
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: WINDOW_WIDTH, height: 768, deviceScaleFactor: 1, mobile: false,
+        });
+        async function until(expression, message) {
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+                if (await evaluate(expression)) return;
+                await pause();
+            }
+            assert.fail(message);
+        }
+        await until(`(() => {
+            const viewer = ReportViewer;
+            const frame = viewer.currentFrame();
+            const leftSource = new URL(frame.images[viewer.state.leftClipIdx].src, document.baseURI).href;
+            const rightSource = new URL(frame.images[viewer.state.rightClipIdx].src, document.baseURI).href;
+            const loaded = (image, source, width) => image.complete
+                && image.currentSrc === source && image.naturalWidth === width && image.naturalHeight > 0;
+            return loaded(viewer.dom.leftImg, leftSource, SOURCE_WIDTH)
+                && loaded(viewer.dom.sizerImg, leftSource, SOURCE_WIDTH)
+                && loaded(viewer.dom.rightImg, rightSource, SOURCE_WIDTH / 2);
+        })()`, 'main and sizing images did not load their current sources');
+        const proof = await evaluate(`(() => {
+            const viewer = ReportViewer;
+            viewer.viewport.setFitMode('actual');
+            const actualWidth = viewer.dom.leftImg.getBoundingClientRect().width;
+            viewer.viewport.setFitMode('width');
+            const fitZoom = viewer.state.zoom;
+            const fitWidth = viewer.dom.leftImg.getBoundingClientRect().width;
+            viewer.viewport.zoomAtPoint(320, 300, 1.1);
+            const zoomed = viewer.state.zoom;
+            viewer.viewport.setFitMode('actual');
+            viewer.lens.setEnabled(true);
+            return {actualWidth, fitZoom, fitWidth, zoomed, stageWidth: viewer.dom.stage.clientWidth};
+        })()`);
+        proof.cases = [];
+        for (const offset of [0, 1]) {
+            await evaluate(`ReportViewer.viewport.setManualAlignment(${offset}, 0); ReportViewer.lens.refresh()`);
+            await until(`(() => {
+                const loaded = (slot, source) => {
+                    const image = document.querySelector('[data-lens-image="' + slot + '"]');
+                    const rect = image.getBoundingClientRect();
+                    return !image.hidden && image.complete && image.currentSrc === source
+                        && image.naturalWidth > 0 && image.naturalHeight > 0
+                        && rect.width > 0 && rect.height > 0;
+                };
+                return loaded('active', ReportViewer.dom.leftImg.currentSrc)
+                    && loaded('difference', ReportViewer.dom.rightImg.currentSrc);
+            })()`, 'Diff Lens clones did not become visible for their current sources');
+            proof.cases.push(await evaluate(`(() => {
+                const left = ReportViewer.dom.leftImg.getBoundingClientRect();
+                const right = ReportViewer.dom.rightImg.getBoundingClientRect();
+                const active = document.querySelector('[data-lens-image="active"]').getBoundingClientRect();
+                const difference = document.querySelector('[data-lens-image="difference"]').getBoundingClientRect();
+                return {
+                    offset: ${offset},
+                    mainSeparation: right.left + right.width * 0.5125 - left.left - left.width * 0.5125,
+                    lensSeparation: difference.left + difference.width * 0.5125 - active.left - active.width * 0.5125,
+                    lensWidth: active.width,
+                };
+            })()`));
+        }
+        console.log(JSON.stringify(proof));
+""".replace("WINDOW_WIDTH", str(window_width)).replace("SOURCE_WIDTH", str(source_width))
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-coordinates", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    proof = json.loads(completed.stdout)
+    for case in proof["cases"]:
+        assert case["mainSeparation"] == pytest.approx(case["offset"], abs=0.1), case
+        assert case["lensSeparation"] == pytest.approx(case["offset"] * 4, abs=0.1), case
+        assert case["lensWidth"] == source_width * 4, case
+    assert proof["actualWidth"] == source_width, proof
+    assert proof["fitWidth"] == pytest.approx(proof["stageWidth"], abs=1), proof
+    if source_width == 3840:
+        assert proof["fitZoom"] < 0.25, proof
+    assert proof["zoomed"] > proof["fitZoom"], proof
+
+
+@pytest.mark.integration
+def test_grid_to_single_preserves_pan_for_destination_image_size(tmp_path: Path) -> None:
+    from PIL import Image
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    for name, size in [("reference", (1920, 1080)), ("encode", (1080, 1920))]:
+        Image.new("RGB", size).save(tmp_path / "screenshots" / name / "10.png")
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1280, height: 768, deviceScaleFactor: 1, mobile: false,
+        });
+        await evaluate('document.querySelector(\'[data-mode="overlay"]\').click()');
+        await waitFor(
+            'ReportViewer.dom.sizerImg.complete && ReportViewer.dom.sizerImg.naturalWidth === 1920',
+            'reference Single image did not load',
+        );
+        await evaluate('document.querySelector(\'[data-mode="grid"]\').click()');
+        await waitFor(
+            `document.querySelector('.rv-grid-image[data-clip-index="1"]')?.naturalHeight === 1920`,
+            'portrait Grid image did not load',
+        );
+        const reportFile = require('node:url').fileURLToPath(report);
+        const portrait = path.join(path.dirname(reportFile), 'screenshots', 'encode', '10.png');
+        const body = (await fs.readFile(portrait)).toString('base64');
+        const destination = 'https://frame-compare-fixture.invalid/portrait.png';
+        const held = [];
+        let phase = 'hold';
+        const respond = requestId => phase === 'fail'
+            ? command('Fetch.failRequest', { requestId, errorReason: 'Failed' })
+            : command('Fetch.fulfillRequest', {
+                requestId, responseCode: 200,
+                responseHeaders: [{ name: 'Content-Type', value: 'image/png' }], body,
+            });
+        socket.addEventListener('message', event => {
+            const { method, params } = JSON.parse(event.data);
+            if (method !== 'Fetch.requestPaused') return;
+            if (phase === 'hold') held.push(params.requestId);
+            else void respond(params.requestId);
+        });
+        await command('Fetch.enable', { patterns: [{ urlPattern: destination }] });
+        const savedViewport = async () => evaluate(`(() => {
+            const { mode, panX, panY, overlaysHidden } = JSON.parse(
+                localStorage.getItem(ReportViewer.state.storageKey),
+            );
+            return { mode, panX, panY, overlaysHidden };
+        })()`);
+        await evaluate(`(() => {
+            document.querySelector('.rv-grid-cell[data-clip-index="1"]').focus();
+            ReportViewer.viewport.setZoom(4);
+            ReportViewer.viewport.setPan(0.2, 0.1);
+            // Use a fresh URL so the browser cannot reuse the already loaded Grid image.
+            ReportViewer.currentFrame().images[1].src = ${JSON.stringify(destination)};
+            document.querySelector('[data-mode="overlay"]').click();
+        })()`);
+        for (let attempt = 0; !held.length && attempt < 100; attempt += 1) await pause();
+        assert.ok(held.length, 'destination image request was not intercepted');
+        assert.equal(await evaluate('ReportViewer.state.mode'), 'overlay');
+        assert.equal(await evaluate('ReportViewer.dom.sizerImg.complete'), false);
+        assert.equal((await savedViewport()).overlaysHidden, false);
+
+        phase = 'fail';
+        await Promise.all(held.map(respond));
+        await waitFor(
+            "ReportViewer.dom.leftLayer.dataset.status === 'error' && ReportViewer.dom.sizerImg.complete",
+            'failed destination did not expose the retry state',
+        );
+        await evaluate("document.getElementById('btn-overlays').click()");
+        assert.equal(
+            (await savedViewport()).overlaysHidden, true,
+            'source label preference was not saved while the destination was unavailable',
+        );
+
+        // Keep the same destination unavailable in the reloaded report.
+        const html = await fs.readFile(reportFile, 'utf8');
+        assert.ok(html.includes('screenshots/encode/10.png'));
+        await fs.writeFile(reportFile, html.replace('screenshots/encode/10.png', destination));
+        await evaluate('globalThis.beforeReload = true');
+        await command('Page.reload', { ignoreCache: true });
+        await waitFor(
+            "!globalThis.beforeReload && typeof ReportViewer !== 'undefined' && Boolean(ReportViewer.gridView)",
+            'viewer did not initialize after reload',
+        );
+        assert.equal(await evaluate(
+            "document.querySelector('[data-mode=overlay]').getAttribute('aria-checked')"
+        ), 'true', 'reload did not restore the selected Single mode');
+        await waitFor(
+            "ReportViewer.dom.leftLayer.dataset.status === 'error' && ReportViewer.dom.sizerImg.complete",
+            'reloaded destination did not expose the retry state',
+        );
+        assert.deepEqual(await savedViewport(), {
+            mode: 'overlay', panX: 0, panY: 0, overlaysHidden: true,
+        });
+
+        phase = 'recover';
+        await evaluate(`(() => {
+            ReportViewer.dom.sizerImg.addEventListener('load', () => {
+                globalThis.retrySizerLoaded = true;
+            }, { once: true });
+            document.querySelector('[data-empty-state] button').click();
+        })()`);
+        await waitFor(
+            `globalThis.retrySizerLoaded && ReportViewer.dom.sizerImg.naturalWidth === 1080
+                && ReportViewer.dom.leftLayer.dataset.status === 'ready'`,
+            'portrait Single image did not load on retry',
+        );
+        assert.deepEqual(await savedViewport(), {
+            mode: 'overlay', panX: 216, panY: 192, overlaysHidden: true,
+        });
+        const pan = await evaluate(`(() => {
+            const { canvas } = ReportViewer.dom;
+            const style = getComputedStyle(canvas);
+            return {
+                x: parseFloat(style.getPropertyValue('--pan-x')),
+                y: parseFloat(style.getPropertyValue('--pan-y')),
+            };
+        })()`);
+        console.log(JSON.stringify(pan));
+"""
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-grid-to-single", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert json.loads(completed.stdout) == pytest.approx({"x": 216, "y": 192})
+
+
+@pytest.mark.integration
+def test_report_restores_custom_zoom_and_pan_after_reload(tmp_path: Path) -> None:
+    from PIL import Image
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    for name in ("reference", "encode"):
+        Image.new("RGB", (960, 540)).save(tmp_path / "screenshots" / name / "10.png")
+    script = _viewer_input_script(
+        r"""
+        const ready = `typeof ReportViewer !== 'undefined' && ReportViewer.dom?.leftImg?.naturalWidth === 960
+            && ReportViewer.dom.rightImg.naturalWidth === 960 && ReportViewer.dom.sizerImg.naturalWidth === 960`;
+        await waitFor(ready, 'report images did not load');
+        await evaluate(`(() => {
+            const range = ReportViewer.dom.zoomRange;
+            range.value = '2';
+            range.dispatchEvent(new Event('input'));
+            ReportViewer.viewport.setPan(-173, -125);
+        })()`);
+        await command('Page.reload');
+        await waitFor(ready, 'report images did not load after reloading');
+        const restored = await evaluate(`(() => {
+            const {dom, state} = ReportViewer;
+            const stage = dom.stage.getBoundingClientRect();
+            const image = dom.leftImg.getBoundingClientRect();
+            return {
+                fitMode: state.fitMode,
+                width: image.width,
+                range: dom.zoomRange.value,
+                readout: dom.zoomVal.textContent,
+                panX: image.left + image.width / 2 - stage.left - stage.width / 2,
+                panY: image.top + image.height / 2 - stage.top - stage.height / 2,
+            };
+        })()`);
+        assert.deepEqual(restored, {
+            fitMode: 'custom', width: 1920, range: '2', readout: '200%', panX: -173, panY: -125,
+        });
+"""
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-reload", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.integration
+def test_report_can_pan_to_bottom_of_taller_right_image_at_actual_size(tmp_path: Path) -> None:
+    from PIL import Image
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    left = Image.new("RGB", (1920, 800))
+    right = Image.new("RGB", (1920, 1080))
+    left.save(tmp_path / "screenshots/reference/10.png")
+    right.save(tmp_path / "screenshots/encode/10.png")
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1024, height: 768, deviceScaleFactor: 2, mobile: false,
+        });
+        await waitFor(`ReportViewer.dom.leftImg.naturalHeight === 800
+            && ReportViewer.dom.sizerImg.naturalHeight === 800
+            && ReportViewer.dom.rightImg.naturalHeight === 1080`, 'unequal images did not load');
+        const geometry = await evaluate(`(() => {
+            const {dom, viewport} = ReportViewer;
+            viewport.setFitMode('actual');
+            viewport.setManualAlignment(0, 45);
+            viewport.setPan(0, -10000);
+            const stage = dom.stage.getBoundingClientRect();
+            const left = dom.leftImg.getBoundingClientRect();
+            const right = dom.rightImg.getBoundingClientRect();
+            viewport.setManualAlignment(0, 0);
+            const resetBottom = dom.rightImg.getBoundingClientRect().bottom;
+            return {
+                width: left.width, height: right.height, stageBottom: stage.bottom,
+                rightBottom: right.bottom, resetBottom,
+            };
+        })()`);
+        assert.equal(geometry.width, 1920, 'actual size uses the base CSS width');
+        assert.equal(geometry.height, 1080);
+        assert.ok(Math.abs(geometry.rightBottom - geometry.stageBottom) < 1, JSON.stringify(geometry));
+        assert.ok(Math.abs(geometry.resetBottom - geometry.stageBottom) < 1, JSON.stringify(geometry));
+"""
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-pan", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.integration
+def test_report_fit_recalculates_for_filmstrip_and_inspector(tmp_path: Path) -> None:
+    from PIL import Image
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    for name in ("reference", "encode"):
+        Image.new("RGB", (960, 540)).save(tmp_path / "screenshots" / name / "10.png")
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1280, height: 768, deviceScaleFactor: 1, mobile: false,
+        });
+        await waitFor(`ReportViewer.dom.leftImg.naturalWidth === 960
+            && ReportViewer.dom.sizerImg.naturalWidth === 960`, 'base images did not load');
+        const height = await evaluate(`(() => {
+            document.querySelector('[data-fit="height"]').click();
+            const height = ReportViewer.dom.stage.getBoundingClientRect().height;
+            document.getElementById('btn-filmstrip-toggle').click();
+            return height;
+        })()`);
+        await waitFor(`(() => {
+            const {stage, leftImg} = ReportViewer.dom;
+            const height = stage.getBoundingClientRect().height;
+            return height > ${height} && Math.abs(leftImg.getBoundingClientRect().height - height) < 1;
+        })()`, 'fit height did not follow the stage after collapsing the filmstrip');
+        const width = await evaluate(`(() => {
+            ReportViewer.viewport.setFitMode('width');
+            const width = ReportViewer.dom.stage.getBoundingClientRect().width;
+            document.getElementById('btn-inspector').click();
+            return width;
+        })()`);
+        await waitFor(`(() => {
+            const {stage, leftImg} = ReportViewer.dom;
+            const width = stage.getBoundingClientRect().width;
+            return width < ${width} - 10 && Math.abs(leftImg.getBoundingClientRect().width - width) < 1;
+        })()`, 'fit width did not follow the stage after opening the Inspector');
+"""
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-stage-size", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("long_caption", [False, True], ids=["short", "long"])
+def test_report_lens_keeps_diff_caption_inside_short_stage(
+    tmp_path: Path, long_caption: bool
+) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(
+        tmp_path,
+        comparison_micro="ATV " + "Long source name " * 40 if long_caption else "ATV HDR10",
+    )
+    script = _viewer_input_script(
+        r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1024, height: 440, deviceScaleFactor: 1, mobile: false,
+        });
+        await waitFor(`ReportViewer.dom.leftImg.naturalWidth > 0
+            && ReportViewer.dom.rightImg.naturalWidth > 0`, 'Diff images did not load');
+        const bounds = await evaluate(`(() => {
+            document.getElementById('btn-lens').click();
+            document.querySelector('[data-lens-size="large"]').click();
+            document.querySelector('[data-lens-caption="on"]').click();
+            const lens = document.getElementById('rv-lens');
+            const caption = lens.querySelector('[data-lens-caption-row]');
+            const second = lens.querySelector('[data-lens-identity="second"]');
+            const stage = ReportViewer.dom.stage.getBoundingClientRect();
+            return {
+                stageBottom: stage.bottom,
+                stageHeight: stage.height,
+                lensBottom: lens.getBoundingClientRect().bottom,
+                imageHeight: lens.querySelector('.rv-lens-view').getBoundingClientRect().height,
+                captionBottom: second.getBoundingClientRect().bottom,
+                caption: second.textContent,
+                scrollable: caption.scrollHeight > caption.clientHeight,
+                tabIndex: caption.tabIndex,
+                rightIndex: ReportViewer.state.rightClipIdx,
+            };
+        })()`);
+        assert.match(bounds.caption, /ATV/, 'second Diff source caption is present');
+        assert.ok(bounds.imageHeight >= bounds.stageHeight / 2, 'the magnified image remains usable');
+        assert.ok(bounds.lensBottom <= bounds.stageBottom - 7, 'the Lens fits inside the stage');
+        if (LONG_CAPTION) {
+            assert.equal(bounds.scrollable, true);
+            assert.equal(bounds.tabIndex, 0);
+            assert.equal(await evaluate(`(() => {
+                const caption = document.querySelector('[data-lens-caption-row]');
+                caption.focus();
+                return document.activeElement === caption;
+            })()`), true);
+            await command('Input.dispatchKeyEvent', {type: 'rawKeyDown', key: 'ArrowDown',
+                code: 'ArrowDown', windowsVirtualKeyCode: 40});
+            await command('Input.dispatchKeyEvent', {type: 'keyUp', key: 'ArrowDown',
+                code: 'ArrowDown', windowsVirtualKeyCode: 40});
+            await waitFor(`document.querySelector('[data-lens-caption-row]').scrollTop > 0`,
+                'focused caption did not scroll with ArrowDown');
+            assert.equal(await evaluate('ReportViewer.state.rightClipIdx'), bounds.rightIndex);
+        } else {
+            assert.equal(bounds.scrollable, false);
+            assert.ok(bounds.captionBottom <= bounds.stageBottom, 'the last caption line fits');
+        }
+""".replace("LONG_CAPTION", json.dumps(long_caption))
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-lens-caption", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.integration
+def test_fullscreen_help_and_inspector_are_reachable_with_trusted_input(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    script = _viewer_input_script(r"""
+        async function click(selector) {
+            const point = await evaluate(`(() => {
+                const rect = document.querySelector('${selector}').getBoundingClientRect();
+                return {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+            })()`);
+            await command('Input.dispatchMouseEvent', {type: 'mousePressed', button: 'left', clickCount: 1, ...point});
+            await command('Input.dispatchMouseEvent', {type: 'mouseReleased', button: 'left', clickCount: 1, ...point});
+        }
+        async function key(key, code, text = '') {
+            await command('Input.dispatchKeyEvent', {type: 'keyDown', key, code, text});
+            await command('Input.dispatchKeyEvent', {type: 'keyUp', key, code});
+            await pause();
+        }
+        async function until(expression) {
+            for (let attempt = 0; attempt < 30; attempt += 1) {
+                if (await evaluate(expression)) return;
+                await pause();
+            }
+            assert.fail(expression);
+        }
+        const hit = selector => `(() => {
+            const element = document.querySelector('${selector}');
+            const rect = element.getBoundingClientRect();
+            return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === element;
+        })()`;
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 1366, height: 1000, deviceScaleFactor: 1, mobile: false,
+        });
+        await click('#btn-fullscreen');
+        await until('Boolean(document.fullscreenElement)');
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-header')).display"), 'none');
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-controls')).display"), 'none');
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-bottom-panel')).display"), 'none');
+        assert.equal(await evaluate('ReportViewer.dom.stage.getBoundingClientRect().height === innerHeight'), true);
+        await until('document.activeElement === ReportViewer.dom.stage');
+        await key('?', 'Slash', '?');
+        await until("ReportViewer.isHelpModalOpen()");
+        assert.equal(await evaluate(hit('#btn-close-help')), true, 'Help close button is behind fullscreen');
+        await click('#btn-close-help');
+        assert.equal(await evaluate('document.fullscreenElement.contains(document.activeElement)'), true);
+        assert.equal(await evaluate('document.activeElement === ReportViewer.dom.stage'), true);
+        await key('I', 'KeyI', 'I');
+        await until('ReportViewer.inspector.isVisible()');
+        await until(hit('#btn-inspector-close'));
+        await key('Escape', 'Escape');
+        await until('document.fullscreenElement === null');
+        assert.equal(await evaluate("document.querySelector('#btn-fullscreen').getAttribute('aria-pressed')"), 'false');
+        console.log('Fullscreen Help, Inspector, focus and Escape passed');
+""")
+    result = _run_browser_input(browser, report_path, tmp_path / "chrome-fullscreen", script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Fullscreen Help, Inspector, focus and Escape passed" in result.stdout

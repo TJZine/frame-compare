@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import re
+from math import inf
+from typing import TYPE_CHECKING
 
+from frame_compare.orchestration.active_rect import active_picture_provenance_from_rect_source
 from frame_compare.orchestration.context import ClipProbeSnapshot, ClipState, RunContext
 from frame_compare.orchestration.execution_types import RenderArtifacts, RenderPhaseOutput
 from frame_compare.orchestration.phase_selection import (
     map_aligned_to_source_frame,
-    selection_detail_for_frame,
-    selection_label_for_frame,
 )
-from frame_compare.orchestration.presentation import clip_role
+from frame_compare.orchestration.selection_rows import selection_rows
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
-from frame_compare.render.geometry import active_picture_provenance_from_rect_source
-from frame_compare.services.release_identity import format_micro_descriptor
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     HDRStaticFacts,
@@ -22,6 +21,10 @@ from frame_compare.utils.media_facts import (
 )
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.vs.props import range_label_from_props
+from frame_compare.vs.types import FallbackTonemap
+
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
 _MASTERING_LUMINANCE = re.compile(r"L\((\d+(?:\.\d+)?|\.\d+),(\d+(?:\.\d+)?|\.\d+)\)")
 
@@ -31,52 +34,41 @@ def run_render_phase(
     *,
     frames: list[int],
     runner: FFmpegRunner,
+    vs_loader: VSLoader | None = None,
 ) -> RenderPhaseOutput:
     from frame_compare.render.batch.orchestrator import render_screenshots_from_batch_detailed
-    from frame_compare.render.types import BatchRenderOptions, ScreenshotBatchRequest
+    from frame_compare.render.types import (
+        BatchRenderOptions,
+        ScreenshotBatchRequest,
+        SelectedScreenshot,
+    )
 
     clips = [ctx.reference, *ctx.comparisons]
     output_dir = ctx.workspace.screenshots_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-    reference_frames = [
-        map_aligned_to_source_frame(clip=ctx.reference, aligned_frame=frame) for frame in frames
-    ]
-    selection_labels = [
-        detail.label
-        if (
-            detail := selection_detail_for_frame(
-                source_frame,
-                ctx.selection_details_by_source_frame,
-            )
-        )
-        is not None
-        else selection_label_for_frame(source_frame, ctx.selection_breakdown)
-        for source_frame in reference_frames
-    ]
+    rows = selection_rows(ctx, frames=frames)
 
     requests: list[ScreenshotBatchRequest] = []
-    expected_frames: dict[str, list[int]] = {}
-    progress_labels = _render_progress_labels(clips)
-    for clip, progress_label in zip(clips, progress_labels, strict=True):
-        source_frames = [
-            map_aligned_to_source_frame(clip=clip, aligned_frame=frame) for frame in frames
-        ]
-        expected_frames[clip.label] = source_frames
+    for clip in clips:
         active_picture = _active_picture_facts(clip)
         requests.append(
             ScreenshotBatchRequest(
                 clip_path=clip.path,
                 label=clip.label,
                 filename_label=clip.path.stem,
-                source_frames=source_frames,
-                comparison_frames=frames,
-                selection_labels=selection_labels,
+                frames=tuple(
+                    SelectedScreenshot(
+                        row.frame,
+                        map_aligned_to_source_frame(clip=clip, aligned_frame=row.frame),
+                        row.label,
+                    )
+                    for row in rows
+                ),
                 size_bytes=clip.probe.fingerprint.size_bytes,
                 source_resolution=(clip.probe.width, clip.probe.height),
                 source_total_frames=clip.probe.num_frames,
                 signal=_source_signal_facts(clip.probe),
                 active_picture=active_picture,
-                progress_label=progress_label,
             )
         )
 
@@ -90,14 +82,13 @@ def run_render_phase(
             ffmpeg_runner=runner,
             reporter=ctx.reporter,
             parallelism=2,
+            vs_loader=vs_loader,
         ),
     )
-    for label, expected in expected_frames.items():
-        actual = [fact.source_frame for fact in rendered.frame_facts_by_label[label]]
-        if actual != expected:
-            raise ValueError(f"rendered frame facts do not match source mapping for {label!r}")
+    for clip in rendered:
+        label = clip.label
         missing_count = sum(
-            fact.picture_type is None for fact in rendered.frame_facts_by_label[label]
+            screenshot.result.facts.picture_type is None for screenshot in clip.screenshots
         )
         if missing_count:
             warnings.append(
@@ -109,17 +100,30 @@ def run_render_phase(
                 )
             )
 
-    screenshot_total = sum(len(paths) for paths in rendered.screenshots_by_label.values())
-    source_total = len(rendered.screenshots_by_label)
+    fallbacks = [
+        f"{clip.label} ({clip.clip_facts.tonemap.transform.cause.value})"
+        for clip in rendered
+        if clip.clip_facts.tonemap is not None
+        and isinstance(clip.clip_facts.tonemap.transform, FallbackTonemap)
+    ]
+    if fallbacks:
+        warnings.append(
+            RunWarning(
+                "render",
+                "warning",
+                "render: fallback tonemap (peak-scaled) applied to " + "; ".join(fallbacks),
+            )
+        )
+
+    screenshot_total = sum(len(clip.screenshots) for clip in rendered)
+    source_total = len(rendered)
     frame_total = screenshot_total // source_total if source_total else 0
     screenshots_unit = "screenshot" if screenshot_total == 1 else "screenshots"
     frames_unit = "frame" if frame_total == 1 else "frames"
     sources_unit = "source" if source_total == 1 else "sources"
     return RenderPhaseOutput(
         render=RenderArtifacts(
-            screenshots_by_label=rendered.screenshots_by_label,
-            frame_facts_by_label=rendered.frame_facts_by_label,
-            clip_facts_by_label=rendered.clip_facts_by_label,
+            clips=rendered,
             screenshot_dir=output_dir,
             warnings=warnings,
         ),
@@ -128,33 +132,6 @@ def run_render_phase(
             f"({frame_total} {frames_unit} × {source_total} {sources_unit})"
         ),
     )
-
-
-def _render_progress_label(clip: ClipState, index: int) -> str:
-    if clip.label_is_explicit:
-        return clip.label
-    role = clip_role(index)
-    descriptor = (
-        format_micro_descriptor(clip.release_identity, separator=" · ")
-        if clip.release_identity is not None
-        else ""
-    )
-    return f"{role} | {descriptor or clip.label}"
-
-
-def _render_progress_labels(clips: list[ClipState]) -> list[str]:
-    labels = [_render_progress_label(clip, index) for index, clip in enumerate(clips)]
-    used = {label for clip, label in zip(clips, labels, strict=True) if clip.label_is_explicit}
-    for index, clip in enumerate(clips):
-        if clip.label_is_explicit:
-            continue
-        base = labels[index]
-        suffix = 2
-        while labels[index] in used:
-            labels[index] = f"{base} ({suffix})"
-            suffix += 1
-        used.add(labels[index])
-    return labels
 
 
 def _source_signal_facts(probe: ClipProbeSnapshot) -> SourceSignalFacts:
@@ -182,18 +159,19 @@ def _source_signal_facts(probe: ClipProbeSnapshot) -> SourceSignalFacts:
     matrix = _observed_int(props.get("matrix"))
     if matrix is None and hdr is not None:
         matrix = _observed_int(hdr.matrix)
-    static = None
-    if hdr is not None:
+    mastering_min, mastering_max = _mastering_luminance_from_props(props)
+    if mastering_min is None and hdr is not None:
         mastering_min, mastering_max = _mastering_luminance(hdr.mastering_display)
-        if any(
-            value is not None for value in (mastering_min, mastering_max, hdr.max_cll, hdr.max_fall)
-        ):
-            static = HDRStaticFacts(
-                mastering_min_nits=mastering_min,
-                mastering_max_nits=mastering_max,
-                max_cll=hdr.max_cll,
-                max_fall=hdr.max_fall,
-            )
+    max_cll = hdr.max_cll if hdr is not None else None
+    max_fall = hdr.max_fall if hdr is not None else None
+    static = None
+    if any(value is not None for value in (mastering_min, mastering_max, max_cll, max_fall)):
+        static = HDRStaticFacts(
+            mastering_min_nits=mastering_min,
+            mastering_max_nits=mastering_max,
+            max_cll=max_cll,
+            max_fall=max_fall,
+        )
     return SourceSignalFacts(
         is_hdr=probe.is_hdr,
         primaries=primaries,
@@ -207,6 +185,29 @@ def _source_signal_facts(probe: ClipProbeSnapshot) -> SourceSignalFacts:
 
 def _observed_int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value != 2 else None
+
+
+def _mastering_luminance_from_props(
+    props: dict[str, str | int | float],
+) -> tuple[float | None, float | None]:
+    # The decoder exports luminance directly in cd/m² (nits).
+    minimum = props.get("masteringdisplayminluminance")
+    maximum = props.get("masteringdisplaymaxluminance")
+    if (
+        not isinstance(minimum, (int, float))
+        or isinstance(minimum, bool)
+        or not isinstance(maximum, (int, float))
+        or isinstance(maximum, bool)
+    ):
+        return None, None
+    try:
+        minimum_nits = float(minimum)
+        maximum_nits = float(maximum)
+    except OverflowError:
+        return None, None
+    if not 0 <= minimum_nits < maximum_nits < inf:
+        return None, None
+    return minimum_nits, maximum_nits
 
 
 def _mastering_luminance(value: str | None) -> tuple[float | None, float | None]:

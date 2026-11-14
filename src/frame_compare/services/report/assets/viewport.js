@@ -1,6 +1,6 @@
 const Viewport = {
     create(viewer) {
-        return { viewer, ...this.controller };
+        return { viewer, pendingGridPan: null, ...this.controller };
     },
 
     controller: {
@@ -147,8 +147,8 @@ const Viewport = {
         const pointer = this.viewer.pointerInteraction;
         pointer.isPanning = true;
         pointer.panMoved = false;
-        pointer.lastPanX = e.clientX;
-        pointer.lastPanY = e.clientY;
+        pointer.panStartX = pointer.lastPanX = e.clientX;
+        pointer.panStartY = pointer.lastPanY = e.clientY;
         pointer.panBasis = this.viewer.state.mode === 'grid'
             ? this.viewer.gridView.panBasisForPoint(e.clientX, e.clientY)
             : null;
@@ -163,7 +163,10 @@ const Viewport = {
 
         const dx = e.clientX - pointer.lastPanX;
         const dy = e.clientY - pointer.lastPanY;
-        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) pointer.panMoved = true;
+        if (Math.abs(e.clientX - pointer.panStartX) > 1
+            || Math.abs(e.clientY - pointer.panStartY) > 1) {
+            pointer.panMoved = true;
+        }
         pointer.lastPanX = e.clientX;
         pointer.lastPanY = e.clientY;
         this.panByPixels(dx, dy, e.clientX, e.clientY, {
@@ -248,7 +251,7 @@ const Viewport = {
     },
 
     clampZoom(level) {
-        return Math.max(0.25, Math.min(4.0, this.viewer.numberOrDefault(level, 1.0)));
+        return Math.max(0.05, Math.min(4.0, this.viewer.numberOrDefault(level, 1.0)));
     },
 
     applyZoom(level, options = {}) {
@@ -260,7 +263,7 @@ const Viewport = {
         this.viewer.dom.canvas.style.setProperty('--zoom-level', this.viewer.state.zoom);
         this.viewer.gridView?.syncViewport();
         if (options.clampPan !== false) this.clampPan();
-        this.viewer.lens?.refresh();
+        else this.viewer.lens?.refresh();
     },
 
     resetViewport() {
@@ -324,11 +327,26 @@ const Viewport = {
         );
     },
 
+    prepareModePan(mode) {
+        const { state } = this.viewer;
+        if (state.mode === mode) return;
+        if (mode === 'grid') {
+            const base = this.baseCanvasSize();
+            state.panX = this.pendingGridPan?.x ?? (base.width > 0 ? state.panX / base.width : 0);
+            state.panY = this.pendingGridPan?.y ?? (base.height > 0 ? state.panY / base.height : 0);
+            this.pendingGridPan = null;
+        } else if (state.mode === 'grid') {
+            this.pendingGridPan = { x: state.panX, y: state.panY };
+            state.panX = 0;
+            state.panY = 0;
+        }
+    },
+
     setPan(x, y, options = {}) {
+        this.pendingGridPan = null;
         this.viewer.state.panX = this.viewer.numberOrDefault(x, 0);
         this.viewer.state.panY = this.viewer.numberOrDefault(y, 0);
         this.clampPan();
-        this.applyPan();
         if (options.save !== false) this.viewer.persistViewerState();
     },
 
@@ -340,19 +358,64 @@ const Viewport = {
             this.applyPan();
             return;
         }
-        const stageRect = this.viewer.dom.stage.getBoundingClientRect();
+        const { state, dom } = this.viewer;
+        const stage = dom.stage.getBoundingClientRect();
         const base = this.baseCanvasSize();
-        if (stageRect.width <= 0 || stageRect.height <= 0 || base.width <= 0 || base.height <= 0) {
-            return;
-        }
+        const rightRequest = state.mainImageRequests?.right;
+        const single = state.mode === 'overlay';
+        // Keep the current pan while sizing or comparison geometry is still pending.
+        const awaitingRight = !single && rightRequest && (
+            rightRequest.status === 'loading' || rightRequest.token !== state.imageRequestToken
+        );
+        const leftRequest = state.mainImageRequests?.left;
+        const gridPan = this.pendingGridPan;
+        // Diff can defer committing the new pair. Ignore the previous sizer until
+        // the current request has installed its image and that image has loaded.
+        const awaitingGridDestination = gridPan && (
+            !leftRequest || leftRequest.token !== state.imageRequestToken
+            || dom.sizerImg.getAttribute('src') !== leftRequest.src
+        );
+        let convertedGridPan = false;
+        if (dom.sizerImg.complete !== false && !awaitingRight && !awaitingGridDestination
+            && stage.width > 0 && stage.height > 0 && base.width > 0 && base.height > 0) {
+            if (gridPan) {
+                state.panX = gridPan.x * base.width;
+                state.panY = gridPan.y * base.height;
+                this.pendingGridPan = null;
+                convertedGridPan = true;
+            }
+            const zoom = state.zoom;
+            const { alignX, alignY } = this.currentAlignment();
+            const rightX = alignX * zoom;
+            const rightY = alignY * zoom;
+            const width = base.width * zoom;
+            const height = base.height * zoom;
 
-        const scaledWidth = base.width * this.viewer.state.zoom;
-        const scaledHeight = base.height * this.viewer.state.zoom;
-        const maxPanX = Math.max(0, (scaledWidth - stageRect.width) / 2);
-        const maxPanY = Math.max(0, (scaledHeight - stageRect.height) / 2);
-        this.viewer.state.panX = Math.max(-maxPanX, Math.min(maxPanX, this.viewer.state.panX));
-        this.viewer.state.panY = Math.max(-maxPanY, Math.min(maxPanY, this.viewer.state.panY));
+            // Coordinates are relative to the unshifted base image's top-left.
+            const singleAligned = single && state.activeClipIdx === state.rightClipIdx;
+            let left = singleAligned ? rightX : 0;
+            let top = singleAligned ? rightY : 0;
+            let right = left + width;
+            let bottom = top + height;
+            const comparison = dom.rightImg;
+            if (!single && comparison?.naturalWidth > 0 && rightRequest?.status !== 'error') {
+                left = Math.min(left, rightX);
+                top = Math.min(top, rightY);
+                right = Math.max(right, rightX + width);
+                bottom = Math.max(bottom, rightY + width * comparison.naturalHeight / comparison.naturalWidth);
+            }
+
+            const clampAxis = (pan, start, end, baseSize, stageSize) => {
+                const origin = (stageSize - baseSize) / 2;
+                const minimum = Math.min(0, stageSize - origin - end);
+                const maximum = Math.max(0, -origin - start);
+                return Math.max(minimum, Math.min(maximum, pan));
+            };
+            state.panX = clampAxis(state.panX, left, right, width, stage.width);
+            state.panY = clampAxis(state.panY, top, bottom, height, stage.height);
+        }
         this.applyPan();
+        if (convertedGridPan) this.viewer.persistViewerState();
     },
 
     applyPan() {
@@ -369,6 +432,7 @@ const Viewport = {
         this.updateFitButtons();
 
         if (options.updateZoom === false) return;
+        this.pendingGridPan = null;
         this.applyFitMode({ resetPan: true });
         this.viewer.persistViewerState();
     },
@@ -383,11 +447,25 @@ const Viewport = {
     },
 
     baseCanvasSize() {
-        const rect = this.viewer.dom.sizerImg.getBoundingClientRect();
-        const zoom = this.viewer.state.zoom || 1.0;
+        const image = this.viewer.dom.sizerImg;
+        return { width: image.naturalWidth || 0, height: image.naturalHeight || 0 };
+    },
+
+    comparisonTransform(point) {
+        const base = this.baseCanvasSize();
+        const alignment = this.currentAlignment();
+        const right = this.viewer.dom.rightImg;
+        const scale = this.viewer.state.zoom;
         return {
-            width: rect.width / zoom,
-            height: rect.height / zoom
+            width: base.width * scale,
+            comparisonHeight: right.naturalWidth > 0
+                ? base.width * right.naturalHeight / right.naturalWidth * scale : 0,
+            height: base.height * scale,
+            scale,
+            originX: point.u * base.width * scale,
+            originY: point.v * base.height * scale,
+            offsetX: alignment.alignX * scale,
+            offsetY: alignment.alignY * scale,
         };
     },
 
@@ -397,7 +475,7 @@ const Viewport = {
 
     applyFitMode(options = {}) {
         if (this.viewer.state.fitMode === 'custom') {
-            this.clampPan();
+            this.applyZoom(this.viewer.state.zoom);
             return;
         }
 
@@ -418,7 +496,8 @@ const Viewport = {
 
         const stageRect = this.viewer.dom.stage.getBoundingClientRect();
         const base = this.baseCanvasSize();
-        if (stageRect.width <= 0 || stageRect.height <= 0 || base.width <= 0 || base.height <= 0) {
+        if (this.viewer.dom.sizerImg.complete === false
+            || stageRect.width <= 0 || stageRect.height <= 0 || base.width <= 0 || base.height <= 0) {
             return;
         }
 
@@ -433,14 +512,6 @@ const Viewport = {
         } else {
             this.clampPan();
         }
-    },
-
-    applyAlignmentPresetOffsets(preset) {
-        const offset = this.presetAlignmentOffsets(preset);
-        if (!offset) return;
-        this.clearRawAlignmentInputs();
-        this.viewer.state.alignX = offset[0];
-        this.viewer.state.alignY = offset[1];
     },
 
     validAlignmentPreset(preset) {
@@ -484,12 +555,9 @@ const Viewport = {
         return presets[preset] || null;
     },
 
-    currentAlignmentState() {
-        return {
-            alignmentPreset: this.viewer.state.alignmentPreset,
-            alignX: this.viewer.state.alignX,
-            alignY: this.viewer.state.alignY
-        };
+    currentAlignment() {
+        const saved = this.viewer.state.pairAlignments[this.currentPairAlignmentKey()];
+        return this.normalizedAlignmentState(saved) || this.neutralAlignmentState();
     },
 
     normalizedAlignmentState(value) {
@@ -523,43 +591,27 @@ const Viewport = {
         return pairAlignments;
     },
 
-    applyAlignmentState(alignment) {
-        const normalized = this.normalizedAlignmentState(alignment) || this.neutralAlignmentState();
-        this.clearRawAlignmentInputs();
-        this.viewer.state.alignmentPreset = normalized.alignmentPreset;
-        this.viewer.state.alignX = normalized.alignX;
-        this.viewer.state.alignY = normalized.alignY;
-    },
-
-    storeCurrentPairAlignment() {
+    writeCurrentAlignment(alignment, { clearDrafts = true } = {}) {
+        if (clearDrafts) this.clearRawAlignmentInputs();
         if (this.viewer.clipCount() <= 0) return;
         const key = this.currentPairAlignmentKey();
         if (!this.isValidPairAlignmentKey(key)) return;
-        this.viewer.state.pairAlignments[key] = this.currentAlignmentState();
-    },
-
-    loadCurrentPairAlignment() {
-        const saved = this.viewer.state.pairAlignments[this.currentPairAlignmentKey()];
-        this.applyAlignmentState(saved || this.neutralAlignmentState());
+        this.viewer.state.pairAlignments[key] = this.normalizedAlignmentState(alignment)
+            || this.neutralAlignmentState();
     },
 
     setAlignmentPreset(preset) {
-        if (!this.validAlignmentPreset(preset)) {
-            return;
-        }
-        this.viewer.state.alignmentPreset = preset;
-        if (preset !== 'custom') {
-            this.applyAlignmentPresetOffsets(preset);
-        }
+        if (!this.validAlignmentPreset(preset)) return;
+        this.writeCurrentAlignment(
+            { ...this.currentAlignment(), alignmentPreset: preset },
+            { clearDrafts: preset !== 'custom' },
+        );
         this.applyAlignment();
         this.viewer.persistViewerState();
     },
 
     setManualAlignment(x, y) {
-        this.clearRawAlignmentInputs();
-        this.viewer.state.alignmentPreset = 'custom';
-        this.viewer.state.alignX = this.viewer.numberOrDefault(x, 0);
-        this.viewer.state.alignY = this.viewer.numberOrDefault(y, 0);
+        this.writeCurrentAlignment({ alignmentPreset: 'custom', alignX: x, alignY: y });
         this.applyAlignment();
         this.viewer.persistViewerState();
     },
@@ -588,6 +640,7 @@ const Viewport = {
     },
 
     commitRawAlignmentInput(axis) {
+        const alignment = this.currentAlignment();
         const field = this.rawAlignmentField(axis);
         const rawValue = this.viewer.state[field];
         if (rawValue === null) return;
@@ -601,25 +654,29 @@ const Viewport = {
         const committedValue = Number(String(rawValue).trim());
         this.viewer.state[field] = null;
         this.setManualAlignment(
-            axis === 'x' ? committedValue : this.viewer.state.alignX,
-            axis === 'y' ? committedValue : this.viewer.state.alignY,
+            axis === 'x' ? committedValue : alignment.alignX,
+            axis === 'y' ? committedValue : alignment.alignY,
         );
         this.rawAlignmentElement(axis).value = committedValue;
     },
 
-    applyAlignment() {
-        this.viewer.dom.canvas.style.setProperty('--align-x', `${this.viewer.state.alignX}px`);
-        this.viewer.dom.canvas.style.setProperty('--align-y', `${this.viewer.state.alignY}px`);
-        this.viewer.dom.alignmentPreset.value = this.viewer.state.alignmentPreset;
-        this.viewer.dom.alignX.value = this.viewer.state.rawAlignX ?? this.viewer.state.alignX;
-        this.viewer.dom.alignY.value = this.viewer.state.rawAlignY ?? this.viewer.state.alignY;
+    applyAlignment({ updateViewport = true } = {}) {
+        const alignment = this.currentAlignment();
+        this.viewer.dom.canvas.style.setProperty('--align-x', `${alignment.alignX}px`);
+        this.viewer.dom.canvas.style.setProperty('--align-y', `${alignment.alignY}px`);
+        this.viewer.dom.alignmentPreset.value = alignment.alignmentPreset;
+        this.viewer.dom.alignX.value = this.viewer.state.rawAlignX ?? alignment.alignX;
+        this.viewer.dom.alignY.value = this.viewer.state.rawAlignY ?? alignment.alignY;
 
         // Visual indicator on gear button if offset is non-zero
-        const isOffset = this.viewer.state.alignX !== 0 || this.viewer.state.alignY !== 0;
+        const isOffset = alignment.alignX !== 0 || alignment.alignY !== 0;
         this.viewer.dom.btnAlignToggle.classList.toggle('has-offset', isOffset);
         this.updateAlignmentStatus();
         this.viewer.updateInspectorData();
-        this.viewer.lens?.refresh();
+        if (updateViewport) {
+            if (this.viewer.state.mode === 'grid') this.viewer.lens?.refresh();
+            else this.clampPan();
+        }
     },
 
     formatSignedPixels(value, axis) {
@@ -639,14 +696,15 @@ const Viewport = {
     },
 
     alignmentStatusValue() {
-        const xText = this.formatSignedPixels(this.viewer.state.alignX, 'x');
-        const yText = this.formatSignedPixels(this.viewer.state.alignY, 'y');
-        const hasOffset = this.viewer.state.alignX !== 0 || this.viewer.state.alignY !== 0;
+        const alignment = this.currentAlignment();
+        const xText = this.formatSignedPixels(alignment.alignX, 'x');
+        const yText = this.formatSignedPixels(alignment.alignY, 'y');
+        const hasOffset = alignment.alignX !== 0 || alignment.alignY !== 0;
 
-        if (!hasOffset && this.viewer.state.alignmentPreset === 'none') return 'none';
-        if (this.viewer.state.alignmentPreset === 'custom') return `custom ${xText} ${yText}`;
-        if (this.viewer.state.alignmentPreset !== 'none') {
-            return `preset ${this.alignmentPresetLabel(this.viewer.state.alignmentPreset)}`;
+        if (!hasOffset && alignment.alignmentPreset === 'none') return 'none';
+        if (alignment.alignmentPreset === 'custom') return `custom ${xText} ${yText}`;
+        if (alignment.alignmentPreset !== 'none') {
+            return `preset ${this.alignmentPresetLabel(alignment.alignmentPreset)}`;
         }
         return `${xText} ${yText}`;
     },

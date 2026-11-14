@@ -21,6 +21,7 @@ from frame_compare.utils.alignment_policy import (
     edge_consensus_offset,
     position_winner,
     sample_to_reference_video_time,
+    selected_start_compensation_seconds,
 )
 
 type EvidenceRowStyle = Literal["value", "warn", "muted"]
@@ -348,17 +349,18 @@ class AudioReviewPresentation:
         )
         offset = self.suggested_offset
         if offset is None:
-            offset = self.attempt.audio.rounded_frame or 0
+            offset = self.attempt.audio.rounded_frame
         weak = max(0, self.attempt.audio.active_chunks - self.attempt.audio.credible_chunks)
         inactive = max(
             0,
             self.attempt.analysis.planned_chunk_count - self.attempt.audio.active_chunks,
         )
         ignored = f"; {weak} weak, {inactive} quiet not counted" if weak or inactive else ""
+        counts = f"Audio: {agreeing} of {self.attempt.audio.credible_chunks} clear sections agree"
+        if offset is not None:
+            counts += f" on {offset:+d}f"
         return (
-            f"Audio: {agreeing} of {self.attempt.audio.credible_chunks} clear sections agree on "
-            f"{offset:+d}f ({max(0, self.attempt.audio.credible_chunks - agreeing)} differ"
-            f"{ignored})."
+            f"{counts} ({max(0, self.attempt.audio.credible_chunks - agreeing)} differ{ignored})."
         )
 
     def established_video_line(self) -> str:
@@ -435,17 +437,17 @@ class AudioReviewPresentation:
                 )
         return tuple(lines)
 
-    def noted_line(self, *, panel: bool = False) -> str | None:
+    def noted_line(self, *, panel: bool = False, include_same_frame: bool = True) -> str | None:
         if self.same_frame_regions:
+            if not include_same_frame:
+                return None
             ranges = ", ".join(
                 _review_region_text(region, panel=panel) for region in self.same_frame_regions
             )
             return (
                 f"Noted: audio differed in {len(self.same_frame_regions)} section"
-                f"{'s' if len(self.same_frame_regions) != 1 else ''} ({ranges}); the video "
-                f"confirmed {self.suggested_offset:+d}f there."
-                if self.suggested_offset is not None
-                else None
+                f"{'s' if len(self.same_frame_regions) != 1 else ''} ({ranges}) "
+                "by less than a frame (sub-frame); not a disagreement."
             )
         if self.resolved_regions and self.suggested_offset is not None:
             ranges = ", ".join(
@@ -561,7 +563,7 @@ def _review_region_text(region: AudioReviewRegion, *, panel: bool) -> str:
 def _review_frame_for_lag(attempt: AudioAlignmentAttempt, lag: int) -> int:
     return compensated_lag_to_frame(
         lag,
-        compensation_seconds=attempt.audio.compensation_seconds or 0.0,
+        compensation_seconds=selected_start_compensation_seconds(attempt.selected_streams),
         fps_reference=Fraction(attempt.fps_num, attempt.fps_den),
     )
 

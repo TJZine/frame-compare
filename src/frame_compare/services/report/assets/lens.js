@@ -2,6 +2,8 @@ const Lens = (() => {
     const PREFERENCES_KEY = 'frame-compare:lens-preferences:v2';
     const REPORT_KEY_PREFIX = 'frame-compare:report-lens:v1:';
     const TOUCH_GESTURE_THRESHOLD = 6;
+    const WINDOW_MARGIN = 8;
+    const WINDOW_BORDERS = 2;
     const MAGNIFICATIONS = [2, 3, 4, 6, 8, 12];
     const SIZES = { small: 160, medium: 240, large: 320 };
     const LENS_DYNAMIC_RANGE_WORDS = Object.freeze(
@@ -53,15 +55,6 @@ const Lens = (() => {
         };
     }
 
-    function compositionPoint(image, clientX, clientY) {
-        const rect = image?.getBoundingClientRect?.();
-        if (!rect || !validDimensions(rect.width, rect.height)) return null;
-        return {
-            u: (clientX - rect.left) / rect.width,
-            v: (clientY - rect.top) / rect.height,
-        };
-    }
-
     function normalizedPosition(value, fallback = DEFAULT_REPORT_STATE.parkedPosition) {
         const u = value?.u;
         const v = value?.v;
@@ -103,7 +96,6 @@ const Lens = (() => {
         height,
         magnification,
         lensSize,
-        viewportWidth = lensSize,
     ) {
         if (
             !point
@@ -117,7 +109,7 @@ const Lens = (() => {
         return {
             width: width * magnification,
             height: height * magnification,
-            left: viewportWidth / 2 - point.u * width * magnification,
+            left: lensSize / 2 - point.u * width * magnification,
             top: lensSize / 2 - point.v * height * magnification,
         };
     }
@@ -386,25 +378,40 @@ const Lens = (() => {
             return true;
         }
 
-        function lensSize() {
-            const stageRect = viewer.dom.stage.getBoundingClientRect();
-            const available = Math.max(1, Math.floor(Math.min(stageRect.width, stageRect.height) - 16));
-            return Math.min(SIZES[state.preferences.size], available);
+        function sizeLens() {
+            const stage = viewer.dom.stage.getBoundingClientRect();
+            const availableHeight = Math.max(1, Math.floor(stage.height - 2 * WINDOW_MARGIN - WINDOW_BORDERS));
+            const width = Math.max(1, Math.min(
+                SIZES[state.preferences.size],
+                availableHeight,
+                Math.floor(stage.width - 2 * WINDOW_MARGIN - WINDOW_BORDERS),
+            ));
+            // Keep the caption's wrapping width stable as its height reduces the image area.
+            dom.lens.style.setProperty('--lens-window-width', `${width + WINDOW_BORDERS}px`);
+            // Reserve most of the available height for the magnified image.
+            const captionBudget = Math.floor(availableHeight * 0.4);
+            dom.lens.style.setProperty('--lens-caption-max-height', `${captionBudget}px`);
+            let captionHeight = 0;
+            if (dom.captionRow && !dom.captionRow.hidden) {
+                captionHeight = dom.captionRow.getBoundingClientRect().height;
+                const scrollable = dom.captionRow.scrollHeight > dom.captionRow.clientHeight;
+                dom.captionRow.classList.toggle('rv-lens-caption--scrollable', scrollable);
+                dom.captionRow.tabIndex = scrollable ? 0 : -1;
+            }
+            const size = Math.min(width, Math.max(1, Math.floor(availableHeight - captionHeight)));
+            dom.lens.style.setProperty('--lens-size', `${size}px`);
+            return size;
         }
 
-        function setImageGeometry(image, point, size, viewportWidth = size) {
+        function setImageGeometry(image, point, size) {
             if (image?.complete === false) return null;
-            const width = Number(image?.naturalWidth);
-            const height = Number(image?.naturalHeight);
-            const geometry = lensImageGeometry(
+            return lensImageGeometry(
                 point,
-                width,
-                height,
+                Number(image?.naturalWidth),
+                Number(image?.naturalHeight),
                 state.preferences.magnification,
                 size,
-                viewportWidth,
             );
-            return geometry;
         }
 
         function clearCloneDom(element) {
@@ -523,21 +530,27 @@ const Lens = (() => {
             return imageRequests[slot]?.status || 'empty';
         }
 
-        function lensFootprint(size) {
+        function lensFootprint() {
             const rect = dom.lens?.getBoundingClientRect?.();
-            const width = Number(rect?.width) > 0 ? rect.width : size;
-            const height = Number(rect?.height) > 0 ? rect.height : size;
+            const width = Number(rect?.width) > 0 ? rect.width : SIZES[state.preferences.size];
+            const height = Number(rect?.height) > 0 ? rect.height : SIZES[state.preferences.size];
             return { width, height };
         }
 
-        function lensPosition(size) {
-            const stageRect = viewer.dom.stage.getBoundingClientRect();
-            const footprint = lensFootprint(size);
-            const maxLeft = Math.max(8, stageRect.width - footprint.width - 8);
-            const maxTop = Math.max(8, stageRect.height - footprint.height - 8);
+        function lensTravel() {
+            const stage = viewer.dom.stage.getBoundingClientRect();
+            const footprint = lensFootprint();
             return {
-                left: 8 + clamp(state.report.parkedPosition.u) * Math.max(0, maxLeft - 8),
-                top: 8 + clamp(state.report.parkedPosition.v) * Math.max(0, maxTop - 8),
+                x: Math.max(0, stage.width - footprint.width - 2 * WINDOW_MARGIN),
+                y: Math.max(0, stage.height - footprint.height - 2 * WINDOW_MARGIN),
+            };
+        }
+
+        function lensPosition() {
+            const travel = lensTravel();
+            return {
+                left: WINDOW_MARGIN + clamp(state.report.parkedPosition.u) * travel.x,
+                top: WINDOW_MARGIN + clamp(state.report.parkedPosition.v) * travel.y,
             };
         }
 
@@ -563,6 +576,21 @@ const Lens = (() => {
             dom.marker.hidden = false;
         }
 
+        function comparisonGeometry(point, size, shifted = false) {
+            const transform = viewer.viewport.comparisonTransform(point);
+            const height = shifted ? transform.comparisonHeight : transform.height;
+            if (!validDimensions(transform.width, height)) return null;
+            // Magnification is in base-source pixels. Both clones share the stage's
+            // comparison canvas, including the second source's resampling and offset.
+            const scale = state.preferences.magnification / transform.scale;
+            return {
+                width: transform.width * scale,
+                height: height * scale,
+                left: size / 2 - (transform.originX - (shifted ? transform.offsetX : 0)) * scale,
+                top: size / 2 - (transform.originY - (shifted ? transform.offsetY : 0)) * scale,
+            };
+        }
+
         function renderDiff(point, size) {
             const showing = viewer.state.mode === 'diff';
             dom.lens.dataset.renderMode = showing ? 'diff' : 'source';
@@ -570,19 +598,7 @@ const Lens = (() => {
                 clearLensImage('difference');
                 return true;
             }
-            const activeRect = state.activeImage?.getBoundingClientRect?.();
-            const sample = activeRect && validDimensions(activeRect.width, activeRect.height)
-                ? {
-                    clientX: activeRect.left + point.u * activeRect.width,
-                    clientY: activeRect.top + point.v * activeRect.height,
-                }
-                : null;
-            const differencePoint = compositionPoint(
-                viewer.dom.rightImg,
-                sample?.clientX,
-                sample?.clientY,
-            );
-            const geometry = setImageGeometry(viewer.dom.rightImg, differencePoint, size);
+            const geometry = comparisonGeometry(point, size, true);
             const source = viewer.dom.rightImg.currentSrc
                 || viewer.dom.rightImg.src
                 || sourceFor(viewer.state.rightClipIdx);
@@ -623,16 +639,17 @@ const Lens = (() => {
                 if (dom.marker) dom.marker.hidden = true;
                 return;
             }
-            const size = lensSize();
-            const source = state.activeImage.currentSrc || state.activeImage.src || sourceFor(state.activeClipIdx);
-            const geometry = setImageGeometry(state.activeImage, state.point, size, size);
-            const activeAvailable = applyLensImage('active', source, geometry);
-            const differenceAvailable = renderDiff(state.point, size);
             renderCaption();
             dom.lens.hidden = false;
-            dom.lens.style.setProperty('--lens-size', `${size}px`);
+            const size = sizeLens();
+            const source = state.activeImage.currentSrc || state.activeImage.src || sourceFor(state.activeClipIdx);
+            const geometry = viewer.state.mode === 'diff'
+                ? comparisonGeometry(state.point, size)
+                : setImageGeometry(state.activeImage, state.point, size);
+            const activeAvailable = applyLensImage('active', source, geometry);
+            const differenceAvailable = renderDiff(state.point, size);
             dom.lens.dataset.size = state.preferences.size;
-            const position = lensPosition(size);
+            const position = lensPosition();
             dom.lens.style.left = `${position.left}px`;
             dom.lens.style.top = `${position.top}px`;
             const activeState = requestStatus('active') === 'loading' ? 'loading' : 'unavailable';
@@ -682,6 +699,7 @@ const Lens = (() => {
                 }
                 state.drag = null;
                 dom.grip?.classList?.toggle?.('is-dragging', false);
+                viewer.updateBlinkControls?.();
                 state.point = null;
                 state.activeImage = null;
                 state.pointer = null;
@@ -783,16 +801,11 @@ const Lens = (() => {
             viewer.announce?.('Lens settings reset.');
         }
 
-        function setPositionFromPixels(left, top, size = lensSize()) {
-            const stageRect = viewer.dom.stage.getBoundingClientRect();
-            const footprint = lensFootprint(size);
-            const maxLeft = Math.max(8, stageRect.width - footprint.width - 8);
-            const maxTop = Math.max(8, stageRect.height - footprint.height - 8);
-            const boundedLeft = clamp(left, 8, maxLeft);
-            const boundedTop = clamp(top, 8, maxTop);
+        function setPositionFromPixels(left, top) {
+            const travel = lensTravel();
             state.report.parkedPosition = {
-                u: maxLeft > 8 ? clamp((boundedLeft - 8) / (maxLeft - 8)) : 0,
-                v: maxTop > 8 ? clamp((boundedTop - 8) / (maxTop - 8)) : 0,
+                u: travel.x > 0 ? clamp((left - WINDOW_MARGIN) / travel.x) : 0,
+                v: travel.y > 0 ? clamp((top - WINDOW_MARGIN) / travel.y) : 0,
             };
         }
 
@@ -813,6 +826,7 @@ const Lens = (() => {
             };
             dom.grip?.classList?.toggle?.('is-dragging', true);
             dom.grip?.setPointerCapture?.(event.pointerId);
+            viewer.updateBlinkControls?.();
             event.preventDefault();
             event.stopPropagation();
         }
@@ -836,6 +850,7 @@ const Lens = (() => {
             if (options.releaseCapture !== false && dom.grip?.hasPointerCapture?.(event.pointerId)) {
                 dom.grip.releasePointerCapture?.(event.pointerId);
             }
+            viewer.updateBlinkControls?.();
             saveReportState();
             announcePosition();
             event.stopPropagation?.();
@@ -851,7 +866,7 @@ const Lens = (() => {
             const direction = directions[event.key];
             if (!direction || !state.report.enabled) return;
             const step = event.shiftKey ? 24 : 4;
-            const position = lensPosition(lensSize());
+            const position = lensPosition();
             setPositionFromPixels(
                 position.left + direction[0] * step,
                 position.top + direction[1] * step,
@@ -1007,6 +1022,7 @@ const Lens = (() => {
         return {
             bind,
             setEnabled,
+            isDraggingGrip: () => state.drag !== null,
             handleStagePointerDown,
             handleStagePointerMove,
             endStagePointer,
@@ -1028,7 +1044,6 @@ const Lens = (() => {
         normalizePreferences,
         normalizeReportState,
         normalizedPoint,
-        compositionPoint,
         normalizedPosition,
         lensImageGeometry,
         boundedPopoverPosition,

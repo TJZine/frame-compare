@@ -10,6 +10,10 @@ from pytest import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
+from frame_compare.orchestration.alignment_report import (
+    AlignmentReportComparison,
+    emit_frame_alignment_report,
+)
 from frame_compare.orchestration.fps_report import FpsReportClip, emit_consolidated_fps_report
 from frame_compare.orchestration.progress import uses_rich_progress
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
@@ -63,9 +67,46 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        print("Clip Overview", file=sys.stderr)
-        print("Frame Alignment", file=sys.stderr)
+    def _run(request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        emit_consolidated_fps_report(
+            stage="after_load_sources",
+            clips=[
+                FpsReportClip(
+                    path=Path("reference.mkv"),
+                    label="Reference",
+                    width=1920,
+                    height=1080,
+                    num_frames=240,
+                    is_hdr=False,
+                    source_fps=Fraction(24),
+                    effective_fps=Fraction(24),
+                    fps_divergent=False,
+                    note=None,
+                    raw_fps=Fraction(24),
+                )
+            ],
+            json_output=request.json_output,
+            quiet=request.quiet,
+            rich_output=True,
+        )
+        emit_frame_alignment_report(
+            stage="after_alignment",
+            comparisons=[
+                AlignmentReportComparison(
+                    label="Comparison",
+                    alignment_source=None,
+                    relative_offset_frames=2,
+                    reference_row_zero_source_frame=2,
+                    comparison_row_zero_source_frame=0,
+                    reference_trim_range=(2, 239),
+                    comparison_trim_range=(0, 237),
+                )
+            ],
+            selected_frames=[4, 8],
+            alignment_warnings=[],
+            json_output=request.json_output,
+            quiet=request.quiet,
+        )
         return RunResult(
             success=True,
             screenshot_dir=Path("screenshots").resolve(),
@@ -83,10 +124,10 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     assert "Comparison complete" in stdout
     assert "Warnings" in stdout
     assert "metadata skipped" in stdout
-    assert "Clip Overview" not in stdout
-    assert "Frame Alignment" not in stdout
-    assert "Clip Overview" in stderr
-    assert "Frame Alignment" in stderr
+    assert "Sources · 1 loaded" not in stdout
+    assert "Frame alignment" not in stdout
+    assert "Sources · 1 loaded" in stderr
+    assert "Frame alignment" in stderr
     assert "Run plan" not in stderr
     assert "Result" not in stderr
 
@@ -111,6 +152,7 @@ def test_run_non_tty_routes_fps_diagnostics_through_logging(
                     effective_fps=Fraction(24, 1),
                     fps_divergent=False,
                     note=None,
+                    raw_fps=Fraction(24, 1),
                 )
             ],
             json_output=_request.json_output,
@@ -225,8 +267,11 @@ def test_run_env_no_color_propagates_to_request(monkeypatch: MonkeyPatch, tmp_pa
         ("ERROR", "json", ["--verbose"], "DEBUG", "json"),
         ("ERROR", "json", ["--quiet", "--verbose"], "WARNING", "json"),
         ("ERROR", "console", ["--json"], "ERROR", "json"),
+        ("INFO", "console", [], "INFO", "console"),
+        ("INFO", "console", ["--no-color"], "INFO", "console"),
     ],
 )
+@pytest.mark.parametrize("tty", ["none", "stdout", "stderr"])
 def test_run_logging_config_and_cli_precedence(
     monkeypatch: MonkeyPatch,
     configured_level: str,
@@ -235,14 +280,24 @@ def test_run_logging_config_and_cli_precedence(
     expected_level: str,
     expected_format: str,
     tmp_path: Path,
+    tty: str,
 ) -> None:
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
-    def _configure_logging(*, level: str, log_format: str) -> None:
+    def _configure_logging(
+        *, level: str, log_format: str, rich_output: bool, no_color: bool
+    ) -> None:
         captured["level"] = level
         captured["format"] = log_format
+        captured["rich_output"] = rich_output
+        captured["no_color"] = no_color
 
+    monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr("frame_compare.cli.entry.configure_logging", _configure_logging)
+    monkeypatch.setattr(
+        "frame_compare.cli.run_command.stream_is_tty",
+        lambda stream: tty != "none" and stream is getattr(sys, tty),
+    )
     monkeypatch.setattr(
         "frame_compare.cli.entry.runner.run",
         lambda _request, dependencies=None: RunResult(success=True),
@@ -268,8 +323,13 @@ def test_run_logging_config_and_cli_precedence(
             ],
             color=False,
             terminal_width=200,
-            env={"NO_COLOR": "1", "TERM": "dumb"},
+            env={"TERM": "dumb"},
         )
 
     assert result.exit_code == 0
-    assert captured == {"level": expected_level, "format": expected_format}
+    assert captured == {
+        "level": expected_level,
+        "format": expected_format,
+        "rich_output": tty != "none" and "--quiet" not in args and "--json" not in args,
+        "no_color": "--no-color" in args,
+    }

@@ -35,13 +35,7 @@ if (!(Test-Path -LiteralPath $ZipPath -PathType Leaf)) {
   throw "Portable bundle ZIP not found: $ZipPath"
 }
 
-function Test-PathWithin([string]$Path, [string]$Parent) {
-  $parentPrefix = $Parent.TrimEnd(
-    [System.IO.Path]::DirectorySeparatorChar,
-    [System.IO.Path]::AltDirectorySeparatorChar
-  ) + [System.IO.Path]::DirectorySeparatorChar
-  return $Path.StartsWith($parentPrefix, [System.StringComparison]::OrdinalIgnoreCase)
-}
+. (Join-Path $PSScriptRoot "path_safety.ps1")
 
 $extractPathRoot = [System.IO.Path]::GetPathRoot($ExtractRoot)
 if (
@@ -70,12 +64,6 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-
-public static class FrameCompareNativeDirectory {
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool CreateDirectory(string path, IntPtr securityAttributes);
-}
 
 public sealed class FrameCompareProcessJob : IDisposable {
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
@@ -267,21 +255,6 @@ public sealed class FrameCompareCappedFileStream : Stream {
 }
 "@
 
-function New-AtomicallyReservedDirectory([string]$Path) {
-  [System.IO.Directory]::CreateDirectory((Split-Path -Parent $Path)) | Out-Null
-  if ([FrameCompareNativeDirectory]::CreateDirectory($Path, [IntPtr]::Zero)) {
-    return
-  }
-  $errorCode = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-  if ($errorCode -eq 183) {
-    throw "ExtractRoot must not already exist; choose a fresh verification directory: $Path"
-  }
-  throw [System.ComponentModel.Win32Exception]::new(
-    $errorCode,
-    "Could not atomically reserve ExtractRoot: $Path"
-  )
-}
-
 function Assert-SafeWindowsSegment([string]$Segment, [string]$EntryName) {
   if (
     [string]::IsNullOrEmpty($Segment) -or
@@ -375,6 +348,7 @@ try {
     "frame-compare-portable-win-x64/licenses/THIRD_PARTY_NOTICES.txt",
     "frame-compare-portable-win-x64/shim/frame-compare.cmd",
     "frame-compare-portable-win-x64/shim/frame-compare-update.cmd",
+    "frame-compare-portable-win-x64/shim/frame-compare-version.ps1",
     "frame-compare-portable-win-x64/shim/frame-compare-update.ps1"
   )
   foreach ($requiredEntry in $requiredEntries) {
@@ -384,7 +358,7 @@ try {
   }
   Write-Host "WINDOWS_EXTRACTED_PROOF zip_layout=ok zip=$ZipPath"
 
-  New-AtomicallyReservedDirectory -Path $ExtractRoot
+  $null = New-AtomicallyReservedDirectory -Path $ExtractRoot
   Write-Host "WINDOWS_EXTRACTED_PROOF extraction_root_reserved=ok root=$ExtractRoot"
   foreach ($validatedEntry in $validatedEntries) {
     $destinationPath = [System.IO.Path]::GetFullPath(
@@ -554,6 +528,7 @@ function Assert-OptionalMatchingProperty(
 $inventoryPath = Join-Path $bundle "bundle_inventory.json"
 $inventory = Read-JsonObject -Path $inventoryPath -Label "Extracted bundle inventory"
 Assert-ExactProperties -Object $inventory -Expected @(
+  "archive",
   "bundle",
   "corresponding_sources",
   "licenses",
@@ -758,16 +733,18 @@ foreach ($collectionName in @("corresponding_sources", "python_distributions")) 
 }
 
 $requiredVsViewDistributions = [ordered]@{
-  "jetpytools" = "3.1.2"
-  "pyside6" = "6.11.2"
-  "pyside6-addons" = "6.11.2"
-  "pyside6-essentials" = "6.11.2"
-  "shiboken6" = "6.11.2"
-  "vapoursynth-bestsource" = "22"
+  "jetpytools" = "3.2.0"
+  "pyside6" = "6.12.0"
+  "pyside6-addons" = "6.12.0"
+  "pyside6-essentials" = "6.12.0"
+  "pyside6-pdf" = "6.12.0.140"
+  "pyside6-webengine" = "6.12.0.140"
+  "shiboken6" = "6.12.0"
+  "vapoursynth-bestsource" = "23"
   "vspackrgb" = "2.0.0"
-  "vsview" = "0.12.1"
-  "cyclopts" = "5.2.0"
-  "vsjetengine" = "1.8.0"
+  "vsview" = "0.14.0"
+  "cyclopts" = "5.4.2"
+  "vsjetengine" = "2.0.0"
 }
 $inventoryDistributionVersions = [Collections.Generic.Dictionary[string, string]]::new(
   [System.StringComparer]::OrdinalIgnoreCase
@@ -845,8 +822,13 @@ foreach ($source in $inventorySources) {
 }
 
 $requiredSourceScripts = @(
+  ".github/actions/windows-portable-build/action.yml",
+  ".github/actions/windows-portable-verify/action.yml",
   ".github/workflows/windows-portable-build.yml",
   "tools/windows_portable/build_portable.ps1",
+  "tools/windows_portable/path_safety.ps1",
+  "tools/windows_portable/portable_launchers.ps1",
+  "tools/windows_portable/shim/frame-compare-version.ps1",
   "tools/windows_portable/runtime_smoke.py",
   "tools/windows_portable/bundle_info.schema.json",
   "tools/windows_portable/manifest.windows-x64.json",
@@ -872,6 +854,7 @@ foreach ($sourceScript in $sourceScripts) {
     $sourceSegments -contains ".." -or
     (
       -not $sourceScript.StartsWith(".github/workflows/", [System.StringComparison]::Ordinal) -and
+      -not $sourceScript.StartsWith(".github/actions/", [System.StringComparison]::Ordinal) -and
       -not $sourceScript.StartsWith("tools/windows_portable/", [System.StringComparison]::Ordinal)
     )
   ) {
@@ -934,6 +917,38 @@ foreach ($licenseRecord in $licenseRecords) {
   $actualLicenseSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $licensePath).Hash.ToLowerInvariant()
   if ($actualLicenseSha256 -ne $expectedLicenseSha256) {
     throw "Inventoried license SHA-256 mismatch: $relativeLicensePath"
+  }
+}
+$requiredNoticePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($artifact in $manifestArtifacts) {
+  $artifactId = Get-RequiredString $artifact "id" "manifest artifact"
+  $license = Get-RequiredObject $artifact "license" "manifest artifact $artifactId"
+  if ($null -eq $license.PSObject.Properties["files"]) { continue }
+  $files = Get-RequiredArray $license "files" "manifest artifact $artifactId license"
+  $spdx = Get-RequiredString $license "spdx" "manifest artifact $artifactId license"
+  foreach ($file in $files) {
+    if ($file -isnot [PSCustomObject]) { throw "Manifest license file must be an object: $artifactId" }
+    $source = Get-RequiredString $file "path" "manifest artifact $artifactId license file"
+    $expectedHash = Get-RequiredString $file "sha256" "manifest artifact $artifactId license file"
+    $basename = [IO.Path]::GetFileName($source)
+    $name = if ($files.Count -gt 1) {
+      "{0}-{1}--{2}" -f $artifactId, $spdx, $basename
+    } else {
+      "{0}-{1}{2}" -f $artifactId, $spdx, [IO.Path]::GetExtension($basename)
+    }
+    if ($name -cnotmatch '\A[A-Za-z0-9._+() -]+\z' -or $name -match '[. ]$') {
+      throw "Unsafe bundle license filename: $name"
+    }
+    $path = "licenses/$name"
+    if (!$requiredNoticePaths.Add($path)) {
+      throw "Duplicate manifest notice destination: $path"
+    }
+    if (!$inventoryLicenses.ContainsKey($path)) {
+      throw "Missing manifest notice: $path"
+    }
+    if ($inventoryLicenses[$path] -cne $expectedHash) {
+      throw "Manifest notice SHA-256 mismatch: $path"
+    }
   }
 }
 $actualLicensePaths = @(
@@ -1280,6 +1295,32 @@ try {
 if ($ffmpegStatus -cne "pass") {
   throw $ffmpegCheckFailure
 }
+$python = Join-Path $bundle "python/python.exe"
+$vsviewProbe = @'
+import os
+from importlib.metadata import entry_points
+
+for name in ('VAPOURSYNTH_HOME', 'VAPOURSYNTH_PLUGIN_PATH', 'VAPOURSYNTH_EXTRA_PLUGIN_PATH'):
+    os.environ.pop(name, None)
+
+from frame_compare.vsview.launcher import preload_vapoursynth_runtime
+
+preload_vapoursynth_runtime()
+import vsview
+
+panel = [
+    entry_point for entry_point in entry_points(group='vsview', name='frame-compare-alignment-review')
+    if entry_point.value == 'frame_compare.vsview.alignment_review_panel'
+]
+if len(panel) != 1 or not hasattr(panel[0].load(), 'AlignmentReviewPanel'):
+    raise RuntimeError('Frame Compare VSView alignment panel entry point is unavailable')
+'@
+$null = Invoke-BoundedCommand `
+  -Label "candidate_vsview_entrypoint" `
+  -FilePath $python `
+  -ArgumentList @("-B", "-I", "-c", $vsviewProbe)
+Write-Host "WINDOWS_EXTRACTED_PROOF vsview_entrypoint=ok"
+
 $installer = Join-Path $bundle "install.cmd"
 $null = Invoke-BoundedCommand -Label "candidate_install" -FilePath $installer
 

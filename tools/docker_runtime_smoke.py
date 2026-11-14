@@ -35,12 +35,12 @@ from frame_compare.vs.runtime_contract import (
     VS_PLACEBO_RELEASE,
     VS_PLACEBO_SOURCE_COMMIT,
     VS_PLACEBO_SOURCE_TREE_SHA256,
-    index_cache_token,
     media_runtime_fingerprint,
 )
-from frame_compare.vs.source import load_source, source_index_path
+from frame_compare.vs.source import load_source
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 from frame_compare.vs.tonemap import apply_tonemap
-from frame_compare.vs.types import TonemapSettings
+from frame_compare.vs.types import LibplaceboTonemap, TonemapSettings
 
 
 def assert_true(condition: object, message: str) -> None:
@@ -75,7 +75,7 @@ assert_true(
 loader_paths = os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep)
 assert_true(
     "/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth" in loader_paths,
-    "VapourSynth R81 wheel native-library path missing from LD_LIBRARY_PATH",
+    "VapourSynth R82 wheel native-library path missing from LD_LIBRARY_PATH",
 )
 assert_true("/usr/local/lib" in loader_paths, "/usr/local/lib missing from LD_LIBRARY_PATH")
 
@@ -132,10 +132,10 @@ plugin_dir = Path(vs.get_plugin_dir())
 extra_plugin_path = os.environ.get("VAPOURSYNTH_EXTRA_PLUGIN_PATH", "")
 plugin_namespaces = sorted(plugin.namespace for plugin in core.plugins())
 
-assert_true(VAPOURSYNTH_RELEASE == "R81", "application runtime contract is not R81")
+assert_true(VAPOURSYNTH_RELEASE == "R82", "application runtime contract is not R82")
 assert_true(
-    release_major == 81 and release_minor == 0,
-    f"expected VapourSynth R81, got {version!r}",
+    release_major == 82 and release_minor == 0,
+    f"expected VapourSynth R82, got {version!r}",
 )
 assert_true(api_major == 4, f"expected VapourSynth API 4, got {api_major!r}")
 assert_true(api_minor == 3, f"expected VapourSynth API minor 3, got {api_minor!r}")
@@ -146,11 +146,19 @@ assert_true(hasattr(core, "lsmas"), "core.lsmas namespace missing")
 lsmas_functions = sorted(function.name for function in core.lsmas.functions())
 assert_true("LWLibavSource" in lsmas_functions, "lsmas.LWLibavSource missing")
 assert_true("LibavSMASHSource" in lsmas_functions, "lsmas.LibavSMASHSource missing")
-source = load_source(media_path, core=core)
+with tempfile.TemporaryDirectory(prefix="frame-compare-source-index-proof-") as index_root:
+    index_cache = ManagedSourceIndexCache(Path(index_root).resolve())
+    source = load_source(media_path, core=core, index_cache=index_cache)
+    expected_index = index_cache.validated_index(media_path)
+    assert expected_index is not None, "managed L-SMASH-Works index missing"
+    before = expected_index.stat()
+    load_source(media_path, core=core, index_cache=index_cache)
+    assert_true(
+        index_cache.validated_index(media_path) == expected_index
+        and expected_index.stat().st_mtime_ns == before.st_mtime_ns,
+        "warm L-SMASH-Works load changed the committed index",
+    )
 source_frame = source.clip.get_frame(0)
-expected_index = source_index_path(media_path)
-assert_true(expected_index.is_file(), f"versioned L-SMASH-Works index missing: {expected_index}")
-assert_true(index_cache_token() in expected_index.name, "source index lacks runtime token")
 assert_true(source.num_frames == 12, f"unexpected L-SMASH-Works frame count: {source.num_frames}")
 assert_true(
     source_frame.width == 64 and source_frame.height == 48,
@@ -454,6 +462,18 @@ with tempfile.TemporaryDirectory(prefix="frame-compare-media-fixtures-") as fixt
             TonemapSettings(tone_curve=ToneCurve.SPLINE, target_nits=203),
             hdr_lsw.hdr_metadata,
         )
+        assert_true(
+            tonemapped_hdr.applied is not None
+            and isinstance(tonemapped_hdr.applied.transform, LibplaceboTonemap),
+            "production tonemap did not use libplacebo",
+        )
+        assert_true(
+            spline_hdr.applied is not None
+            and isinstance(spline_hdr.applied.transform, LibplaceboTonemap),
+            "spline tonemap did not use libplacebo",
+        )
+        tonemapped_hdr = tonemapped_hdr.clip
+        spline_hdr = spline_hdr.clip
         tonemapped_hdr_frame = tonemapped_hdr.get_frame(0)
         assert_true(
             tonemapped_hdr_frame.props.get("_Tonemapped") == 1,
@@ -553,7 +573,7 @@ assert_true(
 payload = json.loads(doctor_path.read_text(encoding="utf-8"))
 assert_true(payload.get("success") is True, f"doctor failed: {payload}")
 doctor = payload["doctor"]
-assert_true(doctor["baseline_version"] == VAPOURSYNTH_RELEASE, "doctor R81 baseline mismatch")
+assert_true(doctor["baseline_version"] == VAPOURSYNTH_RELEASE, "doctor R82 baseline mismatch")
 assert_true(
     doctor["media_runtime"]["fingerprints"]["full"] == expected_fingerprint,
     "doctor runtime fingerprint mismatch",
@@ -575,7 +595,7 @@ for required_check in ("vapoursynth", "lsmas", "vs_placebo", "ffms2", "ffmpeg"):
         checks[required_check]["status"] == "pass",
         f"doctor check failed: {required_check}",
     )
-assert_true(checks["vapoursynth"]["details"]["observed_release"] == "R81", "doctor VS release")
+assert_true(checks["vapoursynth"]["details"]["observed_release"] == "R82", "doctor VS release")
 assert_true(checks["vapoursynth"]["details"]["api_major"] == 4, "doctor VS API")
 assert_true(
     checks["lsmas"]["details"]["expected_native_release"] == LSMASH_WORKS_RELEASE,
@@ -590,7 +610,7 @@ assert_true(
     "doctor vs-placebo distribution mismatch",
 )
 
-version_output = Path("/tmp/frame-compare-version.txt").read_text(encoding="utf-8").strip()
+version_output = os.environ["FRAME_COMPARE_PROOF_VERSION"].strip()
 print(f"DOCKER_PROOF cli=ok version_output={version_output}")
 print(f"DOCKER_PROOF non_root=ok uid={os.geteuid()}")
 print(f"DOCKER_PROOF vapoursynth_import=ok version={version_label} api={api_major}.{api_minor}")

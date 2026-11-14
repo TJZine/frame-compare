@@ -22,7 +22,14 @@ from time import monotonic
 import structlog
 
 from frame_compare.utils.cancellation import raise_if_cancelling
-from frame_compare.utils.subproc import prepare_python_child
+from frame_compare.utils.subproc import (
+    OwnedProcessTree,
+    SubprocessOutputLimitExceeded,
+    prepare_python_child,
+    run_subprocess,
+    spawn_owned_process,
+)
+from frame_compare.vs.types import TonemapSettings
 from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewContractError,
     AlignmentReviewSession,
@@ -179,6 +186,10 @@ class VSViewSessionRequest:
     presentation_names_by_stem: dict[str, str] | None = None
     short_names_by_stem: dict[str, str] | None = None
     memory_limit_mb: int | None = None
+    preview_tonemap: TonemapSettings | None = None
+    source_indexes: dict[Path, Path] | None = None
+    source_index_generated_root: Path | None = None
+    scan_frame_geometry: bool = False
 
 
 def launch_alignment_verification_session(
@@ -285,6 +296,13 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
                 else _redact_inherited_secrets(timeout_output, env)[-_STARTUP_STDERR_LIMIT:]
             ),
         ) from exc
+    except SubprocessOutputLimitExceeded as exc:
+        output = exc.diagnostics.decode("utf-8", errors="replace")
+        raise VSViewError(
+            str(exc),
+            command=tuple(command),
+            startup_stderr=_redact_inherited_secrets(output, env)[-_STARTUP_STDERR_LIMIT:],
+        ) from exc
     except OSError as exc:
         raise VSViewError(
             "startup dependency check could not run",
@@ -312,40 +330,30 @@ def _check_startup_readiness(command: list[str], *, env: dict[str, str]) -> None
 def _run_startup_probe(
     command: list[str], *, env: dict[str, str]
 ) -> subprocess.CompletedProcess[str]:
-    """Poll dependency startup, keeping cancellation and captured pipe cleanup owned."""
-    raise_if_cancelling()
+    """Run the dependency startup check with owned cancellation and capture."""
     command, env = prepare_python_child(command, env=env)
-    process = subprocess.Popen(  # nosec B603
+
+    def abort() -> bool:
+        raise_if_cancelling()
+        return False
+
+    result = run_subprocess(
         command,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        errors="replace",
-        env=env,
         cwd=_CHILD_PROCESS_CWD,
+        env=env,
+        check=False,
+        abort=abort,
+        timeout_seconds=_STARTUP_PROBE_TIMEOUT_SECONDS,
+        max_stdout_bytes=16 * 1024,
+        max_stderr_bytes=32 * 1024,
     )
-    deadline = monotonic() + _STARTUP_PROBE_TIMEOUT_SECONDS
-    try:
-        while True:
-            raise_if_cancelling()
-            remaining = max(0.0, deadline - monotonic())
-            try:
-                stdout, stderr = process.communicate(timeout=min(0.1, remaining))
-                raise_if_cancelling()
-                return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
-            except subprocess.TimeoutExpired:
-                if monotonic() >= deadline:
-                    raise
-    except BaseException:
-        _shutdown_vsview_process(process)
-        raise
-    finally:
-        # communicate closes pipes on success; an interrupted poll must also close them.
-        if process.stdout is not None:
-            process.stdout.close()
-        if process.stderr is not None:
-            process.stderr.close()
+    raise_if_cancelling()
+    return subprocess.CompletedProcess(
+        result.args,
+        result.returncode,
+        result.stdout.decode("utf-8", errors="replace"),
+        result.stderr.decode("utf-8", errors="replace"),
+    )
 
 
 def _redact_inherited_secrets(text: str, env: dict[str, str]) -> str:
@@ -368,11 +376,8 @@ def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> tuple[int
     raise_if_cancelling()
     command, env = prepare_python_child(command, env=env)
     start = monotonic()
-    process = subprocess.Popen(  # nosec B603
+    process, process_tree = spawn_owned_process(
         command,
-        stdin=None,
-        stdout=None,
-        stderr=None,
         env=env,
         cwd=_CHILD_PROCESS_CWD,
     )
@@ -389,19 +394,20 @@ def _run_vsview_command(command: list[str], *, env: dict[str, str]) -> tuple[int
                 if monotonic() >= deadline:
                     raise
     except subprocess.TimeoutExpired as exc:
-        _shutdown_vsview_process(process)
         raise VSViewError(
             "alignment review timed out before VSView closed",
             command=tuple(command),
         ) from exc
-    except BaseException:
-        _shutdown_vsview_process(process)
-        raise
+    finally:
+        _shutdown_vsview_process(process, process_tree)
     return returncode, max(0.0, monotonic() - start)
 
 
-def _shutdown_vsview_process(process: subprocess.Popen[bytes] | subprocess.Popen[str]) -> None:
-    """Boundedly terminate and reap a VSView child after an interrupted wait.
+def _shutdown_vsview_process(
+    process: subprocess.Popen[bytes],
+    process_tree: OwnedProcessTree,
+) -> None:
+    """Boundedly stop and reap the VSView tree when its wait ends.
 
     Cleanup must not replace the timeout, cancellation, or other control-flow
     exception that caused it. In particular, a second interruption while
@@ -409,6 +415,13 @@ def _shutdown_vsview_process(process: subprocess.Popen[bytes] | subprocess.Popen
     kill attempt; there is deliberately no ``Popen`` context manager here,
     because its ``__exit__`` wait is unbounded.
     """
+    try:
+        process_tree.reap(process)
+    except BaseException:
+        pass
+    else:
+        return
+
     with suppress(BaseException):
         process.terminate()
 
@@ -436,6 +449,10 @@ def _write_vsview_session_script(request: VSViewSessionRequest) -> Path:
         presentation_names_by_stem=request.presentation_names_by_stem,
         short_names_by_stem=request.short_names_by_stem,
         memory_limit_mb=request.memory_limit_mb,
+        preview_tonemap=request.preview_tonemap,
+        source_indexes=request.source_indexes,
+        source_index_generated_root=request.source_index_generated_root,
+        scan_frame_geometry=request.scan_frame_geometry,
     )
 
 

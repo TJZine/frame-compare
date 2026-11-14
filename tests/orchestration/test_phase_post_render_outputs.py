@@ -13,6 +13,7 @@ from frame_compare.analysis.types import (
     SelectionBreakdown,
     SelectionDetail,
 )
+from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration import phase_post_render
 from frame_compare.orchestration.execution import build_phases_after_align
 from frame_compare.orchestration.execution_types import (
@@ -23,8 +24,8 @@ from frame_compare.orchestration.execution_types import (
     RunArtifacts,
 )
 from frame_compare.orchestration.phases import execute_phases
+from frame_compare.orchestration.source_labels import resolve_source_label_details
 from frame_compare.orchestration.types import (
-    RunRequest,
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
@@ -43,7 +44,7 @@ from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.media_facts import ActivePictureFacts
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import LogProgressReporter, NullProgressReporter
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+from frame_compare.utils.progress_protocol import AlignmentSummary, ProgressPhaseStatus
 from frame_compare.vs.types import TonemapSettings
 from tests.orchestration.phase_task_helpers import (
     _clip,
@@ -51,6 +52,10 @@ from tests.orchestration.phase_task_helpers import (
     _render_artifacts,
     _RenderRunner,
 )
+from tests.render_test_support import paths_by_label
+from tests.run_request_support import make_run_request
+from tests.services.report_viewer_contracts import SelectParser, script_payload
+from tests.tonemap_test_support import libplacebo_tonemap
 
 
 class _RecordingProgressReporter(NullProgressReporter):
@@ -75,9 +80,10 @@ class _RecordingProgressReporter(NullProgressReporter):
         retain: bool | None = None,
         summary: str | None = None,
         duration_text: str | None = None,
+        alignment_summary: AlignmentSummary | None = None,
         presentation: str | None = None,
     ) -> None:
-        del summary, duration_text, presentation
+        del summary, duration_text, alignment_summary, presentation
         self.completions.append((status, retain))
 
     def suspend(self) -> None:
@@ -241,10 +247,10 @@ def test_run_report_phase_builds_report_data_and_records_path(
     assert report_data.frame_details == []
     assert report_data.clips[0].active_picture == active_picture
     assert report_data.rendering.geometry_by_label["Reference"].active_picture == active_picture
-    assert [image.path for image in report_data.clips[0].images] == render.screenshots_by_label[
+    assert [image.path for image in report_data.clips[0].images] == paths_by_label(render.clips)[
         "Reference"
     ]
-    assert [image.path for image in report_data.clips[1].images] == render.screenshots_by_label[
+    assert [image.path for image in report_data.clips[1].images] == paths_by_label(render.clips)[
         "Encode 1"
     ]
     assert [clip.display.control for clip in report_data.clips] == [
@@ -340,6 +346,56 @@ def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
         assert " · " not in upload_clip.image_name
 
 
+def test_report_resolves_visible_bidi_collisions_in_stem_mode(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    source = ctx.workspace.input_dir / "SRC \u202eABC.mkv"
+    explicit = "SRC [U+202E]ABC"
+    labels = resolve_source_label_details(
+        ordered_paths=[ctx.reference.path, source],
+        overrides_by_path={ctx.reference.path: SourceOverrideConfig(label=explicit)},
+        label_mode=ctx.config.sources.label_mode,
+        label_parser=ctx.config.sources.label_parser,
+    )
+    assert ctx.config.sources.label_mode == "stem"
+    derived = labels[source]
+    assert derived.value == source.stem
+    ctx.reference = replace(
+        ctx.reference,
+        label=labels[ctx.reference.path].value,
+        label_is_explicit=labels[ctx.reference.path].explicit,
+    )
+    ctx.comparisons = [_clip(source, label=derived.value, label_is_explicit=derived.explicit)]
+    assert ctx.workspace.run_dir is not None
+    screenshot_dir = ctx.workspace.run_dir / "screenshots"
+    screenshots = {
+        explicit: [screenshot_dir / "left.png"],
+        derived.value: [screenshot_dir / "right.png"],
+    }
+    for clip in [ctx.reference, *ctx.comparisons]:
+        _RenderRunner().extract_frame(clip.path, 5, screenshots[clip.label][0])
+    render = _render_artifacts(screenshots_by_label=screenshots, screenshot_dir=screenshot_dir)
+    output = phase_post_render.run_report_phase(
+        ctx, frames=[5], render=render, metadata=None, slowpics_url=None
+    )
+    assert output.report_path is not None
+    html = output.report_path.read_text(encoding="utf-8")
+    payload = script_payload(html)
+    reference, comparison = payload["clips"]
+    for profile in ("primary", "control", "micro"):
+        assert reference["display"][profile] == explicit
+        assert comparison["display"][profile] == f"Comparison 1 | {explicit}"
+
+    assert reference["label"] == explicit
+    assert comparison["label"] == source.stem
+    assert set(payload["rendering"]["geometry_by_label"]) == {explicit, source.stem}
+    assert comparison["display"]["filename"] == source.name
+    selects = SelectParser()
+    selects.feed(html)
+    comparison_option = selects.selects["right-select"].options[1]
+    assert comparison_option.text == f"Comparison 1 | {explicit}"
+    assert comparison_option.attrs["title"] == f"Comparison 1 | {explicit} — {explicit}.mkv"
+
+
 def test_run_report_phase_rejects_short_artifacts_before_indexing(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     render = _render_artifacts(
@@ -350,7 +406,7 @@ def test_run_report_phase_rejects_short_artifacts_before_indexing(tmp_path: Path
         source_frames_by_label={"Reference": [1]},
     )
 
-    with pytest.raises(ValueError, match="report artifacts for 'Reference'.*expected 2"):
+    with pytest.raises(ValueError, match="report image count mismatch for 'Reference': expected 2"):
         phase_post_render.run_report_phase(
             ctx,
             frames=[1, 2],
@@ -375,13 +431,12 @@ def test_run_report_phase_discloses_shared_tonemap_setting(
         source_frames_by_label={"Reference": [1], "Encode 1": [1]},
     )
     settings = TonemapSettings(target_nits=203)
-    render.clip_facts_by_label["Reference"] = replace(
-        render.clip_facts_by_label["Reference"], tonemap_settings=settings
+    render.clips = tuple(
+        replace(clip, clip_facts=replace(clip.clip_facts, tonemap=libplacebo_tonemap(settings)))
+        if clip.label == "Reference" or comparison_hdr
+        else clip
+        for clip in render.clips
     )
-    if comparison_hdr:
-        render.clip_facts_by_label["Encode 1"] = replace(
-            render.clip_facts_by_label["Encode 1"], tonemap_settings=settings
-        )
     captured: dict[str, Any] = {}
 
     def _fake_generate_report(
@@ -395,7 +450,8 @@ def test_run_report_phase_discloses_shared_tonemap_setting(
         ctx, frames=[1], render=render, metadata=None, slowpics_url=None
     )
 
-    assert captured["report_data"].rendering.tonemap_settings == settings
+    assert captured["report_data"].clips[0].tonemap == libplacebo_tonemap(settings)
+    assert (captured["report_data"].clips[1].tonemap is not None) == comparison_hdr
 
 
 def test_run_report_phase_builds_four_clip_payload_inputs_in_clip_order(
@@ -459,18 +515,21 @@ def test_run_report_phase_passes_reference_source_frame_details(
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=20)
-    ctx.selection_breakdown = SelectionBreakdown(quantile_bright=[5])
-    ctx.selection_details_by_source_frame = {
-        4: SelectionDetail(
-            frame_index=4,
-            label="User",
-            source="analysis",
-            timecode="00:00:00.167",
-            score=0.5,
-            clip_role="analyze",
-            notes="user_override",
-        )
-    }
+    ctx.selection = replace(ctx.selection, breakdown=SelectionBreakdown(quantile_bright=[5]))
+    ctx.selection = replace(
+        ctx.selection,
+        details_by_source_frame={
+            4: SelectionDetail(
+                frame_index=4,
+                label="User",
+                source="analysis",
+                timecode="00:00:00.167",
+                score=0.5,
+                clip_role="analyze",
+                notes="user_override",
+            )
+        },
+    )
     render = _render_artifacts(
         screenshots_by_label={
             "Reference": [
@@ -646,10 +705,8 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
     ctx.config.slowpics.confirm_upload_after_report = True
     ctx.config.report.enable = True
     report_path = tmp_path / "report.html"
-    state = ExecutionState(
-        artifacts=RunArtifacts(report_path=report_path, report_succeeded=True),
-        selected_frames=[10],
-    )
+    ctx.selection = replace(ctx.selection, frames=(10,))
+    state = ExecutionState(artifacts=RunArtifacts(report_path=report_path, report_succeeded=True))
     reporter = _RecordingProgressReporter()
     ctx.reporter = reporter
     publish_calls = 0
@@ -672,7 +729,7 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
 
     async with httpx.AsyncClient() as client:
         phases = build_phases_after_align(
-            request=RunRequest(root=tmp_path),
+            request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
             http_client=client,
@@ -704,7 +761,8 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
     ctx.config.slowpics.auto_upload = True
     ctx.config.slowpics.confirm_upload_after_report = True
     ctx.config.report.enable = True
-    state = ExecutionState(artifacts=RunArtifacts(), selected_frames=[10])
+    ctx.selection = replace(ctx.selection, frames=(10,))
+    state = ExecutionState(artifacts=RunArtifacts())
     reporter = _RecordingProgressReporter()
     ctx.reporter = reporter
 
@@ -731,7 +789,7 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
 
     async with httpx.AsyncClient() as client:
         phases = build_phases_after_align(
-            request=RunRequest(root=tmp_path),
+            request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
             http_client=client,
@@ -770,10 +828,8 @@ async def test_report_confirmed_report_payload_uses_no_slowpics_url(
     ctx.config.slowpics.auto_upload = True
     ctx.config.slowpics.confirm_upload_after_report = True
     ctx.config.report.enable = True
-    state = ExecutionState(
-        artifacts=RunArtifacts(slowpics_url="https://slow.pics/c/stale"),
-        selected_frames=[10],
-    )
+    ctx.selection = replace(ctx.selection, frames=(10,))
+    state = ExecutionState(artifacts=RunArtifacts(slowpics_url="https://slow.pics/c/stale"))
     captured_slowpics_url: str | None = "not-captured"
 
     def _capture_report(*_args: object, **kwargs: object) -> ReportPhaseOutput:
@@ -787,7 +843,7 @@ async def test_report_confirmed_report_payload_uses_no_slowpics_url(
     )
 
     phases = build_phases_after_align(
-        request=RunRequest(root=tmp_path),
+        request=make_run_request(root=tmp_path),
         monotonic_timer=lambda: 0.0,
         ffmpeg_runner=cast(Any, _RenderRunner()),
         http_client=None,
@@ -921,6 +977,7 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
     )
     monkeypatch.setattr("frame_compare.orchestration.phases.log.warning", _capture_warning)
 
+    ctx.selection = replace(ctx.selection, frames=(10,))
     state = ExecutionState(
         artifacts=RunArtifacts(
             render=_render_artifacts(
@@ -930,12 +987,11 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
                 },
                 screenshot_dir=tmp_path / "screenshots",
             )
-        ),
-        selected_frames=[10],
+        )
     )
     async with httpx.AsyncClient() as client:
         phases = build_phases_after_align(
-            request=RunRequest(root=tmp_path),
+            request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
             http_client=client,
@@ -951,3 +1007,19 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
     assert "publish:" in state.warnings[0].text
     assert "Image upload failed with status 400" in state.warnings[0].text
     assert warning_events == ["phase_warned"]
+
+
+@pytest.mark.parametrize("violation", ["label", "count"])
+def test_report_requires_rendered_clips_in_context_order(tmp_path: Path, violation: str) -> None:
+    ctx = _context(tmp_path)
+    render = _render_artifacts(
+        screenshots_by_label={"Reference": [tmp_path / "frame.png"]}, screenshot_dir=tmp_path
+    )
+    if violation == "label":
+        render.clips = (replace(render.clips[0], label="unrelated"),)
+    else:
+        render.clips = (*render.clips, replace(render.clips[0], label="extra"))
+    with pytest.raises(ValueError, match="clip label mismatch|zip.*longer"):
+        phase_post_render.run_report_phase(
+            ctx, frames=[0], render=render, metadata=None, slowpics_url=None
+        )

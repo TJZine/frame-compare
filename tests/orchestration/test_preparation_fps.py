@@ -10,11 +10,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
+from frame_compare.config.errors import ConfigValidationError
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.errors import (
     MixedSourceFpsError,
 )
-from frame_compare.orchestration.types import RunDependencies, RunRequest
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.vs.types import SourceInfo
 from tests.orchestration.preparation_test_support import (
     METRIC_CONFIG,
@@ -27,6 +28,7 @@ from tests.orchestration.preparation_test_support import (
 from tests.orchestration.preparation_test_support import (
     create_video_files as _create_video_files,
 )
+from tests.run_request_support import make_run_request
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -37,10 +39,12 @@ class FakeVSLoader:
         self,
         *,
         fps_by_name: dict[str, Fraction] | None = None,
+        frame_counts_by_name: dict[str, int] | None = None,
         dimensions_by_name: dict[str, tuple[int, int]] | None = None,
         frame_props_by_name: dict[str, dict[str, object]] | None = None,
     ) -> None:
         self.loaded: list[Path] = []
+        self._frame_counts_by_name = frame_counts_by_name or {}
         self._fps_by_name = fps_by_name or {}
         self._dimensions_by_name = dimensions_by_name or {}
         self._frame_props_by_name = frame_props_by_name or {}
@@ -52,7 +56,7 @@ class FakeVSLoader:
             clip=cast(Any, object()),
             width=width,
             height=height,
-            num_frames=100,
+            num_frames=self._frame_counts_by_name.get(path.name, 100),
             fps=self._fps_by_name.get(path.name, Fraction(24000, 1001)),
             format=cast(Any, object()),
             frame_props=self._frame_props_by_name.get(
@@ -75,14 +79,13 @@ class FakeVSLoader:
     ("config_content", "fps_by_name", "source_fps", "effective_fps", "reference", "domain_fps"),
     [
         pytest.param(
-            MINIMAL_CONFIG
-            + '\n[sources.overrides."01-encode.mkv"]\neffective_fps = "24000/1001"\n',
-            {"00-reference.mkv": Fraction(24000, 1001), "01-encode.mkv": Fraction(30000, 1001)},
-            [Fraction(24000, 1001), Fraction(30000, 1001)],
-            [Fraction(24000, 1001), Fraction(24000, 1001)],
+            MINIMAL_CONFIG + '\n[sources.overrides."01-encode.mkv"]\neffective_fps = "25/1"\n',
+            {"00-reference.mkv": Fraction(25, 1), "01-encode.mkv": Fraction(27021, 1127)},
+            [Fraction(25, 1), Fraction(24000, 1001)],
+            [Fraction(25, 1), Fraction(25, 1)],
             None,
             None,
-            id="applies_effective_fps_overrides_without_changing_source_fps",
+            id="applies_effective_fps_overrides_after_source_fps_canonicalization",
         ),
         pytest.param(
             MINIMAL_CONFIG
@@ -92,7 +95,7 @@ class FakeVSLoader:
                 "01-source-24.mkv": Fraction(24, 1),
                 "02-source-ntsc-ish.mkv": Fraction(13978, 583),
             },
-            [Fraction(24000, 1001), Fraction(24, 1), Fraction(13978, 583)],
+            [Fraction(24000, 1001), Fraction(24, 1), Fraction(24000, 1001)],
             [Fraction(24000, 1001), Fraction(24000, 1001), Fraction(24000, 1001)],
             None,
             None,
@@ -125,13 +128,13 @@ def test_execute_prep_effective_fps(
     loader = FakeVSLoader(fps_by_name=fps_by_name)
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
+            make_run_request(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
         )
     )
     assert [clip.source_fps for clip in prep.clips] == source_fps
     assert [clip.effective_fps for clip in prep.clips] == effective_fps
     if reference is not None:
-        selection_domain = json.loads(prep.analysis_selection_domain)
+        selection_domain = json.loads(prep.selection_domain.token)
         assert selection_domain["reference_path"] == (input_dir / reference).as_posix()
         assert [clip["effective_fps"] for clip in selection_domain["clips"]] == domain_fps
 
@@ -157,7 +160,7 @@ def test_execute_prep_match_fps_preserves_explicit_comparison_effective_fps(
     with pytest.raises(MixedSourceFpsError) as exc_info:
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, loader)),
             )
         )
@@ -252,7 +255,7 @@ def test_execute_prep_majority_fps(
     loader = FakeVSLoader(fps_by_name=fps_by_name)
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
+            make_run_request(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
         )
     )
     if source_fps is not None:
@@ -291,7 +294,7 @@ def test_execute_prep_match_fps_majority_preserves_explicit_override_and_can_sti
     with pytest.raises(MixedSourceFpsError) as exc_info:
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, loader)),
             )
         )
@@ -314,7 +317,7 @@ def test_execute_prep_rejects_mixed_source_fps_before_downstream_work(tmp_path: 
     with pytest.raises(MixedSourceFpsError) as exc_info:
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(root=tmp_path),
+                make_run_request(root=tmp_path),
                 RunDependencies(vs_loader=cast(Any, loader)),
             )
         )
@@ -329,3 +332,123 @@ def test_execute_prep_rejects_mixed_source_fps_before_downstream_work(tmp_path: 
         "comparison_path": str(input_dir / "b_comparison.mkv"),
         "comparison_fps": "30000/1001",
     }
+
+
+@pytest.mark.parametrize(
+    ("decoder_fps", "expected_source_fps"),
+    [
+        (Fraction(27021, 1127), Fraction(24000, 1001)),
+        (Fraction(24, 1), Fraction(24, 1)),
+        (Fraction(24000, 1001), Fraction(24000, 1001)),
+        (Fraction(25, 1), Fraction(25, 1)),
+        (
+            Fraction(24000, 1001) * Fraction(1_000_050, 1_000_000),
+            Fraction(24000, 1001) * Fraction(1_000_050, 1_000_000),
+        ),
+        (
+            Fraction(24000, 1001) * Fraction(1_000_010, 1_000_000),
+            Fraction(24000, 1001),
+        ),
+        (
+            Fraction(24000, 1001) * Fraction(999_990, 1_000_000),
+            Fraction(24000, 1001),
+        ),
+        (
+            Fraction(24000, 1001) * Fraction(1_000_011, 1_000_000),
+            Fraction(24000, 1001) * Fraction(1_000_011, 1_000_000),
+        ),
+        (
+            Fraction(24000, 1001) * Fraction(999_989, 1_000_000),
+            Fraction(24000, 1001) * Fraction(999_989, 1_000_000),
+        ),
+    ],
+)
+def test_execute_prep_canonicalizes_only_rates_within_ten_ppm(
+    decoder_fps: Fraction,
+    expected_source_fps: Fraction,
+    tmp_path: Path,
+) -> None:
+    _create_config(tmp_path)
+    _create_video_files(tmp_path / "comparison_videos", "00-reference.mkv", "01-comparison.mkv")
+    loader = FakeVSLoader(
+        fps_by_name={
+            "00-reference.mkv": decoder_fps,
+            "01-comparison.mkv": decoder_fps,
+        }
+    )
+
+    prep = asyncio.run(
+        preparation.execute_prep(
+            make_run_request(root=tmp_path), RunDependencies(vs_loader=cast(Any, loader))
+        )
+    )
+
+    assert [clip.probe.fps for clip in prep.clips] == [decoder_fps] * 2
+    assert [clip.source_fps for clip in prep.clips] == [expected_source_fps] * 2
+    assert [clip.effective_fps for clip in prep.clips] == [expected_source_fps] * 2
+
+
+def test_execute_prep_rejects_unrepresentable_effective_fps_duration(tmp_path: Path) -> None:
+    reference = "00-reference.mkv"
+    rate = "1/" + "1" + "0" * 310
+    _create_config(
+        tmp_path,
+        content=MINIMAL_CONFIG
+        + '\n[sources]\nmatch_fps = "assume_reference"\n'
+        + f'[sources.overrides."{reference}"]\neffective_fps = "{rate}"\n',
+    )
+    _create_video_files(tmp_path / "comparison_videos", reference, "01-comparison.mkv")
+
+    with pytest.raises(ConfigValidationError) as error:
+        asyncio.run(
+            preparation.execute_prep(
+                make_run_request(root=tmp_path),
+                RunDependencies(
+                    vs_loader=cast(Any, FakeVSLoader(frame_counts_by_name={reference: 240}))
+                ),
+            )
+        )
+
+    detail = error.value.validation_errors[0]
+    assert detail["loc"] == ["sources", "overrides", "effective_fps"]
+    assert reference in str(detail["msg"])
+    assert "duration" in str(detail["msg"])
+
+
+@pytest.mark.parametrize(
+    ("mode", "has_majority"),
+    [("assume_reference", False), ("majority", True), ("majority", False)],
+    ids=["assume-reference", "majority", "majority-fallback"],
+)
+def test_execute_prep_attributes_inherited_fps_overflow_to_matching(
+    tmp_path: Path, mode: str, has_majority: bool
+) -> None:
+    reference = "00-reference.mkv"
+    long_clip = "02-long-comparison.mkv"
+    rate = "1/" + "1" + "0" * 306
+    overridden = [reference, "01-short-comparison.mkv"] if has_majority else [reference]
+    overrides = "".join(
+        f'[sources.overrides."{name}"]\neffective_fps = "{rate}"\n' for name in overridden
+    )
+    _create_config(
+        tmp_path,
+        content=MINIMAL_CONFIG + f'\n[sources]\nmatch_fps = "{mode}"\n' + overrides,
+    )
+    _create_video_files(tmp_path / "comparison_videos", *overridden, long_clip)
+
+    with pytest.raises(ConfigValidationError) as error:
+        asyncio.run(
+            preparation.execute_prep(
+                make_run_request(root=tmp_path),
+                RunDependencies(
+                    vs_loader=cast(Any, FakeVSLoader(frame_counts_by_name={long_clip: 240}))
+                ),
+            )
+        )
+
+    detail = error.value.validation_errors[0]
+    assert detail["loc"] == ["sources", "match_fps"]
+    assert detail["input"] == rate
+    assert "Inherited effective_fps" in str(detail["msg"])
+    assert long_clip in str(detail["msg"])
+    assert "sources.match_fps" in str(error.value.context.hint)
