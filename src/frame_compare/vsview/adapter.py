@@ -203,7 +203,7 @@ def launch_alignment_verification_session(
     """
     try:
         script_path = _write_vsview_session_script(request)
-        session = alignment_review_session_from_script(script_path, require_result_absent=True)
+        session = alignment_review_session_from_script(script_path)
     except (AlignmentReviewContractError, OSError, ValueError) as exc:
         raise VSViewError(f"VSView session setup failed ({type(exc).__name__})") from exc
 

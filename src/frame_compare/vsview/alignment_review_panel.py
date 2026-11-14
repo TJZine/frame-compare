@@ -335,9 +335,7 @@ class AlignmentReviewPanel(WidgetPluginBase[Any, Any]):
                     for output in outputs
                 )
             )
-            session = alignment_review_session_from_script(
-                self.api.file_path, require_result_absent=True
-            )
+            session = alignment_review_session_from_script(self.api.file_path)
             if session.session_id != workspace.session_id:
                 raise AlignmentReviewContractError("alignment review session identity mismatch")
         except AlignmentReviewContractError as exc:

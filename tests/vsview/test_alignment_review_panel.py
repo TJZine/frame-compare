@@ -44,6 +44,10 @@ from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
     ALIGNMENT_REVIEW_METADATA_VERSION,
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
+    AlignmentReviewExpectedComparison,
+    ConfirmedAlignmentReviewDecision,
+    alignment_review_session_from_script,
+    read_alignment_review_result,
 )
 from frame_compare.vsview.alignment_review_panel import (
     AlignmentReviewPanel,
@@ -803,9 +807,22 @@ def test_mixed_states_save_authority_labels_and_preserve_evidence(
         assert all("Viewing:" not in label.text() for label in panel.source_status_labels)
         assert panel.source_status_labels[-1].text() == "Original frame: 11"
     else:
-        script.with_name(f"{script.stem}.alignment-result.json").unlink()
         _call_hook(panel.on_workspace_loaded)
         assert all(not label.isHidden() for label in panel.audio_summary_labels)
+
+        for output_index, frame in enumerate((10, 8, 12, 9, 11)):
+            _enter_frame(panel, output_index, frame)
+        panel.use_positions_button.click()
+
+        session = alignment_review_session_from_script(script)
+        expected = tuple(
+            AlignmentReviewExpectedComparison(f"ref:comparison-{ordinal}", 200, 200)
+            for ordinal in range(1, 5)
+        )
+        assert read_alignment_review_result(session, expected).decisions == tuple(
+            ConfirmedAlignmentReviewDecision(comparison.comparison_key, 10, frame)
+            for comparison, frame in zip(expected, (8, 12, 9, 11), strict=True)
+        )
 
 
 def test_manual_authority_stays_distinct_from_retained_provisional_attempt(

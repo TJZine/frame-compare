@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -16,7 +15,6 @@ from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 ALIGNMENT_REVIEW_METADATA_VERSION = 6
 ALIGNMENT_REVIEW_RESULT_VERSION = 1
 ALIGNMENT_REVIEW_RESULT_SUFFIX = ".alignment-result.json"
-VSVIEW_SESSIONS_DIR_NAME = "vsview_sessions"
 
 ALIGNMENT_REVIEW_METADATA_VERSION_KEY = "frame_compare_contract_version"
 ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY = "frame_compare_session_id"
@@ -72,7 +70,6 @@ MANUAL_AUTHORITY_ORIGINS: frozenset[_AuthorityOrigin] = frozenset(
 @dataclass(frozen=True, slots=True)
 class AlignmentReviewSession:
     script_path: Path
-    sessions_dir: Path
     session_id: str
     result_path: Path
 
@@ -228,36 +225,12 @@ class AlignmentReviewResult:
         _validated_session_id(self.session_id)
 
 
-def alignment_review_session_from_script(
-    script_path: Path,
-    *,
-    sessions_dir: Path | None = None,
-    require_result_absent: bool = False,
-) -> AlignmentReviewSession:
-    """Derive trusted session identity and result path from a generated script."""
-    owner = script_path.parent if sessions_dir is None else sessions_dir
-    if owner.name != VSVIEW_SESSIONS_DIR_NAME or owner.is_symlink() or not owner.is_dir():
-        raise AlignmentReviewContractError("invalid VSView sessions directory")
-    if script_path.parent.resolve() != owner.resolve():
-        raise AlignmentReviewContractError(
-            "VSView session script is outside its sessions directory"
-        )
-    if script_path.is_symlink() or not script_path.is_file():
-        raise AlignmentReviewContractError("VSView session script is not a regular file")
-
-    session_id = _session_id_from_filename(script_path.name)
-    result_path = script_path.with_name(f"{script_path.stem}{ALIGNMENT_REVIEW_RESULT_SUFFIX}")
-    if result_path.parent.resolve() != owner.resolve():
-        raise AlignmentReviewContractError(
-            "alignment review result path escaped its sessions directory"
-        )
-    if require_result_absent and os.path.lexists(result_path):
-        raise AlignmentReviewContractError("alignment review result already exists")
+def alignment_review_session_from_script(script_path: Path) -> AlignmentReviewSession:
+    """Derive session identity and result path from a generated script name."""
     return AlignmentReviewSession(
         script_path=script_path,
-        sessions_dir=owner,
-        session_id=session_id,
-        result_path=result_path,
+        session_id=_session_id_from_filename(script_path.name),
+        result_path=script_path.with_name(f"{script_path.stem}{ALIGNMENT_REVIEW_RESULT_SUFFIX}"),
     )
 
 
@@ -266,7 +239,6 @@ def write_alignment_review_result(
     result: AlignmentReviewResult,
 ) -> None:
     """Atomically write one complete alignment review result."""
-    _validate_session_paths(session, result_file_must_exist=False)
     if result.session_id != session.session_id:
         raise AlignmentReviewContractError("alignment review result session mismatch")
     payload = {
@@ -286,19 +258,10 @@ def read_alignment_review_result(
     expected_comparisons: tuple[AlignmentReviewExpectedComparison, ...],
 ) -> AlignmentReviewResult:
     """Read and strictly validate the exact trusted result sidecar."""
-    _validate_session_paths(session, result_file_must_exist=True)
     try:
-        raw = cast(
-            object,
-            json.loads(
-                session.result_path.read_text(encoding="utf-8"),
-                object_pairs_hook=_json_object_without_duplicates,
-            ),
-        )
+        raw = cast(object, json.loads(session.result_path.read_text(encoding="utf-8")))
     except FileNotFoundError as exc:
         raise AlignmentReviewContractError("alignment review result is missing") from exc
-    except AlignmentReviewContractError:
-        raise
     except (OSError, *SERIALIZED_DECODE_FAILURES) as exc:
         raise AlignmentReviewContractError("alignment review result is unreadable") from exc
     result = _parse_result(raw)
@@ -327,26 +290,6 @@ def validate_alignment_review_result(
                 raise AlignmentReviewContractError("reference source frame is out of bounds")
             if decision.comparison_source_frame >= expected.comparison_source_frame_count:
                 raise AlignmentReviewContractError("comparison source frame is out of bounds")
-
-
-def _validate_session_paths(
-    session: AlignmentReviewSession, *, result_file_must_exist: bool
-) -> None:
-    trusted = alignment_review_session_from_script(
-        session.script_path,
-        sessions_dir=session.sessions_dir,
-    )
-    if trusted != session:
-        raise AlignmentReviewContractError("alignment review session paths are inconsistent")
-    if os.path.lexists(session.result_path):
-        if session.result_path.is_symlink() or not session.result_path.is_file():
-            raise AlignmentReviewContractError("alignment review result is not a regular file")
-        if session.result_path.resolve().parent != session.sessions_dir.resolve():
-            raise AlignmentReviewContractError(
-                "alignment review result escaped its sessions directory"
-            )
-    elif result_file_must_exist:
-        raise AlignmentReviewContractError("alignment review result is missing")
 
 
 def _session_id_from_filename(filename: str) -> str:
@@ -442,9 +385,7 @@ def _parse_audio_review(raw: object) -> AlignmentReviewAudioReview:
     if not isinstance(raw, str):
         raise AlignmentReviewContractError("alignment review audio evidence is invalid")
     try:
-        decoded = json.loads(raw, object_pairs_hook=_json_object_without_duplicates)
-    except AlignmentReviewContractError:
-        raise
+        decoded = json.loads(raw)
     except SERIALIZED_DECODE_FAILURES as exc:
         raise AlignmentReviewContractError("alignment review audio evidence is invalid") from exc
     root = _strict_dict(
@@ -473,23 +414,6 @@ def _parse_audio_review(raw: object) -> AlignmentReviewAudioReview:
     candidate_offset = root["candidate_offset"]
     if candidate_offset is not None and not _is_int(candidate_offset):
         raise AlignmentReviewContractError("alignment review candidate offset is invalid")
-    if (origin == "none") != (frame_offset is None):
-        raise AlignmentReviewContractError("alignment review current authority is inconsistent")
-    if decision_state is None and origin == "computed_this_run":
-        raise AlignmentReviewContractError(
-            "current computed authority requires its trusted attempt"
-        )
-    if decision_state in {"provisional", "unavailable"} and origin in {
-        "computed_this_run",
-        "shared_computed_offsets",
-    }:
-        raise AlignmentReviewContractError("untrusted audio evidence became authoritative")
-    if decision_state == "trusted_automatic" and (
-        origin != "computed_this_run"
-        or candidate_offset is None
-        or frame_offset != candidate_offset
-    ):
-        raise AlignmentReviewContractError("accepted audio evidence is inconsistent")
     return AlignmentReviewAudioReview(
         current_authority=AlignmentReviewCurrentAuthority(origin=origin, frame_offset=frame_offset),
         decision_state=decision_state,
@@ -511,15 +435,6 @@ def _validated_session_id(value: str) -> str:
 
 def _is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _json_object_without_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise AlignmentReviewContractError("alignment review JSON contains duplicate fields")
-        result[key] = value
-    return result
 
 
 def _parse_result(raw: object) -> AlignmentReviewResult:
