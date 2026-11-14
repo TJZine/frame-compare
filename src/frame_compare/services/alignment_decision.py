@@ -423,7 +423,6 @@ def _evidence_columns(estimate: ChunkedAudioEstimate) -> AudioChunkColumns:
         credible=tuple(item.credible for item in estimate.observations),
         agrees=tuple(item.agrees for item in estimate.observations),
         total_samples=sum(item.reference_count for item in estimate.observations),
-        rows_omitted=False,
     )
 
 
@@ -449,7 +448,6 @@ def _empty_evidence(total_samples: int) -> tuple[AudioChunkColumns, tuple[AudioC
         credible=(),
         agrees=(),
         total_samples=total_samples,
-        rows_omitted=False,
     )
     return columns, ()
 

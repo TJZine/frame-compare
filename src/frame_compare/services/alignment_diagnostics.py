@@ -17,7 +17,7 @@ from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.paths import require_managed_immediate_child
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 _MAX_DIAGNOSTIC_BYTES = 2 * 1024 * 1024
 
 type AlignmentReviewOutcome = Literal[

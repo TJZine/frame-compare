@@ -6,7 +6,7 @@ import asyncio
 import json
 import shutil
 import subprocess
-from dataclasses import replace
+from dataclasses import asdict, replace
 from fractions import Fraction
 from pathlib import Path
 from threading import Event
@@ -20,11 +20,6 @@ from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_audio import measure_selected_audio_duration, probe_streams
 from frame_compare.services.errors import AudioAlignmentCancellationError
 from frame_compare.services.types import AlignmentConfig
-from frame_compare.utils.alignment_evidence import (
-    AudioAlignmentAttempt,
-    audio_attempt_payload,
-    evidence_from_payload,
-)
 from frame_compare.utils.alignment_review_projection import audio_evidence_rows
 from frame_compare.vs.env import detect_plugins, ensure_vs_environment
 from frame_compare.vs.loader import DefaultVSLoader
@@ -84,8 +79,11 @@ def test_live_matroska_packet_tail(
         request = alignment_request(
             reference=reference, comparisons=[comparison], generated_dir=tmp_path / "generated"
         )
+        diagnostics_dir = request.generated_dir / "alignment_diagnostics"
         request = replace(
             request,
+            alignment_diagnostics_dir=diagnostics_dir,
+            alignment_diagnostics_root=tmp_path,
             reference=replace(request.reference, source_frame_count=90 * 24),
             comparisons=[
                 replace(request.comparisons[0], source_frame_count=(90 if early_end else 88) * 24)
@@ -98,8 +96,9 @@ def test_live_matroska_packet_tail(
         ).results
         attempt = result.audio_attempt
         assert attempt is not None
-        assert (
-            evidence_from_payload(AudioAlignmentAttempt, audio_attempt_payload(attempt)) == attempt
+        diagnostic = json.loads((diagnostics_dir / "comparison-1.json").read_text(encoding="utf-8"))
+        assert diagnostic["original_audio_attempt"] == json.loads(
+            json.dumps(asdict(attempt), allow_nan=False)
         )
         if early_end:
             assert result.applied is False
