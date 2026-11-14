@@ -262,8 +262,8 @@ def test_portable_assembly_is_inert_and_reproducible(
             "python",
             {
                 "LICENSE.txt": b"license",
-                "python313.zip": b"stdlib",
-                "python313._pth": b"original",
+                "python314.zip": b"stdlib",
+                "python314._pth": b"original",
                 "python.exe": b"never execute",
             },
         ),
@@ -303,7 +303,9 @@ def test_portable_assembly_is_inert_and_reproducible(
         record["license"] = {
             "files": [{"path": "licenses/TEST.txt", "sha256": runtime.sha(older_notice)}]
         }
-    manifest = json.dumps({"artifacts": manifest_records}).encode()
+    manifest = json.dumps(
+        {"bundle": {"python_version": "3.14.10"}, "artifacts": manifest_records}
+    ).encode()
     live_manifest.write_bytes(manifest)
     (source / "uv.lock").write_bytes(lock)
 
@@ -389,7 +391,7 @@ def test_portable_assembly_is_inert_and_reproducible(
     assert not list(site.rglob("*.pyc"))
     assert not (site / "PySide6/QtWebEngine.dll").exists()
     assert "QtWebEngine.dll" not in (site / "pyside6_webengine-1.dist-info/RECORD").read_text()
-    assert (output / "python/python313._pth").read_bytes() == runtime.EMBEDDED_SEARCH_PATH
+    assert (output / "python/python314._pth").read_bytes() == runtime.embedded_search_path("314")
     assert (
         output / "licenses/python/pyside6_webengine-1.dist-info__licenses/LICENSE"
     ).read_bytes() == b"notice"

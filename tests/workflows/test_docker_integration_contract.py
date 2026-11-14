@@ -63,13 +63,13 @@ if [ "$1" = compose ] && [ "$2" = run ]; then
         cat <<'MARKERS'
 DOCKER_PROOF cli=ok version_output=0.6.0
 DOCKER_PROOF non_root=ok uid=1000
-DOCKER_PROOF vapoursynth_import=ok version=R81 api=4.3
+DOCKER_PROOF vapoursynth_import=ok version=R82 api=4.3
 DOCKER_PROOF plugin_dir=/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth
 DOCKER_PROOF extra_plugin_path=/opt/vapoursynth-extra-plugins
 DOCKER_PROOF core_plugins=lsmas,ffms2,vs_placebo
 DOCKER_PROOF lsmash_works=ok release=1310.0.0.0 functions=LibavSMASHSource,LWLibavSource index=proof.ffindex
 DOCKER_PROOF ffms2=ok release=5.0 runtime=5.0.0.0 functions=Source,index index=proof.ffindex
-DOCKER_PROOF vs_placebo=ok version=2.0.4 functions=Tonemap output=RGBS
+DOCKER_PROOF vs_placebo=ok version=2.0.5 functions=Tonemap output=RGBS
 DOCKER_PROOF debian_ffmpeg=7:7.1.5-0+deb13u1
 DOCKER_PROOF ffmpeg_version=ffmpeg version 7.1.5
 DOCKER_PROOF ffprobe_version=ffprobe version 7.1.5
@@ -113,7 +113,7 @@ MARKERS
 version = 2
 
 [media_runtime.fingerprints]
-full = "916760dd9ca2156521326493fbe92c395118d6f1ee36cc421d9bb9e2f66a8697"
+full = "89803760b74dd956d6ab2290c5845cc7ff1614b0005bd982cb2b3980cd658649"
 RECORD
         cat > "$run_dir/run_result.toml" <<'RECORD'
 version = 1
@@ -512,7 +512,7 @@ def test_workflow_uploads_e2e_artifacts_after_verification(repo_root: Path) -> N
         "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
     )
     assert upload_step["with"] == {
-        "name": "docker-e2e-artifacts",
+        "name": "${{ matrix.artifact }}",
         "path": "generated/e2e",
         "if-no-files-found": "warn",
         "retention-days": "14",

@@ -50,7 +50,7 @@ You can enter original frame numbers directly in the source rows. Any edit, incl
 an empty or invalid value, protects that row from automatic updates. **Use viewer frame**
 replaces that manual draft with its source’s retained viewer position and resumes
 tracking. Focused editing is protected. Other source rows continue tracking.
-Automatic tracking uses a contained bridge to the pinned VSView 0.13.0 workspace;
+Automatic tracking uses a contained bridge to the pinned VSView 0.14.0 workspace;
 if unavailable, the panel explains how to unlink playheads and enter frames manually.
 Ordinary VSView sessions are unaffected.
 

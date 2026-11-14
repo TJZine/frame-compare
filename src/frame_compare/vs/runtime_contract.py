@@ -53,11 +53,11 @@ MEDIA_RUNTIME_SCOPES: Final[tuple[MediaRuntimeScope, ...]] = (
     "full",
 )
 
-VAPOURSYNTH_RELEASE: Final = "R81"
+VAPOURSYNTH_RELEASE: Final = "R82"
 VAPOURSYNTH_API_MAJOR: Final = 4
-VAPOURSYNTH_SOURCE_COMMIT: Final = "dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a"
+VAPOURSYNTH_SOURCE_COMMIT: Final = "e0fadcc1c8977e99b11ce2e478996a867a939874"
 VAPOURSYNTH_SOURCE_TREE_SHA256: Final = (
-    "c05ae1a5c0cd05cef1c0946d48e653c8f0e3de91d694cef56149c256ab249844"
+    "a03137a2f325b3ca96585d5524e1556e22c93ca730d4e2390d84082d8cc48fd5"
 )
 
 LSMASH_SOURCE_COMMIT: Final = "d186eb95388710a7a91f6fd353169b457ebbb9db"
@@ -81,23 +81,25 @@ FFMS2_RUNTIME_VERSION: Final = "5.0.0.0"
 FFMS2_SOURCE_COMMIT: Final = "7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04"
 FFMS2_SOURCE_TREE_SHA256: Final = "5be86d5f8f103f8e0b25aaed0b69b7afc06f1b6cd548a6c81160fcd14ea6e8d7"
 
-VS_PLACEBO_RELEASE: Final = "2.0.4"
-VS_PLACEBO_SOURCE_COMMIT: Final = "3cfd23f257ecb62b0cbd81eaaca092e18ae8e579"
+VS_PLACEBO_RELEASE: Final = "2.0.5"
+VS_PLACEBO_SOURCE_COMMIT: Final = "e965afc70167b27924585737477fcd587942824d"
 VS_PLACEBO_SOURCE_TREE_SHA256: Final = (
-    "beb830744f1fa1702eb64cfe8bdaf5780bb3501f9c48901df24ab112a406a30a"
+    "2c049a7c7d5aa15081624050ca6046b6745904f0221741541b3e9dd0f368abcc"
 )
-LIBPLACEBO_SOURCE_COMMIT: Final = "a7a18af88ff0a17c04840dcb3246047bb6b46df3"
+LIBPLACEBO_SOURCE_COMMIT: Final = "275f7dea27924cdd34ab2e6c20e448b6bc4fab65"
 LIBPLACEBO_SOURCE_TREE_SHA256: Final = (
-    "bdbe17582c081e107e1a66c44d5f01aa856a157aa124660d662221848e88eda7"
+    "31a7921d400c88d3f194896b36a076417bb35e8e71261b9ad21709ade7efa3e0"
 )
 LIBDOVI_RELEASE: Final = "3.3.2"
 LIBDOVI_SOURCE_COMMIT: Final = "4fd2b2235c9f93582dd4a00e65ee34a07800afd7"
 LIBDOVI_SOURCE_TREE_SHA256: Final = (
     "e16dfb68270fc5b8610e2f1ae38b0b1051d8e7d03dd4b98a2f22f0e1fd09de26"
 )
+WINDOWS_LIBDOVI_RELEASE: Final = "3.4.0"
+WINDOWS_LIBDOVI_SOURCE_COMMIT: Final = "d1abe0e27ff2c7ab3339614d06db9f8a058af6b2"
 
-WINDOWS_FFMPEG_RELEASE: Final = "n8.1.3-9-g29e619e767"
-WINDOWS_FFMPEG_ARTIFACT_ID: Final = "ffmpeg-btbn-win64-lgpl-8.1-2026-09-30"
+WINDOWS_FFMPEG_RELEASE: Final = "n8.1.3-27-g8dca1586f4"
+WINDOWS_FFMPEG_ARTIFACT_ID: Final = "ffmpeg-btbn-win64-lgpl-8.1-2026-10-31"
 _WINDOWS_FFMPEG_ARTIFACT_MATCH = re.fullmatch(
     r"ffmpeg-btbn-win64-lgpl-\d+\.\d+-(?P<build_date>\d{4}-\d{2}-\d{2})",
     WINDOWS_FFMPEG_ARTIFACT_ID,
@@ -108,8 +110,8 @@ WINDOWS_FFMPEG_EXECUTABLE_TOKEN: Final = (
     f"{WINDOWS_FFMPEG_RELEASE}-"
     f"{date.fromisoformat(_WINDOWS_FFMPEG_ARTIFACT_MATCH.group('build_date')):%Y%m%d}"
 )
-WINDOWS_FFMPEG_SOURCE_COMMIT: Final = "29e619e767cde9045a75c29bc9a8278ae7b3a98b"
-WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT: Final = "6c9aec5fc9a72ec3abedd1fa84db141fa18cf52b"
+WINDOWS_FFMPEG_SOURCE_COMMIT: Final = "8dca1586f468bfcbb78ae3ed618af1361d9f140a"
+WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT: Final = "5031c6f1082414e53688d39e521849905071070d"
 WINDOWS_QT_DEPLOYMENT_PROFILE: Final = "pyside6-addons-no-webengine-v1"
 WINDOWS_PYSIDE6_RELEASE: Final = "6.12.0"
 WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE: Final = "9.0.1"
@@ -257,7 +259,12 @@ def _ffms2_identity(profile: MediaRuntimeProfile) -> dict[str, JSONValue]:
     }
 
 
-def _tone_mapping_identity() -> dict[str, JSONValue]:
+def _tone_mapping_identity(profile: MediaRuntimeProfile) -> dict[str, JSONValue]:
+    libdovi_release, libdovi_commit = (
+        (WINDOWS_LIBDOVI_RELEASE, WINDOWS_LIBDOVI_SOURCE_COMMIT)
+        if profile == "windows-x64"
+        else (LIBDOVI_RELEASE, LIBDOVI_SOURCE_COMMIT)
+    )
     return {
         "vs_placebo": {
             "release": VS_PLACEBO_RELEASE,
@@ -270,8 +277,8 @@ def _tone_mapping_identity() -> dict[str, JSONValue]:
             "source_commit": LIBPLACEBO_SOURCE_COMMIT,
         },
         "libdovi": {
-            "release": LIBDOVI_RELEASE,
-            "source_commit": LIBDOVI_SOURCE_COMMIT,
+            "release": libdovi_release,
+            "source_commit": libdovi_commit,
         },
     }
 
@@ -327,7 +334,7 @@ def _scope_components(
         "decoder": _decoder_identity(profile),
         "standalone_ffmpeg": _standalone_ffmpeg_identity(profile),
         "ffms2": _ffms2_identity(profile),
-        "tone_mapping": _tone_mapping_identity(),
+        "tone_mapping": _tone_mapping_identity(profile),
         "plugin_layout": plugin_layout,
     }
     if profile == "windows-x64":
@@ -392,7 +399,7 @@ def supported_media_runtime_report(
         "decoder": _decoder_identity(selected_profile),
         "standalone_ffmpeg": _standalone_ffmpeg_identity(selected_profile),
         "ffms2": _ffms2_identity(selected_profile),
-        "tone_mapping": _tone_mapping_identity(),
+        "tone_mapping": _tone_mapping_identity(selected_profile),
     }
     if selected_profile == "windows-x64":
         components["qt_deployment"] = _windows_qt_deployment_identity()

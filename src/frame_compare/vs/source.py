@@ -66,6 +66,7 @@ def load_source(
     *,
     decoder_options: LWLibavSourceOptions | None = None,
     index_cache: ManagedSourceIndexCache | None = None,
+    scan_frame_geometry: bool = False,
     abort_check: Callable[[], None] = raise_if_cancelling,
 ) -> SourceInfo:
     """Load video source with automatic format detection.
@@ -106,6 +107,7 @@ def load_source(
             loader_kwargs=loader_kwargs,
             admission=admission,
             index_cache=index_cache,
+            scan_frame_geometry=scan_frame_geometry,
             abort_check=abort_check,
         )
         abort_check()
@@ -150,6 +152,7 @@ def _load_lwlibav_source(
     loader_kwargs: dict[str, int | str],
     admission: SourceAdmission,
     index_cache: ManagedSourceIndexCache | None,
+    scan_frame_geometry: bool,
     abort_check: Callable[[], None],
 ) -> vs.VideoNode:
     def open_source(source: Path, cache: int, index: Path) -> vs.VideoNode:
@@ -162,7 +165,13 @@ def _load_lwlibav_source(
         return clip
 
     if index_cache is not None:
-        clip = index_cache.try_load(path, open_source, admission=admission, abort_check=abort_check)
+        clip = index_cache.try_load(
+            path,
+            open_source,
+            admission=admission,
+            scan_frame_geometry=scan_frame_geometry,
+            abort_check=abort_check,
+        )
         if clip is not None:
             return clip
         if admission.geometry_probe_token is not None:
@@ -171,7 +180,8 @@ def _load_lwlibav_source(
                 path,
             )
     abort_check()
-    admission.scan(path, abort_check=abort_check)
+    if scan_frame_geometry:
+        admission.scan(path, abort_check=abort_check)
     with private_index_directory() as directory:
         return open_source(path, 0, directory / "disabled.lwi")
 

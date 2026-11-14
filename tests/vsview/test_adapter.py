@@ -200,10 +200,10 @@ def test_windows_portable_child_env_relies_on_managed_embedded_path(
     assert child_env["FRAME_COMPARE_RUNTIME_KIND"] == "windows-portable"
     assert child_env["FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"] == "managed-fingerprint"
     assert "PYTHONPATH" not in child_env
-    from tools.windows_portable.portable_runtime import EMBEDDED_SEARCH_PATH
+    from tools.windows_portable.portable_runtime import embedded_search_path
 
-    assert EMBEDDED_SEARCH_PATH.splitlines() == [
-        b"python313.zip",
+    assert embedded_search_path("314").splitlines() == [
+        b"python314.zip",
         b".",
         rb"..\app\site-packages",
         rb"..\app\src",
@@ -650,6 +650,7 @@ def _execute_generated_script(
     successful_index_stems: set[str] | None = None,
     cache_free_failure_stems: set[str] | None = None,
     admission_scan_calls: list[Path] | None = None,
+    scan_frame_geometry: bool = False,
     output_sink: list[tuple[str, int, str]] | None = None,
     audio_review_by_key: dict[str, str] | None = None,
     overlay_sink: list[str] | None = None,
@@ -691,7 +692,9 @@ def _execute_generated_script(
 
     for path in (reference, *comparisons):
         if path.stem in managed_indexes:
-            assert cache_owner.try_load(path, seed_index, admission=admission)
+            assert cache_owner.try_load(
+                path, seed_index, admission=admission, scan_frame_geometry=scan_frame_geometry
+            )
             index = cache_owner.validated_index(path)
             assert index is not None
             source_indexes[path] = index
@@ -789,6 +792,7 @@ def _execute_generated_script(
             presentation_names_by_stem=presentation_names_by_stem,
             source_indexes=source_indexes,
             source_index_generated_root=generated_root,
+            scan_frame_geometry=scan_frame_geometry,
         )
     )
     script = session_path.read_text(encoding="utf-8")
@@ -905,9 +909,11 @@ def test_generated_session_registers_named_outputs_in_input_order(
     assert {metadata["frame_compare_session_id"] for metadata in output_metadata} == {"1" * 32}
 
 
+@pytest.mark.parametrize("scan_frame_geometry", [False, True])
 def test_generated_session_passes_validated_indexes_read_only_and_retries_privately(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    scan_frame_geometry: bool,
 ) -> None:
     admission_scan_calls: list[Path] = []
     output_calls, _metadata, _props, loader_calls = _execute_generated_script(
@@ -918,6 +924,7 @@ def test_generated_session_passes_validated_indexes_read_only_and_retries_privat
         unusable_index_stems={"a"},
         successful_index_stems={"ref"},
         admission_scan_calls=admission_scan_calls,
+        scan_frame_geometry=scan_frame_geometry,
     )
 
     index_cache = ManagedSourceIndexCache(tmp_path.resolve() / "generated")
@@ -930,11 +937,8 @@ def test_generated_session_passes_validated_indexes_read_only_and_retries_privat
         ("a", str(comparison_index), 0),
         ("a", None, 0),
     ]
-    assert admission_scan_calls == [
-        tmp_path / "ref.mkv",
-        tmp_path / "a.mkv",
-        tmp_path / "a.mkv",
-    ]
+    expected_scans = [tmp_path / "ref.mkv", tmp_path / "a.mkv", tmp_path / "a.mkv"]
+    assert admission_scan_calls == (expected_scans if scan_frame_geometry else [])
     assert output_calls == [("ref", 0, "Reference"), ("a", 1, "Comparison 1")]
 
 

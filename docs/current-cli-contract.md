@@ -207,6 +207,10 @@ Current fields:
 - `label_parser`: parsed-label parser priority. `auto` keeps bracket-aware
   Anitopy/GuessIt ordering; `guessit` and `anitopy` select the primary parser
   while retaining the alternate fallback.
+- `scan_frame_geometry`: defaults to `false`. Set to `true` to require a full
+  ffprobe frame-geometry scan before a native open unless the managed index
+  already records a valid completed scan. Applies to CLI and VSView native opens.
+  Source header checks and decoder pixel limits apply in both modes.
 - `overrides`: mapping from source selector to per-source override table.
   Current override fields are `trim_start_frames`, `trim_end_frames`,
   `active_rect = { x, y, width, height }`, `effective_fps = "num/den"`, and an
@@ -980,8 +984,8 @@ recovery requirement.
   before opening the source cache-free. Sources without a
   reusable geometry probe token do not log this warning. Generated VSView sessions
   can reuse validated stable entries or open cache-free. The current profile tokens are
-  `lsw1310-f125953022b6` for managed Windows, `lsw1310-1ec4b81a7724` for unmanaged
-  Windows, and `lsw1310-877219813395` for Debian/Docker. All legacy media-adjacent
+  `lsw1310-47d07506e489` for managed Windows, `lsw1310-7a882880f599` for unmanaged
+  Windows, and `lsw1310-9129a4cbb35a` for Debian/Docker. All legacy media-adjacent
   indexes remain inert.
   See the [source-index transaction](current-architecture.md#shared-caches-and-decoder-indexes).
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
@@ -1558,7 +1562,7 @@ toggles or tags.
 
 ## VSView Native Alignment Diagnostics
 
-VSView 0.13.0 parent telemetry and generated Frame Compare session diagnostics use
+VSView 0.14.0 parent telemetry and generated Frame Compare session diagnostics use
 stderr as the single human diagnostic stream. The native VSView panel is the sole
 human alignment-review interface: the terminal never reads review input, parses a
 confirmation response, or writes a result. The VSView child process is launched with
@@ -1595,7 +1599,7 @@ output per comparison. In the native panel, generated review sessions automatica
 unlink their own playheads. Browse each source to the same visible moment, inspect
 its tracked original-frame number, then choose **Confirm matching frames** once.
 Tracking starts at workspace load and continues while the panel is hidden or another
-tool is selected. The pinned VSView 0.13.0 integration reads retained per-source
+tool is selected. The pinned VSView 0.14.0 integration reads retained per-source
 positions; it does not infer inactive positions from active-source callbacks.
 `{n}/{total} frames ready` reports complete, in-range readiness. Playing, queued or
 in-flight seeking, paused playback workers still draining a frame, loading/reload
@@ -2276,7 +2280,7 @@ Review outputs keep original frame positions/counts, reference FPS, ordering,
 - `doctor --json` writes a single JSON object to stdout through the doctor command owner.
 - Python compatibility remains enforced by package metadata, runtime manifests, and build
   validation; `doctor` does not emit a separate Python-version check.
-- `doctor.baseline_version` is the supported VapourSynth release (`R81`).
+- `doctor.baseline_version` is the supported VapourSynth release (`R82`).
   `doctor.media_runtime` contains the code-owned component contract, scoped
   fingerprints, and index token. `doctor.runtime_environment` reports the
   deployment kind, expected and declared full fingerprints, declaration syntax,

@@ -264,6 +264,7 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert sources.reference is None
     assert sources.analysis_source == "reference"
     assert sources.match_fps == SourceMatchFpsMode.DISABLED
+    assert sources.scan_frame_geometry is False
     assert sources.overrides == {}
     assert tmdb.enabled is True
     assert tmdb.api_key is None

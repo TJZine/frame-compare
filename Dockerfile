@@ -1,20 +1,20 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 0: Pinned Python dependency tooling
 # ─────────────────────────────────────────────────────────────────────────────
-FROM ghcr.io/astral-sh/uv:0.13.5@sha256:32a7bb39b496babbd997b0a39a4d66c126bdaf5661b302bf6f06abda8deca6ff AS uv
+FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build supplemental VapourSynth plugins
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.13.17-slim-trixie@sha256:fe14fd57a4c0361110eaa0c284112b189750bcb43fb04bb5d1ee7b7744027ccf AS builder
+FROM python:3.13.18-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS builder
 
 # Deterministic media-runtime pins. Every Git checkout verifies both the exact
 # commit and a content-derived digest of the complete tracked source tree.
-ARG VAPOURSYNTH_VERSION=81
-ARG VAPOURSYNTH_SOURCE_COMMIT=dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a
-ARG VAPOURSYNTH_SOURCE_TREE_SHA256=c05ae1a5c0cd05cef1c0946d48e653c8f0e3de91d694cef56149c256ab249844
-ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=2e3429524728889328897945564235440910a032ebbc879620ba3ff900758b52
-ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=ed4c9e7fd99a58ce91042a8428745fe4a20696309f52f1bd8202f86141567cd3
+ARG VAPOURSYNTH_VERSION=82
+ARG VAPOURSYNTH_SOURCE_COMMIT=e0fadcc1c8977e99b11ce2e478996a867a939874
+ARG VAPOURSYNTH_SOURCE_TREE_SHA256=a03137a2f325b3ca96585d5524e1556e22c93ca730d4e2390d84082d8cc48fd5
+ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=9bd85641d3655c06ff90c73042204fbcf6db7bd26f8ae9d60a7ee17acf534f2e
+ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=d75f13527367e087265dceb0b069fa483b2ce0d8636774bc346904a581734836
 ARG LSMASH_COMMIT=d186eb95388710a7a91f6fd353169b457ebbb9db
 ARG LSMASH_SOURCE_TREE_SHA256=89c0277c1533c3958fd16f093c2b0bd13a51fcacb748bf88e36f40eff2a7f651
 ARG OBUPARSE_COMMIT=a67fcab9cd9d56c866a7a860f8c4aeb91b8817e8
@@ -23,10 +23,10 @@ ARG LSMASH_WORKS_COMMIT=7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67
 ARG LSMASH_WORKS_SOURCE_TREE_SHA256=da14d5b7df9ff7cee19d1b9e9051e55697c4e6e46d82f1bbcba276097336840d
 ARG FFMS2_COMMIT=7ed5e4d039ca9a6236bd2ebdfdd656c4304fbe04
 ARG FFMS2_SOURCE_TREE_SHA256=5be86d5f8f103f8e0b25aaed0b69b7afc06f1b6cd548a6c81160fcd14ea6e8d7
-ARG VS_PLACEBO_SOURCE_COMMIT=3cfd23f257ecb62b0cbd81eaaca092e18ae8e579
-ARG VS_PLACEBO_SOURCE_TREE_SHA256=beb830744f1fa1702eb64cfe8bdaf5780bb3501f9c48901df24ab112a406a30a
-ARG LIBPLACEBO_SOURCE_COMMIT=a7a18af88ff0a17c04840dcb3246047bb6b46df3
-ARG LIBPLACEBO_SOURCE_TREE_SHA256=bdbe17582c081e107e1a66c44d5f01aa856a157aa124660d662221848e88eda7
+ARG VS_PLACEBO_SOURCE_COMMIT=e965afc70167b27924585737477fcd587942824d
+ARG VS_PLACEBO_SOURCE_TREE_SHA256=2c049a7c7d5aa15081624050ca6046b6745904f0221741541b3e9dd0f368abcc
+ARG LIBPLACEBO_SOURCE_COMMIT=275f7dea27924cdd34ab2e6c20e448b6bc4fab65
+ARG LIBPLACEBO_SOURCE_TREE_SHA256=31a7921d400c88d3f194896b36a076417bb35e8e71261b9ad21709ade7efa3e0
 ARG LIBDOVI_SOURCE_COMMIT=4fd2b2235c9f93582dd4a00e65ee34a07800afd7
 ARG LIBDOVI_SOURCE_TREE_SHA256=e16dfb68270fc5b8610e2f1ae38b0b1051d8e7d03dd4b98a2f22f0e1fd09de26
 ARG DEBIAN_FFMPEG_PACKAGE_VERSION=7:7.1.5-0+deb13u1
@@ -124,7 +124,7 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
     cd /build && \
     rm -rf /build/l-smash
 
-# Build L-SMASH-Works 1310 against the R81 API4 wheel headers and
+# Build L-SMASH-Works 1310 against the R82 API4 wheel headers and
 # Debian Trixie's runtime-matched FFmpeg development libraries. Upstream's
 # Meson path is deprecated, but remains the narrow VapourSynth-only build and
 # avoids pulling unrelated optional dependencies into the runtime baseline.
@@ -171,7 +171,7 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
 
 # Preserve corresponding-source and license provenance for wheel-bundled
 # vs-placebo dependencies. These trees are not used to build the wheels; they
-# document the exact tracked sources selected by the upstream 2.0.4 release.
+# document the exact tracked sources selected by the upstream 2.0.5 release.
 RUN bash /usr/local/bin/checkout_source_commit.sh \
         https://github.com/Lypheo/vs-placebo.git \
         "${VS_PLACEBO_SOURCE_COMMIT}" \
@@ -207,7 +207,7 @@ RUN bash /usr/local/bin/checkout_source_commit.sh \
         "    {\"name\":\"L-SMASH-Works\",\"version\":\"1310.0.0.0\",\"source_commit\":\"${LSMASH_WORKS_COMMIT}\",\"source_url\":\"https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git\",\"source_tree_sha256\":\"${LSMASH_WORKS_SOURCE_TREE_SHA256}\",\"license\":\"ISC AND LGPL-2.1-or-later\"}," \
         "    {\"name\":\"FFMS2\",\"version\":\"5.0\",\"source_commit\":\"${FFMS2_COMMIT}\",\"source_url\":\"https://github.com/FFMS/ffms2.git\",\"source_tree_sha256\":\"${FFMS2_SOURCE_TREE_SHA256}\",\"license\":\"MIT\"}," \
         "    {\"name\":\"Debian FFmpeg\",\"version\":\"${DEBIAN_FFMPEG_PACKAGE_VERSION}\",\"distribution\":\"trixie\",\"selection_kind\":\"debian-package\",\"license\":\"GPL-2.0-or-later\",\"license_path\":\"/usr/local/share/licenses/frame-compare-media-runtime/Debian-FFmpeg-copyright\"}," \
-        "    {\"name\":\"vs-placebo\",\"version\":\"2.0.4\",\"source_ref\":\"2.0.4\",\"source_commit\":\"${VS_PLACEBO_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/Lypheo/vs-placebo.git\",\"source_tree_sha256\":\"${VS_PLACEBO_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-only\",\"selection_kind\":\"tag\"}," \
+        "    {\"name\":\"vs-placebo\",\"version\":\"2.0.5\",\"source_ref\":\"2.0.5\",\"source_commit\":\"${VS_PLACEBO_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/Lypheo/vs-placebo.git\",\"source_tree_sha256\":\"${VS_PLACEBO_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-only\",\"selection_kind\":\"tag\"}," \
         "    {\"name\":\"libplacebo\",\"version\":\"commit ${LIBPLACEBO_SOURCE_COMMIT}\",\"source_commit\":\"${LIBPLACEBO_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/haasn/libplacebo.git\",\"source_tree_sha256\":\"${LIBPLACEBO_SOURCE_TREE_SHA256}\",\"license\":\"LGPL-2.1-or-later\",\"selection_kind\":\"commit\"}," \
         "    {\"name\":\"libdovi\",\"version\":\"3.3.2\",\"source_ref\":\"libdovi-3.3.2\",\"source_commit\":\"${LIBDOVI_SOURCE_COMMIT}\",\"source_url\":\"https://github.com/quietvoid/dovi_tool.git\",\"source_tree_sha256\":\"${LIBDOVI_SOURCE_TREE_SHA256}\",\"license\":\"MIT\",\"selection_kind\":\"tag\"}" \
         '  ]' \
@@ -227,14 +227,14 @@ COPY src/frame_compare/ /src/frame_compare/
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 2: Runtime
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.13.17-slim-trixie@sha256:fe14fd57a4c0361110eaa0c284112b189750bcb43fb04bb5d1ee7b7744027ccf AS runtime
+FROM python:3.13.18-slim-trixie@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
 
-ARG VAPOURSYNTH_VERSION=81
-ARG VS_PLACEBO_VERSION=2.0.4
-ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=2e3429524728889328897945564235440910a032ebbc879620ba3ff900758b52
-ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=ed4c9e7fd99a58ce91042a8428745fe4a20696309f52f1bd8202f86141567cd3
-ARG VS_PLACEBO_X86_64_WHEEL_SHA256=d38796b739ae231e12e7b4f9449b3cb29cc4a5fa9cd50e8147fdd9a202797fff
-ARG VS_PLACEBO_AARCH64_WHEEL_SHA256=eb025cb3f8d723eeaa64dc19b26fa1a0a05b948eb0cedeb8645680d9695ba97d
+ARG VAPOURSYNTH_VERSION=82
+ARG VS_PLACEBO_VERSION=2.0.5
+ARG VAPOURSYNTH_X86_64_WHEEL_SHA256=9bd85641d3655c06ff90c73042204fbcf6db7bd26f8ae9d60a7ee17acf534f2e
+ARG VAPOURSYNTH_AARCH64_WHEEL_SHA256=d75f13527367e087265dceb0b069fa483b2ce0d8636774bc346904a581734836
+ARG VS_PLACEBO_X86_64_WHEEL_SHA256=c4dc7cef219acb7e811827cc92c4c651a0763f1c4fc8c6da06e3e990e21511cf
+ARG VS_PLACEBO_AARCH64_WHEEL_SHA256=23764df853b2978dfda3dd48c7989ec21325a1ba4aa06640087aadb82666c0ec
 ARG DEBIAN_FFMPEG_PACKAGE_VERSION=7:7.1.5-0+deb13u1
 
 COPY --from=uv /uv /uvx /usr/local/bin/
@@ -276,7 +276,7 @@ RUN ldconfig && \
 ENV VAPOURSYNTH_EXTRA_PLUGIN_PATH=/opt/vapoursynth-extra-plugins \
     LD_LIBRARY_PATH=/home/framecompare/.local/lib/python3.13/site-packages/vapoursynth:/usr/local/lib \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=916760dd9ca2156521326493fbe92c395118d6f1ee36cc421d9bb9e2f66a8697 \
+    FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT=89803760b74dd956d6ab2290c5845cc7ff1614b0005bd982cb2b3980cd658649 \
     FRAME_COMPARE_RUNTIME_KIND=docker \
     FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED=1 \
     FRAME_COMPARE_FFMPEG_EXECUTABLE=/usr/bin/ffmpeg \

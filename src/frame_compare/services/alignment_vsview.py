@@ -383,6 +383,11 @@ def maybe_launch_alignment_vsview(
                 cache_dir=cache_dir,
                 source_indexes=source_indexes,
                 source_index_generated_root=source_index_generated_root,
+                scan_frame_geometry=(
+                    vs_loader.scan_frame_geometry
+                    if isinstance(vs_loader, DefaultVSLoader)
+                    else False
+                ),
                 memory_limit_mb=config.memory_limit_mb,
                 preview_tonemap=config.preview_tonemap,
                 frame_props_by_stem=frame_props_by_stem,

@@ -60,6 +60,16 @@ from frame_compare.services.types import ParsedMetadata
         ("Film.2020.1080p.PCOK.WEB-DL-GROUP.mkv", ("PCOK", "WEB-DL", (), (), "GROUP")),
         ("Film.2020.1080p.HMAX.WEB-DL-GROUP.mkv", ("HMAX", "WEB-DL", (), (), "GROUP")),
         ("Film.2020.1080p.MA.BluRay-GROUP.mkv", ("MA", "BluRay", (), (), "GROUP")),
+        (
+            "The.Odyssey.2026.2160p.UHD.BluRay.DTS-HD.MA.5.1.HDR.x265-RandomBytes.mkv",
+            (None, "UHD BluRay", ("HDR",), (), "RandomBytes"),
+        ),
+        ("Film.2020.1080p.WEB-DL.DTS.HD.MA.5.1-GROUP.mkv", (None, "WEB-DL", (), (), "GROUP")),
+        ("Film.2020.1080p.WEB-DL.DTSHD.MA.5.1-GROUP.mkv", (None, "WEB-DL", (), (), "GROUP")),
+        (
+            "Film.2020.1080p.MA.WEB-DL.DTS-HD.MA.5.1-GROUP.mkv",
+            ("MA", "WEB-DL", (), (), "GROUP"),
+        ),
         ("Film.2020.1080p.AppleTV.WEB-DL-GROUP.mkv", ("ATV", "WEB-DL", (), (), "GROUP")),
     ],
 )

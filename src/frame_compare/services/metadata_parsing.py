@@ -403,6 +403,12 @@ def _service_alias_hit(tokens: tuple[str, ...], code: str, alias: tuple[str, ...
     for index in range(len(tokens) - size + 1):
         if tokens[index : index + size] != alias:
             continue
+        # The DTS-HD Master Audio suffix uses the same abbreviation as Movies Anywhere.
+        if alias == ("MA",) and (
+            (index >= 2 and tokens[index - 2 : index] == ("DTS", "HD"))
+            or (index > 0 and tokens[index - 1] == "DTSHD")
+        ):
+            continue
         if code == "HBO" and index + size < len(tokens) and tokens[index + size] == "MAX":
             continue
         if code == "MAX" and index > 0 and tokens[index - 1] == "HBO":

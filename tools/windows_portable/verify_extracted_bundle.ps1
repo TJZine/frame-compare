@@ -740,11 +740,11 @@ $requiredVsViewDistributions = [ordered]@{
   "pyside6-pdf" = "6.12.0.140"
   "pyside6-webengine" = "6.12.0.140"
   "shiboken6" = "6.12.0"
-  "vapoursynth-bestsource" = "22"
+  "vapoursynth-bestsource" = "23"
   "vspackrgb" = "2.0.0"
-  "vsview" = "0.13.0"
-  "cyclopts" = "5.3.0"
-  "vsjetengine" = "1.8.1"
+  "vsview" = "0.14.0"
+  "cyclopts" = "5.4.2"
+  "vsjetengine" = "2.0.0"
 }
 $inventoryDistributionVersions = [Collections.Generic.Dictionary[string, string]]::new(
   [System.StringComparer]::OrdinalIgnoreCase

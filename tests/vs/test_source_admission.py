@@ -272,7 +272,7 @@ def test_scan_refuses_mixed_resolution_mpegts_before_native_open(
     loader = MagicMock()
 
     with pytest.raises(SourceLoadError, match="dimensions change within a stream"):
-        load_source(joined, cast(Core, SimpleNamespace(lsmas=loader)))
+        load_source(joined, cast(Core, SimpleNamespace(lsmas=loader)), scan_frame_geometry=True)
 
     loader.LWLibavSource.assert_not_called()
 
@@ -555,8 +555,13 @@ def test_native_callers_refuse_unverifiable_formats_before_scan_or_open(
 
 @pytest.mark.parametrize("caller", ["source", "preview"])
 @pytest.mark.parametrize("coded_header", [False, True], ids=["unknown-coded", "known-coded"])
-def test_elementary_mpeg2_scans_before_private_native_open(
-    video: Path, monkeypatch: pytest.MonkeyPatch, caller: str, coded_header: bool
+@pytest.mark.parametrize("scan_frame_geometry", [False, True])
+def test_elementary_mpeg2_private_native_open_honors_scan_policy(
+    video: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caller: str,
+    coded_header: bool,
+    scan_frame_geometry: bool,
 ) -> None:
     from typing import Any
 
@@ -583,7 +588,7 @@ def test_elementary_mpeg2_scans_before_private_native_open(
     indices: list[Path] = []
 
     def open_source(path: str, **kwargs: object):
-        assert scanned == [video] * (len(indices) + 1)
+        assert scanned == ([video] * (len(indices) + 1) if scan_frame_geometry else [])
         assert kwargs["cache"] == 0
         index = Path(cast(str, kwargs["cachefile"]))
         assert index.name == "disabled.lwi" and not index.exists()
@@ -594,7 +599,9 @@ def test_elementary_mpeg2_scans_before_private_native_open(
     loader.LWLibavSource.side_effect = open_source
     for _ in range(2):
         if caller == "preview":
-            _, admitted = load_preview_source(loader, video, None)
+            _, admitted = load_preview_source(
+                loader, video, None, scan_frame_geometry=scan_frame_geometry
+            )
             assert admitted.format_name == "mpegvideo"
             assert admitted.geometry_probe_token is None
         else:
@@ -602,6 +609,7 @@ def test_elementary_mpeg2_scans_before_private_native_open(
                 video,
                 cast(Any, SimpleNamespace(lsmas=loader)),
                 index_cache=ManagedSourceIndexCache(video.parent / "generated"),
+                scan_frame_geometry=scan_frame_geometry,
             )
     assert len(indices) == 2
     assert all(not index.parent.exists() for index in indices)

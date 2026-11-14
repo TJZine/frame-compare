@@ -310,6 +310,11 @@ sentinels. It checks the real Docker ignore rules, then exports the exact
 list. The production image copies that stage and the explicit locked package
 metadata. The test service mounts the checkout for tests and verification tools.
 
+CI runs this gate on native AMD64 and ARM64 Linux runners and uploads a separate
+artifact for each architecture. The hosted workflow also builds the `gui-linux`
+target and runs its inside-container offscreen proof on both architectures.
+The separate alignment resource benchmark runs on AMD64.
+
 The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` with
 10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
 It explicitly excludes `tests/integration/test_alignment_streaming_resources.py`.
@@ -448,7 +453,7 @@ generation without requiring a visible desktop launch.
 The verifier contract covers this offscreen path: the `gui-linux` image must discover
 and load the exact Frame Compare VSView panel entry point, construct the panel in its
 inert ordinary-session state, load a production-generated L-SMASH session with VSView
-0.13.0, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
+0.14.0, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
 all three outputs, and round-trip/validate the sibling result sidecar. The R81
 dependency refresh ran the inside-container offscreen proof on macOS Docker Desktop;
 see the [Windows 10 handoff](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-07-dependency-refresh-windows10-handoff.md)
@@ -555,7 +560,7 @@ Canonical verification path:
    Build the portable bundle and validate its deterministic ZIP layout, native
    plugin manifests, license inventory, source provenance, and runtime fingerprint.
 4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
-   verify R81/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.13.0,
+   verify R82/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.5, VSView 0.14.0,
    PySide6 6.12.0, BestSource, vspackrgb, and the selected LGPL-only
    FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
    required bundled Python process, preload the managed VapourSynth runtime before
@@ -736,7 +741,7 @@ Current CI ownership:
 #### Portable runtime input authority
 
 Use the candidate's committed `uv.lock` and Windows runtime manifest with the
-workflow's pinned host Python 3.13.17 and uv 0.13.5. Review changed archive pins,
+workflow's pinned Windows host Python 3.13.17 and uv 0.13.8. Review changed archive pins,
 native provenance, Qt WebEngine exclusions and notices at the candidate commit.
 The assembler authenticates the exact Windows Python dependencies against the
 frozen lock and stages them in a local wheelhouse. It converts the authenticated
@@ -805,8 +810,8 @@ advisory matching. The candidate scanner pins for a Linux x64 verifier are:
 
 | Verified release archive | SHA-256 |
 | --- | --- |
-| [Syft 1.56.0 Linux x64](https://github.com/anchore/syft/releases/tag/v1.56.0) | `1c2493cfcf52d3367d6cb25780d9190c111c2219c34c820574c43e8bae15c528` |
-| [Grype 0.121.0 Linux x64](https://github.com/anchore/grype/releases/tag/v0.121.0) | `64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519` |
+| [Syft 1.57.1 Linux x64](https://github.com/anchore/syft/releases/tag/v1.57.1) | `bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c` |
+| [Grype 0.121.3 Linux x64](https://github.com/anchore/grype/releases/tag/v0.121.3) | `e9da18cc1429e786722e32161288103600efffd8e483c90761f90485bd1bec85` |
 
 Verify archive hashes before extracting tools. For Windows, consume the verified
 canonical portable ZIP by immutable artifact ID and SHA-256. Use the portable

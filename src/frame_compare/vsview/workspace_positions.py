@@ -1,4 +1,4 @@
-"""Contained bridge for retained positions in the pinned VSView 0.13 workspace.
+"""Contained bridge for retained positions in the pinned VSView 0.14 workspace.
 
 The public API exposes only the active frame and hides navigation callbacks when
 the tool panel is closed. Read the workspace's existing per-output authority;
@@ -21,8 +21,8 @@ class WorkspacePositions:
     def __init__(
         self, api: PluginAPI, script: Path, metadata: AlignmentReviewWorkspaceMetadata
     ) -> None:
-        if version("vsview") != "0.13.0":
-            raise RuntimeError("Automatic frame tracking requires VSView 0.13.0")
+        if version("vsview") != "0.14.0":
+            raise RuntimeError("Automatic frame tracking requires VSView 0.14.0")
         # This is the only private VSView access in Frame Compare. Keep the
         # version gate until a public retained-position API replaces it.
         from vsview.app.plugins._controller import get_controller
@@ -59,7 +59,7 @@ class WorkspacePositions:
         if require_idle and (
             playback.state.is_playing
             or playback.has_pending_frame
-            or playback._timeline_rendering
+            or playback.is_rendering
             or not playback.can_reload
             or workspace.tab_manager.disable_switch
             or workspace._is_failed

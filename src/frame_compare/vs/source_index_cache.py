@@ -40,7 +40,7 @@ class _IndexMetadata(TypedDict):
     source_size: int
     source_mtime_ns: int
     source_change_time: int
-    geometry_policy_version: int
+    geometry_policy_version: int | None
     geometry_probe_token: str
     index_size: int
     index_sha256: str
@@ -147,7 +147,12 @@ class ManagedSourceIndexCache:
             yield entry
 
     def _metadata(
-        self, entry: _Entry, source: SourceIdentity, index_path: Path, geometry_probe_token: str
+        self,
+        entry: _Entry,
+        source: SourceIdentity,
+        index_path: Path,
+        geometry_probe_token: str,
+        geometry_policy_version: int | None,
     ) -> _IndexMetadata:
         index = _regular_info(index_path)
         if index.st_size <= 0:
@@ -163,14 +168,19 @@ class ManagedSourceIndexCache:
             "source_size": source.size,
             "source_mtime_ns": source.mtime_ns,
             "source_change_time": source.change_time,
-            "geometry_policy_version": _GEOMETRY_POLICY_VERSION,
+            "geometry_policy_version": geometry_policy_version,
             "geometry_probe_token": geometry_probe_token,
             "index_size": index.st_size,
             "index_sha256": digest,
         }
 
     def _is_valid(
-        self, entry: _Entry, source: SourceIdentity, geometry_probe_token: str | None = None
+        self,
+        entry: _Entry,
+        source: SourceIdentity,
+        geometry_probe_token: str | None = None,
+        *,
+        scan_frame_geometry: bool,
     ) -> bool:
         try:
             # Metadata contains only fixed-size fields. Bound reads of damaged files.
@@ -178,28 +188,40 @@ class ManagedSourceIndexCache:
                 return False
             with entry.metadata.open("rb") as handle:
                 metadata = handle.read(4097)
-            if geometry_probe_token is None:
-                # Discovery returns a path hint. An actual open must match its own probe.
-                payload: object = json.loads(metadata)
-                if not isinstance(payload, dict):
-                    return False
-                token = cast(dict[str, object], payload).get("geometry_probe_token")
-                if not isinstance(token, str) or len(token) != 64:
-                    return False
-                geometry_probe_token = token
+            payload: object = json.loads(metadata)
+            if not isinstance(payload, dict):
+                return False
+            fields = cast(dict[str, object], payload)
+            policy = fields.get("geometry_policy_version")
+            if policy is not None and (
+                type(policy) is not int or policy != _GEOMETRY_POLICY_VERSION
+            ):
+                return False
+            if scan_frame_geometry and policy != _GEOMETRY_POLICY_VERSION:
+                return False
+            # Discovery returns a path hint. An actual open must match its own probe.
+            token = (
+                geometry_probe_token
+                if geometry_probe_token is not None
+                else fields.get("geometry_probe_token")
+            )
+            if not isinstance(token, str) or len(token) != 64:
+                return False
             expected = json.dumps(
-                self._metadata(entry, source, entry.index, geometry_probe_token), sort_keys=True
+                self._metadata(entry, source, entry.index, token, policy), sort_keys=True
             )
             return metadata == expected.encode("ascii")
         except (OSError, ValueError):
             return False
 
-    def validated_index(self, path: Path) -> Path | None:
+    def validated_index(self, path: Path, *, scan_frame_geometry: bool = False) -> Path | None:
         """Find a committed index path. Recheck geometry authority when opening it."""
         try:
             with self._lease(path, create=False) as entry:
                 source = source_identity(entry.source)
-                if self._is_valid(entry, source) and _same_source(path, entry.source, source):
+                if self._is_valid(
+                    entry, source, scan_frame_geometry=scan_frame_geometry
+                ) and _same_source(path, entry.source, source):
                     return entry.index
         except (OSError, RuntimeError, ValueError):
             pass
@@ -212,6 +234,7 @@ class ManagedSourceIndexCache:
         open_source: Callable[[Path, int, Path], T],
         *,
         admission: SourceAdmission,
+        scan_frame_geometry: bool = False,
         abort_check: Callable[[], None] = raise_if_cancelling,
     ) -> T | None:
         """Open an existing index only while its owner lease and authority remain valid."""
@@ -223,7 +246,9 @@ class ManagedSourceIndexCache:
                 if expected_index != entry.index:
                     return None
                 source = source_identity(entry.source)
-                if not self._is_valid(entry, source, probe_token):
+                if not self._is_valid(
+                    entry, source, probe_token, scan_frame_geometry=scan_frame_geometry
+                ):
                     return None
                 return self._open_warm(path, entry, source, open_source, admission, abort_check)
         except (OSError, RuntimeError, ValueError) as error:
@@ -236,6 +261,7 @@ class ManagedSourceIndexCache:
         open_source: Callable[[Path, int, Path], T],
         *,
         admission: SourceAdmission,
+        scan_frame_geometry: bool = False,
         abort_check: Callable[[], None] = raise_if_cancelling,
     ) -> T | None:
         """Open through this cache. A miss with failed construction needs a private retry."""
@@ -245,13 +271,23 @@ class ManagedSourceIndexCache:
         try:
             with self._lease(path, create=True, abort_check=abort_check) as entry:
                 source = source_identity(entry.source)
-                if self._is_valid(entry, source, probe_token):
+                if self._is_valid(
+                    entry, source, probe_token, scan_frame_geometry=scan_frame_geometry
+                ):
                     return self._open_warm(path, entry, source, open_source, admission, abort_check)
-                admission.scan(entry.source, abort_check=abort_check)
+                if scan_frame_geometry:
+                    admission.scan(entry.source, abort_check=abort_check)
                 if not _same_source(path, entry.source, source):
                     return None
                 return self._build(
-                    path, entry, source, open_source, admission, probe_token, abort_check
+                    path,
+                    entry,
+                    source,
+                    open_source,
+                    admission,
+                    probe_token,
+                    scan_frame_geometry,
+                    abort_check,
                 )
         except SourceGeometryError:
             raise
@@ -286,6 +322,7 @@ class ManagedSourceIndexCache:
         open_source: Callable[[Path, int, Path], T],
         admission: SourceAdmission,
         probe_token: str,
+        scan_frame_geometry: bool,
         abort_check: Callable[[], None],
     ) -> T | None:
         with self._stage() as (directory, stage_info):
@@ -300,7 +337,10 @@ class ManagedSourceIndexCache:
             if not os.path.samestat(stage_info, _directory_info(directory)):
                 return None
             _sync_regular_file(index_path)
-            metadata = self._metadata(entry, source, index_path, probe_token)
+            geometry_policy_version = _GEOMETRY_POLICY_VERSION if scan_frame_geometry else None
+            metadata = self._metadata(
+                entry, source, index_path, probe_token, geometry_policy_version
+            )
             with metadata_path.open("x", encoding="ascii") as handle:
                 json.dump(metadata, handle, sort_keys=True)
                 handle.flush()

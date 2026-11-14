@@ -37,9 +37,11 @@ class DefaultVSLoader:
         memory_limit_mb: int | None = None,
         *,
         index_cache: ManagedSourceIndexCache | None = None,
+        scan_frame_geometry: bool = False,
     ) -> None:
         self._memory_limit_mb = memory_limit_mb
         self._index_cache = index_cache
+        self.scan_frame_geometry = scan_frame_geometry
         self._core: vs.Core | None = None
 
     def ensure_core(self) -> vs.Core:
@@ -53,13 +55,19 @@ class DefaultVSLoader:
         self, path: Path, *, abort_check: Callable[[], None] = raise_if_cancelling
     ) -> SourceInfo:
         core = self.ensure_core()
-        return load_source(path, core, index_cache=self._index_cache, abort_check=abort_check)
+        return load_source(
+            path,
+            core,
+            index_cache=self._index_cache,
+            scan_frame_geometry=self.scan_frame_geometry,
+            abort_check=abort_check,
+        )
 
     def validated_index(self, path: Path) -> Path | None:
         """Return the workspace's committed index for a read-only session."""
         if self._index_cache is None:
             return None
-        return self._index_cache.validated_index(path)
+        return self._index_cache.validated_index(path, scan_frame_geometry=self.scan_frame_geometry)
 
     @property
     def source_index_generated_root(self) -> Path | None:

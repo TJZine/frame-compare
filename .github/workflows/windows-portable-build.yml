@@ -161,7 +161,7 @@ jobs:
       - name: Setup isolated host Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.13.17"
+          python-version: "3.13.18"
 
       - name: Require immutable verified inputs
         shell: bash
@@ -216,14 +216,14 @@ jobs:
           mkdir "$tools"
           curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
             --output "$tools/syft.tar.gz" \
-            https://github.com/anchore/syft/releases/download/v1.56.0/syft_1.56.0_linux_amd64.tar.gz
+            https://github.com/anchore/syft/releases/download/v1.57.1/syft_1.57.1_linux_amd64.tar.gz
           curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
             --output "$tools/grype.tar.gz" \
-            https://github.com/anchore/grype/releases/download/v0.121.0/grype_0.121.0_linux_amd64.tar.gz
+            https://github.com/anchore/grype/releases/download/v0.121.3/grype_0.121.3_linux_amd64.tar.gz
           (
             cd "$tools"
-            echo "1c2493cfcf52d3367d6cb25780d9190c111c2219c34c820574c43e8bae15c528  syft.tar.gz" | sha256sum --check
-            echo "64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519  grype.tar.gz" | sha256sum --check
+            echo "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c  syft.tar.gz" | sha256sum --check
+            echo "e9da18cc1429e786722e32161288103600efffd8e483c90761f90485bd1bec85  grype.tar.gz" | sha256sum --check
             tar --extract --gzip --file syft.tar.gz --no-same-owner syft
             tar --extract --gzip --file grype.tar.gz --no-same-owner grype
           )
@@ -257,8 +257,8 @@ jobs:
             --cyclonedx "$evidence/windows-portable.cyclonedx.json" \
             --grype "$evidence/windows-portable.grype.json" \
             --db-status "$evidence/grype-db-status.json" \
-            --expected-syft-version 1.56.0 \
-            --expected-grype-version 0.121.0 \
+            --expected-syft-version 1.57.1 \
+            --expected-grype-version 0.121.3 \
             --output "$evidence/artifact-security.json"
 
       - name: Retain final-artifact security evidence

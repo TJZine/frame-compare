@@ -197,7 +197,10 @@ def prepare_clip_for_render(
         try:
             from frame_compare.vs.loader import DefaultVSLoader
 
-            loader = vs_loader or DefaultVSLoader(memory_limit_mb=config.runtime.memory_limit_mb)
+            loader = vs_loader or DefaultVSLoader(
+                memory_limit_mb=config.runtime.memory_limit_mb,
+                scan_frame_geometry=config.sources.scan_frame_geometry,
+            )
             raise_if_cancelling()
             source_info = loader.load(clip_path)
             diagnostic_source = source_info.clip

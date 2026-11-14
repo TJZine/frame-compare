@@ -195,6 +195,32 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     assert "paths-ignore" not in docker["on"]["pull_request"]
 
 
+def test_docker_verifies_both_native_architectures(repo_root: Path) -> None:
+    workflow = _load_workflow(repo_root / ".github/workflows/docker-integration.yml")
+    job = workflow["jobs"]["docker-integration"]
+    assert job["name"] == "${{ matrix.name }}"
+    assert job["runs-on"] == "${{ matrix.runner }}"
+    assert job["strategy"]["fail-fast"] == "false"
+    variants = {variant["arch"]: variant for variant in job["strategy"]["matrix"]["include"]}
+    assert set(variants) == {"amd64", "arm64"}
+    assert variants["amd64"]["runner"] == "ubuntu-latest"
+    assert variants["amd64"]["name"] == "Docker Integration Tests"
+    assert variants["arm64"]["runner"] == "ubuntu-24.04-arm"
+    assert variants["arm64"]["name"] == "Docker Integration Tests (ARM64)"
+    assert {variant["artifact"] for variant in variants.values()} == {
+        "docker-e2e-artifacts",
+        "docker-e2e-artifacts-arm64",
+    }
+
+    steps = {step.get("name"): step for step in job["steps"]}
+    assert steps["Run opt-in alignment resource proof"]["if"] == "matrix.arch == 'amd64'"
+    offscreen = steps["Verify the Docker GUI runtime offscreen"]
+    assert "if" not in offscreen
+    assert "docker build --target gui-linux" in offscreen["run"]
+    assert "QT_QPA_PLATFORM=offscreen" in offscreen["run"]
+    assert "/tmp/verify_docker_gui.sh --inside-container" in offscreen["run"]
+
+
 def test_pr_title_workflow_can_publish_its_configured_status(repo_root: Path) -> None:
     workflow = _load_workflow(repo_root / ".github" / "workflows" / "pr-title.yml")
     lint_job = workflow["jobs"]["pr_title"]

@@ -156,9 +156,9 @@ def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
 
     payload = json.loads(result.stdout)
     assert payload["success"] is True
-    assert payload["doctor"]["baseline_version"] == "R81"
+    assert payload["doctor"]["baseline_version"] == "R82"
     media_runtime = payload["doctor"]["media_runtime"]
-    assert media_runtime["components"]["decoder"]["vapoursynth"]["release"] == "R81"
+    assert media_runtime["components"]["decoder"]["vapoursynth"]["release"] == "R82"
     assert media_runtime["fingerprints"]["full"] == expected_runtime_fingerprint
     runtime_environment = payload["doctor"]["runtime_environment"]
     assert runtime_environment == {

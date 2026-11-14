@@ -11,7 +11,7 @@ from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 def test_default_vs_loader_load_calls_load_source(tmp_path: Path) -> None:
     """Verify DefaultVSLoader.load delegates to load_source."""
     cache = ManagedSourceIndexCache(tmp_path.resolve())
-    loader = DefaultVSLoader(index_cache=cache)
+    loader = DefaultVSLoader(index_cache=cache, scan_frame_geometry=True)
     path = tmp_path / "video.mkv"
 
     with (
@@ -24,7 +24,11 @@ def test_default_vs_loader_load_calls_load_source(tmp_path: Path) -> None:
         loader.load(path)
 
         mock_load.assert_called_once_with(
-            path, mock_core, index_cache=cache, abort_check=raise_if_cancelling
+            path,
+            mock_core,
+            index_cache=cache,
+            scan_frame_geometry=True,
+            abort_check=raise_if_cancelling,
         )
 
 

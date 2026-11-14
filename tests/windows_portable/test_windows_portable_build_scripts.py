@@ -247,7 +247,7 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
 
     assert manifest["manifest_version"] == 2
-    assert manifest["bundle"]["vs_ref"] == "R81"
+    assert manifest["bundle"]["vs_ref"] == "R82"
     assert manifest["bundle"]["ffmpeg_policy"] == "lgpl-only"
     assert set(manifest["bundle"]["runtime_fingerprints"]) == {
         "analysis",
@@ -261,25 +261,25 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
         for fingerprint in manifest["bundle"]["runtime_fingerprints"].values()
     )
 
-    expected_python_version = "3.13.17"
+    expected_python_version = "3.14.10"
     assert manifest["bundle"]["python_version"] == expected_python_version
     python = artifacts["python-embed-amd64"]
     assert python["version"] == expected_python_version
     assert python["source_ref"] == expected_python_version
-    assert python["release_date"] == "2026-10-21"
+    assert python["release_date"] == "2026-10-25"
 
-    vapoursynth = artifacts["vapoursynth-portable-r81"]
-    assert vapoursynth["version"] == "R81"
-    assert vapoursynth["url"].endswith("/R81/VapourSynth64-Portable-R81.zip")
-    assert vapoursynth["source_ref"] == "R81"
-    assert vapoursynth["source_commit"] == "dd11a9da6f8e2bb24ab4bb084d44bf01fb93612a"
-    assert vapoursynth["bytes"] == 31797504
+    vapoursynth = artifacts["vapoursynth-portable-r82"]
+    assert vapoursynth["version"] == "R82"
+    assert vapoursynth["url"].endswith("/R82/VapourSynth64-Portable-R82.zip")
+    assert vapoursynth["source_ref"] == "R82"
+    assert vapoursynth["source_commit"] == "e0fadcc1c8977e99b11ce2e478996a867a939874"
+    assert vapoursynth["bytes"] == 31801679
     assert vapoursynth["sha256"] == (
-        "6d625bd3b4d68697a7664a886f3a5e2f1df1a4744b4811bf77bd944baed63436"
+        "f97ea50c4c9f778eeac4bc4e3e43f86fb3b71787371d06e584e0c47f396874ca"
     )
-    assert vapoursynth["source_bytes"] == 1134224
+    assert vapoursynth["source_bytes"] == 1140334
     assert vapoursynth["source_sha256"] == (
-        "8b539506bba0fce6794d905da771a1b88a5cf2288a99ae0d32b8acd675240391"
+        "d908d2c7a9278918658db0f2e3e46ac11c78cfb365d265616c41e648bc561900"
     )
 
     lsmas = artifacts["vs-plugin-lsmas-1310.0.0.0-win-amd64-wheel"]
@@ -294,13 +294,13 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     )
     assert lsmas["source_commit"] == "7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67"
 
-    placebo = artifacts["vs-plugin-vs-placebo-2.0.4-win-amd64-wheel"]
-    assert placebo["version"] == "2.0.4"
+    placebo = artifacts["vs-plugin-vs-placebo-2.0.5-win-amd64-wheel"]
+    assert placebo["version"] == "2.0.5"
     assert placebo["install"]["type"] == "python_wheel"
     assert placebo["url"].endswith("-win_amd64.whl")
 
-    ffmpeg = artifacts["ffmpeg-btbn-win64-lgpl-8.1-2026-09-30"]
-    assert ffmpeg["version"].startswith("n8.1.3-9-g29e619e767")
+    ffmpeg = artifacts["ffmpeg-btbn-win64-lgpl-8.1-2026-10-31"]
+    assert ffmpeg["version"].startswith("n8.1.3-27-g8dca1586f4")
     assert ffmpeg["license"]["spdx"] == "LGPL-2.1-or-later"
     assert not any(artifact_id.startswith("ffms2") for artifact_id in artifacts)
 
@@ -352,15 +352,15 @@ def test_windows_portable_manifest_pins_exact_vsview_windows_graph(repo_root: Pa
     )
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
     expected = {
-        "vsview-0.13.0-wheel": ("0.13.0", 2285313),
-        "cyclopts-5.3.0-wheel": ("5.3.0", 296696),
+        "vsview-0.14.0-wheel": ("0.14.0", 2377037),
+        "cyclopts-5.4.2-wheel": ("5.4.2", 300704),
         "pyside6-6.12.0-win-amd64-wheel": ("6.12.0", 578958),
         "pyside6-addons-6.12.0-win-amd64-wheel": ("6.12.0", 40522402),
         "pyside6-essentials-6.12.0-win-amd64-wheel": ("6.12.0", 82153795),
         "shiboken6-6.12.0-win-amd64-wheel": ("6.12.0", 1265476),
         "pyside6-pdf-6.12.0.140-win-amd64-wheel": ("6.12.0.140", 2983516),
         "pyside6-webengine-6.12.0.140-win-amd64-wheel": ("6.12.0.140", 131697708),
-        "vapoursynth-bestsource-22-win-amd64-wheel": ("22", 15890493),
+        "vapoursynth-bestsource-23-win-amd64-wheel": ("23", 16086999),
         "vspackrgb-2.0.0-win-amd64-wheel": ("2.0.0", 122797),
     }
     for artifact_id, (version, byte_count) in expected.items():
@@ -396,15 +396,15 @@ def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> Non
     lock = tomllib.loads(_read_text_or_fail(repo_root / "uv.lock"))
     packages = {package["name"]: package for package in lock["package"]}
     artifact_ids = {
-        "vsview": "vsview-0.13.0-wheel",
-        "cyclopts": "cyclopts-5.3.0-wheel",
+        "vsview": "vsview-0.14.0-wheel",
+        "cyclopts": "cyclopts-5.4.2-wheel",
         "pyside6": "pyside6-6.12.0-win-amd64-wheel",
         "pyside6-addons": "pyside6-addons-6.12.0-win-amd64-wheel",
         "pyside6-essentials": "pyside6-essentials-6.12.0-win-amd64-wheel",
         "shiboken6": "shiboken6-6.12.0-win-amd64-wheel",
         "pyside6-pdf": "pyside6-pdf-6.12.0.140-win-amd64-wheel",
         "pyside6-webengine": "pyside6-webengine-6.12.0.140-win-amd64-wheel",
-        "vapoursynth-bestsource": "vapoursynth-bestsource-22-win-amd64-wheel",
+        "vapoursynth-bestsource": "vapoursynth-bestsource-23-win-amd64-wheel",
         "vspackrgb": "vspackrgb-2.0.0-win-amd64-wheel",
     }
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
@@ -640,7 +640,7 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         assert expected in build_script
 
     for expected in (
-        "version_major == 81",
+        "version_major == 82",
         "api_minor == 3",
         "LWLibavSource",
         "LibavSMASHSource",
@@ -1361,11 +1361,11 @@ def _write_extracted_verifier_fixture(
                 ("PySide6_Pdf", "6.12.0.140"),
                 ("PySide6_WebEngine", "6.12.0.140"),
                 ("shiboken6", "6.12.0"),
-                ("vapoursynth-bestsource", "22"),
+                ("vapoursynth-bestsource", "23"),
                 ("vspackrgb", "2.0.0"),
-                ("VSView", "0.13.0"),
-                ("cyclopts", "5.3.0"),
-                ("vsjetengine", "1.8.1"),
+                ("VSView", "0.14.0"),
+                ("cyclopts", "5.4.2"),
+                ("vsjetengine", "2.0.0"),
             )
         ],
         "schema_version": 2,
@@ -2247,14 +2247,14 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         "PySide6-Pdf": ("6.12.0.140", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "PySide6-WebEngine": ("6.12.0.140", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
         "shiboken6": ("6.12.0", "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
-        "VapourSynth": ("81", "LGPL-2.1-or-later"),
-        "vapoursynth-bestsource": ("22", "MIT"),
+        "VapourSynth": ("82", "LGPL-2.1-or-later"),
+        "vapoursynth-bestsource": ("23", "MIT"),
         "vapoursynth-lsmas": ("1310.0.0.0", "ISC AND LGPL-2.1-or-later"),
-        "vs-placebo": ("2.0.4", "LGPL-2.1-only"),
+        "vs-placebo": ("2.0.5", "LGPL-2.1-only"),
         "vspackrgb": ("2.0.0", "MIT"),
-        "VSView": ("0.13.0", "EUPL-1.2"),
-        "cyclopts": ("5.3.0", "Apache-2.0"),
-        "vsjetengine": ("1.8.1", "EUPL-1.2"),
+        "VSView": ("0.14.0", "EUPL-1.2"),
+        "cyclopts": ("5.4.2", "Apache-2.0"),
+        "vsjetengine": ("2.0.0", "EUPL-1.2"),
     }
     for index, (name, (version, license_expression)) in enumerate(distributions.items()):
         dist_info = site_packages / f"package_{index}-{version}.dist-info"
@@ -2813,7 +2813,7 @@ def test_windows_portable_requirements_export_uses_the_captured_commit(
     )
 
     assert result.returncode == 0, _normalized_process_output(result)
-    assert b"vsview==0.13.0" in expected
+    assert b"vsview==0.14.0" in expected
     assert output.read_bytes() == expected
 
 

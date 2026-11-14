@@ -438,19 +438,21 @@ never searches parent directories.
   probing opens the resolved target. Pair names and report identity still use the discovered path.
   Older probe keys miss so source stream admission runs again. Persisted probe
   dimensions and frame counts use bounded positive signed-32-bit decoder fields, while
-  FPS numerator and denominator use positive signed-64-bit components matching R81's
+  FPS numerator and denominator use positive signed-64-bit components matching R82's
   `VSVideoInfo` representation. Filesystem size/mtime and cache-safety bounds remain
   deliberate signed-64-bit limits rather than claims about decoder field widths;
   malformed entries are skipped individually.
 - `<resolved paths.generated_dir>/cache/source-indexes/`: `ManagedSourceIndexCache`
   owns persistent L-SMASH-Works indexes. The entry key binds the resolved media
-  path and the profile's decoder token: `lsw1310-f125953022b6` for managed Windows,
-  `lsw1310-1ec4b81a7724` for unmanaged Windows, and `lsw1310-877219813395` for
+  path and the profile's decoder token: `lsw1310-47d07506e489` for managed Windows,
+  `lsw1310-7a882880f599` for unmanaged Windows, and `lsw1310-9129a4cbb35a` for
   Debian/Docker. Managed Windows and Debian/Docker tokens isolate their
   packaged decoder ABIs. Unmanaged profile tokens do not verify native ABI
   changes. Under a per-entry lock, reuse checks the cache paths and matches the
   source identity (device, inode, size, mtime and change time), geometry policy
-  version, geometry probe token, decoder runtime token, and index size and SHA-256.
+  version when a full scan ran, geometry probe token, decoder runtime token, and
+  index size and SHA-256. The default accepts a matching entry with or without
+  scan evidence. An opt-in open requires matching scan evidence.
   The probe token binds the resolved ffprobe executable path and file identity
   to its reported program and library versions. Windows reads NTFS change time
   from the source handle. Sources without that Windows identity or a verifiable
@@ -481,12 +483,13 @@ bounded header probe and require exactly one non-attached video stream. The same
 detected demuxer. Native opening requires a positively identified AVI,
 Matroska/WebM, MOV/MP4-family, MPEG-TS, or elementary MPEG-2 source. Only the first
 four single-file container families qualify for managed reuse with the packaged
-defaults, which disable MOV external tracks. Elementary MPEG-2 retains its full-scan
-private-open path. Manifests such as ffconcat and sources with missing, malformed,
+defaults, which disable MOV external tracks. Elementary MPEG-2 opens privately.
+Manifests such as ffconcat and sources with missing, malformed,
 or unrecognized format information are refused before native code because a
 top-level file identity cannot cover independently changing referenced media. Cold
 opens and private cache-free opens, including the VSView fallback, scan the frame
-records emitted by ffprobe before native indexing or decoding. For each stream,
+records emitted by ffprobe before native indexing or decoding when
+`sources.scan_frame_geometry` is enabled. For each stream,
 the coded and visible dimensions must stay constant and within the canvas policy.
 The scan uses multiple decoder threads and runs once per admission, even if a
 managed build falls back to a private open. The scan stops if ffprobe produces no
@@ -494,12 +497,14 @@ stdout for 120 seconds. Its total duration can exceed that interval while frames
 keep arriving. An explicit ffprobe pixel-limit rejection causes refusal even
 when ffprobe exits successfully. Ordinary decoder diagnostics within the output
 budget do not cause refusal on their own. Warm managed opens can reuse the scan
-proof under the cache checks above after the header probe. The cold scan remains
-because a real mixed-resolution H.264 transport stream reproduced a native
-L-SMASH heap abort when admitted without it. L-SMASH playback also receives an owned
-`max_pixels` option that caller-supplied decoder options cannot remove. Absent
-ffprobe, missing or changing frame dimensions, and multiple real video streams fail
-with a typed source-load error on the managed loader path.
+proof under the cache checks above after the header probe. The scan is off by
+default because it adds a full decode on cold opens. A mixed-resolution H.264
+transport stream reproduced a native L-SMASH heap abort without it. L-SMASH
+playback always receives an owned `max_pixels` option that caller-supplied
+decoder options cannot remove. Absent
+ffprobe, invalid header dimensions, and multiple real video streams fail with a
+typed source-load error on the managed loader path. A requested scan also
+rejects missing or changing frame dimensions.
 HDR probing and FFmpeg screenshots use the
 first video stream that is not an attached picture; extraction explicitly maps
 `0:V:0`. Selected-video
@@ -899,7 +904,7 @@ result write, and fail-closed parse/validation boundary. `frame_compare.vsview.a
 is the sole human review surface inside VSView: it stays inert for rejected/ordinary
 sessions and presents entry authority/evidence separately from original frame drafts
 and saved outcomes. `vsview.workspace_positions` is the sole private integration
-with explicitly version-gated VSView 0.13.0: it reads the owning workspace’s retained
+with explicitly version-gated VSView 0.14.0: it reads the owning workspace’s retained
 `VideoOutput.last_frame` values by validated output identity and sets that generated
 workspace’s own playhead control to Unlink. It never changes global preferences or
 patches dependency hooks. The panel exists and receives workspace-load hooks even
@@ -1026,10 +1031,11 @@ owners. Its explicit X11 contract is:
 - optional host `XAUTHORITY` cookie file mount when required by the desktop
 - container process UID/GID aligned to the host user for narrow local-user X11 permission flows
 
-The optional GUI proof is non-CI and non-default. Its verifier contract requires the
+CI runs the optional GUI image's offscreen proof on native AMD64 and ARM64.
+The visible X11 launch remains a separate host check. The verifier requires the
 `gui-linux` image to discover and load the exact Frame Compare VSView entry point,
 construct the panel in its inert ordinary-session state, load a production-generated
-L-SMASH session with VSView 0.13.0, register one `Reference` and ordered comparison
+L-SMASH session with VSView 0.14.0, register one `Reference` and ordered comparison
 outputs, render frame 0 for each output, exercise complete source readiness plus the
 whole-set positions and keep-current actions, and round-trip/validate the sibling
 result sidecar. The 2026-10-07 dependency-refresh handoff records a reported

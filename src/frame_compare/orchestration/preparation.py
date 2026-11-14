@@ -544,6 +544,7 @@ async def execute_prep(
         deps.vs_loader = DefaultVSLoader(
             memory_limit_mb=config.runtime.memory_limit_mb,
             index_cache=ManagedSourceIndexCache(workspace.generated_root),
+            scan_frame_geometry=config.sources.scan_frame_geometry,
         )
     validate_skip_analysis_frame_selection_contract(
         skip_analysis=request.skip_analysis,

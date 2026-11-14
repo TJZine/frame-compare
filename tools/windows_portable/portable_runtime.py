@@ -57,16 +57,13 @@ EXPORT = (
     "requirements.txt",
 )
 TRIM = (125, 359295997)
-EMBEDDED_SEARCH_PATH = (
-    b"python313.zip\r\n.\r\n..\\app\\site-packages\r\n..\\app\\src\r\nimport site\r\n"
-)
 NATIVE_DESTINATIONS = {"ffmpeg", "python", "vs/core"}
 _SHA = re.compile(r"[a-f0-9]{64}")
 _REQUIREMENT = re.compile(r"([a-z0-9-]+)==([0-9][a-z0-9.]*)(?: ; (.+))? \\")
 _COMPATIBLE_WHEEL = re.compile(
     r"-(?:py3|py2\.py3)-none-(?:any|win_amd64)\.whl$"
-    r"|-cp313-cp313-win_amd64\.whl$"
-    r"|-cp(\d{2,3})-abi3-win_amd64\.whl$"
+    r"|-cp(?P<native>\d{2,3})-cp(?P=native)-win_amd64\.whl$"
+    r"|-cp(?P<abi3>\d{2,3})-abi3-win_amd64\.whl$"
 )
 _DOWNLOAD_HOSTS = {
     "www.python.org",
@@ -82,6 +79,12 @@ def sha(data: bytes) -> str:
 
 def normalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def embedded_search_path(python_tag: str) -> bytes:
+    return f"python{python_tag}.zip\r\n.\r\n..\\app\\site-packages\r\n..\\app\\src\r\nimport site\r\n".encode(
+        "ascii"
+    )
 
 
 @dataclass(frozen=True)
@@ -191,7 +194,7 @@ def _requirements(data: bytes) -> dict[str, str]:
     return result
 
 
-def _locked_inputs(lock: bytes, requirements: bytes) -> dict[str, tuple[str, Pin]]:
+def _locked_inputs(lock: bytes, requirements: bytes, python_tag: str) -> dict[str, tuple[str, Pin]]:
     selected = _requirements(requirements)
     # uv export omits L-SMASH because it was installed separately from the
     # runtime manifest. Require that wheel to agree with the frozen lock too.
@@ -209,8 +212,14 @@ def _locked_inputs(lock: bytes, requirements: bytes) -> dict[str, tuple[str, Pin
         wheels = []
         for wheel in package.get("wheels", []):
             match = _COMPATIBLE_WHEEL.search(wheel["url"])
-            if match and (match[1] is None or int(match[1]) <= 313):
-                wheels.append(wheel)
+            if match is None:
+                continue
+            native, abi3 = match.group("native", "abi3")
+            if native is not None and native != python_tag:
+                continue
+            if abi3 is not None and int(abi3) > int(python_tag):
+                continue
+            wheels.append(wheel)
         if name == "anitopy" and version == "2.1.1" and not wheels:
             result[name] = version, _lock_pin(package["sdist"])
         elif len(wheels) == 1:
@@ -318,7 +327,7 @@ def _stage_wheel(source: Path, pin: Pin, wheelhouse: Path) -> None:
 
 
 def _install_runtime_wheels(
-    layout: Layout, pinned: dict[str, tuple[str, Pin]], cache: Path
+    layout: Layout, pinned: dict[str, tuple[str, Pin]], cache: Path, python_version: str
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="fc-wheels-") as temporary:
         work = Path(temporary)
@@ -362,6 +371,8 @@ def _install_runtime_wheels(
                 "copy",
                 "--python",
                 sys.executable,
+                "--python-version",
+                python_version,
                 "--python-platform",
                 "x86_64-pc-windows-msvc",
                 "--target",
@@ -465,8 +476,14 @@ def _unique_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def assemble(root: Path, manifest: bytes, lock: bytes, requirements: bytes, cache: Path) -> None:
     layout = Layout(root)
-    pinned = _locked_inputs(lock, requirements)
-    artifacts = json.loads(manifest, object_pairs_hook=_unique_json_keys)["artifacts"]
+    configuration = json.loads(manifest, object_pairs_hook=_unique_json_keys)
+    python_version = configuration["bundle"]["python_version"]
+    version = re.fullmatch(r"(3)\.(\d{1,2})\.\d+", python_version)
+    if version is None:
+        raise ValueError("Portable manifest must pin an exact CPython version")
+    python_tag = version[1] + version[2]
+    pinned = _locked_inputs(lock, requirements, python_tag)
+    artifacts = configuration["artifacts"]
     destinations = set()
     manifest_wheels = set()
     artifact_ids = set()
@@ -500,15 +517,15 @@ def assemble(root: Path, manifest: bytes, lock: bytes, requirements: bytes, cach
 
     if destinations != NATIVE_DESTINATIONS:
         raise ValueError("Portable manifest does not pin the complete native runtime")
-    python_path = "python/python313._pth"
-    if not {"python/python313.zip", python_path} <= layout.records.keys():
+    python_path = f"python/python{python_tag}._pth"
+    if not {f"python/python{python_tag}.zip", python_path} <= layout.records.keys():
         raise ValueError("Embedded CPython archive lacks its expected search-path files")
-    (root / python_path).write_bytes(EMBEDDED_SEARCH_PATH)
+    (root / python_path).write_bytes(embedded_search_path(python_tag))
 
-    _install_runtime_wheels(layout, pinned, cache)
+    _install_runtime_wheels(layout, pinned, cache, python_version)
     site = root / SITE
     if not (site / "vapoursynth/libvapoursynth.dll").is_file():
-        raise ValueError("VapourSynth wheel lacks the managed R81 package DLL")
+        raise ValueError("VapourSynth wheel lacks the managed package DLL")
     _trim_site_packages(site)
     _python_licenses(root)
     for source, name in (("ffmpeg/LICENSE.txt", "ffmpeg"), ("python/LICENSE.txt", "python")):
