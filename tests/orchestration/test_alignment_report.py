@@ -17,7 +17,7 @@ from frame_compare.orchestration.context import (
     ClipProbeSnapshot,
     ClipState,
 )
-from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
+from frame_compare.services.alignment_evidence import AlignmentStabilitySummary
 from frame_compare.utils.run_warnings import RunWarning
 
 

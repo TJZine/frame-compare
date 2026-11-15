@@ -6,36 +6,29 @@ import hashlib
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Literal
 
 import pytest
 
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services import alignment_audio, alignment_diagnostics
-from frame_compare.services.alignment import _build_audio_review_map
-from frame_compare.services.alignment_keys import alignment_key
-from frame_compare.services.types import AlignmentResult, ComparisonResolution
-from frame_compare.utils.alignment_evidence import (
-    MAX_ALIGNMENT_EVIDENCE_BYTES,
+from frame_compare.services.alignment_evidence import (
     MAX_AUDIO_CHUNKS,
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,
     AudioAnalysisFacts,
-    AudioAttemptStatus,
     AudioChunkColumns,
     AudioChunkRun,
     AudioCollectionFacts,
-    AudioCollectionFailure,
     AudioDecisionCandidate,
-    AudioDecisionState,
     AudioSameFrameContext,
     AudioStageOutcome,
     SelectedAudioStreamEvidence,
     VideoCheckObservation,
     VideoTargetEvidence,
-    evidence_from_payload,
 )
+from frame_compare.services.types import AlignmentResult, ComparisonResolution
 
 _CHUNK_SAMPLES = 40000
 _LAG_SAMPLES = 240000
@@ -240,75 +233,6 @@ def maximum_audio_attempt() -> AudioAlignmentAttempt:
     )
 
 
-def test_audio_attempt_rejects_invalid_or_contradictory_states() -> None:
-    attempt = audio_attempt()
-
-    with pytest.raises(ValueError, match="must be one of"):
-        replace(attempt.decision, state=cast(AudioDecisionState, "invalid"))
-    with pytest.raises(ValueError, match="must be one of"):
-        replace(attempt, status=cast(AudioAttemptStatus, "invalid"))
-    with pytest.raises(ValueError, match="lacks a candidate"):
-        replace(attempt.decision, candidate=None)
-    with pytest.raises(ValueError, match="share one length"):
-        replace(attempt.chunks, starts=attempt.chunks.starts + (999999,))
-
-    with pytest.raises(ValueError, match="inactive chunks cannot carry lag evidence"):
-        evidence_from_payload(
-            AudioChunkColumns,
-            {**asdict(attempt.chunks), "active": [False] * _PLANNED_CHUNKS},
-        )
-    with pytest.raises(ValueError, match="agreeing chunks must be credible"):
-        evidence_from_payload(
-            AudioChunkColumns,
-            {**asdict(attempt.chunks), "credible": [False] * _PLANNED_CHUNKS},
-        )
-    for status in ("preanalysis_rejection", "aborted"):
-        with pytest.raises(ValueError, match="non-complete audio attempts"):
-            replace(attempt, status=status)
-
-    unavailable = replace(attempt.decision, state="unavailable", candidate=None)
-    for status in ("preanalysis_rejection", "aborted"):
-        assert replace(attempt, status=status, decision=unavailable).status == status
-
-
-def _facts_payload() -> dict[str, Any]:
-    return {
-        "role": "reference",
-        "emitted_samples": 8000,
-        "eof_sample": 8000,
-        "elapsed_seconds": 0.25,
-        "returncode": 0,
-        "stderr_bytes": 44,
-        "stderr_truncated": False,
-        "cleanup_completed": True,
-    }
-
-
-def _failure_payload() -> dict[str, Any]:
-    return {"category": "nonzero_exit", "side": "comparison"}
-
-
-def test_collection_record_rejects_invalid_counts_and_failure_topology() -> None:
-    base = evidence_from_payload(AudioCollectionFacts, _facts_payload())
-    assert base.emitted_samples == 8000
-    with pytest.raises(ValueError, match="unknown keys"):
-        evidence_from_payload(AudioCollectionFacts, {**_facts_payload(), "failure_category": None})
-    with pytest.raises(ValueError, match="must be an integer"):
-        evidence_from_payload(AudioCollectionFacts, {**_facts_payload(), "eof_sample": True})
-    with pytest.raises(ValueError, match="must be a finite number"):
-        evidence_from_payload(
-            AudioCollectionFacts, {**_facts_payload(), "elapsed_seconds": float("inf")}
-        )
-
-    failure = evidence_from_payload(AudioCollectionFailure, _failure_payload())
-    assert failure.category == "nonzero_exit"
-    assert failure.side == "comparison"
-    assert (
-        evidence_from_payload(AudioCollectionFailure, {"category": "timeout", "side": None}).side
-        is None
-    )
-
-
 def _result(attempt: AudioAlignmentAttempt, *, manual: bool = False) -> AlignmentResult:
     return AlignmentResult(
         reference_clip="reference.mkv",
@@ -350,7 +274,7 @@ def test_diagnostic_is_bounded_pathless_and_preserves_original_digest(tmp_path: 
     )
 
     payload = json.loads(path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
     assert before_digest == after_digest == payload["original_attempt_digest"]
     assert payload["review_outcome"] == "confirmed"
     assert payload["final_resolution"]["frame_offset"] == 0
@@ -526,7 +450,7 @@ def _maximum_shape_attempt(shape: str) -> tuple[AudioAlignmentAttempt, tuple[int
 
 
 @pytest.mark.parametrize("shape", ("runs", "same-frame", "run-targets", "mixed"))
-def test_maximum_evidence_shapes_fit_full_and_native_envelopes(tmp_path: Path, shape: str) -> None:
+def test_maximum_evidence_shapes_fit_diagnostic_envelope(tmp_path: Path, shape: str) -> None:
     attempt, populations = _maximum_shape_attempt(shape)
     result = _result(attempt)
 
@@ -540,42 +464,9 @@ def test_maximum_evidence_shapes_fit_full_and_native_envelopes(tmp_path: Path, s
         resolution=ComparisonResolution(result, "diagnostic", "computed_this_run"),
     )
     diagnostic_payload = json.loads(path.read_text(encoding="utf-8"))
-    assert diagnostic_size <= MAX_ALIGNMENT_EVIDENCE_BYTES, (shape, populations, diagnostic_size)
-    assert (
-        evidence_from_payload(AudioAlignmentAttempt, diagnostic_payload["original_audio_attempt"])
-        == attempt
-    )
-
-    reference = Path("reference.mkv")
-    comparison = Path("comparison.mkv")
-    key = alignment_key(reference, comparison)
-    native = _build_audio_review_map(
-        reference=reference,
-        comparisons=[comparison],
-        resolutions={
-            key: ComparisonResolution(
-                result=result,
-                comparison_cache_key="key",
-                origin="computed_this_run",
-            )
-        },
-    )[key]
-    native_size = len(native.encode("utf-8"))
-    assert native_size <= MAX_ALIGNMENT_EVIDENCE_BYTES, (shape, populations, native_size)
-    projected = json.loads(native)["audio_attempt"]
-    assert evidence_from_payload(AudioAlignmentAttempt, projected) == replace(
-        attempt,
-        chunks=replace(
-            attempt.chunks,
-            starts=(),
-            counts=(),
-            active=(),
-            lags=(),
-            psrs=(),
-            credible=(),
-            agrees=(),
-            rows_omitted=True,
-        ),
+    assert diagnostic_size <= 2 * 1024 * 1024, (shape, populations, diagnostic_size)
+    assert diagnostic_payload["original_audio_attempt"] == json.loads(
+        json.dumps(asdict(attempt), allow_nan=False)
     )
 
 

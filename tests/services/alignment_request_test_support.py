@@ -81,4 +81,4 @@ def vsview_session(tmp_path: Path) -> AlignmentReviewSession:
     sessions_dir.mkdir(exist_ok=True)
     script = sessions_dir / f"vsview_ref_20260831T000000Z_{VSVIEW_SESSION_ID}.py"
     script.write_text("# generated\n", encoding="utf-8")
-    return alignment_review_session_from_script(script, require_result_absent=True)
+    return alignment_review_session_from_script(script)

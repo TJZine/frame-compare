@@ -8,12 +8,12 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
-from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
     MAX_AUDIO_CHUNKS,
     AudioOutcomeStatus,
 )
+from frame_compare.services.errors import AudioAlignmentError
 
 FloatArray = npt.NDArray[np.float64]
 

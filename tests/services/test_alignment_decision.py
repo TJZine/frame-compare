@@ -28,8 +28,7 @@ from frame_compare.services.alignment_decision import (
     derive_stability,
     v6_failure_reasons,
 )
-from frame_compare.services.alignment_video import _lag_to_frame
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
     AudioAuthorityRecount,
     AudioOutcomeStatus,
@@ -39,7 +38,8 @@ from frame_compare.utils.alignment_evidence import (
     VideoTargetPosition,
     VideoTargetResolution,
 )
-from frame_compare.utils.alignment_policy import rounded_frame
+from frame_compare.services.alignment_policy import rounded_frame
+from frame_compare.services.alignment_video import _lag_to_frame
 from tests.services.alignment_evidence_test_support import attempt_with_chunks
 from tests.services.alignment_synthetic_audio import (
     insert_program,

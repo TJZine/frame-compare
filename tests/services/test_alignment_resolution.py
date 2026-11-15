@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from frame_compare.services.alignment_diagnostics import original_attempt_digest
+from frame_compare.services.alignment_evidence import AudioAlignmentAttempt
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_resolution import (
     confirm_manual,
@@ -21,7 +22,6 @@ from frame_compare.services.alignment_reuse_cache import (
     save_reusable_offsets,
 )
 from frame_compare.services.types import AlignmentResult, ComparisonResolution
-from frame_compare.utils.alignment_evidence import AudioAlignmentAttempt
 from frame_compare.utils.types import AlignmentRequest
 from tests.alignment_review_test_support import (
     provisional_audio_attempt,

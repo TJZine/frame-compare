@@ -24,11 +24,7 @@ from frame_compare.vsview.alignment_review_contract import (
     AlignmentReviewReferenceMetadata,
     AlignmentReviewWorkspaceMetadata,
 )
-from tests.alignment_review_test_support import (
-    audio_review,
-    native_attempt_payload,
-    provisional_audio_attempt,
-)
+from tests.alignment_review_test_support import audio_review
 
 
 def model(*, offset: int | None = 504, role: overlay.Role = "CMP", count: int = 8):
@@ -59,18 +55,24 @@ def test_workspace_authority_precedence_identity_names_and_mixed_reference():
     reviews = (
         AlignmentReviewAudioReview(
             AlignmentReviewCurrentAuthority("preexisting_manual_override", 0),
-            "current_attempt",
-            provisional_audio_attempt(ordinal=1, frame_offset=504),
+            "provisional",
+            504,
+            (),
+            (),
         ),
         AlignmentReviewAudioReview(
             AlignmentReviewCurrentAuthority("none", None),
-            "current_attempt",
-            provisional_audio_attempt(ordinal=2, frame_offset=-504),
+            "provisional",
+            -504,
+            (),
+            (),
         ),
         AlignmentReviewAudioReview(
             AlignmentReviewCurrentAuthority("shared_computed_offsets", 504),
-            "historical_details_unavailable",
             None,
+            None,
+            (),
+            (),
         ),
     )
     workspace = AlignmentReviewWorkspaceMetadata(
@@ -84,7 +86,6 @@ def test_workspace_authority_precedence_identity_names_and_mixed_reference():
                 f"key-{i}",
                 i,
                 "Full comparison name",
-                r.current_authority.frame_offset,
                 r,
             )
             for i, r in enumerate(reviews, 1)
@@ -474,10 +475,10 @@ def test_runtime_wires_native_previews_using_strict_launch_workspace(tmp_path, m
             else json.dumps(
                 {
                     "current_authority": {"origin": "none", "frame_offset": None},
-                    "evidence_availability": "current_attempt",
-                    "audio_attempt": native_attempt_payload(
-                        provisional_audio_attempt(ordinal=2, frame_offset=504)
-                    ),
+                    "decision_state": "provisional",
+                    "candidate_offset": 504,
+                    "summary_lines": [],
+                    "detail_lines": [],
                 }
             )
         )
@@ -485,7 +486,6 @@ def test_runtime_wires_native_previews_using_strict_launch_workspace(tmp_path, m
             "path": str(tmp_path / f"{name}.mkv"),
             "display_name": name,
             "comparison_key": f"ref:{name}",
-            "suggested_offset": 0 if ordinal == 1 else None,
             "audio_review": evidence,
         }
     data = cast(
@@ -505,15 +505,24 @@ def test_runtime_wires_native_previews_using_strict_launch_workspace(tmp_path, m
             "memory_limit_mb": None,
         },
     )
-    runtime.run_session(data, tmp_path / f"session_{'1' * 32}.py")
+    runtime.run_session(
+        data,
+        tmp_path / f"session_{'1' * 32}.py",
+        metadata_version=runtime.REVIEW_METADATA_VERSION,
+    )
     assert [(i, n) for _, i, n, _ in registered] == [
         (0, "Reference"),
         (1, "Comparison 1"),
         (2, "Comparison 2"),
     ]
-    assert registered[2][3]["frame_compare_suggested_offset"] is None
+    assert (
+        json.loads(registered[2][3]["frame_compare_audio_review"])["current_authority"][
+            "frame_offset"
+        ]
+        is None
+    )
     for clip, _, _, metadata in registered:
-        assert metadata["frame_compare_contract_version"] == 5
+        assert metadata["frame_compare_contract_version"] == 6
         assert clip.num_frames == 8 and clip.fps == sources["ref"].fps
         frame = clip.get_frame(5)
         assert frame.props["SourceIndex"] == 5

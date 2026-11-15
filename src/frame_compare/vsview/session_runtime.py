@@ -39,11 +39,12 @@ from frame_compare.vsview.alignment_review_contract import (
     ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
     ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
     ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY,
-    ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
     ALIGNMENT_REVIEW_METADATA_VERSION,
     ALIGNMENT_REVIEW_METADATA_VERSION_KEY,
     AlignmentReviewContractError,
+    AlignmentReviewDecisionState,
     AlignmentReviewOutputCandidate,
+    alignment_review_metadata_version_message,
     parse_alignment_review_workspace_metadata,
 )
 
@@ -63,7 +64,6 @@ class ComparisonSource(TypedDict):
     managed_index_path: NotRequired[str]
     display_name: str
     comparison_key: str
-    suggested_offset: int | None
     audio_review: str
 
 
@@ -85,7 +85,10 @@ class AudioReviewAuthority(TypedDict):
 
 class AudioReviewPayload(TypedDict):
     current_authority: AudioReviewAuthority
-    audio_attempt: dict[str, object] | None
+    decision_state: AlignmentReviewDecisionState | None
+    candidate_offset: int | None
+    summary_lines: list[str]
+    detail_lines: list[str]
 
 
 class _VideoNodeWithFps(Protocol):
@@ -110,7 +113,6 @@ REVIEW_METADATA_KEYS = {
     "ordinal": ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
     "role": ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
     "name": ALIGNMENT_REVIEW_METADATA_NAME_KEY,
-    "suggested_offset": ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
     "audio_review": ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
 }
 
@@ -164,15 +166,8 @@ class SessionConsole:
         authority = audio_review["current_authority"]
         origin = authority["origin"]
         offset = authority["frame_offset"]
-        attempt = audio_review["audio_attempt"]
-        decision_raw = attempt.get("decision") if isinstance(attempt, dict) else None
-        decision = cast(dict[str, object], decision_raw) if isinstance(decision_raw, dict) else None
-        state = decision.get("state") if decision is not None else None
-        candidate_raw = decision.get("candidate") if decision is not None else None
-        candidate = (
-            cast(dict[str, object], candidate_raw) if isinstance(candidate_raw, dict) else None
-        )
-        candidate_offset = candidate.get("frame_offset") if candidate is not None else None
+        state = audio_review["decision_state"]
+        candidate_offset = audio_review["candidate_offset"]
 
         if origin == "computed_this_run" and state == "trusted_automatic" and offset is not None:
             return f"audio {offset:+d}f", False
@@ -477,13 +472,22 @@ def _comparison_metadata(
         REVIEW_METADATA_KEYS["ordinal"]: comparison_number,
         REVIEW_METADATA_KEYS["role"]: "comparison",
         REVIEW_METADATA_KEYS["name"]: target["display_name"],
-        REVIEW_METADATA_KEYS["suggested_offset"]: target["suggested_offset"],
         REVIEW_METADATA_KEYS["audio_review"]: target["audio_review"],
     }
 
 
-def run_session(data: SessionData, script_path: Path) -> None:
+def run_session(
+    data: SessionData, script_path: Path, *, metadata_version: int | None = None
+) -> None:
     console = SessionConsole()
+    # Generated scripts pass the version of the data they embed.
+    if metadata_version != REVIEW_METADATA_VERSION:
+        console.safe_print(
+            console.status_line(
+                "[FAIL]", alignment_review_metadata_version_message(metadata_version)
+            )
+        )
+        sys.exit(1)
     install_workspace_log_filter()
     reference = data["reference"]
     targets = data["targets"]
@@ -603,7 +607,7 @@ def run_session(data: SessionData, script_path: Path) -> None:
         prepared_comparisons.append((comparison_number, label, target, comp_clip))
 
     session_id = script_path.stem.rpartition("_")[2]
-    # Parse the same metadata-v5 workspace the panel will consume, with actual
+    # Parse the same review workspace the panel will consume, with actual
     # untrimmed frame counts, before deriving immutable display-only launch facts.
     candidates = (
         AlignmentReviewOutputCandidate(

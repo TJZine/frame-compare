@@ -543,11 +543,11 @@ identity is not persisted.
   cache misses and are replaced on the next save without migration. A read I/O
   error or serialization failure during a save warns and preserves the existing
   manual overrides.
-- `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: schema-v4,
-  diagnostic-only audio evidence owned by
-  `frame_compare.services.alignment_diagnostics` and defined once in
-  `frame_compare.utils.alignment_evidence`. One shared 2 MiB per-comparison sanity
-  bound covers this file and native review metadata. The diagnostic retains
+- `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: diagnostic-only
+  schema v5, written by `frame_compare.services.alignment_diagnostics` using the full
+  attempt defined in `frame_compare.services.alignment_evidence`. The diagnostic
+  writer keeps the 2 MiB per-comparison limit. Schema v5 removes
+  `chunks.rows_omitted`. The diagnostic retains
   selected-stream facts with start-time compensation, contiguous chunk runs, plain
   per-chunk columnar rows, the global lag, the sub-frame
   estimate, paired collection summaries, the A4b authority recount, and the final
@@ -566,18 +566,18 @@ identity is not persisted.
   Script filenames use a prefix of the reference stem capped at 64 characters and
   150 UTF-8 bytes, followed by a timestamp and session UUID. Session metadata retains
   the full display name. Frame Compare metadata in generated
-  sessions is schema v5. Older, unknown, or mixed versions require regeneration.
+  sessions is schema v6. Older, unknown, or mixed versions require regeneration.
 - `<run-folder>/generated/vsview_sessions/vsview_*.alignment-result.json`: the
   session-scoped native alignment-review result sidecar. It is written atomically by
   the VSView panel only after one complete whole-set confirm action (positions or
   known offsets) or keep-current action.
   The sidecar remains result schema v1: one ordered decision per comparison, either
   confirmed raw source frames or `keep_current`. Frame Compare derives this sibling
-  path from the trusted generated session script, checks the UUID/session identity and
-  ordered comparison set, and validates raw source-frame bounds before applying any
-  confirmed offset. Missing, malformed, stale, mixed-session, duplicate, incomplete,
-  or out-of-bounds results are rejected; panel metadata never supplies the result path
-  or frame counts.
+  path from the trusted generated session script, checks the UUID and ordered
+  comparison set, and validates raw source-frame bounds before applying any confirmed
+  offset. Missing, malformed, stale, or incomplete results are rejected, as are
+  duplicate comparison decisions and out-of-bounds frames. A directory at the result
+  path is reported as unreadable.
 - screenshot output directories and generated HTML reports
 - Windows source installs build verified bundles under
   `dist/frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z` (UTC); the AppData
@@ -838,18 +838,15 @@ It never falls back to FFMS2. A missing or failing loader becomes
 `video_check_unavailable`, not a run failure.
 ### Alignment evidence, reuse, and native review
 
-`frame_compare.utils.alignment_evidence` is the single definition of the v4
-evidence schema: frozen dataclasses, one strict standard-library payload walker/parser,
-plain explicit records, and the shared per-comparison byte bound. Pure shared alignment
-math and vote policy live in `utils.alignment_policy`; the shared P4/P4a
-decision/region/check-point projection lives in `utils.alignment_review_projection`
-and is consumed by both terminal and panel renderers. `alignment_presentation`
-owns the terminal/Rich and structured-warning rendering of that projection, using
-the shared `utils.terminal_sections` and `utils.artifact_paths` primitives;
-`alignment_review_panel` renders the same projection in VSView. Native metadata v5
-uses a bounded projection that omits all per-chunk row columns while retaining runs,
-`chunks.total_samples`, authoritative target facts, aggregate
-counts, video checks, and review check points.
+`frame_compare.services.alignment_evidence` defines the frozen records for a full
+audio alignment attempt. `services.alignment_policy` owns shared alignment math
+and votes. `services.alignment_review_projection` derives the P4/P4a reasons, regions,
+and check points used by `services.alignment_presentation`. That parent-process
+service renders terminal/Rich output and structured warnings, and builds the text for
+the VSView panel. The panel uses the supplied summary and detail lines and appends
+origin-bound messages from the source frame counts. The summary, detail, Keep, and
+saved wording is unchanged. Metadata v6 replaces the stripped attempt with these
+presentation lines and the authority and candidate fields.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
 `frame_compare.services.alignment_reuse_prompt` owns the Rich stderr
@@ -872,7 +869,7 @@ stream/chunk details as unavailable rather than inventing them.
 Native alignment review is split across existing owners. `vsview.session_script` reserves
 and generates the session; `vsview.session_runtime` prepares every untrimmed source,
 retains actual color props/defaults/FPS and registers outputs with reserved `hdr=False`
-separately from strict metadata-v5 kwargs. Ordinary SDR packing is used even with the
+separately from strict metadata-v6 kwargs. Ordinary SDR packing is used even with the
 HDR viewer environment flag; final rendering/tone-map settings are unaffected.
 `vsview.alignment_overlay` uses one public ModifyFrame per source, with n/f together,
 to paint source identity, Original frame and all other sources' live opening-hint
@@ -890,17 +887,18 @@ Authority-first raw offsets use `c + d_own - d_target`, distinguish zero/missing
 provisional edges, check target bounds and do not change trims or evidence authority.
 Reference remains the persistence baseline rather than a required visual first step.
 
-The runtime otherwise uses
-the explicit generated script path for session identity, creates one `Reference`
-output and the complete ordered `Comparison N` output set, registering each source once and
-serializing role/key/ordinal/name, the authoritative integer/null offset, and bounded
-service-projected audio evidence as metadata schema v5. That projection omits
-per-chunk rows but retains target identity, bounds, credibility and offset, analyzed
-sample span, aggregate audio facts, and the complete bounded video/review evidence. The
-typed `frame_compare.vsview.alignment_review_contract` owns the session identity,
-strict metadata-v5/result-v1 topology and primitive DTO validation, trusted
-sibling-sidecar path, atomic
-result write, and fail-closed parse/validation boundary. `frame_compare.vsview.alignment_review_panel`
+The runtime uses the generated script name for session identity and registers one
+`Reference` output and the ordered `Comparison N` outputs with role, key, ordinal,
+and name metadata. The per-comparison v6 JSON contains `current_authority`
+(origin and applied integer or null offset), `decision_state`, `candidate_offset`,
+`summary_lines`, and `detail_lines`. An unapplied comparison has origin `none`
+and a null authority offset. The candidate is the original attempt's candidate,
+which can differ from the video-confirmed offset used in summary text. Opening hints
+use current authority first, then the raw candidate for a provisional attempt. A
+zero offset remains valid. `frame_compare.vsview.alignment_review_contract` validates
+the workspace shape and v6 field types, derives the UUID and sibling result path from
+the given script path, and owns atomic result-v1 writes and result validation.
+`frame_compare.vsview.alignment_review_panel`
 is the sole human review surface inside VSView: it stays inert for rejected/ordinary
 sessions and presents entry authority/evidence separately from original frame drafts
 and saved outcomes. `vsview.workspace_positions` is the sole private integration
@@ -924,10 +922,11 @@ complete stable set, including Reference. The handler re-reads workspace authori
 rejects a changed set or pending state, and preserves valid zero. Separate complete
 known-offset input remains available. Keep saves a distinct whole-set `keep_current`
 decision per comparison. Successful writes freeze frames; failed writes stay editable.
-The panel builds immutable audio-review presentations once per comparison at workspace
-activation; replacement clears them. Navigation never grants evidence authority or
-writes results. `alignment_vsview` owns availability policy,
-expected-comparison construction from raw source counts, result acceptance, and
+Workspace activation loads the parent-built audio-review text. Reloading the
+workspace reactivates the panel even after a save. A second save atomically replaces
+the existing sidecar. After a successful VSView exit, the parent reads the last saved
+result. Navigation never grants evidence authority or writes results.
+`alignment_vsview` owns availability policy, expected-comparison construction from raw source counts, result acceptance, and
 applying confirmed offsets; its service, persistence, override, cache, and CLI/config
 boundaries remain unchanged and it does not parse terminal input. The
 `frame_compare.vsview.adapter` remains the composition boundary for the current
@@ -1270,7 +1269,8 @@ and legacy sessions without settings retain the existing preview-default path.
 Both preview speeds use `sequence`: quality retains temporal peak measurement;
 fast disables it, using the same metadata peak policy as fast screenshots. Original
 frame addresses, counts, effective reference FPS, output order, `hdr=False`
-registration, metadata-v5 review authority and sidecar identity remain unchanged.
+registration, metadata-v6 review authority and result-v1 sidecar identity are
+preserved by preview tone mapping.
 
 The known libplacebo SDR destination is BT.709-primary BT.1886 encoded RGB. After
 the existing optional gamma adjustment, `tonemap_conversion` decodes that transfer
@@ -1561,15 +1561,16 @@ Runtime ownership matrix:
 | Pure numeric chunked GCC-PHAT estimation: chunk planning, per-chunk prominence, global-lag accumulation, and agreement gating | `frame_compare.services.alignment_correlation` |
 | Audio/video authority decision: compensation and rounding, A4a/A4b classification and recount, V6 trusted predicate/reason ordering, stability, and agreement-fraction scoring | `frame_compare.services.alignment_decision` |
 | Bounded L-SMASH video confirmation, V3/V3a sampling, V5/V5a scoring, cancellation/identity checks, and review check points | `frame_compare.services.alignment_video` |
-| Single definition of diagnostic-v4 evidence, metadata-v5 projection facts, strict payload parsing, and the shared 2 MiB evidence bound | `frame_compare.utils.alignment_evidence` |
-| Shared compensation, sample/frame conversion, vote, and confirmation policy | `frame_compare.utils.alignment_policy` |
-| Shared P4/P4a terminal/panel presentation projection | `frame_compare.utils.alignment_review_projection` |
-| Terminal/Rich rendering and JSON review warning for the shared alignment presentation | `frame_compare.services.alignment_presentation` |
+| Frozen alignment-attempt records and full-attempt serialization | `frame_compare.services.alignment_evidence` |
+| Schema-v5 diagnostic snapshot, canonical attempt digest, and 2 MiB per-comparison limit | `frame_compare.services.alignment_diagnostics` |
+| Shared compensation, sample/frame conversion, vote, and confirmation policy | `frame_compare.services.alignment_policy` |
+| Shared P4/P4a reasons, regions, and check points for terminal and panel presentation | `frame_compare.services.alignment_review_projection` |
+| Terminal/Rich rendering, JSON review warnings, and parent-built VSView summary and detail text | `frame_compare.services.alignment_presentation` |
 | Shared open-rail human section rendering and ASCII fallback | `frame_compare.utils.terminal_sections` |
 | Human artifact-path display and terminal hyperlinks | `frame_compare.utils.artifact_paths` |
 | Memory-only final alignment summary carried to phase and completion output | `frame_compare.utils.progress_protocol` |
 | Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
-| Typed native VSView session/result identity, metadata, sidecar persistence, and validation | `frame_compare.vsview.alignment_review_contract` |
+| Native VSView workspace metadata v6 validation, script-derived identity, and result-v1 validation and atomic persistence | `frame_compare.vsview.alignment_review_contract` |
 | Native VSView alignment-review panel, public callback observation, and source-lineup decisions | `frame_compare.vsview.alignment_review_panel` |
 | VSView availability, launch adapter, and selected media-runtime preload | `frame_compare.vsview.adapter`, `frame_compare.vsview.launcher` |
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
@@ -1599,7 +1600,7 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/services/alignment.py` and its focused audio-alignment owners
   (`alignment_audio.py`, `alignment_streaming.py`, `alignment_correlation.py`,
   `alignment_decision.py`, `alignment_presentation.py`, `alignment_vsview.py`)
-  plus the single evidence definition in `src/frame_compare/utils/alignment_evidence.py`
+  plus the single evidence definition in `src/frame_compare/services/alignment_evidence.py`
 - `src/frame_compare/render/batch/orchestrator.py`
 - `src/frame_compare/orchestration/doctor.py` and its focused diagnostic owners
   (`doctor_checks.py`, `doctor_types.py`)
@@ -1619,8 +1620,8 @@ Native alignment-review hotspot dispositions for the current implementation:
 | Hotspot | Disposition |
 | --- | --- |
 | `src/frame_compare/vsview/session_script.py` | Owns script-path reservation, deterministic session data and the installed-package bootstrap. The generated path remains the session identity. |
-| `src/frame_compare/vsview/session_runtime.py` | Owns typed session execution: L-SMASH preview source loading, defaults and console guidance, all-or-nothing output registration, one-reference/ordered-comparison topology, and metadata-v5 transport required by the panel. |
-| `src/frame_compare/vsview/alignment_review_contract.py` | Responsibility unchanged: it owns typed session identity, strict metadata-v5/result-v1 validation, sibling-sidecar containment, atomic result persistence, and authoritative result shape; it validates the embedded audio attempt through the single `utils/alignment_evidence.py` parser instead of re-describing the schema. |
+| `src/frame_compare/vsview/session_runtime.py` | Loads L-SMASH preview sources, applies preview defaults, prints console guidance, and registers the complete reference and ordered comparison set with metadata v6. |
+| `src/frame_compare/vsview/alignment_review_contract.py` | Validates workspace topology, v6 metadata fields, and result-v1 decisions. Derives the session UUID and sibling sidecar path from the generated script and writes results atomically. |
 | `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, validated evidence presentation, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, and safe contract-rejection feedback. |
 | `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |
 | `src/frame_compare/services/alignment_vsview.py` | Responsibility reduced: it parses and validates the native result through the typed contract, accepts it, and applies existing offset/override policy; terminal confirmation parsing is no longer an owner. |

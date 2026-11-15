@@ -12,7 +12,7 @@ from typing import BinaryIO, cast
 
 import numpy as np
 
-from frame_compare.utils.alignment_evidence import AudioPairSide, CollectionFailureCategory
+from frame_compare.services.alignment_evidence import AudioPairSide, CollectionFailureCategory
 from frame_compare.utils.child_environment import (
     child_environment,
     diagnostic_secrets,

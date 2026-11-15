@@ -17,6 +17,9 @@ import pytest
 import tomli_w
 
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
+from frame_compare.services.alignment_evidence import (
+    AlignmentStabilitySummary,
+)
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME,
 )
@@ -36,9 +39,6 @@ from frame_compare.services.types import (
     ReusableAlignmentEntry,
 )
 from frame_compare.utils import file_lock
-from frame_compare.utils.alignment_evidence import (
-    AlignmentStabilitySummary,
-)
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
@@ -157,7 +157,7 @@ def test_typed_alignment_passes_presentation_names_without_changing_vsview_keys(
     comparison = tmp_path / "raw-comparison-stem.mkv"
     reference.touch()
     comparison.touch()
-    config = AlignmentConfig(cache_results=False)
+    config = AlignmentConfig(cache_results=False, use_vsview=True)
     request = _alignment_request(
         tmp_path,
         reference=reference,
@@ -186,9 +186,11 @@ def test_typed_alignment_passes_presentation_names_without_changing_vsview_keys(
             config,
         )
 
-    assert launch.call_args.kwargs["offsets_by_key"] == {
-        "raw-reference-stem:raw-comparison-stem": 0
-    }
+    reviews = launch.call_args.kwargs["audio_review_by_key"]
+    assert {
+        key: json.loads(review)["current_authority"]["frame_offset"]
+        for key, review in reviews.items()
+    } == {"raw-reference-stem:raw-comparison-stem": 0}
     assert launch.call_args.kwargs["reference"].presentation_name == (
         "PMTP WEB-DL | DV HDR10+ | Kitsune"
     )
@@ -298,9 +300,14 @@ def test_align_clips_from_request_always_reuses_shared_offsets_skips_compute_and
     assert results[0].correlation_score == pytest.approx(0.87)
     review = json.loads(mock_vs.call_args.kwargs["audio_review_by_key"]["ref:comp"])
     assert review == {
-        "audio_attempt": None,
         "current_authority": {"frame_offset": 7, "origin": "shared_computed_offsets"},
-        "evidence_availability": "historical_details_unavailable",
+        "decision_state": None,
+        "candidate_offset": None,
+        "summary_lines": [
+            "Accepted audio alignment reused: +7f — APPLIED",
+            "No additional confirmation needed.",
+        ],
+        "detail_lines": ["Historical audio details unavailable."],
     }
     terminal = capsys.readouterr().err
     assert "+7f · reused from last run" in terminal

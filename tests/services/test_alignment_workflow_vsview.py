@@ -306,7 +306,6 @@ def test_alignment_passes_complete_native_session_request(
     assert request.preview_tonemap is settings
     assert request.reference == tmp_path / "ref.mkv"
     assert request.comparisons == [tmp_path / "comparison.mkv"]
-    assert request.suggested_offsets_by_key == {"ref:comparison": 3}
     assert request.presentation_names_by_stem == {
         "ref": "ref",
         "comparison": "comparison",
@@ -316,8 +315,9 @@ def test_alignment_passes_complete_native_session_request(
         "origin": "computed_this_run",
         "frame_offset": 3,
     }
-    assert review["evidence_availability"] == "current_attempt"
-    assert review["audio_attempt"]["decision"]["candidate"]["frame_offset"] == 3
+    assert set(request.audio_review_by_key) == {"ref:comparison"}
+    assert review["decision_state"] == "trusted_automatic"
+    assert review["candidate_offset"] == 3
 
 
 @pytest.mark.parametrize("payload", ["[" * 10000, "1" * 5000])

@@ -13,13 +13,7 @@ from subprocess import CalledProcessError, TimeoutExpired
 from threading import Event
 from typing import cast
 
-from frame_compare.services.errors import (
-    AudioAlignmentCleanupError,
-    AudioAlignmentError,
-    raise_if_alignment_cancelled,
-)
-from frame_compare.services.types import AlignmentChannelStrategy
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
     AudioDurationBasis,
     AudioMetadataMatch,
@@ -27,6 +21,12 @@ from frame_compare.utils.alignment_evidence import (
     AudioStartBasis,
     SelectedAudioStreamEvidence,
 )
+from frame_compare.services.errors import (
+    AudioAlignmentCleanupError,
+    AudioAlignmentError,
+    raise_if_alignment_cancelled,
+)
+from frame_compare.services.types import AlignmentChannelStrategy
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.subproc import (
     PROBE_STDERR_BYTES,

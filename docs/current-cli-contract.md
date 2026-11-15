@@ -1592,8 +1592,8 @@ is:
    `! VSView review    {reason}; current offsets were kept.`
 
 Normal VSView labels reuse the release-aware presentation identities prepared by the
-typed alignment request. Paths and stems remain the internal source, suggested
-offset, manual-override, and alignment-result identities. The generated workspace
+typed alignment request. Paths and stems remain the internal source, comparison,
+manual-override, and alignment-result identities. The generated workspace
 contains each source exactly once: one `Reference` and one ordered `Comparison N`
 output per comparison. In the native panel, generated review sessions automatically
 unlink their own playheads. Browse each source to the same visible moment, inspect
@@ -1653,26 +1653,33 @@ provisional outcome, the explicit unresolved unavailable outcome, or
 The Frame Compare alignment-review tool panel registers with first priority so it is
 the first Tool Panel tab when VSView constructs the sidebar for this workflow.
 
-The generated session carries an explicit UUID session identity, one reference role,
-ordered comparison roles/keys/ordinals, presentation names, S1 short names for the
-hint rows, the authoritative integer
-or null offset, and one bounded primitive audio-evidence projection in strict metadata
-schema v5. The reader requires `chunks.rows_omitted` to be true and each recorded
-alternative offset to belong to its target's alternatives. The projection retains
-`chunks.total_samples`, aggregate chunk counts, runs, the authority recount, base
-video checks, check points, and each target's authoritative `target_offset`,
-`credible`, `start_sample`, `end_sample`, alternatives, resolution, and sampled
-positions. The panel derives display bounds from public
-output clip lengths, while the alignment service validates raw result indices against
-the authoritative `AlignmentClipRequest.source_frame_count` facts. The trusted result
-sidecar remains schema v1 with the same `confirmed` and `keep_current` actions and
-exact ordered whole-set decision shape. Only metadata v5 is accepted; older,
-unknown versions, and mixed Frame Compare sessions are rejected
-with instructions to generate a new session. There is no compatibility reader or
-trust-upgrade path. Ordinary non-Frame-Compare sessions remain inert. Frame Compare
-derives the sibling result path from the trusted generated script path, then rejects
-missing, malformed, stale, mixed-session, duplicate, incomplete, or out-of-bounds
-results. It never trusts panel-supplied paths or counts.
+The generated session carries a UUID, one reference role, ordered comparison
+roles/keys/ordinals, presentation names, and S1 short names for the hint rows.
+Metadata v6 carries one JSON value per comparison with `current_authority`,
+`decision_state`, `candidate_offset`, `summary_lines`, and `detail_lines`. The
+parent prepares the summary and detail text. The panel preserves its wording and
+adds any source-bound messages. The v6 payload replaces the stripped audio attempt.
+
+`current_authority` holds the applied offset and its origin. An unapplied comparison
+has a null authority offset and origin `none`. The decision state and candidate offset
+come from the original attempt and may be null. Summary text can describe a
+video-confirmed offset that differs from the raw candidate. Opening hints prioritize
+the current offset, including zero, then use the raw candidate for a provisional
+attempt. The panel derives display bounds from public output clip lengths. The parent
+validates saved raw frame indices against `AlignmentClipRequest.source_frame_count`.
+
+Generated scripts carry the metadata version from the Frame Compare installation
+that wrote them. The runtime checks this version before loading sources and asks
+for a regenerated session if the version is missing or differs from v6. The panel
+requires v6 output metadata, rejects mixed Frame Compare sessions, and remains inert
+in ordinary VSView sessions. The result sidecar remains schema v1 with an
+ordered whole-set decision list of `confirmed` and `keep_current` actions. Frame
+Compare derives the sibling result path from the generated script. It rejects missing,
+malformed, stale, or incomplete results, duplicate comparison decisions, and
+out-of-bounds frames. A directory at that path is reported as unreadable. Reloading a
+saved session reactivates the panel. Another save atomically overwrites the sidecar.
+After a successful VSView exit, the parent reads the last saved result.
+
 Accepted manual offsets are persisted separately in the current run's
 `generated/manual_overrides.toml`. Its canonical version "2" stores source names,
 signed frame offsets, and timestamps; record presence represents confirmed manual
@@ -2057,8 +2064,9 @@ resolved geometry remains reusable regardless of detector provenance.
 ## Persistence Rules
 
 Fresh runs write one diagnostic artifact per comparison at
-`<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v4 is marked
-`diagnostic_only` and is limited to 2 MiB per comparison. The diagnostic omits
+`<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v5 is marked
+`diagnostic_only` and keeps the 2 MiB per-comparison limit. It stores the full
+audio attempt and drops the former `chunks.rows_omitted` flag. The diagnostic omits
 automatically collected media paths, PCM, raw command lines, full subprocess
 stderr, environment values, and credentials. Explicit source labels retain
 authored text subject to whitespace normalization and length limits, so they
@@ -2077,11 +2085,9 @@ run folder also shares bounded labels, pseudonymous source identity digests, sel
 stream metadata, and timing evidence.
 
 Diagnostic files are never read for offset selection, trim application, or shared
-cache reuse. Diagnostic v4 and generated-session metadata v5 were extended in place
-for this unreleased policy; older native metadata is rejected and regenerated. Native
-metadata retains the same authoritative target/aggregate facts in a bounded
-projection without per-chunk rows. Missing, edited, corrupt, or unsupported
-artifacts cannot authorize an
+cache reuse. Native metadata v6 carries presentation text and the fields used for
+authority and opening hints. The full structured attempt remains in the run
+diagnostic. Missing, edited, corrupt, or unsupported artifacts cannot authorize an
 offset or act as a negative cache. Ordinary write failure warns and leaves in-memory
 authority unchanged; a containment or symlink escape remains fail-closed. The shared
 alignment cache remains schema v2 and stores eligible authority only. Only fresh
@@ -2180,7 +2186,7 @@ measurement, while quality screenshots measure each still independently. Fast
 previews and screenshots use the same metadata peak policy. SDR, disabled mapping,
 and legacy sessions without settings retain their existing preview handling.
 Review outputs keep original frame positions/counts, reference FPS, ordering,
-`hdr=False` registration and the existing metadata-v5/session result authority.
+`hdr=False` registration, metadata v6 review authority, and result-v1 sidecar identity.
 
 ## `wizard` Command Contract
 

@@ -15,7 +15,7 @@ from frame_compare.services.alignment_correlation import (
     ChunkPlan,
     ChunkRun,
 )
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
     AlignmentStabilitySummary,
     AudioAlignmentDecision,
@@ -32,12 +32,12 @@ from frame_compare.utils.alignment_evidence import (
     VideoCheckObservation,
     VideoTargetEvidence,
 )
-from frame_compare.utils.alignment_policy import (
+from frame_compare.services.alignment_policy import (
     compensated_lag_to_frame,
     compensated_offset_seconds,
     start_compensation_seconds,
 )
-from frame_compare.utils.alignment_policy import (
+from frame_compare.services.alignment_policy import (
     rounded_frame as _rounded_frame,
 )
 
@@ -423,7 +423,6 @@ def _evidence_columns(estimate: ChunkedAudioEstimate) -> AudioChunkColumns:
         credible=tuple(item.credible for item in estimate.observations),
         agrees=tuple(item.agrees for item in estimate.observations),
         total_samples=sum(item.reference_count for item in estimate.observations),
-        rows_omitted=False,
     )
 
 
@@ -449,7 +448,6 @@ def _empty_evidence(total_samples: int) -> tuple[AudioChunkColumns, tuple[AudioC
         credible=(),
         agrees=(),
         total_samples=total_samples,
-        rows_omitted=False,
     )
     return columns, ()
 

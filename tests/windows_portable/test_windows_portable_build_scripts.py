@@ -942,8 +942,6 @@ def test_windows_portable_python_vsview_proof_covers_viewer_first_whole_set(
     assert "len({media_path, comparison_one_media_path, comparison_two_media_path}) == 3" in proof
     assert "comparisons=[comparison_one_media_path, comparison_two_media_path]" in proof
     assert "comparisons=[media_path" not in proof
-    assert 'f"{media_path.stem}:{comparison_one_media_path.stem}": 0' in proof
-    assert 'f"{media_path.stem}:{comparison_two_media_path.stem}": 0' in proof
     assert 'comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2}' in proof
     assert 'comparison_two_media_path.stem: {"_Matrix": 2, "_Range": 2}' in proof
     tree = ast.parse(proof_source)

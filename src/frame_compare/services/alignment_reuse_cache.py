@@ -15,6 +15,10 @@ import structlog
 import tomli_w
 
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
+from frame_compare.services.alignment_evidence import (
+    AlignmentStabilityClassification,
+    AlignmentStabilitySummary,
+)
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_sources import require_current_alignment_sources
 from frame_compare.services.types import (
@@ -22,10 +26,6 @@ from frame_compare.services.types import (
     AlignmentReuseCacheOrigin,
     ComparisonResolution,
     ReusableAlignmentEntry,
-)
-from frame_compare.utils.alignment_evidence import (
-    AlignmentStabilityClassification,
-    AlignmentStabilitySummary,
 )
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling

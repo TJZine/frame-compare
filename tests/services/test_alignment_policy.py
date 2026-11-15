@@ -10,7 +10,7 @@ from frame_compare.services.alignment_decision import (
     classify_audio_observations,
     competing_run_center,
 )
-from frame_compare.utils.alignment_policy import (
+from frame_compare.services.alignment_policy import (
     confirmed_offset,
     edge_consensus_offset,
     start_compensation_seconds,

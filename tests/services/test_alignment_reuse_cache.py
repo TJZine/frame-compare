@@ -18,6 +18,9 @@ import pytest
 import tomli_w
 
 import frame_compare.services.alignment_reuse_cache as reuse_cache
+from frame_compare.services.alignment_evidence import (
+    AlignmentStabilitySummary,
+)
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME,
     CACHE_VERSION,
@@ -31,9 +34,6 @@ from frame_compare.services.types import (
     ComparisonResolution,
 )
 from frame_compare.utils import file_lock
-from frame_compare.utils.alignment_evidence import (
-    AlignmentStabilitySummary,
-)
 from frame_compare.utils.file_lock import FileLockTimeoutError
 from frame_compare.utils.types import (
     AlignmentCacheSettings,

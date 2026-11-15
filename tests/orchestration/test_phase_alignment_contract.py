@@ -585,6 +585,76 @@ def test_final_alignment_summary_preserves_origins(
     assert alignment_summary_lines(summary, width=200)[0].plain == expected
 
 
+def test_final_summary_shows_changed_audio_offset_and_unapplied_state(tmp_path: Path) -> None:
+    from frame_compare.services.alignment_resolution import confirm_manual
+    from frame_compare.services.types import ComparisonResolution
+    from frame_compare.utils.progress import alignment_summary_lines
+    from tests.alignment_review_test_support import trusted_audio_attempt
+    from tests.services.alignment_request_test_support import alignment_request
+
+    reference, comparison = tmp_path / "ref.mkv", tmp_path / "comparison.mkv"
+    reference.touch()
+    comparison.touch()
+    request = alignment_request(
+        reference=reference, comparisons=[comparison], generated_dir=tmp_path
+    )
+    request = replace(
+        request, comparisons=[replace(request.comparisons[0], short_name="Encode [red]")]
+    )
+    initial = ComparisonResolution(
+        AlignmentResult(
+            reference.name,
+            comparison.name,
+            0,
+            0.0,
+            1.0,
+            "cross_correlation",
+            "computed",
+            audio_attempt=trusted_audio_attempt(frame_offset=0),
+        ),
+        "key",
+        "computed_this_run",
+    )
+    confirmed = confirm_manual(
+        initial,
+        frame_offset=2,
+        fps_reference=Fraction(24),
+        reference_clip=reference,
+        comparison_clip=comparison,
+    )
+    summary = phase_alignment._align_success_summary(
+        request=request, resolutions=(confirmed,), review_ran=True
+    )
+    assert (
+        alignment_summary_lines(summary, width=120)[0].plain
+        == "Encode [red] +2f (audio +0f) · confirmed in VSView"
+    )
+    rejected = ComparisonResolution(
+        AlignmentResult(
+            reference.name,
+            comparison.name,
+            None,
+            None,
+            0.5,
+            "cross_correlation",
+            "computed",
+            applied=False,
+            audio_attempt=provisional_audio_attempt(frame_offset=146),
+        ),
+        "key",
+        "computed_this_run",
+    )
+    summary = phase_alignment._align_success_summary(
+        request=request, resolutions=(rejected,), review_ran=False
+    )
+    line = alignment_summary_lines(summary, width=120)[0]
+    assert line.plain == "Encode [red] not applied"
+    assert any(
+        span.style == "yellow" and line.plain[span.start : span.end] == "not applied"
+        for span in line.spans
+    )
+
+
 @pytest.mark.parametrize(
     ("counts", "offset", "expected"),
     [

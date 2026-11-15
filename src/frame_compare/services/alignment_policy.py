@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from fractions import Fraction
 from statistics import median
 
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AUDIO_ANALYSIS_SAMPLE_RATE,
     SelectedAudioStreamEvidence,
 )

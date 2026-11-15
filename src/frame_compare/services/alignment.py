@@ -33,9 +33,20 @@ from frame_compare.services.alignment_diagnostics import (
     AlignmentReviewOutcome,
     write_alignment_diagnostic,
 )
+from frame_compare.services.alignment_evidence import (
+    AUDIO_ANALYSIS_SAMPLE_RATE,
+    AudioAlignmentAttempt,
+    AudioCollectionFacts,
+    AudioCollectionFailure,
+    AudioCollectionObservation,
+    AudioPairSide,
+    VideoCheckObservation,
+    analysis_stream_start,
+)
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.alignment_presentation import (
+    panel_audio_review_lines,
     present_alignment_evidence,
 )
 from frame_compare.services.alignment_previous_offsets import (
@@ -77,18 +88,6 @@ from frame_compare.services.types import (
     AlignmentOperationOutcome,
     AlignmentResult,
     ComparisonResolution,
-)
-from frame_compare.utils.alignment_evidence import (
-    AUDIO_ANALYSIS_SAMPLE_RATE,
-    MAX_ALIGNMENT_EVIDENCE_BYTES,
-    AudioAlignmentAttempt,
-    AudioCollectionFacts,
-    AudioCollectionFailure,
-    AudioCollectionObservation,
-    AudioPairSide,
-    VideoCheckObservation,
-    analysis_stream_start,
-    audio_attempt_payload,
 )
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
@@ -144,41 +143,6 @@ def format_rejected_alignment_warning(
     )
 
 
-def _build_offsets_map(
-    *,
-    reference: Path,
-    comparisons: list[Path],
-    resolutions: dict[str, ComparisonResolution],
-) -> dict[str, int | None]:
-    """Build stable `{reference:comparison -> frame_offset}` map for VSView."""
-    offsets_by_key: dict[str, int | None] = {}
-    for comp in comparisons:
-        key = alignment_key(reference, comp)
-        res = resolutions.get(key)
-        offsets_by_key[key] = res.accepted_offset if res is not None else None
-    return offsets_by_key
-
-
-def _project_audio_attempt_for_review(attempt: AudioAlignmentAttempt) -> AudioAlignmentAttempt:
-    """Embed the attempt without per-chunk rows in native review metadata."""
-    if attempt.chunks.rows_omitted:
-        return attempt
-    return replace(
-        attempt,
-        chunks=replace(
-            attempt.chunks,
-            starts=(),
-            counts=(),
-            active=(),
-            lags=(),
-            psrs=(),
-            credible=(),
-            agrees=(),
-            rows_omitted=True,
-        ),
-    )
-
-
 def _build_audio_review_map(
     *,
     reference: Path,
@@ -190,28 +154,27 @@ def _build_audio_review_map(
         key = alignment_key(reference, comparison)
         resolution = resolutions[key]
         result = resolution.result
+        attempt = result.audio_attempt
+        decision = attempt.decision if attempt is not None else None
+        candidate = decision.candidate if decision is not None else None
+        summary_lines, detail_lines = panel_audio_review_lines(resolution)
         payload = {
             "current_authority": {
                 "origin": resolution.origin if result.applied else "none",
                 "frame_offset": result.frame_offset if result.applied else None,
             },
-            "evidence_availability": resolution.evidence_availability,
-            "audio_attempt": (
-                audio_attempt_payload(_project_audio_attempt_for_review(result.audio_attempt))
-                if result.audio_attempt is not None
-                else None
-            ),
+            "decision_state": decision.state if decision is not None else None,
+            "candidate_offset": candidate.frame_offset if candidate is not None else None,
+            "summary_lines": summary_lines,
+            "detail_lines": detail_lines,
         }
-        encoded = json.dumps(
+        payloads[key] = json.dumps(
             payload,
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
             allow_nan=False,
         )
-        if len(encoded.encode("utf-8")) > MAX_ALIGNMENT_EVIDENCE_BYTES:
-            raise AudioAlignmentError("Native alignment-review audio evidence exceeds 2 MiB.")
-        payloads[key] = encoded
     return payloads
 
 
@@ -1294,11 +1257,6 @@ async def align_clips_from_request(
                 diagnostics_dir=request.alignment_diagnostics_dir if diagnostic_keys else None,
             )
 
-        offsets_by_key = _build_offsets_map(
-            reference=reference,
-            comparisons=comparisons,
-            resolutions=resolutions,
-        )
         audio_review_by_key = (
             _build_audio_review_map(
                 reference=reference,
@@ -1311,7 +1269,6 @@ async def align_clips_from_request(
         review = maybe_launch_alignment_vsview(
             reference=request.reference,
             comparisons=request.comparisons,
-            offsets_by_key=offsets_by_key,
             audio_review_by_key=audio_review_by_key,
             cache_dir=request.generated_dir,
             config=config,

@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import asdict, replace
+from dataclasses import replace
 from fractions import Fraction
-from typing import Any
 
-from frame_compare.services.alignment import _project_audio_attempt_for_review
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,
@@ -41,18 +39,18 @@ def audio_review(suggestion: int | None) -> str:
                 "origin": "shared_computed_offsets" if suggestion is not None else "none",
                 "frame_offset": suggestion,
             },
-            "evidence_availability": (
-                "historical_details_unavailable" if suggestion is not None else "not_computed"
-            ),
-            "audio_attempt": None,
+            "decision_state": None,
+            "candidate_offset": None,
+            "summary_lines": [
+                f"Accepted audio alignment reused: {suggestion:+d}f — APPLIED"
+                if suggestion is not None
+                else "No usable audio candidate (no usable audio signal) — NOT APPLIED"
+            ],
+            "detail_lines": ["Historical audio details unavailable."],
         },
         sort_keys=True,
         separators=(",", ":"),
     )
-
-
-def native_attempt_payload(attempt: AudioAlignmentAttempt) -> dict[str, Any]:
-    return asdict(_project_audio_attempt_for_review(attempt))
 
 
 def frame_lag(frame_offset: int) -> int:

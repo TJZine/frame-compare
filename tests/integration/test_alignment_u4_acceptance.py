@@ -34,10 +34,10 @@ from frame_compare.services.alignment_audio import (
     probe_streams,
     select_audio_pair,
 )
+from frame_compare.services.alignment_policy import position_winner
+from frame_compare.services.alignment_review_projection import build_audio_review_presentation
 from frame_compare.services.alignment_video import VideoClipRequest
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
-from frame_compare.utils.alignment_policy import position_winner
-from frame_compare.utils.alignment_review_projection import build_audio_review_presentation
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.env import detect_plugins, ensure_vs_environment

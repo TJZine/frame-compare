@@ -8,7 +8,7 @@ from fractions import Fraction
 from statistics import median
 from typing import Literal
 
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AudioAlignmentAttempt,
     VideoCheckObservation,
     VideoCheckPoint,
@@ -16,7 +16,7 @@ from frame_compare.utils.alignment_evidence import (
     VideoTargetKind,
     VideoTargetResolution,
 )
-from frame_compare.utils.alignment_policy import (
+from frame_compare.services.alignment_policy import (
     compensated_lag_to_frame,
     edge_consensus_offset,
     position_winner,

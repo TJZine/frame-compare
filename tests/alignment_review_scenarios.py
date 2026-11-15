@@ -1,11 +1,8 @@
-"""Literal presentation scenarios, independent of audio/video producers.
-
-Producer parity tests in services keep these fixtures aligned with real output.
-"""
+"""Literal audio review evidence scenarios for panel and equivalence checks."""
 
 from dataclasses import replace
 
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,

@@ -88,8 +88,10 @@ audio = {
     f"ref:{n}": json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
-            "evidence_availability": "not_computed",
-            "audio_attempt": None,
+            "decision_state": None,
+            "candidate_offset": None,
+            "summary_lines": [],
+            "detail_lines": [],
         }
     )
     for n in ("a", "b")
@@ -97,7 +99,6 @@ audio = {
 script = write_vsview_session_script(
     reference=paths[0],
     comparisons=paths[1:],
-    suggested_offsets_by_key={"ref:a": None, "ref:b": None},
     audio_review_by_key=audio,
     # Tiny FFV1 sources may lack decoder primaries/transfer. Exercise the same
     # explicit missing-metadata SDR defaults used by generated review sessions.

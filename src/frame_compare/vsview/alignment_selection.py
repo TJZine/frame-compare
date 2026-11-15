@@ -18,11 +18,9 @@ def opening_hint(comparison: AlignmentReviewComparisonMetadata) -> OpeningHint:
     authority = comparison.audio_review.current_authority.frame_offset
     if authority is not None:
         return OpeningHint(authority)
-    attempt = comparison.audio_review.audio_attempt
-    if attempt is not None and attempt.decision.state == "provisional":
-        candidate = attempt.decision.candidate
-        if candidate is not None:
-            return OpeningHint(candidate.frame_offset, provisional=True)
+    candidate = comparison.audio_review.candidate_offset
+    if comparison.audio_review.decision_state == "provisional" and candidate is not None:
+        return OpeningHint(candidate, provisional=True)
     return OpeningHint(None)
 
 

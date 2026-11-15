@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
 )
