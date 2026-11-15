@@ -141,7 +141,7 @@ def _provisional_review() -> str:
     )
 
 
-def _malformed_review() -> str:
+def _provisional_review_without_candidate() -> str:
     return json.dumps(
         {
             "current_authority": {"origin": "none", "frame_offset": None},
@@ -237,7 +237,7 @@ def _execute_ready_block(
     return stderr.getvalue()
 
 
-@pytest.mark.parametrize("case", ["utf8", "ascii", "malformed"])
+@pytest.mark.parametrize("case", ["utf8", "ascii", "provisional-without-candidate"])
 def test_generated_ready_block_output_cases(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
 ) -> None:
@@ -245,8 +245,11 @@ def test_generated_ready_block_output_cases(
         tmp_path,
         monkeypatch,
         stderr_encoding="ascii" if case == "ascii" else "utf-8",
-        audio_review_by_key={"ref:a": _accepted_review(), "ref:b": _malformed_review()}
-        if case == "malformed"
+        audio_review_by_key={
+            "ref:a": _accepted_review(),
+            "ref:b": _provisional_review_without_candidate(),
+        }
+        if case == "provisional-without-candidate"
         else None,
     )
     if case == "utf8":

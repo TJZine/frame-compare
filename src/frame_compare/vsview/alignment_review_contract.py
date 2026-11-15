@@ -299,6 +299,15 @@ def _session_id_from_filename(filename: str) -> str:
     return _validated_session_id(token)
 
 
+def alignment_review_metadata_version_message(version: object) -> str:
+    rendered = str(version) if _is_int(version) else "unknown"
+    return (
+        "Alignment review requires a newly generated session. "
+        f"This session uses metadata v{rendered}; "
+        f"this version requires v{ALIGNMENT_REVIEW_METADATA_VERSION}."
+    )
+
+
 def _parse_output_metadata(
     candidate: AlignmentReviewOutputCandidate,
 ) -> AlignmentReviewReferenceMetadata | AlignmentReviewComparisonMetadata:
@@ -309,12 +318,7 @@ def _parse_output_metadata(
     metadata = candidate.metadata
     version = metadata.get(ALIGNMENT_REVIEW_METADATA_VERSION_KEY)
     if not _is_int(version) or version != ALIGNMENT_REVIEW_METADATA_VERSION:
-        rendered = str(version) if _is_int(version) else "unknown"
-        raise AlignmentReviewContractError(
-            "Alignment review requires a newly generated session. "
-            f"This session uses metadata v{rendered}; "
-            f"this version requires v{ALIGNMENT_REVIEW_METADATA_VERSION}."
-        )
+        raise AlignmentReviewContractError(alignment_review_metadata_version_message(version))
     role = metadata.get(ALIGNMENT_REVIEW_METADATA_ROLE_KEY)
     if role == "reference":
         expected_keys = ALIGNMENT_REVIEW_REFERENCE_METADATA_KEYS

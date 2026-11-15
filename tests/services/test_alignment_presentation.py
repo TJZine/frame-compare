@@ -787,7 +787,7 @@ def test_unresolved_reason_lists_region_before_unexamined_add_on(
     assert err.index(region) < err.index(add_on)
 
 
-def test_authoritative_nested_targets_match_compact_native_projection(
+def test_nested_target_reasons_and_regions_appear_in_terminal(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     attempt = _production_nested_targets_attempt()
@@ -905,7 +905,7 @@ def test_authoritative_nested_targets_match_compact_native_projection(
         ),
     ],
 )
-def test_target_context_and_terminal_rows_match_compact_native_projection(
+def test_target_context_drives_terminal_and_json_review_output(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     credible: bool,
@@ -993,7 +993,7 @@ def test_target_context_and_terminal_rows_match_compact_native_projection(
         assert json.loads(json_streams.err)["reason"] == expected_reason
 
 
-def test_nonzero_reference_start_shifts_full_and_compact_region_times() -> None:
+def test_nonzero_reference_start_shifts_region_times() -> None:
     attempt = producer_target_context_attempt(credible=True, resolution="unresolved")
     reference, comparison = attempt.selected_streams
     attempt = replace(
@@ -1009,7 +1009,7 @@ def test_nonzero_reference_start_shifts_full_and_compact_region_times() -> None:
     assert "+2f  1:10–1:40  not settled" in review.region_lines(panel=True)
 
 
-def test_resolved_credible_run_context_matches_full_and_compact_terminal(
+def test_resolved_credible_run_context_appears_in_terminal(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     attempt = producer_run_context_attempt()
@@ -1053,7 +1053,7 @@ def test_resolved_credible_run_context_matches_full_and_compact_terminal(
     )
 
 
-def test_partial_final_target_bounds_match_compact_native_projection() -> None:
+def test_partial_final_target_ends_at_last_sample() -> None:
     attempt = _partial_final_target_attempt()
     full_review = build_audio_review_presentation(attempt)
 
@@ -1064,7 +1064,7 @@ def test_partial_final_target_bounds_match_compact_native_projection() -> None:
     assert all("1:00-2:00" not in line for line in full_review.region_lines())
 
 
-def test_partial_final_base_regions_match_compact_native_projection() -> None:
+def test_partial_final_run_and_full_track_regions_end_at_last_sample() -> None:
     partial = _partial_final_target_attempt()
     run_attempt = replace(partial, video_check=replace(partial.video_check, targets=()))
     full_attempt = replace(run_attempt, runs=())
@@ -1079,7 +1079,7 @@ def test_partial_final_base_regions_match_compact_native_projection() -> None:
         assert all("2:00" not in line for line in full_regions)
 
 
-def test_partial_final_same_frame_context_matches_compact_native_projection() -> None:
+def test_partial_final_same_frame_region_ends_at_last_sample() -> None:
     partial = _partial_final_target_attempt()
     attempt = replace(
         partial,

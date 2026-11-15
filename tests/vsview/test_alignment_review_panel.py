@@ -1226,7 +1226,6 @@ def test_audio_review_stays_stable_during_navigation_and_refreshes_with_workspac
     _call_hook(panel.on_workspace_loaded)
     assert "+9f" in panel.audio_summary_labels[0].text()
     assert panel.source_status_labels[0].text() == "Original frame unavailable"
-    _visit(panel, api, 0, 12)
 
 
 @pytest.mark.parametrize("text", ["", "-1", "x", "200"])

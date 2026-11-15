@@ -631,6 +631,7 @@ def _execute_generated_script(
     output_sink: list[tuple[str, int, str]] | None = None,
     overlay_sink: list[str] | None = None,
     legacy_index_payload: bool = False,
+    legacy_review_payload: bool = False,
 ) -> tuple[
     list[tuple[str, int, str]],
     list[dict[str, object]],
@@ -767,6 +768,10 @@ def _execute_generated_script(
         )
     )
     script = session_path.read_text(encoding="utf-8")
+    if legacy_review_payload:
+        # v5 embedded this offset alongside the older audio-review JSON string.
+        assert script.count('"audio_review":') == 1
+        script = script.replace('"audio_review":', '"suggested_offset": 0, "audio_review":')
     if legacy_index_payload:
         legacy = tmp_path / "ref.mkv.frame-compare-old.lwi"
         legacy.write_bytes(b"legacy")
@@ -782,6 +787,36 @@ def _execute_generated_script(
         },
     )
     return output_calls, output_metadata, applied_props, loader_calls
+
+
+def test_generated_v5_session_requires_regeneration_without_review_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    legacy_review = json.dumps(
+        {
+            "current_authority": {"origin": "shared_computed_offsets", "frame_offset": 0},
+            "evidence_availability": "historical_details_unavailable",
+            "audio_attempt": None,
+        }
+    )
+    outputs: list[tuple[str, int, str]] = []
+
+    with pytest.raises(SystemExit) as stopped:
+        _execute_generated_script(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            comparison_stems=("a",),
+            audio_review_by_key={"ref:a": legacy_review},
+            output_sink=outputs,
+            legacy_review_payload=True,
+        )
+
+    assert stopped.value.code == 1
+    err = capsys.readouterr().err
+    assert "Alignment review requires a newly generated session." in err
+    assert "This session uses metadata v5; this version requires v6." in err
+    assert "VSView is open" not in err
+    assert outputs == []
 
 
 def test_adapter_writer_emits_parent_source_index_root(
