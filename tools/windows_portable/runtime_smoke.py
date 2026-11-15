@@ -507,6 +507,22 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         assert_true(
             workspace.session_id == session.session_id, "generated output/session identities differ"
         )
+        expected_comparison_keys = {
+            f"{media_path.stem}:{comparison_one_media_path.stem}",
+            f"{media_path.stem}:{comparison_two_media_path.stem}",
+        }
+        assert_true(
+            {pair.comparison_key for pair in workspace.comparisons} == expected_comparison_keys,
+            "generated VSView comparison keys differ",
+        )
+        assert_true(
+            all(
+                pair.audio_review.current_authority.origin == "shared_computed_offsets"
+                and pair.audio_review.current_authority.frame_offset == 0
+                for pair in workspace.comparisons
+            ),
+            "generated VSView comparisons lost reused zero authority",
+        )
         expected = tuple(
             AlignmentReviewExpectedComparison(
                 pair.comparison_key,

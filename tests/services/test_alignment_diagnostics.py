@@ -12,7 +12,6 @@ import pytest
 
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services import alignment_audio, alignment_diagnostics
-from frame_compare.services.alignment_diagnostics import _MAX_DIAGNOSTIC_BYTES
 from frame_compare.services.alignment_evidence import (
     MAX_AUDIO_CHUNKS,
     AlignmentStabilitySummary,
@@ -465,7 +464,7 @@ def test_maximum_evidence_shapes_fit_diagnostic_envelope(tmp_path: Path, shape: 
         resolution=ComparisonResolution(result, "diagnostic", "computed_this_run"),
     )
     diagnostic_payload = json.loads(path.read_text(encoding="utf-8"))
-    assert diagnostic_size <= _MAX_DIAGNOSTIC_BYTES, (shape, populations, diagnostic_size)
+    assert diagnostic_size <= 2 * 1024 * 1024, (shape, populations, diagnostic_size)
     assert diagnostic_payload["original_audio_attempt"] == json.loads(
         json.dumps(asdict(attempt), allow_nan=False)
     )

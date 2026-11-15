@@ -950,49 +950,6 @@ def test_windows_portable_python_vsview_proof_covers_viewer_first_whole_set(
         for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "prove_generated_vsview_session"
     )
-    (writer,) = (
-        node
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "write_vsview_session_script"
-    )
-    (reviews,) = (kw.value for kw in writer.keywords if kw.arg == "audio_review_by_key")
-    assert isinstance(reviews, ast.DictComp)
-    (generator,) = reviews.generators
-    assert generator.is_async == 0 and not generator.ifs
-    assert isinstance(generator.target, ast.Name)
-    assert isinstance(reviews.key, ast.Name) and reviews.key.id == generator.target.id
-    expected_keys = ast.parse(
-        '(f"{media_path.stem}:{comparison_one_media_path.stem}", '
-        'f"{media_path.stem}:{comparison_two_media_path.stem}")',
-        mode="eval",
-    ).body
-    assert ast.dump(generator.iter) == ast.dump(expected_keys)
-
-    encode_review = reviews.value
-    assert isinstance(encode_review, ast.Call)
-    assert ast.unparse(encode_review.func) == "json.dumps"
-    (argument,) = encode_review.args
-    payload = ast.literal_eval(argument)
-    assert isinstance(payload, dict)
-    assert set(payload) == {
-        "current_authority",
-        "decision_state",
-        "candidate_offset",
-        "summary_lines",
-        "detail_lines",
-    }
-    authority = payload["current_authority"]
-    assert isinstance(authority, dict)
-    assert authority == {"origin": "shared_computed_offsets", "frame_offset": 0}
-    assert type(authority["frame_offset"]) is int
-    assert payload["decision_state"] is None
-    assert payload["candidate_offset"] is None
-    for field in ("summary_lines", "detail_lines"):
-        lines = payload[field]
-        assert isinstance(lines, list) and all(isinstance(line, str) for line in lines)
-
     callback_methods = {
         "on_workspace_loaded",
         "on_current_voutput_changed",
