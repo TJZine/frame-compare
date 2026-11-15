@@ -23,7 +23,7 @@ from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection, SourceMatchFpsMode
 from frame_compare.config.schema_models import SourceOverrideConfig
-from frame_compare.error_context import JSONValue
+from frame_compare.errors import JSONValue
 from frame_compare.orchestration.active_rect import (
     active_rect_identity,
     active_rect_policy_identity,
