@@ -551,15 +551,18 @@ unchanged.
   `  webhook` rows; `report`; `screenshots` with `  {N} files`; `alignment` when
   alignment ran; `diagnostics` when written; and the `slow.pics` row `upload
   skipped because the report could not be confirmed` when that happened.
+  The `alignment` row shows the same per-source offsets and origins for applied
+  entries as the Align phase summary.
   Declined uploads get no row. After one blank body line, `run` is `{N} frames ·
   {N} sources · analysis cached` or `analysis computed`, with nothing for
   `skipped`, followed by `time` as `{dur} total`, `  machine`, and `  you` with
   their existing items. Artifact paths are Rich hyperlinks and use the shared
-  path formatter. `--quiet` is unchanged.
+  path formatter.
 - Final warnings are grouped by producer-selected source in a yellow-rail
   `! Warnings` section. Each source has its accent bold name, `!` notes (or `–`
   for skipped items), dim detail lines indented two spaces, and one blank body
-  line between sources. The hidden-count line is unchanged. Records are
+  line between sources. When warnings are hidden, a final line gives the total
+  number of hidden warnings and their counts by source. Records are
   de-duplicated for display, and warning rows associated with post-upload action
   rows remain on those rows.
 - `run --json` does not emit the human warning panel, does not add warning
