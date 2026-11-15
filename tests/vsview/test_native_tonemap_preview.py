@@ -148,7 +148,7 @@ if mode == "legacy":
                    if isinstance(n, ast.Constant) and isinstance(n.value, str))
     data = json.loads(payload)
     data.pop("preview_tonemap")
-    runtime.run_session(data, script)
+    runtime.run_session(data, script, metadata_version=runtime.REVIEW_METADATA_VERSION)
 else:
     exec(compile(text, str(script), "exec"), {"__file__": str(script)})
 assert [output[1:3] for output in outputs] == [(0, "Reference"), (1, "Comparison 1"), (2, "Comparison 2")]

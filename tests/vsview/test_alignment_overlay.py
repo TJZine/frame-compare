@@ -505,7 +505,11 @@ def test_runtime_wires_native_previews_using_strict_launch_workspace(tmp_path, m
             "memory_limit_mb": None,
         },
     )
-    runtime.run_session(data, tmp_path / f"session_{'1' * 32}.py")
+    runtime.run_session(
+        data,
+        tmp_path / f"session_{'1' * 32}.py",
+        metadata_version=runtime.REVIEW_METADATA_VERSION,
+    )
     assert [(i, n) for _, i, n, _ in registered] == [
         (0, "Reference"),
         (1, "Comparison 1"),

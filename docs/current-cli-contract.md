@@ -1668,9 +1668,11 @@ the current offset, including zero, then use the raw candidate for a provisional
 attempt. The panel derives display bounds from public output clip lengths. The parent
 validates saved raw frame indices against `AlignmentClipRequest.source_frame_count`.
 
-The panel requires metadata v6 and asks for a regenerated session when the metadata
-version is older or unknown. It rejects mixed Frame Compare sessions and remains
-inert in ordinary VSView sessions. The result sidecar remains schema v1 with an
+Generated scripts carry the metadata version from the Frame Compare installation
+that wrote them. The runtime checks this version before loading sources and asks
+for a regenerated session if the version is missing or differs from v6. The panel
+requires v6 output metadata, rejects mixed Frame Compare sessions, and remains inert
+in ordinary VSView sessions. The result sidecar remains schema v1 with an
 ordered whole-set decision list of `confirmed` and `keep_current` actions. Frame
 Compare derives the sibling result path from the generated script. It rejects missing,
 malformed, stale, or incomplete results, duplicate comparison decisions, and

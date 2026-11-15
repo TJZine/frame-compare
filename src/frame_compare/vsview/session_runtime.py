@@ -476,17 +476,21 @@ def _comparison_metadata(
     }
 
 
-def run_session(data: SessionData, script_path: Path) -> None:
+def run_session(
+    data: SessionData, script_path: Path, *, metadata_version: int | None = None
+) -> None:
     console = SessionConsole()
+    # Generated scripts pass the version of the data they embed.
+    if metadata_version != REVIEW_METADATA_VERSION:
+        console.safe_print(
+            console.status_line(
+                "[FAIL]", alignment_review_metadata_version_message(metadata_version)
+            )
+        )
+        sys.exit(1)
     install_workspace_log_filter()
     reference = data["reference"]
     targets = data["targets"]
-    # Generated v5 scripts embed this field and call the installed runtime.
-    if any("suggested_offset" in target for target in targets.values()):
-        console.safe_print(
-            console.status_line("[FAIL]", alignment_review_metadata_version_message(5))
-        )
-        sys.exit(1)
     frame_props_by_label = data["frame_props_by_label"]
     short_names = data["short_names"]
     raw_tonemap = data.get("preview_tonemap")

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.vs.types import TonemapSettings
+from frame_compare.vsview.alignment_review_contract import ALIGNMENT_REVIEW_METADATA_VERSION
 
 if TYPE_CHECKING:
     from frame_compare.vsview.session_runtime import ComparisonSource, SessionData
@@ -177,5 +178,5 @@ from frame_compare.vsview.session_runtime import SessionData, run_session
 
 SESSION_DATA = cast(SessionData, json.loads({payload!r}))
 
-run_session(SESSION_DATA, Path(__file__))
+run_session(SESSION_DATA, Path(__file__), metadata_version={ALIGNMENT_REVIEW_METADATA_VERSION})
 '''
