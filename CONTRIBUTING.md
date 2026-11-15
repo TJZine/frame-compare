@@ -530,8 +530,8 @@ a noun phrase and ends with a period.
 - User pages link to Internals pages only where the reader needs exact behavior. Link to
   a specific section with its anchor when one section answers the question. Overview
   pages may link to whole Internals pages.
-- User pages never link to `docs/plans/`, `docs/reviews/`, `docs/prompts/`,
-  `docs/TODO.md`, `docs/images/README.md`, or `docs/release-evidence/`.
+- User pages never link to `docs/TODO.md`, `docs/images/README.md`, or
+  `docs/release-evidence/`.
 
 #### UI text, keys, and literals
 

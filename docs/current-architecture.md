@@ -1644,4 +1644,3 @@ Native alignment-review hotspot dispositions for the current implementation:
 ## Unknowns And Maintainer Decisions Still Open
 
 - Whether any import-level package APIs should be promoted from convenience-only to supported/stable.
-- Whether a durable multi-session plan workflow should become active again in this repo. The runbook currently keeps `docs/plans/` inactive by default.

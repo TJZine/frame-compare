@@ -46,9 +46,6 @@ reviews:
     - path: "docs/current-cli-contract.md"
       instructions: |
         Review as the public CLI/config contract. Flag drift in command names, option semantics, stdout/stderr behavior, JSON payloads, exit codes, path resolution, config persistence, or report auto-open rules. Ensure tests and docs stay in lockstep.
-    - path: "docs/plans/**/*.md"
-      instructions: |
-        Review tracked plans as scoped handoff memory, not global policy. Flag plans that lack explicit status, treat inactive or closed plans as current authority, duplicate runbook policy, or omit verification and rollback notes for active implementation work.
     - path: ".agents/project.md"
       instructions: |
         Review as the single repository profile for shared skills. Check current source/command facts, product obligations, relevant evidence routes, and explicit limits. Existing architecture can be deliberately redesigned; equal error output alone does not prove redundant tests. Do not add model bindings, mandatory role pipelines, or duplicate authorities.

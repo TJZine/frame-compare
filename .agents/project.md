@@ -184,11 +184,9 @@ creation/maintenance skills own that map's deliberate lifecycle, not app facts.
 Architecture and CLI documents own their product contracts. Keep each rule in one
 authoritative place and replace duplicate prose with a direct pointer.
 
-Use an inline task record by default. A cross-session task may use one dated plan
-under `docs/plans/`; preserve the current `search.exclude: true` front matter and
-`Status: Active`/`Status: Historical` lifecycle so internal planning stays out of
-the user-documentation search index. Do not activate old plans merely because
-they exist. Record material decisions and remaining evidence gaps once.
+Use an inline task record by default. Cross-session handoffs stay in
+untracked local notes, not the tracked docs tree. Record material decisions and
+remaining evidence gaps once.
 
 Host-specific model identifiers, effort settings, permissions, and tool mappings
 belong in host configuration. Optional executor presets in `.codex/agents/*.toml`
