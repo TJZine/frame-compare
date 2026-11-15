@@ -1607,7 +1607,7 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/vsview/adapter.py`, `session_script.py`, `session_runtime.py`,
   `alignment_review_contract.py`, and `alignment_review_panel.py`
 
-Working rule: changes to these files should usually trigger full verification and, when they reshape behavior or ownership, a same-pass update to this document.
+Changes to these files usually need full verification.
 
 The render scheduler hotspot now owns only per-clip job scheduling, progress, and
 stop/drain behavior. Selection/request identity belongs to `PreparedClipRender`,

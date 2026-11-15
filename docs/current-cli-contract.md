@@ -24,35 +24,7 @@ documents that promise elsewhere.
   owns human artifact-path formatting and terminal hyperlinks. `SessionConsole`
   mirrors the same section rules in the VSView process.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
-- Primary executable contract checks include:
-  - `tests/cli/test_help_and_import.py` for command registration, help text, and
-    lazy-import behavior.
-  - `tests/cli/test_run_command.py`, `tests/cli/test_run_json_errors.py`, and
-    `tests/cli/test_run_report_open.py` for command behavior, JSON errors, and
-    report auto-open gating.
-  - `tests/cli/test_run_slowpics_options.py` for the slow.pics `run` option
-    surface.
-  - `tests/cli/test_run_output.py` for human output, JSON stdout cleanliness,
-    and slow.pics post-upload presentation behavior.
-  - `tests/cli/test_history_command.py` for history config resolution, exact JSON
-    and stream contracts, exact-name opening, browser failures, and lazy help.
-  - `tests/config/test_schema.py` for config schema/defaults, including the
-    exact slow.pics field set.
-  - `tests/config/test_overrides.py` for CLI override mapping semantics.
-  - `tests/e2e/test_cli_version.py` for the public `version` command contract.
-  - `tests/cli/test_exit_codes.py` for exit-code behavior.
-  - `tests/test_cli_contract_docs.py` for keeping this document aligned with the live
-    override map and authority wiring.
 - `docs/ENGINEERING_RUNBOOK.md` owns workflow, verification, and public-surface policy.
-
-Update this document in the same pass when changing:
-
-- command names or subcommand structure
-- user-facing flag names or meanings
-- CLI flag to config mapping or persistence rules
-- JSON output schema for `run --json` or `doctor --json`
-- browser/report-opening rules
-- slow.pics post-upload side-effect behavior or warning placement
 
 ## Command Surface
 
