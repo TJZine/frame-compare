@@ -11,13 +11,15 @@ the same configuration and resolves paths consistently.
 ## Before you begin
 
 Create or select a workspace with at least two supported files in its input directory.
-For an example you can publish that matches the output below, use two sources such as:
+For a two-source example, use files such as:
 
 ```text
 comparison_videos/
 ├── pq10-reference.ts
 └── hlg10-comparison.ts
 ```
+
+The terminal samples below use three releases of the same Black Sails episode.
 
 Supported extensions are `.mkv`, `.mp4`, `.avi`, `.m2ts`, and `.ts`, matched
 case-insensitively.
@@ -103,17 +105,19 @@ Check:
 Check the sources, the Reference line, and the frame counts in this output.
 
 ``` { .text .fc-output title="Output · frame-compare run --dry-run" }
-No side effects: this dry run validates configuration and input filenames only; it does not write,
-render, upload, or open anything.
+No side effects: this dry run validates configuration and input filenames only; it does not write, render, upload, or
+open anything.
 
 Will use
   Workspace: /workspace
   Input directory: comparison_videos
-  Sources (2): hlg10-comparison.ts, pq10-reference.ts
-  Reference: pq10-reference.ts -> pq10-reference.ts
-  Frame selection: specific frames, random frames, dark frames, bright frames
-  Specific frames: 1000
-  Frame counts: specific=1, random=3, dark=1, bright=1, motion=0
+  Sources (3): Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv,
+Black.Sails.S01E08.VIII.1080p.AMZN.WEB-DL.DDP.5.1.H.264-GNOME.mkv,
+Black.Sails.S01E08.VIII.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-NOGRP.mkv
+  Reference: Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv -> Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv
+  Frame selection: specific frames, random frames, dark frames, bright frames, motion frames
+  Specific frames: 0, 120
+  Frame counts: specific=2, random=4, dark=2, bright=2, motion=2
   Analysis: quality mode; metrics required; random seed 42
 
 Would create in a real run
@@ -158,15 +162,20 @@ or command explicitly enables it.
 Use the report and screenshot paths in the completed-run summary.
 
 ``` { .text .fc-output title="Output · frame-compare run" }
-╭─ ✓ Comparison complete ──────────────────────────────────────────────────────────────────────────╮
-│   report               generated/pq10-reference + hlg10-comparison/report.html                   │
-│   screenshots          generated/pq10-reference + hlg10-comparison/screenshots  12 files         │
-│                                                                                                  │
-│   run                  6 frames · 2 sources · cache miss                                         │
-│                                                                                                  │
-│   time                 5m 06s total                                                              │
-│     machine            setup 52.0 s    analyze 2m 29s    render 1m 45s                           │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ ! Comparison complete · 1 warning
+│ report          generated/Black Sails/report.html
+│ screenshots     generated/Black Sails/screenshots  30 files
+│ alignment       GNOME +147f · NOGRP +0f · audio
+│ diagnostics     generated/Black Sails/alignment_diagnostics
+│
+│ run             10 of 12 frames · 3 sources · analysis computed
+│ time            11m 12s total
+│   machine       setup 48.5 s · analyze 7m 16s · align 2m 51s · render 16.6 s
+╰─
+
+╭─ ! Warnings
+│ ! 2 requested frames fall outside the shared range and were skipped: 0, 120
+╰─
 ```
 
 ## Repeat comparisons
