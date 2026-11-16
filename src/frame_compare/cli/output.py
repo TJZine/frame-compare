@@ -29,12 +29,14 @@ from frame_compare.utils.terminal_theme import (
     GlyphSet,
     format_duration,
     glyphs_for_console,
+    print_with_paths,
 )
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
     from frame_compare.orchestration.coordinator import RunResult
     from frame_compare.orchestration.run_inputs import AcquiredRunConfig
+    from frame_compare.orchestration.types import InterruptedRun
 
 
 STYLE_UNIT = "dim"
@@ -531,9 +533,44 @@ def print_result_summary(
         section.print(console)
 
 
-def _count_screenshot_files(screenshot_dir: Path) -> int | None:
+def print_interruption(
+    console: Console, interruption: InterruptedRun | None, *, root: Path
+) -> None:
+    glyph = glyphs_for_console(console).warning
+    phase = None if interruption is None else interruption.phase
+    title = "Interrupted" if phase is None else f"Interrupted during {phase}"
+    console.print(f"[bold {WARN}]{glyph} {escape(title)}[/]")
+    if interruption is None:
+        return
+
+    workspace = interruption.workspace
+    if workspace is not None and workspace.run_dir is not None:
+        kept = _count_screenshot_files(workspace.screenshots_dir, missing_is_empty=True)
+        if kept is not None:
+            path = format_display_path(workspace.run_dir, root=root)
+            print_with_paths(
+                console,
+                f"  kept      {kept} of {interruption.planned_screenshots} screenshots · {escape(path)}",
+                (path,),
+            )
+
+    reusable = [
+        name
+        for name, written in (
+            ("analysis", interruption.analysis_cache_written),
+            ("alignment", interruption.alignment_cache_written),
+        )
+        if written
+    ]
+    if reusable:
+        console.print(f"  next run  reuses cached {' and '.join(reusable)}")
+
+
+def _count_screenshot_files(screenshot_dir: Path, *, missing_is_empty: bool = False) -> int | None:
     try:
         entries = list(screenshot_dir.iterdir())
+    except FileNotFoundError:
+        return 0 if missing_is_empty else None
     except OSError:
         return None
     return sum(1 for entry in entries if entry.is_file() and entry.suffix.lower() == ".png")

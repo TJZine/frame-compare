@@ -332,6 +332,12 @@ Frame Compare-owned indexes before reuse. See
 [Supported Media Runtime](supported-media-runtime.md) for the profile boundary and
 recovery requirement.
 
+An interrupted run sends its phase and reserved workspace to the human CLI
+through the runner's interruption callback. Analysis and alignment report
+successful reusable cache writes from their persistence owners. The CLI counts
+retained screenshots after the runner returns control, while the existing
+failure-record path remains responsible for persisted run status.
+
 ### Configuration persistence
 
 `orchestration.run_inputs` owns the selected run configuration. The only intentional

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -252,6 +253,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
         quiet: bool = False,
         json_output: bool = False,
         vs_loader: VSLoader | None = None,
+        on_reusable_cache_written: Callable[[], None] | None = None,
     ) -> AlignmentOperationOutcome:
         outcome = await real_align(
             request,
@@ -262,6 +264,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
             quiet=quiet,
             json_output=json_output,
             vs_loader=vs_loader,
+            on_reusable_cache_written=on_reusable_cache_written,
         )
         results = outcome.results
         assert len(results) == 1

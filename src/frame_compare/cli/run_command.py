@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -17,6 +18,7 @@ from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.cli.output import (
     planned_frame_count,
     print_at_a_glance,
+    print_interruption,
     print_result_summary,
 )
 from frame_compare.config.errors import ConfigValidationError
@@ -60,6 +62,7 @@ if TYPE_CHECKING:
         FullWindowRetryConfirmationDecision,
         FullWindowRetryConfirmationFn,
         FullWindowRetryConfirmationRequest,
+        InterruptedRun,
         SlowpicsUploadConfirmationDecision,
         SlowpicsUploadConfirmationFn,
         SlowpicsUploadConfirmationRequest,
@@ -258,6 +261,12 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         no_color=effective_no_color,
     )
 
+    interrupted: InterruptedRun | None = None
+
+    def _capture_interruption(facts: InterruptedRun) -> None:
+        nonlocal interrupted
+        interrupted = facts
+
     try:
         select_run_config_path(args.config_path, args.resolved_root)
         run_options = parse_run_options(args, no_color=effective_no_color)
@@ -311,6 +320,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             deps=deps,
             console=console,
             inputs=inputs,
+            on_interrupted=(None if args.quiet or args.json_output else _capture_interruption),
         )
         result = deps.runner.run(request, dependencies=run_dependencies)
     except FrameCompareError as error:
@@ -320,7 +330,15 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             deps=deps,
             no_color=effective_no_color,
         ) from error
-    except (KeyboardInterrupt, typer.Abort):
+    except (KeyboardInterrupt, typer.Abort) as error:
+        if not (args.quiet or args.json_output) and (
+            interrupted is not None or isinstance(error, KeyboardInterrupt)
+        ):
+            print_interruption(
+                deps.console_factory(stderr=True, no_color=effective_no_color),
+                interrupted,
+                root=args.resolved_root,
+            )
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
 
     if args.json_output:
@@ -363,6 +381,7 @@ def build_runner_dependencies(
     deps: RunCommandDeps,
     console: Console,
     inputs: AcquiredRunConfig,
+    on_interrupted: Callable[[InterruptedRun], None] | None = None,
 ) -> RunDependencies | None:
     config = inputs.config
     confirm_slowpics_upload = (
@@ -384,7 +403,10 @@ def build_runner_dependencies(
         if full_window_retry_prompt_is_legal(args=args, deps=deps, config=config)
         else None
     )
-    if confirm_slowpics_upload is None and confirm_full_window_retry is None:
+    if all(
+        callback is None
+        for callback in (confirm_slowpics_upload, confirm_full_window_retry, on_interrupted)
+    ):
         return None
 
     from frame_compare.orchestration.coordinator import RunDependencies
@@ -392,6 +414,7 @@ def build_runner_dependencies(
     return RunDependencies(
         confirm_slowpics_upload=confirm_slowpics_upload,
         confirm_full_window_retry=confirm_full_window_retry,
+        on_interrupted=on_interrupted,
     )
 
 

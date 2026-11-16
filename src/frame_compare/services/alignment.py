@@ -1171,6 +1171,7 @@ async def align_clips_from_request(
     quiet: bool = False,
     json_output: bool = False,
     vs_loader: VSLoader | None = None,
+    on_reusable_cache_written: Callable[[], None] | None = None,
 ) -> AlignmentOperationOutcome:
     """Align clips from the typed request seam with shared previous-offset reuse."""
     try:
@@ -1342,8 +1343,24 @@ async def align_clips_from_request(
         if config.cache_results:
             candidate = prepare_reusable_source_set(request, resolutions)
             if candidate is not None:
-                save_reusable_offsets(request, candidate)
+                written = save_reusable_offsets(request, candidate)
                 require_current_alignment_sources(request)
+                if (
+                    written
+                    and on_reusable_cache_written is not None
+                    and (
+                        request.previous_offsets == "always"
+                        or all(
+                            resolution.origin != "interactive_confirmed_this_run"
+                            or (
+                                resolution.computed_fallback is not None
+                                and resolution.computed_fallback.applied
+                            )
+                            for resolution in candidate.resolutions
+                        )
+                    )
+                ):
+                    on_reusable_cache_written()
 
         return AlignmentOperationOutcome(
             ordered_results(request, resolutions),

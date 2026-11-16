@@ -23,6 +23,7 @@ from frame_compare.orchestration.progress import (
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
+    is_run_interruption,
 )
 from frame_compare.utils.progress import LogProgressReporter
 from frame_compare.utils.progress_protocol import (
@@ -43,6 +44,7 @@ class PhaseStatus(StrEnum):
     SKIPPED = "skipped"
     WARNED = "warned"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 PhaseExecute = Callable[[RunContext], Awaitable[None]]
@@ -155,12 +157,13 @@ async def execute_phases(
                     error=str(exc),
                     exc_info=exc,
                 )
-        except BaseException:
-            # Cancellation and other control-flow exceptions do not inherit
-            # from Exception.  They still need a terminal lifecycle status so
-            # progress cannot report a cancelled phase as completed.
-            phase.status = PhaseStatus.FAILED
-            phase_progress_status = ProgressPhaseStatus.FAILED
+        except BaseException as error:
+            if is_run_interruption(error):
+                phase.status = PhaseStatus.INTERRUPTED
+                phase_progress_status = ProgressPhaseStatus.INTERRUPTED
+            else:
+                phase.status = PhaseStatus.FAILED
+                phase_progress_status = ProgressPhaseStatus.FAILED
             raise
         else:
             phase.status = PhaseStatus.COMPLETED

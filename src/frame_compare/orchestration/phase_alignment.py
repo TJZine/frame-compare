@@ -119,6 +119,7 @@ async def run_align_phase(
         verbose=verbose,
         quiet=quiet,
         json_output=json_output,
+        on_reusable_cache_written=lambda: ctx.reusable_cache_writes.add("alignment"),
     )
 
     results = outcome.results

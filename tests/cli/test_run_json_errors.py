@@ -610,16 +610,22 @@ def test_run_json_stale_analysis_config_keys_fail_before_runner(
     }
 
 
+@pytest.mark.parametrize("options", [[], ["--quiet"], ["--json"]])
 def test_run_exit_code_is_130_on_keyboard_interrupt(
-    monkeypatch: MonkeyPatch, tmp_path: Path
+    options: list[str], monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise KeyboardInterrupt()
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = _invoke_run_with_minimal_workspace([], tmp_path=tmp_path, monkeypatch=monkeypatch)
+    result = _invoke_run_with_minimal_workspace(options, tmp_path=tmp_path, monkeypatch=monkeypatch)
     assert result.exit_code == int(ExitCode.INTERRUPTED)
+    if options:
+        assert result.stderr == ""
+        assert result.stdout == ""
+    else:
+        assert result.stderr.strip() == "! Interrupted"
 
 
 def test_run_error_wraps_colon_after_a_full_width_config_path(

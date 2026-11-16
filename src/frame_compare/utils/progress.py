@@ -55,12 +55,14 @@ _DURABLE_STATUS_GLYPHS = {
     ProgressPhaseStatus.SKIPPED: "skipped",
     ProgressPhaseStatus.WARNED: "warning",
     ProgressPhaseStatus.FAILED: "failed",
+    ProgressPhaseStatus.INTERRUPTED: "skipped",
 }
 _DURABLE_STATUS_STYLES = {
     ProgressPhaseStatus.COMPLETED: OK,
     ProgressPhaseStatus.SKIPPED: "dim",
     ProgressPhaseStatus.WARNED: WARN,
     ProgressPhaseStatus.FAILED: FAIL,
+    ProgressPhaseStatus.INTERRUPTED: "dim",
 }
 
 UPLOAD_PRESENTATION = "upload"
@@ -378,7 +380,12 @@ class PlainProgressReporter:
                 return
             task = self._task
             nested = bool(self._task_stack)
-            if not nested or status in {
+            if status == ProgressPhaseStatus.INTERRUPTED:
+                if not nested:
+                    console = human_console(stderr=True, no_color=True)
+                    glyph = glyphs_for_console(console).skipped
+                    console.print(f"{glyph} {task.label.title():<16}interrupted")
+            elif not nested or status in {
                 ProgressPhaseStatus.WARNED,
                 ProgressPhaseStatus.FAILED,
             }:
@@ -535,6 +542,8 @@ class RichProgressReporter:
                     self._progress.update(task_id, description="Warning", refresh=True)
                 elif status == ProgressPhaseStatus.FAILED:
                     self._progress.update(task_id, description="Failed", refresh=True)
+                elif status == ProgressPhaseStatus.INTERRUPTED:
+                    self._progress.update(task_id, description="Interrupted", refresh=True)
 
                 if total is not None and status in {
                     ProgressPhaseStatus.COMPLETED,
@@ -548,6 +557,9 @@ class RichProgressReporter:
                     if label in self._progress.steps:
                         self._progress.steps[label] = status.value
                 should_retain = status != ProgressPhaseStatus.COMPLETED
+                if status == ProgressPhaseStatus.INTERRUPTED:
+                    should_retain = not nested
+                    summary, duration_text, alignment_summary = "interrupted", None, None
                 if status == ProgressPhaseStatus.COMPLETED and retain is not False:
                     should_retain = retain is True or (
                         not nested and duration >= _MIN_DURABLE_PHASE_SECONDS
@@ -722,7 +734,10 @@ class LogProgressReporter:
     ) -> None:
         """Log phase completion."""
         del retain, summary, duration_text, alignment_summary
-        log.info("phase_completed", phase=self._name, status=status.value)
+        log_status = (
+            ProgressPhaseStatus.FAILED if status == ProgressPhaseStatus.INTERRUPTED else status
+        )
+        log.info("phase_completed", phase=self._name, status=log_status.value)
         if self._task_stack:
             self._name, self._total, self._current, self._last_logged_milestone = (
                 self._task_stack.pop()

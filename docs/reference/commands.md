@@ -369,6 +369,9 @@ post-upload actions. If the sources do not share a requested frame, the CLI
 also reports the skipped frame when it establishes the shared range. The
 completion summary shows how many of the planned frames were rendered.
 
+After Ctrl+C, the CLI reports where the run stopped, how many screenshots it
+kept in the run folder, and which caches it wrote for reuse.
+
 ## Automation
 
 For unattended use:

@@ -73,6 +73,7 @@ enable = false
         quiet=False,
         json_output=False,
         vs_loader=None,
+        on_reusable_cache_written=None,
     ):
         assert request.shared_alignment_cache_dir == tmp_path / "generated" / "cache" / "alignment"
         assert request.reference.identity.path == request.reference.path

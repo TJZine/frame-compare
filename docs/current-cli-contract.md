@@ -834,7 +834,14 @@ error before rendering.
 
 After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. In-flight FFmpeg batch extraction is stopped and reaped with bounded cleanup; frame extraction keeps its existing timeout. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
 
-The interrupted run follows the failure-record path and exits 130. On Windows,
+The interrupted run follows the failure-record path and exits 130. The active
+human progress line says `interrupted` and uses the skip glyph. After cleanup, the
+CLI prints `! Interrupted during {phase}` when a phase is known. A reserved run
+folder gets a `kept` row with its screenshot count, planned count, and path.
+A `next run` row names only reusable analysis or alignment caches written by
+this run. Quiet and JSON output omit this human summary.
+
+On Windows,
 once the standalone CLI has completed its Python cleanup and selected exit 130,
 it ignores further Ctrl+C during interpreter/native-module teardown to preserve
 that exit status. This does not change repeated-interrupt behavior while the run

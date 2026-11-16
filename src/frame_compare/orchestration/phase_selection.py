@@ -352,6 +352,9 @@ def _run_analyze_phase_once(
         )
         metrics_cache_hit = True
     else:
+        can_reuse_cache = (
+            not force_recompute and ctx.selection_domain.full_window_retry_override is None
+        )
         acquisition = calculate_metrics(
             metric_request,
             video_paths=input_videos,
@@ -362,6 +365,9 @@ def _run_analyze_phase_once(
             vs_loader=vs_loader,
             selection_domain=selection_domain,
             force_recompute=force_recompute,
+            on_cache_written=(
+                (lambda: ctx.reusable_cache_writes.add("analysis")) if can_reuse_cache else None
+            ),
         )
         metrics = acquisition.metrics
         metrics_cache_hit = acquisition.disposition == "hit"

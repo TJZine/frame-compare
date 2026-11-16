@@ -337,10 +337,12 @@ def test_calculate_metrics_records_cache_miss_compute_and_write(
     video_path = tmp_path / "v1.mkv"
     video_path.write_bytes(b"")
     recorder = AnalysisTimingRecorder()
+    notify = MagicMock()
 
     calculate_metrics(
         MetricCacheRequest(analysis_source_path=None),
         timing_recorder=recorder,
+        on_cache_written=notify,
         video_paths=[video_path],
         config=AnalysisConfig(),
         cache_dir=tmp_path,
@@ -351,6 +353,7 @@ def test_calculate_metrics_records_cache_miss_compute_and_write(
     assert set(recorder.as_dict()) >= {"cache_lookup", "source_load", "cache_write"}
     assert mock_strategy.call_args.kwargs["timing_recorder"] is recorder
     mock_save.assert_called_once()
+    notify.assert_called_once_with()
 
 
 def _quality_strategy_result(frame_count: int = 10) -> MetricComputationResult:
@@ -475,9 +478,11 @@ def test_calculate_metrics_cache_save_is_best_effort(
     video_paths[0].write_bytes(b"")
     config = AnalysisConfig()
     recorder = AnalysisTimingRecorder()
+    notify = MagicMock()
     result = calculate_metrics(
         MetricCacheRequest(analysis_source_path=None),
         timing_recorder=recorder,
+        on_cache_written=notify,
         video_paths=video_paths,
         config=config,
         cache_dir=tmp_path,
@@ -490,6 +495,7 @@ def test_calculate_metrics_cache_save_is_best_effort(
     assert recorder.cache_write_state == "failed"
     assert recorder.as_dict()["cache_write"] >= 0.0
     mock_save.assert_called_once()
+    notify.assert_not_called()
 
 
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
