@@ -330,8 +330,12 @@ def test_build_html_generated_timestamp(
         assert date.text == timestamp
 
 
-def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
-    html = build_html(report_payload)
+@pytest.mark.parametrize(
+    "title",
+    ["Les Voiles Noires S01E08", "Black Sails S01E08", "EbP vs english-dub-only +1 more"],
+)
+def test_build_html_renders_header_metadata(report_payload: ReportPayload, title: str) -> None:
+    html = build_html({**report_payload, "title": title})
     tags = parse_start_tags(html)
     info_modal = parse_info_modal(html)
     elements = parse_elements(html)
@@ -342,8 +346,10 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     info_icon = require_first(info_button, tag="svg")
     inspector_icon = require_first(inspector_button, tag="svg")
 
+    assert require_first(elements, class_name="rv-title").text == title
+    assert require_first(elements, tag="title").text == f"{title} - Frame Compare Report"
     metadata = require_first(elements, class_name="rv-meta")
-    assert "• 2 frames • 2 clips" in metadata.text
+    assert "• 2 frames • 2 sources" in metadata.text
     generated = require_first(metadata, tag="time")
     assert generated.attrs["datetime"] == "2026-05-22T12:00:00+00:00"
     assert generated.attrs["title"] == "2026-05-22T12:00:00+00:00"
@@ -366,7 +372,7 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     assert info_modal.attrs["role"] == "dialog"
     assert info_modal.section_headings == ["General", "Sources", "Rendering"]
     assert info_modal.general == {
-        "Title": "Renderer Contract",
+        "Title": title,
         "Report ID": "report_0123456789abcdef0123456789abcdef",
         "Generated": "2026-05-22T12:00:00+00:00",
         "Content": "2 frames · 2 sources",

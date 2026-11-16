@@ -1218,7 +1218,10 @@ source-frame alignment. View-mode controls and the Help dialog state each mode's
 (reveal spatial differences, inspect one source, locate changed pixels, alternate the
 selected pair, scan sources together).
 Keyboard focus uses a neutral light outline, and the image canvas has no decorative
-shadow. The renderer emits the header generation timestamp as a `<time>` element
+shadow. Report payload generation derives the comparison title from resolved TMDB
+metadata and reference episode numbers, shared content identity, or source short
+labels, in that order. The renderer uses the payload title and labels the header
+count as sources. The renderer emits the header generation timestamp as a `<time>` element
 carrying the exact ISO timestamp in `datetime` and `title`; the viewer localizes its
 text to medium date plus short time. The exact timestamp remains available in the
 tooltip, Report Information, and payload.
