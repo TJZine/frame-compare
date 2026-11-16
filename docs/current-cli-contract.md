@@ -417,7 +417,7 @@ unchanged.
   line around the group.
 - Normal non-quiet runs begin with a dim-rail `Run plan` section containing
   `Workspace`, `Frames`, `Rendering`, `Alignment`, `Review`, and `Publishing`
-  groups. Rows and their order are unchanged. Group keys are accent bold; their
+  groups. Group keys are accent bold; their
   sub-rows are indented two spaces, and there is one blank body line between
   groups. `Workspace` is the root with `config`, `input`, and `output` sub-rows
   (`output` is the resolved generated-data root). `Frames` is `N total` with a
@@ -432,15 +432,16 @@ unchanged.
   VSView review` / `audio, VSView required` / `audio` / `disabled`, with a
   `tools` row of `{glyph} FFmpeg audio · {glyph} VSView`; unavailable tools are
   followed by muted `(unavailable)` or the existing probe-failure text, VSView
-  is omitted when not requested, and FFmpeg shows `–` when alignment is disabled.
-  Its `offsets` row uses the existing label with a lower-case first letter.
+  is omitted when not requested. Its `offsets` row uses the existing label
+  with a lower-case first letter. Disabled alignment omits both sub-rows.
   `Review` is `HTML report · opens when done` / `HTML report` / `disabled`, with
   `metadata` as `TMDB lookup` / `disabled`. `Publishing` is `slow.pics ·
   {visibility lower} · ask after the local report` / `automatic upload`, or
   `disabled` / `disabled by --no-upload`, with `after upload` as
   `copy URL · open browser · create shortcut` / `none`, `webhook` as
   `configured` / muted `not configured` (the URL is never displayed), and
-  `cleanup` with the existing text lower-cased first. The `tools` separators are
+  `cleanup` with the existing text lower-cased first. Disabled publishing omits
+  all three sub-rows. The `tools` separators are
   ` · `.
 - Human run-plan paths show the resolved workspace root once as an absolute anchor.
   Contained config, input, generated-data, and result paths are shown relative to

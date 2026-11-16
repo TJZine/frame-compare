@@ -98,14 +98,11 @@ def _lower_first(text: str) -> str:
 def _format_tools_row(
     *,
     glyphs: GlyphSet,
-    alignment_enabled: bool,
     ffmpeg_available: bool,
     vsview_requested: bool,
     vsview_status: str | None,
 ) -> str:
-    if not alignment_enabled:
-        ffmpeg_entry = f"{glyphs.skipped} FFmpeg audio"
-    elif ffmpeg_available:
+    if ffmpeg_available:
         ffmpeg_entry = f"[{OK}]{glyphs.ok}[/] FFmpeg audio"
     else:
         ffmpeg_entry = f"[{WARN}]{glyphs.warning}[/] FFmpeg audio [dim](unavailable)[/]"
@@ -154,32 +151,6 @@ def print_at_a_glance(
     config = inputs.config
     root, config_path = inputs.root, inputs.config_path
     workspace = resolve_run_workspace(inputs)
-    vsview_status: str | None = None
-    use_vsview = config.audio_alignment.use_vsview
-    force_interactive = config.audio_alignment.force_interactive
-    if use_vsview or force_interactive:
-        from frame_compare.vsview.adapter import (
-            VSViewAvailabilityStatus,
-            check_vsview_availability,
-        )
-
-        availability = check_vsview_availability()
-        if availability.is_available:
-            vsview_status = "available (true)"
-        elif availability.status == VSViewAvailabilityStatus.PROBE_FAILED:
-            vsview_status = availability.public_probe_failure_status()
-        else:
-            vsview_status = "unavailable (false)"
-
-    from frame_compare.utils.subproc import resolve_executable
-
-    try:
-        resolve_executable("ffmpeg")
-        resolve_executable("ffprobe")
-    except FileNotFoundError:
-        ffmpeg_available = False
-    else:
-        ffmpeg_available = True
     workspace_root = root.resolve()
     input_path = workspace.input_dir
     analysis = config.analysis
@@ -193,6 +164,8 @@ def print_at_a_glance(
     overlay_mode = config.screenshots.overlay_mode
     tonemap_enabled = config.color.enable_tonemap
     alignment_enabled = config.audio_alignment.enable
+    use_vsview = config.audio_alignment.use_vsview
+    force_interactive = config.audio_alignment.force_interactive
     upload_enabled = config.slowpics.auto_upload
     report_confirmed_upload = upload_enabled and config.slowpics.confirm_upload_after_report
     glyphs = glyphs_for_console(console)
@@ -243,18 +216,6 @@ def print_at_a_glance(
         alignment_text = "audio, then VSView review"
     else:
         alignment_text = "audio"
-    reuse_policy_label = {
-        "disabled": "Do not reuse previous offsets",
-        "prompt": "Ask before reusing previous offsets",
-        "always": "Reuse previous offsets when valid",
-    }[config.audio_alignment.previous_offsets]
-    tools_text = _format_tools_row(
-        glyphs=glyphs,
-        alignment_enabled=alignment_enabled,
-        ffmpeg_available=ffmpeg_available,
-        vsview_requested=use_vsview or force_interactive,
-        vsview_status=vsview_status,
-    )
     if not config.report.enable:
         review_text = _styled_value("disabled")
     elif config.report.auto_open:
@@ -280,19 +241,6 @@ def print_at_a_glance(
                 "automatic upload",
             ]
         )
-    enabled_actions: list[str] = []
-    if config.slowpics.copy_url_to_clipboard:
-        enabled_actions.append("copy URL")
-    if config.slowpics.open_in_browser:
-        enabled_actions.append("open browser")
-    if config.slowpics.create_url_shortcut:
-        enabled_actions.append("create shortcut")
-    after_upload_text = _dot_join(enabled_actions) if enabled_actions else _styled_value("none")
-    cleanup_text = (
-        "Delete uploaded screenshots when report-safe"
-        if config.slowpics.delete_after_upload
-        else "Keep local artifacts"
-    )
 
     table = Section()
 
@@ -343,8 +291,44 @@ def print_at_a_glance(
 
     _add_separator(table)
     _add_section(table, "Alignment", _styled_value(alignment_text))
-    _add_plan_kv(table, "tools", tools_text)
-    _add_plan_kv(table, "offsets", _styled_value(_lower_first(reuse_policy_label)))
+    if alignment_enabled:
+        vsview_status: str | None = None
+        if use_vsview or force_interactive:
+            from frame_compare.vsview.adapter import (
+                VSViewAvailabilityStatus,
+                check_vsview_availability,
+            )
+
+            availability = check_vsview_availability()
+            if availability.is_available:
+                vsview_status = "available (true)"
+            elif availability.status == VSViewAvailabilityStatus.PROBE_FAILED:
+                vsview_status = availability.public_probe_failure_status()
+            else:
+                vsview_status = "unavailable (false)"
+
+        from frame_compare.utils.subproc import resolve_executable
+
+        try:
+            resolve_executable("ffmpeg")
+            resolve_executable("ffprobe")
+        except FileNotFoundError:
+            ffmpeg_available = False
+        else:
+            ffmpeg_available = True
+        reuse_policy_label = {
+            "disabled": "Do not reuse previous offsets",
+            "prompt": "Ask before reusing previous offsets",
+            "always": "Reuse previous offsets when valid",
+        }[config.audio_alignment.previous_offsets]
+        tools_text = _format_tools_row(
+            glyphs=glyphs,
+            ffmpeg_available=ffmpeg_available,
+            vsview_requested=use_vsview or force_interactive,
+            vsview_status=vsview_status,
+        )
+        _add_plan_kv(table, "tools", tools_text)
+        _add_plan_kv(table, "offsets", _styled_value(_lower_first(reuse_policy_label)))
 
     _add_separator(table)
     _add_section(table, "Review", review_text)
@@ -352,12 +336,26 @@ def print_at_a_glance(
 
     _add_separator(table)
     _add_section(table, "Publishing", publishing_text)
-    _add_plan_kv(table, "after upload", after_upload_text)
-    if config.slowpics.webhook_url:
-        _add_plan_kv(table, "webhook", _styled_value("configured"))
-    else:
-        _add_plan_kv(table, "webhook", "[dim]not configured[/]")
-    _add_plan_kv(table, "cleanup", _styled_value(_lower_first(cleanup_text)))
+    if upload_enabled:
+        enabled_actions: list[str] = []
+        if config.slowpics.copy_url_to_clipboard:
+            enabled_actions.append("copy URL")
+        if config.slowpics.open_in_browser:
+            enabled_actions.append("open browser")
+        if config.slowpics.create_url_shortcut:
+            enabled_actions.append("create shortcut")
+        after_upload_text = _dot_join(enabled_actions) if enabled_actions else _styled_value("none")
+        cleanup_text = (
+            "Delete uploaded screenshots when report-safe"
+            if config.slowpics.delete_after_upload
+            else "Keep local artifacts"
+        )
+        _add_plan_kv(table, "after upload", after_upload_text)
+        if config.slowpics.webhook_url:
+            _add_plan_kv(table, "webhook", _styled_value("configured"))
+        else:
+            _add_plan_kv(table, "webhook", "[dim]not configured[/]")
+        _add_plan_kv(table, "cleanup", _styled_value(_lower_first(cleanup_text)))
 
     table.title = section_title("Run plan")
     table.rail_style = BORDER_NEUTRAL

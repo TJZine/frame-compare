@@ -193,8 +193,39 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(
     assert "BT.2390 reference" in _rendered_row_value(output, "tone map")
     assert "FFmpeg" in output
     assert "disabled by --no-upload" in output
+    for label in ("after upload", "webhook", "cleanup"):
+        with pytest.raises(AssertionError, match=f"Missing row label: {label}"):
+            _rendered_row_value(output, label)
     assert "opens when done" in output
     assert "VSView" not in output
+
+
+def test_run_plan_omits_details_for_features_disabled_in_config() -> None:
+    config = _config()
+    config.audio_alignment.enable = False
+    config.slowpics.auto_upload = False
+    config.slowpics.open_in_browser = True
+    config.slowpics.webhook_url = "https://example.test/unused"
+    config.slowpics.delete_after_upload = True
+    console = _console()
+
+    print_at_a_glance(
+        console,
+        inputs=AcquiredRunConfig(_workspace_path(), _workspace_path("config.toml"), config),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
+    )
+
+    output = _render(console)
+    for heading in ("Alignment", "Publishing"):
+        row = next(line for line in output.splitlines() if line.startswith(f"│ {heading} "))
+        assert row.split() == ["│", heading, "disabled"]
+    for label in ("tools", "offsets", "after upload", "webhook", "cleanup"):
+        with pytest.raises(AssertionError, match=f"Missing row label: {label}"):
+            _rendered_row_value(output, label)
 
 
 def test_run_plan_reports_auto_renderer_when_ffmpeg_is_not_forced(
@@ -252,38 +283,6 @@ def test_at_a_glance_reports_non_executable_ffmpeg_override_as_unavailable(
     )
 
     assert "(unavailable)" in _rendered_row_value(_render(console), "tools")
-
-
-def test_at_a_glance_marks_ffmpeg_audio_disabled_in_tools_row(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    config = _config()
-    config.audio_alignment.enable = False
-    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
-    console = _console()
-
-    print_at_a_glance(
-        console,
-        inputs=AcquiredRunConfig(
-            _workspace_path(),
-            _workspace_path("config", "config.toml"),
-            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
-        ),
-        no_cache=False,
-        from_cache_only=False,
-        skip_analysis=False,
-        skip_metadata=False,
-        no_upload_flag=False,
-    )
-
-    output = _render(console)
-    assert "Alignment" in output
-    assert "disabled" in output
-    tools_row = _rendered_row_value(output, "tools")
-    assert "FFmpeg audio" in tools_row
-    assert "(unavailable)" not in tools_row
-    assert "not required" not in tools_row
-    assert "VSView" not in tools_row
 
 
 def test_at_a_glance_prints_previous_offsets_effective_mode(
@@ -619,6 +618,8 @@ def test_run_plan_no_color_uses_native_wrapping_without_truncation(
 def test_run_plan_wraps_complete_key_labels_at_very_narrow_width(
     monkeypatch: MonkeyPatch,
 ) -> None:
+    config = _config()
+    config.slowpics.auto_upload = True
     console = _console_at_width(24)
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
 
@@ -627,7 +628,7 @@ def test_run_plan_wraps_complete_key_labels_at_very_narrow_width(
         inputs=AcquiredRunConfig(
             _workspace_path(),
             _workspace_path("config", "config.toml"),
-            apply_cli_overrides(_config(), CLIConfigOverrides(no_upload=False)),
+            config,
         ),
         no_cache=False,
         from_cache_only=False,
