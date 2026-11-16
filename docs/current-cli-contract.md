@@ -1135,8 +1135,8 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 
 - Newly generated standalone reports use payload version `1.4`. Each clip carries a
   presentation-only `display` object with full primary identity, release descriptor,
-  ordinary-control label, constrained micro label, and the exact basename. Display
-  names are assembled from prepared release identity and explicit-label state.
+  ordinary-control label, shared short source label for compact captions, and the
+  exact basename. Display names use prepared release identity and explicit-label state.
   Filename-derived bidirectional formatting controls appear as code points such as
   `[U+202E]` in the UI. Frame Compare qualifies collisions between the resulting
   display names while preserving explicit labels, canonical clip labels, report

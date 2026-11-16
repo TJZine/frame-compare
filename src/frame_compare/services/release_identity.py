@@ -6,7 +6,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from frame_compare.config.text_validation import is_control_character
+from frame_compare.config.text_validation import (
+    is_control_character,
+    show_bidi_formatting_controls,
+)
 
 _STEM_TOKEN = re.compile(r"[^.\-_ ]+")
 
@@ -110,7 +113,12 @@ class ShortNameSource:
     stem: str
 
 
-def short_source_names(sources: Sequence[ShortNameSource], *, roles: Sequence[str]) -> list[str]:
+def short_source_names(
+    sources: Sequence[ShortNameSource],
+    *,
+    roles: Sequence[str],
+    show_bidi_controls: bool = False,
+) -> list[str]:
     """Prefer explicit labels, unique usable groups, micro descriptors, then filename text."""
     groups = [
         source.identity.release_group
@@ -152,6 +160,8 @@ def short_source_names(sources: Sequence[ShortNameSource], *, roles: Sequence[st
         )
         names.append(micro or differing or label)
         protected.append(False)
+    if show_bidi_controls:
+        names = [show_bidi_formatting_controls(name) for name in names]
     return unique_presentation_names(names, roles=list(roles), protected=protected)
 
 
