@@ -308,14 +308,15 @@ def test_report_shows_bidi_formatting_in_filename_without_changing_identity(
     output = generate_report(report, ReportConfig(), output_path=tmp_path / "report.html")
     payload = _json_payload_from_report(output)
     assert payload["clips"][0]["display"]["filename"] == filename
-    assert payload["title"] == visible_filename
+    title = "מקור [U+202E]CBA[U+202C] vs clip2"
+    assert payload["title"] == title
     for profile in ("primary", "release", "control", "micro"):
         assert payload["clips"][0]["display"][profile] == visible_filename
     assert payload["clips"][0]["name"] == payload["clips"][0]["label"] == filename
     assert payload["frames"][0]["images"][0]["clip"] == filename
     assert payload["report_id"] == baseline["report_id"]
     html = output.read_text(encoding="utf-8")
-    assert f"<title>{visible_filename} - Frame Compare Report</title>" in html
+    assert f"<title>{title} - Frame Compare Report</title>" in html
     selects = SelectParser()
     selects.feed(html)
     assert selects.selects["left-select"].options[0].attrs["title"] == (
