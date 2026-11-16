@@ -524,7 +524,10 @@ identity is not persisted.
   `frame_compare.services.run_result_record` and written atomically only after a
   reserved run completes or fails. It stores sanitized run-folder-relative output
   facts, UTC lifecycle timing, bounded warning summaries, cache/phase facts,
-  slow.pics outcome, and a sanitized typed failure when applicable. A failed run
+  slow.pics outcome, and a sanitized typed failure when applicable. Cancellation
+  records use `RUN_INTERRUPTED` in the existing `failure.name` field and retain the
+  stored status `failed`. The CLI uses this marker to show `interrupted` in the
+  human table. The JSON projector exposes the stored status. A failed run
   can still record an uploaded slow.pics outcome and URL when the publisher
   confirmed remote success before cancellation. Orchestration captures that fact
   synchronously before optional post-upload work or another cancellation

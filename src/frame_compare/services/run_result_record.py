@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import tomllib
+from asyncio import CancelledError
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
@@ -23,6 +24,7 @@ from frame_compare.utils.types import WorkspacePaths
 RUN_RESULT_FILENAME = "run_result.toml"
 _VERSION = 1
 _MAX_WARNING_SUMMARIES = 8
+_INTERRUPTED_FAILURE_NAME = "RUN_INTERRUPTED"
 _SAFE_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,79}$")
 _SLOWPICS_COMPARISON_PATH = re.compile(r"^/c/[A-Za-z0-9_-]+$")
 
@@ -99,6 +101,14 @@ class RunResultRecord:
     slowpics_url: str | None = None
     failure: RunFailure | None = None
     version: int = _VERSION
+
+    @property
+    def was_interrupted(self) -> bool:
+        return (
+            self.status == "failed"
+            and self.failure is not None
+            and self.failure.name == _INTERRUPTED_FAILURE_NAME
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,7 +263,11 @@ def _failure_from_exception(error: BaseException) -> RunFailure:
         name = error.name if _SAFE_NAME.fullmatch(error.name) else "RUN_FAILED"
     else:
         code = "FC-0001"
-        name = "INTERNAL_ERROR"
+        name = (
+            _INTERRUPTED_FAILURE_NAME
+            if isinstance(error, (CancelledError, KeyboardInterrupt))
+            else "INTERNAL_ERROR"
+        )
     return RunFailure(
         code=code,
         name=name,

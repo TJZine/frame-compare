@@ -1240,7 +1240,9 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
     assert list((tmp_path / "generated").rglob("clip_probe.toml")) == []
     records = list((tmp_path / "generated").rglob(RUN_RESULT_FILENAME))
     assert len(records) == 1
-    assert read_run_result(records[0]).status == "failed"
+    record = read_run_result(records[0])
+    assert record.status == "failed"
+    assert record.was_interrupted
 
 
 def test_real_render_failure_wins_over_queued_sigint_and_client_close(tmp_path: Path) -> None:

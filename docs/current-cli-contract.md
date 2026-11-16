@@ -309,8 +309,12 @@ unchanged.
   search permission.
   History does not create the root, return a JSON success document, or fall back
   to the workspace or portable bundle.
-- Human `history list` output goes to stdout and exposes the exact run name,
-  status, persisted time, and report availability. Diagnostics and warnings use
+- Human `history list` writes a table to stdout with the exact run name, local date
+  and time, source and frame counts when recorded, status, and report availability
+  as `yes` or `no`. It uses completion time when known, then start time. Statuses include `completed`, `completed with warnings`, `failed`,
+  `interrupted`, and `unavailable`. Unreadable entries have empty count cells.
+  Count columns appear when at least one record supplies counts. An existing empty
+  root prints `No recorded runs in <generated dir>.` Diagnostics and warnings use
   stderr.
 - `history list --json` writes exactly one compact object to stdout with top-level
   key `runs`. Every entry has exactly `name`, `status`, `started_at`,
@@ -1034,8 +1038,11 @@ recovery requirement.
   the final outcome without modifying `run_info.toml`. Successful records are
   written after all post-run phases settle and the coordinator's HTTP client
   closes. Their status is `completed` or `completed_with_warnings`. Failures
-  after reservation get one best-effort `failed` record. Failures before
-  reservation write no record. An ordinary
+  after reservation get one best-effort `failed` record. New records for
+  `asyncio.CancelledError` and `KeyboardInterrupt` use `RUN_INTERRUPTED` in
+  `failure.name`. Human history displays those records as `interrupted`.
+  History JSON and older undifferentiated failures continue to use `failed`.
+  Failures before reservation write no record. An ordinary
   completed-run result-write failure is warning-only and leaves the run successful;
   an ordinary failed-run result-write failure preserves the identical original
   exception and exit mapping. `KeyboardInterrupt` and `SystemExit` raised while

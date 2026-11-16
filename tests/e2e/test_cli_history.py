@@ -1,4 +1,4 @@
-"""E5: empty history through the real console entry point."""
+"""E5: history through the real console entry point."""
 
 from __future__ import annotations
 
@@ -21,10 +21,18 @@ def test_cli_history_list_json_has_no_runs(
     arguments = ["history", "list", "--json", "--root", str(root.root)]
     result = run_cli(root.root, arguments)
 
+    human_arguments = ["history", "list", "--root", str(root.root)]
+    human = run_cli(root.root, human_arguments)
+    assert human.exit_code == 0
+    assert human.stderr == ""
+    assert human.stdout == f"No recorded runs in {root.generated_dir.resolve()}.\n"
+
     # History command contract.
     summary = {"exit_code": result.exit_code, "payload": json.loads(result.stdout)}
     expected = {"exit_code": 0, "payload": {"runs": []}}
-    record("E5-history-empty", root, [(arguments, result)], summary, expected)
+    record(
+        "E5-history-empty", root, [(arguments, result), (human_arguments, human)], summary, expected
+    )
 
 
 @pytest.mark.e2e
