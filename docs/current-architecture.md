@@ -235,7 +235,10 @@ role labels and bounded console-width policy shared by orchestration reports.
 content/release identity types and plain formatters. Preparation invokes the existing
 GuessIt/Anitopy parser seam once per source and attaches the resulting presentation
 metadata and explicit-label provenance to `ClipState`; these fields are excluded from
-source, cache, selection, and report identity.
+source, cache, selection, and report identity. Release identity records whether a
+parsed group qualifies for short names. The short-name formatter uses the ordered
+filename stems for shared-token fallback and resolves presentation collisions after
+choosing the names.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
 through presentation surfaces while source paths, fingerprints,
@@ -1219,7 +1222,10 @@ source-frame alignment. View-mode controls and the Help dialog state each mode's
 (reveal spatial differences, inspect one source, locate changed pixels, alternate the
 selected pair, scan sources together).
 Keyboard focus uses a neutral light outline, and the image canvas has no decorative
-shadow. The renderer emits the header generation timestamp as a `<time>` element
+shadow. Report payload generation derives the comparison title from resolved TMDB
+metadata and reference episode numbers, shared content identity, or source short
+labels, in that order. The renderer uses the payload title and labels the header
+count as sources. The renderer emits the header generation timestamp as a `<time>` element
 carrying the exact ISO timestamp in `datetime` and `title`; the viewer localizes its
 text to medium date plus short time. The exact timestamp remains available in the
 tooltip, Report Information, and payload.

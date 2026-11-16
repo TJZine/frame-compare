@@ -14,19 +14,19 @@ from frame_compare.services.release_identity import (
     ("sources", "roles", "expected"),
     [
         pytest.param(
-            [ShortNameSource(None, "  Encode A  ", True)],
+            [ShortNameSource(None, "  Encode A  ", True, "Movie")],
             ["Reference"],
             ["  Encode A  "],
             id="  Encode A  ",
         ),
         pytest.param(
-            [ShortNameSource(None, "\tEncode A\t", True)],
+            [ShortNameSource(None, "\tEncode A\t", True, "Movie")],
             ["Reference"],
             ["\tEncode A\t"],
             id="\tEncode A\t",
         ),
         pytest.param(
-            [ShortNameSource(None, "\xa0Encode A\xa0", True)],
+            [ShortNameSource(None, "\xa0Encode A\xa0", True, "Movie")],
             ["Reference"],
             ["\xa0Encode A\xa0"],
             id="\xa0Encode A\xa0",
@@ -35,10 +35,13 @@ from frame_compare.services.release_identity import (
             [
                 ShortNameSource(
                     identity=ReleaseIdentity(
-                        content=ContentIdentity("Movie"), release_group="GROUP"
+                        content=ContentIdentity("Movie"),
+                        release_group="GROUP",
+                        has_terminal_release_group=True,
                     ),
                     label="  My encode  ",
                     label_is_explicit=True,
+                    stem="Movie.1080p-GROUP",
                 )
             ],
             ["Reference"],
@@ -49,10 +52,13 @@ from frame_compare.services.release_identity import (
             [
                 ShortNameSource(
                     identity=ReleaseIdentity(
-                        content=ContentIdentity("Movie"), release_group="GROUP"
+                        content=ContentIdentity("Movie"),
+                        release_group="GROUP",
+                        has_terminal_release_group=True,
                     ),
                     label=" 	 ",
                     label_is_explicit=True,
+                    stem="Movie.1080p-GROUP",
                 )
             ],
             ["Reference"],
@@ -61,13 +67,16 @@ from frame_compare.services.release_identity import (
         ),
         pytest.param(
             [
-                ShortNameSource(identity=None, label="GROUP", label_is_explicit=True),
+                ShortNameSource(identity=None, label="GROUP", label_is_explicit=True, stem="Movie"),
                 ShortNameSource(
                     identity=ReleaseIdentity(
-                        content=ContentIdentity("Movie"), release_group="GROUP"
+                        content=ContentIdentity("Movie"),
+                        release_group="GROUP",
+                        has_terminal_release_group=True,
                     ),
                     label="Automatic",
                     label_is_explicit=False,
+                    stem="Movie.1080p-GROUP",
                 ),
             ],
             ["Reference", "Comparison"],

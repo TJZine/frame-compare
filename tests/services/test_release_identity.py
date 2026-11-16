@@ -1,5 +1,7 @@
 """Structured release identity corpus and formatter tests."""
 
+from pathlib import Path
+
 import pytest
 
 from frame_compare.services.metadata_parsing import (
@@ -289,6 +291,7 @@ def _short_name_identity(
         dynamic_range_claims=dynamic_range,
         release_group=group,
         revision_tags=revision,
+        has_terminal_release_group=group is not None,
     )
 
 
@@ -298,7 +301,7 @@ def _short_name_source(
     *,
     explicit: bool = False,
 ) -> ShortNameSource:
-    return ShortNameSource(identity=identity, label=label, label_is_explicit=explicit)
+    return ShortNameSource(identity=identity, label=label, label_is_explicit=explicit, stem="")
 
 
 @pytest.mark.parametrize(
@@ -378,6 +381,50 @@ def _short_name_source(
 )
 def test_short_names(sources: list[ShortNameSource], roles: list[str], expected: list[str]) -> None:
     assert short_source_names(sources, roles=roles) == expected
+
+
+_EBP = "Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv"
+_GNOME = "Black.Sails.S01E08.VIII.1080p.AMZN.WEB-DL.DDP.5.1.H.264-GNOME.mkv"
+_NOGRP = "Black.Sails.S01E08.VIII.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-NOGRP.mkv"
+_DEMON_SLAYER = "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv"
+_DEMON_SLAYER_COPY = "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv"
+
+
+@pytest.mark.parametrize(
+    ("filenames", "expected"),
+    [
+        ([_EBP, _GNOME, _NOGRP], ["EbP", "GNOME", "NOGRP"]),
+        ([_EBP, _DEMON_SLAYER], ["EbP", "english-dub-only"]),
+        (
+            [_EBP, _DEMON_SLAYER_COPY, _DEMON_SLAYER],
+            ["EbP", "english-dub-only-copy", "english-dub-only"],
+        ),
+        (
+            [
+                "Constructed.Witch-Kira.audio-delay-500ms.mkv",
+                "Constructed.Witch-Kira.audio-starts-500ms-in-sync.mkv",
+            ],
+            ["delay-500ms", "starts-500ms-in-sync"],
+        ),
+        (["Movie.x264-Group.mkv", "Movie.1080p.BluRay-Group-copy.mkv"], ["Group", "BluRay"]),
+        (["Movie.cutA.final.mkv", "Movie.cutB.final.mkv"], ["cutA", "cutB"]),
+        (["Movie.mkv", "Movie.alternate.mkv"], ["Canonical 1", "alternate"]),
+    ],
+)
+def test_short_names_for_real_filenames(filenames: list[str], expected: list[str]) -> None:
+    sources = [
+        ShortNameSource(
+            identity=parse_filename_with_release_identity(filename)[1],
+            label=f"Canonical {index}",
+            label_is_explicit=False,
+            stem=Path(filename).stem,
+        )
+        for index, filename in enumerate(filenames, start=1)
+    ]
+
+    assert (
+        short_source_names(sources, roles=[f"Source {i}" for i in range(len(sources))]) == expected
+    )
 
 
 def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> None:

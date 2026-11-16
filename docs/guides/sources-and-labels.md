@@ -104,6 +104,11 @@ such as `[U+202E]`. An explicit source label remains the primary report presenta
 None of these presentation choices changes baked overlays, local screenshot names,
 report mappings, or the slow.pics collection title.
 
+Frame Compare can use a shorter label in Sources and alignment summaries. An explicit
+label takes priority. Automatic short labels use release details or the part of the
+filename that distinguishes the source.
+
+
 ## Apply trims without modifying media
 
 ```toml
