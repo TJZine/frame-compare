@@ -373,6 +373,14 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 else list(current_preflight_warnings)
             ),
         )
+        if (
+            local_deps.on_failed_alignment_diagnostics is not None
+            and artifacts is not None
+            and artifacts.alignment_diagnostics_dir is not None
+            and isinstance(original_error, Exception)
+        ):
+            with suppress(Exception):
+                local_deps.on_failed_alignment_diagnostics(artifacts.alignment_diagnostics_dir)
         if local_deps.on_interrupted is not None and is_run_interruption(original_error):
             phase_label = _interrupted_phase_label(phase_plan)
             planned_frames = selected_frame_count

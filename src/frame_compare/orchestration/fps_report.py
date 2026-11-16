@@ -13,7 +13,11 @@ from rich.markup import escape
 from rich.text import Text
 
 from frame_compare.orchestration.context import ClipState
-from frame_compare.orchestration.presentation import clip_role, report_console_width
+from frame_compare.orchestration.presentation import (
+    clip_role,
+    join_source_names,
+    report_console_width,
+)
 from frame_compare.services.release_identity import (
     ContentIdentity,
     ReleaseIdentity,
@@ -125,24 +129,6 @@ def _source_fps_reason(raw_fps: Fraction, source_fps: Fraction) -> str | None:
     return "within 10 ppm of standard"
 
 
-def _format_runtime(num_frames: int, fps: Fraction) -> str:
-    """Format H:MM:SS from a frame count and rate, floored."""
-    total_seconds = num_frames * fps.denominator // fps.numerator if fps > 0 else 0
-    hours, remainder = divmod(total_seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    if hours:
-        return f"{hours}:{minutes:02d}:{seconds:02d}"
-    return f"{minutes}:{seconds:02d}"
-
-
-def _join_names(names: Sequence[str]) -> str:
-    if len(names) == 1:
-        return names[0]
-    if len(names) == 2:
-        return f"{names[0]} and {names[1]}"
-    return f"{', '.join(names[:-1])}, and {names[-1]}"
-
-
 def _format_fps_value(value: Fraction) -> str:
     return f"{_format_fps_decimal(value)} ({_format_fraction(value)})"
 
@@ -249,12 +235,11 @@ def _source_detail_line(clip: FpsReportClip) -> str:
         fps_segment = escape(f"{_fps_decimal_text(clip.effective_fps)} fps")
     else:
         fps_segment = f"{_format_fps_transition(clip)} [dim]({escape(clip.fps_reason)})[/]"
+    duration = float(clip.num_frames / clip.effective_fps) if clip.effective_fps > 0 else 0.0
     segments = [
         escape(f"{clip.width}×{clip.height}"),
         fps_segment,
-        escape(
-            f"{clip.num_frames:,} frames ({_format_runtime(clip.num_frames, clip.effective_fps)})"
-        ),
+        escape(f"{clip.num_frames:,} frames ({format_duration(duration)})"),
     ]
     size = _format_file_size(clip.size_bytes)
     if size:
@@ -304,9 +289,9 @@ def _length_difference_lines(
         gap_text = ""
         if reference_fps > 0:
             seconds = frames / reference_fps
-            gap_text = f" ({seconds:.1f} s)" if seconds < 1.0 else f" ({format_duration(seconds)})"
+            gap_text = f" ({format_duration(seconds)})"
         lines.append(
-            f"Lengths differ: {_join_names(names)} {verb} {frames} {unit}{gap_text} "
+            f"Lengths differ: {join_source_names(names)} {verb} {frames} {unit}{gap_text} "
             f"{direction} than {reference_short}."
         )
     return lines
@@ -325,7 +310,7 @@ def _render_load_sources_overview(
             detail=f"{len(clips)} {'source' if len(clips) == 1 else 'sources'}",
         )
         if common_content is not None
-        else section_title("Sources", detail=f"{len(clips)} loaded")
+        else section_title("Sources", detail=str(len(clips)))
     )
     section = Section(title)
     _add_clip_overview(section, clips, verbose=verbose)

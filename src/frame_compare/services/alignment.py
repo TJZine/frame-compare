@@ -1272,7 +1272,6 @@ async def align_clips_from_request(
             verbose=verbose,
             quiet=quiet,
             json_output=json_output,
-            diagnostics_written=bool(diagnostic_keys),
             review_pending=initial_outcome == "pending",
         )
         if completed_confirmed_reuse and not requested_comparisons:

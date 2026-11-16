@@ -6,7 +6,9 @@ text. ``Text`` values can be used to supply literal text directly.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TypeVar
 
@@ -17,6 +19,41 @@ from rich.text import Text
 from frame_compare.utils.terminal_theme import ACCENT, GLYPHS_ASCII, glyphs_for_console
 
 _T = TypeVar("_T")
+
+
+@dataclass
+class _RunSpacing:
+    after_section: bool = False
+
+
+_run_spacing: ContextVar[_RunSpacing | None] = ContextVar("run_spacing", default=None)
+
+
+@contextmanager
+def run_output_spacing() -> Generator[None]:
+    """Share block spacing between the run's stdout and stderr presenters."""
+    token = _run_spacing.set(_RunSpacing())
+    try:
+        yield
+    finally:
+        _run_spacing.reset(token)
+
+
+def phase_group_needs_separator() -> bool:
+    """Consume a section boundary before the first retained phase line."""
+    spacing = _run_spacing.get()
+    if spacing is None or not spacing.after_section:
+        return False
+    spacing.after_section = False
+    return True
+
+
+def _finish_section(console: Console, *, trailing_space: bool = True) -> None:
+    spacing = _run_spacing.get()
+    if spacing is not None:
+        spacing.after_section = True
+    elif trailing_space:
+        console.print()
 
 
 @dataclass
@@ -65,10 +102,10 @@ class Section:
         yield from self.render_body(console, options)
         yield Text("+-" if ascii_only else "╰─", style=self.rail_style)
 
-    def print(self, console: Console) -> None:
+    def print(self, console: Console, *, trailing_space: bool = True) -> None:
         console.print()
         console.print(self)
-        console.print()
+        _finish_section(console, trailing_space=trailing_space)
 
     def prompt(self, console: Console, question: str, ask: Callable[[str], _T]) -> _T:
         """Print an in-rail prompt, closing the section even on interruption.
@@ -96,7 +133,7 @@ class Section:
             return ask(lines[-1].plain if lines else "")
         finally:
             console.print(Text("+-" if ascii_only else "╰─", style=self.rail_style))
-            console.print()
+            _finish_section(console)
 
 
 def section_title(title: str, *, detail: str | None = None) -> str:

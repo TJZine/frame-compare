@@ -480,7 +480,7 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
     config.analysis.motion_frame_count = 4
     config.analysis.random_seed = 99
     config.analysis.performance_mode = AnalysisPerformanceMode.PERFORMANCE
-    config.analysis.ignore_lead_seconds = 2.5
+    config.analysis.ignore_lead_seconds = 0.3
     config.analysis.ignore_trail_seconds = 4.0
     config.sources.analysis_source = "fastest"
     config.screenshots.overlay_mode = OverlayMode.DIAGNOSTIC
@@ -530,7 +530,7 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
     assert "active area automatic" in _rendered_row_value(output, "geometry")
     assert "2 user · 3 random · 2 dark · 1 bright · 4 motion" in _rendered_row_value(output, "mix")
     assert "fastest source" in _rendered_row_value(output, "analysis")
-    assert "first 2.5 s · last 4.0 s" in _rendered_row_value(output, "skip")
+    assert "first 0.3 s · last 4.0 s" in _rendered_row_value(output, "skip")
     assert "ask before reusing previous offsets" in _rendered_row_value(output, "offsets")
     assert "HTML report" in output
     assert "opens when done" not in output
@@ -1286,18 +1286,18 @@ def _timed_result() -> RunResult:
                 "prompts 3.0 s",
             ),
             (),
-            id="machine-user",
+            id="phases-user",
         ),
         pytest.param(
             RunResult(success=True, duration_seconds=5.0, phase_timings={"render": 5.0}),
-            ("5.0 s total", "render 5.0 s", "machine"),
+            ("5.0 s total", "render 5.0 s", "phases"),
             ("setup", "analyze", "align", "upload", "VSView review", "prompts", "you"),
             id="partial-zero",
         ),
         pytest.param(
             RunResult(success=True, duration_seconds=2.0),
             ("2.0 s total",),
-            ("machine", "you"),
+            ("phases", "you"),
             id="all-zero",
         ),
         pytest.param(

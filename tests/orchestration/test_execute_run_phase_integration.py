@@ -3,24 +3,34 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Never
 from unittest.mock import AsyncMock
 
 import pytest
 
+from frame_compare.cli.entry import app
+from frame_compare.cli.errors import ExitCode
 from frame_compare.config.loader import load_config
 from frame_compare.config.overrides import CLIConfigOverrides
-from frame_compare.orchestration import phase_alignment, phase_post_render
+from frame_compare.orchestration import execution, phase_alignment, phase_post_render
+from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.orchestration.execution_types import (
+    AlignPhaseOutput,
     MetadataPrefetch,
     RunArtifacts,
 )
 from frame_compare.orchestration.types import (
+    RunRequest,
+    RunResult,
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
+from frame_compare.render.errors import RenderError
+from frame_compare.runner import run as real_run
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.run_result_record import read_run_result
 from frame_compare.services.types import (
@@ -28,6 +38,7 @@ from frame_compare.services.types import (
     AlignmentResult,
     TmdbMetadata,
 )
+from tests.cli.cli_helpers import _normalize_cli_output, _write_minimal_config, runner
 from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
 
@@ -128,6 +139,75 @@ enable = false
     assert by_video["a_ref.mkv"] == [32, 66, 83]
     assert by_video["b_comp1.mkv"] == [31, 65, 82]
     assert by_video["c_comp2.mkv"] == [33, 67, 84]
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_render_failure_reports_written_alignment_diagnostics_once_in_human_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, json_output: bool
+) -> None:
+    def _run(request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return real_run(
+            request,
+            replace(
+                dependencies or RunDependencies(),
+                vs_loader=FakeVSLoader(),
+                ffmpeg_runner=FakeFFmpegRunner(),
+            ),
+        )
+
+    def _align(
+        ctx: RunContext, *, selected_frames: list[int], **_kwargs: object
+    ) -> AlignPhaseOutput:
+        diagnostics = ctx.workspace.alignment_diagnostics_dir
+        assert diagnostics is not None
+        diagnostics.mkdir()
+        (diagnostics / "comparison-1.json").write_text("{}", encoding="utf-8")
+        return AlignPhaseOutput(
+            ctx.reference, ctx.comparisons, selected_frames, alignment_diagnostics_dir=diagnostics
+        )
+
+    def _fail_render(*_args: object, **_kwargs: object) -> Never:
+        raise RenderError("test render failure")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    monkeypatch.setattr(execution, "run_align_phase", _align)
+    monkeypatch.setattr(execution, "run_render_phase", _fail_render)
+
+    root = tmp_path / "workspace"
+    config_path = _write_minimal_config(root)
+    with config_path.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "\n[audio_alignment]\nenable = true\n"
+            "[screenshots]\nuse_ffmpeg = true\n"
+            "[report]\nenable = false\n"
+        )
+    create_video_files(root / "comparison_videos", "reference.mkv", "encode.mkv")
+    command = [
+        "run",
+        "--root",
+        str(root),
+        "--skip-analysis",
+        "--skip-metadata",
+        "--no-upload",
+        "--frames",
+        "30",
+        "--random-frame-count",
+        "0",
+    ]
+    result = runner.invoke(app, [*command, "--json"] if json_output else command)
+    assert result.exit_code == int(ExitCode.PROCESSING_ERROR), result.output
+    (path,) = (root / "generated").glob("*/alignment_diagnostics/comparison-1.json")
+    display_path = str(path.parent.relative_to(root))
+    if json_output:
+        payload = json.loads(result.stdout)
+        assert payload["error"]["code"] == "FC-4004"
+        assert "alignment_diagnostics" not in result.stdout
+        assert display_path not in result.stderr
+    else:
+        stderr = _normalize_cli_output(result.stderr)
+        assert stderr.count(display_path) == 1
+        assert stderr.index("test render failure") < stderr.index(display_path)
+        assert "Comparison complete" not in result.stdout
 
 
 def test_execute_run_forced_alignment_failure_stops_before_render_and_records_failure(

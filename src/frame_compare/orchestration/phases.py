@@ -25,7 +25,7 @@ from frame_compare.utils.cancellation import (
     cancellation_checkpoint,
     is_run_interruption,
 )
-from frame_compare.utils.progress import LogProgressReporter
+from frame_compare.utils.progress import LogProgressReporter, PlainProgressReporter
 from frame_compare.utils.progress_protocol import (
     AlignmentSummary,
     ProgressPhaseStatus,
@@ -50,6 +50,7 @@ class PhaseStatus(StrEnum):
 PhaseExecute = Callable[[RunContext], Awaitable[None]]
 PhaseWarnOnly = bool | Callable[[RunContext], bool]
 PhaseSkipCondition = Callable[[ConfigSchema], bool]
+CONFIG_DISABLED = "Disabled"
 PhaseSkipDetail = str | Callable[[ConfigSchema], str | None]
 
 
@@ -104,6 +105,10 @@ async def execute_phases(
                 if callable(phase.skip_detail)
                 else phase.skip_detail
             )
+            if skip_detail == CONFIG_DISABLED and (
+                uses_rich_progress(reporter) or isinstance(reporter, PlainProgressReporter)
+            ):
+                continue
             start_phase_progress(
                 reporter,
                 name=phase.name,

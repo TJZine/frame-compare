@@ -591,10 +591,25 @@ def test_final_alignment_summary_preserves_origins(
 @pytest.mark.parametrize(
     ("counts", "offset", "expected"),
     [
-        ((240, 216), 0, "Reference has 1.0 s more at the end"),
-        ((240, 216), 24, "Reference has 1.0 s more at the start"),
-        ((240, 192), 24, "Reference has 1.0 s more at the start and 1.0 s more at the end"),
-        ((240, 216, 264), 0, "Reference has 1.0 s more at the end, Beta has 2.0 s more at the end"),
+        ((240, 216), 0, "Reference has 1.0 s more at the end than Alpha"),
+        ((240, 216), 24, "Reference has 1.0 s more at the start than Alpha"),
+        (
+            (240, 192),
+            24,
+            "Reference has 1.0 s more at the start and 1.0 s more at the end than Alpha",
+        ),
+        (
+            (240, 216, 264),
+            0,
+            "Reference has 1.0 s more at the end than Alpha; Beta has 2.0 s more at the end than Alpha",
+        ),
+        ((240, 252), 24, "Reference has 1.0 s more at the start; Alpha has 1.5 s more at the end"),
+        ((240, 216, 240), 0, "Reference and Beta have 1.0 s more at the end than Alpha"),
+        (
+            (240, 216, 240, 240),
+            0,
+            "Reference, Beta, and Gamma have 1.0 s more at the end than Alpha",
+        ),
         ((240, 240), 24, None),
     ],
 )
@@ -609,7 +624,9 @@ def test_extra_footage_describes_final_shared_range(
 
     comparisons = [
         _clip(tmp_path / f"comp{index}.mkv", label=name, num_frames=count)
-        for index, (count, name) in enumerate(zip(counts[1:], ("Alpha", "Beta"), strict=False))
+        for index, (count, name) in enumerate(
+            zip(counts[1:], ("Alpha", "Beta", "Gamma"), strict=False)
+        )
     ]
     ctx = _context(tmp_path, comparisons=comparisons)
     ctx.reference = _clip(ctx.reference.path, label="Reference", num_frames=counts[0])
@@ -644,9 +661,7 @@ def test_extra_footage_describes_final_shared_range(
     output = _run_align_phase(ctx, selected_frames=[30])
     assert output.alignment_summary is not None
     note = output.alignment_summary.extra_footage
-    assert note == (
-        expected + "; frames come from the range all sources share." if expected else None
-    )
+    assert note == (expected + "; frames come from the shared range." if expected else None)
     from frame_compare.orchestration.coordinator import _assemble_run_result
     from frame_compare.orchestration.execution_types import ExecutionState
     from frame_compare.orchestration.phase_output_application import apply_phase_output

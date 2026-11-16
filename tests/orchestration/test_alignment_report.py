@@ -1,6 +1,7 @@
 """Unit tests for frame alignment diagnostics reporting helpers."""
 
 import os
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -310,7 +311,46 @@ def test_emit_frame_alignment_report_caps_selected_frame_list(
     )
 
     captured = capsys.readouterr()
-    assert "aligned 0, 1, 2, 3, 4, 5, 6, 7, ... (12 total)" in captured.err
+    assert "aligned 0, 1, 2, 3, 4, 5, 6, 7, … (12 total)" in captured.err
+
+
+@pytest.mark.parametrize("distinct_lists", [False, True])
+def test_aligned_frame_rows_follow_shared_or_per_comparison_trims(
+    capsys: pytest.CaptureFixture[str], distinct_lists: bool
+) -> None:
+    first = AlignmentReportComparison(
+        label="First",
+        alignment_source="manual",
+        relative_offset_frames=1,
+        reference_row_zero_source_frame=1,
+        comparison_row_zero_source_frame=0,
+        reference_trim_range=(1, 99),
+        comparison_trim_range=(0, 98),
+    )
+    second = replace(
+        first,
+        label="Second",
+        selected_frames=(3, 9) if distinct_lists else (4, 8),
+    )
+    emit_frame_alignment_report(
+        stage="after_align",
+        comparisons=[first, second],
+        selected_frames=[4, 8],
+        alignment_warnings=[],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert output.count("trims") == 2
+    second_heading = output.index("Second")
+    first_frames = output.index("aligned 4, 8")
+    if distinct_lists:
+        assert first_frames < second_heading < output.index("aligned 3, 9")
+    else:
+        assert second_heading < output.rindex("trims") < first_frames
+    assert output.count("  frames ") == (2 if distinct_lists else 1)
 
 
 def test_emit_frame_alignment_report_shows_material_stability_concisely(
@@ -383,7 +423,7 @@ def test_emit_frame_alignment_report_points_only_warned_comparisons_to_warnings(
     output = capsys.readouterr().err
     assert "Frame alignment" in output
     assert output.count("! see warnings") == 1
-    assert output.index("warned") < output.index("aligned 0, 50") < output.index("! see warnings")
+    assert output.index("warned") < output.index("! see warnings") < output.index("aligned 0, 50")
     assert output.index("! see warnings") < output.index("other")
     assert "alignment not applied [video check]" not in output
     assert "row 0" not in output

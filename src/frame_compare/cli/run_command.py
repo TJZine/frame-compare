@@ -38,12 +38,17 @@ from frame_compare.orchestration.run_inputs import (
     refresh_report_auto_open_preference,
     select_run_config_path,
 )
-from frame_compare.utils.artifact_paths import artifact_link
+from frame_compare.utils.artifact_paths import artifact_link, format_display_path
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.terminal import interruptible_prompt, stream_is_tty
-from frame_compare.utils.terminal_sections import Section, section_title
-from frame_compare.utils.terminal_theme import ACCENT, format_duration, glyphs_for_console
+from frame_compare.utils.terminal_sections import Section, run_output_spacing, section_title
+from frame_compare.utils.terminal_theme import (
+    ACCENT,
+    format_duration,
+    glyphs_for_console,
+    print_with_paths,
+)
 
 from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn, format_enum_expected
 from .run_contracts import (
@@ -254,6 +259,7 @@ class RunCliRawArgs:
     tm_speed: str | None = None
 
 
+@run_output_spacing()
 def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
     effective_no_color = args.no_color or deps.no_color_env_present
     console = deps.console_factory(
@@ -262,6 +268,22 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
     )
 
     interrupted: InterruptedRun | None = None
+    failure_diagnostics: Path | None = None
+
+    def _capture_failed_alignment_diagnostics(path: Path) -> None:
+        nonlocal failure_diagnostics
+        failure_diagnostics = path
+
+    def _print_failure_diagnostics(path: Path | None) -> None:
+        if path is None or args.quiet or args.json_output:
+            return
+        display = format_display_path(path, root=args.resolved_root)
+        link = artifact_link(path, root=args.resolved_root, verbose=args.verbose)
+        print_with_paths(
+            deps.console_factory(stderr=True, no_color=effective_no_color),
+            f"  diagnostics  {link}",
+            (display,),
+        )
 
     def _capture_interruption(facts: InterruptedRun) -> None:
         nonlocal interrupted
@@ -321,15 +343,15 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             console=console,
             inputs=inputs,
             on_interrupted=(None if args.quiet or args.json_output else _capture_interruption),
+            on_failed_alignment_diagnostics=(
+                None if args.quiet or args.json_output else _capture_failed_alignment_diagnostics
+            ),
         )
         result = deps.runner.run(request, dependencies=run_dependencies)
     except FrameCompareError as error:
-        raise run_error_exit(
-            error,
-            args=args,
-            deps=deps,
-            no_color=effective_no_color,
-        ) from error
+        exit_error = run_error_exit(error, args=args, deps=deps, no_color=effective_no_color)
+        _print_failure_diagnostics(failure_diagnostics)
+        raise exit_error from error
     except (KeyboardInterrupt, typer.Abort) as error:
         if not (args.quiet or args.json_output) and (
             interrupted is not None or isinstance(error, KeyboardInterrupt)
@@ -340,12 +362,19 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
                 root=args.resolved_root,
             )
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
+    except Exception as error:
+        if failure_diagnostics is None:
+            raise
+        exit_code = deps.handle_error(error, no_color=effective_no_color, verbose=args.verbose)
+        _print_failure_diagnostics(failure_diagnostics)
+        raise typer.Exit(code=exit_code) from error
 
     if args.json_output:
         handle_json_output(result)
         return
 
     if not result.success:
+        _print_failure_diagnostics(result.alignment_diagnostics_dir)
         raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
 
     post_upload_actions = collect_interactive_slowpics_actions(
@@ -382,6 +411,7 @@ def build_runner_dependencies(
     console: Console,
     inputs: AcquiredRunConfig,
     on_interrupted: Callable[[InterruptedRun], None] | None = None,
+    on_failed_alignment_diagnostics: Callable[[Path], None] | None = None,
 ) -> RunDependencies | None:
     config = inputs.config
     confirm_slowpics_upload = (
@@ -405,7 +435,12 @@ def build_runner_dependencies(
     )
     if all(
         callback is None
-        for callback in (confirm_slowpics_upload, confirm_full_window_retry, on_interrupted)
+        for callback in (
+            confirm_slowpics_upload,
+            confirm_full_window_retry,
+            on_interrupted,
+            on_failed_alignment_diagnostics,
+        )
     ):
         return None
 
@@ -415,6 +450,7 @@ def build_runner_dependencies(
         confirm_slowpics_upload=confirm_slowpics_upload,
         confirm_full_window_retry=confirm_full_window_retry,
         on_interrupted=on_interrupted,
+        on_failed_alignment_diagnostics=on_failed_alignment_diagnostics,
     )
 
 

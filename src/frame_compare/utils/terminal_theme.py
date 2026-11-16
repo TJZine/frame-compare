@@ -197,10 +197,8 @@ def use_ascii_fallback_on_non_utf_streams() -> None:
 
 
 def format_duration(seconds: float) -> str:
-    """Format a duration for a human summary (S3 value grammar)."""
+    """Format elapsed time or a source duration for human output."""
     total_seconds = max(0.0, seconds)
-    if total_seconds < 1.0:
-        return f"{total_seconds * 1000:.0f} ms"
     if total_seconds < 60.0:
         return f"{total_seconds:.1f} s"
 
@@ -210,7 +208,7 @@ def format_duration(seconds: float) -> str:
         return f"{minutes}m {remaining_seconds:02d}s"
 
     hours, remaining_minutes = divmod(minutes, 60)
-    return f"{hours}h {remaining_minutes:02d}m {remaining_seconds:02d}s"
+    return f"{hours}h {remaining_minutes:02d}m"
 
 
 __all__ = [

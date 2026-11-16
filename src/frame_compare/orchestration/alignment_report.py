@@ -42,6 +42,8 @@ class AlignmentReportComparison:
     stability: AlignmentStabilitySummary | None = None
     short_name: str | None = None
     reference_short_name: str | None = None
+    # When absent, this comparison uses the run's shared aligned frame list.
+    selected_frames: tuple[int, ...] | None = None
 
 
 def build_frame_alignment_report(
@@ -121,7 +123,7 @@ def _format_selected_frames(selected_frames: Sequence[int]) -> str:
         return f"frame {selected_frames[0]} (1 total)"
     shown = [str(frame) for frame in selected_frames[:_MAX_SELECTED_FRAMES]]
     if len(selected_frames) > _MAX_SELECTED_FRAMES:
-        shown.append(f"... ({len(selected_frames)} total)")
+        shown.append(f"… ({len(selected_frames)} total)")
     return ", ".join(shown)
 
 
@@ -174,7 +176,13 @@ def _render_alignment_table(
         if comparisons and comparisons[0].reference_short_name
         else "Reference"
     )
-    for index, comparison in enumerate(comparisons):
+    shared_frames = tuple(selected_frames)
+    frame_lists = [
+        comparison.selected_frames if comparison.selected_frames is not None else shared_frames
+        for comparison in comparisons
+    ]
+    common_frames = frame_lists[0] if frame_lists and len(set(frame_lists)) == 1 else None
+    for index, (comparison, frames) in enumerate(zip(comparisons, frame_lists, strict=True)):
         if index > 0:
             section.add_line()
 
@@ -201,14 +209,14 @@ def _render_alignment_table(
             if verbose:
                 value += f"; {stability.valid_windows} credible chunks"
             section.add_row("  stability", Text(value))
-        if selected_frames:
-            section.add_row(
-                "  frames",
-                Text(f"aligned {_format_selected_frames(selected_frames)}"),
-            )
+        if common_frames is None and frames:
+            section.add_row("  frames", Text(f"aligned {_format_selected_frames(frames)}"))
 
         if comparison.comparison_path in warned_comparison_paths:
             section.add_note("see warnings")
+
+    if common_frames:
+        section.add_row("  frames", Text(f"aligned {_format_selected_frames(common_frames)}"))
 
     if verbose:
         for comparison in comparisons:

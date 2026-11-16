@@ -156,6 +156,7 @@ class RunDependencies:
     clock: Callable[[], datetime] = field(default=_utc_now)
     monotonic_timer: Callable[[], float] = field(default=monotonic)
     on_interrupted: Callable[[InterruptedRun], None] | None = None
+    on_failed_alignment_diagnostics: Callable[[Path], None] | None = None
     capture_reserved_run: Callable[[ReservedRunCapture], None] | None = field(
         default=None,
         init=False,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import structlog
 from rich.markup import escape
@@ -23,7 +22,6 @@ from frame_compare.utils.alignment_review_projection import (
     audio_evidence_rows,
     build_audio_review_presentation,
 )
-from frame_compare.utils.artifact_paths import artifact_link
 from frame_compare.utils.progress import RichProgressReporter
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal_sections import Section, section_title
@@ -180,11 +178,8 @@ def _verbose_evidence_lines(attempt: AudioAlignmentAttempt) -> list[str]:
 def _render_alignment_evidence_panel(
     *,
     entries: list[tuple[str, tuple[Text, ...], tuple[EvidenceRow, ...]]],
-    diagnostics_dir: Path | None,
     no_color: bool,
     needs_review_count: int,
-    root: Path | None,
-    verbose: bool,
 ) -> None:
     review_verb = "needs" if needs_review_count == 1 else "need"
     section = Section(
@@ -202,9 +197,6 @@ def _render_alignment_evidence_panel(
             section.add_line(line)
         for row in verbose_rows:
             section.add_row(row.key, f"[dim]{escape(row.value)}[/]")
-    if diagnostics_dir is not None:
-        section.add_line()
-        section.add_row("diagnostics", artifact_link(diagnostics_dir, root=root, verbose=verbose))
     section.print(human_console(stderr=True, no_color=no_color, height=1000))
 
 
@@ -217,7 +209,6 @@ def present_alignment_evidence(
     verbose: bool,
     quiet: bool,
     json_output: bool,
-    diagnostics_written: bool,
     review_pending: bool = False,
 ) -> None:
     lines: list[str] = []
@@ -276,9 +267,6 @@ def present_alignment_evidence(
         if human_actionable:
             needs_review_count += 1
         entries.append((short, normal_rows, verbose_rows))
-    diagnostics_dir = request.alignment_diagnostics_dir if diagnostics_written else None
-    if diagnostics_dir is not None and not quiet and not json_output:
-        lines.append(f"Audio diagnostics: {diagnostics_dir}")
     if not lines:
         return
     if progress is not None:
@@ -287,11 +275,8 @@ def present_alignment_evidence(
         if isinstance(progress, RichProgressReporter):
             _render_alignment_evidence_panel(
                 entries=entries,
-                diagnostics_dir=diagnostics_dir if not quiet else None,
                 no_color=config.no_color,
                 needs_review_count=needs_review_count,
-                root=request.workspace_root,
-                verbose=verbose,
             )
         else:
             print("\n".join(lines), file=sys.stderr)

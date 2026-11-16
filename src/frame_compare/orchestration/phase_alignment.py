@@ -36,7 +36,7 @@ from frame_compare.orchestration.phase_selection import (
     shared_source_frame_range,
     source_frames_for_reference_base_domain,
 )
-from frame_compare.orchestration.presentation import clip_role
+from frame_compare.orchestration.presentation import clip_role, join_source_names
 from frame_compare.render.prepare import resolve_tonemap_settings
 from frame_compare.services.alignment import (
     align_clips_from_request,
@@ -341,12 +341,7 @@ def _extra_footage_note(
 ) -> str | None:
     if len({clip.probe.num_frames for clip in originals}) <= 1:
         return None
-    parts: list[str] = []
-
-    def duration(frames: int, fps: Fraction) -> str:
-        seconds = frames / float(fps)
-        return f"{seconds:.1f} s" if seconds < 1 else format_duration(seconds)
-
+    sources_by_extent: dict[tuple[Fraction, Fraction], list[str]] = {}
     for source, original, final in zip(
         [request.reference, *request.comparisons], originals, aligned, strict=True
     ):
@@ -354,14 +349,21 @@ def _extra_footage_note(
         original_end = original.trim.trim_start_frames + original.effective_num_frames()
         final_end = final.trim.trim_start_frames + final.effective_num_frames()
         end = original_end - final_end
+        extent = (max(start, 0) / original.effective_fps, max(end, 0) / original.effective_fps)
+        sources_by_extent.setdefault(extent, []).append(_request_short_name(source))
+
+    shared_sources = sources_by_extent.pop((Fraction(0), Fraction(0)), [])
+    comparator = f" than {shared_sources[0]}" if len(shared_sources) == 1 else ""
+    parts: list[str] = []
+    for (start, end), names in sources_by_extent.items():
         extents: list[str] = []
         if start > 0:
-            extents.append(f"{duration(start, original.effective_fps)} more at the start")
+            extents.append(f"{format_duration(float(start))} more at the start")
         if end > 0:
-            extents.append(f"{duration(end, original.effective_fps)} more at the end")
-        if extents:
-            parts.append(f"{_request_short_name(source)} has {' and '.join(extents)}")
-    return ", ".join(parts) + "; frames come from the range all sources share." if parts else None
+            extents.append(f"{format_duration(float(end))} more at the end")
+        verb = "has" if len(names) == 1 else "have"
+        parts.append(f"{join_source_names(names)} {verb} {' and '.join(extents)}{comparator}")
+    return "; ".join(parts) + "; frames come from the shared range." if parts else None
 
 
 def _request_short_name(comparison: AlignmentClipRequest) -> str:

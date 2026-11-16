@@ -5,7 +5,9 @@ from __future__ import annotations
 from fractions import Fraction
 from pathlib import Path
 
+import httpx
 import pytest
+from structlog.testing import capture_logs
 
 from frame_compare.analysis.types import (
     SelectionBreakdown,
@@ -18,6 +20,7 @@ from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies
 from frame_compare.orchestration.execution import (
     build_execution_phase_plan,
+    build_phases_after_align,
     build_phases_before_align,
 )
 from frame_compare.orchestration.execution_types import (
@@ -32,14 +35,109 @@ from frame_compare.orchestration.execution_types import (
     RunArtifacts,
 )
 from frame_compare.orchestration.phase_output_application import apply_phase_output
+from frame_compare.orchestration.phases import PhaseStatus, execute_phases
 from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.progress import (
+    LogProgressReporter,
+    PlainProgressReporter,
+    RichProgressReporter,
+)
 from frame_compare.utils.run_warnings import RunWarning
 from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state, execution_context
 from .phase_task_helpers import _context, _frame_metrics, _render_artifacts, _workspace
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("transport", ["tty", "pipe", "json"])
+@pytest.mark.parametrize("configured", [True, False])
+async def test_phase_output_distinguishes_disabled_from_runtime_skips(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    transport: str,
+    configured: bool,
+) -> None:
+    from rich.console import Console
+
+    config = get_default_config()
+    config.audio_alignment.enable = not configured
+    config.report.enable = not configured
+    config.slowpics.auto_upload = not configured
+    config.slowpics.confirm_upload_after_report = not configured
+    config.analysis.dark_frame_count = 0
+    config.analysis.bright_frame_count = 0
+    config.analysis.motion_frame_count = 0
+    state = ExecutionState()
+    state.artifacts.slowpics_upload_confirmation_status = "declined"
+    request = make_run_request(
+        config=config, root=tmp_path, skip_analysis=configured, skip_metadata=configured
+    )
+    ctx = _context(tmp_path)
+    ctx.config = config
+    reporter: RichProgressReporter | PlainProgressReporter | LogProgressReporter
+    if transport == "tty":
+        console = Console(stderr=True, force_terminal=True, no_color=True, width=120)
+        monkeypatch.setattr("frame_compare.utils.progress.human_console", lambda **_: console)
+        reporter = RichProgressReporter()
+    elif transport == "pipe":
+        reporter = PlainProgressReporter()
+    else:
+        reporter = LogProgressReporter()
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: pytest.fail("this phase test must not call a network service")
+        )
+    ) as client:
+        before = build_phases_before_align(
+            request=request,
+            config=config,
+            monotonic_timer=lambda: 0.0,
+            state=state,
+            input_videos=[ctx.reference.path],
+            workspace=ctx.workspace,
+        )
+        after = build_phases_after_align(
+            request=request,
+            config=config,
+            monotonic_timer=lambda: 0.0,
+            state=state,
+            ffmpeg_runner=FakeFFmpegRunner(),
+            http_client=client,
+            metadata_prefetch=MetadataPrefetch(None, False),
+        )
+        expected = (
+            {"analyze", "align", "metadata", "publish", "report"}
+            if configured
+            else {
+                "analyze",
+                "publish",
+            }
+        )
+        phases = [phase for phase in [*before, *after] if phase.name in expected]
+        with capture_logs() as logs:
+            await execute_phases(phases, ctx, reporter)
+
+    assert {phase.name for phase in phases if phase.status == PhaseStatus.SKIPPED} == expected
+    output = capsys.readouterr().err
+    if transport == "json":
+        assert output == ""
+        assert {
+            event["phase"]
+            for event in logs
+            if event.get("event") == "phase_completed" and event.get("status") == "skipped"
+        } == expected
+    elif configured:
+        assert output == ""
+    elif transport == "tty":
+        assert "– Analyze         not required" in output
+        assert "– Publish         declined" in output
+    else:
+        assert output.splitlines() == ["[SKIP] ANALYZE  Not required", "[SKIP] PUBLISH  Declined"]
 
 
 def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
@@ -420,6 +518,6 @@ async def test_align_phase_records_review_split_duration_text(tmp_path: Path) ->
     await phase.execute(_context(tmp_path))
 
     assert timings["align"] == pytest.approx(60.0)
-    assert phase.duration_text == "17s + 42s review"
+    assert phase.duration_text == "17.5 s + 42.5 s review"
     assert phase.success_summary == "1 pair confirmed in VSView"
     assert state.vsview_review_seconds == pytest.approx(42.5)

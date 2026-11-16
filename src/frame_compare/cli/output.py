@@ -377,24 +377,24 @@ def _add_time_rows(table: Section, *, result: RunResult) -> None:
     review_seconds = max(0.0, result.vsview_review_seconds)
     _add_kv(table, "time", f"{format_duration(result.duration_seconds)} total")
 
-    machine_items: list[str] = []
+    phase_items: list[str] = []
     setup_seconds = timings.get("preflight", 0.0) + timings.get("load_sources", 0.0)
     if setup_seconds > 0.0:
-        machine_items.append(f"setup {format_duration(setup_seconds)}")
+        phase_items.append(f"setup {format_duration(setup_seconds)}")
     analyze_seconds = timings.get("analyze", 0.0)
     if analyze_seconds > 0.0:
-        machine_items.append(f"analyze {format_duration(analyze_seconds)}")
+        phase_items.append(f"analyze {format_duration(analyze_seconds)}")
     align_seconds = max(0.0, timings.get("align", 0.0) - review_seconds)
     if align_seconds > 0.0:
-        machine_items.append(f"align {format_duration(align_seconds)}")
+        phase_items.append(f"align {format_duration(align_seconds)}")
     render_seconds = timings.get("render", 0.0)
     if render_seconds > 0.0:
-        machine_items.append(f"render {format_duration(render_seconds)}")
+        phase_items.append(f"render {format_duration(render_seconds)}")
     upload_seconds = timings.get("publish", 0.0)
     if upload_seconds > 0.0:
-        machine_items.append(f"upload {format_duration(upload_seconds)}")
-    if machine_items:
-        table.add_row("  machine", _dot_join(machine_items))
+        phase_items.append(f"upload {format_duration(upload_seconds)}")
+    if phase_items:
+        table.add_row("  phases", _dot_join(phase_items))
 
     you_items: list[str] = []
     if review_seconds > 0.0:
@@ -519,7 +519,7 @@ def print_result_summary(
 
     table.title = title
     table.rail_style = border_style
-    table.print(console)
+    table.print(console, trailing_space=not warnings)
 
     if warnings:
         warning_text = _format_warning_panel_text(warnings, glyphs=glyphs)

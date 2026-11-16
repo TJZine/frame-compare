@@ -412,9 +412,8 @@ unchanged.
   `+-`, `|`, `+-`, `*`, and `o` for the section and status glyphs, while the
   existing `·`, `›`, `…`, `×` mappings remain in force. Rich output uses this
   renderer for every in-scope section; the VSView process applies the same rules
-  in `SessionConsole`. There is one blank line before and after each section;
-  phase lines are grouped without blank lines between them and have one blank
-  line around the group.
+  in `SessionConsole`. One blank line separates `run` blocks, including the
+  completion and Warnings sections. Adjacent phase lines form one block.
 - Normal non-quiet runs begin with a dim-rail `Run plan` section containing
   `Workspace`, `Frames`, `Rendering`, `Alignment`, `Review`, and `Publishing`
   groups. Group keys are accent bold; their
@@ -479,7 +478,7 @@ unchanged.
   prompt would be needed.
 #### Source, alignment, and completion summaries
 
-- After sources load, normal human output uses one `Sources · N loaded` section
+- After sources load, normal human output uses one `Sources · N` section
   when all sources do not share one content identity, or `{content identity} ·
   {N} sources` when they do. `1 source` is used for one source. The content
   identity is no longer repeated in the body. Each source entry has its bold name,
@@ -498,8 +497,10 @@ unchanged.
   and do not add fields to successful stdout.
 - Material alignment information is printed in a dim-rail `Frame alignment`
   section when accepted or rejected frame-alignment changes need explanation. Each
-  comparison has a bold short-name line, `trims`, `stability` when present, and
-  `frames` (`aligned …`, or `aligned frame 0 (1 total)` for a single frame at index 0).
+  comparison has a bold short-name line, `trims`, and `stability` when present.
+  The shared `frames` row follows the last comparison. When aligned frame lists
+  differ, each comparison shows its own list. The row uses `aligned …` or
+  `aligned frame 0 (1 total)` for one frame at index 0.
   The `offset` and `source` rows are removed; the Align phase summary carries the
   final offsets and origins. A comparison with an alignment warning gets a
   `! see warnings` note. The warning itself appears in the final Warnings section.
@@ -544,9 +545,8 @@ unchanged.
   Provisional evidence never authorizes trims, persistence, or computed-cache
   authority. Verbose evidence remains as dim key/value rows,
   including the original attempt and stream/chunk/video facts without fabricating
-  current details for reused results. A written diagnostics directory appears as
-  the `diagnostics` hyperlink row. Plain mode prints `{short}: {line 1 state}` and
-  indents following lines two spaces, then `Audio diagnostics: {path}`. The
+  current details for reused results. Plain mode prints `{short}: {line 1 state}`
+  and indents following lines two spaces. The
   pre-review `✓ Align … alignment applied` line is removed. Quiet mode retains
   only actionable entries and the final screenshots line.
 - When previous offsets are reused interactively, the prompt section is
@@ -583,8 +583,11 @@ unchanged.
   form is `{accepted} of {N} comparisons aligned · {origin}` followed by one row per
   comparison at column 18; the wrapped `{origin}` appears only when every comparison
   has an applied offset and all those applied comparisons share that origin. Length
-  differences add the dim extra-footage line.
-  Review duration is `· {machine} + {review} review`. The Align phase is warned whenever any
+  differences add a dim note. Names with the same extra time at the start and
+  end share a clause. Distinct amounts use separate clauses joined by semicolons.
+  The note names the comparison source when exactly one source needed no trim
+  and ends with `frames come from the shared range.`
+  Review duration is `· {alignment time} + {review time} review`. The Align phase is warned whenever any
   comparison ends without an applied offset, whether or not review ran; this
   changes only the phase glyph and colour and does not change authority, trims,
   persistence, the warnings list, or the completion title.
@@ -593,15 +596,16 @@ unchanged.
   section title with a matching rail. Rows are `slow.pics` with the URL only when
   uploaded, followed by the existing copy/open result items and `  shortcut` and
   `  webhook` rows; `report`; `screenshots` with `  {N} files`; `alignment` when
-  alignment ran; `diagnostics` when written; and the `slow.pics` row `upload
+  alignment ran; the `diagnostics` hyperlink when written; and the `slow.pics` row `upload
   skipped because the report could not be confirmed` when that happened.
   Declined uploads get no row. After one blank body line, `run` is `{N} frames ·
   {N} sources · analysis cached` or `analysis computed`, with nothing for
   `skipped`. If rendered and planned frame counts differ, the row shows
   `{rendered} of {planned} frames`. The next rows are `time` as `{dur} total`,
-  `  machine`, and `  you` with
-  their existing items. Artifact paths are Rich hyperlinks and use the shared
-  path formatter. `--quiet` is unchanged.
+  `  phases`, and `  you` with their corresponding timings. Artifact paths are
+  Rich hyperlinks and use the shared path formatter. If a failure after alignment
+  prevents the completion section, the error is followed by the diagnostics path
+  when available. `--quiet` is unchanged.
 - The yellow-rail `! Warnings` section lists every distinct warning once,
   including post-upload action warnings. The completion title counts that same
   list. Copy, browser, shortcut, and webhook rows retain concise outcomes. The
@@ -658,15 +662,19 @@ unchanged.
 - Rich phase lines use `{glyph} {Label:<16}{summary}`, so the summary begins at
   column 18. The duration is appended inline in dim as `{summary} · {dur}`; with
   no summary, the duration alone begins at column 18. Retention rules are
-  unchanged for completed top-level phases of 10 seconds or more, skipped,
-  warned, and failed phases, and successful uploads. Plain mode keeps
-  `[OK] ALIGN  Completed in …` and related existing renderers.
+  unchanged for completed top-level phases of 10 seconds or more, runtime
+  skips, warned and failed phases, and successful uploads. Plain mode uses
+  `[OK] ALIGN  Completed in …`. Human durations use one decimal below a minute
+  (`0.3 s`, `12.9 s`), minutes and seconds from a minute (`1m 08s`), and hours
+  and minutes from an hour (`1h 02m`). Timecodes show positions within media.
 - Phase summaries are unchanged except for Align: Analyze uses `{N} frames
   selected`, Render uses `{N} screenshots ({F} frames × {S} sources)`, Publish
   uses `{N} screenshots uploaded · {visibility}`, and a skipped phase uses its
-  lower-cased detail, such as `– Publish          declined`.
+  lower-cased detail, such as `– Publish          declined`. Config- or
+  flag-disabled phases are omitted from both human progress reporters.
+  Runtime skips retain their detail, and structured logging records every skip.
 - Non-TTY human runs use those product phase labels in chronological ASCII
-  progress lines on stderr. Each top-level phase emits once when it completes;
+  progress lines on stderr. Each enabled top-level phase emits once when it completes;
   successful lines include elapsed time, skips preserve their detail, and failed
   phases emit `[FAIL]` before the existing typed error presentation. Successful
   nested work and percentage milestones remain silent. Warned or failed nested
