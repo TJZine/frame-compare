@@ -235,7 +235,10 @@ role labels and bounded console-width policy shared by orchestration reports.
 content/release identity types and plain formatters. Preparation invokes the existing
 GuessIt/Anitopy parser seam once per source and attaches the resulting presentation
 metadata and explicit-label provenance to `ClipState`; these fields are excluded from
-source, cache, selection, and report identity.
+source, cache, selection, and report identity. Release identity records whether a
+parsed group qualifies for short names. The short-name formatter uses the ordered
+filename stems for shared-token fallback and resolves presentation collisions after
+choosing the names.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
 through presentation surfaces while source paths, fingerprints,

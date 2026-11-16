@@ -251,8 +251,14 @@ before probing, metadata prefetch, run-folder reservation, rendering, or HTTP
 work. Derived collisions are qualified deterministically with source stems and
 then stable source order. Resolved labels drive overlays, reports, alignment display,
 and render artifact keys, but do not change source/cache/alignment identity or physical
-PNG filenames. Live render progress uses exact explicit labels or unique role-prefixed
-micro release descriptors. slow.pics columns use exact explicit labels or unique full
+PNG filenames. The Sources and alignment summaries use explicit short labels first.
+A parsed release group qualifies as a short label when it is the final hyphen-delimited
+token and the filename also identifies a resolution, source, or codec. Otherwise the
+summary uses the compact release details, then the differing filename text after removing
+shared leading and trailing tokens. If the full stem remains, a matching parsed-title
+prefix can be removed. An empty remainder falls back to the resolved label.
+Live render progress uses exact explicit labels or unique role-prefixed micro release
+descriptors. slow.pics columns use exact explicit labels or unique full
 release descriptors, with the canonical resolved label as the uninformative-parser
 fallback. Orchestrated rendering continues to use the source stem as `filename_label`. When the resulting
 absolute screenshot path would exceed the legacy Windows browser-safe boundary, the

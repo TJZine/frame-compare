@@ -15,6 +15,7 @@ from frame_compare.orchestration.fps_report import (
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
 )
+from frame_compare.services.metadata_parsing import parse_filename_with_release_identity
 from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
 
 
@@ -76,6 +77,7 @@ def _fps_report_clip(
     raw_fps: Fraction | None = None,
     fps_reason: str | None = None,
     size_bytes: int = 0,
+    release_identity: ReleaseIdentity | None = None,
 ) -> FpsReportClip:
     return FpsReportClip(
         path=path,
@@ -91,6 +93,7 @@ def _fps_report_clip(
         raw_fps=source_fps if raw_fps is None else raw_fps,
         fps_reason=fps_reason,
         size_bytes=size_bytes,
+        release_identity=release_identity,
     )
 
 
@@ -439,6 +442,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    dub = "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv"
     clips = [
         _fps_report_clip(
             path=Path("ref.mkv"),
@@ -454,7 +458,8 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
             size_bytes=17 * 1024**3,
         ),
         _fps_report_clip(
-            path=Path("encode.mkv"),
+            path=Path(dub),
+            release_identity=parse_filename_with_release_identity(dub)[1],
             label="Encode [candidate]",
             width=1920,
             height=1080,
@@ -494,9 +499,8 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "17.00 GiB" in captured.err
     assert "0.00 B" not in captured.err
     assert "ref.mkv" in captured.err
-    assert "encode.mkv" in captured.err
-    assert "Lengths differ" in captured.err
-    assert "1200 frames" in captured.err
+    assert dub in captured.err
+    assert "Lengths differ: english-dub-only is 1200 frames" in captured.err
     assert "FPS target: 24000/1001 (majority)" in captured.err
     assert "analysis" in captured.err
     assert "\n│\n│ analysis        " in captured.err
@@ -523,7 +527,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert colored.out == ""
     assert "\x1b[" in colored.err
     assert "ref.mkv" in colored.err
-    assert "encode.mkv" in colored.err
+    assert dub in colored.err
 
 
 def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
