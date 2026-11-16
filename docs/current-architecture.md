@@ -1164,9 +1164,9 @@ replacement remains owned by `frame_compare.utils.atomic_write`.
 
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, internal overlay mode presented to
-users as Single where appropriate, diff, and pair-based blink modes; frame/category
+users as Single where appropriate, diff, pair-based blink, and grid modes; frame/category
 navigation; a source-labels toggle for stage labels and current-frame metadata; a
-primary toolbar plus floating viewport palette; a collapsible, compact/normal/large
+primary toolbar plus viewport palette; a collapsible, compact/normal/large
 filmstrip bottom panel; a responsive inspector drawer with Frame, Clips, Image offset,
 and Review tabs; fullscreen support; viewport pan, zoom, actual size and fit height
 controls (plus continued support for a restored width-fit preference without a visible
@@ -1200,13 +1200,17 @@ retain text and counts without colored dots or thumbnail stripes. Palette orient
 rotates its existing icon through CSS, while the viewer updates the accessible action label. The floating
 palette omits a fit-width control; actual size and fit height remain, and a restored
 width-fit preference still computes zoom and keeps the fit radio group keyboard
-reachable when neither visible radio matches. The floating palette does not
-reserve image space. In Slider, Single, Diff, and Blink, source chips sit near
-the bottom above the frame chip. They sit above a horizontal palette or beside
-a vertical one, leaving the top-left corner clear for burned-in text. On fine
-pointers the palette carries a `data-proximity` state driven by a throttled
-stage pointermove listener: near at or within 96 px of the palette rectangle,
-far at or beyond 160 px with hysteresis between, far on stage pointer
+reachable when neither visible radio matches. In Slider, Single, Diff, and Blink,
+the palette floats over the stage without reserving image space. With a horizontal
+palette, source chips sit above the bottom controls. A vertical palette sits to
+the right of the chips, which stay near the bottom above the frame chip. This
+leaves the top-left corner clear for burned-in text. In Grid, the palette has a
+row below the cells or a column beside them when vertical. The frame selector in
+the toolbar identifies the current frame in windowed Grid. Fullscreen hides the
+toolbar and shows the current frame chip below the cells. On fine pointers a throttled stage pointermove
+listener updates the palette's `data-proximity` state. It sets near at or within
+96 px of the palette rectangle and far at or beyond 160 px with hysteresis between.
+The state is also far on stage pointer
 leave, forced far during viewport or slider drags, forced near for 3000 ms after
 load and while either the image-offset or lens-settings popover is open, and always
 near on coarse pointers or when the fine-pointer media query stops matching.

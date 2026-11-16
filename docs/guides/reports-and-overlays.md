@@ -55,8 +55,11 @@ filters by category and has **Compact**, **Normal**, and **Large** sizes. Choose
 pair
 with the two source selectors and swap them with the button between them.
 
-The floating palette over the image holds zoom, fit, viewport reset, fullscreen,
-**Source labels**, and **Lens**. `report.include_filmstrip = false` hides the filmstrip.
+The viewport palette holds zoom, fit, viewport reset, fullscreen, **Source labels**,
+and **Lens**. In Grid, the palette sits below or beside the cells, keeping footer
+labels clear. The frame selector shows the current frame in the toolbar. In
+fullscreen Grid, the frame chip shows it below the cells. In the other modes the
+palette floats over the image. `report.include_filmstrip = false` hides the filmstrip.
 `Offset: none` in the toolbar refers to a spatial image offset; it does not change
 timing
 alignment.

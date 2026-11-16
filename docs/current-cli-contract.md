@@ -1143,7 +1143,10 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 - Viewer spatial translation is labeled `Offset`, distinct from temporal source-frame
   alignment. Filmstrip captions show the comparison frame number and selection category
   at every thumbnail size, with the full original frame label available on hover and
-  in the frame selector. The viewport palette remains floating and adds no reserved row.
+  in the frame selector. In Grid, the palette sits below or beside the cells and
+  the frame selector identifies the current frame in the toolbar. Fullscreen Grid
+  shows the current frame chip below the cells. In Slider, Single, Diff, and Blink,
+  the palette floats over the image without reserving space.
 - Filmstrip captions center the frame-number/category group over a shallow bottom
   gradient without reducing thumbnail image space or increasing card height.
   Category identification uses text in captions and filters; filters keep their counts,

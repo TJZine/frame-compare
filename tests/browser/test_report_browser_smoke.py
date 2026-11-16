@@ -1880,9 +1880,7 @@ def _assert_inspector_clears_toolbar_during_image_retry(browser: str, tmp_path: 
 
 @pytest.mark.integration
 @pytest.mark.parametrize(("width", "height"), [(390, 844), (1280, 720), (1920, 1080)])
-def test_report_stage_chips_clear_viewport_controls(
-    tmp_path: Path, width: int, height: int
-) -> None:
+def test_report_labels_clear_viewport_controls(tmp_path: Path, width: int, height: int) -> None:
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable")
@@ -1950,10 +1948,77 @@ def test_report_stage_chips_clear_viewport_controls(
                 assert.ok(disjoint(chip, controls) && disjoint(chip, frame), message);
             }
         }
+        await evaluate("document.querySelector('[data-mode=grid]').click()");
+        const gridLayouts = `(() => {
+            const palette = document.querySelector('.rv-viewport-palette');
+            const frameChip = document.querySelector('.rv-stage-overlay-info');
+            const select = document.getElementById('frame-select');
+            const rect = element => element.getBoundingClientRect().toJSON();
+            return ['horizontal', 'vertical'].map(orientation => {
+                ReportViewer.setPaletteOrientation(orientation, { save: false });
+                return {
+                    direction: getComputedStyle(palette).flexDirection,
+                    controls: rect(palette), frame: rect(frameChip),
+                    frameVisible: getComputedStyle(frameChip).visibility === 'visible',
+                    chipText: frameChip.textContent.trim().replace(/\\s+/g, ' '),
+                    selectedText: select.selectedOptions[0].textContent.trim(),
+                    select: rect(select), stage: rect(ReportViewer.dom.stage),
+                    footers: [...document.querySelectorAll('.rv-grid-label')].map(rect),
+                    expectedFooters: innerWidth <= 768 ? 1 : 2,
+                };
+            });
+        })()`;
+        for (const layout of await evaluate(gridLayouts)) {
+            const {direction, controls, frame, footers, expectedFooters} = layout;
+            const message = JSON.stringify(layout);
+            assert.equal(frame.height, 0, message);
+            assert.ok(layout.select.height > 0, message);
+            assert.ok(controls.height > 0, message);
+            assert.equal(footers.length, expectedFooters, message);
+            for (const footer of footers) {
+                assert.ok(footer.height > 0, message);
+                assert.ok(direction === 'row'
+                    ? footer.bottom <= controls.top
+                    : footer.right <= controls.left, message);
+            }
+        }
+
+        const fullscreen = await command('Runtime.evaluate', {
+            expression: "document.body.requestFullscreen().then(() => 'entered', error => String(error))",
+            awaitPromise: true, userGesture: true, returnByValue: true,
+        });
+        assert.equal(fullscreen.exceptionDetails, undefined);
+        const nativeFullscreen = await evaluate('document.fullscreenElement === document.body');
+        if (!nativeFullscreen) {
+            // Exercise the production fullscreen CSS in hosts that deny fullscreen entry.
+            await evaluate(`(() => {
+                for (const sheet of document.querySelectorAll('style')) {
+                    sheet.textContent = sheet.textContent.replaceAll('body:fullscreen', 'body[data-test-fullscreen]');
+                }
+                document.body.dataset.testFullscreen = '';
+            })()`);
+        }
+        console.log(JSON.stringify({viewport: [width, height], nativeFullscreen, result: fullscreen.result.value}));
+        for (const layout of await evaluate(gridLayouts)) {
+            const {controls, frame, footers, stage, expectedFooters} = layout;
+            const message = JSON.stringify(layout);
+            assert.equal(layout.select.height, 0, message);
+            assert.ok(frame.height > 0 && layout.frameVisible, message);
+            assert.ok(layout.chipText && layout.chipText === layout.selectedText, message);
+            assert.ok(frame.top >= stage.top && frame.bottom <= stage.bottom, message);
+            assert.ok(frame.left >= stage.left && frame.right <= stage.right, message);
+            assert.ok(controls.height > 0 && disjoint(frame, controls), message);
+            assert.equal(footers.length, expectedFooters, message);
+            for (const footer of footers) {
+                assert.ok(footer.height > 0 && disjoint(footer, controls) && disjoint(footer, frame), message);
+            }
+        }
+
 """
     )
     completed = _run_browser_input(browser, report_path, tmp_path / "chrome-stage-chips", script)
     assert completed.returncode == 0, completed.stdout + completed.stderr
+    print(completed.stdout, end="")
 
 
 @pytest.mark.integration

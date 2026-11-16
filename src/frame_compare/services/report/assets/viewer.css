@@ -488,6 +488,7 @@ select optgroup {
 
 /* 5. Viewer Stage */
 .rv-viewer-stage {
+    --stage-inset: 12px;
     flex: 1 1 0;
     min-width: 0;
     min-height: 0;
@@ -683,14 +684,73 @@ body:fullscreen .rv-inspector {
     z-index: 2;
 }
 
-/* Grid mode: a deterministic contact sheet over the shared viewport state. */
-.rv-mode-grid .rv-canvas {
+/* Lay out the contact sheet and palette in separate tracks inside the stage. */
+.rv-viewer-stage.rv-mode-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+.rv-mode-grid .rv-canvas,
+.rv-mode-grid .rv-stage-labels,
+.rv-mode-grid .rv-stage-overlay-info {
     display: none;
 }
 
+body:fullscreen .rv-mode-grid .rv-stage-overlay-info {
+    display: flex;
+}
+
+.rv-mode-grid .rv-stage-chrome {
+    display: contents;
+}
+
+.rv-mode-grid .rv-stage-bottom-controls {
+    grid-row: 2;
+    padding-bottom: var(--stage-inset);
+}
+
+/* Narrow screens keep the horizontal layout even with a saved vertical preference. */
+@media (width > 768px) {
+    .rv-viewer-stage.rv-mode-grid:has(.rv-viewport-palette[data-orientation="vertical"]) {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: minmax(0, 1fr);
+    }
+
+    .rv-mode-grid:has(.rv-viewport-palette[data-orientation="vertical"]) .rv-stage-bottom-controls {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    /* In fullscreen the selector is hidden, so give the frame chip its own track. */
+    body:fullscreen .rv-viewer-stage.rv-mode-grid:has(.rv-viewport-palette[data-orientation="vertical"]) {
+        grid-template-rows: minmax(0, 1fr) auto;
+        column-gap: var(--stage-inset);
+        padding-inline-end: var(--stage-inset);
+        padding-bottom: var(--stage-inset);
+    }
+
+    body:fullscreen .rv-mode-grid:has(.rv-viewport-palette[data-orientation="vertical"]) .rv-stage-bottom-controls {
+        display: contents;
+    }
+
+    body:fullscreen .rv-mode-grid:has(.rv-viewport-palette[data-orientation="vertical"]) .rv-stage-overlay-info {
+        grid-area: 2 / 1;
+        justify-self: start;
+        margin-inline-start: var(--stage-inset);
+    }
+
+    body:fullscreen .rv-mode-grid .rv-viewport-palette[data-orientation="vertical"] {
+        grid-area: 1 / 2 / -1;
+        align-self: end;
+    }
+}
+
 .rv-grid {
-    position: absolute;
-    inset: 0;
+    position: relative;
+    grid-row: 1;
     z-index: 5;
     min-width: 0;
     min-height: 0;
@@ -858,7 +918,6 @@ body:fullscreen .rv-inspector {
 }
 
 .rv-stage-chrome {
-    --stage-inset: 12px;
     position: absolute;
     inset: 0;
     display: grid;
@@ -915,10 +974,6 @@ body:fullscreen .rv-inspector {
         grid-area: 1 / 2 / -1;
         align-self: end;
     }
-}
-
-.rv-mode-grid .rv-stage-labels {
-    display: none;
 }
 
 .rv-lens-target {
@@ -2388,11 +2443,8 @@ body.rv-inspector-open .rv-viewer-stage {
         width: 100%;
     }
 
-    .rv-stage-chrome {
-        --stage-inset: 8px;
-    }
-
     .rv-viewer-stage {
+        --stage-inset: 8px;
         flex: 0 0 50vh;
         min-height: 18rem;
     }
