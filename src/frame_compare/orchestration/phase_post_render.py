@@ -354,6 +354,8 @@ def run_report_phase(
                 active_picture=clip_facts.geometry.active_picture,
                 images=images,
                 label=clip.label,
+                release_identity=clip.release_identity,
+                label_is_explicit=clip.label_is_explicit,
                 source_identity=source_identity_from_fingerprint(
                     replace(clip.probe.fingerprint, path=clip.path)
                 ),

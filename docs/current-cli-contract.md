@@ -251,8 +251,14 @@ before probing, metadata prefetch, run-folder reservation, rendering, or HTTP
 work. Derived collisions are qualified deterministically with source stems and
 then stable source order. Resolved labels drive overlays, reports, alignment display,
 and render artifact keys, but do not change source/cache/alignment identity or physical
-PNG filenames. Live render progress uses exact explicit labels or unique role-prefixed
-micro release descriptors. slow.pics columns use exact explicit labels or unique full
+PNG filenames. The Sources and alignment summaries use explicit short labels first.
+A parsed release group qualifies as a short label when it is the final hyphen-delimited
+token and the filename also identifies a resolution, source, or codec. Otherwise the
+summary uses the compact release details, then the differing filename text after removing
+shared leading and trailing tokens. If the full stem remains, a matching parsed-title
+prefix can be removed. An empty remainder falls back to the resolved label.
+Live render progress uses exact explicit labels or unique role-prefixed micro release
+descriptors. slow.pics columns use exact explicit labels or unique full
 release descriptors, with the canonical resolved label as the uninformative-parser
 fallback. Orchestrated rendering continues to use the source stem as `filename_label`. When the resulting
 absolute screenshot path would exceed the legacy Windows browser-safe boundary, the
@@ -1151,12 +1157,16 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
   gradient without reducing thumbnail image space or increasing card height.
   Category identification uses text in captions and filters; filters keep their counts,
   and the selected thumbnail retains its brass border.
-- The header shows the generation date and time localized by the browser. The exact
-  ISO timestamp remains in the report payload and in the `<time>` element's `datetime`
-  and `title` attributes; hover over the header or Generated value to inspect it.
+- The report title uses the TMDB title when available, with the reference filename's
+  season and episode for television. Otherwise it uses the shared filename-derived
+  content title from the CLI Sources header, or the first two short labels joined by
+  ` vs ` with ` +N more` for additional sources. Filenames remain in Clips and Report
+  Information. The second header line shows the localized generation date and time,
+  frame count, and source count. The exact ISO timestamp remains in the report payload
+  and in the `<time>` element's `datetime` and `title` attributes; hover over the header or Generated value to inspect it.
   Unparseable date text is shown unchanged.
-- Report identity includes output-affecting overlay, geometry, tonemap, presentation,
-  signal, and per-image provenance facts. It excludes absolute paths, image bytes or
+- Report identity includes the comparison title and output-affecting overlay, geometry,
+  tonemap, presentation, signal, and per-image provenance facts. It excludes absolute paths, image bytes or
   `src` values, timestamps, transient browser state, clip display strings, requested
   tonemap settings, and fallback causes. Applied implementation, algorithm, effective
   controls and resolved per-clip peaks participate in identity. Identical output via

@@ -106,6 +106,11 @@ sources. Drag the lens window's grip to move it.
 
 ### Report information
 
+The header names the comparison and shows when the report was generated, how many
+frames it contains, and how many sources it compares. The title uses the title from
+TMDB when available, the shared title from the filenames, or the short source labels.
+Open the Clips inspector or Report Information to see the original filenames.
+
 The **Report information** button in the header opens the **Report Information** dialog.
 It lists the title, report ID, generated time, content, the **Opens in** view, the
 default

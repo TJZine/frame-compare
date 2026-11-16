@@ -506,7 +506,7 @@ def _render_header(
     return f"""        <header class="rv-header">
             <div>
                 <div class="rv-title">{_esc_text(title)}</div>
-                <div class="rv-meta">Generated {generated_time} • {frame_count} frames • {clip_count} clips</div>
+                <div class="rv-meta">Generated {generated_time} • {frame_count} frames • {clip_count} sources</div>
             </div>
             <div class="rv-header-right">
                 {slowpics_block}{inspector_button} {info_button} {help_button}
