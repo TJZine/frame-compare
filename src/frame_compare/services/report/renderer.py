@@ -697,10 +697,6 @@ def _render_stage() -> str:
             </div>
             <div class="rv-divider"><div class="rv-divider-handle"></div></div>
         </div>
-        <div class="rv-stage-labels">
-            <div id="label-left" class="rv-overlay-label"></div>
-            <div id="label-right" class="rv-overlay-label right"></div>
-        </div>
         <span id="rv-lens-target" class="rv-lens-target" aria-hidden="true" hidden><i></i><i></i><i></i><i></i></span>
         <section id="rv-grid" class="rv-grid" aria-label="Grid comparison" hidden>
             <div class="rv-grid-frame-error" data-grid-frame-error hidden></div>
@@ -717,12 +713,20 @@ def _render_stage() -> str:
             <div class="rv-lens-caption" data-lens-caption-row hidden><span class="rv-lens-identity" data-lens-identity="active"></span><span class="rv-lens-identity" data-lens-identity="second" hidden aria-hidden="true"></span></div>
             <button class="rv-lens-grip" type="button" data-lens-drag-handle aria-label="Move lens window" title="Drag to move lens; use arrow keys when focused"><span aria-hidden="true">⠿</span></button>
         </aside>
-        <div class="rv-stage-overlay-info">
-            <span class="rv-info-label" data-current-frame-label></span>
-            <span class="rv-info-divider" data-current-frame-category-divider>•</span>
-            <span class="rv-info-category" data-current-frame-category></span>
-        </div>
+        <div class="rv-stage-chrome">
+            <div class="rv-stage-labels">
+                <div id="label-left" class="rv-overlay-label"></div>
+                <div id="label-right" class="rv-overlay-label right"></div>
+            </div>
+            <div class="rv-stage-bottom-controls">
+                <div class="rv-stage-overlay-info">
+                    <span class="rv-info-label" data-current-frame-label></span>
+                    <span class="rv-info-divider" data-current-frame-category-divider>•</span>
+                    <span class="rv-info-category" data-current-frame-category></span>
+                </div>
 {_render_viewport_palette()}
+            </div>
+        </div>
 {_render_lens_settings()}
     </div>"""
 

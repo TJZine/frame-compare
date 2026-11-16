@@ -857,11 +857,64 @@ body:fullscreen .rv-inspector {
     white-space: nowrap;
 }
 
-.rv-stage-labels {
+.rv-stage-chrome {
+    --stage-inset: 12px;
     position: absolute;
     inset: 0;
-    z-index: 10;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto minmax(0, max-content);
+    padding-bottom: var(--stage-inset);
     pointer-events: none;
+}
+
+.rv-stage-labels {
+    grid-row: 2;
+    z-index: 10;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 12px;
+    margin: 0 var(--stage-inset) 6px;
+}
+
+.rv-stage-bottom-controls {
+    grid-row: 3;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    min-height: 0;
+    padding-inline: var(--stage-inset);
+}
+
+/* A vertical palette sits beside the chips, leaving their bottom position
+   independent of its height. The entire chrome layer still floats. */
+@media (width > 768px) {
+    .rv-stage-chrome:has(.rv-viewport-palette[data-orientation="vertical"]):not(.rv-mode-grid *) {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: minmax(0, 1fr) auto auto;
+        padding-inline-end: var(--stage-inset);
+    }
+
+    .rv-stage-chrome:has(.rv-viewport-palette[data-orientation="vertical"]):not(.rv-mode-grid *) .rv-stage-labels {
+        grid-column: 1;
+        margin-inline-end: 8px;
+    }
+
+    .rv-stage-chrome:has(.rv-viewport-palette[data-orientation="vertical"]):not(.rv-mode-grid *) .rv-stage-bottom-controls {
+        display: contents;
+    }
+
+    .rv-stage-chrome:has(.rv-viewport-palette[data-orientation="vertical"]):not(.rv-mode-grid *) .rv-stage-overlay-info {
+        grid-area: 3 / 1;
+        justify-self: start;
+        margin-inline-start: var(--stage-inset);
+    }
+
+    .rv-stage-chrome:not(.rv-mode-grid *) .rv-viewport-palette[data-orientation="vertical"] {
+        grid-area: 1 / 2 / -1;
+        align-self: end;
+    }
 }
 
 .rv-mode-grid .rv-stage-labels {
@@ -1126,9 +1179,6 @@ body:fullscreen .rv-inspector {
 
 /* Labels overlay on image */
 .rv-overlay-label {
-    position: absolute;
-    top: 12px;
-    left: 12px;
     background: var(--bg-floating);
     padding: 4px 10px;
     border-radius: 4px;
@@ -1137,14 +1187,13 @@ body:fullscreen .rv-inspector {
     pointer-events: none;
     border: 1px solid var(--border);
     color: var(--text-primary);
-    max-width: calc(50% - 18px);
+    max-width: calc(50% - 6px);
     white-space: normal;
     overflow-wrap: anywhere;
 }
 
 .rv-overlay-label.right {
-    left: auto;
-    right: 12px;
+    margin-left: auto;
     text-align: right;
 }
 
@@ -1176,10 +1225,6 @@ body:fullscreen .rv-inspector {
 
 /* 6. Floating Overlay Stage Info (Dynamic Metadata overlay) */
 .rv-stage-overlay-info {
-    position: absolute;
-    right: auto;
-    bottom: 12px;
-    left: 12px;
     z-index: 10;
     background: var(--bg-floating);
     border: 1px solid var(--border);
@@ -1192,7 +1237,7 @@ body:fullscreen .rv-inspector {
     color: var(--text-secondary);
     pointer-events: none;
     justify-content: center;
-    max-width: min(calc(100% - 12rem), 34rem);
+    max-width: min(50%, 34rem);
     transition: opacity 0.15s ease, visibility 0.15s ease;
 }
 
@@ -1225,14 +1270,16 @@ body:fullscreen .rv-inspector {
 }
 
 .rv-viewport-palette {
-    position: absolute;
-    right: 16px;
-    bottom: 16px;
+    position: relative;
+    margin: 0 4px 4px auto;
     z-index: 35;
     display: flex;
     align-items: center;
     gap: 4px;
-    max-width: min(calc(100% - 2rem), 58rem);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+    max-width: 58rem;
     padding: 4px;
     border: 1px solid var(--border-hover);
     border-radius: 6px;
@@ -1346,7 +1393,7 @@ body:fullscreen .rv-inspector {
     flex-wrap: nowrap;
     align-items: stretch;
     max-width: none;
-    max-height: calc(100% - 2rem);
+    max-height: calc(100% - 4px);
     width: auto;
     overflow-y: auto;
 }
@@ -2263,11 +2310,8 @@ body.rv-inspector-open .rv-viewer-stage {
 @media (max-width: 992px) {
 
     .rv-viewport-palette {
-        right: 12px;
-        bottom: 12px;
-        max-width: calc(100% - 1.5rem);
-        flex-wrap: wrap;
-        justify-content: flex-end;
+        margin-right: 0;
+        margin-bottom: 0;
     }
 
     .rv-stage-overlay-info {
@@ -2344,15 +2388,8 @@ body.rv-inspector-open .rv-viewer-stage {
         width: 100%;
     }
 
-    .rv-overlay-label {
-        top: 8px;
-        left: 8px;
-        max-width: calc(50% - 12px);
-    }
-
-    .rv-overlay-label.right {
-        right: 8px;
-        left: auto;
+    .rv-stage-chrome {
+        --stage-inset: 8px;
     }
 
     .rv-viewer-stage {
@@ -2382,11 +2419,7 @@ body.rv-inspector-open .rv-viewer-stage {
     }
 
     .rv-viewport-palette {
-        right: 8px;
-        bottom: 8px;
-        max-width: calc(100% - 1rem);
         flex-wrap: wrap !important;
-        justify-content: flex-end;
         flex-direction: row !important;
         width: auto !important;
         height: auto !important;

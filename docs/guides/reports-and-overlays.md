@@ -61,10 +61,11 @@ The floating palette over the image holds zoom, fit, viewport reset, fullscreen,
 timing
 alignment.
 
-Selectors identify the source at the point of selection. Source labels stay
-anchored to the viewport while zooming and panning, and are useful when baked text is
-outside the visible area. Baked text stays with screenshots uploaded to slow.pics and is
-unaffected by the source-labels toggle.
+Selectors identify the source at the point of selection. In Slider, Single, Diff,
+and Blink, source labels stay near the bottom while you zoom and pan. They sit
+above the frame chip and above a horizontal palette or beside a vertical one.
+Baked text stays with screenshots uploaded to slow.pics and is unaffected by the
+source-labels toggle.
 
 When baked text already provides enough context, hide source labels to reduce
 overlapping

@@ -435,7 +435,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ReportViewer.setMode('diff');
         const sourceHudStyle = window.getComputedStyle(label);
         document.documentElement.dataset.hudStylesAligned = String(
-            label.getBoundingClientRect().top === rightLabel.getBoundingClientRect().top
+            label.getBoundingClientRect().bottom === rightLabel.getBoundingClientRect().bottom
             && sourceHudStyle.borderRadius === window.getComputedStyle(rightLabel).borderRadius
         );
         label.style.transition = 'none';
@@ -565,10 +565,8 @@ document.addEventListener('DOMContentLoaded', () => {
             window.getComputedStyle(frameHud).display === 'none'
             || !rectanglesIntersect(paletteRect, frameHud.getBoundingClientRect())
         );
-        document.documentElement.dataset.sliderLabelsTopAnchored = String(
-            approximately(leftSliderLabel.top, stageRect.top + labelInset)
-            && approximately(rightSliderLabel.top, stageRect.top + labelInset)
-            && approximately(leftSliderLabel.left, stageRect.left + labelInset)
+        document.documentElement.dataset.sliderLabelsSideAnchored = String(
+            approximately(leftSliderLabel.left, stageRect.left + labelInset)
             && approximately(rightSliderLabel.right, stageRect.right - labelInset)
         );
         document.documentElement.dataset.sliderLabelsContained = String(
@@ -577,12 +575,6 @@ document.addEventListener('DOMContentLoaded', () => {
             && rightSliderLabel.left >= stageRect.left + (stageRect.width / 2)
             && rightSliderLabel.right <= stageRect.right
         );
-        document.documentElement.dataset.sliderLabelGeometry = JSON.stringify({
-            stage: stageRect.toJSON(),
-            left: leftSliderLabel.toJSON(),
-            right: rightSliderLabel.toJSON(),
-            labelInset,
-        });
 
         stage.style.transition = 'none';
         ReportViewer.inspector.setOpen(true, { focus: false, save: false });
@@ -1260,9 +1252,7 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-slider-labels-separate"] == "true"
     assert parser.document_attributes["data-palette-bottom-anchored"] == "true"
     assert parser.document_attributes["data-bottom-huds-separate"] == "true"
-    assert parser.document_attributes["data-slider-labels-top-anchored"] == "true", (
-        parser.document_attributes["data-slider-label-geometry"]
-    )
+    assert parser.document_attributes["data-slider-labels-side-anchored"] == "true"
     assert parser.document_attributes["data-slider-labels-contained"] == "true"
     assert parser.document_attributes["data-mode-center-stable"] == "true", (
         parser.document_attributes["data-toolbar-geometry"]
@@ -1885,6 +1875,84 @@ def _assert_inspector_clears_toolbar_during_image_retry(browser: str, tmp_path: 
         )
     )
     completed = _run_browser_input(browser, report_path, tmp_path / "chrome-status-banner", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("width", "height"), [(390, 844), (1280, 720), (1920, 1080)])
+def test_report_stage_chips_clear_viewport_controls(
+    tmp_path: Path, width: int, height: int
+) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path)
+    script = _viewer_input_script(
+        f"const width = {width}; const height = {height};"
+        + r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width, height, deviceScaleFactor: 1, mobile: false,
+        });
+        assert.deepEqual(await evaluate('[innerWidth, innerHeight]'), [width, height]);
+        const modes = await evaluate(`(() => {
+            const stage = ReportViewer.dom.stage;
+            const palette = document.querySelector('.rv-viewport-palette');
+            const frameChip = document.querySelector('.rv-stage-overlay-info');
+            const sourceChips = [...document.querySelectorAll('.rv-stage-labels .rv-overlay-label')];
+            const rect = element => element.getBoundingClientRect().toJSON();
+            return ['slider', 'overlay', 'diff', 'blink'].flatMap(mode => {
+                document.querySelector('[data-mode="' + mode + '"]').click();
+                return ['horizontal', 'vertical'].map(orientation => {
+                    ReportViewer.setPaletteOrientation(orientation, { save: false });
+                    const direction = getComputedStyle(palette).flexDirection;
+                    let blinkSpeedReachable = true;
+                    if (mode === 'blink' && direction === 'column') {
+                        palette.scrollTop = palette.scrollHeight;
+                        const speed = rect(document.getElementById('blink-speed'));
+                        const controls = rect(palette);
+                        blinkSpeedReachable = speed.height > 0
+                            && speed.top >= controls.top && speed.bottom <= controls.bottom;
+                        palette.scrollTop = 0;
+                    }
+                    return {
+                        mode, orientation, direction, blinkSpeedReachable,
+                        frame: rect(frameChip), controls: rect(palette),
+                        chips: sourceChips.map(rect).filter(chip => chip.height > 0),
+                        stage: rect(stage),
+                    };
+                });
+            });
+        })()`);
+        const inset = width <= 768 ? 8 : 12;
+        const disjoint = (a, b) => !b.height || (
+            a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top
+        );
+        const near = (edge, limit) => edge <= limit && limit - edge <= 16;
+        for (const entry of modes) {
+            const {mode, direction, chips, frame, controls, stage} = entry;
+            const message = JSON.stringify(entry);
+            assert.equal(chips.length, mode === 'overlay' ? 1 : 2, message);
+            assert.ok(controls.height > 0 && controls.top >= stage.top, message);
+            assert.ok(entry.blinkSpeedReachable, message);
+            assert.ok(frame.height > 0 || width <= 992, message);
+            const [left, right] = chips;
+            assert.ok(Math.abs(left.left - stage.left - inset) <= 1, message);
+            const lowerEdge = frame.height > 0 ? frame.top : stage.bottom - inset;
+            const chipRowEdge = direction === 'column' ? lowerEdge : Math.min(lowerEdge, controls.top);
+            assert.ok(near(left.bottom, chipRowEdge), message);
+            if (right) {
+                const rightEdge = direction === 'column' ? controls.left : stage.right - inset;
+                assert.ok(near(right.right, rightEdge) && near(right.bottom, chipRowEdge), message);
+                assert.ok(disjoint(left, right), message);
+            }
+            for (const chip of chips) {
+                assert.ok(chip.top >= stage.top, message);
+                assert.ok(disjoint(chip, controls) && disjoint(chip, frame), message);
+            }
+        }
+"""
+    )
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-stage-chips", script)
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
 

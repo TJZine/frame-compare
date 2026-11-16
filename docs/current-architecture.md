@@ -1200,10 +1200,13 @@ retain text and counts without colored dots or thumbnail stripes. Palette orient
 rotates its existing icon through CSS, while the viewer updates the accessible action label. The floating
 palette omits a fit-width control; actual size and fit height remain, and a restored
 width-fit preference still computes zoom and keeps the fit radio group keyboard
-reachable when neither visible radio matches. The floating palette does not reserve
-stage height. On fine pointers the palette carries a `data-proximity` state driven
-by a throttled stage pointermove listener: near at or within 96 px of the palette
-rectangle, far at or beyond 160 px with hysteresis between, far on stage pointer
+reachable when neither visible radio matches. The floating palette does not
+reserve image space. In Slider, Single, Diff, and Blink, source chips sit near
+the bottom above the frame chip. They sit above a horizontal palette or beside
+a vertical one, leaving the top-left corner clear for burned-in text. On fine
+pointers the palette carries a `data-proximity` state driven by a throttled
+stage pointermove listener: near at or within 96 px of the palette rectangle,
+far at or beyond 160 px with hysteresis between, far on stage pointer
 leave, forced far during viewport or slider drags, forced near for 3000 ms after
 load and while either the image-offset or lens-settings popover is open, and always
 near on coarse pointers or when the fine-pointer media query stops matching.
