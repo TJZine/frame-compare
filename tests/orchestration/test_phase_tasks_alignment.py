@@ -434,7 +434,7 @@ def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
     assert output.reference.trim.trim_start_frames == 2
     assert output.selected_frames == [48]
     assert [warning.text for warning in output.warnings] == [
-        "frame selection: dropped user frame(s) outside aligned renderable range: 0"
+        "1 requested frame falls outside the shared range and was skipped: 0"
     ]
 
 

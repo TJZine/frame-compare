@@ -111,6 +111,8 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
             success=True,
             screenshot_dir=Path("screenshots").resolve(),
             warnings=[RunWarning("sources", "skipped", "metadata skipped")],
+            frame_count=8,
+            clips_processed=3,
         )
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
@@ -122,6 +124,7 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     stderr = _normalize_cli_output(result.stderr)
     assert "Run plan" in stdout
     assert "Comparison complete" in stdout
+    assert "8 of 10 frames · 3 sources" in stdout
     assert "Warnings" in stdout
     assert "metadata skipped" in stdout
     assert "Sources · 1 loaded" not in stdout

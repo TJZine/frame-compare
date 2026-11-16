@@ -596,7 +596,9 @@ unchanged.
   skipped because the report could not be confirmed` when that happened.
   Declined uploads get no row. After one blank body line, `run` is `{N} frames ·
   {N} sources · analysis cached` or `analysis computed`, with nothing for
-  `skipped`, followed by `time` as `{dur} total`, `  machine`, and `  you` with
+  `skipped`. If rendered and planned frame counts differ, the row shows
+  `{rendered} of {planned} frames`. The next rows are `time` as `{dur} total`,
+  `  machine`, and `  you` with
   their existing items. Artifact paths are Rich hyperlinks and use the shared
   path formatter. `--quiet` is unchanged.
 - The yellow-rail `! Warnings` section lists every distinct warning once,
@@ -819,7 +821,11 @@ uses knee 1.0. Existing explicit color overrides retain precedence. The field na
   `--frames` disables `--random-frame-count` or the metric-count options.
 
 When a metric selector is pending, FramePlan can pass an empty provisional plan
-to Analyze. User frames outside the selection window still produce a drop warning.
+to Analyze. User frames outside the selection window produce a drop warning.
+When a requested frame falls outside the shared source range, the CLI prints a
+notice after Align, or immediately after the sources block when alignment is
+disabled. The same shared-range warning appears once in the final Warnings
+section.
 If Analyze fails, an ordinary run continues with a warning only when usable User
 or Random frames remain. Otherwise it exits with the typed analysis or selection
 error before rendering.

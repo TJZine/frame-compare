@@ -1070,7 +1070,7 @@ def test_select_initial_frame_plan_warns_when_user_frames_are_dropped(
 
     assert 2 in output.selected_frames
     assert [warning.text for warning in output.warnings] == [
-        "frame selection: dropped user frame(s) outside trims/windowing: 0"
+        "1 requested frame falls outside the shared range and was skipped: 0"
     ]
 
 

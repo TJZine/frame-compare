@@ -15,6 +15,7 @@ from rich.console import Console
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.cli.output import (
+    planned_frame_count,
     print_at_a_glance,
     print_result_summary,
 )
@@ -339,6 +340,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         console,
         result=result,
         quiet=args.quiet,
+        planned_frames=planned_frame_count(inputs.config.analysis),
         post_upload_actions=post_upload_actions,
         root=args.resolved_root,
         verbose=args.verbose,

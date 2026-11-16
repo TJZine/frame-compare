@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -52,6 +53,9 @@ __all__ = [
     "selection_details_with_source_offset",
     "selection_label_for_frame",
     "selection_timecode_for_frame",
+    "shared_source_frame_range",
+    "user_frames_outside_shared_range",
+    "shared_range_drop_warning",
     "source_frames_for_reference_base_domain",
 ]
 
@@ -132,8 +136,7 @@ def _select_initial_frame_plan_once(ctx: RunContext) -> FramePlanPhaseOutput:
             kind=SelectionFailureKind.NO_INITIAL_FRAMES,
         )
     warnings = _dropped_user_frame_warnings(
-        config=ctx.config.analysis,
-        reference=ctx.reference,
+        ctx,
         window_start=window_start,
         frame_count=frame_count,
     )
@@ -191,25 +194,55 @@ def _user_frames_in_window(
     return sorted({frame for frame in config.user_frames if source_start <= frame < source_end})
 
 
+def shared_source_frame_range(reference: ClipState, comparisons: Sequence[ClipState]) -> range:
+    length = min(clip.effective_num_frames() for clip in (reference, *comparisons))
+    start = reference.trim.trim_start_frames
+    return range(start, start + length)
+
+
+def user_frames_outside_shared_range(ctx: RunContext) -> tuple[int, ...]:
+    shared = shared_source_frame_range(ctx.reference, ctx.comparisons)
+    return tuple(
+        sorted({frame for frame in ctx.config.analysis.user_frames if frame not in shared})
+    )
+
+
+def shared_range_drop_warning(frames: tuple[int, ...]) -> RunWarning:
+    count = len(frames)
+    wording = "frame falls" if count == 1 else "frames fall"
+    skipped = "was skipped" if count == 1 else "were skipped"
+    return RunWarning(
+        "frame selection",
+        "warning",
+        f"{count} requested {wording} outside the shared range and {skipped}: "
+        + ", ".join(map(str, frames)),
+        dropped_user_frames=frames,
+    )
+
+
 def _dropped_user_frame_warnings(
+    ctx: RunContext,
     *,
-    config: AnalysisConfig,
-    reference: ClipState,
     window_start: int,
     frame_count: int,
 ) -> list[RunWarning]:
-    retained = _user_frames_in_window(config, reference, window_start, frame_count)
-    dropped = sorted(set(config.user_frames) - set(retained))
-    if not dropped:
-        return []
-    return [
-        RunWarning(
-            "frame selection",
-            "warning",
-            "frame selection: dropped user frame(s) outside trims/windowing: "
-            + ", ".join(str(frame) for frame in dropped),
+    requested = ctx.config.analysis.user_frames
+    retained = _user_frames_in_window(ctx.config.analysis, ctx.reference, window_start, frame_count)
+    outside_shared_range = user_frames_outside_shared_range(ctx)
+    excluded = sorted(set(requested).difference(retained, outside_shared_range))
+    warnings: list[RunWarning] = []
+    if outside_shared_range:
+        warnings.append(shared_range_drop_warning(outside_shared_range))
+    if excluded:
+        warnings.append(
+            RunWarning(
+                "frame selection",
+                "warning",
+                "frame selection: dropped user frame(s) outside trims/windowing: "
+                + ", ".join(map(str, excluded)),
+            )
         )
-    ]
+    return warnings
 
 
 def _selection_window_for_context(ctx: RunContext) -> tuple[int, int]:
@@ -284,8 +317,7 @@ def run_analyze_phase(
         warnings=[
             *output.warnings,
             *_dropped_user_frame_warnings(
-                config=ctx.config.analysis,
-                reference=ctx.reference,
+                ctx,
                 window_start=ctx.selection_domain.selection_window.start_frame,
                 frame_count=ctx.selection_domain.selection_window.frame_count,
             ),

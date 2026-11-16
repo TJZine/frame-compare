@@ -32,6 +32,8 @@ from frame_compare.orchestration.phase_selection import (
     selection_breakdown_with_source_offset,
     selection_details_with_source_offset,
     selection_timecode_for_frame,
+    shared_range_drop_warning,
+    shared_source_frame_range,
     source_frames_for_reference_base_domain,
 )
 from frame_compare.orchestration.presentation import clip_role
@@ -203,14 +205,7 @@ async def run_align_phase(
     normalized_selected_frames = normalized_selection.selected_frames
     if normalized_selection.dropped_user_source_frames:
         warnings.append(
-            RunWarning(
-                "frame selection",
-                "warning",
-                "frame selection: dropped user frame(s) outside aligned renderable range: "
-                + ", ".join(
-                    str(frame) for frame in normalized_selection.dropped_user_source_frames
-                ),
-            )
+            shared_range_drop_warning(tuple(normalized_selection.dropped_user_source_frames))
         )
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
@@ -797,14 +792,8 @@ def _selectable_aligned_source_window(
     comparisons: list[ClipState],
     selection_source_window: tuple[int, int] | None,
 ) -> tuple[int, int]:
-    common_length = min(
-        [
-            reference.effective_num_frames(),
-            *[comparison.effective_num_frames() for comparison in comparisons],
-        ]
-    )
-    overlap_start = reference.trim.trim_start_frames
-    overlap_end = overlap_start + common_length
+    shared_range = shared_source_frame_range(reference, comparisons)
+    overlap_start, overlap_end = shared_range.start, shared_range.stop
     if selection_source_window is not None:
         selection_start, selection_end = selection_source_window
         overlap_start = max(overlap_start, selection_start)

@@ -25,6 +25,10 @@ from frame_compare.orchestration.fps_report import (
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
 )
+from frame_compare.orchestration.phase_selection import (
+    shared_range_drop_warning,
+    user_frames_outside_shared_range,
+)
 from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import (
@@ -50,9 +54,28 @@ from frame_compare.utils.cancellation import (
     is_cancelling,
 )
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.terminal_theme import WARN, glyphs_for_console, human_console
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = ["RunDependencies", "RunRequest", "RunResult", "execute_run"]
+
+
+def _emit_dropped_frames_notice(request: RunRequest, frames: tuple[int, ...]) -> None:
+    if frames and not (request.json_output or request.quiet):
+        console = human_console(stderr=True, no_color=request.no_color)
+        glyph = glyphs_for_console(console).warning
+        console.print(f"[{WARN}]{glyph}[/] {shared_range_drop_warning(frames).message}")
+
+
+def _combine_shared_range_warnings(warnings: list[RunWarning]) -> tuple[int, ...]:
+    relevant = [warning for warning in warnings if warning.dropped_user_frames]
+    frames = tuple(sorted({frame for warning in relevant for frame in warning.dropped_user_frames}))
+    if len(relevant) > 1:
+        warnings[:] = [
+            *(warning for warning in warnings if not warning.dropped_user_frames),
+            shared_range_drop_warning(frames),
+        ]
+    return frames
 
 
 def _assemble_run_result(
@@ -184,6 +207,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             no_color=request.no_color,
             verbose=request.verbose,
         )
+        if not prep.config.audio_alignment.enable:
+            _emit_dropped_frames_notice(request, user_frames_outside_shared_range(context))
         state.phase_timings["load_sources"] = max(
             0.0, local_deps.monotonic_timer() - prep.load_sources_start
         )
@@ -225,6 +250,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             ]
         )
         await execute_phases(phase_plan.before_align, context, reporter)
+        dropped_frames = _combine_shared_range_warnings(state.warnings)
+        if prep.config.audio_alignment.enable:
+            _emit_dropped_frames_notice(request, dropped_frames)
         selected_frame_count = len(list(context.selection.frames))
         emit_final_selection_report(
             selected_frames=list(context.selection.frames),

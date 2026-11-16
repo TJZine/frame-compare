@@ -32,6 +32,7 @@ from frame_compare.utils.terminal_theme import (
 )
 
 if TYPE_CHECKING:
+    from frame_compare.config.schema import AnalysisConfig
     from frame_compare.orchestration.coordinator import RunResult
     from frame_compare.orchestration.run_inputs import AcquiredRunConfig
 
@@ -186,13 +187,7 @@ def print_at_a_glance(
     bright_frame_count = analysis.bright_frame_count
     motion_frame_count = analysis.motion_frame_count
     random_seed = analysis.random_seed
-    requested_total = (
-        len(user_frames)
-        + random_frame_count
-        + dark_frame_count
-        + bright_frame_count
-        + motion_frame_count
-    )
+    requested_total = planned_frame_count(analysis)
     overlay_mode = config.screenshots.overlay_mode
     tonemap_enabled = config.color.enable_tonemap
     alignment_enabled = config.audio_alignment.enable
@@ -367,6 +362,16 @@ def print_at_a_glance(
     table.print(console)
 
 
+def planned_frame_count(analysis: AnalysisConfig) -> int:
+    return (
+        len(analysis.user_frames)
+        + analysis.random_frame_count
+        + analysis.dark_frame_count
+        + analysis.bright_frame_count
+        + analysis.motion_frame_count
+    )
+
+
 def _add_time_rows(table: Section, *, result: RunResult) -> None:
     timings = result.phase_timings
     review_seconds = max(0.0, result.vsview_review_seconds)
@@ -406,6 +411,7 @@ def print_result_summary(
     *,
     result: RunResult,
     quiet: bool,
+    planned_frames: int | None = None,
     post_upload_actions: PostUploadActionResults = (),
     root: Path | None = None,
     verbose: bool = False,
@@ -491,7 +497,10 @@ def print_result_summary(
         _add_kv(table, "slow.pics", "upload skipped because the report could not be confirmed")
 
     run_segments: list[str] = []
-    if result.frame_count > 0:
+    if planned_frames is not None and result.frame_count != planned_frames:
+        unit = "frame" if planned_frames == 1 else "frames"
+        run_segments.append(f"{result.frame_count} of {planned_frames} {unit}")
+    elif result.frame_count > 0:
         unit = "frame" if result.frame_count == 1 else "frames"
         run_segments.append(f"{result.frame_count} {unit}")
     if result.clips_processed > 0:

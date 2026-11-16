@@ -414,6 +414,7 @@ def test_execute_run_analysis_failure_without_initial_frames_is_fatal(
 
 def test_execute_run_metric_selection_survives_dropped_user_frame(
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     create_config(
         tmp_path,
@@ -454,9 +455,9 @@ def test_execute_run_metric_selection_survives_dropped_user_frame(
         ("a_source.mkv", 0),
         ("b_comp.mkv", 0),
     ]
-    assert any(
-        "dropped user frame(s) outside trims/windowing: 120" in w.text for w in result.warnings
-    )
+    warning = "1 requested frame falls outside the shared range and was skipped: 120"
+    assert [item.text for item in result.warnings].count(warning) == 1
+    assert capsys.readouterr().err.count(f"! {warning}") == 1
 
 
 def test_execute_run_no_cache_recomputes_warm_full_window_retry(

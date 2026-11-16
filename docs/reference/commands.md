@@ -365,7 +365,9 @@ the [CLI behavioral contract](../current-cli-contract.md#output-modes).
 
 When a run completes with warnings, the completion block gives the count. The
 Warnings block lists each distinct warning, including details about failed
-post-upload actions.
+post-upload actions. If the sources do not share a requested frame, the CLI
+also reports the skipped frame when it establishes the shared range. The
+completion summary shows how many of the planned frames were rendered.
 
 ## Automation
 
