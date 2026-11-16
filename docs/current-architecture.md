@@ -339,6 +339,10 @@ do not replace admitted run settings. Doctor shares `select_run_config_path` and
 never searches parent directories.
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
+- `frame_compare.config.loader` supplies the selected file and validation schema to
+  the config error formatter. `frame_compare.config.errors` redacts diagnostic
+  values before formatting invalid settings and uses the affected table's schema
+  for unknown-key suggestions.
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
   config and preset writes; runtime `slowpics.webhook_url` and `tmdb.api_key` values
   are excluded from every generated TOML payload. The config-owned representation

@@ -593,7 +593,7 @@ def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    with pytest.raises(MetricsCalculationError, match="Cached metrics missing or mismatched"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(execute_run(request, deps=deps))
 
 
@@ -739,7 +739,7 @@ enable = false
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
-    with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(execute_run(request, deps=deps))
 
 
@@ -825,5 +825,5 @@ def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(execute_run(request, deps=deps))

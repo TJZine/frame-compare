@@ -13,7 +13,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.errors import AnalysisCacheMissError
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
 from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.types import (
@@ -109,7 +109,7 @@ def acquire_required_metrics(
     if result.reason == "version_mismatch":
         found = read_cache_version(error_path) or "unknown"
         raise CacheVersionMismatchError(found, str(CACHE_VERSION))
-    raise MetricsCalculationError(f"Cached metrics missing or mismatched ({result.reason}).")
+    raise AnalysisCacheMissError(f"Cached metrics missing or mismatched ({result.reason}).")
 
 
 def compute_cache_key(

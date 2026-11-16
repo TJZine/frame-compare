@@ -103,8 +103,12 @@ def test_build_frame_alignment_report_uses_final_normalized_trim_domain() -> Non
     )
 
 
+@pytest.mark.parametrize(
+    ("frames", "frame_text"),
+    [([0, 28, 83], "aligned 0, 28, 83"), ([0], "aligned frame 0 (1 total)")],
+)
 def test_emit_frame_alignment_report_renders_human_panel_to_stderr(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], frames: list[int], frame_text: str
 ) -> None:
     comparison = AlignmentReportComparison(
         label="Encode [candidate]",
@@ -119,7 +123,7 @@ def test_emit_frame_alignment_report_renders_human_panel_to_stderr(
     emit_frame_alignment_report(
         stage="after_align",
         comparisons=[comparison],
-        selected_frames=[0, 28, 83],
+        selected_frames=frames,
         alignment_warnings=[],
         json_output=False,
         quiet=False,
@@ -137,7 +141,7 @@ def test_emit_frame_alignment_report_renders_human_panel_to_stderr(
     assert "offset" not in captured.err
     assert "Reference source 155 <-> Encode [candidate] source 0" in captured.err
     assert "Reference 155..999 · Encode [candidate] 0..844" in captured.err
-    assert "aligned 0, 28, 83" in captured.err
+    assert frame_text in captured.err
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
 

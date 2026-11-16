@@ -277,8 +277,8 @@ def test_preset_list_error_does_not_suggest_unsupported_verbose(
 
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
     assert "--verbose" not in result.stderr
-    assert "Details:" in result.stderr
-    assert "path:" in result.stderr
+    assert "Details:" not in result.stderr
+    assert "Configuration file not found: missing.toml" in result.stderr
 
 
 def test_preset_list_error_uses_default_terminal_color_policy(

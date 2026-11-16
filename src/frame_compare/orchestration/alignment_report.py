@@ -116,6 +116,8 @@ def _format_range(trim_range: tuple[int, int]) -> str:
 
 
 def _format_selected_frames(selected_frames: Sequence[int]) -> str:
+    if len(selected_frames) == 1:
+        return f"frame {selected_frames[0]} (1 total)"
     shown = [str(frame) for frame in selected_frames[:_MAX_SELECTED_FRAMES]]
     if len(selected_frames) > _MAX_SELECTED_FRAMES:
         shown.append(f"... ({len(selected_frames)} total)")

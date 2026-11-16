@@ -249,7 +249,8 @@ alignment reuse, and TMDB caches are preserved. See the
 Saved by `--write-config`
 :   No
 
-Require valid cached analysis; never recompute.
+Require valid cached analysis. If the cache is missing for your selection, run once
+without `--from-cache-only` to build it.
 
 #### `--dry-run` { #run-dry-run .fc-key }
 

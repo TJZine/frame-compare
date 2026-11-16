@@ -17,7 +17,10 @@ Settings take precedence in this order, highest first:
 4. Built-in defaults
 
 The default file is `config/config.toml` under the workspace root. Unknown top-level
-tables are ignored; an unknown key inside a Frame Compare table fails validation.
+tables are ignored. For an unknown key inside a Frame Compare table, the error
+shows the dotted key and suggests up to three valid keys in that table. Errors
+in the effective configuration name the selected file for context.
+For an invalid value, the error shows what the setting accepts and what you supplied.
 
 Use the wizard for common settings and edit TOML for the rest. See [config validation](../current-cli-contract.md#config-validation-logging-and-migration).
 

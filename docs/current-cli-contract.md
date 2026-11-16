@@ -101,8 +101,9 @@ and `cli_helpers.handle_error`):
 | `130` | A run or the wizard interrupted by Ctrl+C, or a wizard prompt aborted or reaching end of input |
 
 The first digit of an `FC-` code selects its family and exit code. Human output
-prints the code and message on stderr; `--json` prints the typed error document
-described under Output Modes. An unexpected error exits 1 and prints a fixed
+prints the code and message on stderr with a hint when available. The details
+block and its verbose prompt are omitted when the message already contains every
+detail value. `--json` prints the typed error document described under Output Modes. An unexpected error exits 1 and prints a fixed
 message to stderr. In `--json` mode it emits no stdout document.
 
 ## Shared Path Resolution Rules
@@ -484,7 +485,7 @@ unchanged.
 - Material alignment information is printed in a dim-rail `Frame alignment`
   section when accepted or rejected frame-alignment changes need explanation. Each
   comparison has a bold short-name line, `trims`, `stability` when present, and
-  `frames` (`aligned …`).
+  `frames` (`aligned …`, or `aligned frame 0 (1 total)` for a single frame at index 0).
   The `offset` and `source` rows are removed; the Align phase summary carries the
   final offsets and origins. Alignment warnings are `!` notes, and verbose
   `details` rows are unchanged. The existing evidence still reports normalized
@@ -495,11 +496,13 @@ unchanged.
 - `--verbose` adds a dim-rail `Final selection` section after alignment. Its rows
   are unchanged; the `After Alignment` stage label is omitted.
 - Audio alignment uses a dim rail, or a yellow rail when any comparison needs
-  review, with title `Audio alignment` and optional dim ` · {N} needs review`.
+  review, with title `Audio alignment` and optional dim ` · 1 needs review` or
+  ` · {N} need review`.
   Each entry starts with a bold short name and one of the exact states `{+Nf} ·
   applied`, `{+Nf} · confirm in VSView`, `{+Nf} · reused from last run`,
   `{+Nf} · previously confirmed`, `{+Nf} · manual offset`, `{+Nf} · not applied`,
-  or `no audio match ({reason phrase})`. Fresh results include the dim evidence
+  or `no audio match ({reason phrase})`. The reason uses plain language. Fresh
+  results include the dim evidence
   line `{agreeing} of {active} sections agree · video check {+Nf} · {stability}`.
   The agreeing count is `authority_recount.authority_agreeing_chunks` when an
   authority recount exists, otherwise `audio.agreeing_chunks`; both are counted
@@ -1042,7 +1045,8 @@ recovery requirement.
   the matching shared analysis cache entry for the exact current performance mode
   and metric algorithm identity before metadata prefetch and before run-folder
   reservation, so a missing, wrong-mode, or invalid entry does not leave an empty
-  run folder.
+  run folder. A cache miss reports `No cached analysis for this selection.` and
+  tells the user to run once without `--from-cache-only`.
 - The matching cache must remain valid through the cache-only Analyze phase. If
   its later acquisition fails, the run exits with the typed cache/analysis error
   before rendering or publishing; it does not complete with only the initial
@@ -1798,7 +1802,11 @@ Unknown keys at the root of the config remain ignored so a config can carry
 top-level sections owned by other tools. Every Frame Compare-owned nested
 config table rejects unknown keys, including nested source override and active
 rectangle tables. A misspelled or stale key inside an owned table therefore
-fails config validation instead of silently using a default.
+fails config validation instead of silently using a default. Its error names the
+selected configuration file as context, gives the full dotted key and suggests up
+to three keys from that table. Invalid values show the expected value or constraint
+and the supplied value, subject to redaction. Validation after merging settings
+reports the effective configuration and lists the selected file as context.
 
 Validation details retain rejected non-secret inputs for diagnostics. Inputs at
 `slowpics.webhook_url` and `tmdb.api_key` are always replaced with `<redacted>`

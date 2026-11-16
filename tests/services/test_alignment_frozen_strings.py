@@ -1055,6 +1055,7 @@ def test_inconclusive_copy_does_not_report_boundary_hint_with_four_positions() -
         ("analysis_budget_exceeded", "analysis budget exceeded"),
         ("source_identity_changed", "source changed during analysis"),
         ("timeout", "audio collection failed"),
+        ("video_check_inconclusive", "video check was inconclusive"),
     ],
 )
 def test_normal_unavailable_copy_is_frozen(

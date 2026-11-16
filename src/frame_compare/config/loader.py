@@ -84,18 +84,20 @@ def _toml_suppressed_settings_schema(
     )
 
 
-def _require_regular_config_file(path: Path, *, required: bool) -> None:
+def _require_regular_config_file(path: Path, *, required: bool) -> bool:
     """Follow authored symlinks, but never read a directory or special device."""
     try:
         source_stat = path.stat()
     except FileNotFoundError:
         if required:
             raise ConfigNotFoundError(path) from None
+        return False
     except OSError:
         raise ConfigParseError(path, "could not access configuration file") from None
     else:
         if not stat.S_ISREG(source_stat.st_mode):
             raise ConfigParseError(path, "configuration must be a regular file")
+        return True
 
 
 def load_config(
@@ -104,7 +106,7 @@ def load_config(
 ) -> ConfigSchema:
     """Load configuration from TOML file with overrides."""
     source_path = config_path or Path("config/config.toml")
-    _require_regular_config_file(source_path, required=config_path is not None)
+    file_selected = _require_regular_config_file(source_path, required=config_path is not None)
 
     merged_overrides = overrides or {}
 
@@ -125,7 +127,7 @@ def load_config(
             {"model_config": SettingsConfigDict(**new_config_dict)},
         )
 
-    return _load_settings(settings_cls, merged_overrides, source_path)
+    return _load_settings(settings_cls, merged_overrides, source_path if file_selected else None)
 
 
 def load_environment_config() -> ConfigSchema:
@@ -133,7 +135,7 @@ def load_environment_config() -> ConfigSchema:
     settings_cls = _toml_suppressed_settings_schema(
         "EnvironmentOnlySchema", _environment_settings_sources
     )
-    return _load_settings(settings_cls, {}, Path("config/config.toml"))
+    return _load_settings(settings_cls, {}, None)
 
 
 def _environment_settings_sources(
@@ -148,17 +150,18 @@ def _environment_settings_sources(
 
 
 def _load_settings(
-    settings_cls: type[ConfigSchema], overrides: dict[str, object], source_path: Path
+    settings_cls: type[ConfigSchema], overrides: dict[str, object], source_path: Path | None
 ) -> ConfigSchema:
+    parse_path = source_path or Path("config/config.toml")
     try:
         # Pydantic validates inputs at runtime, so we cast to Any to bypass static checks
         # on kwargs unpacking.
         return settings_cls(**cast(Any, overrides))
     except tomllib.TOMLDecodeError as exc:
-        raise ConfigParseError(source_path, format_toml_syntax_error(exc)) from None
+        raise ConfigParseError(parse_path, format_toml_syntax_error(exc)) from None
     except UnicodeDecodeError:
         raise ConfigParseError(
-            source_path,
+            parse_path,
             "configuration is not valid UTF-8",
         ) from None
     except SettingsError:
@@ -168,11 +171,13 @@ def _load_settings(
             hint="Check JSON syntax in FRAME_COMPARE_* section and list variables",
         ) from None
     except OSError:
-        raise ConfigParseError(source_path, "could not read configuration file") from None
+        raise ConfigParseError(parse_path, "could not read configuration file") from None
     except ValidationError as exc:
         # pydantic errors are compatible with our normalizer but require a cast for strict typing
         normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
-        raise ConfigValidationError(normalized) from None
+        raise ConfigValidationError(
+            normalized, source_path=source_path, schema=settings_cls, effective=True
+        ) from None
 
 
 def load_raw_config(config_path: Path) -> RawConfigDocument:
@@ -200,7 +205,7 @@ def load_raw_config(config_path: Path) -> RawConfigDocument:
 
     return RawConfigDocument(
         payload=payload,
-        config=validate_raw_config_payload(payload, redact_inputs=True),
+        config=validate_raw_config_payload(payload, redact_inputs=True, source_path=config_path),
     )
 
 
@@ -208,6 +213,7 @@ def validate_raw_config_payload(
     payload: Mapping[str, object],
     *,
     redact_inputs: bool,
+    source_path: Path | None = None,
 ) -> ConfigSchema:
     """Validate parsed or already resolved values without reacquiring sources.
 
@@ -226,7 +232,9 @@ def validate_raw_config_payload(
             for error in normalized:
                 if "input" in error:
                     error["input"] = "<redacted>"
-        raise ConfigValidationError(normalized) from None
+        raise ConfigValidationError(
+            normalized, source_path=source_path, schema=defaults_only_schema
+        ) from None
 
 
 def _narrow_toml_table(value: object, *, path: str) -> TomlPayload:

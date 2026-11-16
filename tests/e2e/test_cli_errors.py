@@ -150,6 +150,28 @@ def test_cli_errors_are_typed_and_json_only(
 
 
 @pytest.mark.e2e
+def test_cli_names_unknown_config_key_and_suggests_keys_from_its_section(
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+) -> None:
+    root = workspace({"sources": {"overrides": {"clip.mkv": {"effective_fp": "24/1"}}}})
+    result = run_cli(
+        root.root,
+        ["run", "--dry-run", "--root", str(root.root), "--skip-metadata", "--no-upload"],
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    message = " ".join(result.stderr.split())
+    assert str(root.config_path).replace(" ", "") in message.replace(" ", "")
+    assert "sources.overrides.clip.mkv.effective_fp: unknown key" in message
+    assert (
+        "Closest valid keys for sources.overrides.clip.mkv.effective_fp: "
+        "sources.overrides.clip.mkv.effective_fps,"
+    ) in message
+
+
+@pytest.mark.e2e
 @pytest.mark.parametrize("field_name", ["input_dir", "generated_dir", "config_dir"])
 def test_cli_rejects_nul_paths_as_typed_config_errors(
     field_name: str,

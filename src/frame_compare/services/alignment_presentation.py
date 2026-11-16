@@ -186,10 +186,11 @@ def _render_alignment_evidence_panel(
     root: Path | None,
     verbose: bool,
 ) -> None:
+    review_verb = "needs" if needs_review_count == 1 else "need"
     section = Section(
         title=section_title(
             "Audio alignment",
-            detail=(f"{needs_review_count} needs review" if needs_review_count else None),
+            detail=f"{needs_review_count} {review_verb} review" if needs_review_count else None,
         ),
         rail_style=BORDER_PENDING if needs_review_count else BORDER_NEUTRAL,
     )

@@ -54,12 +54,14 @@ def format_error_console(
     if error.hint:
         output += f"  [{WARN}]Hint:[/] {escape(error.hint)}\n"
 
-    if (verbose or verbose_hint is None) and error.context.details:
-        output += f"\n  [{MUTED}]Details:[/]\n"
-        for k, v in error.context.details.items():
-            output += f"    [{MUTED}]{escape(str(k))}:[/] {escape(str(v))}\n"
-    elif error.context.details and verbose_hint is not None:
-        output += f"\n  [{MUTED}]For more details, run with {escape(verbose_hint)}[/]"
+    details = error.context.details
+    if details and any(str(value) not in error.context.message for value in details.values()):
+        if verbose or verbose_hint is None:
+            output += f"\n  [{MUTED}]Details:[/]\n"
+            for k, v in details.items():
+                output += f"    [{MUTED}]{escape(str(k))}:[/] {escape(str(v))}\n"
+        else:
+            output += f"\n  [{MUTED}]For more details, run with {escape(verbose_hint)}[/]"
 
     return output.rstrip()
 

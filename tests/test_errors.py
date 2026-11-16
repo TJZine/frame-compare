@@ -148,6 +148,17 @@ def test_get_exit_code_maps_by_error_code_prefix_for_generic_error(code, expecte
     assert get_exit_code(error) == expected
 
 
+_ERROR_WITH_EXTRA_DETAILS = FrameCompareError(
+    ErrorContext(
+        code="FC-4006",
+        name="CACHE_CORRUPTION",
+        message="Cache file corrupted",
+        hint="Clear cache directory",
+        details={"path": str(Path("/cache"))},
+    )
+)
+
+
 @pytest.mark.parametrize(
     ("error", "verbose", "hint", "present", "absent"),
     [
@@ -159,25 +170,32 @@ def test_get_exit_code_maps_by_error_code_prefix_for_generic_error(code, expecte
             ["Details:", "For more details, run with --verbose"],
         ),
         (
-            CacheCorruptionError(Path("/cache")),
+            _ERROR_WITH_EXTRA_DETAILS,
             True,
             "--verbose",
             ["Details:", "path:", str(Path("/cache"))],
             [],
         ),
         (
-            CacheCorruptionError(Path("/cache")),
+            _ERROR_WITH_EXTRA_DETAILS,
             False,
             "--verbose",
             ["For more details, run with --verbose"],
             ["Details:"],
         ),
         (
-            CacheCorruptionError(Path("/cache")),
+            _ERROR_WITH_EXTRA_DETAILS,
             False,
             None,
             ["Details:", "path:"],
             ["For more details, run with --verbose"],
+        ),
+        (
+            CacheCorruptionError(Path("/cache")),
+            True,
+            "--verbose",
+            [],
+            ["Details:", "For more details, run with --verbose"],
         ),
         (RenderError(), True, "--verbose", [], ["Details:"]),
         (
@@ -205,6 +223,7 @@ def test_get_exit_code_maps_by_error_code_prefix_for_generic_error(code, expecte
         "verbose-details",
         "hidden-details",
         "no-hint",
+        "redundant-details",
         "verbose-empty",
         "literal-brackets",
     ],
