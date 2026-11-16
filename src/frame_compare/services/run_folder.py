@@ -4,20 +4,29 @@ import logging
 import ntpath
 import re
 import uuid
+from collections import Counter
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services.errors import GeneratedDataReservationError
-from frame_compare.services.metadata import parse_filename
-from frame_compare.services.types import ParsedMetadata, TmdbMetadata
+from frame_compare.services.release_identity import (
+    ShortNameSource,
+    common_content_identity,
+    format_content_identity,
+    format_tmdb_content_title,
+    short_source_names,
+)
+from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.paths import require_managed_immediate_child
 
 _UNNAMED_RUN_BASE = "unnamed_run"
 _MAX_FOLDER_NAME_LENGTH = 64
-_NUMERIC_COLLISION_ATTEMPTS = 100
+_TOKEN_SEPARATORS = " .-,"
 
 # Characters illegal in Windows filenames (also avoid on Unix for portability)
 _ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -36,166 +45,136 @@ class RunFolderReservation:
     naming_source: RunFolderNamingSource
 
 
-def sanitize_folder_name(name: str) -> str:
-    if not name:
-        return _UNNAMED_RUN_BASE
-
-    sanitized = _ILLEGAL_CHARS.sub(" ", name)
-    sanitized = _MULTI_SPACE.sub(" ", sanitized).strip()
-    sanitized = sanitized.rstrip(". ")
-
-    if not sanitized:
-        return _UNNAMED_RUN_BASE
-
-    if len(sanitized) > _MAX_FOLDER_NAME_LENGTH:
-        truncated = sanitized[:_MAX_FOLDER_NAME_LENGTH]
-        sanitized = truncated.rstrip(". ")
-        if not sanitized:
-            fallback = truncated.replace(".", "").replace(" ", "")
-            sanitized = fallback if fallback else _UNNAMED_RUN_BASE
-
-    sanitized = _avoid_windows_reserved_filename(sanitized)
-
-    return sanitized
+def _clean_folder_text(value: str) -> str:
+    return _MULTI_SPACE.sub(" ", _ILLEGAL_CHARS.sub(" ", value)).strip().rstrip(". ")
 
 
-def _avoid_windows_reserved_filename(name: str) -> str:
+def _token_prefix(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    if value[limit] in _TOKEN_SEPARATORS:
+        return value[:limit].rstrip(_TOKEN_SEPARATORS)
+    boundary = max(value.rfind(separator, 0, limit) for separator in _TOKEN_SEPARATORS)
+    return value[:boundary].rstrip(_TOKEN_SEPARATORS) if boundary >= 0 else ""
+
+
+def _avoid_windows_reserved_filename(name: str, limit: int) -> str:
     if ntpath.isreserved(name):
-        safe_name = f"{name.replace('.', ' ')} run"
-        safe_name = _MULTI_SPACE.sub(" ", safe_name).strip().rstrip(". ")
-        if len(safe_name) > _MAX_FOLDER_NAME_LENGTH:
-            safe_name = safe_name[:_MAX_FOLDER_NAME_LENGTH].rstrip(". ")
+        safe_name = _clean_folder_text(f"{name.replace('.', ' ')} run")
+        safe_name = _token_prefix(safe_name, limit)
         return safe_name if safe_name and not ntpath.isreserved(safe_name) else _UNNAMED_RUN_BASE
     return name
 
 
-def find_common_metadata(filenames: list[str]) -> tuple[str | None, int | None]:
-    if not filenames:
-        return None, None
-
-    parsed_results: list[ParsedMetadata] = []
-    for filename in filenames:
-        parsed_results.append(parse_filename(filename))
-
-    if len(parsed_results) == 1:
-        pm = parsed_results[0]
-        return pm.title if pm.title else None, pm.year
-
-    titles = [p.title.lower().strip() for p in parsed_results if p.title]
-    common_title: str | None = None
-    if titles and len(set(titles)) == 1:
-        common_title = next(p.title for p in parsed_results if p.title)
-
-    years = [p.year for p in parsed_results if p.year is not None]
-    common_year: int | None = None
-    if years and len(set(years)) == 1:
-        common_year = years[0]
-
-    return common_title, common_year
-
-
-def _combine_filename_stems(filenames: list[str]) -> str:
-    if not filenames:
-        return _UNNAMED_RUN_BASE
-
-    stems: list[str] = []
-    for filename in filenames:
-        stem = Path(filename).stem
-        if len(stem) > 30:
-            stem = stem[:30]
-        stems.append(sanitize_folder_name(stem))
-
-    seen: set[str] = set()
-    unique_stems: list[str] = []
-    for stem in stems:
-        if stem.lower() not in seen:
-            seen.add(stem.lower())
-            unique_stems.append(stem)
-
-    combined = " + ".join(unique_stems[:2])
-    if len(unique_stems) > 2:
-        combined += f" +{len(unique_stems) - 2} more"
-
-    return sanitize_folder_name(combined)
-
-
-def _append_collision_suffix(folder_name: str, suffix: str) -> str:
-    allowed = _MAX_FOLDER_NAME_LENGTH - (len(suffix) + 1)
-    if allowed < 1:
-        allowed = 1
-    trimmed = folder_name[:allowed].rstrip(". ")
-    if not trimmed:
-        trimmed = _UNNAMED_RUN_BASE[:allowed]
-    return f"{trimmed}_{suffix}"
-
-
-def _derive_base_folder_name(
-    filenames: list[str],
-    tmdb_metadata: TmdbMetadata | None = None,
+def _folder_title(
+    sources: Sequence[ShortNameSource], tmdb_metadata: TmdbMetadata | None
 ) -> tuple[str, RunFolderNamingSource]:
-    if not filenames:
-        return _UNNAMED_RUN_BASE, "unnamed"
+    if not sources:
+        return "", "unnamed"
 
-    base_name: str | None = None
+    identities = [source.identity for source in sources]
+    if tmdb_metadata is not None and tmdb_metadata.title:
+        return format_tmdb_content_title(tmdb_metadata, identities[0]), "tmdb"
 
-    if tmdb_metadata is not None:
-        title = tmdb_metadata.title
-        year = tmdb_metadata.year
-        if title:
-            base_name = f"{title} ({year})" if year and year > 0 else title
-            return sanitize_folder_name(base_name), "tmdb"
+    common = common_content_identity(identities)
+    if common is not None:
+        return format_content_identity(common), "parsed_metadata"
 
-    common_title, common_year = find_common_metadata(filenames)
-    if common_title:
-        base_name = f"{common_title} ({common_year})" if common_year else common_title
-        return sanitize_folder_name(base_name), "parsed_metadata"
+    titles = list(
+        dict.fromkeys(
+            format_content_identity(identity.content)
+            for identity in identities
+            if identity is not None and identity.content.title_origin == "parsed"
+        )
+    )
+    return " + ".join(titles[:2]), "filename_stems"
 
-    combined = _combine_filename_stems(filenames)
-    if combined == _UNNAMED_RUN_BASE:
-        return combined, "unnamed"
-    return combined, "filename_stems"
+
+def _distinct_folder_labels(labels: list[str]) -> list[str]:
+    counts = Counter(label.casefold() for label in labels)
+    used = {label for label, count in counts.items() if label and count == 1}
+    for index, label in enumerate(labels):
+        if label and counts[label.casefold()] == 1:
+            continue
+        role = "Reference" if index == 0 else f"Comparison {index}"
+        base = f"{role} - {label}" if label else role
+        name = base
+        suffix = 2
+        while name.casefold() in used:
+            name = f"{base} ({suffix})"
+            suffix += 1
+        labels[index] = name
+        used.add(name.casefold())
+    return labels
+
+
+def _label_summary(labels: Sequence[str], kept: int) -> str:
+    summary = ", ".join(labels[:kept])
+    omitted = len(labels) - kept
+    if omitted:
+        summary = f"{summary} +{omitted}".strip()
+    return summary
+
+
+def _fit_folder_name(title: str, labels: Sequence[str], limit: int) -> str:
+    for kept in range(len(labels), -1, -1):
+        summary = _label_summary(labels, kept)
+        name = " - ".join(part for part in (title, summary) if part)
+        if len(name) <= limit:
+            return name or _UNNAMED_RUN_BASE
+
+    summary = _label_summary(labels, 0)
+    title_budget = limit - (len(summary) + 3 if summary else 0)
+    shortened_title = _token_prefix(title, title_budget).removesuffix(" +")
+    if not shortened_title:
+        return _fit_folder_name("", labels, limit)
+    return " - ".join(part for part in (shortened_title, summary) if part)
 
 
 def reserve_run_folder(
     generated_root: Path,
-    filenames: list[str],
+    sources: Sequence[ShortNameSource],
     tmdb_metadata: TmdbMetadata | None = None,
+    *,
+    now: datetime | None = None,
 ) -> RunFolderReservation:
-    base_name, naming_source = _derive_base_folder_name(filenames, tmdb_metadata)
+    raw_title, naming_source = _folder_title(sources, tmdb_metadata)
+    title = _clean_folder_text(raw_title)
+    cleaned_labels = [_clean_folder_text(name) for name in short_source_names(sources)]
+    if not title and not any(cleaned_labels):
+        naming_source = "unnamed"
+    labels = _distinct_folder_labels(cleaned_labels)
 
-    def _reservation(candidate_name: str) -> RunFolderReservation:
-        return RunFolderReservation(
-            path=generated_root / candidate_name,
-            folder_name=candidate_name,
-            base_name=base_name,
-            naming_source=naming_source,
-        )
+    def _candidate_name(suffix: str = "") -> str:
+        limit = _MAX_FOLDER_NAME_LENGTH - len(suffix)
+        name = _fit_folder_name(title, labels, limit)
+        return _avoid_windows_reserved_filename(name, limit) + suffix
 
-    reservation = _reservation(base_name)
+    base_name = _candidate_name()
+
+    def _reserve(name: str) -> RunFolderReservation:
+        path = generated_root / name
+        _reserve_candidate(generated_root, path)
+        return RunFolderReservation(path, name, base_name, naming_source)
 
     try:
-        _reserve_candidate(generated_root, reservation.path)
-        return reservation
+        return _reserve(base_name)
     except FileExistsError:
         log.debug(
             "Run folder collision on base path; will retry with suffixes. Path: %s",
-            reservation.path,
+            generated_root / base_name,
         )
 
-    for attempt in range(2, _NUMERIC_COLLISION_ATTEMPTS + 2):
-        suffix_name = _append_collision_suffix(base_name, str(attempt))
-        suffix_reservation = _reservation(suffix_name)
+    local_time = (now or datetime.now()).astimezone()
+    minute = local_time.strftime("%Y-%m-%d %H.%M")
+    second = local_time.strftime("%Y-%m-%d %H.%M.%S")
+    for stamp in (minute, second):
         try:
-            _reserve_candidate(generated_root, suffix_reservation.path)
-            return suffix_reservation
+            return _reserve(_candidate_name(f" ({stamp})"))
         except FileExistsError:
             continue
 
-    random_suffix = uuid.uuid4().hex[:8]
-    fallback_name = _append_collision_suffix(base_name, random_suffix)
-    fallback_reservation = _reservation(fallback_name)
-    _reserve_candidate(generated_root, fallback_reservation.path)
-    return fallback_reservation
+    return _reserve(_candidate_name(f" ({second} {uuid.uuid4().hex[:8]})"))
 
 
 def _reserve_candidate(owner: Path, candidate: Path) -> None:

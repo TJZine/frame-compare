@@ -17,6 +17,7 @@ from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import phase_post_render, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.services.errors import TmdbError
+from frame_compare.services.release_identity import ShortNameSource
 from frame_compare.services.run_folder import RunFolderReservation
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
@@ -157,11 +158,11 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
 
     def _reserve_run_folder(
         generated_root: Path,
-        filenames: list[str],
+        sources: list[ShortNameSource],
         tmdb_metadata: TmdbMetadata | None,
     ) -> RunFolderReservation:
         del generated_root, tmdb_metadata
-        reserve_calls.append(filenames)
+        reserve_calls.append([source.stem for source in sources])
         return RunFolderReservation(
             path=Path("should-not-be-used"),
             folder_name="should-not-be-used",
@@ -206,9 +207,9 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
     cache_paths: list[Path] = []
 
     def _capture_reserve_run_folder(
-        generated_root: Path, filenames: list[str], tmdb_metadata: TmdbMetadata | None
+        generated_root: Path, sources: list[ShortNameSource], tmdb_metadata: TmdbMetadata | None
     ) -> RunFolderReservation:
-        del filenames
+        del sources
         captured_tmdb_metadata.append(tmdb_metadata)
         return RunFolderReservation(
             path=generated_root / "Fight Club (1999)",
@@ -341,7 +342,7 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
         }
     ]
     run_info = tomllib.loads(
-        (tmp_path / "generated" / "source" / "run_info.toml").read_text(encoding="utf-8")
+        (tmp_path / "generated" / "source - source" / "run_info.toml").read_text(encoding="utf-8")
     )
     assert run_info["tmdb"] == {
         "enabled": True,

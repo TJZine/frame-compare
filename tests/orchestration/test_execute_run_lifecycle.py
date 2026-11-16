@@ -79,7 +79,10 @@ def test_execute_run_returns_success_and_records_preflight_timing(
 
     assert result.success is True
     assert result.warnings == []
-    assert result.screenshot_dir == (tmp_path / "generated" / "source" / "screenshots").resolve()
+    assert (
+        result.screenshot_dir
+        == (tmp_path / "generated" / "source - source" / "screenshots").resolve()
+    )
     assert result.frame_count == 10
     assert result.clips_processed == 1
     assert result.duration_seconds >= 0.0

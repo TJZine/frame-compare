@@ -1001,9 +1001,15 @@ recovery requirement.
   folders are not reused to satisfy analysis cache hits. Screenshots, run-local
   generated state, and the canonical report remain beneath that reserved folder
   even when media input is external.
-- Run-folder names are capped at 64 characters and do not include exact timestamps.
-  The first successful reservation uses the title-first base name, and collisions use
-  compact numeric suffixes such as `_2` and `_3`.
+- Run-folder names contain the TMDB title and reference episode when available, the
+  shared filename-derived content title, or up to two different parsed content titles.
+  The title is followed by ` - ` and the comma-separated short source labels. If no
+  title is available, the name uses the short labels alone. If a label becomes empty
+  or clashes after filename sanitization, its source role keeps it distinct. Names
+  are capped at 64 characters. If the name is too long, Frame Compare drops trailing labels, adds
+  ` +N` for the omitted labels, and shortens the title at a token boundary if needed.
+  A collision adds the local timestamp ` (YYYY-MM-DD HH.MM)`. A further collision
+  adds seconds, then a short UUID if that second is already taken.
   Exact creation time and run identity are written to root-level
   `<run-folder>/run_info.toml` immediately after reservation and before probing
   or rendering. Version 2 stores `version`, UTC `created_at` with a `Z` suffix,

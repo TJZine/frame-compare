@@ -644,13 +644,13 @@ selection domain before metadata prefetch or run-folder reservation. Report gene
 receives the explicit canonical `<run-folder>/report.html` path from post-render
 orchestration; no report-specific output directory or fallback placement exists.
 
-Run-folder names are title-first and capped at 64 characters for Windows path
-headroom. The base name comes from resolved TMDB title/year, common parsed
-metadata, combined filename stems, or `unnamed_run`. Windows reserved basenames
-are rewritten before reservation. Exact timestamps are not
-part of folder names; collisions use compact numeric suffixes such as `_2` and
-`_3`, then a short random suffix if bounded numeric claiming cannot reserve a
-directory. Preparation validates the reserved immediate-child path and completes
+Run-folder naming consumes the prepared release identities and explicit-label provenance.
+It shares the report's TMDB and shared content title formatting and uses short labels
+to distinguish sources. It reserves the unsuffixed name first, then the local minute,
+local second, and a UUID for a same-second collision. The 64-character budget includes
+the suffix. Source roles distinguish labels that are empty or collide after filename
+sanitization. Trailing labels are omitted before title truncation at a token boundary.
+Windows reserved basenames are rewritten before reservation. Preparation validates the reserved immediate-child path and completes
 the `WorkspacePaths` transition before writing metadata. The exact creation time
 then lives in `<run-folder>/run_info.toml`, which is written before probing,
 rendering, or other runtime-heavy work. If reservation validation, the workspace

@@ -34,7 +34,8 @@ def test_cli_history_list_json_isolates_oversized_record(
     record: Callable[..., None],
 ) -> None:
     root = workspace()
-    valid = root.generated_dir / "Valid"
+    valid_name = "Valid S01E08 - EbP, GNOME (2026-07-14 12.00)"
+    valid = root.generated_dir / valid_name
     broken = root.generated_dir / "Broken"
     valid.mkdir()
     broken.mkdir()
@@ -69,7 +70,7 @@ def test_cli_history_list_json_isolates_oversized_record(
     }
     expected = {
         "exit_code": 0,
-        "runs": [["Broken", "unavailable"], ["Valid", "completed"]],
+        "runs": [["Broken", "unavailable"], [valid_name, "completed"]],
         "warning_on_stderr": True,
     }
     record("E5-history-oversized", root, [(arguments, result)], summary, expected)

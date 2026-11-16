@@ -1,15 +1,20 @@
 """Typed, presentation-only identities derived from release filenames."""
 
+from __future__ import annotations
+
 import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from frame_compare.config.text_validation import (
     is_control_character,
     show_bidi_formatting_controls,
 )
+
+if TYPE_CHECKING:
+    from frame_compare.services.types import TmdbMetadata
 
 _STEM_TOKEN = re.compile(r"[^.\-_ ]+")
 
@@ -53,6 +58,19 @@ def format_content_identity(content: ContentIdentity) -> str:
     elif content.episode is not None:
         label += f" E{content.episode:02d}"
     return label
+
+
+def format_tmdb_content_title(metadata: TmdbMetadata, reference: ReleaseIdentity | None) -> str:
+    """Format a resolved title with the reference's episode marker for television."""
+    if metadata.media_type == "tv" and reference is not None:
+        return format_content_identity(
+            ContentIdentity(
+                metadata.title,
+                season=reference.content.season,
+                episode=reference.content.episode,
+            )
+        )
+    return metadata.title
 
 
 def format_release_descriptor(identity: ReleaseIdentity, separator: str = " | ") -> str:
@@ -114,7 +132,10 @@ class ShortNameSource:
 
 
 def short_source_names(
-    sources: Sequence[ShortNameSource], *, roles: Sequence[str], show_bidi_controls: bool = False
+    sources: Sequence[ShortNameSource],
+    *,
+    roles: Sequence[str] | None = None,
+    show_bidi_controls: bool = False,
 ) -> list[str]:
     """Prefer explicit labels, unique usable groups, micro descriptors, then filename text."""
     groups = [
@@ -157,6 +178,10 @@ def short_source_names(
         )
         names.append(micro or differing or label)
         protected.append(False)
+    if roles is None:
+        roles = [
+            "Reference" if index == 0 else f"Comparison {index}" for index in range(len(sources))
+        ]
     if show_bidi_controls:
         names = [show_bidi_formatting_controls(name) for name in names]
     return unique_presentation_names(names, roles=list(roles), protected=protected)
@@ -217,11 +242,13 @@ def unique_presentation_names(
     return resolved
 
 
-def common_content_identity(identities: list[ReleaseIdentity]) -> ContentIdentity | None:
+def common_content_identity(identities: Sequence[ReleaseIdentity | None]) -> ContentIdentity | None:
     """Return safely shared content identity, or None when content conflicts."""
-    if not identities or not any(item.content.title_origin == "parsed" for item in identities):
+    contents = [item.content for item in identities if item is not None]
+    if len(contents) != len(identities) or not any(
+        content.title_origin == "parsed" for content in contents
+    ):
         return None
-    contents = [item.content for item in identities]
     if len({" ".join(item.title.casefold().split()) for item in contents}) != 1:
         return None
     for field in ("year", "season", "episode"):
@@ -252,6 +279,7 @@ __all__ = [
     "format_content_identity",
     "format_micro_descriptor",
     "format_release_descriptor",
+    "format_tmdb_content_title",
     "short_source_names",
     "unique_presentation_names",
 ]

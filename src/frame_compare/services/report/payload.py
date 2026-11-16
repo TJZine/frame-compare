@@ -17,11 +17,11 @@ from frame_compare.config.text_validation import show_bidi_formatting_controls
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services.errors import ReportError
 from frame_compare.services.release_identity import (
-    ContentIdentity,
     ReleaseIdentity,
     ShortNameSource,
     common_content_identity,
     format_content_identity,
+    format_tmdb_content_title,
     short_source_names,
 )
 from frame_compare.services.types import TmdbMetadata
@@ -359,22 +359,11 @@ def build_report_payload(
 def _comparison_title(data: ReportData) -> str:
     identities = [clip.release_identity for clip in data.clips]
     if data.metadata is not None:
-        reference = identities[0]
-        if data.metadata.media_type == "tv" and reference is not None:
-            return format_content_identity(
-                ContentIdentity(
-                    data.metadata.title,
-                    season=reference.content.season,
-                    episode=reference.content.episode,
-                )
-            )
-        return data.metadata.title
+        return format_tmdb_content_title(data.metadata, identities[0])
 
-    known_identities = [identity for identity in identities if identity is not None]
-    if len(known_identities) == len(identities):
-        common = common_content_identity(known_identities)
-        if common is not None:
-            return format_content_identity(common)
+    common = common_content_identity(identities)
+    if common is not None:
+        return format_content_identity(common)
 
     names = short_source_names(
         [
@@ -385,8 +374,7 @@ def _comparison_title(data: ReportData) -> str:
                 stem=clip.path.stem,
             )
             for clip in data.clips
-        ],
-        roles=["Reference", *(f"Comparison {index}" for index in range(1, len(data.clips)))],
+        ]
     )
     title = " vs ".join(names[:2])
     if len(names) > 2:
