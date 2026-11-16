@@ -30,6 +30,7 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationRequest,
 )
 from frame_compare.services.errors import SlowpicsError
+from frame_compare.services.metadata_parsing import parse_filename_with_release_identity
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.release_identity import (
     ContentIdentity,
@@ -104,6 +105,7 @@ async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
         release_group="Kitsune",
+        has_terminal_release_group=True,
     )
     comparison = _clip(
         tmp_path / "comparison_videos" / "comparison.mkv",
@@ -190,6 +192,7 @@ def test_run_report_phase_builds_report_data_and_records_path(
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
         release_group="Kitsune",
+        has_terminal_release_group=True,
     )
     comparison = _clip(
         tmp_path / "comparison_videos" / "encode.mkv",
@@ -344,6 +347,50 @@ def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
     ]
     for upload_clip in upload_clips:
         assert " · " not in upload_clip.image_name
+
+
+def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    paths = [
+        ctx.workspace.input_dir / name
+        for name in (
+            "Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv",
+            "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv",
+        )
+    ]
+    ctx.reference, *ctx.comparisons = [
+        _clip(
+            path,
+            label=path.stem,
+            release_identity=parse_filename_with_release_identity(path.name)[1],
+        )
+        for path in paths
+    ]
+    assert ctx.workspace.run_dir is not None
+    screenshot_dir = ctx.workspace.run_dir / "screenshots"
+    clips = [ctx.reference, *ctx.comparisons]
+    screenshots = {
+        clip.label: [screenshot_dir / f"{index}.png"] for index, clip in enumerate(clips)
+    }
+    for clip in clips:
+        _RenderRunner().extract_frame(clip.path, 5, screenshots[clip.label][0])
+    render = _render_artifacts(screenshots_by_label=screenshots, screenshot_dir=screenshot_dir)
+
+    output = phase_post_render.run_report_phase(
+        ctx, frames=[5], render=render, metadata=None, slowpics_url=None
+    )
+
+    assert output.report_path is not None
+    payload = script_payload(output.report_path.read_text(encoding="utf-8"))
+    assert [clip["display"]["micro"] for clip in payload["clips"]] == ["EbP", "english-dub-only"]
+    assert [clip["display"]["control"] for clip in payload["clips"]] == [
+        "1080p · BluRay · EbP",
+        "only",
+    ]
+    assert [clip["display"]["filename"] for clip in payload["clips"]] == [
+        path.name for path in paths
+    ]
+    assert [clip["label"] for clip in payload["clips"]] == [path.stem for path in paths]
 
 
 def test_report_resolves_visible_bidi_collisions_in_stem_mode(tmp_path: Path) -> None:
