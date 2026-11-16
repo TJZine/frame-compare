@@ -235,7 +235,10 @@ role labels and bounded console-width policy shared by orchestration reports.
 content/release identity types and plain formatters. Preparation invokes the existing
 GuessIt/Anitopy parser seam once per source and attaches the resulting presentation
 metadata and explicit-label provenance to `ClipState`; these fields are excluded from
-source, cache, selection, and report identity.
+source, cache, selection, and report identity. Release identity records whether a
+parsed group qualifies for short names. The short-name formatter uses the ordered
+filename stems for shared-token fallback and resolves presentation collisions after
+choosing the names.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
 through presentation surfaces while source paths, fingerprints,
@@ -1290,8 +1293,10 @@ per clip. `phase_post_render` reuses prepared release identities, explicit-label
 provenance, shared formatters, stable roles, and set-level collision handling once per
 report, joining profile segments with `·` (slow.pics image names keep the `|`
 separator; burned-in screenshot text is the clip label and does not use release
-descriptors). Report controls consume control or micro names,
-while Inspector/info and ARIA surfaces use the primary identity and the displayed basename.
+descriptors). The micro profile uses the same short source names as terminal
+summaries, with bidi controls made visible before collision handling. Grid, the lens,
+and compact inspector rows consume this profile. Regular controls and source details
+use the control and primary profiles and the displayed basename.
 Per-clip presentation contains applied tonemap facts; the rendering summary derives a
 shared implementation/algorithm/control projection, excluding clip-specific peaks and
 causes. Identity includes applied output facts and excludes requested settings and

@@ -97,8 +97,8 @@ def test_build_frame_alignment_report_uses_final_normalized_trim_domain() -> Non
             reference_path=Path("ref.mkv"),
             comparison_path=Path("encode.mkv"),
             presentation_name="Encode",
-            short_name="Encode",
-            reference_short_name="Reference",
+            short_name="encode",
+            reference_short_name="ref",
         ),
     )
 

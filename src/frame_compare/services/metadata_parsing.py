@@ -10,8 +10,11 @@ import anitopy
 import structlog
 from guessit import guessit
 
-from frame_compare.config.text_validation import is_control_character
-from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
+from frame_compare.services.release_identity import (
+    ContentIdentity,
+    ReleaseIdentity,
+    normalize_release_text,
+)
 from frame_compare.services.types import ParsedMetadata
 
 log = structlog.get_logger()
@@ -33,6 +36,7 @@ class _ParsedFilenameFields:
     source: str | None = None
     resolution: str | None = None
     service: str | None = None
+    codec: str | None = None
 
 
 def _first_text(parser_result: dict[str, object], *keys: str) -> str | None:
@@ -104,6 +108,10 @@ def _merge_parser_metadata(
         service=_keep_existing(
             current.service,
             _first_text(parser_result, "streaming_service"),
+        ),
+        codec=_keep_existing(
+            current.codec,
+            _first_text(parser_result, "video_codec", "audio_codec"),
         ),
     )
 
@@ -336,8 +344,8 @@ def parse_filename_with_release_identity(
 
 def _release_identity(filename: str, fields: _ParsedFilenameFields) -> ReleaseIdentity:
     stem = Path(filename).stem
-    parsed_title = _normalize_release_text(re.sub(r"[._\-]", " ", fields.title or ""))
-    fallback_title = _normalize_release_text(re.sub(r"[._\-]", " ", stem))
+    parsed_title = normalize_release_text(re.sub(r"[._\-]", " ", fields.title or ""))
+    fallback_title = normalize_release_text(re.sub(r"[._\-]", " ", stem))
     resolution = _normalize_optional_release_text(fields.resolution)
     source_type = _source_type(filename, fields.source)
     release_suffix = _release_suffix(stem, resolution, source_type)
@@ -347,7 +355,7 @@ def _release_identity(filename: str, fields: _ParsedFilenameFields) -> ReleaseId
         full_dynamic_range_claims,
         release_suffix,
     )
-    inference_suffix = _normalize_release_text(release_suffix)
+    inference_suffix = normalize_release_text(release_suffix)
     if release_group is not None:
         terminal_group = re.search(
             rf"(?i)(?:^|[._ -]){re.escape(release_group)}$",
@@ -355,6 +363,14 @@ def _release_identity(filename: str, fields: _ParsedFilenameFields) -> ReleaseId
         )
         if terminal_group is not None:
             inference_suffix = inference_suffix[: terminal_group.start()].rstrip("._- ")
+    prefix, separator, final_token = stem.rpartition("-")
+    has_terminal_release_group = bool(
+        separator
+        and prefix
+        and release_group
+        and final_token.casefold() == release_group.casefold()
+        and (resolution or source_type or fields.source or fields.codec)
+    )
     release_tokens = _release_tokens(inference_suffix)
     dynamic_range_claims = _dynamic_range_claims(release_tokens)
     return ReleaseIdentity(
@@ -373,20 +389,14 @@ def _release_identity(filename: str, fields: _ParsedFilenameFields) -> ReleaseId
         release_group=release_group,
         revision_tags=_revision_tags(inference_suffix),
         variant_tags=_variant_tags(inference_suffix),
+        has_terminal_release_group=has_terminal_release_group,
     )
-
-
-def _normalize_release_text(value: str) -> str:
-    without_controls = "".join(
-        " " if is_control_character(character) else character for character in value
-    )
-    return " ".join(without_controls.split())
 
 
 def _normalize_optional_release_text(value: str | None) -> str | None:
     if value is None:
         return None
-    return _normalize_release_text(value) or None
+    return normalize_release_text(value) or None
 
 
 def _release_tokens(value: str) -> tuple[str, ...]:
@@ -458,7 +468,7 @@ def _release_group(
     # GuessIt can fold recognized dynamic-range tags into the release group.
     # Only correct the tag-position form; a group after the conventional "-"
     # separator may legitimately begin with one of these prefixes.
-    normalized_suffix = _normalize_release_text(release_suffix)
+    normalized_suffix = normalize_release_text(release_suffix)
     prefix = next(
         (
             candidate

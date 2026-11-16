@@ -38,9 +38,10 @@ from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.metadata_parsing import parse_filename
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.release_identity import (
+    ShortNameSource,
     format_compact_identity,
-    format_micro_descriptor,
     format_release_descriptor,
+    short_source_names,
     unique_presentation_names,
 )
 from frame_compare.services.report.display import (
@@ -316,18 +317,18 @@ def run_report_phase(
             for index, clip in enumerate(clips)
         ]
     )
-    micros = distinct_report_names(
+    micros = short_source_names(
         [
-            clip.label
-            if clip.label_is_explicit
-            else (
-                format_micro_descriptor(clip.release_identity, separator=" · ")
-                if clip.release_identity
-                else ""
+            ShortNameSource(
+                identity=clip.release_identity,
+                label=clip.label,
+                label_is_explicit=clip.label_is_explicit,
+                stem=clip.path.stem,
             )
-            or controls[index]
-            for index, clip in enumerate(clips)
-        ]
+            for clip in clips
+        ],
+        roles=roles,
+        show_bidi_controls=True,
     )
     clip_info: list[ClipInfo] = []
     for clip_index, (clip, rendered_clip) in enumerate(zip(clips, render.clips, strict=True)):
