@@ -10,7 +10,7 @@ from pytest import MonkeyPatch
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
-from frame_compare.config.errors import ConfigNotFoundError
+from frame_compare.config.errors import ConfigNotFoundError, ConfigParseError
 from frame_compare.errors import ErrorContext, FrameCompareError
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 
@@ -620,6 +620,27 @@ def test_run_exit_code_is_130_on_keyboard_interrupt(
 
     result = _invoke_run_with_minimal_workspace([], tmp_path=tmp_path, monkeypatch=monkeypatch)
     assert result.exit_code == int(ExitCode.INTERRUPTED)
+
+
+def test_run_error_wraps_colon_after_a_full_width_config_path(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    path = Path("a" * 75 + ".toml")
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise ConfigParseError(path, "invalid TOML syntax")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    result = _invoke_run_with_minimal_workspace(
+        ["--no-color"],
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        env={"COLUMNS": "80", "TERM": "xterm-256color"},
+    )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert f"\n{path}\n: invalid TOML syntax\n" in result.stderr
+    assert all(len(line) <= 80 for line in result.stderr.splitlines())
 
 
 def test_run_no_color_error_output_has_no_rich_markup(

@@ -257,7 +257,8 @@ without `--from-cache-only` to build it.
 Saved by `--write-config`
 :   No
 
-Show what a run would use and create, without side effects.
+Show what a run would use and create, without side effects. The human plan wraps
+to your terminal width and keeps each path together.
 
 #### `--write-config` { #run-write-config .fc-key }
 

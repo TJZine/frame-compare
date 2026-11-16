@@ -163,7 +163,7 @@ def test_cli_names_unknown_config_key_and_suggests_keys_from_its_section(
     assert result.exit_code == 2
     assert result.stdout == ""
     message = " ".join(result.stderr.split())
-    assert str(root.config_path).replace(" ", "") in message.replace(" ", "")
+    assert str(root.config_path) in result.stderr
     assert "sources.overrides.clip.mkv.effective_fp: unknown key" in message
     assert (
         "Closest valid keys for sources.overrides.clip.mkv.effective_fp: "

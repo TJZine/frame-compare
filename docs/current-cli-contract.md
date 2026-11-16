@@ -23,6 +23,8 @@ documents that promise elsewhere.
   renderer for Rich human sections. `src/frame_compare/utils/artifact_paths.py`
   owns human artifact-path formatting and terminal hyperlinks. `SessionConsole`
   mirrors the same section rules in the VSView process.
+- `src/frame_compare/utils/terminal_theme.py` owns the human console and path-safe
+  wrapping used by human dry-run and typed error output.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
 - Primary executable contract checks include:
   - `tests/cli/test_help_and_import.py` for command registration, help text, and
@@ -103,7 +105,10 @@ and `cli_helpers.handle_error`):
 The first digit of an `FC-` code selects its family and exit code. Human output
 prints the code and message on stderr with a hint when available. The details
 block and its verbose prompt are omitted when the message already contains every
-detail value. `--json` prints the typed error document described under Output Modes. An unexpected error exits 1 and prints a fixed
+detail value. Typed human errors wrap to the terminal width. Paths that do not fit
+at the end of a line move intact to the next line, including selectors displayed
+with quotes and escaped characters. `--json` prints the typed error
+document described under Output Modes. An unexpected error exits 1 and prints a fixed
 message to stderr. In `--json` mode it emits no stdout document.
 
 ## Shared Path Resolution Rules
@@ -348,6 +353,8 @@ unchanged.
   `Will use`, `Would create in a real run`, `Publishing after success`, `Unknown
   until execution`, and `Not performed by dry-run`. Contained input paths are shown
   relative to the workspace root, while external input paths remain absolute.
+  Human output wraps to the terminal width and moves a path intact to the next
+  line when it does not fit.
   `--quiet` emits only a minimal source-count/no-side-effects summary.
   `--dry-run --json` writes exactly one JSON document to stdout, and typed errors
   retain the standard JSON error schema and stream placement.

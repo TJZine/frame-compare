@@ -15,7 +15,12 @@ import typer
 import typer.rich_utils as typer_rich_utils
 from typer.core import TyperGroup
 
-from frame_compare.cli.errors import ExitCode, format_error_console, get_exit_code
+from frame_compare.cli.errors import (
+    ExitCode,
+    error_display_paths,
+    format_error_console,
+    get_exit_code,
+)
 from frame_compare.config.errors import ConfigWriteError
 from frame_compare.config.persistence import dump_config_for_persistence
 from frame_compare.config.schema import ConfigSchema
@@ -23,7 +28,7 @@ from frame_compare.errors import FrameCompareError
 from frame_compare.services.slowpics_url import require_comparison_url
 from frame_compare.utils.subproc import prepare_python_child
 from frame_compare.utils.terminal import no_color_requested
-from frame_compare.utils.terminal_theme import human_console
+from frame_compare.utils.terminal_theme import human_console, print_with_paths
 
 
 class TextWriter(Protocol):
@@ -181,7 +186,7 @@ def handle_error(
             verbose_hint=verbose_hint,
         )
         console = human_console(stderr=True, no_color=no_color)
-        console.print(message)
+        print_with_paths(console, message, error_display_paths(error))
         return int(get_exit_code(error))
     typer.echo(UNEXPECTED_ERROR_MESSAGE, err=True)
     return int(ExitCode.GENERAL_ERROR)

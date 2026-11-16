@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -208,12 +210,17 @@ def test_run_dry_run_source_count_and_quiet_semantics(
         assert "Input directory: comparison_videos" in result.stdout
 
 
+@pytest.mark.parametrize(("columns", "separator"), [("80", "\n"), ("240", " ")])
 def test_run_dry_run_human_reports_workspace_root_input_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    columns: str,
+    separator: str,
 ) -> None:
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("COLUMNS", columns)
     with isolated_cli_filesystem(tmp_path, monkeypatch):
-        root = Path("workspace")
+        root = Path("workspace with enough spaces to force a line break")
         config_path = _write_workspace(root)
         config_path.write_text(
             MINIMAL_CONFIG.replace(
@@ -228,10 +235,67 @@ def test_run_dry_run_human_reports_workspace_root_input_path(
         result = _invoke(root, config_path)
 
     assert result.exit_code == 0
-    compact_output = "".join(result.stdout.split())
-    assert "Inputdirectory:." in compact_output
-    assert f"Inputdirectory:{resolved_root}" not in compact_output
-    assert f"Workspace:{resolved_root}" in compact_output
+    assert "Input directory: .\n" in result.stdout
+    assert f"Workspace:{separator}{resolved_root}\n" in result.stdout
+
+
+def test_run_dry_run_preserves_quoted_windows_selector_in_human_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selector = r"C:\A Long Project Name With Spaces\reference.mkv"
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("COLUMNS", "80")
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_workspace(
+            root, config_suffix=f"\n[sources]\nreference = '{selector}'\n"
+        )
+        input_dir = root / "comparison_videos"
+        input_dir.mkdir()
+        (input_dir / "source.mkv").touch()
+        result = _invoke(root, config_path, "--skip-metadata", "--no-upload")
+
+    assert result.exit_code == int(ExitCode.INPUT_ERROR)
+    assert f"\n{selector!r} " in result.stderr
+    assert all(len(line) <= 80 for line in result.stderr.splitlines())
+
+
+def test_run_dry_run_wraps_after_a_full_width_source_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    name = "a" * 76 + ".mkv"
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("COLUMNS", "80")
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_workspace(root)
+        input_dir = root / "comparison_videos"
+        input_dir.mkdir()
+        for filename in (name, "source.mkv"):
+            (input_dir / filename).touch()
+        result = _invoke(root, config_path, "--skip-metadata", "--no-upload")
+
+    assert result.exit_code == 0
+    assert f"Sources (2):\n{name}\n, source.mkv\n" in result.stdout
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows filenames do not permit tabs")
+def test_run_dry_run_keeps_a_tabbed_posix_filename_on_one_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    name = "a" * 45 + "\t" + "b" * 22 + ".mkv"
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("COLUMNS", "80")
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        config_path = _write_workspace(root)
+        input_dir = root / "comparison_videos"
+        input_dir.mkdir()
+        (input_dir / name).touch()
+        result = _invoke(root, config_path, "--skip-metadata", "--no-upload")
+
+    assert result.exit_code == 0
+    assert re.search(r"^a{45} {1,8}b{22}\.mkv$", result.stdout, re.MULTILINE)
 
 
 def test_run_dry_run_human_marks_disabled_parent_actions_not_applicable(

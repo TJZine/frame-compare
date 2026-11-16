@@ -10,11 +10,17 @@ from __future__ import annotations
 
 import codecs
 import io
+import os
+import re
 import sys
+from collections.abc import Iterable
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import IO, Literal
 
+from rich.cells import cell_len, chop_cells
 from rich.console import Console
+from rich.text import Text
 
 ACCENT = "#d2ac6b"
 KEY = "dim"
@@ -75,7 +81,7 @@ def human_console(
     height: int | None = None,
 ) -> Console:
     """Build a Rich console for human output with highlighting disabled."""
-    return Console(
+    console = Console(
         file=file,
         stderr=stderr,
         no_color=no_color,
@@ -84,6 +90,71 @@ def human_console(
         height=height,
         highlight=False,
     )
+
+    # Rich assigns dumb terminals a fixed size even when the stream is a PTY.
+    if width is None and console.is_dumb_terminal:
+        with suppress(OSError, ValueError):
+            size = os.get_terminal_size(console.file.fileno())
+            if size.columns > 0:
+                console.size = (size.columns, height or size.lines or console.height)
+    return console
+
+
+def print_with_paths(console: Console, markup: str, paths: Iterable[str]) -> None:
+    """Wrap human output at the console width, keeping each path on one line."""
+    text = Text.from_markup(markup)
+    present_paths = sorted(
+        {path for path in paths if path and path in text.plain and "\n" not in path},
+        key=len,
+        reverse=True,
+    )
+    if not present_paths:
+        console.print(text)
+        return
+
+    # Rich expands each tab to between one and eight spaces depending on its column.
+    # Match those spaces within the path so wrapping cannot split the expanded name.
+    alternatives = "|".join(
+        r" {1,8}".join(map(re.escape, path.split("\t"))) for path in present_paths
+    )
+    tokens = re.compile(rf"""(?P<path>[\['"(]*(?:{alternatives})(?=$|[\s:'"),\]]))|\S+""")
+    width = max(1, console.width)
+    lines: list[Text] = []
+    for line in text.split(allow_blank=True):
+        lines.extend(_wrap_path_line(line, width, tokens))
+    # If a path exceeds the terminal width on its own, let the terminal handle
+    # its display. Cropping or inserting a newline would change the copied path.
+    console.print(Text("\n").join(lines), soft_wrap=True)
+
+
+def _wrap_path_line(line: Text, width: int, tokens: re.Pattern[str]) -> list[Text]:
+    line.expand_tabs()
+    plain = line.plain
+    breaks: list[int] = []
+    used_width = 0
+    previous_end = 0
+    for match in tokens.finditer(plain):
+        token = match[0]
+        start = match.start()
+        token_width = cell_len(token)
+        used_width += cell_len(plain[previous_end:start])
+        if previous_end and used_width + token_width > width:
+            breaks.append(start)
+            used_width = 0
+        if match["path"] is None and token_width > width:
+            pieces = chop_cells(token, width)
+            for piece in pieces[:-1]:
+                start += len(piece)
+                breaks.append(start)
+            used_width = cell_len(pieces[-1])
+        else:
+            used_width += token_width
+        previous_end = match.end()
+
+    wrapped = list(line.divide(breaks))
+    for fragment in wrapped:
+        fragment.rstrip()
+    return wrapped
 
 
 _ASCII_PUNCTUATION = str.maketrans(
@@ -162,5 +233,6 @@ __all__ = [
     "glyphs_for_encoding",
     "glyphs_for_stream",
     "human_console",
+    "print_with_paths",
     "use_ascii_fallback_on_non_utf_streams",
 ]
