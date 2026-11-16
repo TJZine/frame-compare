@@ -24,7 +24,7 @@ from frame_compare.utils.alignment_review_projection import (
 )
 from frame_compare.utils.progress import RichProgressReporter
 from frame_compare.utils.progress_protocol import ProgressReporter
-from frame_compare.utils.terminal_sections import Section, section_title
+from frame_compare.utils.terminal_sections import Section, print_plain_run_block, section_title
 from frame_compare.utils.terminal_theme import (
     ACCENT,
     BORDER_NEUTRAL,
@@ -278,8 +278,10 @@ def present_alignment_evidence(
                 no_color=config.no_color,
                 needs_review_count=needs_review_count,
             )
-        else:
+        elif quiet:
             print("\n".join(lines), file=sys.stderr)
+        else:
+            print_plain_run_block("\n".join(lines), file=sys.stderr)
     finally:
         if progress is not None:
             progress.resume()

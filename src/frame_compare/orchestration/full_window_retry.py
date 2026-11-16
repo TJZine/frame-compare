@@ -27,6 +27,7 @@ from frame_compare.orchestration.selection_domain import (
 )
 from frame_compare.orchestration.types import FullWindowRetryConfirmationRequest
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.terminal_theme import format_exclusion_duration
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.context import ClipState, RunContext
@@ -286,13 +287,20 @@ def _full_window_config(config: ConfigSchema) -> ConfigSchema:
 
 
 def _override_warning(ignore_lead_seconds: float, ignore_trail_seconds: float) -> RunWarning:
+    def message(lead: str, trail: str, effective: str) -> str:
+        return (
+            f"{_FULL_WINDOW_RETRY_WARNING} "
+            f"(configured lead={lead}, trail={trail}; effective lead={effective}, trail={effective})"
+        )
+
     return RunWarning(
         "analysis",
         "warning",
-        (
-            f"{_FULL_WINDOW_RETRY_WARNING} "
-            f"(configured lead={ignore_lead_seconds:g}s, trail={ignore_trail_seconds:g}s; "
-            "effective lead=0s, trail=0s)"
+        message(f"{ignore_lead_seconds:g}s", f"{ignore_trail_seconds:g}s", "0s"),
+        human_message=message(
+            format_exclusion_duration(ignore_lead_seconds),
+            format_exclusion_duration(ignore_trail_seconds),
+            format_exclusion_duration(0.0),
         ),
     )
 

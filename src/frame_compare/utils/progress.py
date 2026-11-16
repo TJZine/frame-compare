@@ -31,7 +31,7 @@ from frame_compare.utils.progress_protocol import (
     AlignmentSummaryEntry,
     ProgressPhaseStatus,
 )
-from frame_compare.utils.terminal_sections import phase_group_needs_separator
+from frame_compare.utils.terminal_sections import take_run_block_separator
 from frame_compare.utils.terminal_theme import (
     ACCENT,
     FAIL,
@@ -368,7 +368,7 @@ class PlainProgressReporter:
                 if not nested:
                     console = human_console(stderr=True, no_color=True)
                     glyph = glyphs_for_console(console).skipped
-                    if phase_group_needs_separator():
+                    if take_run_block_separator():
                         console.print()
                     console.print(f"{glyph} {task.label.title():<16}interrupted")
             elif not nested or status in {
@@ -381,7 +381,7 @@ class PlainProgressReporter:
                     else ""
                 )
                 line = f"{_DURABLE_STATUS_MARKERS[status]} {task.label}{detail}"
-                if phase_group_needs_separator():
+                if take_run_block_separator():
                     print(file=sys.stderr)
                 print(line.encode("ascii", "backslashreplace").decode("ascii"), file=sys.stderr)
             self._task = self._task_stack.pop() if self._task_stack else None
@@ -589,7 +589,7 @@ class RichProgressReporter:
         alignment_summary: AlignmentSummary | None = None,
     ) -> None:
         """Print a retained phase line with its duration inline."""
-        if phase_group_needs_separator():
+        if take_run_block_separator():
             self._progress.console.print()
         glyphs = glyphs_for_console(self._progress.console)
         glyph = getattr(glyphs, _DURABLE_STATUS_GLYPHS[status])

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
@@ -81,6 +81,7 @@ async def run_align_phase(
     verbose: bool = False,
     quiet: bool = False,
     json_output: bool = False,
+    on_diagnostics_written: Callable[[Path], None] | None = None,
 ) -> AlignPhaseOutput:
     if not ctx.comparisons:
         return AlignPhaseOutput(
@@ -120,6 +121,7 @@ async def run_align_phase(
         quiet=quiet,
         json_output=json_output,
         on_reusable_cache_written=lambda: ctx.reusable_cache_writes.add("alignment"),
+        on_diagnostics_written=on_diagnostics_written,
     )
 
     results = outcome.results
@@ -293,7 +295,6 @@ async def run_align_phase(
                 aligned=[reference, *comparisons],
             ),
         ),
-        alignment_diagnostics_dir=outcome.diagnostics_dir,
         review_seconds=review_summary.review_seconds,
         review_unresolved=review_summary.review_unresolved,
         has_unapplied_offsets=any(not result.applied for result in results),

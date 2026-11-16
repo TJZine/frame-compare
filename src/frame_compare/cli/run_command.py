@@ -42,10 +42,15 @@ from frame_compare.utils.artifact_paths import artifact_link, format_display_pat
 from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.terminal import interruptible_prompt, stream_is_tty
-from frame_compare.utils.terminal_sections import Section, run_output_spacing, section_title
+from frame_compare.utils.terminal_sections import (
+    Section,
+    run_output_spacing,
+    section_title,
+    take_run_block_separator,
+)
 from frame_compare.utils.terminal_theme import (
     ACCENT,
-    format_duration,
+    format_exclusion_duration,
     glyphs_for_console,
     print_with_paths,
 )
@@ -365,6 +370,8 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
     except Exception as error:
         if failure_diagnostics is None:
             raise
+        if take_run_block_separator():
+            typer.echo(err=True)
         exit_code = deps.handle_error(error, no_color=effective_no_color, verbose=args.verbose)
         _print_failure_diagnostics(failure_diagnostics)
         raise typer.Exit(code=exit_code) from error
@@ -491,8 +498,8 @@ def build_confirm_full_window_retry_callback(
             "skip",
             " · ".join(
                 (
-                    f"first {format_duration(request.ignore_lead_seconds)}",
-                    f"last {format_duration(request.ignore_trail_seconds)}",
+                    f"first {format_exclusion_duration(request.ignore_lead_seconds)}",
+                    f"last {format_exclusion_duration(request.ignore_trail_seconds)}",
                 )
             ),
         )
@@ -749,6 +756,8 @@ def run_error_exit(
             )
         )
         return typer.Exit(code=int(get_exit_code(error)))
+    if take_run_block_separator():
+        typer.echo(err=True)
     return typer.Exit(code=deps.handle_error(error, no_color=no_color, verbose=args.verbose))
 
 

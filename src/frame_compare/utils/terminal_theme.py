@@ -211,6 +211,13 @@ def format_duration(seconds: float) -> str:
     return f"{hours}h {remaining_minutes:02d}m"
 
 
+def format_exclusion_duration(seconds: float) -> str:
+    """Display authored sub-minute exclusion settings at their configured precision."""
+    if seconds < 60.0:
+        return f"{float(seconds)} s"
+    return format_duration(seconds)
+
+
 __all__ = [
     "ACCENT",
     "BORDER_FAILED",
@@ -227,6 +234,7 @@ __all__ = [
     "WARN",
     "GlyphSet",
     "format_duration",
+    "format_exclusion_duration",
     "glyphs_for_console",
     "glyphs_for_encoding",
     "glyphs_for_stream",

@@ -99,9 +99,11 @@ Analyze validation timing for ordinary runs.
 `RunDependencies` supplies aware UTC wall time for persisted start/completion
 timestamps and a separate monotonic timer for preflight, source loading, phases,
 and total success/failure durations. Persisted `duration_seconds` comes from that
-monotonic total rather than wall-clock subtraction. After failure cleanup and
-run-record handling, the coordinator can pass an already-written alignment
-diagnostics path to the caller. The run CLI renders it with the error using its
+monotonic total rather than wall-clock subtraction. The alignment service
+reports the diagnostics directory after a successful per-run write. Execution
+records that path in run artifacts independently of alignment or selection
+application. After failure cleanup and run-record handling, the coordinator can
+pass the path to the caller. The run CLI renders it with the error using its
 human output path formatter.
 Current phase-family owners are intentionally explicit:
 

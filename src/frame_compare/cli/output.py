@@ -15,7 +15,7 @@ from frame_compare.utils.artifact_paths import (
 from frame_compare.utils.post_upload_actions import PostUploadActionResults
 from frame_compare.utils.progress import AlignmentSummaryValue
 from frame_compare.utils.run_warnings import RunWarning, WarningSource
-from frame_compare.utils.terminal_sections import Section, section_title
+from frame_compare.utils.terminal_sections import Section, section_title, take_run_block_separator
 from frame_compare.utils.terminal_theme import (
     ACCENT,
     BORDER_FAILED,
@@ -28,6 +28,7 @@ from frame_compare.utils.terminal_theme import (
     WARN,
     GlyphSet,
     format_duration,
+    format_exclusion_duration,
     glyphs_for_console,
     print_with_paths,
 )
@@ -183,8 +184,8 @@ def print_at_a_glance(
     else:
         excluded_window = _dot_join(
             [
-                f"first {format_duration(analysis.ignore_lead_seconds)}",
-                f"last {format_duration(analysis.ignore_trail_seconds)}",
+                f"first {format_exclusion_duration(analysis.ignore_lead_seconds)}",
+                f"last {format_exclusion_duration(analysis.ignore_trail_seconds)}",
             ]
         )
     if config.screenshots.use_ffmpeg:
@@ -534,6 +535,8 @@ def print_result_summary(
 def print_interruption(
     console: Console, interruption: InterruptedRun | None, *, root: Path
 ) -> None:
+    if take_run_block_separator():
+        console.print()
     glyph = glyphs_for_console(console).warning
     phase = None if interruption is None else interruption.phase
     title = "Interrupted" if phase is None else f"Interrupted during {phase}"
@@ -616,10 +619,11 @@ def _format_warning_panel_text(warnings: list[RunWarning], *, glyphs: GlyphSet) 
                 lines.append("")
             lines.append(f"[bold {ACCENT}]{escape(warning.source)}[/]")
             current_source = warning.source
+        message = escape(warning.human_message or warning.message)
         if warning.severity == "skipped":
-            lines.append(f"[dim]{glyphs.skipped} {escape(warning.message)}[/]")
+            lines.append(f"[dim]{glyphs.skipped} {message}[/]")
         else:
-            lines.append(f"[{WARN}]{glyphs.warning}[/] {escape(warning.message)}")
+            lines.append(f"[{WARN}]{glyphs.warning}[/] {message}")
         if warning.detail is not None:
             lines.append(f"  [dim]{escape(warning.detail)}[/]")
     return "\n".join(lines)

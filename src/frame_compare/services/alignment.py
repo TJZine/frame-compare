@@ -1172,6 +1172,7 @@ async def align_clips_from_request(
     json_output: bool = False,
     vs_loader: VSLoader | None = None,
     on_reusable_cache_written: Callable[[], None] | None = None,
+    on_diagnostics_written: Callable[[Path], None] | None = None,
 ) -> AlignmentOperationOutcome:
     """Align clips from the typed request seam with shared previous-offset reuse."""
     try:
@@ -1264,6 +1265,9 @@ async def align_clips_from_request(
             review_outcome=initial_outcome,
             emit_success_log=json_output,
         )
+        if diagnostic_keys and on_diagnostics_written is not None:
+            assert request.alignment_diagnostics_dir is not None
+            on_diagnostics_written(request.alignment_diagnostics_dir)
         present_alignment_evidence(
             request=request,
             resolutions=resolutions,
@@ -1281,7 +1285,6 @@ async def align_clips_from_request(
                 resolutions=tuple(
                     resolutions[alignment_key(reference, comp.path)] for comp in request.comparisons
                 ),
-                diagnostics_dir=request.alignment_diagnostics_dir if diagnostic_keys else None,
             )
 
         offsets_by_key = _build_offsets_map(
@@ -1367,7 +1370,6 @@ async def align_clips_from_request(
             resolutions=tuple(
                 resolutions[alignment_key(reference, comp.path)] for comp in request.comparisons
             ),
-            diagnostics_dir=request.alignment_diagnostics_dir if diagnostic_keys else None,
         )
     except _RunInterrupt:
         await cancellation_checkpoint()

@@ -181,6 +181,9 @@ def build_phases_before_align(
     workspace: WorkspacePaths,
     vs_loader: VSLoader | None = None,
 ) -> list[Phase]:
+    def _record_alignment_diagnostics(path: Path) -> None:
+        state.artifacts.alignment_diagnostics_dir = path
+
     def _run_align_with_current_selection(ctx: RunContext):
         return run_align_phase(
             ctx,
@@ -189,6 +192,7 @@ def build_phases_before_align(
             verbose=request.verbose,
             quiet=request.quiet,
             json_output=request.json_output,
+            on_diagnostics_written=_record_alignment_diagnostics,
         )
 
     return [

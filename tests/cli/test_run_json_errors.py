@@ -17,6 +17,7 @@ from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from .cli_helpers import (
     MINIMAL_CONFIG,
     _invoke_run_with_minimal_workspace,
+    _normalize_cli_output,
     _write_minimal_config,
     isolated_cli_filesystem,
     runner,
@@ -626,6 +627,7 @@ def test_run_exit_code_is_130_on_keyboard_interrupt(
         assert result.stdout == ""
     else:
         assert result.stderr.strip() == "! Interrupted"
+        assert "╰─\n\n! Interrupted" in _normalize_cli_output(result.output)
 
 
 def test_run_error_wraps_colon_after_a_full_width_config_path(

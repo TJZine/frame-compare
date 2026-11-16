@@ -414,6 +414,8 @@ unchanged.
   renderer for every in-scope section; the VSView process applies the same rules
   in `SessionConsole`. One blank line separates `run` blocks, including the
   completion and Warnings sections. Adjacent phase lines form one block.
+  Plain audio evidence forms a separate block. Errors and interruption summaries
+  are separated from the preceding section by one blank line.
 - Normal non-quiet runs begin with a dim-rail `Run plan` section containing
   `Workspace`, `Frames`, `Rendering`, `Alignment`, `Review`, and `Publishing`
   groups. Group keys are accent bold; their
@@ -603,9 +605,11 @@ unchanged.
   `skipped`. If rendered and planned frame counts differ, the row shows
   `{rendered} of {planned} frames`. The next rows are `time` as `{dur} total`,
   `  phases`, and `  you` with their corresponding timings. Artifact paths are
-  Rich hyperlinks and use the shared path formatter. If a failure after alignment
-  prevents the completion section, the error is followed by the diagnostics path
-  when available. `--quiet` is unchanged.
+  Rich hyperlinks and use the shared path formatter. The diagnostics path is
+  available once a diagnostic is written, including when alignment later fails
+  or the run continues with its original selection. If an error prevents the
+  completion section, the error is followed by the written diagnostics path.
+  Quiet, JSON, and managed interruption output omit this path.
 - The yellow-rail `! Warnings` section lists every distinct warning once,
   including post-upload action warnings. The completion title counts that same
   list. Copy, browser, shortcut, and webhook rows retain concise outcomes. The
@@ -666,7 +670,9 @@ unchanged.
   skips, warned and failed phases, and successful uploads. Plain mode uses
   `[OK] ALIGN  Completed in …`. Human durations use one decimal below a minute
   (`0.3 s`, `12.9 s`), minutes and seconds from a minute (`1m 08s`), and hours
-  and minutes from an hour (`1h 02m`). Timecodes show positions within media.
+  and minutes from an hour (`1h 02m`). The run plan, the full-window prompt,
+  and its warning show authored sub-minute exclusion values with their available
+  precision, such as `0.03 s`. Timecodes show positions within media.
 - Phase summaries are unchanged except for Align: Analyze uses `{N} frames
   selected`, Render uses `{N} screenshots ({F} frames × {S} sources)`, Publish
   uses `{N} screenshots uploaded · {visibility}`, and a skipped phase uses its

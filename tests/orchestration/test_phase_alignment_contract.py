@@ -254,6 +254,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
         json_output: bool = False,
         vs_loader: VSLoader | None = None,
         on_reusable_cache_written: Callable[[], None] | None = None,
+        on_diagnostics_written: Callable[[Path], None] | None = None,
     ) -> AlignmentOperationOutcome:
         outcome = await real_align(
             request,
@@ -265,6 +266,7 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
             json_output=json_output,
             vs_loader=vs_loader,
             on_reusable_cache_written=on_reusable_cache_written,
+            on_diagnostics_written=on_diagnostics_written,
         )
         results = outcome.results
         assert len(results) == 1
@@ -654,7 +656,6 @@ def test_extra_footage_describes_final_shared_range(
                 ComparisonResolution(result, str(index), "computed_this_run")
                 for index, result in enumerate(results)
             ),
-            diagnostics_dir=tmp_path / "actual diagnostics",
         )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", align)
@@ -677,7 +678,6 @@ def test_extra_footage_describes_final_shared_range(
         duration_seconds=1.0,
     )
     assert result.alignment_summary == output.alignment_summary
-    assert result.alignment_diagnostics_dir == output.alignment_diagnostics_dir
 
 
 @pytest.mark.parametrize("review_kind", ["none", "kept", "unresolved", "mixed"])

@@ -10,7 +10,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import TypeVar
+from typing import TextIO, TypeVar
 
 from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
 from rich.segment import Segment
@@ -23,7 +23,7 @@ _T = TypeVar("_T")
 
 @dataclass
 class _RunSpacing:
-    after_section: bool = False
+    after_block: bool = False
 
 
 _run_spacing: ContextVar[_RunSpacing | None] = ContextVar("run_spacing", default=None)
@@ -39,19 +39,29 @@ def run_output_spacing() -> Generator[None]:
         _run_spacing.reset(token)
 
 
-def phase_group_needs_separator() -> bool:
-    """Consume a section boundary before the first retained phase line."""
+def take_run_block_separator() -> bool:
+    """Consume an outstanding blank line between run output blocks."""
     spacing = _run_spacing.get()
-    if spacing is None or not spacing.after_section:
+    if spacing is None or not spacing.after_block:
         return False
-    spacing.after_section = False
+    spacing.after_block = False
     return True
+
+
+def print_plain_run_block(text: str, *, file: TextIO) -> None:
+    """Keep a plain text block in the same sequence as rich run sections."""
+    spacing = _run_spacing.get()
+    if spacing is not None:
+        print(file=file)
+    print(text, file=file)
+    if spacing is not None:
+        spacing.after_block = True
 
 
 def _finish_section(console: Console, *, trailing_space: bool = True) -> None:
     spacing = _run_spacing.get()
     if spacing is not None:
-        spacing.after_section = True
+        spacing.after_block = True
     elif trailing_space:
         console.print()
 
