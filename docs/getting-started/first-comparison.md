@@ -169,8 +169,8 @@ Use the report and screenshot paths in the completed-run summary.
 │ diagnostics     generated/Black Sails/alignment_diagnostics
 │
 │ run             10 of 12 frames · 3 sources · analysis computed
-│ time            11m 12s total
-│   machine       setup 48.5 s · analyze 7m 16s · align 2m 51s · render 16.6 s
+│ time            7m 35s total
+│   phases        setup 29.6 s · analyze 5m 06s · align 1m 46s · render 12.8 s
 ╰─
 
 ╭─ ! Warnings
