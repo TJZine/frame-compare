@@ -75,5 +75,5 @@ def test_fast_successful_align_keeps_its_phase_line(
     phase = Phase("align", align, success_summary="source +0f · reused from last run")
     asyncio.run(execute_phases([phase], _context(tmp_path), reporter))
     assert Text.from_ansi(output.getvalue()).plain.strip() == (
-        "✓ Align           source +0f · reused from last run · 0s"
+        "✓ Align           source +0f · reused from last run · 0.0 s"
     )
