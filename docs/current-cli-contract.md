@@ -500,8 +500,9 @@ unchanged.
   comparison has a bold short-name line, `trims`, `stability` when present, and
   `frames` (`aligned …`, or `aligned frame 0 (1 total)` for a single frame at index 0).
   The `offset` and `source` rows are removed; the Align phase summary carries the
-  final offsets and origins. Alignment warnings are `!` notes, and verbose
-  `details` rows are unchanged. The existing evidence still reports normalized
+  final offsets and origins. A comparison with an alignment warning gets a
+  `! see warnings` note. The warning itself appears in the final Warnings section.
+  Verbose `details` rows are unchanged. The existing evidence still reports normalized
   source-frame row 0, final trim ranges, selected aligned frames, and alignment
   warning context. Stability is derived from credible chunk runs; unobserved
   planned chunks remain unassessed. Individual diagnostic chunks are never printed.
@@ -598,12 +599,13 @@ unchanged.
   `skipped`, followed by `time` as `{dur} total`, `  machine`, and `  you` with
   their existing items. Artifact paths are Rich hyperlinks and use the shared
   path formatter. `--quiet` is unchanged.
-- Final warnings are grouped by producer-selected source in a yellow-rail
-  `! Warnings` section. Each source has its accent bold name, `!` notes (or `–`
-  for skipped items), dim detail lines indented two spaces, and one blank body
-  line between sources. The hidden-count line is unchanged. Records are
-  de-duplicated for display, and warning rows associated with post-upload action
-  rows remain on those rows.
+- The yellow-rail `! Warnings` section lists every distinct warning once,
+  including post-upload action warnings. The completion title counts that same
+  list. Copy, browser, shortcut, and webhook rows retain concise outcomes. The
+  section groups by source only when several sources are represented, with `!`
+  for warnings, `–` for skipped items, and dim, indented details when present.
+  Rejected comparisons use the short label and a plain-language reason, followed
+  by a note that frames use the reference's frame numbers.
 - The output redesign moves information rather than dropping it:
 
   | Removed or changed | Information now shown in |

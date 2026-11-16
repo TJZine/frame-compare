@@ -124,7 +124,9 @@ async def run_align_phase(
 
     updated_comparisons: list[ClipState] = []
     warnings: list[RunWarning] = []
-    for comparison, result in zip(ctx.comparisons, results, strict=True):
+    for comparison, comparison_request, result in zip(
+        ctx.comparisons, alignment_request.comparisons, results, strict=True
+    ):
         alignment = None
         if result.applied:
             frame_offset = result.frame_offset
@@ -140,7 +142,8 @@ async def run_align_phase(
             warnings.append(
                 format_rejected_alignment_warning(
                     result,
-                    comparison_label=comparison.label,
+                    comparison_label=comparison_request.short_name or comparison_request.label,
+                    comparison_path=comparison.path,
                 )
             )
         updated_comparisons.append(

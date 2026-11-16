@@ -89,6 +89,7 @@ from frame_compare.utils.alignment_evidence import (
     VideoCheckObservation,
     analysis_stream_start,
     audio_attempt_payload,
+    audio_unavailable_phrase,
 )
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
@@ -114,33 +115,22 @@ __all__ = [
 ]
 
 
-def _safe_alignment_diagnostic(diagnostic: str | None) -> str:
-    if diagnostic is None:
-        return "no diagnostic"
-    normalized = " ".join(diagnostic.strip().split())
-    if not normalized:
-        return "no diagnostic"
-    allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.=, ")
-    if any(char not in allowed_chars for char in normalized):
-        return "diagnostic unavailable"
-    return normalized[:120]
-
-
 def format_rejected_alignment_warning(
     result: AlignmentResult,
     *,
     comparison_label: str,
+    comparison_path: Path,
 ) -> RunWarning:
     """Format a rejected computed alignment as a deterministic run warning."""
-    reason = _safe_alignment_diagnostic(result.diagnostic)
+    reason = audio_unavailable_phrase(result.diagnostic or "no_usable_audio")
     return RunWarning(
         source="alignment",
         severity="warning",
-        message=f"align: {comparison_label} alignment left unapplied",
-        detail=(
-            f"because {reason}; rendering in best-effort reference-frame domain "
-            "without accepted alignment."
+        message=(
+            f"{comparison_label}: alignment not applied ({reason}); "
+            "frames use the reference's frame numbers."
         ),
+        comparison_path=comparison_path,
     )
 
 

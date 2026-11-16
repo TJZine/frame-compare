@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,9 +12,9 @@ from frame_compare.utils.artifact_paths import (
     artifact_link,
     format_display_path,
 )
-from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
+from frame_compare.utils.post_upload_actions import PostUploadActionResults
 from frame_compare.utils.progress import AlignmentSummaryValue
-from frame_compare.utils.run_warnings import RunWarning, WarningSeverity, WarningSource
+from frame_compare.utils.run_warnings import RunWarning, WarningSource
 from frame_compare.utils.terminal_sections import Section, section_title
 from frame_compare.utils.terminal_theme import (
     ACCENT,
@@ -40,15 +39,6 @@ if TYPE_CHECKING:
 STYLE_UNIT = "dim"
 STYLE_PATH = "dim"
 STYLE_WARN = "yellow"
-
-
-@dataclass(frozen=True)
-class WarningPresentation:
-    source: WarningSource
-    severity: WarningSeverity
-    message: str
-    detail: str | None = None
-    action: str | None = None
 
 
 def _styled_value(value: str) -> str:
@@ -431,18 +421,13 @@ def print_result_summary(
         *result.post_upload_actions,
         *post_upload_actions,
     )
-    row_warning_count = _row_warning_count(all_post_upload_actions)
-    warnings = [
-        presentation
-        for presentation in _warning_presentations(result.warnings, all_post_upload_actions)
-        if presentation.action not in _ROW_WARNING_ACTIONS
-    ]
+    warnings = _warning_presentations(result.warnings, all_post_upload_actions)
     glyphs = glyphs_for_console(console)
     if not result.success:
         title = f"[bold {FAIL}]{glyphs.failed} Comparison failed[/]"
         border_style = BORDER_FAILED
-    elif warnings or row_warning_count:
-        warning_count = row_warning_count + len(warnings)
+    elif warnings:
+        warning_count = len(warnings)
         noun = "warning" if warning_count == 1 else "warnings"
         title = (
             f"[bold {WARN}]{glyphs.warning} Comparison complete[/] [dim]· {warning_count} {noun}[/]"
@@ -471,7 +456,7 @@ def print_result_summary(
             )
             break
         if not action.success:
-            _add_kv(table, "  shortcut", _shortcut_failure_value(action, glyphs=glyphs))
+            _add_kv(table, "  shortcut", f"[{WARN}]{glyphs.warning}[/] not created")
             break
 
     for action in all_post_upload_actions:
@@ -528,12 +513,7 @@ def print_result_summary(
     table.print(console)
 
     if warnings:
-        max_lines = len(warnings) if verbose else 8
-        visible = warnings[:max_lines]
-        remaining = len(warnings) - len(visible)
-        warning_text = _format_warning_panel_text(visible, glyphs=glyphs)
-        if remaining > 0:
-            warning_text += _format_hidden_warning_counts(warnings[max_lines:], glyphs=glyphs)
+        warning_text = _format_warning_panel_text(warnings, glyphs=glyphs)
         section = Section(
             title=f"[{STYLE_WARN}]{glyphs.warning} Warnings[/]", rail_style=BORDER_PENDING
         )
@@ -555,30 +535,6 @@ def _slowpics_link(url: str) -> str:
     return f"[link={target}][bold {ACCENT} underline]{escape(url)}[/][/link]"
 
 
-_ROW_WARNING_ACTIONS = ("clipboard", "browser", "shortcut", "webhook")
-
-
-def _row_warning_count(actions: PostUploadActionResults) -> int:
-    count = sum(
-        1 for action in actions if not action.success and action.kind in ("clipboard", "browser")
-    )
-    for kind in ("shortcut", "webhook"):
-        for action in actions:
-            if action.kind == kind:
-                if not action.success:
-                    count += 1
-                break
-    return count
-
-
-def _shortcut_failure_value(action: PostUploadActionResult, *, glyphs: GlyphSet) -> str:
-    item = f"[{WARN}]{glyphs.warning}[/] not created"
-    reason = None if action.warning is None else action.warning.detail
-    if reason:
-        item += f" [dim]({escape(reason)})[/]"
-    return item
-
-
 def _followup_action_items(actions: PostUploadActionResults, *, glyphs: GlyphSet) -> list[str]:
     items: list[str] = []
     for action in actions:
@@ -591,79 +547,27 @@ def _followup_action_items(actions: PostUploadActionResults, *, glyphs: GlyphSet
             if action.success:
                 items.append(f"[{OK}]{glyphs.ok}[/] opened in browser")
             else:
-                item = f"[{WARN}]{glyphs.warning}[/] browser didn't open"
-                reason = None if action.warning is None else action.warning.detail
-                if reason:
-                    item += f" [dim]({escape(reason)})[/]"
-                items.append(item)
+                items.append(f"[{WARN}]{glyphs.warning}[/] browser didn't open")
     return items
 
 
 def _warning_presentations(
     warnings: list[RunWarning],
     actions: PostUploadActionResults,
-) -> list[WarningPresentation]:
-    candidates: list[WarningPresentation] = []
-    seen: set[tuple[str, WarningSeverity, str, str | None]] = set()
-    action_warnings_by_record = {
-        action.warning: _post_upload_warning_presentation(action)
-        for action in actions
-        if action.warning is not None
-    }
-
-    for warning in warnings:
-        row = action_warnings_by_record.get(warning)
-        if row is None:
-            row = WarningPresentation(
-                warning.source, warning.severity, warning.message, warning.detail
-            )
-        key = (row.source, row.severity, row.message, row.detail)
-        if key in seen:
-            continue
-        seen.add(key)
-        candidates.append(row)
-
-    for row in action_warnings_by_record.values():
-        key = (row.source, row.severity, row.message, row.detail)
-        if key in seen:
-            continue
-        seen.add(key)
-        candidates.append(row)
-
-    return _group_warnings_by_source(candidates)
+) -> list[RunWarning]:
+    recorded = [*warnings, *(action.warning for action in actions if action.warning is not None)]
+    grouped: dict[WarningSource, dict[RunWarning, None]] = {}
+    for warning in recorded:
+        grouped.setdefault(warning.source, {})[warning] = None
+    return [warning for group in grouped.values() for warning in group]
 
 
-def _post_upload_warning_presentation(
-    action: PostUploadActionResult,
-) -> WarningPresentation:
-    warning = action.warning
-    if warning is None:
-        raise ValueError("post-upload warning presentation requires action.warning")
-    return WarningPresentation(
-        source=warning.source,
-        severity=warning.severity,
-        message=warning.message,
-        detail=warning.detail,
-        action=action.kind,
-    )
-
-
-def _group_warnings_by_source(warnings: list[WarningPresentation]) -> list[WarningPresentation]:
-    sources: list[str] = []
-    grouped: dict[str, list[WarningPresentation]] = {}
-    for warning in warnings:
-        if warning.source not in grouped:
-            sources.append(warning.source)
-            grouped[warning.source] = []
-        grouped[warning.source].append(warning)
-    return [warning for source in sources for warning in grouped[source]]
-
-
-def _format_warning_panel_text(warnings: list[WarningPresentation], *, glyphs: GlyphSet) -> str:
+def _format_warning_panel_text(warnings: list[RunWarning], *, glyphs: GlyphSet) -> str:
     lines: list[str] = []
+    group_by_source = len({warning.source for warning in warnings}) > 1
     current_source: str | None = None
     for warning in warnings:
-        if warning.source != current_source:
+        if group_by_source and warning.source != current_source:
             if lines:
                 lines.append("")
             lines.append(f"[bold {ACCENT}]{escape(warning.source)}[/]")
@@ -675,14 +579,3 @@ def _format_warning_panel_text(warnings: list[WarningPresentation], *, glyphs: G
         if warning.detail is not None:
             lines.append(f"  [dim]{escape(warning.detail)}[/]")
     return "\n".join(lines)
-
-
-def _format_hidden_warning_counts(hidden: list[WarningPresentation], *, glyphs: GlyphSet) -> str:
-    counts_by_source: dict[str, int] = {}
-    for warning in hidden:
-        counts_by_source[warning.source] = counts_by_source.get(warning.source, 0) + 1
-
-    count_text = ", ".join(
-        f"{escape(source)}={count}" for source, count in sorted(counts_by_source.items())
-    )
-    return f"\n[{WARN}]{glyphs.warning}[/] ... ({len(hidden)} more) hidden by source: {count_text}"

@@ -489,7 +489,7 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
         assert ctx.comparisons[0].alignment is None
         detail = {
             "stream": "audio stream override",
-            "timeline": "selected_audio_timeline_unavailable",
+            "timeline": "selected audio timeline unavailable",
             "ffmpeg_error": "FFmpeg failed with exit code 1",
             "ffmpeg_missing": "FFmpeg binary not found",
         }[unavailable_kind]
@@ -722,7 +722,13 @@ def test_unapplied_and_unresolved_review_warn_only_the_align_phase(
     assert output.has_unapplied_offsets is unapplied
     assert output.review_unresolved is (review_kind == "unresolved")
     expected_warnings = (
-        [format_rejected_alignment_warning(original_results[0], comparison_label=comparison.label)]
+        [
+            format_rejected_alignment_warning(
+                original_results[0],
+                comparison_label=comparison.label,
+                comparison_path=comparison.path,
+            )
+        ]
         if unapplied
         else []
     )

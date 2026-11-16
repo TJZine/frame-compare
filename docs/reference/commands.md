@@ -363,6 +363,10 @@ The first digit of an `FC-` code selects its family and exit code. Human output 
 the code and message on stderr; `--json` prints a typed error document, described in
 the [CLI behavioral contract](../current-cli-contract.md#output-modes).
 
+When a run completes with warnings, the completion block gives the count. The
+Warnings block lists each distinct warning, including details about failed
+post-upload actions.
+
 ## Automation
 
 For unattended use:

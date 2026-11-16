@@ -46,13 +46,18 @@ def test_unapplied_alignment_warning_preserves_adversarial_label_and_semantics()
         None,
         "computed",
         applied=False,
-        diagnostic="low_confidence",
+        diagnostic="video_check_inconclusive",
     )
     neutral_label = "Encode B"
     adversarial_label = "Encode skipped frames: because ordinary label"
     rows = [
         _warning_presentations(
-            [format_rejected_alignment_warning(result, comparison_label=label)], ()
+            [
+                format_rejected_alignment_warning(
+                    result, comparison_label=label, comparison_path=Path("cmp.mkv")
+                )
+            ],
+            (),
         )[0]
         for label in (neutral_label, adversarial_label)
     ]
@@ -64,18 +69,18 @@ def test_unapplied_alignment_warning_preserves_adversarial_label_and_semantics()
     )
     assert neutral.source == "alignment"
     assert neutral.severity == "warning"
-    assert neutral.message == "align: Encode B alignment left unapplied"
-    assert neutral.detail == (
-        "because low_confidence; rendering in best-effort reference-frame domain "
-        "without accepted alignment."
+    assert neutral.message == (
+        "Encode B: alignment not applied (video check was inconclusive); "
+        "frames use the reference's frame numbers."
     )
+    assert neutral.detail is None
     assert adversarial.message == neutral.message.replace(neutral_label, adversarial_label)
     assert adversarial_label in adversarial.message
     assert adversarial_label not in adversarial.source
-    assert adversarial.detail is not None and adversarial_label not in adversarial.detail
+    assert adversarial.detail is None
     rendered = []
     for row in rows:
-        console = Console(record=True, force_terminal=True, width=240)
+        console = Console(record=True, force_terminal=True, width=240, height=25)
         console.print(_format_warning_panel_text([row], glyphs=GLYPHS_UNICODE))
         rendered.append(console.export_text(styles=True))
     assert rendered[1] == rendered[0].replace(neutral_label, adversarial_label)
@@ -800,31 +805,26 @@ def test_result_summary_report_path_presentation(external: bool) -> None:
         assert f"(absolute: {report})" in output
 
 
-def test_result_summary_warning_headline_cap_and_verbose_expansion() -> None:
-    warnings = [RunWarning("sources", "warning", f"warning {index}") for index in range(1, 11)]
-    normal_console = _console()
+@pytest.mark.parametrize("verbose", [False, True])
+def test_result_summary_lists_all_distinct_warnings_without_a_category_for_one_source(
+    verbose: bool,
+) -> None:
+    console = _console()
+    warnings = [RunWarning("sources", "warning", f"warning item {index}") for index in range(10)]
     print_result_summary(
-        normal_console,
-        result=RunResult(success=True, warnings=warnings),
+        console,
+        result=RunResult(success=True, warnings=[*warnings, warnings[0]]),
         quiet=False,
+        verbose=verbose,
     )
-    normal_output = _render(normal_console)
-    assert "Comparison complete · 10 warnings" in normal_output
-    assert "warning 8" in normal_output
-    assert "warning 9" not in normal_output
-    assert "(2 more)" in normal_output
 
-    verbose_console = _console()
-    print_result_summary(
-        verbose_console,
-        result=RunResult(success=True, warnings=warnings),
-        quiet=False,
-        verbose=True,
-    )
-    verbose_output = _render(verbose_console)
-    assert "Comparison complete · 10 warnings" in verbose_output
-    assert "warning 10" in verbose_output
-    assert "(2 more)" not in verbose_output
+    output = _render(console)
+    assert "Comparison complete · 10 warnings" in output
+    _, section = output.split("Warnings", 1)
+    assert "│ sources" not in section
+    assert "hidden by source" not in section
+    for index in range(10):
+        assert section.count(f"warning item {index}") == 1
 
 
 def test_result_summary_quiet_mode_prints_only_screenshot_path_when_available() -> None:
@@ -946,7 +946,7 @@ def test_result_summary_shows_followup_failure_on_row_not_in_panel() -> None:
     assert "Comparison complete · 4 warnings" in output
     assert "URL not copied" in output
     assert "action: clipboard" not in output
-    assert "failed to copy URL" not in output
+    assert output.count("failed to copy URL") == 1
     assert "alignment" in output
     assert "slow.pics" in output
     assert output.count("alignment") == 1
@@ -1045,12 +1045,16 @@ def test_result_summary_uploaded_with_each_followup_failing() -> None:
     assert "no browser accepted the request" in output
     assert "not created" in output
     assert "failed to write URL shortcut Example.url: boom" in output
-    assert "delivery failed" in output
-    assert "Warnings" not in output
-    assert "failed to copy URL" not in output
+    completion, warnings = output.split("Warnings", 1)
+    assert "delivery failed" in completion
+    assert "no browser accepted the request" not in completion
+    assert "failed to write URL shortcut Example.url: boom" not in completion
+    assert "slow.pics browser:" in warnings
+    assert "slow.pics webhook: delivery failed" in warnings
+    assert output.count("failed to copy URL") == 1
 
 
-def test_result_summary_shortcut_and_webhook_warnings_are_deduplicated_on_rows() -> None:
+def test_result_summary_shortcut_and_webhook_warnings_are_deduplicated_in_warning_section() -> None:
     console = _console()
     shortcut_warning = RunWarning(
         "slow.pics",
@@ -1090,11 +1094,11 @@ def test_result_summary_shortcut_and_webhook_warnings_are_deduplicated_on_rows()
     assert "Comparison complete · 2 warnings" in output
     assert "not created" in output
     assert "delivery failed" in output
-    assert "Warnings" not in output
+    _, warnings = output.split("Warnings", 1)
     assert output.count("failed to write URL shortcut Example.url: boom") == 1
-    assert output.count("delivery failed") == 1
-    assert "slow.pics shortcut:" not in output
-    assert "slow.pics webhook:" not in output
+    assert warnings.count("slow.pics webhook: delivery failed") == 1
+    assert warnings.count("slow.pics shortcut:") == 1
+    assert "│ slow.pics\n" not in warnings
 
 
 def test_result_summary_ascii_fallback_uses_ascii_glyphs() -> None:
@@ -1320,7 +1324,7 @@ def test_result_summary_time_rows(
         assert fragment not in output
 
 
-def test_post_upload_association_requires_record_equality() -> None:
+def test_warning_deduplication_includes_source() -> None:
     from frame_compare.cli.output import _warning_presentations
 
     action_warning = RunWarning("slow.pics", "warning", "same emitted text")
@@ -1331,7 +1335,4 @@ def test_post_upload_association_requires_record_equality() -> None:
         [other_warning, replace(action_warning)],
         (PostUploadActionResult(kind="webhook", success=False, warning=action_warning),),
     )
-    assert [(row.source, row.action) for row in rows] == [
-        ("history", None),
-        ("slow.pics", "webhook"),
-    ]
+    assert rows == [other_warning, action_warning]

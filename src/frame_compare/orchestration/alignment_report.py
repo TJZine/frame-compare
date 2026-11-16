@@ -142,10 +142,11 @@ def _format_stability(summary: AlignmentStabilitySummary) -> str:
 def _has_material_alignment_info(
     *,
     comparisons: Sequence[AlignmentReportComparison],
-    alignment_warnings: list[RunWarning],
+    warned_comparison_paths: set[Path],
 ) -> bool:
     return any(
-        comparison.relative_offset_frames not in (None, 0)
+        comparison.comparison_path in warned_comparison_paths
+        or comparison.relative_offset_frames not in (None, 0)
         or (
             comparison.alignment_source is not None
             and (
@@ -157,14 +158,14 @@ def _has_material_alignment_info(
             )
         )
         for comparison in comparisons
-    ) or bool(alignment_warnings)
+    )
 
 
 def _render_alignment_table(
     *,
     comparisons: Sequence[AlignmentReportComparison],
     selected_frames: Sequence[int],
-    alignment_warnings: list[RunWarning],
+    warned_comparison_paths: set[Path],
     verbose: bool,
 ) -> Section:
     section = Section(section_title("Frame alignment"))
@@ -206,11 +207,8 @@ def _render_alignment_table(
                 Text(f"aligned {_format_selected_frames(selected_frames)}"),
             )
 
-    if alignment_warnings:
-        if comparisons:
-            section.add_line()
-        for warning in alignment_warnings:
-            section.add_note(warning.text)
+        if comparison.comparison_path in warned_comparison_paths:
+            section.add_note("see warnings")
 
     if verbose:
         for comparison in comparisons:
@@ -242,7 +240,7 @@ def _render_human_alignment_report(
     stage: str,
     comparisons: Sequence[AlignmentReportComparison],
     selected_frames: Sequence[int],
-    alignment_warnings: list[RunWarning],
+    warned_comparison_paths: set[Path],
     no_color: bool,
     verbose: bool,
 ) -> None:
@@ -256,7 +254,7 @@ def _render_human_alignment_report(
     _render_alignment_table(
         comparisons=comparisons,
         selected_frames=selected_frames,
-        alignment_warnings=alignment_warnings,
+        warned_comparison_paths=warned_comparison_paths,
         verbose=verbose,
     ).print(console)
 
@@ -275,9 +273,14 @@ def emit_frame_alignment_report(
     """Emit the frame alignment report for human-readable runs."""
     if quiet or json_output:
         return
+    warned_comparison_paths = {
+        warning.comparison_path
+        for warning in alignment_warnings
+        if warning.comparison_path is not None
+    }
     if not _has_material_alignment_info(
         comparisons=comparisons,
-        alignment_warnings=alignment_warnings,
+        warned_comparison_paths=warned_comparison_paths,
     ):
         return
 
@@ -285,7 +288,7 @@ def emit_frame_alignment_report(
         stage=stage,
         comparisons=comparisons,
         selected_frames=selected_frames,
-        alignment_warnings=alignment_warnings,
+        warned_comparison_paths=warned_comparison_paths,
         no_color=no_color,
         verbose=verbose,
     )
