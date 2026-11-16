@@ -1173,10 +1173,14 @@ primary toolbar plus viewport palette; a collapsible, compact/normal/large
 filmstrip bottom panel; a responsive inspector drawer with Frame, Clips, Image offset,
 and Review tabs; fullscreen support; viewport pan, zoom, actual size and fit height
 controls (plus continued support for a restored width-fit preference without a visible
-control), reveal, and adjacent-frame preloading. The toolbar owner uses
-CSS Grid to keep frame, mode, and context/offset zones stable at wide widths, then
-reflows them to two rows and a narrow stack without JavaScript measurement or DOM
-reordering. Frame arrow shortcuts select the adjacent visible frame while suppressing
+control), reveal, and adjacent-frame preloading. The toolbar combines the title,
+frame stepper and filter badge, mode switch, context controls, offset status, and
+report actions. From 1280 px the flex row reserves source-select space before
+sizing the title and frame select. At intermediate widths the title and stepper
+share a row above the other controls. Their width is independent of the CSS Grid
+tracks below. The toolbar retains the stacked order through 768 px. The offset status appears for
+a visible pair with a nonzero offset. At compact widths the full value can wrap
+inside the status without covering adjacent controls. Frame arrow shortcuts select the adjacent visible frame while suppressing
 native document and filmstrip scrolling; the selected filmstrip item owns its roving
 tab stop. Custom view-mode, fit, filmstrip-size, and lens-option radio groups use
 standard arrow and Home/End selection. The header Help dialog is the single persistent
@@ -1227,13 +1231,10 @@ selected pair, scan sources together).
 Keyboard focus uses a neutral light outline, and the image canvas has no decorative
 shadow. Report payload generation derives the comparison title from resolved TMDB
 metadata and reference episode numbers, shared content identity, or source short
-labels, in that order. The renderer uses the payload title and labels the header
-count as sources. The renderer emits the header generation timestamp as a `<time>` element
-carrying the exact ISO timestamp in `datetime` and `title`; the viewer localizes its
-text to medium date plus short time. The exact timestamp remains available in the
-tooltip, Report Information, and payload.
-Report Information is the single place for report metadata: title, report ID, generated
-timestamp, frame/clip counts, and the slow.pics link. The renderer alone builds that
+labels, in that order. The toolbar title uses a single line with the full title in
+its tooltip. Report Information shows the report ID, generation time and content
+counts. The Generated `<time>` contains the exact ISO timestamp in `datetime` and
+`title`. The viewer localizes its visible date and time. The renderer alone builds that
 link's safe http(s) href; no viewer script re-derives it. The viewer's Inspector builds
 the Report Information source cards, Opens in, and Default pair at startup; renderer.py
 emits only their containers.
@@ -1305,8 +1306,12 @@ report, joining profile segments with `·` (slow.pics image names keep the `|`
 separator; burned-in screenshot text is the clip label and does not use release
 descriptors). The micro profile uses the same short source names as terminal
 summaries, with bidi controls made visible before collision handling. Grid, the lens,
-and compact inspector rows consume this profile. Regular controls and source details
-use the control and primary profiles and the displayed basename.
+and compact inspector rows consume this profile. Native source options start with
+the short name and append distinct control detail. A detail that repeats a complete
+trailing alias in the short name is omitted. The closed select caps its
+width and can clip long names. The option title and accessible name retain the
+primary identity and displayed basename. Stage chips and source details continue
+to use their existing profiles.
 Per-clip presentation contains applied tonemap facts; the rendering summary derives a
 shared implementation/algorithm/control projection, excluding clip-specific peaks and
 causes. Identity includes applied output facts and excludes requested settings and

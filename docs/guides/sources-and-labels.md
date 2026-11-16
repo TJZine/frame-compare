@@ -102,8 +102,10 @@ start of the stem. An empty remainder falls back to the resolved source label.
 Frame Compare qualifies remaining collisions by source role and preserves explicit
 labels.
 
-The report uses detailed release labels in its regular controls and short names in
-Grid, the lens, and the inspector's compact source views. The report keeps the exact
+The source selectors start with the short name and append release details that add
+information. An alias already at the end of the short name appears once.
+Hover over a selector for the full identity. Grid, the lens, and the inspector's
+compact source views use the short name. The report keeps the exact
 basename and canonical source label in its embedded metadata. It displays any
 bidirectional formatting controls in names as code points such as `[U+202E]`.
 

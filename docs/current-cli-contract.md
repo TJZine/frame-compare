@@ -1142,12 +1142,15 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
   measurement)`. The per-clip applied facts disclose the resolved source-peak origin.
   When fast mode uses the `default` origin, the report notes that no HDR peak metadata
   was found and the default 1000-nit peak was used.
-- The primary report toolbar keeps frame navigation, view modes, and mode-specific
-  context/alignment in three stable CSS-owned zones on wide screens. It becomes a
-  two-row layout at medium widths and a stacked layout at narrow widths without
-  changing DOM order, native controls, keyboard behavior, or ARIA semantics.
+- The report toolbar combines the comparison title, frame navigation, view modes,
+  mode-specific controls, and report actions. It uses one row on wide screens,
+  two rows at intermediate widths, and a stack on narrow screens. Native source
+  options show the short label first, then distinct control detail. A repeated trailing
+  alias is omitted from the option. Long labels can
+  clip in the closed control. The full option title and accessible name remain available.
 - Viewer spatial translation is labeled `Offset`, distinct from temporal source-frame
-  alignment. Filmstrip captions show the comparison frame number and selection category
+  alignment. The toolbar shows it for the displayed pair when the offset is nonzero.
+  The full offset value can wrap inside the status at compact widths. Filmstrip captions show the comparison frame number and selection category
   at every thumbnail size, with the full original frame label available on hover and
   in the frame selector. In Grid, the palette sits below or beside the cells and
   the frame selector identifies the current frame in the toolbar. Fullscreen Grid
@@ -1161,10 +1164,10 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
   season and episode for television. Otherwise it uses the shared filename-derived
   content title from the CLI Sources header, or the first two short labels joined by
   ` vs ` with ` +N more` for additional sources. Filenames remain in Clips and Report
-  Information. The second header line shows the localized generation date and time,
-  frame count, and source count. The exact ISO timestamp remains in the report payload
-  and in the `<time>` element's `datetime` and `title` attributes; hover over the header or Generated value to inspect it.
-  Unparseable date text is shown unchanged.
+  Information. Report Information shows the localized generation date and time, frame
+  count, and source count. The exact ISO timestamp remains in the report payload and
+  in the Generated value's `datetime` and `title` attributes. Unparseable date text is
+  shown unchanged.
 - Report identity includes the comparison title and output-affecting overlay, geometry,
   tonemap, presentation, signal, and per-image provenance facts. It excludes absolute paths, image bytes or
   `src` values, timestamps, transient browser state, clip display strings, requested

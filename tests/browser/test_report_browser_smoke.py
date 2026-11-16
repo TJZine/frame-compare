@@ -22,11 +22,13 @@ from frame_compare.render.overlay_text import format_file_size
 from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import (
     ClipInfo,
+    FrameDetail,
     ReportClipDisplayInfo,
     ReportData,
     ReportImageInfo,
     ReportRenderingInfo,
 )
+from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     PresentationState,
@@ -214,7 +216,13 @@ def _generated_report(
     tonemapped: bool = False,
     encoded_image_paths: bool = False,
     frames: tuple[int, ...] = (10,),
+    frame_details: tuple[FrameDetail, ...] = (),
     comparison_micro: str = "ATV HDR10",
+    comparison_control: str = _COMPARISON_RELEASE,
+    comparison_explicit_label: str | None = None,
+    third_source: bool = False,
+    metadata: TmdbMetadata | None = None,
+    slowpics_url: str | None = None,
 ) -> Path:
     clips: list[ClipInfo] = []
     geometry_by_name = {
@@ -283,17 +291,51 @@ def _generated_report(
                 display=ReportClipDisplayInfo(
                     primary=(_REFERENCE_PRIMARY if name == "reference" else _COMPARISON_PRIMARY),
                     release=(_REFERENCE_RELEASE if name == "reference" else _COMPARISON_RELEASE),
-                    control=(_REFERENCE_RELEASE if name == "reference" else _COMPARISON_RELEASE),
+                    control=(_REFERENCE_RELEASE if name == "reference" else comparison_control),
                     micro="PMTP DV" if name == "reference" else comparison_micro,
                     filename=f"{label}.mkv",
                 ),
             )
         )
 
+    if comparison_explicit_label is not None:
+        clip = clips[1]
+        clips[1] = replace(
+            clip,
+            label=comparison_explicit_label,
+            label_is_explicit=True,
+            display=replace(
+                clip.display,
+                primary=comparison_explicit_label,
+                control=comparison_explicit_label,
+                micro=comparison_explicit_label,
+            ),
+        )
+    if third_source:
+        clip = clips[1]
+        clips.append(
+            replace(
+                clip,
+                name="third",
+                label="Third source",
+                path=tmp_path / "third.mkv",
+                display=ReportClipDisplayInfo(
+                    primary="Third source",
+                    release="Third",
+                    control="Third",
+                    micro="Third",
+                    filename="third.mkv",
+                ),
+            )
+        )
+        geometry_by_name["third"] = geometry_by_name["encode"]
     return generate_report(
         ReportData(
             clips=[replace(clip) for clip in clips],
             frames=list(frames),
+            frame_details=list(frame_details),
+            metadata=metadata,
+            slowpics_url=slowpics_url,
             rendering=ReportRenderingInfo(
                 overlay_mode=OverlayMode.DIAGNOSTIC,
                 include_frame_number=True,
@@ -490,70 +532,44 @@ document.addEventListener('DOMContentLoaded', () => {
             })
         );
         ReportViewer.setFilmstripSize(originalFilmstripSize, { save: false });
-        const primaryControls = document.querySelector('.rv-primary-controls');
-        const frameControls = document.querySelector('.rv-frame-controls');
-        const modeControls = document.querySelector('.rv-mode-controls');
-        const contextZone = document.querySelector('.rv-context-zone');
-        const modeGeometry = ['slider', 'overlay', 'diff', 'blink', 'grid'].map(mode => {
+        const toolbar = document.querySelector('.rv-controls');
+        const title = toolbar.querySelector('.rv-title');
+        const frameControls = toolbar.querySelector('.rv-frame-controls');
+        const modeControls = toolbar.querySelector('.rv-mode-controls');
+        const contextZone = toolbar.querySelector('.rv-context-zone');
+        const actions = toolbar.querySelector('.rv-bar-actions');
+        const layouts = ['slider', 'overlay', 'diff', 'blink', 'grid'].map(mode => {
             ReportViewer.setMode(mode);
-            const primaryRect = primaryControls.getBoundingClientRect();
-            const frameRect = frameControls.getBoundingClientRect();
-            const modeRect = modeControls.getBoundingClientRect();
-            const contextRect = contextZone.getBoundingClientRect();
-            const visibleContext = contextZone.querySelector('.rv-context-controls:not([hidden])');
-            const alignment = document.getElementById('alignment-status');
-            const visibleContextRect = visibleContext?.getBoundingClientRect();
-            const alignmentRect = alignment.getBoundingClientRect();
-            return {
-                mode,
-                center: modeRect.left + (modeRect.width / 2),
-                primary: primaryRect.toJSON(),
-                frame: frameRect.toJSON(),
-                modeRect: modeRect.toJSON(),
-                context: contextRect.toJSON(),
-                childrenSeparate: !visibleContextRect
-                    || !rectanglesIntersect(visibleContextRect, alignmentRect),
-                zonesSeparate: !rectanglesIntersect(frameRect, modeRect)
-                    && !rectanglesIntersect(frameRect, contextRect)
-                    && !rectanglesIntersect(modeRect, contextRect),
-            };
+            const rect = node => node.getBoundingClientRect().toJSON();
+            return {mode, bar: rect(toolbar), title: rect(title), frame: rect(frameControls),
+                modes: rect(modeControls), context: rect(contextZone), actions: rect(actions)};
         });
-        const modeCenters = modeGeometry.map(entry => entry.center);
-        const firstGeometry = modeGeometry[0];
-        document.documentElement.dataset.toolbarGeometry = JSON.stringify(modeGeometry);
-        document.documentElement.dataset.modeCenterStable = String(
-            Math.max(...modeCenters) - Math.min(...modeCenters) <= 1
-        );
-        document.documentElement.dataset.toolbarHeightStable = String(
-            modeGeometry.every(entry => (
-                approximately(entry.primary.top, firstGeometry.primary.top)
-                && approximately(entry.primary.height, firstGeometry.primary.height)
-            ))
-        );
-        document.documentElement.dataset.toolbarZonesSeparate = String(
-            modeGeometry.every(entry => entry.zonesSeparate && entry.childrenSeparate)
-        );
-        document.documentElement.dataset.toolbarAnchors = String(
-            modeGeometry.every(entry => {
-                if (window.innerWidth > 1120) {
-                    return approximately(entry.frame.left, entry.primary.left)
-                        && approximately(entry.context.right, entry.primary.right)
-                        && approximately(
-                            entry.center,
-                            entry.primary.left + (entry.primary.width / 2)
-                        );
-                }
-                if (window.innerWidth > 768) {
-                    return approximately(entry.frame.left, entry.primary.left)
-                        && approximately(entry.modeRect.right, entry.primary.right)
-                        && approximately(entry.context.left, entry.primary.left)
-                        && approximately(entry.context.right, entry.primary.right);
-                }
-                return approximately(entry.frame.left, entry.primary.left)
-                    && approximately(entry.frame.right, entry.primary.right)
-                    && approximately(entry.context.left, entry.primary.left)
-                    && approximately(entry.context.right, entry.primary.right);
-            })
+        document.documentElement.dataset.toolbarGeometry = JSON.stringify(layouts);
+        document.documentElement.dataset.toolbarLayout = String(layouts.every(layout => {
+            const {bar, title, frame, modes, context, actions} = layout;
+            const boxes = [title, frame, modes, context, actions];
+            if (!boxes.every((box, index) => box.left >= bar.left && box.right <= bar.right
+                && boxes.slice(index + 1).every(other => !rectanglesIntersect(box, other)))) return false;
+            if (innerWidth >= 1280) {
+                return title.right <= frame.left && frame.right <= modes.left
+                    && modes.right <= context.left && context.right <= actions.left
+                    && Math.max(...boxes.map(box => box.top)) < Math.min(...boxes.map(box => box.bottom));
+            }
+            if (innerWidth > 768) {
+                return title.right <= frame.left && frame.bottom <= modes.top
+                    && modes.right <= context.left && context.right <= actions.left;
+            }
+            return title.bottom <= actions.top && actions.bottom <= frame.top
+                && frame.bottom <= modes.top && modes.bottom <= context.top;
+        }));
+        const times = [...document.querySelectorAll('time[datetime]')];
+        const generated = times[0];
+        document.documentElement.dataset.reportTimeLocalized = String(
+            times.length === 1 && Boolean(generated.closest('#info-modal'))
+            && generated.title === generated.dateTime
+            && generated.textContent === new Intl.DateTimeFormat(undefined, {
+                dateStyle: 'medium', timeStyle: 'short',
+            }).format(new Date(generated.dateTime))
         );
         ReportViewer.setMode('slider');
         document.documentElement.dataset.paletteBottomAnchored = String(
@@ -1013,6 +1029,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     y: canvas.getPropertyValue('--align-y').trim(),
                     transform: getComputedStyle(document.querySelector('.rv-right')).transform,
                     status: document.getElementById('alignment-status').textContent.trim(),
+                    statusVisible: document.getElementById('alignment-status').getBoundingClientRect().height > 0,
                 };
                 viewer.restorePersistedState();
                 result.restored = viewer.viewport.currentAlignment();
@@ -1059,9 +1076,8 @@ def test_pair_offsets_survive_same_source_slider_mode_repair(tmp_path: Path) -> 
         ), case
         assert case["x"] == f"{expected['alignX']}px", case
         assert case["y"] == f"{expected['alignY']}px", case
-        assert case["status"] == (
-            "Offset: custom +7x +3y" if case["savedOffset"] else "Offset: none"
-        ), case
+        assert case["statusVisible"] == case["savedOffset"], case
+        assert case["status"] == ("Offset: custom +7x +3y" if case["savedOffset"] else ""), case
         if case["mode"] == "diff":
             assert case["transform"] == (
                 "matrix(1, 0, 0, 1, 7, 3)" if case["savedOffset"] else "matrix(1, 0, 0, 1, 0, 0)"
@@ -1204,6 +1220,7 @@ def test_report_omits_fit_width_keeps_restored_state_reachable_and_h_toggles_lab
         (768, 720, 1.0),
         (900, 720, 1.0),
         (1024, 768, 1.0),
+        (1280, 720, 1.0),
         (1366, 768, 1.0),
         (1920, 1080, 1.0),
         (3440, 1440, 1.0),
@@ -1254,18 +1271,10 @@ def test_generated_report_initializes_observable_mode_and_aria_state(
     assert parser.document_attributes["data-bottom-huds-separate"] == "true"
     assert parser.document_attributes["data-slider-labels-side-anchored"] == "true"
     assert parser.document_attributes["data-slider-labels-contained"] == "true"
-    assert parser.document_attributes["data-mode-center-stable"] == "true", (
-        parser.document_attributes["data-toolbar-geometry"]
-    )
-    assert parser.document_attributes["data-toolbar-height-stable"] == "true", (
-        parser.document_attributes["data-toolbar-geometry"]
-    )
-    assert parser.document_attributes["data-toolbar-zones-separate"] == "true", (
-        parser.document_attributes["data-toolbar-geometry"]
-    )
-    assert parser.document_attributes["data-toolbar-anchors"] == "true", parser.document_attributes[
+    assert parser.document_attributes["data-toolbar-layout"] == "true", parser.document_attributes[
         "data-toolbar-geometry"
     ]
+    assert parser.document_attributes["data-report-time-localized"] == "true"
     assert parser.document_attributes["data-inspector-hud-anchored"] == "true"
     assert parser.document_attributes["data-inspector-width-policy"] == "true"
     assert parser.document_attributes["data-inspector-overflow-safe"] == "true"
@@ -1847,7 +1856,7 @@ def _assert_inspector_clears_toolbar_during_image_retry(browser: str, tmp_path: 
         const toolbarReachable = `(() => {
             const drawer = document.getElementById('rv-inspector');
             return Math.abs(drawer.getBoundingClientRect().top - ${toolbarBottom}) <= 0.5
-                && ['left-select', 'btn-swap-clips', 'right-select', 'alignment-status'].every(id => {
+                && ['left-select', 'btn-swap-clips', 'right-select'].every(id => {
                     const control = document.getElementById(id);
                     const { x, y, width, height } = control.getBoundingClientRect();
                     return control.contains(document.elementFromPoint(x + width / 2, y + height / 2));
@@ -1879,12 +1888,184 @@ def _assert_inspector_clears_toolbar_during_image_retry(browser: str, tmp_path: 
 
 
 @pytest.mark.integration
+def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    title = "Black Sails S01E08 Comparison Reference!"
+    report_path = _generated_report(
+        tmp_path,
+        frames=(10, 12),
+        frame_details=(FrameDetail(category="dark"), FrameDetail(category="selected")),
+        comparison_micro="english-dub-only-copy",
+        comparison_control="only-copy",
+        third_source=True,
+        metadata=TmdbMetadata(
+            tmdb_id=1, title=title, original_title=title, year=2026, media_type="movie"
+        ),
+        slowpics_url="https://example.invalid/never-opened",
+    )
+    script = _viewer_input_script(r"""
+        const snapshot = `(() => {
+            const bar = document.querySelector('.rv-controls');
+            const controls = [...bar.querySelectorAll('button,select,a,#alignment-status,#active-filter-badge')]
+                .filter(node => node.getBoundingClientRect().height > 0)
+                .map(node => {
+                    const box = node.getBoundingClientRect();
+                    const y = (box.top + box.bottom) / 2;
+                    const center = (box.left + box.right) / 2;
+                    const points = node.matches('select') ? [center, box.right - 2, box.right - 8] : [center];
+                    const hits = points.map(x => node.contains(document.elementFromPoint(x, y)));
+                    return {id: node.id || node.dataset.mode || node.textContent, box: box.toJSON(), hits};
+                });
+            const select = document.getElementById('right-select');
+            const style = getComputedStyle(select);
+            const context = document.createElement('canvas').getContext('2d');
+            context.font = style.font;
+            const optionText = select.selectedOptions[0].text;
+            const offset = document.getElementById('alignment-status');
+            const badge = document.getElementById('active-filter-badge');
+            return {
+                offsetText: offset.textContent,
+                offsetFits: offset.scrollWidth <= offset.clientWidth && offset.scrollHeight <= offset.clientHeight,
+                filterText: badge.textContent,
+                controls, bar: bar.getBoundingClientRect().toJSON(),
+                pageWidth: document.documentElement.scrollWidth,
+                optionText,
+                labelWidth: context.measureText(optionText).width,
+                available: select.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight),
+            };
+        })()`;
+        for (const [width,height] of [[769,844],[900,844],[1280,720],[1366,768]]) {
+            await command('Emulation.setDeviceMetricsOverride',{
+                width,height,deviceScaleFactor:1,mobile:false,
+            });
+            for (const [expectedOffset, x, y] of [
+                ['', 0, 0],
+                ['Offset: custom +7x 0y', 7, 0],
+                ['Offset: preset right 1px'],
+                ['Offset: custom +12x -12y', 12, -12],
+                ['Offset: custom +120x -120y', 120, -120],
+            ]) {
+                const active = Boolean(expectedOffset);
+                await evaluate(`(() => {
+                    document.querySelector('[data-mode=slider]').click();
+                    document.querySelector('${active?"[data-frame-filter][data-category=dark]":"[data-frame-filter]"}').click();
+                    if (${x === undefined}) {
+                        const preset = document.getElementById('alignment-preset');
+                        preset.value = 'right-1';
+                        preset.dispatchEvent(new Event('change', {bubbles: true}));
+                    } else {
+                        ReportViewer.viewport.setManualAlignment(${x}, ${y});
+                    }
+                    window.scrollTo(0, 0);
+                })()`);
+                const state = await evaluate(snapshot);
+                const message = JSON.stringify({width,expectedOffset,...state});
+                const {controls,bar,pageWidth} = state;
+                assert.ok(pageWidth <= width, message);
+                assert.equal(state.filterText, active ? 'Filtered: Dark' : '', message);
+                assert.equal(state.offsetText, expectedOffset, message);
+                assert.ok(state.offsetFits, message);
+                assert.ok(controls.some(control => control.id === 'View on slow.pics ↗'), message);
+                for (const id of ['alignment-status','active-filter-badge']) {
+                    assert.equal(controls.some(control => control.id === id), active, message);
+                }
+                for (const [index,{box,hits}] of controls.entries()) {
+                    assert.ok(hits.every(Boolean) && box.left >= bar.left && box.right <= bar.right, message);
+                    for (const {box:other} of controls.slice(index+1)) {
+                        assert.ok(box.right <= other.left || other.right <= box.left
+                            || box.bottom <= other.top || other.bottom <= box.top, message);
+                    }
+                }
+                const inOneRow = children => Math.max(...children.map(item => item.box.top))
+                    < Math.min(...children.map(item => item.box.bottom));
+                if (width >= 1280) {
+                    assert.ok(inOneRow(controls), message);
+                    assert.equal(state.optionText, 'english-dub-only-copy', message);
+                    assert.ok(state.available >= state.labelWidth, message);
+                } else {
+                    const stepperIds = ['btn-prev','frame-select','btn-next','active-filter-badge'];
+                    const stepper = controls.filter(item => stepperIds.includes(item.id));
+                    const secondRow = controls.filter(item => !stepperIds.includes(item.id));
+                    assert.ok(inOneRow(stepper) && inOneRow(secondRow), message);
+                    assert.ok(Math.max(...stepper.map(item => item.box.bottom))
+                        <= Math.min(...secondRow.map(item => item.box.top)), message);
+                }
+            }
+        }
+""")
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-toolbar-offset", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.integration
+def test_closed_source_select_keeps_full_overlong_label(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    label = "W" * 256
+    report_path = _generated_report(tmp_path, comparison_explicit_label=label)
+    script = _viewer_input_script(r"""
+        await command('Emulation.setDeviceMetricsOverride', {
+            width: 390, height: 844, deviceScaleFactor: 1, mobile: false,
+        });
+        await evaluate("document.querySelector('[data-mode=slider]').click()");
+        await command('Accessibility.enable');
+        const selected = await command('Runtime.evaluate', {
+            expression: "document.querySelector('#right-select').selectedOptions[0]",
+        });
+        const ax = await command('Accessibility.getPartialAXTree', {objectId: selected.result.objectId});
+        const choice = await evaluate(`(() => {
+            const select = document.querySelector('#right-select');
+            const option = select.selectedOptions[0];
+            const style = getComputedStyle(select);
+            const text = document.createElement('canvas').getContext('2d');
+            text.font = style.font;
+            const bar = select.closest('.rv-controls').getBoundingClientRect();
+            const box = select.getBoundingClientRect();
+            return {
+                text: option.text, title: option.title, selectedTitle: select.title, value: select.value,
+                selectLabel: select.getAttribute('aria-label'), width: box.width,
+                naturalWidth: text.measureText(option.text).width,
+                wholeControlInBar: box.left >= bar.left && box.right <= bar.right,
+                noOverflow: document.documentElement.scrollWidth <= innerWidth,
+            };
+        })()`);
+        assert.equal(choice.selectLabel, 'Right clip');
+        assert.equal(choice.value, '1');
+        const longLabel = 'W'.repeat(256);
+        assert.equal(choice.text, longLabel);
+        assert.ok(choice.title.startsWith(longLabel + ' — '));
+        assert.equal(choice.selectedTitle, choice.title);
+        assert.equal(ax.nodes[0].name.value, choice.title);
+        const select = await command('Runtime.evaluate', {
+            expression: "document.querySelector('#right-select')",
+        });
+        const axSelect = await command('Accessibility.getPartialAXTree', {objectId: select.result.objectId});
+        assert.equal(axSelect.nodes[0].name.value, 'Right clip');
+        assert.equal(axSelect.nodes[0].value.value, choice.title);
+        assert.ok(choice.width > 0 && choice.naturalWidth > choice.width);
+        assert.ok(choice.wholeControlInBar && choice.noOverflow);
+""")
+    completed = _run_browser_input(browser, report_path, tmp_path / "chrome-long-label", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(("width", "height"), [(390, 844), (1280, 720), (1920, 1080)])
 def test_report_labels_clear_viewport_controls(tmp_path: Path, width: int, height: int) -> None:
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable")
-    report_path = _generated_report(tmp_path)
+    title = "Black Sails S01E08 Comparison Reference!"
+    report_path = _generated_report(
+        tmp_path,
+        third_source=True,
+        metadata=TmdbMetadata(
+            tmdb_id=1, title=title, original_title=title, year=2026, media_type="movie"
+        ),
+    )
     script = _viewer_input_script(
         f"const width = {width}; const height = {height};"
         + r"""
@@ -1892,6 +2073,22 @@ def test_report_labels_clear_viewport_controls(tmp_path: Path, width: int, heigh
             width, height, deviceScaleFactor: 1, mobile: false,
         });
         assert.deepEqual(await evaluate('[innerWidth, innerHeight]'), [width, height]);
+        const bar = await evaluate(`(() => {
+            document.querySelector('[data-mode=slider]').click();
+            const toolbar = document.querySelector('.rv-controls');
+            const title = toolbar.querySelector('.rv-title');
+            const boxes = [...toolbar.querySelectorAll(
+                '.rv-title, .rv-frame-controls, .rv-mode-controls, .rv-context-zone, .rv-bar-actions'
+            )].map(node => node.getBoundingClientRect());
+            return {
+                sourceCount: document.getElementById('left-select').options.length,
+                titleLength: title.title.length,
+                singleRow: Math.max(...boxes.map(box => box.top)) < Math.min(...boxes.map(box => box.bottom)),
+            };
+        })()`);
+        assert.equal(bar.sourceCount, 3);
+        assert.equal(bar.titleLength, 40);
+        if (width >= 1280) assert.ok(bar.singleRow, JSON.stringify(bar));
         const modes = await evaluate(`(() => {
             const stage = ReportViewer.dom.stage;
             const palette = document.querySelector('.rv-viewport-palette');
@@ -1964,7 +2161,7 @@ def test_report_labels_clear_viewport_controls(tmp_path: Path, width: int, heigh
                     selectedText: select.selectedOptions[0].textContent.trim(),
                     select: rect(select), stage: rect(ReportViewer.dom.stage),
                     footers: [...document.querySelectorAll('.rv-grid-label')].map(rect),
-                    expectedFooters: innerWidth <= 768 ? 1 : 2,
+                    expectedFooters: innerWidth <= 768 ? 1 : 3,
                 };
             });
         })()`;
@@ -2483,7 +2680,6 @@ def test_fullscreen_help_and_inspector_are_reachable_with_trusted_input(tmp_path
         });
         await click('#btn-fullscreen');
         await until('Boolean(document.fullscreenElement)');
-        assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-header')).display"), 'none');
         assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-controls')).display"), 'none');
         assert.equal(await evaluate("getComputedStyle(document.querySelector('.rv-bottom-panel')).display"), 'none');
         assert.equal(await evaluate('ReportViewer.dom.stage.getBoundingClientRect().height === innerHeight'), true);

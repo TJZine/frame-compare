@@ -720,7 +720,6 @@ const ReportViewer = {
 
     observeToolbar() {
         const toolbar = document.querySelector('.rv-controls');
-        const header = document.querySelector('.rv-header');
         const update = () => document.body.style.setProperty(
             '--rv-toolbar-bottom',
             `${toolbar.getBoundingClientRect().bottom}px`,
@@ -728,7 +727,6 @@ const ReportViewer = {
         update();
         const observer = new ResizeObserver(update);
         observer.observe(toolbar);
-        observer.observe(header);
         observer.observe(this.dom.status);
     },
 

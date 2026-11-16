@@ -356,6 +356,7 @@ def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path
         for name in (
             "Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv",
             "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv",
+            "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv",
         )
     ]
     ctx.reference, *ctx.comparisons = [
@@ -381,16 +382,33 @@ def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path
     )
 
     assert output.report_path is not None
-    payload = script_payload(output.report_path.read_text(encoding="utf-8"))
-    assert [clip["display"]["micro"] for clip in payload["clips"]] == ["EbP", "english-dub-only"]
+    html = output.report_path.read_text(encoding="utf-8")
+    payload = script_payload(html)
+    short_names = ["EbP", "english-dub-only", "english-dub-only-copy"]
+    assert [clip["display"]["micro"] for clip in payload["clips"]] == short_names
     assert [clip["display"]["control"] for clip in payload["clips"]] == [
         "1080p · BluRay · EbP",
         "only",
+        "only-copy",
     ]
     assert [clip["display"]["filename"] for clip in payload["clips"]] == [
         path.name for path in paths
     ]
     assert [clip["label"] for clip in payload["clips"]] == [path.stem for path in paths]
+
+    parser = SelectParser()
+    parser.feed(html)
+    for select_id in ("left-select", "right-select", "active-select"):
+        options = parser.selects[select_id].options
+        assert [option.text for option in options] == [
+            "EbP · 1080p · BluRay · EbP",
+            *short_names[1:],
+        ]
+        assert [option.attrs["value"] for option in options] == ["0", "1", "2"]
+        for option, path in zip(options, paths, strict=True):
+            title = option.attrs["title"]
+            assert title is not None and title.endswith(path.name)
+            assert option.attrs["aria-label"] == title
 
 
 def test_report_resolves_visible_bidi_collisions_in_stem_mode(tmp_path: Path) -> None:
