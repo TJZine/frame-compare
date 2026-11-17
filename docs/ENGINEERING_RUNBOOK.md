@@ -35,7 +35,6 @@ preserve or explicitly change the corresponding product contracts and proof.
   licensing, and compatibility boundary.
 - `docs/DECISIONS.md`: historical rationale.
 - `CONTRIBUTING.md`: contributor setup and PR mechanics; `README.md`: user overview.
-- `docs/plans/**`: task memory activated under Planning And Handoff below.
 - Host configuration: tools, permissions, runtime capabilities, and model settings.
   It must not recreate the retired repository role/skill policy.
 
@@ -175,8 +174,7 @@ The repository-local `verify-frame-compare` skill under
 `.agents/skills/verify-frame-compare/` owns the application user-journey map and
 driving entrypoint. Use affected journeys alongside the relevant procedures below;
 it adds no universal gate. Its shared creation/maintenance procedures run on
-request. The [initial pilot](plans/2026-10-15-verification-map-pilot.md) is historical
-evidence; native and physical Windows acceptance remain separate proof obligations.
+request. Native and physical Windows acceptance remain separate proof obligations.
 
 Full native runs use the measured local count of four workers with `--dist loadgroup`.
 Focused selections, including single-test runs, may stay serial; `addopts` does not
@@ -1108,38 +1106,9 @@ allowance; configuration presence is not proof that a capability is available.
 
 ## Planning And Handoff
 
-`design-code` owns planning method. The following repository-specific lifecycle
-keeps durable task memory out of user-documentation search. `docs/plans/` is
-inactive by default.
-
-It becomes authoritative only when all of these are true:
-
-1. The work needs a durable cross-session handoff, or the maintainer explicitly asks for a tracked plan file.
-2. A dated plan file is created or updated under `docs/plans/`.
-3. The plan has the required Zensical search-exclusion front matter followed by an
-   activation metadata block containing `Status: Active`.
-
-Required active-plan preamble:
-
-```text
----
-search:
-  exclude: true
----
-
-Status: Active
-Scope: <task scope>
-Owner: <person or session>
-```
-
-Rules:
-
-- If no active-plan marker exists, treat `docs/plans/` as reference-only.
-- Keep `search.exclude: true` on every tracked plan so internal planning material
-  cannot enter the user-documentation search index.
-- For single-session work, keep the plan inline unless a durable handoff is needed.
-- Only one active plan should exist per workstream.
-- When the work closes, change the marker to `Status: Historical` or move the document to historical/reference context in the same pass.
+`design-code` owns planning method. Keep task plans inline or in untracked
+local notes. The tracked docs tree holds no plan or review records; git
+history keeps the earlier ones.
 
 ## Documentation Freshness Triggers
 
@@ -1149,9 +1118,8 @@ Update `docs/current-cli-contract.md` when its documented product behavior chang
 
 Update `.agents/project.md` for changed local facts, common command routes, or
 test-policy decisions. Update this runbook for changed specialist procedures,
-verification requirements, plan-search metadata, or release authorization. Update
-the corresponding host or review-tool adapter when its discovery semantics change.
+verification requirements, or release authorization. Update the corresponding
+host or review-tool adapter when its discovery semantics change.
 Shared methodology belongs in the shared skills, not another repository copy.
 
-Correct stale active references in the same change. Historical plans remain history
-and do not require rewriting to resemble the current workflow.
+Correct stale active references in the same change.

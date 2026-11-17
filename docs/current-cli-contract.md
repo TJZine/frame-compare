@@ -26,35 +26,7 @@ documents that promise elsewhere.
 - `src/frame_compare/utils/terminal_theme.py` owns the human console and path-safe
   wrapping used by human dry-run and typed error output.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
-- Primary executable contract checks include:
-  - `tests/cli/test_help_and_import.py` for command registration, help text, and
-    lazy-import behavior.
-  - `tests/cli/test_run_command.py`, `tests/cli/test_run_json_errors.py`, and
-    `tests/cli/test_run_report_open.py` for command behavior, JSON errors, and
-    report auto-open gating.
-  - `tests/cli/test_run_slowpics_options.py` for the slow.pics `run` option
-    surface.
-  - `tests/cli/test_run_output.py` for human output, JSON stdout cleanliness,
-    and slow.pics post-upload presentation behavior.
-  - `tests/cli/test_history_command.py` for history config resolution, exact JSON
-    and stream contracts, exact-name opening, browser failures, and lazy help.
-  - `tests/config/test_schema.py` for config schema/defaults, including the
-    exact slow.pics field set.
-  - `tests/config/test_overrides.py` for CLI override mapping semantics.
-  - `tests/e2e/test_cli_version.py` for the public `version` command contract.
-  - `tests/cli/test_exit_codes.py` for exit-code behavior.
-  - `tests/test_cli_contract_docs.py` for keeping this document aligned with the live
-    override map and authority wiring.
 - `docs/ENGINEERING_RUNBOOK.md` owns workflow, verification, and public-surface policy.
-
-Update this document in the same pass when changing:
-
-- command names or subcommand structure
-- user-facing flag names or meanings
-- CLI flag to config mapping or persistence rules
-- JSON output schema for `run --json` or `doctor --json`
-- browser/report-opening rules
-- slow.pics post-upload side-effect behavior or warning placement
 
 ## Command Surface
 
@@ -488,7 +460,7 @@ unchanged.
 - After sources load, normal human output uses one `Sources · N` section
   when all sources do not share one content identity, or `{content identity} ·
   {N} sources` when they do. `1 source` is used for one source. The content
-  identity is no longer repeated in the body. Each source entry has its bold name,
+  identity appears only in the title. Each source entry has its bold name,
   `  reference` in dim on the reference only, the dim
   `{w}×{h} · {fps} fps · {frames} frames ({runtime}) · {size}` line, the dim
   filename, and the dim display path in `--verbose` mode. Length differences and
@@ -498,10 +470,10 @@ unchanged.
   `size_bytes`; it is not bitrate or a quality signal, and it is not added to
   successful `run --json`.
 - If every effective frame rate matches and no source FPS was adjusted, frame-rate
-  output is omitted. Otherwise a dim-rail `Frame rates` section contains the
-  existing table content as key/value rows; the `After Alignment` stage label is
-  omitted. JSON-mode FPS diagnostics retain their existing structured stderr event
-  and do not add fields to successful stdout.
+  output is omitted. Otherwise a dim-rail `Frame rates` section after alignment
+  shows the details as key/value rows without an `After Alignment` stage label.
+  JSON-mode FPS diagnostics use a structured stderr event and do not add fields
+  to successful stdout.
 - Material alignment information is printed in a dim-rail `Frame alignment`
   section when accepted or rejected frame-alignment changes need explanation. Each
   comparison has a bold short-name line, `trims`, and `stability` when present.
@@ -519,14 +491,15 @@ unchanged.
   planned chunks remain unassessed. Individual diagnostic chunks are never printed.
   The section is suppressed by `--quiet` and never emitted to `run --json` stdout.
 - `--verbose` adds a dim-rail `Final selection` section after alignment. Its rows
-  are unchanged; the `After Alignment` stage label is omitted.
+  do not include an `After Alignment` stage label.
 - Audio alignment uses a dim rail, or a yellow rail when any comparison needs
   review, with title `Audio alignment` and optional dim ` · 1 needs review` or
   ` · {N} need review`.
   Each entry starts with a bold short name and one of the exact states `{+Nf} ·
   applied`, `{+Nf} · confirm in VSView`, `{+Nf} · reused from last run`,
   `{+Nf} · previously confirmed`, `{+Nf} · manual offset`, `{+Nf} · not applied`,
-  or `no audio match ({reason phrase})`. The reason uses plain language. Fresh
+  or `no audio match ({reason phrase})`. The reason uses plain language. A freshly
+  computed, applied offset uses `applied` when no review is pending. Fresh
   results include the dim evidence
   line `{agreeing} of {active} sections agree · video check {+Nf} · {stability}`.
   The agreeing count is `authority_recount.authority_agreeing_chunks` when an
@@ -561,8 +534,9 @@ unchanged.
 - When previous offsets are reused interactively, the prompt section is
   `› Reuse previous offsets?`. Each line is bold `{short}`, two spaces,
   `{+Nf} · {origin} · {accepted}` where origin is `confirmed in VSView` or
-  `audio`; verbose mode may append seconds and add `file` and `path` rows. A
-  `cache` row follows. The question is inside the rail as
+  `audio`; verbose mode may append seconds and add `file` and `path` rows.
+  Progress and the reuse prompt identify sources by unique short names. A `cache`
+  row follows the prompt entries. The question is inside the rail as
   `│ Reuse these offsets? [y/N]: `, followed by the answer and `╰─`. The
   `reference` and `Content` rows are omitted. If the prompt is unavailable, the
   `!` note outside the section remains
@@ -571,8 +545,9 @@ unchanged.
   three numbered steps, then an `outputs` table. The table's third column uses
   `reference`, `audio {+Nf}`, `audio {+Nf} · not applied`, `audio {+Nf} · reused`,
   `previously confirmed {+Nf}`, `manual offset {+Nf}`, or `no audio match` as
-  applicable. Separate `hints` rows are removed. Display assumptions follow the
-  outputs after a blank line as a `! VSView display assumptions` note and the
+  applicable. The table has no separate `hints` rows; the VSView overlay shows
+  the full detail. Display assumptions follow the outputs after a blank line as
+  a `! VSView display assumptions` note and the
   existing `source`/`preview`/`range`/`impact` rows. `[WARN]` and `[FAIL]`
   source-loading status lines remain outside the section.
 - VSView unavailable output is a yellow-rail `! VSView review unavailable`
@@ -607,6 +582,8 @@ unchanged.
   `  webhook` rows; `report`; `screenshots` with `  {N} files`; `alignment` when
   alignment ran; the `diagnostics` hyperlink when written; and the `slow.pics` row `upload
   skipped because the report could not be confirmed` when that happened.
+  The `alignment` row shows the same per-source offsets and origins for applied
+  entries as the Align phase summary.
   Declined uploads get no row. After one blank body line, `run` is `{N} frames ·
   {N} sources · analysis cached` or `analysis computed`, with nothing for
   `skipped`. If rendered and planned frame counts differ, the row shows
@@ -991,7 +968,7 @@ recovery requirement.
   the command fails through the standard typed metrics/preparation error path
   rather than silently validating a full-frame cache identity.
 - The full fingerprint remains inside the cache payload and is validated on load.
-  Legacy run-folder `cache.compframes` files are not used as analysis cache hits.
+  Run-folder `cache.compframes` files do not count as analysis cache hits.
 - Probe-cache files remain on-disk format version 1, but key schema 4 includes the
   scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint plus a strong
   source/probe token. The token binds device, inode, size, mtime and change time to
@@ -1039,8 +1016,8 @@ recovery requirement.
   reusable geometry probe token do not log this warning. Generated VSView sessions
   can reuse validated stable entries or open cache-free. The current profile tokens are
   `lsw1310-47d07506e489` for managed Windows, `lsw1310-7a882880f599` for unmanaged
-  Windows, and `lsw1310-9129a4cbb35a` for Debian/Docker. All legacy media-adjacent
-  indexes remain inert.
+  Windows, and `lsw1310-9129a4cbb35a` for Debian/Docker. Media-adjacent
+  indexes are not used.
   See the [source-index transaction](current-architecture.md#shared-caches-and-decoder-indexes).
 - Analysis is skipped automatically when `dark_frame_count`, `bright_frame_count`,
   and `motion_frame_count` are all `0`; `frame_plan` still selects configured
@@ -1165,9 +1142,9 @@ URL in a browser. The same report auto-open rules decide whether the report is
 opened. The prompt is an accent-rail `› Publish to slow.pics?` section. When the
 report opened, its body is `The report is open in your browser. Review it first.`
 Otherwise the body is `Review the report before publishing:` followed by the
-report path as a dim link. The `Visibility` row is removed. The question inside
-the rail is `│ Upload to {visibility} slow.pics? [y/N]: `, followed by the answer
-and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
+report path as a dim link. The prompt gives the visibility in the question,
+without a separate `Visibility` row. The question inside the rail is
+`│ Upload to {visibility} slow.pics? [y/N]: `, followed by the answer and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 
 ### Report And Overlay Metadata Contract
 
@@ -1610,8 +1587,8 @@ non-embedded reports and for warn-only report failures. It does not request
 slow.pics remote removal and does not map to remote `removeAfter`.
 
 `copy_url_to_clipboard`, `open_in_browser`, `create_url_shortcut`, and
-`webhook_url` are implemented config fields for slow.pics legacy UX parity. They
-do not add new `run` flags, wizard prompts, or `run --json` stdout fields.
+`webhook_url` are slow.pics configuration fields without corresponding `run`
+flags, wizard prompts, or `run --json` stdout fields.
 
 `copy_url_to_clipboard` and `open_in_browser` are interactive CLI-owned actions:
 they run only after a successful upload in human non-quiet TTY runs. Clipboard
@@ -1921,8 +1898,7 @@ logs on stderr; otherwise `[logging].format` applies. This does not change the
 successful `run --json` stdout schema or permit human diagnostics on JSON
 stdout.
 
-Configs created before this contract must remove these inert keys because they
-now fail nested validation:
+Nested config validation rejects these keys:
 
 - Remove `analysis.save_frames_data`; it never controlled persisted frame data
   and has no replacement.
@@ -1933,10 +1909,11 @@ now fail nested validation:
 - Remove `logging.file`; Frame Compare does not support config-driven file
   logging.
 
-The former root `[diagnostics]` table and `DiagnosticsConfig` owner no longer exist.
-Because unknown root sections are deliberately ignored, a stale `[diagnostics]` table
-is inert; remove it. There is no `per_frame_nits` replacement: selection scores are not
-luminance measurements, and tonemap targets describe an applied transform rather than
+The schema has no root `[diagnostics]` table or `DiagnosticsConfig` owner.
+Remove any `[diagnostics]` table. Unknown root sections are ignored, so the table
+has no effect.
+There is no `per_frame_nits` replacement: selection scores are not luminance
+measurements, and tonemap targets describe an applied transform rather than
 observed source-frame brightness.
 
 ## Config-Only Audio Alignment Surface
@@ -2153,7 +2130,7 @@ resolved geometry remains reusable regardless of detector provenance.
 Fresh runs write one diagnostic artifact per comparison at
 `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`. Schema v5 is marked
 `diagnostic_only` and keeps the 2 MiB per-comparison limit. It stores the full
-audio attempt and drops the former `chunks.rows_omitted` flag. The diagnostic omits
+audio attempt without a `chunks.rows_omitted` flag. The diagnostic omits
 automatically collected media paths, PCM, raw command lines, full subprocess
 stderr, environment values, and credentials. Explicit source labels retain
 authored text subject to whitespace normalization and length limits, so they
@@ -2270,8 +2247,8 @@ source, with the existing metadata probe for unspecified signals. Mapping happen
 before preview defaults and overlays; mapped output retains its sRGB properties.
 Both speeds use the sequence policy: quality previews retain temporal peak
 measurement, while quality screenshots measure each still independently. Fast
-previews and screenshots use the same metadata peak policy. SDR, disabled mapping,
-and legacy sessions without settings retain their existing preview handling.
+previews and screenshots use the same metadata peak policy. SDR sources, sessions
+with mapping disabled, and sessions without settings use the regular preview path.
 Review outputs keep original frame positions/counts, reference FPS, ordering,
 `hdr=False` registration, metadata v6 review authority, and result-v1 sidecar identity.
 
@@ -2348,7 +2325,7 @@ Review outputs keep original frame positions/counts, reference FPS, ordering,
   except for the exact installed Windows portable state-config fallback described
   under Shared Path Resolution Rules. The prompted media input may be external.
 - Publishing visibility/deletion and TMDB-key setup are config/environment/preset
-  concerns and are no longer wizard prompts. Typed failures continue to use the
+  concerns outside the wizard prompts. Typed failures use the
   standard stderr adapter, honor the `NO_COLOR` environment variable, and do not
   suggest unsupported `--verbose` usage.
 
@@ -2362,14 +2339,12 @@ Review outputs keep original frame positions/counts, reference FPS, ordering,
 - Invalid or escaping selected paths are typed top-level failures. An explicit
   missing, nonregular, unreadable, malformed, or invalid config is a failed TMDB check
   with config details. An absent default config uses defaults plus environment.
-  This does not change the doctor JSON schema.
 - `doctor` makes no HTTP requests and does not test slow.pics reachability. The
   `tmdb_api_key` check validates local configuration and credential format only;
   it does not contact TMDB. slow.pics connectivity is exercised by the
   browser-compatible upload flow when publishing is requested.
 - Neither human output nor the `doctor.checks` array in `doctor --json` contains a
-  `slowpics` check. Consumers that require that ID or the earlier check count must
-  adjust.
+  `slowpics` check.
 - `doctor --json` writes a single JSON object to stdout through the doctor command owner.
 - Python compatibility remains enforced by package metadata, runtime manifests, and build
   validation; `doctor` does not emit a separate Python-version check.
@@ -2404,7 +2379,7 @@ Review outputs keep original frame positions/counts, reference FPS, ordering,
   `VSView`, and `TMDB API key`. Each check is one row: a status glyph, the check
   name in a fixed-width column, and the message. A hint follows on the next row
   in the message column as muted `hint` plus the hint text, folding inside that
-  column. Check messages and hint text are unchanged.
+  column.
 - Human check status glyphs are `✗` for critical failures, `–` for passed
   optional checks whose capability is unavailable, `!` for failed noncritical
   checks, and `✓` for passed checks (ASCII fallback `x`, `-`, `!`, `+`).
@@ -2413,8 +2388,6 @@ Review outputs keep original frame positions/counts, reference FPS, ordering,
   comparisons.` or `✗ Runtime is not ready for comparisons.`, followed by muted
   `{f} required check(s) failed · {w} warnings` with correct plurals and zero
   parts omitted. Only `!` rows count as warnings; `–` skipped rows do not.
-  These presentation changes do not alter JSON fields, JSON status values, or
-  exit-code behavior.
 - Failed checks and optional-unavailable warnings include a short deterministic next
   action when the check can prove one. `doctor --json` exposes the same text as
   `install_hint`. Hints distinguish missing executables, unavailable runtimes/plugins,
