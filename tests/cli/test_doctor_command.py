@@ -619,7 +619,7 @@ def test_doctor_top_level_frame_compare_error_uses_cli_error_contract(
     assert result.stdout == ""
     assert "FC-1001" in result.stderr
     assert "--verbose" not in result.stderr
-    assert "Details:" in result.stderr
+    assert "Details:" not in result.stderr
     assert "Traceback" not in result.stderr
 
 

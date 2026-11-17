@@ -27,7 +27,7 @@ from frame_compare.render.types import (
     RenderRequest,
     ScreenshotBatchRequest,
 )
-from frame_compare.utils.cancellation import is_cancelling, raise_if_cancelling
+from frame_compare.utils.cancellation import is_cancelling, is_run_interruption, raise_if_cancelling
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 from frame_compare.utils.subproc import SubprocessAborted
 
@@ -204,8 +204,12 @@ def render_clip_jobs(
                 raise RuntimeError("render jobs completed without a rendered clip")
             completed.append(result)
         return tuple(completed)
-    except BaseException:
-        status = ProgressPhaseStatus.FAILED
+    except BaseException as error:
+        status = (
+            ProgressPhaseStatus.INTERRUPTED
+            if is_run_interruption(error)
+            else ProgressPhaseStatus.FAILED
+        )
         raise
     finally:
         if reporter is not None:

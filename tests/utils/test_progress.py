@@ -167,7 +167,7 @@ def test_rich_progress_reporter_indeterminate_phase_shows_elapsed(
     assert task.fields["presentation"] == "indeterminate"
     with reporter._progress.console.capture() as capture:
         reporter._progress.console.print(reporter._progress.get_renderable())
-    assert "0:42" in capture.get()
+    assert "42.0 s" in capture.get()
 
     reporter.complete_phase()
 
@@ -218,14 +218,14 @@ def test_rich_progress_reporter_serializes_concurrent_updates() -> None:
             ProgressPhaseStatus.COMPLETED,
             "50 frames selected",
             None,
-            "✓ Analyze         50 frames selected · 12s",
+            "✓ Analyze         50 frames selected · 12.0 s",
         ),
-        (ProgressPhaseStatus.COMPLETED, None, None, "✓ Analyze         12s"),
+        (ProgressPhaseStatus.COMPLETED, None, None, "✓ Analyze         12.0 s"),
         (
             ProgressPhaseStatus.COMPLETED,
             "offsets",
-            "2s + 42s review",
-            "✓ Analyze         offsets · 2s + 42s review",
+            "2.0 s + 42.0 s review",
+            "✓ Analyze         offsets · 2.0 s + 42.0 s review",
         ),
         (ProgressPhaseStatus.FAILED, None, None, "✗ Analyze"),
         (ProgressPhaseStatus.WARNED, None, None, "! Analyze"),
@@ -251,6 +251,44 @@ def test_durable_phase_duration_is_inline(
     rendered = Text.from_ansi(output.getvalue()).plain
     assert rendered == expected + "\n"
     assert all(line == line.rstrip() for line in rendered.splitlines())
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (0.3, "0.3 s"),
+        (0.99, "1.0 s"),
+        (1.0, "1.0 s"),
+        (12.9, "12.9 s"),
+        (59.9, "59.9 s"),
+        (60.0, "1m 00s"),
+        (68.0, "1m 08s"),
+        (3599.0, "59m 59s"),
+        (3600.0, "1h 00m"),
+        (3725.0, "1h 02m"),
+    ],
+)
+def test_human_phase_duration_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    seconds: float,
+    expected: str,
+) -> None:
+    rich_reporter, rich_output = _captured_rich_reporter(monkeypatch)
+    rich_reporter._print_durable_line(
+        ProgressPhaseStatus.COMPLETED,
+        "Render",
+        summary=None,
+        duration=seconds,
+        duration_text=None,
+    )
+    readings = iter([0.0, seconds])
+    monkeypatch.setattr("frame_compare.utils.progress.monotonic", lambda: next(readings))
+    plain_reporter = PlainProgressReporter()
+    plain_reporter.start_phase("RENDER", 1)
+    plain_reporter.complete_phase()
+    assert Text.from_ansi(rich_output.getvalue()).plain.rstrip().endswith(f" {expected}")
+    assert capsys.readouterr().err == f"[OK] RENDER  Completed in {expected}\n"
 
 
 def test_step_map_tracks_run_phases_and_nested_work(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -367,7 +405,7 @@ def test_live_progress_caps_width_and_follows_resize(monkeypatch: pytest.MonkeyP
             lines = Text.from_ansi(capture.get()).plain.splitlines()
             assert all(len(line) <= min(width, 120) for line in lines)
             assert "reading audio" in lines[0]
-            assert "0:00" in lines[0]
+            assert "0.0 s" in lines[0]
             assert "Analyze" in lines[-1]
             assert reporter._progress.console.width == width
     finally:

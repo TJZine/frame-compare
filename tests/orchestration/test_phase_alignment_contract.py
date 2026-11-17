@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
@@ -252,6 +253,8 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
         quiet: bool = False,
         json_output: bool = False,
         vs_loader: VSLoader | None = None,
+        on_reusable_cache_written: Callable[[], None] | None = None,
+        on_diagnostics_written: Callable[[Path], None] | None = None,
     ) -> AlignmentOperationOutcome:
         outcome = await real_align(
             request,
@@ -262,6 +265,8 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
             quiet=quiet,
             json_output=json_output,
             vs_loader=vs_loader,
+            on_reusable_cache_written=on_reusable_cache_written,
+            on_diagnostics_written=on_diagnostics_written,
         )
         results = outcome.results
         assert len(results) == 1
@@ -489,7 +494,7 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
         assert ctx.comparisons[0].alignment is None
         detail = {
             "stream": "audio stream override",
-            "timeline": "selected_audio_timeline_unavailable",
+            "timeline": "selected audio timeline unavailable",
             "ffmpeg_error": "FFmpeg failed with exit code 1",
             "ffmpeg_missing": "FFmpeg binary not found",
         }[unavailable_kind]
@@ -658,10 +663,25 @@ def test_final_summary_shows_changed_audio_offset_and_unapplied_state(tmp_path: 
 @pytest.mark.parametrize(
     ("counts", "offset", "expected"),
     [
-        ((240, 216), 0, "Reference has 1.0 s more at the end"),
-        ((240, 216), 24, "Reference has 1.0 s more at the start"),
-        ((240, 192), 24, "Reference has 1.0 s more at the start and 1.0 s more at the end"),
-        ((240, 216, 264), 0, "Reference has 1.0 s more at the end, Beta has 2.0 s more at the end"),
+        ((240, 216), 0, "Reference has 1.0 s more at the end than Alpha"),
+        ((240, 216), 24, "Reference has 1.0 s more at the start than Alpha"),
+        (
+            (240, 192),
+            24,
+            "Reference has 1.0 s more at the start and 1.0 s more at the end than Alpha",
+        ),
+        (
+            (240, 216, 264),
+            0,
+            "Reference has 1.0 s more at the end than Alpha; Beta has 2.0 s more at the end than Alpha",
+        ),
+        ((240, 252), 24, "Reference has 1.0 s more at the start; Alpha has 1.5 s more at the end"),
+        ((240, 216, 240), 0, "Reference and Beta have 1.0 s more at the end than Alpha"),
+        (
+            (240, 216, 240, 240),
+            0,
+            "Reference, Beta, and Gamma have 1.0 s more at the end than Alpha",
+        ),
         ((240, 240), 24, None),
     ],
 )
@@ -676,7 +696,9 @@ def test_extra_footage_describes_final_shared_range(
 
     comparisons = [
         _clip(tmp_path / f"comp{index}.mkv", label=name, num_frames=count)
-        for index, (count, name) in enumerate(zip(counts[1:], ("Alpha", "Beta"), strict=False))
+        for index, (count, name) in enumerate(
+            zip(counts[1:], ("Alpha", "Beta", "Gamma"), strict=False)
+        )
     ]
     ctx = _context(tmp_path, comparisons=comparisons)
     ctx.reference = _clip(ctx.reference.path, label="Reference", num_frames=counts[0])
@@ -704,16 +726,13 @@ def test_extra_footage_describes_final_shared_range(
                 ComparisonResolution(result, str(index), "computed_this_run")
                 for index, result in enumerate(results)
             ),
-            diagnostics_dir=tmp_path / "actual diagnostics",
         )
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", align)
     output = _run_align_phase(ctx, selected_frames=[30])
     assert output.alignment_summary is not None
     note = output.alignment_summary.extra_footage
-    assert note == (
-        expected + "; frames come from the range all sources share." if expected else None
-    )
+    assert note == (expected + "; frames come from the shared range." if expected else None)
     from frame_compare.orchestration.coordinator import _assemble_run_result
     from frame_compare.orchestration.execution_types import ExecutionState
     from frame_compare.orchestration.phase_output_application import apply_phase_output
@@ -729,7 +748,6 @@ def test_extra_footage_describes_final_shared_range(
         duration_seconds=1.0,
     )
     assert result.alignment_summary == output.alignment_summary
-    assert result.alignment_diagnostics_dir == output.alignment_diagnostics_dir
 
 
 @pytest.mark.parametrize("review_kind", ["none", "kept", "unresolved", "mixed"])
@@ -792,7 +810,13 @@ def test_unapplied_and_unresolved_review_warn_only_the_align_phase(
     assert output.has_unapplied_offsets is unapplied
     assert output.review_unresolved is (review_kind == "unresolved")
     expected_warnings = (
-        [format_rejected_alignment_warning(original_results[0], comparison_label=comparison.label)]
+        [
+            format_rejected_alignment_warning(
+                original_results[0],
+                comparison_label=comparison.label,
+                comparison_path=comparison.path,
+            )
+        ]
         if unapplied
         else []
     )

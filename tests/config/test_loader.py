@@ -127,21 +127,24 @@ def test_config_with_invalid_utf8_raises_config_parse_error(tmp_path: Path) -> N
         load_config(config_path=config_file)
 
 
-def test_validation_error_raises(tmp_path: Path) -> None:
-    """Test that invalid config values raise ConfigValidationError."""
-    config_file = tmp_path / "invalid.toml"
-    config_file.write_text(
-        """
-        [analysis]
-        random_frame_count = -1
-        """,
-        encoding="utf-8",
-    )
+@pytest.mark.parametrize(("invalid_source", "supplied"), [("file", -1), ("environment", "-1")])
+def test_validation_error_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid_source: str, supplied: int | str
+) -> None:
+    config_file = tmp_path / "validation.toml"
+    file_value = -1 if invalid_source == "file" else 7
+    config_file.write_text(f"[analysis]\nrandom_frame_count = {file_value}\n", encoding="utf-8")
+    if invalid_source == "environment":
+        monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__RANDOM_FRAME_COUNT", "-1")
 
     with pytest.raises(ConfigValidationError) as exc:
         load_config(config_path=config_file)
 
-    assert "Invalid configuration" in str(exc.value)
+    assert exc.value.context.message == (
+        f"Invalid effective configuration (selected file: {config_file}): "
+        f"analysis.random_frame_count: Input should be greater than or equal to 0 (given {supplied!r})"
+    )
+    assert exc.value.hint == "Correct the listed settings using the expected values above."
     # Check context is available
     assert exc.value.context.details is not None
     errors = exc.value.context.details.get("validation_errors")

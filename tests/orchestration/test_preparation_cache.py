@@ -260,7 +260,7 @@ def test_execute_prep_from_cache_only_validates_metrics_cache_when_analysis_runs
 
     request = make_run_request(root=tmp_path, from_cache_only=True, skip_analysis=False)
 
-    with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(
             preparation.execute_prep(request, RunDependencies(vs_loader=cast(Any, FakeVSLoader())))
         )
@@ -330,7 +330,7 @@ def test_execute_prep_cache_only_rejects_metadata_mismatch_before_run_folder_res
     cache_path.write_text(json.dumps(payload), encoding="utf-8")
     directories_before = {path for path in generated_dir.iterdir() if path.is_dir()}
 
-    with pytest.raises(MetricsCalculationError, match="mismatched_inputs"):
+    with pytest.raises(MetricsCalculationError) as exc_info:
         asyncio.run(
             preparation.execute_prep(
                 make_run_request(root=tmp_path, from_cache_only=True),
@@ -338,6 +338,9 @@ def test_execute_prep_cache_only_rejects_metadata_mismatch_before_run_folder_res
             )
         )
 
+    assert exc_info.value.context.details == {
+        "reason": "Cached metrics missing or mismatched (mismatched_inputs).",
+    }
     directories_after = {path for path in generated_dir.iterdir() if path.is_dir()}
     assert directories_after == directories_before
 
@@ -376,7 +379,7 @@ def test_execute_prep_from_cache_only_rejects_missing_probe_snapshot_for_selecte
         encoding="utf-8",
     )
 
-    with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(
             preparation.execute_prep(
                 make_run_request(root=tmp_path, from_cache_only=True),

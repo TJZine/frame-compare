@@ -123,7 +123,7 @@ def test_cache_only_refuses_invalid_probe_authority_before_metadata_and_reservat
     reserve = MagicMock(side_effect=AssertionError("must validate before run metadata/reservation"))
     monkeypatch.setattr(preparation, "_resolve_run_directory", reserve)
     loader = RecordingLoader()
-    with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(
             preparation.execute_prep(
                 make_run_request(root=tmp_path, from_cache_only=True),
@@ -229,7 +229,7 @@ def test_untrusted_persisted_token_misses_at_both_preparation_entrypoints(
     cache_path.write_text(tomli_w.dumps(payload), encoding="utf-8")
     loader = RecordingLoader()
     if cache_only:
-        with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
+        with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
             asyncio.run(
                 preparation.execute_prep(
                     make_run_request(root=tmp_path, from_cache_only=True),

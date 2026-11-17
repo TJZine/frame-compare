@@ -32,6 +32,7 @@ from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.loader import DefaultVSLoader
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from frame_compare.config.schema import AnalysisConfig
@@ -143,7 +144,7 @@ def _save_metrics_cache_best_effort(
     cache_dir: Path,
     reporter: ProgressReporter | None,
     timing_recorder: AnalysisTimingRecorder | None,
-) -> None:
+) -> bool:
     with record_span(timing_recorder, "cache_write"):
         try:
             save_metrics_cache(metrics, cache_dir)
@@ -155,6 +156,8 @@ def _save_metrics_cache_best_effort(
             if reporter:
                 reporter.set_description(f"Cache save failed: {e}")
             log.warning("analysis_cache_save_failed", error=str(e), exc_info=True)
+            return False
+        return True
 
 
 def calculate_metrics(
@@ -169,6 +172,7 @@ def calculate_metrics(
     timing_recorder: AnalysisTimingRecorder | None = None,
     memory_limit_mb: int | None = None,
     force_recompute: bool = False,
+    on_cache_written: Callable[[], None] | None = None,
 ) -> MetricsAcquisition:
     if not video_paths:
         raise MetricsCalculationError("No input video paths provided")
@@ -218,7 +222,9 @@ def calculate_metrics(
     finally:
         del source
 
-    _save_metrics_cache_best_effort(metrics, cache_dir, reporter, timing_recorder)
+    written = _save_metrics_cache_best_effort(metrics, cache_dir, reporter, timing_recorder)
+    if written and on_cache_written is not None:
+        on_cache_written()
 
     if reporter:
         reporter.advance(1)

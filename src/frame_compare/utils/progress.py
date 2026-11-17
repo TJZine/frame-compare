@@ -20,7 +20,6 @@ from rich.progress import (
     Task,
     TaskID,
     TextColumn,
-    TimeRemainingColumn,
 )
 from rich.progress_bar import ProgressBar
 from rich.table import Column, Table
@@ -32,11 +31,13 @@ from frame_compare.utils.progress_protocol import (
     AlignmentSummaryEntry,
     ProgressPhaseStatus,
 )
+from frame_compare.utils.terminal_sections import take_run_block_separator
 from frame_compare.utils.terminal_theme import (
     ACCENT,
     FAIL,
     OK,
     WARN,
+    format_duration,
     glyphs_for_console,
     human_console,
 )
@@ -55,26 +56,17 @@ _DURABLE_STATUS_GLYPHS = {
     ProgressPhaseStatus.SKIPPED: "skipped",
     ProgressPhaseStatus.WARNED: "warning",
     ProgressPhaseStatus.FAILED: "failed",
+    ProgressPhaseStatus.INTERRUPTED: "skipped",
 }
 _DURABLE_STATUS_STYLES = {
     ProgressPhaseStatus.COMPLETED: OK,
     ProgressPhaseStatus.SKIPPED: "dim",
     ProgressPhaseStatus.WARNED: WARN,
     ProgressPhaseStatus.FAILED: FAIL,
+    ProgressPhaseStatus.INTERRUPTED: "dim",
 }
 
 UPLOAD_PRESENTATION = "upload"
-
-
-def _format_elapsed(seconds: float) -> str:
-    whole_seconds = int(max(0.0, seconds))
-    hours, remainder = divmod(whole_seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    if hours:
-        return f"{hours}h {minutes:02d}m {seconds:02d}s"
-    if minutes:
-        return f"{minutes}m {seconds:02d}s"
-    return f"{seconds}s"
 
 
 def align_phase_duration_text(*, align_seconds: float, review_seconds: float) -> str | None:
@@ -86,7 +78,7 @@ def align_phase_duration_text(*, align_seconds: float, review_seconds: float) ->
     if review_seconds <= 0.0:
         return None
     machine_seconds = max(0.0, align_seconds - review_seconds)
-    return f"{_format_elapsed(machine_seconds)} + {_format_elapsed(review_seconds)} review"
+    return f"{format_duration(machine_seconds)} + {format_duration(review_seconds)} review"
 
 
 __all__ = [
@@ -215,27 +207,21 @@ class _UploadTimeRemainingColumn(ProgressColumn):
     def render(self, task: Task) -> RenderableType:
         if task.time_remaining is None:
             return Text("")
-        return Text(f"· {_format_elapsed(task.time_remaining)} left", style="dim")
+        return Text(f"· {format_duration(task.time_remaining)} left", style="dim")
 
 
 class _EstimatedTimeRemainingColumn(ProgressColumn):
     """Render the ETA label and value only after Rich has an estimate."""
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._remaining = TimeRemainingColumn(compact=True)
-
     def render(self, task: Task) -> RenderableType:
         if task.time_remaining is None:
             return Text("")
-        value = self._remaining.render(task)
-        return Text.assemble("ETA ", value)
+        return Text(f"ETA {format_duration(task.time_remaining)}")
 
 
 class _ElapsedTimeColumn(ProgressColumn):
     def render(self, task: Task) -> RenderableType:
-        minutes, seconds = divmod(int(task.elapsed or 0), 60)
-        return Text(f"{minutes}:{seconds:02d}")
+        return Text(format_duration(task.elapsed or 0.0))
 
 
 class _RunProgress(Progress):
@@ -378,16 +364,25 @@ class PlainProgressReporter:
                 return
             task = self._task
             nested = bool(self._task_stack)
-            if not nested or status in {
+            if status == ProgressPhaseStatus.INTERRUPTED:
+                if not nested:
+                    console = human_console(stderr=True, no_color=True)
+                    glyph = glyphs_for_console(console).skipped
+                    if take_run_block_separator():
+                        console.print()
+                    console.print(f"{glyph} {task.label.title():<16}interrupted")
+            elif not nested or status in {
                 ProgressPhaseStatus.WARNED,
                 ProgressPhaseStatus.FAILED,
             }:
                 detail = (
-                    f"  Completed in {_format_elapsed(monotonic() - task.started_at)}"
+                    f"  Completed in {format_duration(monotonic() - task.started_at)}"
                     if status == ProgressPhaseStatus.COMPLETED
                     else ""
                 )
                 line = f"{_DURABLE_STATUS_MARKERS[status]} {task.label}{detail}"
+                if take_run_block_separator():
+                    print(file=sys.stderr)
                 print(line.encode("ascii", "backslashreplace").decode("ascii"), file=sys.stderr)
             self._task = self._task_stack.pop() if self._task_stack else None
 
@@ -535,6 +530,8 @@ class RichProgressReporter:
                     self._progress.update(task_id, description="Warning", refresh=True)
                 elif status == ProgressPhaseStatus.FAILED:
                     self._progress.update(task_id, description="Failed", refresh=True)
+                elif status == ProgressPhaseStatus.INTERRUPTED:
+                    self._progress.update(task_id, description="Interrupted", refresh=True)
 
                 if total is not None and status in {
                     ProgressPhaseStatus.COMPLETED,
@@ -548,6 +545,9 @@ class RichProgressReporter:
                     if label in self._progress.steps:
                         self._progress.steps[label] = status.value
                 should_retain = status != ProgressPhaseStatus.COMPLETED
+                if status == ProgressPhaseStatus.INTERRUPTED:
+                    should_retain = not nested
+                    summary, duration_text, alignment_summary = "interrupted", None, None
                 if status == ProgressPhaseStatus.COMPLETED and retain is not False:
                     should_retain = retain is True or (
                         not nested and duration >= _MIN_DURABLE_PHASE_SECONDS
@@ -589,6 +589,8 @@ class RichProgressReporter:
         alignment_summary: AlignmentSummary | None = None,
     ) -> None:
         """Print a retained phase line with its duration inline."""
+        if take_run_block_separator():
+            self._progress.console.print()
         glyphs = glyphs_for_console(self._progress.console)
         glyph = getattr(glyphs, _DURABLE_STATUS_GLYPHS[status])
         style = _DURABLE_STATUS_STYLES[status]
@@ -599,7 +601,7 @@ class RichProgressReporter:
             status == ProgressPhaseStatus.COMPLETED
             or (status == ProgressPhaseStatus.WARNED and alignment_summary is not None)
         ):
-            resolved_duration = _format_elapsed(duration)
+            resolved_duration = format_duration(duration)
         continuation: tuple[Text, ...] = ()
         if alignment_summary is not None:
             duration_width = cell_len(resolved_duration) + 3 if resolved_duration else 0
@@ -722,7 +724,10 @@ class LogProgressReporter:
     ) -> None:
         """Log phase completion."""
         del retain, summary, duration_text, alignment_summary
-        log.info("phase_completed", phase=self._name, status=status.value)
+        log_status = (
+            ProgressPhaseStatus.FAILED if status == ProgressPhaseStatus.INTERRUPTED else status
+        )
+        log.info("phase_completed", phase=self._name, status=log_status.value)
         if self._task_stack:
             self._name, self._total, self._current, self._last_logged_milestone = (
                 self._task_stack.pop()

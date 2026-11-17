@@ -295,7 +295,7 @@ def test_required_cache_load_rejects_misfiled_algorithm(tmp_path: Path) -> None:
     }
     cache_file(tmp_path, fingerprint, video).write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(MetricsCalculationError, match="mismatched_inputs"):
+    with pytest.raises(MetricsCalculationError) as caught:
         acquire_required_metrics(
             request,
             video_paths=[video],
@@ -303,6 +303,11 @@ def test_required_cache_load_rejects_misfiled_algorithm(tmp_path: Path) -> None:
             cache_dir=tmp_path,
             selection_domain=None,
         )
+    assert caught.value.context.message == "No cached analysis for this selection."
+    assert caught.value.hint == "Run once without --from-cache-only to build the cache."
+    details = caught.value.context.details
+    assert details is not None
+    assert details["reason"] == "Cached metrics missing or mismatched (mismatched_inputs)."
 
 
 def test_load_cache_with_unencodable_algorithm_identity_is_corrupted(tmp_path: Path) -> None:

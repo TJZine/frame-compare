@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import re
+from difflib import get_close_matches
 from pathlib import Path
 from tomllib import TOMLDecodeError
-from typing import cast
+from typing import cast, get_args, get_origin
+
+from pydantic import BaseModel
 
 from frame_compare.errors import ErrorContext, FrameCompareError, JSONValue
 
@@ -28,6 +31,85 @@ def _redact_config_input(value: JSONValue, location: tuple[str, ...]) -> JSONVal
         # An invalid array of config tables still has its section's location.
         return [_redact_config_input(item, location) for item in value]
     return value
+
+
+def _config_location(error: dict[str, JSONValue]) -> tuple[str, ...]:
+    location = error.get("loc")
+    return tuple(str(part) for part in location) if isinstance(location, list) else ()
+
+
+def _config_section_fields(schema: type[BaseModel], section: tuple[str, ...]) -> tuple[str, ...]:
+    annotation: object = schema
+    for part in section:
+        # A nullable nested model or a mapping of source selectors to overrides
+        # contributes its value model to the next step through the location.
+        args = get_args(annotation)
+        if get_origin(annotation) is dict:
+            annotation = args[1]
+            continue
+        annotation = next((arg for arg in args if arg is not type(None)), annotation)
+        if not isinstance(annotation, type) or not issubclass(annotation, BaseModel):
+            return ()
+        field = annotation.model_fields.get(part)
+        if field is None:
+            return ()
+        annotation = field.annotation
+    annotation = next((arg for arg in get_args(annotation) if arg is not type(None)), annotation)
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return tuple(annotation.model_fields)
+    return ()
+
+
+def _config_validation_message(
+    errors: list[dict[str, JSONValue]], source_path: Path | None, *, effective: bool
+) -> str:
+    lines: list[str] = []
+    for error in errors:
+        key = ".".join(_config_location(error)) or "configuration"
+        if error.get("type") == "extra_forbidden":
+            lines.append(f"{key}: unknown key")
+            continue
+        problem = str(error.get("msg", "invalid value")).removeprefix("Value error, ")
+        if "input" in error:
+            problem += f" (given {error['input']!r})"
+        lines.append(f"{key}: {problem}")
+    if effective:
+        heading = "Invalid effective configuration"
+        if source_path is not None:
+            heading += f" (selected file: {source_path})"
+    else:
+        heading = (
+            f"Invalid configuration in {source_path}"
+            if source_path is not None
+            else "Invalid configuration"
+        )
+    if len(lines) > 1:
+        return f"{heading}:\n  " + "\n  ".join(lines)
+    if lines:
+        return f"{heading}: {lines[0]}"
+    return heading
+
+
+def _config_validation_hint(
+    errors: list[dict[str, JSONValue]], schema: type[BaseModel]
+) -> str | None:
+    suggestions: list[str] = []
+    for error in errors:
+        location = _config_location(error)
+        if error.get("type") != "extra_forbidden" or not location:
+            continue
+        key = location[-1]
+        section = location[:-1]
+        valid_keys = _config_section_fields(schema, section)
+        closest = get_close_matches(key, valid_keys, n=3, cutoff=0)
+        if closest:
+            keys = ", ".join(".".join((*section, candidate)) for candidate in closest)
+            suggestions.append(f"Closest valid keys for {'.'.join(location)}: {keys}.")
+    if suggestions:
+        return " ".join(suggestions)
+    if errors:
+        return "Correct the listed settings using the expected values above."
+    return None
 
 
 def format_toml_syntax_error(error: TOMLDecodeError) -> str:
@@ -80,28 +162,21 @@ class ConfigValidationError(ConfigError):
         errors: list[dict[str, JSONValue]],
         *,
         message: str | None = None,
-        hint: str = "Check field types and constraints",
+        hint: str | None = None,
+        source_path: Path | None = None,
+        schema: type[BaseModel] | None = None,
+        effective: bool = False,
     ) -> None:
         sanitized_errors: list[dict[str, JSONValue]] = []
         for error in errors:
             sanitized_error = error.copy()
             if "input" in sanitized_error:
-                raw_location = sanitized_error.get("loc")
-                location = (
-                    tuple(str(part) for part in raw_location)
-                    if isinstance(raw_location, list)
-                    else ()
-                )
+                location = _config_location(sanitized_error)
                 sanitized_error["input"] = _redact_config_input(sanitized_error["input"], location)
             sanitized_errors.append(sanitized_error)
 
-        fields: list[str] = []
-        for e in sanitized_errors:
-            loc = e.get("loc")
-            if isinstance(loc, list) and loc:
-                fields.append(str(loc[-1]))
-            else:
-                fields.append("unknown")
+        if hint is None and schema is not None:
+            hint = _config_validation_hint(sanitized_errors, schema)
 
         # Cast to avoid invariance issues with list[dict[str, JSONValue]] vs list[JSONValue]
         safe_errors = cast("JSONValue", sanitized_errors)
@@ -110,12 +185,14 @@ class ConfigValidationError(ConfigError):
             ErrorContext(
                 code="FC-1003",
                 name="CONFIG_VALIDATION_ERROR",
-                message=message or f"Invalid configuration: {', '.join(fields)}",
-                hint=hint,
+                message=message
+                or _config_validation_message(sanitized_errors, source_path, effective=effective),
+                hint=hint if hint is not None else "Check field types and constraints",
                 details={"validation_errors": safe_errors},
             )
         )
         self.validation_errors = sanitized_errors
+        self.source_path = source_path
 
 
 class PresetNotFoundError(ConfigError):

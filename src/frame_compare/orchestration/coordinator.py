@@ -18,6 +18,7 @@ from frame_compare.orchestration.execution import (
     build_execution_phase_plan,
 )
 from frame_compare.orchestration.execution_types import (
+    ExecutionPhasePlan,
     ExecutionState,
     RunArtifacts,
 )
@@ -25,7 +26,12 @@ from frame_compare.orchestration.fps_report import (
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
 )
-from frame_compare.orchestration.phases import execute_phases
+from frame_compare.orchestration.phase_selection import (
+    generated_frame_count,
+    shared_range_drop_warning,
+    user_frames_outside_shared_range,
+)
+from frame_compare.orchestration.phases import PhaseStatus, execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import (
     rich_phase_label,
@@ -38,6 +44,7 @@ from frame_compare.orchestration.run_result_lifecycle import (
 )
 from frame_compare.orchestration.selection_report import emit_final_selection_report
 from frame_compare.orchestration.types import (
+    InterruptedRun,
     ReservedRunCapture,
     RunDependencies,
     RunRequest,
@@ -48,11 +55,31 @@ from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
     is_cancelling,
+    is_run_interruption,
 )
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.terminal_theme import WARN, glyphs_for_console, human_console
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = ["RunDependencies", "RunRequest", "RunResult", "execute_run"]
+
+
+def _emit_dropped_frames_notice(request: RunRequest, frames: tuple[int, ...]) -> None:
+    if frames and not (request.json_output or request.quiet):
+        console = human_console(stderr=True, no_color=request.no_color)
+        glyph = glyphs_for_console(console).warning
+        console.print(f"[{WARN}]{glyph}[/] {shared_range_drop_warning(frames).message}")
+
+
+def _combine_shared_range_warnings(warnings: list[RunWarning]) -> tuple[int, ...]:
+    relevant = [warning for warning in warnings if warning.dropped_user_frames]
+    frames = tuple(sorted({frame for warning in relevant for frame in warning.dropped_user_frames}))
+    if len(relevant) > 1:
+        warnings[:] = [
+            *(warning for warning in warnings if not warning.dropped_user_frames),
+            shared_range_drop_warning(frames),
+        ]
+    return frames
 
 
 def _assemble_run_result(
@@ -105,7 +132,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     run_timer_start: float | None = None
     phase_timings: dict[str, float] = {}
     clip_count = 0
-    selected_frame_count = 0
+    selected_frame_count: int | None = None
+    phase_plan: ExecutionPhasePlan | None = None
+    context: RunContext | None = None
     artifacts: RunArtifacts | None = None
     preflight_warnings: list[RunWarning] = []
     current_preflight_warnings: list[RunWarning] | None = None
@@ -136,7 +165,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         nonlocal artifacts, clip_count, phase_timings, preflight_warnings, run_start
         nonlocal current_preflight_warnings
         nonlocal run_timer_start
-        nonlocal selected_frame_count
+        nonlocal context, phase_plan, selected_frame_count
         run_start = local_deps.clock()
         run_timer_start = local_deps.monotonic_timer()
         reporter = local_deps.progress
@@ -184,6 +213,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             no_color=request.no_color,
             verbose=request.verbose,
         )
+        if not prep.config.audio_alignment.enable:
+            _emit_dropped_frames_notice(request, user_frames_outside_shared_range(context))
         state.phase_timings["load_sources"] = max(
             0.0, local_deps.monotonic_timer() - prep.load_sources_start
         )
@@ -225,6 +256,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             ]
         )
         await execute_phases(phase_plan.before_align, context, reporter)
+        dropped_frames = _combine_shared_range_warnings(state.warnings)
+        if prep.config.audio_alignment.enable:
+            _emit_dropped_frames_notice(request, dropped_frames)
         selected_frame_count = len(list(context.selection.frames))
         emit_final_selection_report(
             selected_frames=list(context.selection.frames),
@@ -331,7 +365,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             duration_seconds=duration_seconds,
             artifacts=artifacts,
             clip_count=clip_count,
-            selected_frame_count=selected_frame_count,
+            selected_frame_count=selected_frame_count or 0,
             phase_timings=phase_timings,
             warnings=(
                 preflight_warnings
@@ -339,4 +373,41 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 else list(current_preflight_warnings)
             ),
         )
+        if (
+            local_deps.on_failed_alignment_diagnostics is not None
+            and artifacts is not None
+            and artifacts.alignment_diagnostics_dir is not None
+            and isinstance(original_error, Exception)
+        ):
+            with suppress(Exception):
+                local_deps.on_failed_alignment_diagnostics(artifacts.alignment_diagnostics_dir)
+        if local_deps.on_interrupted is not None and is_run_interruption(original_error):
+            phase_label = _interrupted_phase_label(phase_plan)
+            planned_frames = selected_frame_count
+            if planned_frames is None:
+                analysis = request.inputs.config.analysis
+                planned_frames = len(analysis.user_frames) + generated_frame_count(analysis)
+            with suppress(Exception):
+                local_deps.on_interrupted(
+                    InterruptedRun(
+                        phase=phase_label,
+                        workspace=reserved_workspace,
+                        planned_screenshots=planned_frames * clip_count,
+                        analysis_cache_written=(
+                            context is not None and "analysis" in context.reusable_cache_writes
+                        ),
+                        alignment_cache_written=(
+                            context is not None and "alignment" in context.reusable_cache_writes
+                        ),
+                    )
+                )
         raise
+
+
+def _interrupted_phase_label(plan: ExecutionPhasePlan | None) -> str | None:
+    if plan is None:
+        return "Setup"
+    for phase in (*plan.before_align, *plan.after_align):
+        if phase.status == PhaseStatus.INTERRUPTED:
+            return rich_phase_label(phase.name)
+    return None

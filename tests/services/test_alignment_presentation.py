@@ -160,7 +160,6 @@ def _present(
         verbose=verbose,
         quiet=quiet,
         json_output=json_output,
-        diagnostics_written=False,
     )
 
 
@@ -449,6 +448,7 @@ def test_inconclusive_copy_does_not_report_boundary_hint_with_four_positions() -
         ("analysis_budget_exceeded", "analysis budget exceeded"),
         ("source_identity_changed", "source changed during analysis"),
         ("timeout", "audio collection failed"),
+        ("video_check_inconclusive", "video check was inconclusive"),
     ],
 )
 def test_audio_unavailable_phrase(reason: str, phrase: str) -> None:
@@ -1403,7 +1403,6 @@ def test_normal_audio_evidence_reports_observation_and_stability(
         verbose=False,
         quiet=False,
         json_output=False,
-        diagnostics_written=False,
         review_pending=True,
     )
     rich_text = rendered.getvalue()
@@ -1420,7 +1419,7 @@ def test_normal_audio_evidence_reports_observation_and_stability(
 
 
 @pytest.mark.parametrize("verbose", [False, True])
-def test_audio_diagnostics_use_workspace_relative_link(
+def test_audio_evidence_does_not_repeat_completion_diagnostics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verbose: bool
 ) -> None:
     from io import StringIO
@@ -1451,9 +1450,7 @@ def test_audio_diagnostics_use_workspace_relative_link(
         verbose=verbose,
         quiet=False,
         json_output=False,
-        diagnostics_written=True,
     )
     plain = Text.from_ansi(output.getvalue()).plain
-    assert f"diagnostics     {Path('generated') / 'run' / 'alignment_diagnostics'}" in plain
-    assert str(tmp_path) not in plain if not verbose else "(absolute:" in plain
-    assert f'href="{diagnostics.as_uri()}"' in console.export_html(clear=False)
+    assert "Audio alignment" in plain
+    assert "alignment_diagnostics" not in plain

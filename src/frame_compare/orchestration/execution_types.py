@@ -71,7 +71,6 @@ class AlignPhaseOutput:
     warnings: list[RunWarning] = field(default_factory=list[RunWarning])
     success_summary: str | None = None
     alignment_summary: AlignmentSummary | None = None
-    alignment_diagnostics_dir: Path | None = None
     # Measured VSView review wait for the human summary (memory only).
     review_seconds: float = 0.0
     # True when review was pending but VSView never ran: the durable Align

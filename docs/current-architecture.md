@@ -99,7 +99,12 @@ Analyze validation timing for ordinary runs.
 `RunDependencies` supplies aware UTC wall time for persisted start/completion
 timestamps and a separate monotonic timer for preflight, source loading, phases,
 and total success/failure durations. Persisted `duration_seconds` comes from that
-monotonic total rather than wall-clock subtraction.
+monotonic total rather than wall-clock subtraction. The alignment service
+reports the diagnostics directory after a successful per-run write. Execution
+records that path in run artifacts independently of alignment or selection
+application. After failure cleanup and run-record handling, the coordinator can
+pass the path to the caller. The run CLI renders it with the error using its
+human output path formatter.
 Current phase-family owners are intentionally explicit:
 
 - `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
@@ -332,6 +337,12 @@ Frame Compare-owned indexes before reuse. See
 [Supported Media Runtime](supported-media-runtime.md) for the profile boundary and
 recovery requirement.
 
+An interrupted run sends its phase and reserved workspace to the human CLI
+through the runner's interruption callback. Analysis and alignment report
+successful reusable cache writes from their persistence owners. The CLI counts
+retained screenshots after the runner returns control, while the existing
+failure-record path remains responsible for persisted run status.
+
 ### Configuration persistence
 
 `orchestration.run_inputs` owns the selected run configuration. The only intentional
@@ -342,6 +353,10 @@ do not replace admitted run settings. Doctor shares `select_run_config_path` and
 never searches parent directories.
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
+- `frame_compare.config.loader` supplies the selected file and validation schema to
+  the config error formatter. `frame_compare.config.errors` redacts diagnostic
+  values before formatting invalid settings and uses the affected table's schema
+  for unknown-key suggestions.
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
   config and preset writes; runtime `slowpics.webhook_url` and `tmdb.api_key` values
   are excluded from every generated TOML payload. The config-owned representation

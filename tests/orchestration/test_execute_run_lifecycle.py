@@ -969,6 +969,9 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
             raise RenderError("render failed before interrupt")
         ready.set()
         assert release_render.wait(3)
+        if owner == "render":
+            request.output_path.parent.mkdir(parents=True, exist_ok=True)
+            request.output_path.write_bytes(b"retained screenshot fixture")
         return RenderedFrameResult(
             request.output_path,
             RenderedFrameFacts(
@@ -1005,7 +1008,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                     clip=root / "reference.mkv",
                     diagnostic_source=root / "reference.mkv",
                     frame_number=index,
-                    output_path=root / f"{index}.png",
+                    output_path=workspace.screenshots_dir / f"{index}.png",
                     overlay=None,
                     encoder_settings=EncoderSettings(),
                 )
@@ -1064,7 +1067,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                 "run",
                 "--root",
                 str(root),
-                "--quiet",
+                *([] if owner == "render" else ["--quiet"]),
                 "--skip-analysis",
                 "--skip-metadata",
                 "--no-upload",
@@ -1077,6 +1080,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
         json.dumps(
             {
                 "exit": result.exit_code,
+                "stderr": result.stderr,
                 "status": record.status,
                 "calls": sorted(calls),
                 "later": later,
@@ -1118,6 +1122,12 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
         assert observed["children"] == 1
     elif owner == "render":
         assert observed["calls"] in ([0], [0, 1])
+        stderr = observed["stderr"]
+        assert "– Render          interrupted" in stderr
+        assert "! Interrupted during Render" in stderr
+        assert f"{len(observed['calls'])} of 10 screenshots" in stderr
+        assert "[FAIL] RENDER" not in stderr
+        assert "next run" not in stderr
     else:
         assert observed["close_completed"] == [True]
 

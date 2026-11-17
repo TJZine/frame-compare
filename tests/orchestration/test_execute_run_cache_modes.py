@@ -414,6 +414,7 @@ def test_execute_run_analysis_failure_without_initial_frames_is_fatal(
 
 def test_execute_run_metric_selection_survives_dropped_user_frame(
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     create_config(
         tmp_path,
@@ -454,9 +455,9 @@ def test_execute_run_metric_selection_survives_dropped_user_frame(
         ("a_source.mkv", 0),
         ("b_comp.mkv", 0),
     ]
-    assert any(
-        "dropped user frame(s) outside trims/windowing: 120" in w.text for w in result.warnings
-    )
+    warning = "1 requested frame falls outside the shared range and was skipped: 120"
+    assert [item.text for item in result.warnings].count(warning) == 1
+    assert capsys.readouterr().err.count(f"! {warning}") == 1
 
 
 def test_execute_run_no_cache_recomputes_warm_full_window_retry(
@@ -593,7 +594,7 @@ def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    with pytest.raises(MetricsCalculationError, match="Cached metrics missing or mismatched"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(execute_run(request, deps=deps))
 
 
@@ -739,7 +740,7 @@ enable = false
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
-    with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(execute_run(request, deps=deps))
 
 
@@ -825,5 +826,5 @@ def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_
     )
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(execute_run(request, deps=deps))

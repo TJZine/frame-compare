@@ -23,6 +23,8 @@ documents that promise elsewhere.
   renderer for Rich human sections. `src/frame_compare/utils/artifact_paths.py`
   owns human artifact-path formatting and terminal hyperlinks. `SessionConsole`
   mirrors the same section rules in the VSView process.
+- `src/frame_compare/utils/terminal_theme.py` owns the human console and path-safe
+  wrapping used by human dry-run and typed error output.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
 - Primary executable contract checks include:
   - `tests/cli/test_help_and_import.py` for command registration, help text, and
@@ -101,8 +103,12 @@ and `cli_helpers.handle_error`):
 | `130` | A run or the wizard interrupted by Ctrl+C, or a wizard prompt aborted or reaching end of input |
 
 The first digit of an `FC-` code selects its family and exit code. Human output
-prints the code and message on stderr; `--json` prints the typed error document
-described under Output Modes. An unexpected error exits 1 and prints a fixed
+prints the code and message on stderr with a hint when available. The details
+block and its verbose prompt are omitted when the message already contains every
+detail value. Typed human errors wrap to the terminal width. Paths that do not fit
+at the end of a line move intact to the next line, including selectors displayed
+with quotes and escaped characters. `--json` prints the typed error
+document described under Output Modes. An unexpected error exits 1 and prints a fixed
 message to stderr. In `--json` mode it emits no stdout document.
 
 ## Shared Path Resolution Rules
@@ -357,6 +363,8 @@ unchanged.
   `Will use`, `Would create in a real run`, `Publishing after success`, `Unknown
   until execution`, and `Not performed by dry-run`. Contained input paths are shown
   relative to the workspace root, while external input paths remain absolute.
+  Human output wraps to the terminal width and moves a path intact to the next
+  line when it does not fit.
   `--quiet` emits only a minimal source-count/no-side-effects summary.
   `--dry-run --json` writes exactly one JSON document to stdout, and typed errors
   retain the standard JSON error schema and stream placement.
@@ -408,12 +416,13 @@ unchanged.
   `+-`, `|`, `+-`, `*`, and `o` for the section and status glyphs, while the
   existing `·`, `›`, `…`, `×` mappings remain in force. Rich output uses this
   renderer for every in-scope section; the VSView process applies the same rules
-  in `SessionConsole`. There is one blank line before and after each section;
-  phase lines are grouped without blank lines between them and have one blank
-  line around the group.
+  in `SessionConsole`. One blank line separates `run` blocks, including the
+  completion and Warnings sections. Adjacent phase lines form one block.
+  Plain audio evidence forms a separate block. Errors and interruption summaries
+  are separated from the preceding section by one blank line.
 - Normal non-quiet runs begin with a dim-rail `Run plan` section containing
   `Workspace`, `Frames`, `Rendering`, `Alignment`, `Review`, and `Publishing`
-  groups. Rows and their order are unchanged. Group keys are accent bold; their
+  groups. Group keys are accent bold; their
   sub-rows are indented two spaces, and there is one blank body line between
   groups. `Workspace` is the root with `config`, `input`, and `output` sub-rows
   (`output` is the resolved generated-data root). `Frames` is `N total` with a
@@ -428,15 +437,16 @@ unchanged.
   VSView review` / `audio, VSView required` / `audio` / `disabled`, with a
   `tools` row of `{glyph} FFmpeg audio · {glyph} VSView`; unavailable tools are
   followed by muted `(unavailable)` or the existing probe-failure text, VSView
-  is omitted when not requested, and FFmpeg shows `–` when alignment is disabled.
-  Its `offsets` row uses the existing label with a lower-case first letter.
+  is omitted when not requested. Its `offsets` row uses the existing label
+  with a lower-case first letter. Disabled alignment omits both sub-rows.
   `Review` is `HTML report · opens when done` / `HTML report` / `disabled`, with
   `metadata` as `TMDB lookup` / `disabled`. `Publishing` is `slow.pics ·
   {visibility lower} · ask after the local report` / `automatic upload`, or
   `disabled` / `disabled by --no-upload`, with `after upload` as
   `copy URL · open browser · create shortcut` / `none`, `webhook` as
   `configured` / muted `not configured` (the URL is never displayed), and
-  `cleanup` with the existing text lower-cased first. The `tools` separators are
+  `cleanup` with the existing text lower-cased first. Disabled publishing omits
+  all three sub-rows. The `tools` separators are
   ` · `.
 - Human run-plan paths show the resolved workspace root once as an absolute anchor.
   Contained config, input, generated-data, and result paths are shown relative to
@@ -474,7 +484,7 @@ unchanged.
   prompt would be needed.
 #### Source, alignment, and completion summaries
 
-- After sources load, normal human output uses one `Sources · N loaded` section
+- After sources load, normal human output uses one `Sources · N` section
   when all sources do not share one content identity, or `{content identity} ·
   {N} sources` when they do. `1 source` is used for one source. The content
   identity is no longer repeated in the body. Each source entry has its bold name,
@@ -493,11 +503,14 @@ unchanged.
   and do not add fields to successful stdout.
 - Material alignment information is printed in a dim-rail `Frame alignment`
   section when accepted or rejected frame-alignment changes need explanation. Each
-  comparison has a bold short-name line, `trims`, `stability` when present, and
-  `frames` (`aligned …`).
+  comparison has a bold short-name line, `trims`, and `stability` when present.
+  The shared `frames` row follows the last comparison. When aligned frame lists
+  differ, each comparison shows its own list. The row uses `aligned …` or
+  `aligned frame 0 (1 total)` for one frame at index 0.
   The `offset` and `source` rows are removed; the Align phase summary carries the
-  final offsets and origins. Alignment warnings are `!` notes, and verbose
-  `details` rows are unchanged. The existing evidence still reports normalized
+  final offsets and origins. A comparison with an alignment warning gets a
+  `! see warnings` note. The warning itself appears in the final Warnings section.
+  Verbose `details` rows are unchanged. The existing evidence still reports normalized
   source-frame row 0, final trim ranges, selected aligned frames, and alignment
   warning context. Stability is derived from credible chunk runs; unobserved
   planned chunks remain unassessed. Individual diagnostic chunks are never printed.
@@ -505,11 +518,13 @@ unchanged.
 - `--verbose` adds a dim-rail `Final selection` section after alignment. Its rows
   are unchanged; the `After Alignment` stage label is omitted.
 - Audio alignment uses a dim rail, or a yellow rail when any comparison needs
-  review, with title `Audio alignment` and optional dim ` · {N} needs review`.
+  review, with title `Audio alignment` and optional dim ` · 1 needs review` or
+  ` · {N} need review`.
   Each entry starts with a bold short name and one of the exact states `{+Nf} ·
   applied`, `{+Nf} · confirm in VSView`, `{+Nf} · reused from last run`,
   `{+Nf} · previously confirmed`, `{+Nf} · manual offset`, `{+Nf} · not applied`,
-  or `no audio match ({reason phrase})`. Fresh results include the dim evidence
+  or `no audio match ({reason phrase})`. The reason uses plain language. Fresh
+  results include the dim evidence
   line `{agreeing} of {active} sections agree · video check {+Nf} · {stability}`.
   The agreeing count is `authority_recount.authority_agreeing_chunks` when an
   authority recount exists, otherwise `audio.agreeing_chunks`; both are counted
@@ -536,9 +551,8 @@ unchanged.
   Provisional evidence never authorizes trims, persistence, or computed-cache
   authority. Verbose evidence remains as dim key/value rows,
   including the original attempt and stream/chunk/video facts without fabricating
-  current details for reused results. A written diagnostics directory appears as
-  the `diagnostics` hyperlink row. Plain mode prints `{short}: {line 1 state}` and
-  indents following lines two spaces, then `Audio diagnostics: {path}`. The
+  current details for reused results. Plain mode prints `{short}: {line 1 state}`
+  and indents following lines two spaces. The
   pre-review `✓ Align … alignment applied` line is removed. Quiet mode retains
   only actionable entries and the final screenshots line.
 - When previous offsets are reused interactively, the prompt section is
@@ -575,8 +589,11 @@ unchanged.
   form is `{accepted} of {N} comparisons aligned · {origin}` followed by one row per
   comparison at column 18; the wrapped `{origin}` appears only when every comparison
   has an applied offset and all those applied comparisons share that origin. Length
-  differences add the dim extra-footage line.
-  Review duration is `· {machine} + {review} review`. The Align phase is warned whenever any
+  differences add a dim note. Names with the same extra time at the start and
+  end share a clause. Distinct amounts use separate clauses joined by semicolons.
+  The note names the comparison source when exactly one source needed no trim
+  and ends with `frames come from the shared range.`
+  Review duration is `· {alignment time} + {review time} review`. The Align phase is warned whenever any
   comparison ends without an applied offset, whether or not review ran; this
   changes only the phase glyph and colour and does not change authority, trims,
   persistence, the warnings list, or the completion title.
@@ -585,19 +602,25 @@ unchanged.
   section title with a matching rail. Rows are `slow.pics` with the URL only when
   uploaded, followed by the existing copy/open result items and `  shortcut` and
   `  webhook` rows; `report`; `screenshots` with `  {N} files`; `alignment` when
-  alignment ran; `diagnostics` when written; and the `slow.pics` row `upload
+  alignment ran; the `diagnostics` hyperlink when written; and the `slow.pics` row `upload
   skipped because the report could not be confirmed` when that happened.
   Declined uploads get no row. After one blank body line, `run` is `{N} frames ·
   {N} sources · analysis cached` or `analysis computed`, with nothing for
-  `skipped`, followed by `time` as `{dur} total`, `  machine`, and `  you` with
-  their existing items. Artifact paths are Rich hyperlinks and use the shared
-  path formatter. `--quiet` is unchanged.
-- Final warnings are grouped by producer-selected source in a yellow-rail
-  `! Warnings` section. Each source has its accent bold name, `!` notes (or `–`
-  for skipped items), dim detail lines indented two spaces, and one blank body
-  line between sources. The hidden-count line is unchanged. Records are
-  de-duplicated for display, and warning rows associated with post-upload action
-  rows remain on those rows.
+  `skipped`. If rendered and planned frame counts differ, the row shows
+  `{rendered} of {planned} frames`. The next rows are `time` as `{dur} total`,
+  `  phases`, and `  you` with their corresponding timings. Artifact paths are
+  Rich hyperlinks and use the shared path formatter. The diagnostics path is
+  available once a diagnostic is written, including when alignment later fails
+  or the run continues with its original selection. If an error prevents the
+  completion section, the error is followed by the written diagnostics path.
+  Quiet, JSON, and managed interruption output omit this path.
+- The yellow-rail `! Warnings` section lists every distinct warning once,
+  including post-upload action warnings. The completion title counts that same
+  list. Copy, browser, shortcut, and webhook rows retain concise outcomes. The
+  section groups by source only when several sources are represented, with `!`
+  for warnings, `–` for skipped items, and dim, indented details when present.
+  Rejected comparisons use the short label and a plain-language reason, followed
+  by a note that frames use the reference's frame numbers.
 - The output redesign moves information rather than dropping it:
 
   | Removed or changed | Information now shown in |
@@ -647,15 +670,21 @@ unchanged.
 - Rich phase lines use `{glyph} {Label:<16}{summary}`, so the summary begins at
   column 18. The duration is appended inline in dim as `{summary} · {dur}`; with
   no summary, the duration alone begins at column 18. Retention rules are
-  unchanged for completed top-level phases of 10 seconds or more, skipped,
-  warned, and failed phases, and successful uploads. Plain mode keeps
-  `[OK] ALIGN  Completed in …` and related existing renderers.
+  unchanged for completed top-level phases of 10 seconds or more, runtime
+  skips, warned and failed phases, and successful uploads. Plain mode uses
+  `[OK] ALIGN  Completed in …`. Human durations use one decimal below a minute
+  (`0.3 s`, `12.9 s`), minutes and seconds from a minute (`1m 08s`), and hours
+  and minutes from an hour (`1h 02m`). The run plan, the full-window prompt,
+  and its warning show authored sub-minute exclusion values with their available
+  precision, such as `0.03 s`. Timecodes show positions within media.
 - Phase summaries are unchanged except for Align: Analyze uses `{N} frames
   selected`, Render uses `{N} screenshots ({F} frames × {S} sources)`, Publish
   uses `{N} screenshots uploaded · {visibility}`, and a skipped phase uses its
-  lower-cased detail, such as `– Publish          declined`.
+  lower-cased detail, such as `– Publish          declined`. Config- or
+  flag-disabled phases are omitted from both human progress reporters.
+  Runtime skips retain their detail, and structured logging records every skip.
 - Non-TTY human runs use those product phase labels in chronological ASCII
-  progress lines on stderr. Each top-level phase emits once when it completes;
+  progress lines on stderr. Each enabled top-level phase emits once when it completes;
   successful lines include elapsed time, skips preserve their detail, and failed
   phases emit `[FAIL]` before the existing typed error presentation. Successful
   nested work and percentage milestones remain silent. Warned or failed nested
@@ -811,7 +840,11 @@ uses knee 1.0. Existing explicit color overrides retain precedence. The field na
   `--frames` disables `--random-frame-count` or the metric-count options.
 
 When a metric selector is pending, FramePlan can pass an empty provisional plan
-to Analyze. User frames outside the selection window still produce a drop warning.
+to Analyze. User frames outside the selection window produce a drop warning.
+When a requested frame falls outside the shared source range, the CLI prints a
+notice after Align, or immediately after the sources block when alignment is
+disabled. The same shared-range warning appears once in the final Warnings
+section.
 If Analyze fails, an ordinary run continues with a warning only when usable User
 or Random frames remain. Otherwise it exits with the typed analysis or selection
 error before rendering.
@@ -820,7 +853,14 @@ error before rendering.
 
 After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. In-flight FFmpeg batch extraction is stopped and reaped with bounded cleanup; frame extraction keeps its existing timeout. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
 
-The interrupted run follows the failure-record path and exits 130. On Windows,
+The interrupted run follows the failure-record path and exits 130. The active
+human progress line says `interrupted` and uses the skip glyph. After cleanup, the
+CLI prints `! Interrupted during {phase}` when a phase is known. A reserved run
+folder gets a `kept` row with its screenshot count, planned count, and path.
+A `next run` row names only reusable analysis or alignment caches written by
+this run. Quiet and JSON output omit this human summary.
+
+On Windows,
 once the standalone CLI has completed its Python cleanup and selected exit 130,
 it ignores further Ctrl+C during interpreter/native-module teardown to preserve
 that exit status. This does not change repeated-interrupt behavior while the run
@@ -1061,7 +1101,8 @@ recovery requirement.
   the matching shared analysis cache entry for the exact current performance mode
   and metric algorithm identity before metadata prefetch and before run-folder
   reservation, so a missing, wrong-mode, or invalid entry does not leave an empty
-  run folder.
+  run folder. A cache miss reports `No cached analysis for this selection.` and
+  tells the user to run once without `--from-cache-only`.
 - The matching cache must remain valid through the cache-only Analyze phase. If
   its later acquisition fails, the run exits with the typed cache/analysis error
   before rendering or publishing; it does not complete with only the initial
@@ -1834,7 +1875,11 @@ Unknown keys at the root of the config remain ignored so a config can carry
 top-level sections owned by other tools. Every Frame Compare-owned nested
 config table rejects unknown keys, including nested source override and active
 rectangle tables. A misspelled or stale key inside an owned table therefore
-fails config validation instead of silently using a default.
+fails config validation instead of silently using a default. Its error names the
+selected configuration file as context, gives the full dotted key and suggests up
+to three keys from that table. Invalid values show the expected value or constraint
+and the supplied value, subject to redaction. Validation after merging settings
+reports the effective configuration and lists the selected file as context.
 
 Validation details retain rejected non-secret inputs for diagnostics. Inputs at
 `slowpics.webhook_url` and `tmdb.api_key` are always replaced with `<redacted>`

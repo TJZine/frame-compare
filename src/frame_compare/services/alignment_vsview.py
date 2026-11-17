@@ -109,13 +109,16 @@ def _ensure_forced_availability(
 ) -> None:
     if is_available:
         return
+    hint = "Run 'frame-compare doctor' to check VSView, or drop --force-interactive-alignment."
     if status == VSViewAvailabilityStatus.PROBE_FAILED:
         raise AudioAlignmentError(
-            f"Interactive alignment requested but VSView {probe_failure_reason}."
+            f"Interactive alignment requested but VSView {probe_failure_reason}.",
+            hint=hint,
         )
     raise AudioAlignmentError(
         "Interactive alignment requested but VSView and the Frame Compare panel "
-        "are not available in this Python environment."
+        "are not available in this Python environment.",
+        hint=hint,
     )
 
 

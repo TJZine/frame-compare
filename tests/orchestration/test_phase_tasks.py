@@ -650,7 +650,7 @@ def test_run_analyze_phase_cache_only_invalid_cache_does_not_recompute(
 
     with pytest.raises(
         CacheCorruptionError if corrupt else MetricsCalculationError,
-        match="Cache file corrupted" if corrupt else "Cached metrics missing",
+        match="Cache file corrupted" if corrupt else "No cached analysis for this selection",
     ):
         phase_selection.run_analyze_phase(
             ctx,
@@ -733,13 +733,16 @@ def test_run_analyze_phase_cache_only_metadata_mismatch_does_not_recompute(
     )
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
 
-    with pytest.raises(MetricsCalculationError, match="mismatched_inputs"):
+    with pytest.raises(MetricsCalculationError) as exc_info:
         phase_selection.run_analyze_phase(
             ctx,
             input_videos=[ctx.reference.path],
             workspace=ctx.workspace,
             require_cache_only=True,
         )
+    assert exc_info.value.context.details == {
+        "reason": "Cached metrics missing or mismatched (mismatched_inputs).",
+    }
 
 
 @pytest.mark.unit
@@ -1067,7 +1070,7 @@ def test_select_initial_frame_plan_warns_when_user_frames_are_dropped(
 
     assert 2 in output.selected_frames
     assert [warning.text for warning in output.warnings] == [
-        "frame selection: dropped user frame(s) outside trims/windowing: 0"
+        "1 requested frame falls outside the shared range and was skipped: 0"
     ]
 
 

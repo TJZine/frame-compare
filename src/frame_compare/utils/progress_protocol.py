@@ -18,6 +18,7 @@ class ProgressPhaseStatus(StrEnum):
     SKIPPED = "skipped"
     WARNED = "warned"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 @dataclass(frozen=True)

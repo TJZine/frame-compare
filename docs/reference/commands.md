@@ -249,14 +249,16 @@ alignment reuse, and TMDB caches are preserved. See the
 Saved by `--write-config`
 :   No
 
-Require valid cached analysis; never recompute.
+Require valid cached analysis. If the cache is missing for your selection, run once
+without `--from-cache-only` to build it.
 
 #### `--dry-run` { #run-dry-run .fc-key }
 
 Saved by `--write-config`
 :   No
 
-Show what a run would use and create, without side effects.
+Show what a run would use and create, without side effects. The human plan wraps
+to your terminal width and keeps each path together.
 
 #### `--write-config` { #run-write-config .fc-key }
 
@@ -360,6 +362,15 @@ Commands exit with these codes:
 The first digit of an `FC-` code selects its family and exit code. Human output prints
 the code and message on stderr; `--json` prints a typed error document, described in
 the [CLI behavioral contract](../current-cli-contract.md#output-modes).
+
+When a run completes with warnings, the completion block gives the count. The
+Warnings block lists each distinct warning, including details about failed
+post-upload actions. If the sources do not share a requested frame, the CLI
+also reports the skipped frame when it establishes the shared range. The
+completion summary shows how many of the planned frames were rendered.
+
+After Ctrl+C, the CLI reports where the run stopped, how many screenshots it
+kept in the run folder, and which caches it wrote for reuse.
 
 ## Automation
 

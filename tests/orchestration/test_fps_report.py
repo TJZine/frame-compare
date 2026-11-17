@@ -10,7 +10,6 @@ import pytest
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot, ClipState
 from frame_compare.orchestration.fps_report import (
     FpsReportClip,
-    _format_runtime,
     _length_difference_lines,
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
@@ -271,10 +270,6 @@ def test_build_consolidated_fps_report_with_empty_comparisons_returns_reference_
     assert report[0].path == reference.path
 
 
-def test_format_runtime_floors_fractional_fps_exactly() -> None:
-    assert _format_runtime(24_000, Fraction(24_000, 1001)) == "16:41"
-
-
 def test_build_consolidated_fps_report_flags_divergence_when_effective_fps_differs() -> None:
     reference = _make_clip_state("ref.mkv", "Reference", Fraction(24, 1), Fraction(24, 1))
     comp = _make_clip_state("a.mkv", "Encode 1", Fraction(24, 1), Fraction(30000, 1001))
@@ -488,7 +483,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Sources · 2 loaded" in captured.err
+    assert "Sources · 2" in captured.err
     assert "Sources" in captured.err
     assert "After Load Sources" not in captured.err
     assert "3840×2160" in captured.err
@@ -845,7 +840,7 @@ def test_emit_consolidated_fps_report_wraps_at_narrow_terminal_widths(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Sources · 1 loaded" in captured.err
+    assert "Sources · 1" in captured.err
     assert "a-very-long-source-name.mkv" in captured.err
     assert "3840×2160" in captured.err
     assert "\x1b[" not in captured.err

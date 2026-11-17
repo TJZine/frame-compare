@@ -9,6 +9,11 @@ class _RunInterrupt(BaseException):
     """Synchronous owner stopped; its async caller must deliver cancellation."""
 
 
+def is_run_interruption(error: BaseException) -> bool:
+    """Identify an interrupt at synchronous and asynchronous run boundaries."""
+    return isinstance(error, (KeyboardInterrupt, asyncio.CancelledError, _RunInterrupt))
+
+
 def is_cancelling() -> bool:
     """Return whether the current task has a pending cancellation request."""
     try:

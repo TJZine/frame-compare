@@ -42,6 +42,7 @@ from frame_compare.services.alignment_evidence import (
     AudioPairSide,
     VideoCheckObservation,
     analysis_stream_start,
+    audio_unavailable_phrase,
 )
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_manual_overrides import load_manual_overrides
@@ -113,33 +114,22 @@ __all__ = [
 ]
 
 
-def _safe_alignment_diagnostic(diagnostic: str | None) -> str:
-    if diagnostic is None:
-        return "no diagnostic"
-    normalized = " ".join(diagnostic.strip().split())
-    if not normalized:
-        return "no diagnostic"
-    allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.=, ")
-    if any(char not in allowed_chars for char in normalized):
-        return "diagnostic unavailable"
-    return normalized[:120]
-
-
 def format_rejected_alignment_warning(
     result: AlignmentResult,
     *,
     comparison_label: str,
+    comparison_path: Path,
 ) -> RunWarning:
     """Format a rejected computed alignment as a deterministic run warning."""
-    reason = _safe_alignment_diagnostic(result.diagnostic)
+    reason = audio_unavailable_phrase(result.diagnostic or "no_usable_audio")
     return RunWarning(
         source="alignment",
         severity="warning",
-        message=f"align: {comparison_label} alignment left unapplied",
-        detail=(
-            f"because {reason}; rendering in best-effort reference-frame domain "
-            "without accepted alignment."
+        message=(
+            f"{comparison_label}: alignment not applied ({reason}); "
+            "frames use the reference's frame numbers."
         ),
+        comparison_path=comparison_path,
     )
 
 
@@ -1144,6 +1134,8 @@ async def align_clips_from_request(
     quiet: bool = False,
     json_output: bool = False,
     vs_loader: VSLoader | None = None,
+    on_reusable_cache_written: Callable[[], None] | None = None,
+    on_diagnostics_written: Callable[[Path], None] | None = None,
 ) -> AlignmentOperationOutcome:
     """Align clips from the typed request seam with shared previous-offset reuse."""
     try:
@@ -1236,6 +1228,9 @@ async def align_clips_from_request(
             review_outcome=initial_outcome,
             emit_success_log=json_output,
         )
+        if diagnostic_keys and on_diagnostics_written is not None:
+            assert request.alignment_diagnostics_dir is not None
+            on_diagnostics_written(request.alignment_diagnostics_dir)
         present_alignment_evidence(
             request=request,
             resolutions=resolutions,
@@ -1244,7 +1239,6 @@ async def align_clips_from_request(
             verbose=verbose,
             quiet=quiet,
             json_output=json_output,
-            diagnostics_written=bool(diagnostic_keys),
             review_pending=initial_outcome == "pending",
         )
         if completed_confirmed_reuse and not requested_comparisons:
@@ -1254,7 +1248,6 @@ async def align_clips_from_request(
                 resolutions=tuple(
                     resolutions[alignment_key(reference, comp.path)] for comp in request.comparisons
                 ),
-                diagnostics_dir=request.alignment_diagnostics_dir if diagnostic_keys else None,
             )
 
         audio_review_by_key = (
@@ -1309,8 +1302,24 @@ async def align_clips_from_request(
         if config.cache_results:
             candidate = prepare_reusable_source_set(request, resolutions)
             if candidate is not None:
-                save_reusable_offsets(request, candidate)
+                written = save_reusable_offsets(request, candidate)
                 require_current_alignment_sources(request)
+                if (
+                    written
+                    and on_reusable_cache_written is not None
+                    and (
+                        request.previous_offsets == "always"
+                        or all(
+                            resolution.origin != "interactive_confirmed_this_run"
+                            or (
+                                resolution.computed_fallback is not None
+                                and resolution.computed_fallback.applied
+                            )
+                            for resolution in candidate.resolutions
+                        )
+                    )
+                ):
+                    on_reusable_cache_written()
 
         return AlignmentOperationOutcome(
             ordered_results(request, resolutions),
@@ -1318,7 +1327,6 @@ async def align_clips_from_request(
             resolutions=tuple(
                 resolutions[alignment_key(reference, comp.path)] for comp in request.comparisons
             ),
-            diagnostics_dir=request.alignment_diagnostics_dir if diagnostic_keys else None,
         )
     except _RunInterrupt:
         await cancellation_checkpoint()

@@ -23,8 +23,9 @@ from frame_compare.orchestration.progress import (
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
+    is_run_interruption,
 )
-from frame_compare.utils.progress import LogProgressReporter
+from frame_compare.utils.progress import LogProgressReporter, PlainProgressReporter
 from frame_compare.utils.progress_protocol import (
     AlignmentSummary,
     ProgressPhaseStatus,
@@ -43,11 +44,13 @@ class PhaseStatus(StrEnum):
     SKIPPED = "skipped"
     WARNED = "warned"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 PhaseExecute = Callable[[RunContext], Awaitable[None]]
 PhaseWarnOnly = bool | Callable[[RunContext], bool]
 PhaseSkipCondition = Callable[[ConfigSchema], bool]
+CONFIG_DISABLED = "Disabled"
 PhaseSkipDetail = str | Callable[[ConfigSchema], str | None]
 
 
@@ -102,6 +105,10 @@ async def execute_phases(
                 if callable(phase.skip_detail)
                 else phase.skip_detail
             )
+            if skip_detail == CONFIG_DISABLED and (
+                uses_rich_progress(reporter) or isinstance(reporter, PlainProgressReporter)
+            ):
+                continue
             start_phase_progress(
                 reporter,
                 name=phase.name,
@@ -155,12 +162,13 @@ async def execute_phases(
                     error=str(exc),
                     exc_info=exc,
                 )
-        except BaseException:
-            # Cancellation and other control-flow exceptions do not inherit
-            # from Exception.  They still need a terminal lifecycle status so
-            # progress cannot report a cancelled phase as completed.
-            phase.status = PhaseStatus.FAILED
-            phase_progress_status = ProgressPhaseStatus.FAILED
+        except BaseException as error:
+            if is_run_interruption(error):
+                phase.status = PhaseStatus.INTERRUPTED
+                phase_progress_status = ProgressPhaseStatus.INTERRUPTED
+            else:
+                phase.status = PhaseStatus.FAILED
+                phase_progress_status = ProgressPhaseStatus.FAILED
             raise
         else:
             phase.status = PhaseStatus.COMPLETED
