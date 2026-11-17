@@ -262,8 +262,8 @@ def test_run_report_phase_builds_report_data_and_records_path(
         "My Explicit",
     ]
     assert [clip.display.micro for clip in report_data.clips] == [
-        "Reference | ATV WEB-DL · DV HDR10+ · Kitsune",
-        "Comparison 1 | ATV WEB-DL · DV HDR10+ · Kitsune",
+        "reference",
+        "encode",
         "My Explicit",
     ]
     assert report_data.clips[2].display.release == "2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
@@ -335,7 +335,6 @@ def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
     for clip in report_data.clips:
         assert " · " in clip.display.primary
         assert " · " in clip.display.control
-        assert " · " in clip.display.micro
         assert "|" not in clip.display.release
 
     default_separator = format_micro_descriptor(identity)

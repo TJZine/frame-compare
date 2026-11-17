@@ -233,13 +233,16 @@ PNG filenames. The Sources and alignment summaries use explicit short labels fir
 A parsed release group qualifies as a short label when it is unique among the sources,
 the filename ends with a hyphen followed by the complete group, and the filename
 also identifies a resolution, source, or codec. Hyphenated groups are supported. Otherwise the
-summary uses the compact release details, then the differing filename text after removing
-shared leading and trailing tokens. If the full stem remains, a matching parsed-title
+summary uses compact release details when available. If those details collide,
+unique differing filename text takes precedence over role prefixes. The filename
+fallback removes shared leading and trailing tokens. If the full stem remains, a matching parsed-title
 prefix can be removed. An empty remainder falls back to the resolved label.
 Live render progress uses exact explicit labels or unique role-prefixed micro release
 descriptors. slow.pics columns use exact explicit labels or unique full
-release descriptors. Descriptors show only usable groups; without one, they end
-with the shared short source name. Orchestrated rendering continues to use the source stem as `filename_label`. When the resulting
+release descriptors. Descriptors show only usable groups. Without one, a descriptor
+appends differing filename text or a fallback label when it adds information.
+Repeated release facts and role prefixes are omitted. Orchestrated rendering
+continues to use the source stem as `filename_label`. When the resulting
 absolute screenshot path would exceed the legacy Windows browser-safe boundary, the
 physical filename retains a readable source-stem prefix and adds a deterministic
 digest suffix so local `file://` reports remain loadable without identity collisions.
@@ -1186,13 +1189,14 @@ without a separate `Visibility` row. The question inside the rail is
 - The report toolbar combines the comparison title, frame navigation, view modes,
   mode-specific controls, and report actions. It uses one row on wide screens,
   two rows at intermediate widths, and a stack on narrow screens. Native source
-  options show the short label first, then distinct control detail. A repeated trailing
-  descriptor segment equal to the short label is omitted from the option. Long labels can
+  options show the short label first, then distinct control detail. Detail that
+  equals or ends with the complete short label after a separator is omitted or
+  shortened, including short labels with multiple segments. Long labels can
   clip in the closed control. The full option title and accessible name remain available.
 - Viewer spatial translation is labeled `Offset`, distinct from temporal source-frame
   alignment. The toolbar shows it for the displayed pair when the offset is nonzero,
-  including Single when the active source is the pair's right source.
-  The full offset value can wrap inside the status at compact widths. Filmstrip captions show the comparison frame number and selection category
+  including Single when the active source is the selected right source.
+  The full offset value can wrap inside the status below 1280 px. Filmstrip captions show the comparison frame number and selection category
   at every thumbnail size, with the full original frame label available on hover and
   in the frame selector. In Grid, the palette sits below or beside the cells and
   the frame selector identifies the current frame in the toolbar. Fullscreen Grid

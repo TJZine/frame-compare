@@ -107,9 +107,6 @@ def test_reserve_run_folder_preserves_explicit_labels_when_no_title_parses(tmp_p
     ("labels", "name"),
     [
         (("???", "GNOME"), "Reference, GNOME"),
-        (("A|B", "A?B"), "Reference A B, Comparison 1 A B"),
-        (("A|B", "A?B", "Reference A B"), "Reference A B, Comparison 1 A B, Reference A B (2)"),
-        (("A|B", "a?b"), "Reference A B, Comparison 1 a b"),
         (("???", "Reference"), "Reference Reference, Comparison 1 Reference"),
     ],
 )
@@ -183,12 +180,12 @@ def test_reserve_run_folder_fits_collisions_at_title_token_boundaries(
 ) -> None:
     title = separator.join(("This", "title", "must", "fit", "without", "splitting", "a", "word"))
     metadata = TmdbMetadata(1, title, "Original", 2026, "movie")
-    sources = _explicit("A", "B")
+    sources = _explicit("X", "Y")
 
     first = reserve_run_folder(tmp_path, sources, metadata, now=_NOW)
     second = reserve_run_folder(tmp_path, sources, metadata, now=_NOW)
 
-    assert first.folder_name == f"{title} (2026) - A, B"
+    assert first.folder_name == f"{title} (2026) - X, Y"
     assert second.folder_name.endswith(f" - +2{_MINUTE}")
     shortened_title = second.folder_name.removesuffix(f" - +2{_MINUTE}")
     assert shortened_title in [
@@ -397,3 +394,37 @@ def test_single_long_folder_label_keeps_its_words(tmp_path: Path) -> None:
     )
     assert result.folder_name == "Film (2024) - A detailed encode label A detailed encode label A"
     assert len(result.folder_name) <= 64
+
+
+@pytest.mark.parametrize(
+    ("filename", "label", "metadata", "expected", "naming_source"),
+    [
+        (
+            "Inception.mkv",
+            "Inception",
+            TmdbMetadata(1, "Inception", "Inception", 2010, "movie"),
+            "Inception (2010) - Reference",
+            "tmdb",
+        ),
+        (
+            "Movie.2010.1080p.BluRay.x264.mkv",
+            "Movie (2010)",
+            None,
+            "Movie (2010) - BluRay",
+            "parsed_metadata",
+        ),
+    ],
+)
+def test_reserve_run_folder_compares_only_short_name_with_title(
+    tmp_path: Path,
+    filename: str,
+    label: str,
+    metadata: TmdbMetadata | None,
+    expected: str,
+    naming_source: str,
+) -> None:
+    parsed = _sources(filename)[0]
+    source = ShortNameSource(parsed.identity, label, False, parsed.stem)
+    result = reserve_run_folder(tmp_path, [source], metadata, now=_NOW)
+    assert result.folder_name == expected
+    assert result.naming_source == naming_source

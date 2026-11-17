@@ -117,7 +117,8 @@ def test_screenshots_it_file_descriptor() -> None:
         has_terminal_release_group=True,
     )
     assert (
-        format_release_descriptor(identity) == "2160p | iT WEB-DL | DV HDR | ThisBlockHasProblems"
+        format_release_descriptor(identity, short_name="")
+        == "2160p | iT WEB-DL | DV HDR | ThisBlockHasProblems"
     )
 
 
@@ -165,7 +166,7 @@ def test_hlg_claim_is_not_duplicated_in_release_descriptor() -> None:
         has_terminal_release_group=True,
     )
 
-    assert format_release_descriptor(identity) == "1080p | AMZN WEBRip | HLG | GROUP"
+    assert format_release_descriptor(identity, short_name="") == "1080p | AMZN WEBRip | HLG | GROUP"
 
 
 @pytest.mark.parametrize(
@@ -202,8 +203,8 @@ def test_parser_derived_controls_are_normalized(monkeypatch: pytest.MonkeyPatch)
 
     assert identity.content.title == "Movie Title"
     assert identity.release_group == "GROUP EVIL"
-    assert "\n" not in format_compact_identity(identity)
-    assert "\x1b" not in format_compact_identity(identity)
+    assert "\n" not in format_compact_identity(identity, short_name="")
+    assert "\x1b" not in format_compact_identity(identity, short_name="")
 
 
 @pytest.mark.parametrize(
@@ -262,8 +263,11 @@ def test_formatters_and_common_content() -> None:
         ("REPACK",),
         has_terminal_release_group=True,
     )
-    assert format_release_descriptor(first) == "2160p | PMTP WEB-DL | DV HDR10+ | Kitsune"
-    assert format_compact_identity(second).startswith(
+    assert (
+        format_release_descriptor(first, short_name="")
+        == "2160p | PMTP WEB-DL | DV HDR10+ | Kitsune"
+    )
+    assert format_compact_identity(second, short_name="").startswith(
         "Avatar Aang The Last Airbender (2026) | 2160p"
     )
     assert format_micro_descriptor(second) == "ATV WEB-DL | DV HDR10+ | REPACK | Kitsune"
@@ -289,13 +293,13 @@ def test_separator_keyword_applies_to_inner_and_outer_joins() -> None:
         release_group="Kitsune",
         has_terminal_release_group=True,
     )
-    assert format_release_descriptor(identity, separator=" · ") == (
+    assert format_release_descriptor(identity, separator=" · ", short_name="") == (
         "2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
     )
     assert format_micro_descriptor(identity, separator=" · ") == (
         "ATV WEB-DL · DV HDR10+ · Kitsune"
     )
-    compact = format_compact_identity(identity, separator=" · ")
+    compact = format_compact_identity(identity, separator=" · ", short_name="")
     assert compact == "Example (2026) · 2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
     assert "|" not in compact
 
@@ -409,13 +413,14 @@ _DEMON_SLAYER_COPY = "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv"
 
 
 @pytest.mark.parametrize(
-    ("filenames", "expected"),
+    ("filenames", "expected", "descriptors"),
     [
-        ([_EBP, _GNOME, _NOGRP], ["EbP", "GNOME", "NOGRP"]),
-        ([_EBP, _DEMON_SLAYER], ["EbP", "english-dub-only"]),
+        ([_EBP, _GNOME, _NOGRP], ["EbP", "GNOME", "NOGRP"], None),
+        ([_EBP, _DEMON_SLAYER], ["EbP", "english-dub-only"], None),
         (
             [_EBP, _DEMON_SLAYER_COPY, _DEMON_SLAYER],
             ["EbP", "english-dub-only-copy", "english-dub-only"],
+            None,
         ),
         (
             [
@@ -423,14 +428,43 @@ _DEMON_SLAYER_COPY = "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv"
                 "Constructed.Witch-Kira.audio-starts-500ms-in-sync.mkv",
             ],
             ["delay-500ms", "starts-500ms-in-sync"],
+            None,
         ),
-        (["Movie.x264-Group.mkv", "Movie.1080p.BluRay-Group-copy.mkv"], ["Group", "Group-copy"]),
-        (["Movie.1080p.BluRay.x264-D-Z0N3.mkv", "Movie.1080p.x264-EbP.mkv"], ["D-Z0N3", "EbP"]),
-        (["Movie.cutA.final.mkv", "Movie.cutB.final.mkv"], ["cutA", "cutB"]),
-        (["Movie.mkv", "Movie.alternate.mkv"], ["Canonical 1", "alternate"]),
+        (
+            ["Movie.x264-Group.mkv", "Movie.1080p.BluRay-Group-copy.mkv"],
+            ["Group", "Group-copy"],
+            None,
+        ),
+        (
+            ["Movie.1080p.BluRay.x264-D-Z0N3.mkv", "Movie.1080p.x264-EbP.mkv"],
+            ["D-Z0N3", "EbP"],
+            None,
+        ),
+        (["Movie.cutA.final.mkv", "Movie.cutB.final.mkv"], ["cutA", "cutB"], None),
+        (["Movie.mkv", "Movie.alternate.mkv"], ["Canonical 1", "alternate"], None),
+        (
+            ["Movie.2010.1080p.BluRay.x264.crf18.mkv", "Movie.2010.1080p.BluRay.x264.crf20.mkv"],
+            ["crf18", "crf20"],
+            ["1080p · BluRay · crf18", "1080p · BluRay · crf20"],
+        ),
+        (
+            ["Movie.2010.1080p.BluRay.HYBRID.x264.mkv", "Movie.2010.1080p.WEB-DL.x264.mkv"],
+            ["BluRay", "WEB-DL"],
+            ["1080p · BluRay · HYBRID", "1080p · WEB-DL"],
+        ),
+        (
+            [
+                "Movie.2010.crf18.2160p.AMZN.WEB-DL.H.265-FLUX.mkv",
+                "Movie.2010.crf20.2160p.AMZN.WEB-DL.H.265-FLUX.mkv",
+            ],
+            ["crf18", "crf20"],
+            ["2160p · AMZN WEB-DL · FLUX", "2160p · AMZN WEB-DL · FLUX"],
+        ),
     ],
 )
-def test_short_names_for_real_filenames(filenames: list[str], expected: list[str]) -> None:
+def test_short_names_for_real_filenames(
+    filenames: list[str], expected: list[str], descriptors: list[str] | None
+) -> None:
     sources = [
         ShortNameSource(
             identity=parse_filename_with_release_identity(filename)[1],
@@ -440,18 +474,21 @@ def test_short_names_for_real_filenames(filenames: list[str], expected: list[str
         )
         for index, filename in enumerate(filenames, start=1)
     ]
-
     assert short_source_names(sources) == expected
+    actual_descriptors = []
     for source, short in zip(sources, expected, strict=True):
         assert source.identity is not None
         descriptor = format_release_descriptor(source.identity, separator=" · ", short_name=short)
-        compact = format_compact_identity(source.identity, separator=" · ", short_name=short)
-        assert descriptor.endswith(short)
-        assert compact.endswith(descriptor)
+        actual_descriptors.append(descriptor)
+        assert format_compact_identity(source.identity, separator=" · ", short_name=short).endswith(
+            descriptor
+        )
         if not source.identity.has_terminal_release_group:
             assert format_micro_descriptor(
                 source.identity, include_group=True
             ) == format_micro_descriptor(source.identity, include_group=False)
+    if descriptors is not None:
+        assert actual_descriptors == descriptors
 
 
 def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> None:

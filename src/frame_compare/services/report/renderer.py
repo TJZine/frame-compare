@@ -91,16 +91,28 @@ def _render_frame_options(
     )
 
 
+def _distinct_source_detail(detail: str, short_name: str) -> str:
+    folded_short = short_name.casefold()
+    if detail.casefold() == folded_short:
+        return ""
+
+    separator = " · "
+    boundary = detail.find(separator)
+    while boundary != -1:
+        if detail[boundary + len(separator) :].casefold() == folded_short:
+            return detail[:boundary]
+        # A short label can begin with a middot, making separators overlap.
+        boundary = detail.find(separator, boundary + 1)
+    return detail
+
+
 def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int) -> str:
     options: list[str] = []
     for i, clip in enumerate(clips):
         selected_attr = " selected" if i == selected_index else ""
         short_name = _clip_display(clip, "micro")
         detail = _clip_display(clip, "control")
-        segments = detail.split(" · ")
-        if segments[-1].casefold() == short_name.casefold():
-            segments.pop()
-        detail = " · ".join(segments)
+        detail = _distinct_source_detail(detail, short_name)
         text = f"{short_name} · {detail}" if detail else short_name
         accessible_name = _esc_attr(_clip_accessible_name(clip))
         options.append(

@@ -100,7 +100,25 @@ def test_build_html_report_information_content_counts_frames(
     assert parse_info_modal(html).general["Content"] == expected
 
 
-def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPayload) -> None:
+@pytest.mark.parametrize(
+    ("short", "detail", "expected"),
+    [
+        ("Reference micro", "Reference control", "Reference micro · Reference control"),
+        (
+            "AMZN WEB-DL · DV HDR · FLUX",
+            "2160p · AMZN WEB-DL · DV HDR · FLUX",
+            "AMZN WEB-DL · DV HDR · FLUX · 2160p",
+        ),
+        ("Custom · Cut", "custom · cut", "Custom · Cut"),
+        ("Straße", "2160p · STRASSE", "Straße · 2160p"),
+        ("STRASSE", "2160p · Straße", "STRASSE · 2160p"),
+        ("· crf18", "1080p · BluRay · · crf18", "· crf18 · 1080p · BluRay"),
+    ],
+)
+def test_build_html_renders_frame_and_clip_selectors(
+    report_payload: ReportPayload, short: str, detail: str, expected: str
+) -> None:
+    report_payload["clips"][0]["display"].update(micro=short, control=detail)
     html = build_html(report_payload)
     parser = SelectParser()
     parser.feed(html)
@@ -112,15 +130,14 @@ def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPaylo
     ]
     assert parser.selects["left-select"].attrs["aria-label"] == "Left clip"
     reference = next(
-        option
-        for option in parser.selects["left-select"].options
-        if option.text == "Reference micro · Reference control"
+        option for option in parser.selects["left-select"].options if option.text == expected
     )
     assert "selected" in reference.attrs
     assert reference.attrs["title"] == "Reference primary <unsafe> — reference exact <unsafe>.mkv"
     assert reference.attrs["aria-label"] == reference.attrs["title"]
     assert reference.attrs["value"] == "0"
     assert parser.selects["right-select"].attrs["aria-label"] == "Right clip"
+    assert parser.selects["right-select"].options[0].text == expected
     candidate = next(
         option
         for option in parser.selects["right-select"].options
@@ -132,9 +149,7 @@ def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPaylo
     assert candidate.attrs["value"] == "1"
     assert parser.selects["active-select"].attrs["aria-label"] == "Single clip"
     active_reference = next(
-        option
-        for option in parser.selects["active-select"].options
-        if option.text == "Reference micro · Reference control"
+        option for option in parser.selects["active-select"].options if option.text == expected
     )
     assert "selected" in active_reference.attrs
 

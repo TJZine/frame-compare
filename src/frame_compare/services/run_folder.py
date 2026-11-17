@@ -76,12 +76,7 @@ def _folder_title(
     identities = [source.identity for source in sources]
     title = comparison_title(identities, tmdb_metadata)
     if title is not None:
-        source = (
-            "tmdb"
-            if tmdb_metadata is not None and tmdb_metadata.title.strip()
-            else "parsed_metadata"
-        )
-        return title, source
+        return title
 
     titles = list(
         dict.fromkeys(
@@ -135,19 +130,15 @@ def reserve_run_folder(
         naming_source = "unnamed"
     roles = [clip_role(index) for index in range(len(sources))]
     title_tokens = _STEM_WORDS.findall(title.casefold())
-    for index, source in enumerate(sources):
-        # A lone filename can leave only its year after removing the parsed title.
-        if title_tokens and any(
-            _STEM_WORDS.findall(value.casefold()) == title_tokens
-            for value in (cleaned_labels[index], source.label)
-        ):
+    for index, label in enumerate(cleaned_labels):
+        label_tokens = _STEM_WORDS.findall(label.casefold())
+        if label_tokens and set(label_tokens).issubset(title_tokens):
             cleaned_labels[index] = ""
     labels = [
         _clean_folder_text(label)
         for label in unique_presentation_names(
             [label or roles[index] for index, label in enumerate(cleaned_labels)],
             roles=roles,
-            collision_key=lambda value: _clean_folder_text(value).casefold(),
         )
     ]
 

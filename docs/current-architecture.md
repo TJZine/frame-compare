@@ -249,10 +249,10 @@ metadata and explicit-label provenance to `ClipState`; these fields are excluded
 source, cache, and selection identity. Report titles can use the derived content
 identity or short labels and participate in report identity. Release identity records
 whether a parsed group qualifies for display. Every release formatter applies that
-policy; without a usable group, long descriptors end with the shared short name.
-The short-name formatter uses the ordered
-filename stems for shared-token fallback and resolves presentation collisions after
-choosing the names.
+policy. Without a usable group, a long descriptor can append the filename difference
+or fallback label when it adds information. It omits repeated release facts and
+role prefixes. When compact descriptors collide, the short-name formatter uses
+unique differing filename text before resolving remaining collisions with roles.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
 through presentation surfaces while source paths, fingerprints,
@@ -1349,9 +1349,9 @@ separator; burned-in screenshot text is the clip label and does not use release
 descriptors). The micro profile uses the same short source names as terminal
 summaries, with bidi controls made visible before collision handling. Grid, the lens,
 and compact inspector rows consume this profile. Native source options start with
-the short name and append distinct control detail. A final descriptor segment equal
-to the short name is omitted. The closed select caps its
-width and can clip long names. The option title and accessible name retain the
+the short name and append distinct control detail. A descriptor equal to the short
+name, or ending with that complete short name after a separator, is omitted or
+shortened. The closed select caps its width and can clip long names. The option title and accessible name retain the
 primary identity and displayed basename. Stage chips and source details continue
 to use their existing profiles.
 Per-clip presentation contains applied tonemap facts; the rendering summary derives a

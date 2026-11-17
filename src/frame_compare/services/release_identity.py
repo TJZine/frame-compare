@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -67,12 +67,12 @@ def clip_role(index: int) -> str:
 
 def comparison_title(
     identities: Sequence[ReleaseIdentity | None], metadata: TmdbMetadata | None
-) -> str | None:
-    """Return the resolved or shared content title, before surface-specific fallbacks."""
+) -> tuple[str, Literal["tmdb", "parsed_metadata"]] | None:
+    """Return the comparison title and its source before surface-specific fallbacks."""
     if metadata is not None and metadata.title.strip():
         reference = identities[0] if identities else None
         content = reference.content if reference is not None else None
-        return format_content_identity(
+        title = format_content_identity(
             ContentIdentity(
                 metadata.title,
                 year=(metadata.year or (content.year if content is not None else None))
@@ -86,8 +86,9 @@ def comparison_title(
                 else None,
             )
         )
+        return title, "tmdb"
     common = common_content_identity(identities)
-    return format_content_identity(common) if common is not None else None
+    return (format_content_identity(common), "parsed_metadata") if common is not None else None
 
 
 def _usable_release_group(identity: ReleaseIdentity) -> str | None:
@@ -95,7 +96,7 @@ def _usable_release_group(identity: ReleaseIdentity) -> str | None:
 
 
 def format_release_descriptor(
-    identity: ReleaseIdentity, separator: str = " | ", *, short_name: str = ""
+    identity: ReleaseIdentity, separator: str = " | ", *, short_name: str
 ) -> str:
     """Format release facts without repeating content identity."""
     source = " ".join(part for part in (identity.service, identity.source_type) if part)
@@ -104,14 +105,18 @@ def format_release_descriptor(
     parts.extend(identity.revision_tags)
     parts.extend(identity.variant_tags)
     descriptor = separator.join(part for part in parts if part)
-    ending = _usable_release_group(identity) or short_name.replace(" · ", separator)
+    ending = _usable_release_group(identity)
+    if ending is None:
+        role_prefixed = re.match(r"^(Reference|Comparison \d+) \| ", short_name) is not None
+        from_facts = all(part in parts for part in short_name.split(" · "))
+        ending = "" if role_prefixed or from_facts else short_name.replace(" · ", separator)
     if ending and not (descriptor == ending or descriptor.endswith(separator + ending)):
         return separator.join(part for part in (descriptor, ending) if part)
     return descriptor
 
 
 def format_compact_identity(
-    identity: ReleaseIdentity, separator: str = " | ", *, short_name: str = ""
+    identity: ReleaseIdentity, separator: str = " | ", *, short_name: str
 ) -> str:
     """Format content and release facts in one compact line."""
     return separator.join(
@@ -173,9 +178,30 @@ def short_source_names(
     tokens = [tuple(_STEM_TOKEN.finditer(stem)) for stem in stems]
     token_values = [tuple(token[0].casefold() for token in matches) for matches in tokens]
     prefix, suffix = _shared_stem_edges(token_values)
+    micros = [
+        format_micro_descriptor(source.identity, separator=" · ", include_group=group is not None)
+        if source.identity is not None
+        else ""
+        for source, group in zip(sources, groups, strict=True)
+    ]
+    differing_names: list[str] = []
+    for index, source in enumerate(sources):
+        start = prefix
+        end = len(tokens[index]) - suffix
+        if prefix == suffix == 0 and source.identity is not None:
+            start = _verified_title_prefix(source.identity.content, token_values[index])
+        differing_names.append(
+            stems[index][tokens[index][start].start() : tokens[index][end - 1].end()]
+            if start < end
+            else ""
+        )
+    micro_counts = Counter(name.casefold() for name in micros)
+    differing_counts = Counter(name.casefold() for name in differing_names)
     names: list[str] = []
     protected: list[bool] = []
-    for index, (source, group) in enumerate(zip(sources, groups, strict=True)):
+    for source, group, micro, differing in zip(
+        sources, groups, micros, differing_names, strict=True
+    ):
         label = source.label.strip()
         if source.label_is_explicit and label:
             names.append(source.label)
@@ -183,25 +209,14 @@ def short_source_names(
             continue
         if group and _release_group_is_unique(group, groups):
             names.append(group)
-            protected.append(False)
-            continue
-        micro = (
-            format_micro_descriptor(
-                source.identity, separator=" · ", include_group=group is not None
-            )
-            if source.identity is not None
-            else ""
-        )
-        start = prefix
-        end = len(tokens[index]) - suffix
-        if prefix == suffix == 0 and source.identity is not None:
-            start = _verified_title_prefix(source.identity.content, token_values[index])
-        differing = (
-            stems[index][tokens[index][start].start() : tokens[index][end - 1].end()]
-            if start < end
-            else ""
-        )
-        names.append(micro or differing or label)
+        elif (
+            micro_counts[micro.casefold()] > 1
+            and differing
+            and differing_counts[differing.casefold()] == 1
+        ):
+            names.append(differing)
+        else:
+            names.append(micro or differing or label)
         protected.append(False)
     roles = [clip_role(index) for index in range(len(sources))]
     if show_bidi_controls:
@@ -243,7 +258,6 @@ def unique_presentation_names(
     *,
     roles: list[str],
     protected: list[bool] | None = None,
-    collision_key: Callable[[str], str] = str,
 ) -> list[str]:
     """Resolve display-only collisions deterministically without changing identities."""
     if len(names) != len(roles):
@@ -251,22 +265,20 @@ def unique_presentation_names(
     protected = [False] * len(names) if protected is None else protected
     if len(names) != len(protected):
         raise ValueError("names and protected must have equal lengths")
-    counts = Counter(collision_key(name) for name in names)
+    counts = Counter(names)
     resolved = [
-        f"{roles[index]} | {name}"
-        if counts[collision_key(name)] > 1 and not protected[index]
-        else name
+        f"{roles[index]} | {name}" if counts[name] > 1 and not protected[index] else name
         for index, name in enumerate(names)
     ]
-    used = {collision_key(name) for index, name in enumerate(resolved) if protected[index]}
+    used = {name for index, name in enumerate(resolved) if protected[index]}
     for index, name in enumerate(resolved):
         if protected[index]:
             continue
         suffix = 2
-        while collision_key(resolved[index]) in used:
+        while resolved[index] in used:
             resolved[index] = f"{name} ({suffix})"
             suffix += 1
-        used.add(collision_key(resolved[index]))
+        used.add(resolved[index])
     return resolved
 
 

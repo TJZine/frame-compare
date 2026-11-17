@@ -355,7 +355,8 @@ def _comparison_title(data: ReportData) -> str:
     identities = [clip.release_identity for clip in data.clips]
     shared = comparison_title(identities, data.metadata)
     if shared is not None:
-        return shared
+        title, _source = shared
+        return title
     names = [clip.display.micro for clip in data.clips]
     title = " vs ".join(names[:2])
     if len(names) > 2:

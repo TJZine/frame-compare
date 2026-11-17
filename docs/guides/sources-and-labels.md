@@ -94,11 +94,13 @@ short source names. An explicit label takes priority. Otherwise a unique release
 group supplies the name when it appears at the end of a filename that also has
 release details such as a resolution, source, or codec. Without a usable group,
 Frame Compare uses compact release details or the part of the filename that differs
-between sources. Source roles distinguish any remaining collisions.
+between sources. If compact details collide, unique differing filename text takes
+precedence over role prefixes.
 
-Long release labels show only usable groups. Without one, they end with the source's
-short name. Source selectors show the short name first, followed by release details,
-with a repeated final short name shown once.
+Long release labels show only usable groups. Without one, they append differing
+filename text or a fallback label when it adds information. Repeated release facts
+and role prefixes are omitted. Source selectors show the short name first, followed
+by any remaining release details.
 Hover over a selector for the full identity. Grid, the lens, and the inspector's
 compact source views use the short name. The report keeps the exact
 basename and canonical source label in its embedded metadata. It displays any

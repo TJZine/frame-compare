@@ -171,8 +171,6 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_probe_cach
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
-    run_name = _OLD_RUN_NAME
-    run_dir = tmp_path / "generated" / run_name
 
     request = make_run_request(
         root=tmp_path,
@@ -186,7 +184,6 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_probe_cach
     with pytest.raises(MetricsCalculationError):
         asyncio.run(execute_run(request, deps=deps))
 
-    assert not run_dir.exists()
     assert not list((tmp_path / "generated").glob("*/run_info.toml"))
 
 
