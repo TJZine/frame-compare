@@ -186,7 +186,7 @@ body {
     align-items: center;
     gap: 0.5rem;
     min-width: 0;
-    min-block-size: var(--rv-context-min-block-size, 36px);
+    min-block-size: 36px;
 }
 
 .rv-control-group {
@@ -2356,7 +2356,6 @@ body.rv-inspector-open .rv-viewer-stage {
     .rv-context-controls {
         grid-area: 1 / 1;
         justify-self: end;
-        flex: none;
     }
 
     .rv-context-controls[hidden] {
@@ -2707,13 +2706,6 @@ body.rv-inspector-open .rv-viewer-stage {
     .rv-viewport-palette {
         transition: none !important;
         animation: none !important;
-    }
-}
-
-@media (width >= 1280px) and (pointer: coarse) {
-    .rv-context-zone {
-        /* 44px paging target plus the control group's padding and border. */
-        --rv-context-min-block-size: calc(44px + 2 * (3px + 1px));
     }
 }
 

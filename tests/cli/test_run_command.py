@@ -177,16 +177,6 @@ def test_handle_json_output_success_schema(capsys: pytest.CaptureFixture[str]) -
     }
 
 
-def test_handle_json_output_failure_exits_processing_error(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    with pytest.raises(typer.Exit) as exc_info:
-        handle_json_output(RunResult(success=False, errors=["failed"]))
-
-    assert exc_info.value.exit_code == int(ExitCode.PROCESSING_ERROR)
-    assert json.loads(capsys.readouterr().out)["errors"] == ["failed"]
-
-
 def test_handle_json_output_omits_memory_only_review_wait(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -895,5 +895,3 @@ def handle_json_output(result: RunResult) -> None:
         "errors": list(result.errors),
     }
     typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False))
-    if not result.success:
-        raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))

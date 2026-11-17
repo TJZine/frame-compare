@@ -495,7 +495,8 @@ const ReportViewer = {
     focusElement(element) {
         const outsideFullscreen = document.fullscreenElement
             && !document.fullscreenElement.contains(element);
-        const hidden = element?.getClientRects && element.getClientRects().length === 0;
+        const hidden = (element?.getClientRects && element.getClientRects().length === 0)
+            || element?.checkVisibility?.({ visibilityProperty: true }) === false;
         if (outsideFullscreen || hidden) element = this.dom.stage;
         if (element && typeof element.focus === 'function') {
             element.focus({ preventScroll: true });

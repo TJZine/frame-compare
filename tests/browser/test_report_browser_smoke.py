@@ -1908,7 +1908,6 @@ def _assert_inspector_clears_toolbar_during_image_retry(browser: str, tmp_path: 
 
 @pytest.mark.integration
 def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path: Path) -> None:
-    source_count = 7
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable")
@@ -1920,16 +1919,15 @@ def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path:
         comparison_micro="english-dub-only-copy",
         comparison_control="english-dub-only-copy",
         third_source=True,
-        additional_sources=source_count - 3,
+        additional_sources=4,
         metadata=TmdbMetadata(
             tmdb_id=1, title=title, original_title=title, year=2026, media_type="movie"
         ),
         slowpics_url="https://example.invalid/never-opened",
     )
     script = _viewer_input_script(
-        f"const sourceCount = {source_count};"
-        + r"""
-        assert.equal(await evaluate("document.getElementById('left-select').options.length"), sourceCount);
+        r"""
+        assert.equal(await evaluate("document.getElementById('left-select').options.length"), 7);
         const snapshot = `(() => {
             const bar = document.querySelector('.rv-controls');
             const controls = [...bar.querySelectorAll('button,select,a,#alignment-status,#active-filter-badge')]
@@ -2048,7 +2046,7 @@ def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path:
                             const pager = document.getElementById('btn-grid-next').getBoundingClientRect();
                             return {x: mode.x, height: bar.height, pagerHeight: pager.height};
                         })()`));
-                        if (coarse && mode === 'grid' && sourceCount > 4) {
+                        if (coarse && mode === 'grid') {
                             assert.ok(geometry.at(-1).pagerHeight >= 44, message);
                         }
                     }
@@ -2079,6 +2077,21 @@ def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path:
         }
         await evaluate(`ReportViewer.viewport.setManualAlignment(0, 0)`);
         assert.equal(await evaluate('ReportViewer.dom.alignmentStatus.hidden'), true);
+        await command('Emulation.setDeviceMetricsOverride', {width: 1366, height: 768, deviceScaleFactor: 1, mobile: false});
+        await evaluate("ReportViewer.setMode('slider'); ReportViewer.dom.btnSwapClips.focus()");
+        assert.equal(await evaluate('document.activeElement.id'), 'btn-swap-clips');
+        // Exercise the document shortcut path while retaining the original focus target.
+        for (const key of ['I', 'G', 'I']) {
+            await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', {key: '${key}', bubbles: true}))`);
+        }
+        assert.deepEqual(await evaluate(`({
+            mode: ReportViewer.state.mode,
+            inspectorOpen: ReportViewer.state.inspectorOpen,
+            active: document.activeElement === ReportViewer.dom.stage ? 'stage' : document.activeElement.tagName,
+            swapRects: ReportViewer.dom.btnSwapClips.getClientRects().length,
+            swapVisibility: getComputedStyle(ReportViewer.dom.btnSwapClips).visibility
+        })`), {mode: 'grid', inspectorOpen: false, active: 'stage', swapRects: 1, swapVisibility: 'hidden'});
+
 """
     )
     completed = _run_browser_input(browser, report_path, tmp_path / "chrome-toolbar-offset", script)
