@@ -2473,12 +2473,32 @@ body.rv-inspector-open .rv-viewer-stage {
 }
 
 @media (768px < width < 1280px) {
-    .rv-context-controls select {
-        min-width: 3rem;
+    /* Wrap whole controls onto another row instead of shrinking the source selects. */
+    .rv-controls {
+        display: flex;
+        flex-wrap: wrap;
+    }
+
+    .rv-title-stepper {
+        flex-basis: 100%;
+    }
+
+    .rv-context-zone,
+    .rv-context-controls {
+        min-width: auto;
     }
 
     .rv-context-zone {
+        flex-wrap: wrap;
         gap: 0.375rem;
+    }
+
+    .rv-context-controls select {
+        flex: none;
+    }
+
+    .rv-bar-actions {
+        margin-inline-start: auto;
     }
 
     .rv-alignment-status {

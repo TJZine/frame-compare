@@ -1206,7 +1206,8 @@ frame stepper and filter badge, mode switch, context controls, offset status, an
 report actions. At 1280 px and wider it stays on one row, with a stable mode-switch
 position and bar height across modes at zero offset, including coarse-pointer
 Grid paging. From 769 to 1599 px it uses smaller text and padding. Intermediate widths put the title and stepper above the other
-controls. Through 768 px the stacked controls follow DOM and keyboard order,
+controls, which wrap onto another row when they do not fit; the source selects keep
+their width. Through 768 px the stacked controls follow DOM and keyboard order,
 with report actions last. The offset status appears for a visible pair with a
 nonzero offset, including Single when it shows the selected right source. It is
 hidden for Single sources other than the selected right source. Offset appearance can shift

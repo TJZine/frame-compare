@@ -2003,17 +2003,18 @@ def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path:
                 }
                 const inOneRow = children => Math.max(...children.map(item => item.box.top))
                     < Math.min(...children.map(item => item.box.bottom));
+                assert.equal(state.optionText, 'english-dub-only-copy', message);
+                assert.ok(state.available >= state.labelWidth, message);
                 if (width >= 1280) {
                     assert.ok(inOneRow(controls), message);
-                    assert.equal(state.optionText, 'english-dub-only-copy', message);
-                    assert.ok(state.available >= state.labelWidth, message);
                 } else {
+                    // Below 1280px the stepper leads; the rest may wrap but never shrinks.
                     const stepperIds = ['btn-prev','frame-select','btn-next','active-filter-badge'];
                     const stepper = controls.filter(item => stepperIds.includes(item.id));
-                    const secondRow = controls.filter(item => !stepperIds.includes(item.id));
-                    assert.ok(inOneRow(stepper) && inOneRow(secondRow), message);
+                    const rest = controls.filter(item => !stepperIds.includes(item.id));
+                    assert.ok(inOneRow(stepper), message);
                     assert.ok(Math.max(...stepper.map(item => item.box.bottom))
-                        <= Math.min(...secondRow.map(item => item.box.top)), message);
+                        <= Math.min(...rest.map(item => item.box.top)), message);
                 }
             }
         }
