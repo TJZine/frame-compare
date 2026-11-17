@@ -25,6 +25,35 @@ notes used by the guarded publication workflow.
   vulnerabilities before signing.
 - Provision the required Python 3.13 build interpreter directly for Windows
   source installs without first installing the project's development dependencies.
+- Name each run folder after what is compared and the sources' short names, for
+  example `Black Sails S01E08 - EbP, GNOME, NOGRP`. When that name already exists,
+  the date and time are added. Existing run folders keep their names.
+- Title the HTML report by what is compared, for example `Black Sails S01E08`,
+  instead of the reference filename. Movie titles from TMDB include the year.
+- Take a source's short name from the part of its filename that differs from the
+  other sources when it has no usable release group, for example
+  `english-dub-only`, or `crf18` and `crf20` for two of your own encodes. Release
+  groups that contain a hyphen, such as `D-Z0N3`, are recognized.
+- Show `history list` as a table with the run name, time, sources, frames, status,
+  and whether a report exists. Interrupted runs show `interrupted`. JSON output is
+  unchanged.
+- Simplify `run` output. Each warning appears once, in the Warnings block.
+  Requested frames outside the shared range are reported when they are skipped,
+  and the summary shows how many were rendered, for example `10 of 12 frames`. The
+  run plan and phase lines leave out features that are turned off. Durations use
+  one format: `0.3 s`, `12.9 s`, `1m 08s`, `1h 02m`.
+- After Ctrl+C, print which phase was interrupted, what was kept, and what the
+  next run reuses. Piped output prints a line such as `[STOP] RENDER  Interrupted`.
+- Give specific hints for `--from-cache-only` without a cache, VSView not being
+  available, and two sources with the same name. Configuration errors name the
+  file and the key, and suggest up to three valid keys for an unknown one. Dry-run
+  and error output wrap to the terminal width without splitting paths.
+- Combine the report viewer's header and toolbar into one bar. The generated time
+  and content counts are in Report Information. The image offset appears in the
+  bar only while an offset is set. Source selectors start with the short name.
+- Place the viewer's source labels at the bottom of the image so they do not
+  cover the screenshot's own overlay, and keep Grid cell labels clear of the
+  viewer controls.
 
 ### Removed
 
@@ -55,6 +84,13 @@ notes used by the guarded publication workflow.
   version helper: code-only ZIPs do not replace the AppData `bin` updater. Use a
   fresh bundle folder and preserve user configuration, media, and generated data.
   Same-line stable/RC transitions and signed-range downgrades remain supported.
+- Keep release labels, slow.pics image names, and report source selectors from
+  ending in a stray word taken from the filename, such as `only`.
+- Report an unreadable source as a source error under `--from-cache-only` instead
+  of as a missing cache.
+- Exit with code 130 when Ctrl+C is pressed again while the interruption summary
+  prints.
+- Show a duration just under a minute as `1m 00s` instead of `60.0 s`.
 
 ## [0.7.0]
 
