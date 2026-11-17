@@ -41,7 +41,7 @@ Frame Compare appends the local date and time, such as ` (2026-11-16 13.25)`.
 Source roles keep labels distinct when characters are removed or replaced to make
 a valid folder name. Long names can omit trailing source labels and show their
 count as `+N`. A single long label is shortened between words. Movie titles include
-the year when available. A source label that repeats the title becomes its role,
+the year when available. A derived source label that repeats the title becomes its role,
 for example `Inception (2010) - Reference`. The collision timestamp and
 `run_info.toml` creation time come from the same clock reading.
 

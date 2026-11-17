@@ -130,7 +130,9 @@ def reserve_run_folder(
         naming_source = "unnamed"
     roles = [clip_role(index) for index in range(len(sources))]
     title_tokens = _STEM_WORDS.findall(title.casefold())
-    for index, label in enumerate(cleaned_labels):
+    for index, (source, label) in enumerate(zip(sources, cleaned_labels, strict=True)):
+        if source.label_is_explicit:
+            continue
         label_tokens = _STEM_WORDS.findall(label.casefold())
         if label_tokens and set(label_tokens).issubset(title_tokens):
             cleaned_labels[index] = ""

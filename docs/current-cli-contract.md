@@ -241,7 +241,8 @@ Live render progress uses exact explicit labels or unique role-prefixed micro re
 descriptors. slow.pics columns use exact explicit labels or unique full
 release descriptors. Descriptors show only usable groups. Without one, a descriptor
 appends differing filename text or a fallback label when it adds information.
-Repeated release facts and role prefixes are omitted. Orchestrated rendering
+Release facts are listed once. Filename text used as the short label is appended
+as written. Role prefixes are omitted. Orchestrated rendering
 continues to use the source stem as `filename_label`. When the resulting
 absolute screenshot path would exceed the legacy Windows browser-safe boundary, the
 physical filename retains a readable source-stem prefix and adds a deterministic

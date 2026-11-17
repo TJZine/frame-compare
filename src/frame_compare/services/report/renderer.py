@@ -92,17 +92,11 @@ def _render_frame_options(
 
 
 def _distinct_source_detail(detail: str, short_name: str) -> str:
-    folded_short = short_name.casefold()
-    if detail.casefold() == folded_short:
-        return ""
-
     separator = " · "
-    boundary = detail.find(separator)
-    while boundary != -1:
-        if detail[boundary + len(separator) :].casefold() == folded_short:
-            return detail[:boundary]
-        # A short label can begin with a middot, making separators overlap.
-        boundary = detail.find(separator, boundary + 1)
+    segments = detail.split(separator)
+    count = short_name.count(separator) + 1
+    if separator.join(segments[-count:]).casefold() == short_name.casefold():
+        return separator.join(segments[:-count])
     return detail
 
 

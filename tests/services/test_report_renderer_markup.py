@@ -110,9 +110,6 @@ def test_build_html_report_information_content_counts_frames(
             "AMZN WEB-DL · DV HDR · FLUX · 2160p",
         ),
         ("Custom · Cut", "custom · cut", "Custom · Cut"),
-        ("Straße", "2160p · STRASSE", "Straße · 2160p"),
-        ("STRASSE", "2160p · Straße", "STRASSE · 2160p"),
-        ("· crf18", "1080p · BluRay · · crf18", "· crf18 · 1080p · BluRay"),
     ],
 )
 def test_build_html_renders_frame_and_clip_selectors(

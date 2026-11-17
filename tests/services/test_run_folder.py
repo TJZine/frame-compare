@@ -180,12 +180,12 @@ def test_reserve_run_folder_fits_collisions_at_title_token_boundaries(
 ) -> None:
     title = separator.join(("This", "title", "must", "fit", "without", "splitting", "a", "word"))
     metadata = TmdbMetadata(1, title, "Original", 2026, "movie")
-    sources = _explicit("X", "Y")
+    sources = _explicit("A", "B")
 
     first = reserve_run_folder(tmp_path, sources, metadata, now=_NOW)
     second = reserve_run_folder(tmp_path, sources, metadata, now=_NOW)
 
-    assert first.folder_name == f"{title} (2026) - X, Y"
+    assert first.folder_name == f"{title} (2026) - A, B"
     assert second.folder_name.endswith(f" - +2{_MINUTE}")
     shortened_title = second.folder_name.removesuffix(f" - +2{_MINUTE}")
     assert shortened_title in [
@@ -428,3 +428,9 @@ def test_reserve_run_folder_compares_only_short_name_with_title(
     result = reserve_run_folder(tmp_path, [source], metadata, now=_NOW)
     assert result.folder_name == expected
     assert result.naming_source == naming_source
+
+
+def test_reserve_run_folder_keeps_explicit_labels_that_match_a_title_token(tmp_path: Path) -> None:
+    metadata = TmdbMetadata(1, "A Quiet Place", "A Quiet Place", 2018, "movie")
+    result = reserve_run_folder(tmp_path, _explicit("A", "B"), metadata, now=_NOW)
+    assert result.folder_name == "A Quiet Place (2018) - A, B"

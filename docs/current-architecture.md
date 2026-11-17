@@ -245,8 +245,8 @@ source, cache, and selection identity. Report titles can use the derived content
 identity or short labels and participate in report identity. Release identity records
 whether a parsed group qualifies for display. Every release formatter applies that
 policy. Without a usable group, a long descriptor can append the filename difference
-or fallback label when it adds information. It omits repeated release facts and
-role prefixes. When compact descriptors collide, the short-name formatter uses
+or fallback label when it adds information. It lists release facts once, appends
+filename text used as the short label as written, and omits role prefixes. When compact descriptors collide, the short-name formatter uses
 unique differing filename text before resolving remaining collisions with roles.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
@@ -673,7 +673,7 @@ local second, and a UUID for a same-second collision. The 64-character budget in
 the suffix. Reservation and `run_info.toml` share one reading of the injected run clock.
 Movie titles include the TMDB year or parsed reference year when available. Source
 roles distinguish labels that are empty or collide after filename
-sanitization, or repeat the title. A single long label is shortened at a token
+sanitization. A derived label that repeats the title also becomes its role. A single long label is shortened at a token
 boundary. Other trailing labels are omitted before title truncation at a token boundary.
 Windows reserved basenames are rewritten before reservation. Preparation validates the reserved immediate-child path and completes
 the `WorkspacePaths` transition before writing metadata. The exact creation time

@@ -98,8 +98,9 @@ between sources. If compact details collide, unique differing filename text take
 precedence over role prefixes.
 
 Long release labels show only usable groups. Without one, they append differing
-filename text or a fallback label when it adds information. Repeated release facts
-and role prefixes are omitted. Source selectors show the short name first, followed
+filename text or a fallback label when it adds information. Release facts are listed
+once. Filename text used as the short label is appended as written. Role prefixes
+are omitted. Source selectors show the short name first, followed
 by any remaining release details.
 Hover over a selector for the full identity. Grid, the lens, and the inspector's
 compact source views use the short name. The report keeps the exact

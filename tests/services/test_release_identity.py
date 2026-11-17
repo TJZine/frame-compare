@@ -413,14 +413,33 @@ _DEMON_SLAYER_COPY = "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv"
 
 
 @pytest.mark.parametrize(
-    ("filenames", "expected", "descriptors"),
+    ("filenames", "expected", "long_labels"),
     [
-        ([_EBP, _GNOME, _NOGRP], ["EbP", "GNOME", "NOGRP"], None),
-        ([_EBP, _DEMON_SLAYER], ["EbP", "english-dub-only"], None),
+        (
+            [_EBP, _GNOME, _NOGRP],
+            ["EbP", "GNOME", "NOGRP"],
+            [
+                "Black Sails S01E08 · 1080p · BluRay · EbP",
+                "Black Sails S01E08 · 1080p · AMZN WEB-DL · GNOME",
+                "Black Sails S01E08 · 1080p · BluRay REMUX · NOGRP",
+            ],
+        ),
+        (
+            [_EBP, _DEMON_SLAYER],
+            ["EbP", "english-dub-only"],
+            [
+                "Black Sails S01E08 · 1080p · BluRay · EbP",
+                "Constructed DemonSlayer Kitsune · english-dub-only",
+            ],
+        ),
         (
             [_EBP, _DEMON_SLAYER_COPY, _DEMON_SLAYER],
             ["EbP", "english-dub-only-copy", "english-dub-only"],
-            None,
+            [
+                "Black Sails S01E08 · 1080p · BluRay · EbP",
+                "Constructed DemonSlayer Kitsune · english-dub-only-copy",
+                "Constructed DemonSlayer Kitsune · english-dub-only",
+            ],
         ),
         (
             [
@@ -428,29 +447,40 @@ _DEMON_SLAYER_COPY = "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv"
                 "Constructed.Witch-Kira.audio-starts-500ms-in-sync.mkv",
             ],
             ["delay-500ms", "starts-500ms-in-sync"],
-            None,
+            [
+                "Constructed Witch Kira · delay-500ms",
+                "Constructed Witch Kira · starts-500ms-in-sync",
+            ],
         ),
         (
             ["Movie.x264-Group.mkv", "Movie.1080p.BluRay-Group-copy.mkv"],
             ["Group", "Group-copy"],
-            None,
+            ["Movie · Group", "Movie · 1080p · BluRay · Group-copy"],
         ),
         (
             ["Movie.1080p.BluRay.x264-D-Z0N3.mkv", "Movie.1080p.x264-EbP.mkv"],
             ["D-Z0N3", "EbP"],
-            None,
+            ["Movie · 1080p · BluRay · D-Z0N3", "Movie · 1080p · EbP"],
         ),
-        (["Movie.cutA.final.mkv", "Movie.cutB.final.mkv"], ["cutA", "cutB"], None),
-        (["Movie.mkv", "Movie.alternate.mkv"], ["Canonical 1", "alternate"], None),
+        (
+            ["Movie.cutA.final.mkv", "Movie.cutB.final.mkv"],
+            ["cutA", "cutB"],
+            ["Movie cutA final · cutA", "Movie cutB final · cutB"],
+        ),
+        (
+            ["Movie.mkv", "Movie.alternate.mkv"],
+            ["Canonical 1", "alternate"],
+            ["Movie · Canonical 1", "Movie · alternate"],
+        ),
         (
             ["Movie.2010.1080p.BluRay.x264.crf18.mkv", "Movie.2010.1080p.BluRay.x264.crf20.mkv"],
             ["crf18", "crf20"],
-            ["1080p · BluRay · crf18", "1080p · BluRay · crf20"],
+            ["Movie (2010) · 1080p · BluRay · crf18", "Movie (2010) · 1080p · BluRay · crf20"],
         ),
         (
             ["Movie.2010.1080p.BluRay.HYBRID.x264.mkv", "Movie.2010.1080p.WEB-DL.x264.mkv"],
             ["BluRay", "WEB-DL"],
-            ["1080p · BluRay · HYBRID", "1080p · WEB-DL"],
+            ["Movie (2010) · 1080p · BluRay · HYBRID", "Movie (2010) · 1080p · WEB-DL"],
         ),
         (
             [
@@ -458,12 +488,15 @@ _DEMON_SLAYER_COPY = "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv"
                 "Movie.2010.crf20.2160p.AMZN.WEB-DL.H.265-FLUX.mkv",
             ],
             ["crf18", "crf20"],
-            ["2160p · AMZN WEB-DL · FLUX", "2160p · AMZN WEB-DL · FLUX"],
+            [
+                "Movie (2010) · 2160p · AMZN WEB-DL · FLUX",
+                "Movie (2010) · 2160p · AMZN WEB-DL · FLUX",
+            ],
         ),
     ],
 )
 def test_short_names_for_real_filenames(
-    filenames: list[str], expected: list[str], descriptors: list[str] | None
+    filenames: list[str], expected: list[str], long_labels: list[str]
 ) -> None:
     sources = [
         ShortNameSource(
@@ -475,20 +508,16 @@ def test_short_names_for_real_filenames(
         for index, filename in enumerate(filenames, start=1)
     ]
     assert short_source_names(sources) == expected
-    actual_descriptors = []
-    for source, short in zip(sources, expected, strict=True):
+    for source, short, long_label in zip(sources, expected, long_labels, strict=True):
         assert source.identity is not None
-        descriptor = format_release_descriptor(source.identity, separator=" · ", short_name=short)
-        actual_descriptors.append(descriptor)
-        assert format_compact_identity(source.identity, separator=" · ", short_name=short).endswith(
-            descriptor
+        assert (
+            format_compact_identity(source.identity, separator=" · ", short_name=short)
+            == long_label
         )
         if not source.identity.has_terminal_release_group:
             assert format_micro_descriptor(
                 source.identity, include_group=True
             ) == format_micro_descriptor(source.identity, include_group=False)
-    if descriptors is not None:
-        assert actual_descriptors == descriptors
 
 
 def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -496,3 +525,11 @@ def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr("frame_compare.services.metadata_parsing.anitopy.parse", lambda _name: None)
     _, identity = parse_filename_with_release_identity("odd_name.mkv")
     assert identity.content == ContentIdentity("odd name", title_origin="fallback")
+
+
+@pytest.mark.parametrize("short", ["Reference | BluRay", "Comparison 1 | BluRay"])
+def test_release_descriptor_omits_role_prefixed_short_name(short: str) -> None:
+    _, identity = parse_filename_with_release_identity("Movie.2010.1080p.BluRay.x264.mkv")
+    assert (
+        format_release_descriptor(identity, separator=" · ", short_name=short) == "1080p · BluRay"
+    )
