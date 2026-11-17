@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from rich.text import Text
 from structlog.testing import capture_logs
 
 from frame_compare.analysis.types import (
@@ -134,6 +135,7 @@ async def test_phase_output_distinguishes_disabled_from_runtime_skips(
     elif configured:
         assert output == ""
     elif transport == "tty":
+        output = Text.from_ansi(output).plain
         assert "– Analyze         not required" in output
         assert "– Publish         declined" in output
     else:

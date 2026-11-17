@@ -10,6 +10,7 @@ from typing import Literal
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from rich.console import Console
+from rich.text import Text
 
 from frame_compare.cli.output import print_at_a_glance, print_result_summary
 from frame_compare.config.loader import get_default_config
@@ -1112,7 +1113,7 @@ def test_result_summary_ascii_fallback_uses_ascii_glyphs() -> None:
     print_result_summary(console, result=RunResult(success=True), quiet=False)
 
     stream.seek(0)
-    output = stream.read()
+    output = Text.from_ansi(stream.read()).plain
     stream.close()
     assert "+ Comparison complete" in output
     assert "✓" not in output
