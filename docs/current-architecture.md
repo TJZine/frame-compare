@@ -1204,15 +1204,20 @@ and Review tabs; fullscreen support; viewport pan, zoom, actual size and fit hei
 controls (plus continued support for a restored width-fit preference without a visible
 control), reveal, and adjacent-frame preloading. The toolbar combines the title,
 frame stepper and filter badge, mode switch, context controls, offset status, and
-report actions. From 1280 px the flex row reserves source-select space before
-sizing the title and frame select. At intermediate widths the title and stepper
-share a row above the other controls. Their width is independent of the CSS Grid
-tracks below. The toolbar retains the stacked order through 768 px. The offset status appears for
-a visible pair with a nonzero offset. At compact widths the full value can wrap
+report actions. At 1280 px and wider it stays on one row, with a stable mode-switch
+position and bar height across modes, including wrapped offsets and coarse-pointer
+Grid paging. From 769 to 1599 px it uses smaller text
+and padding. Intermediate widths put the title and stepper above the other
+controls. Through 768 px the stacked controls follow DOM and keyboard order,
+with report actions last. The offset status appears for a visible pair with a
+nonzero offset, including Single when it shows the pair's right source. It is
+hidden for the left or an unrelated Single source. Offset appearance can shift
+the mode switch; the toolbar reserves no inactive status space. At compact widths
+the full value can wrap
 inside the status without covering adjacent controls. Frame arrow shortcuts select the adjacent visible frame while suppressing
 native document and filmstrip scrolling; the selected filmstrip item owns its roving
 tab stop. Custom view-mode, fit, filmstrip-size, and lens-option radio groups use
-standard arrow and Home/End selection. The header Help dialog is the single persistent
+standard arrow and Home/End selection. The toolbar Help dialog is the single persistent
 shortcut reference, and the filmstrip is the final visible report region. The
 desktop Inspector starts at the measured toolbar bottom, including shifts caused
 by the viewer status banner. One responsive Inspector width token controls both
@@ -1223,8 +1228,8 @@ The drawer also starts at the top in fullscreen.
 Help and Report Information share the local `HelpInfoDialog` owner in
 `assets/viewer.js` for visibility, focus restoration, Tab trapping, and Escape
 handling. The Inspector retains its separate drawer lifecycle and focus policy.
-Fullscreen includes the stage, Inspector, and dialogs while hiding the header,
-toolbar, and filmstrip. Closing a dialog whose trigger is hidden returns focus to
+Fullscreen includes the stage, Inspector, and dialogs while hiding the merged
+toolbar and filmstrip. Closing a dialog whose trigger is hidden returns focus to
 the stage.
 
 Viewer appearance remains owned by `assets/viewer.css`: neutral charcoal surfaces,
@@ -1240,7 +1245,8 @@ reachable when neither visible radio matches. In Slider, Single, Diff, and Blink
 the palette floats over the stage without reserving image space. With a horizontal
 palette, source chips sit above the bottom controls. A vertical palette sits to
 the right of the chips, which stay near the bottom above the frame chip. This
-leaves the top-left corner clear for burned-in text. In Grid, the palette has a
+leaves the top-left corner clear for burned-in text. On mobile, chip metadata
+ends with an ellipsis when it exceeds the available width. In Grid, the palette has a
 row below the cells or a column beside them when vertical. The frame selector in
 the toolbar identifies the current frame in windowed Grid. Fullscreen hides the
 toolbar and shows the current frame chip below the cells. On fine pointers a throttled stage pointermove
@@ -1261,10 +1267,12 @@ Keyboard focus uses a neutral light outline, and the image canvas has no decorat
 shadow. Report payload generation derives the comparison title from resolved TMDB
 metadata and reference episode numbers, shared content identity, or source short
 labels, in that order. The toolbar title uses a single line with the full title in
-its tooltip. Report Information shows the report ID, generation time and content
-counts. The Generated `<time>` contains the exact ISO timestamp in `datetime` and
-`title`. The viewer localizes its visible date and time. The renderer alone builds that
-link's safe http(s) href; no viewer script re-derives it. The viewer's Inspector builds
+its tooltip. Report Information shows the report ID and is the single place for
+Generated and Content (frame and source counts), including when the report has
+no frames. The Generated `<time>` contains the exact ISO timestamp in `datetime` and
+`title`. The viewer localizes its visible date and time. The toolbar and Report
+Information include the slow.pics link when available. The renderer alone builds
+its safe http(s) href; no viewer script re-derives it. The viewer's Inspector builds
 the Report Information source cards, Opens in, and Default pair at startup; renderer.py
 emits only their containers.
 

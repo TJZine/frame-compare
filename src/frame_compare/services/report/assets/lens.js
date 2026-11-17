@@ -709,7 +709,7 @@ const Lens = (() => {
             render();
             if (restoreToggleFocus) dom.toggle?.focus?.();
             if (options.save !== false) saveReportState();
-            viewer.announce?.(`Lens ${state.report.enabled ? 'on' : 'off'}.`);
+            viewer.announce(`Lens ${state.report.enabled ? 'on' : 'off'}.`);
             if (state.report.enabled && dom.lens && !dom.lens.hidden) dom.settings?.focus?.();
         }
 
@@ -798,7 +798,7 @@ const Lens = (() => {
             savePreferences();
             saveReportState();
             render();
-            viewer.announce?.('Lens settings reset.');
+            viewer.announce('Lens settings reset.');
         }
 
         function setPositionFromPixels(left, top) {
@@ -812,7 +812,7 @@ const Lens = (() => {
         function announcePosition() {
             const horizontal = Math.round(state.report.parkedPosition.u * 100);
             const vertical = Math.round(state.report.parkedPosition.v * 100);
-            viewer.announce?.(`Lens position ${horizontal}% across, ${vertical}% down.`);
+            viewer.announce(`Lens position ${horizontal}% across, ${vertical}% down.`);
         }
 
         function startDrag(event) {

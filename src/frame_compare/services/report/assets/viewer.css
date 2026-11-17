@@ -184,7 +184,6 @@ body {
     align-self: stretch;
     display: flex;
     align-items: center;
-    justify-content: flex-end;
     gap: 0.5rem;
     min-width: 0;
     min-height: 36px;
@@ -239,7 +238,6 @@ body {
 }
 
 .rv-frame-controls {
-    justify-self: start;
     max-width: 100%;
 }
 
@@ -247,7 +245,6 @@ body {
     flex: none;
     margin-inline-start: auto;
     min-width: max-content;
-    justify-self: center;
 }
 
 .rv-context-controls {
@@ -2347,7 +2344,29 @@ body.rv-inspector-open .rv-viewer-stage {
 
 /* 11. Responsive adaptation */
 @media (width >= 1280px) {
-    /* Keep room for the audit prefixes before allocating space to the title and frame control. */
+    /* Reserve the pair group's two selects, 2rem swap button, padding/border and
+       responsive child margins before sizing the title and frame control.
+       Other modes keep this footprint; a visible offset can still grow it. */
+    .rv-context-zone {
+        /* Keep every mode tall enough for coarse paging: a 44px button plus
+           the control group's 3px padding and 1px border on each side.
+           This also accommodates the wrapped offset without reserving width. */
+        min-block-size: calc(44px + 2 * (3px + 1px));
+        display: grid;
+        grid-template-columns: calc(2 * var(--rv-source-select-width) + 2rem + 10px + var(--rv-pair-control-margins, 0px)) auto;
+        gap: 0;
+    }
+
+    .rv-context-controls {
+        grid-area: 1 / 1;
+        justify-self: end;
+    }
+
+    .rv-alignment-status {
+        grid-area: 1 / 2;
+        margin-inline-start: 0.5rem;
+    }
+
     .rv-context-zone,
     .rv-context-controls {
         flex: none;
@@ -2367,7 +2386,9 @@ body.rv-inspector-open .rv-viewer-stage {
 
 @media (768px < width < 1600px) {
     .rv-controls {
+        /* Compact controls keep the toolbar on one row from 1280px. */
         --rv-source-select-width: 11rem;
+        --rv-pair-control-margins: 4px;
         --rv-frame-select-min-width: 3.5rem;
         gap: 0.3125rem;
         padding-inline: 0.75rem;
@@ -2507,6 +2528,12 @@ body.rv-inspector-open .rv-viewer-stage {
 }
 
 @media (max-width: 768px) {
+    .rv-stage-label-meta {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
     body {
         height: auto;
         min-height: 100vh;
@@ -2517,10 +2544,10 @@ body.rv-inspector-open .rv-viewer-stage {
         grid-template-columns: minmax(0, 1fr);
         grid-template-areas:
             "title"
-            "actions"
             "frame"
             "mode"
-            "context";
+            "context"
+            "actions";
         padding-inline: 0.5rem;
     }
 

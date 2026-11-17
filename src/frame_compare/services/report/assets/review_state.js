@@ -408,7 +408,7 @@ const ReviewState = (() => {
         function showMessage(message, warning = false, announce = true) {
             viewer.setText(viewer.dom.reviewStatus, message);
             viewer.dom.reviewStatus.dataset.tone = warning ? 'warning' : 'saved';
-            if (announce) viewer.announce?.(message);
+            if (announce) viewer.announce(message);
         }
 
         function messageWithPersistence(message) {

@@ -106,15 +106,14 @@ sources. Drag the lens window's grip to move it.
 
 ### Report information
 
-The header names the comparison and shows when the report was generated, how many
-frames it contains, and how many sources it compares. The title uses the title from
+The toolbar names the comparison. The title uses the title from
 TMDB when available, the shared title from the filenames, or the short source labels.
 Open the Clips inspector or Report Information to see the original filenames.
 
-The **Report information** button in the header opens the **Report Information** dialog.
-It lists the title, report ID, generated time, content, the **Opens in** view, the
-default
-pair, the slow.pics link when uploaded, and every source. Its **Rendering** section
+The **Report information** button in the toolbar opens the **Report Information** dialog,
+including in an empty report. This is the single place for Generated and Content.
+It lists the title, report ID, generated time, frame and source counts, the **Opens in** view,
+the default pair, the slow.pics link when uploaded, and every source. Its **Rendering** section
 states
 whether tonemapping ran and the shared applied transform and controls, or that the
 transform varies by source. The Clips inspector shows each source's actual transform,

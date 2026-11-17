@@ -221,6 +221,7 @@ def _generated_report(
     comparison_control: str = _COMPARISON_RELEASE,
     comparison_explicit_label: str | None = None,
     third_source: bool = False,
+    additional_sources: int = 0,
     metadata: TmdbMetadata | None = None,
     slowpics_url: str | None = None,
 ) -> Path:
@@ -328,6 +329,25 @@ def _generated_report(
             )
         )
         geometry_by_name["third"] = geometry_by_name["encode"]
+    for index in range(additional_sources):
+        name = f"additional-{index + 1}"
+        label = f"Additional source {index + 1}"
+        clips.append(
+            replace(
+                clips[1],
+                name=name,
+                label=label,
+                path=tmp_path / f"{name}.mkv",
+                display=ReportClipDisplayInfo(
+                    primary=label,
+                    release=label,
+                    control=label,
+                    micro=label,
+                    filename=f"{name}.mkv",
+                ),
+            )
+        )
+        geometry_by_name[name] = geometry_by_name["encode"]
     return generate_report(
         ReportData(
             clips=[replace(clip) for clip in clips],
@@ -558,8 +578,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return title.right <= frame.left && frame.bottom <= modes.top
                     && modes.right <= context.left && context.right <= actions.left;
             }
-            return title.bottom <= actions.top && actions.bottom <= frame.top
-                && frame.bottom <= modes.top && modes.bottom <= context.top;
+            return title.bottom <= frame.top && frame.bottom <= modes.top
+                && modes.bottom <= context.top && context.bottom <= actions.top;
         }));
         const times = [...document.querySelectorAll('time[datetime]')];
         const generated = times[0];
@@ -1887,7 +1907,10 @@ def _assert_inspector_clears_toolbar_during_image_retry(browser: str, tmp_path: 
 
 
 @pytest.mark.integration
-def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path: Path) -> None:
+@pytest.mark.parametrize("source_count", [3, 7])
+def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(
+    tmp_path: Path, source_count: int
+) -> None:
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable")
@@ -1899,12 +1922,16 @@ def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path:
         comparison_micro="english-dub-only-copy",
         comparison_control="english-dub-only-copy",
         third_source=True,
+        additional_sources=source_count - 3,
         metadata=TmdbMetadata(
             tmdb_id=1, title=title, original_title=title, year=2026, media_type="movie"
         ),
         slowpics_url="https://example.invalid/never-opened",
     )
-    script = _viewer_input_script(r"""
+    script = _viewer_input_script(
+        f"const sourceCount = {source_count};"
+        + r"""
+        assert.equal(await evaluate("document.getElementById('left-select').options.length"), sourceCount);
         const snapshot = `(() => {
             const bar = document.querySelector('.rv-controls');
             const controls = [...bar.querySelectorAll('button,select,a,#alignment-status,#active-filter-badge')]
@@ -1930,12 +1957,13 @@ def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path:
                 filterText: badge.textContent,
                 controls, bar: bar.getBoundingClientRect().toJSON(),
                 pageWidth: document.documentElement.scrollWidth,
+                pageHeight: document.documentElement.scrollHeight,
                 optionText,
                 labelWidth: context.measureText(optionText).width,
                 available: select.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight),
             };
         })()`;
-        for (const [width,height] of [[769,844],[900,844],[1280,720],[1366,768]]) {
+        for (const [width,height] of [[769,844],[900,844],[1280,720],[1366,768],[1920,1080]]) {
             await command('Emulation.setDeviceMetricsOverride',{
                 width,height,deviceScaleFactor:1,mobile:false,
             });
@@ -1993,7 +2021,70 @@ def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path:
                 }
             }
         }
-""")
+
+        const unstable = [];
+        for (const coarse of [false, true]) {
+            await command('Emulation.setTouchEmulationEnabled', {enabled: coarse, maxTouchPoints: 1});
+            assert.equal(await evaluate("matchMedia('(pointer: coarse)').matches"), coarse);
+            for (const width of [1280, 1366, 1920]) {
+                await command('Emulation.setDeviceMetricsOverride', {width, height: 768, deviceScaleFactor: 1, mobile: false});
+                for (const offset of [0, 120]) {
+                    await evaluate(`ReportViewer.viewport.setManualAlignment(${offset}, ${-offset}); ReportViewer.state.activeClipIdx = ReportViewer.state.rightClipIdx`);
+                    const geometry = [];
+                    for (const mode of ['slider', 'overlay', 'diff', 'blink', 'grid']) {
+                        await evaluate(`ReportViewer.setMode('${mode}')`);
+                        await pause();
+                        const state = await evaluate(snapshot);
+                        const message = JSON.stringify({coarse, width, offset, mode, ...state});
+                        assert.ok(state.pageWidth <= width && state.pageHeight <= 768 && state.offsetFits, message);
+                        for (const [index, {box, hits}] of state.controls.entries()) {
+                            assert.ok(hits.every(Boolean) && box.left >= 0 && box.right <= width, message);
+                            for (const {box: other} of state.controls.slice(index + 1)) {
+                                assert.ok(box.right <= other.left || other.right <= box.left
+                                    || box.bottom <= other.top || other.bottom <= box.top, message);
+                            }
+                        }
+                        geometry.push(await evaluate(`(() => {
+                            const bar = document.querySelector('.rv-controls').getBoundingClientRect();
+                            const mode = document.querySelector('.rv-mode-controls').getBoundingClientRect();
+                            const pager = document.getElementById('btn-grid-next').getBoundingClientRect();
+                            return {x: mode.x, height: bar.height, pagerHeight: pager.height};
+                        })()`));
+                        if (coarse && mode === 'grid' && sourceCount > 4) {
+                            assert.ok(geometry.at(-1).pagerHeight >= 44, message);
+                        }
+                    }
+                    if (offset === 0) assert.ok(Math.max(...geometry.map(item => item.x)) - Math.min(...geometry.map(item => item.x)) < 1, JSON.stringify(geometry));
+                    if (Math.max(...geometry.map(item => item.height)) - Math.min(...geometry.map(item => item.height)) >= 1) {
+                        unstable.push({coarse, width, offset, geometry});
+                    }
+                }
+            }
+        }
+        assert.deepEqual(unstable, [], 'toolbar height changed across modes: ' + JSON.stringify(unstable));
+        await command('Emulation.setTouchEmulationEnabled', {enabled: false});
+        await evaluate(`ReportViewer.viewport.setManualAlignment(7, -2); ReportViewer.setMode('overlay')`);
+        for (const active of [1, 0, 2]) {
+            const offset = await evaluate(`(() => {
+                const select = document.getElementById('active-select');
+                select.value = '${active}';
+                select.dispatchEvent(new Event('change', {bubbles: true}));
+                return {hidden: ReportViewer.dom.alignmentStatus.hidden,
+                    text: ReportViewer.dom.alignmentStatus.textContent,
+                    applied: ReportViewer.dom.leftLayer.classList.contains('rv-layer--aligned-active'),
+                    transform: getComputedStyle(ReportViewer.dom.leftLayer).transform};
+            })()`);
+            assert.equal(offset.hidden, active !== 1);
+            assert.equal(offset.applied, active === 1);
+            if (active === 1) {
+                assert.equal(offset.text, 'Offset: custom +7x -2y');
+                assert.equal(offset.transform, 'matrix(1, 0, 0, 1, 7, -2)');
+            }
+        }
+        await evaluate(`ReportViewer.viewport.setManualAlignment(0, 0)`);
+        assert.equal(await evaluate('ReportViewer.dom.alignmentStatus.hidden'), true);
+"""
+    )
     completed = _run_browser_input(browser, report_path, tmp_path / "chrome-toolbar-offset", script)
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
@@ -2052,7 +2143,7 @@ def test_closed_source_select_keeps_full_overlong_label(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize(("width", "height"), [(390, 844), (1280, 720), (1920, 1080)])
+@pytest.mark.parametrize(("width", "height"), [(390, 844), (1280, 720), (1366, 768), (1920, 1080)])
 def test_report_labels_clear_viewport_controls(tmp_path: Path, width: int, height: int) -> None:
     browser = _browser_executable()
     if browser is None:
@@ -2088,6 +2179,40 @@ def test_report_labels_clear_viewport_controls(tmp_path: Path, width: int, heigh
         assert.equal(bar.sourceCount, 3);
         assert.equal(bar.titleLength, 40);
         if (width >= 1280) assert.ok(bar.singleRow, JSON.stringify(bar));
+        if (width >= 1280) {
+            const geometry = [];
+            for (const mode of ['slider', 'overlay', 'diff', 'blink', 'grid']) {
+                await evaluate(`ReportViewer.setMode('${mode}')`);
+                await pause();
+                geometry.push(await evaluate(`(() => {
+                    const mode = document.querySelector('.rv-mode-controls').getBoundingClientRect();
+                    const bar = document.querySelector('.rv-controls').getBoundingClientRect();
+                    return {x: mode.x, height: bar.height};
+                })()`));
+            }
+            assert.ok(Math.max(...geometry.map(item => item.x)) - Math.min(...geometry.map(item => item.x)) < 1, JSON.stringify(geometry));
+            assert.ok(Math.max(...geometry.map(item => item.height)) - Math.min(...geometry.map(item => item.height)) < 1, JSON.stringify(geometry));
+        }
+        if (width <= 768) {
+            const rows = await evaluate(`['.rv-title', '.rv-frame-controls', '.rv-mode-controls', '.rv-context-zone', '.rv-bar-actions'].map(selector => document.querySelector(selector).getBoundingClientRect().top)`);
+            assert.deepEqual(rows, [...rows].sort((a, b) => a - b));
+            await evaluate(`ReportViewer.setMode('slider'); document.getElementById('frame-select').focus()`);
+            for (const selector of ['[data-mode=slider]', '#left-select', '#btn-swap-clips', '#right-select', '#btn-inspector', '#btn-info', '#btn-help']) {
+                await command('Input.dispatchKeyEvent', {type: 'keyDown', key: 'Tab', code: 'Tab'});
+                await command('Input.dispatchKeyEvent', {type: 'keyUp', key: 'Tab', code: 'Tab'});
+                assert.equal(await evaluate(`document.activeElement.matches('${selector}')`), true, selector);
+            }
+            const metadata = await evaluate(`(() => {
+                const label = document.querySelector('#label-left .rv-stage-label-meta');
+                return {width: label.clientWidth, contentWidth: label.scrollWidth,
+                    overflow: getComputedStyle(label).overflow,
+                    ellipsis: getComputedStyle(label).textOverflow};
+            })()`);
+            assert.ok(metadata.width > 0 && metadata.contentWidth > metadata.width);
+            assert.equal(metadata.overflow, 'hidden');
+            assert.equal(metadata.ellipsis, 'ellipsis');
+        }
+        await evaluate(`ReportViewer.setMode('slider')`);
         const modes = await evaluate(`(() => {
             const stage = ReportViewer.dom.stage;
             const palette = document.querySelector('.rv-viewport-palette');
@@ -2194,7 +2319,6 @@ def test_report_labels_clear_viewport_controls(tmp_path: Path, width: int, heigh
                 document.body.dataset.testFullscreen = '';
             })()`);
         }
-        console.log(JSON.stringify({viewport: [width, height], nativeFullscreen, result: fullscreen.result.value}));
         for (const layout of await evaluate(gridLayouts)) {
             const {controls, frame, footers, stage, expectedFooters} = layout;
             const message = JSON.stringify(layout);
@@ -2214,7 +2338,6 @@ def test_report_labels_clear_viewport_controls(tmp_path: Path, width: int, heigh
     )
     completed = _run_browser_input(browser, report_path, tmp_path / "chrome-stage-chips", script)
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    print(completed.stdout, end="")
 
 
 @pytest.mark.integration
@@ -2700,3 +2823,54 @@ def test_fullscreen_help_and_inspector_are_reachable_with_trusted_input(tmp_path
     result = _run_browser_input(browser, report_path, tmp_path / "chrome-fullscreen", script)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Fullscreen Help, Inspector, focus and Escape passed" in result.stdout
+
+
+@pytest.mark.integration
+def test_empty_report_keeps_information_and_help_available(tmp_path: Path) -> None:
+    from tests.services.report_viewer_contracts import script_payload
+
+    from frame_compare.services.report.renderer import build_html
+
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report = _generated_report(tmp_path)
+    payload = script_payload(report.read_text(encoding="utf-8"))
+    payload.update(clips=[], frames=[], stats={"frame_count": 0, "clip_count": 0})
+    report.write_text(build_html(payload), encoding="utf-8")
+    script = _viewer_input_script(r"""
+        async function click(selector) {
+            const point = await evaluate(`(() => {
+                const rect = document.querySelector('${selector}').getBoundingClientRect();
+                return {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+            })()`);
+            await command('Input.dispatchMouseEvent', {type: 'mousePressed', button: 'left', clickCount: 1, ...point});
+            await command('Input.dispatchMouseEvent', {type: 'mouseReleased', button: 'left', clickCount: 1, ...point});
+        }
+        await click('#btn-info');
+        const empty = await evaluate(`(() => {
+            const info = document.getElementById('btn-info');
+            const entries = Object.fromEntries([...document.querySelectorAll('#info-modal dt')]
+                .map(term => [term.textContent, term.nextElementSibling.textContent]));
+            return {infoDisabled: info.disabled, helpDisabled: ReportViewer.dom.btnHelp.disabled,
+                frameDisabled: ReportViewer.dom.frameSelect.disabled,
+                offsetDisabled: ReportViewer.dom.alignX.disabled,
+                inspectorDisabled: ReportViewer.dom.btnInspectorResetCurrentAlign.disabled,
+                infoOpen: ReportViewer.isInfoModalOpen(), entries,
+                iso: document.querySelector('#info-modal time').dateTime};
+        })()`);
+        assert.equal(empty.infoDisabled, false);
+        assert.equal(empty.helpDisabled, false);
+        assert.equal(empty.frameDisabled, true);
+        assert.equal(empty.offsetDisabled, true);
+        assert.equal(empty.inspectorDisabled, true);
+        assert.equal(empty.infoOpen, true);
+        assert.equal(empty.entries.Content, '0 frames · 0 sources');
+        assert.ok(empty.entries.Generated && empty.iso.includes('T'));
+        await click('#btn-close-info');
+        assert.equal(await evaluate('document.activeElement === ReportViewer.dom.btnInfo'), true);
+        await click('#btn-help');
+        assert.equal(await evaluate('ReportViewer.isHelpModalOpen()'), true);
+    """)
+    completed = _run_browser_input(browser, report, tmp_path / "chrome-empty", script)
+    assert completed.returncode == 0, completed.stdout + completed.stderr

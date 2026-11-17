@@ -1213,7 +1213,8 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
   descriptor segment equal to the short label is omitted from the option. Long labels can
   clip in the closed control. The full option title and accessible name remain available.
 - Viewer spatial translation is labeled `Offset`, distinct from temporal source-frame
-  alignment. The toolbar shows it for the displayed pair when the offset is nonzero.
+  alignment. The toolbar shows it for the displayed pair when the offset is nonzero,
+  including Single when the active source is the pair's right source.
   The full offset value can wrap inside the status at compact widths. Filmstrip captions show the comparison frame number and selection category
   at every thumbnail size, with the full original frame label available on hover and
   in the frame selector. In Grid, the palette sits below or beside the cells and

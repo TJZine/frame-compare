@@ -1575,7 +1575,16 @@ function alignmentStatus() {
     const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
     viewer.bindAlignmentEvents();
     viewer.inspector.bind();
+    const announcements = [];
+    viewer.announce = message => announcements.push(message);
     assert.equal(viewer.dom.alignmentStatus.hidden, true);
+    viewer.viewport.setManualAlignment(3, -1);
+    assert.deepEqual(announcements, ['Offset: custom +3x -1y']);
+    viewer.viewport.updateAlignmentStatus();
+    viewer.render();
+    viewer.viewport.setManualAlignment(3, -1);
+    assert.equal(announcements.length, 1);
+    viewer.viewport.setAlignmentPreset('none');
     viewer.swapPairClips();
     viewer.viewport.setManualAlignment(5, -2);
     viewer.swapPairClips();
@@ -1605,7 +1614,10 @@ function singleModeAlignment() {
     viewer.setMode('overlay');
     viewer.state.activeClipIdx = viewer.state.rightClipIdx;
     viewer.viewport.setManualAlignment(9, -4);
+    viewer.render();
     viewer.updateImages();
+    assert.equal(viewer.dom.alignmentStatus.hidden, false);
+    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +9x -4y');
     assert.equal(viewer.dom.canvas.style.values['--align-x'], '9px');
     assert.equal(viewer.dom.canvas.style.values['--align-y'], '-4px');
     assert.equal(viewer.dom.leftLayer.classList.contains('rv-layer--aligned-active'), true);
@@ -1614,9 +1626,19 @@ function singleModeAlignment() {
     assert.equal(viewer.dom.leftLayer.classList.contains('rv-layer--aligned-active'), false);
     assert.equal(viewer.dom.leftLayer.classList.contains('active'), false);
     viewer.state.activeClipIdx = viewer.state.leftClipIdx;
+    viewer.render();
     viewer.updateImages();
     assert.equal(viewer.dom.leftLayer.classList.contains('rv-layer--aligned-active'), false);
+    assert.equal(viewer.dom.alignmentStatus.hidden, true);
+    viewer.state.activeClipIdx = 2;
+    viewer.render();
+    viewer.updateImages();
+    assert.equal(viewer.dom.alignmentStatus.hidden, true);
     assert.equal(viewer.state.mode, 'overlay');
+    const single = loadViewer({ clipCount: 1 }).viewer;
+    single.setMode('overlay');
+    single.viewport.setManualAlignment(9, -4);
+    assert.equal(single.dom.alignmentStatus.hidden, true);
 }
 
 function directionalFourClip() {

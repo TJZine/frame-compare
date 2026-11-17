@@ -709,7 +709,10 @@ const Viewport = {
         const status = this.viewer.dom.alignmentStatus;
         if (!status) return;
         const alignment = this.currentAlignment();
-        const pairIsShown = ['slider', 'diff', 'blink'].includes(this.viewer.state.mode);
+        const state = this.viewer.state;
+        const pairIsShown = ['slider', 'diff', 'blink'].includes(state.mode)
+            || (state.mode === 'overlay' && state.leftClipIdx !== state.rightClipIdx
+                && state.activeClipIdx === state.rightClipIdx);
         if (!pairIsShown || (alignment.alignX === 0 && alignment.alignY === 0)) {
             status.hidden = true;
             status.replaceChildren();
@@ -724,7 +727,7 @@ const Viewport = {
         const value = document.createElement('span');
         value.className = 'rv-offset-value';
         value.textContent = ` ${valueText}`;
-        if (status.hidden) this.viewer.announce?.(announcement);
+        if (status.hidden) this.viewer.announce(announcement);
         status.hidden = false;
         status.replaceChildren(label, value);
     },

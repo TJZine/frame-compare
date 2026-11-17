@@ -74,7 +74,7 @@ const GridView = (() => {
         }
 
         function announce(message) {
-            viewer.announce?.(message);
+            viewer.announce(message);
         }
 
         function updateControls(options = {}) {

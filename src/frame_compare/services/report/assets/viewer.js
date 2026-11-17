@@ -487,7 +487,7 @@ const ReportViewer = {
         document.querySelectorAll(
             '.rv-controls button, .rv-controls select, .rv-controls input, .rv-viewport-palette button, .rv-viewport-palette select, .rv-viewport-palette input, .rv-bottom-panel button, .rv-bottom-panel select, .rv-bottom-panel input, .rv-inspector button, .rv-inspector select, .rv-inspector input'
         ).forEach(control => {
-            if (control === this.dom.btnHelp) return;
+            if (control === this.dom.btnHelp || control.closest('.rv-bar-actions')) return;
             control.disabled = disabled;
         });
     },
