@@ -44,8 +44,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "build_initial_selection_details_by_source_frame",
-    "generated_frame_count",
-    "planned_frame_count",
     "map_aligned_to_source_frame",
     "run_analyze_phase",
     "selection_breakdown_with_source_offset",
@@ -251,19 +249,6 @@ def _selection_window_for_context(ctx: RunContext) -> tuple[int, int]:
     if window.frame_count > 0:
         return window.start_frame, window.frame_count
     return 0, ctx.reference.effective_num_frames()
-
-
-def planned_frame_count(config: AnalysisConfig) -> int:
-    return len(config.user_frames) + generated_frame_count(config)
-
-
-def generated_frame_count(config: AnalysisConfig) -> int:
-    return (
-        config.random_frame_count
-        + config.dark_frame_count
-        + config.bright_frame_count
-        + config.motion_frame_count
-    )
 
 
 def _source_offset_for_reference_window(reference: ClipState, window_start: int) -> int:

@@ -232,11 +232,6 @@ count. The selection-domain FPS is the effective reference FPS, even when metric
 come from another analysis source. Sparse performance samples remain in source-frame
 coordinates during this allocation.
 
-`frame_compare.orchestration.phase_selection` owns requested and generated frame
-counts used by completion and interruption summaries. CLI presenters load that
-owner only when presenting a run, keeping CLI acquisition and dry-run imports
-independent of runtime execution.
-
 `frame_compare.orchestration.source_labels` resolves presentation labels after
 selector/override resolution and before probing or run-folder reservation.
 `frame_compare.orchestration.presentation` owns the bounded console-width policy

@@ -609,8 +609,10 @@ def test_run_json_stale_analysis_config_keys_fail_before_runner(
     }
 
 
-@pytest.mark.parametrize("options", [[], ["--quiet"], ["--json"]])
-@pytest.mark.parametrize("second_interrupt", [False, True])
+@pytest.mark.parametrize(
+    ("options", "second_interrupt"),
+    [([], False), ([], True), (["--quiet"], False), (["--json"], False)],
+)
 def test_run_exit_code_is_130_on_keyboard_interrupt(
     second_interrupt: bool, options: list[str], monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:

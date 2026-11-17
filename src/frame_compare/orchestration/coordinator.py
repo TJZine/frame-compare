@@ -27,7 +27,6 @@ from frame_compare.orchestration.fps_report import (
     emit_consolidated_fps_report,
 )
 from frame_compare.orchestration.phase_selection import (
-    planned_frame_count,
     shared_range_drop_warning,
     user_frames_outside_shared_range,
 )
@@ -389,7 +388,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             planned_frames = selected_frame_count
             if planned_frames is None:
                 analysis = request.inputs.config.analysis
-                planned_frames = planned_frame_count(analysis)
+                planned_frames = analysis.requested_frame_count
             with suppress(Exception):
                 local_deps.on_interrupted(
                     InterruptedRun(

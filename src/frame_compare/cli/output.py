@@ -160,9 +160,7 @@ def print_at_a_glance(
     bright_frame_count = analysis.bright_frame_count
     motion_frame_count = analysis.motion_frame_count
     random_seed = analysis.random_seed
-    from frame_compare.orchestration.phase_selection import planned_frame_count
-
-    requested_total = planned_frame_count(analysis)
+    requested_total = analysis.requested_frame_count
     overlay_mode = config.screenshots.overlay_mode
     tonemap_enabled = config.color.enable_tonemap
     alignment_enabled = config.audio_alignment.enable

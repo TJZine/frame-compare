@@ -28,7 +28,6 @@ from frame_compare.orchestration.full_window_retry import (
 )
 from frame_compare.orchestration.phase_selection import (
     build_initial_selection_details_by_source_frame,
-    generated_frame_count,
     selection_breakdown_with_source_offset,
     selection_details_with_source_offset,
     selection_timecode_for_frame,
@@ -190,10 +189,10 @@ async def run_align_phase(
             reference=reference,
             comparisons=comparisons,
             selection_source_window=selection_source_window,
-            generated_requested_count=generated_frame_count(ctx.config.analysis),
+            generated_requested_count=ctx.config.analysis.generated_frame_count,
             seed=ctx.config.analysis.random_seed,
             allow_fallback=(
-                generated_frame_count(ctx.config.analysis) > 0
+                ctx.config.analysis.generated_frame_count > 0
                 and ctx.selection_domain.full_window_retry_override is None
             ),
             require_full_generated_selection=ctx.selection_domain.full_window_retry_override
@@ -552,7 +551,7 @@ def _reselect_frames_for_trimmed_overlap(
         comparisons=comparisons,
         selection_source_window=selection_source_window,
     )
-    target_count = generated_frame_count(config)
+    target_count = config.generated_frame_count
     if selectable_length <= 0 or target_count <= 0:
         return None
     if target_count > selectable_length:

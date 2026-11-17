@@ -95,11 +95,11 @@ def _render(console: Console) -> str:
     return console.export_text(styles=False)
 
 
-def _rendered_row_value(output: str, row_label: str, *, indent: int = 3) -> str:
+def _rendered_row_value(output: str, row_label: str) -> str:
     lines = output.splitlines()
     for index, line in enumerate(lines):
         content = line.partition("│")[2].partition("│")[0]
-        row_prefix = f"{' ' * indent}{row_label}"
+        row_prefix = f"   {row_label}"
         if not content.startswith(row_prefix):
             continue
         value_start = len(row_prefix)
@@ -112,9 +112,9 @@ def _rendered_row_value(output: str, row_label: str, *, indent: int = 3) -> str:
             continuation_content = continuation.partition("│")[2].partition("│")[0]
             if not continuation_content.strip():
                 break
-            if not continuation_content.startswith(" " * indent):
+            if not continuation_content.startswith("   "):
                 break
-            if len(continuation_content) > indent and not continuation_content[indent].isspace():
+            if len(continuation_content) > 3 and not continuation_content[3].isspace():
                 break
             rendered_lines.append(continuation)
         return "\n".join(rendered_lines)
@@ -691,7 +691,7 @@ def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
         (screenshots / name).write_bytes(b"\x89PNG\r\n\x1a\n")
     (screenshots / "notes.txt").write_text("not an image")
 
-    console = _console_at_width(240)
+    console = _console()
     print_result_summary(
         console,
         result=RunResult(
@@ -701,14 +701,12 @@ def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
             clips_processed=2,
         ),
         quiet=False,
+        root=tmp_path,
     )
 
-    screenshots_row = _rendered_row_value(_render(console), "screenshots", indent=1)
-    row_cells = [line.partition("│")[2].strip() for line in screenshots_row.splitlines()]
-    assert str(screenshots) in "".join(row_cells)
-    assert "3 files" in " ".join(row_cells)
+    assert "screenshots  3 files" in _render(console)
 
-    missing_console = _console_at_width(240)
+    missing_console = _console()
     print_result_summary(
         missing_console,
         result=RunResult(
@@ -718,9 +716,14 @@ def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
             clips_processed=2,
         ),
         quiet=False,
+        root=tmp_path,
     )
 
-    assert "files" not in _render(missing_console)
+    missing_path = str(Path("screenshots") / "absent")
+    assert any(
+        line.split() == ["│", "screenshots", missing_path]
+        for line in _render(missing_console).splitlines()
+    )
 
 
 def test_result_summary_resolves_relative_artifact_link_against_root(

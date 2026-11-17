@@ -438,15 +438,18 @@ def test_calculate_metrics_uses_effective_fps_in_metadata(
     video_paths = [tmp_path / "v1.mkv"]
     video_paths[0].write_bytes(b"")
 
+    receipts: list[None] = []
     result = calculate_metrics(
         MetricCacheRequest(effective_fps=Fraction(24000, 1001), analysis_source_path=None),
         video_paths=video_paths,
         config=AnalysisConfig(),
         cache_dir=tmp_path,
+        on_cache_written=lambda: receipts.append(None),
     )
 
     assert result.metrics.metadata.fps == Fraction(24000, 1001)
     mock_save.assert_called_once()
+    assert receipts == [None]
 
 
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
@@ -475,12 +478,14 @@ def test_calculate_metrics_cache_save_is_best_effort(
     video_paths[0].write_bytes(b"")
     config = AnalysisConfig()
     recorder = AnalysisTimingRecorder()
+    receipts: list[None] = []
     result = calculate_metrics(
         MetricCacheRequest(analysis_source_path=None),
         timing_recorder=recorder,
         video_paths=video_paths,
         config=config,
         cache_dir=tmp_path,
+        on_cache_written=lambda: receipts.append(None),
     )
 
     assert isinstance(result.metrics, FrameMetrics)
@@ -490,6 +495,7 @@ def test_calculate_metrics_cache_save_is_best_effort(
     assert recorder.cache_write_state == "failed"
     assert recorder.as_dict()["cache_write"] >= 0.0
     mock_save.assert_called_once()
+    assert receipts == []
 
 
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")

@@ -99,7 +99,7 @@ def compute_selection_window_with_recovery(
             raise error from None
         _require_confirmation(
             error=error,
-            requested_frame_count=_requested_frame_count(config),
+            requested_frame_count=config.analysis.requested_frame_count,
             config=config,
             confirm=confirm,
         )
@@ -257,20 +257,9 @@ def raise_if_full_window_retry_runtime_failed(
     if ctx.selection_domain.full_window_retry_override is None:
         return
     selection_error = SelectionError(
-        type(error).__name__, requested=_requested_frame_count(ctx.config), found=0
+        type(error).__name__, requested=ctx.config.analysis.requested_frame_count, found=0
     )
     raise _fatal_selection_error(selection_error, retry_failed=True) from error
-
-
-def _requested_frame_count(config: ConfigSchema) -> int:
-    analysis = config.analysis
-    return (
-        len(analysis.user_frames)
-        + analysis.random_frame_count
-        + analysis.dark_frame_count
-        + analysis.bright_frame_count
-        + analysis.motion_frame_count
-    )
 
 
 def _full_window_config(config: ConfigSchema) -> ConfigSchema:

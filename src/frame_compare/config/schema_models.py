@@ -88,6 +88,19 @@ class AnalysisConfig(BaseModel):
     dark_quantile: float = Field(default=0.05, ge=0.0, le=0.5)
     bright_quantile: float = Field(default=0.95, ge=0.5, le=1.0)
 
+    @property
+    def generated_frame_count(self) -> int:
+        return (
+            self.random_frame_count
+            + self.dark_frame_count
+            + self.bright_frame_count
+            + self.motion_frame_count
+        )
+
+    @property
+    def requested_frame_count(self) -> int:
+        return len(self.user_frames) + self.generated_frame_count
+
     @field_validator("user_frames")
     @classmethod
     def validate_user_frames(cls, value: list[int]) -> list[int]:
@@ -97,13 +110,7 @@ class AnalysisConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_requested_frame_total(self) -> AnalysisConfig:
-        requested = (
-            len(self.user_frames)
-            + self.random_frame_count
-            + self.dark_frame_count
-            + self.bright_frame_count
-            + self.motion_frame_count
-        )
+        requested = self.requested_frame_count
         if requested == 0:
             raise ValueError("at least one analysis frame selector must request a frame")
         if requested > 100:

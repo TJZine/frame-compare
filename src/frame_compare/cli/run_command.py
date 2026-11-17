@@ -379,11 +379,6 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         handle_json_output(result)
         return
 
-    if not result.success:
-        raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
-
-    from frame_compare.orchestration.phase_selection import planned_frame_count
-
     post_upload_actions = collect_interactive_slowpics_actions(
         result,
         args=args,
@@ -394,7 +389,7 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         console,
         result=result,
         quiet=args.quiet,
-        planned_frames=planned_frame_count(inputs.config.analysis),
+        planned_frames=inputs.config.analysis.requested_frame_count,
         post_upload_actions=post_upload_actions,
         root=args.resolved_root,
         verbose=args.verbose,
@@ -417,9 +412,9 @@ def build_runner_dependencies(
     deps: RunCommandDeps,
     console: Console,
     inputs: AcquiredRunConfig,
-    on_interrupted: Callable[[InterruptedRun], None] | None = None,
-    on_failed_alignment_diagnostics: Callable[[Path], None] | None = None,
-) -> RunDependencies | None:
+    on_interrupted: Callable[[InterruptedRun], None],
+    on_failed_alignment_diagnostics: Callable[[Path], None],
+) -> RunDependencies:
     config = inputs.config
     confirm_slowpics_upload = (
         build_confirm_slowpics_upload_callback(
@@ -440,17 +435,6 @@ def build_runner_dependencies(
         if full_window_retry_prompt_is_legal(args=args, deps=deps, config=config)
         else None
     )
-    if all(
-        callback is None
-        for callback in (
-            confirm_slowpics_upload,
-            confirm_full_window_retry,
-            on_interrupted,
-            on_failed_alignment_diagnostics,
-        )
-    ):
-        return None
-
     from frame_compare.orchestration.coordinator import RunDependencies
 
     return RunDependencies(
