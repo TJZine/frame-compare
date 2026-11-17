@@ -2,10 +2,8 @@
 
 Choose a user goal, read its feature file, and follow the parent skill's
 [Launch, Doctor, Evidence and Cleanup](../SKILL.md) around the drive. This is the
-maintained application-verification map; the dated
-[pilot](../../../../docs/plans/2026-10-15-verification-map-pilot.md) remains historical
-evidence, not a source of current pass claims. The initial three features do not
-cover all Frame Compare behavior.
+maintained application-verification map. The initial three features do not cover
+all Frame Compare behavior.
 
 | User goal | Driver and observable result | Explicit boundary |
 | --- | --- | --- |

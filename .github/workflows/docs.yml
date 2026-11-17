@@ -63,7 +63,7 @@ jobs:
           internal = [
               item["location"]
               for item in items
-              if item["location"].startswith(("TODO/", "plans/", "reviews/", "prompts/", "images/", "release-evidence/"))
+              if item["location"].startswith(("TODO/", "images/", "release-evidence/"))
           ]
           if internal:
               raise SystemExit(f"Internal documentation leaked into search: {internal}")

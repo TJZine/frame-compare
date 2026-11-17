@@ -825,8 +825,8 @@ reasons. Stability is derived from chunk runs (`stable` on agreement,
 `possible_drift` for a sustained walk across three or more runs, `variable`
 otherwise, `insufficient_evidence` below three credible chunks), and the
 correlation score is the agreeing-over-credible fraction. The estimator-policy
-token is part of the shared source-set identity. The new policy makes prior
-whole-set shared cache entries miss, including their interactive confirmations.
+token is part of the shared source-set identity. Whole-set shared cache entries
+under a different policy token miss, including their interactive confirmations.
 `alignment_video` owns V1-V5a: bounded five-offset base scoring, targeted run/chunk
 hypothesis checks, L-SMASH loading through the injected run `VSLoader`, active-rect
 crop/downscale/rank scoring, cancellation and source-identity checks, and bounded
@@ -844,8 +844,7 @@ and votes. `services.alignment_review_projection` derives the P4/P4a reasons, re
 and check points used by `services.alignment_presentation`. That parent-process
 service renders terminal/Rich output and structured warnings, and builds the text for
 the VSView panel. The panel uses the supplied summary and detail lines and appends
-origin-bound messages from the source frame counts. The summary, detail, Keep, and
-saved wording is unchanged. Metadata v6 replaces the stripped attempt with these
+origin-bound messages from the source frame counts. Metadata v6 carries these
 presentation lines and the authority and candidate fields.
 `frame_compare.services.alignment_keys` owns the stable reference/comparison
 alignment key shared by alignment sequencing and previous-offset policy.
@@ -866,11 +865,13 @@ time for all entries. Shared cache schema v2 remains accepted-authority-only and
 not serialize the richer attempt. Warm cache entries therefore report historical
 stream/chunk details as unavailable rather than inventing them.
 
-Native alignment review is split across existing owners. `vsview.session_script` reserves
-and generates the session; `vsview.session_runtime` prepares every untrimmed source,
-retains actual color props/defaults/FPS and registers outputs with reserved `hdr=False`
-separately from strict metadata-v6 kwargs. Ordinary SDR packing is used even with the
-HDR viewer environment flag; final rendering/tone-map settings are unaffected.
+`vsview.session_script` reserves the script path and generates deterministic session
+data and a bootstrap that imports the installed Frame Compare package.
+`vsview.session_runtime` loads every untrimmed preview source through L-SMASH,
+applies preview defaults, retains actual color props and FPS, and registers outputs
+with reserved `hdr=False` separately from strict metadata-v6 kwargs. It also prints
+console guidance. Ordinary SDR packing is used even with the HDR viewer
+environment flag; final rendering/tone-map settings are unaffected.
 `vsview.alignment_overlay` uses one public ModifyFrame per source, with n/f together,
 to paint source identity, Original frame and all other sources' live opening-hint
 projections in stable output order. Immutable validated source facts and authority-first
@@ -900,9 +901,11 @@ the workspace shape and v6 field types, derives the UUID and sibling result path
 the given script path, and owns atomic result-v1 writes and result validation.
 `frame_compare.vsview.alignment_review_panel`
 is the sole human review surface inside VSView: it stays inert for rejected/ordinary
-sessions and presents entry authority/evidence separately from original frame drafts
-and saved outcomes. `vsview.workspace_positions` is the sole private integration
-with explicitly version-gated VSView 0.14.0: it reads the owning workspace’s retained
+sessions, reports contract rejections without exposing local paths or activating
+review, and presents entry authority/evidence separately from original frame drafts
+and saved outcomes.
+`vsview.workspace_positions` is the sole private integration with explicitly
+version-gated VSView 0.14.0: it reads the owning workspace’s retained
 `VideoOutput.last_frame` values by validated output identity and sets that generated
 workspace’s own playhead control to Unlink. It never changes global preferences or
 patches dependency hooks. The panel exists and receives workspace-load hooks even
@@ -926,13 +929,14 @@ Workspace activation loads the parent-built audio-review text. Reloading the
 workspace reactivates the panel even after a save. A second save atomically replaces
 the existing sidecar. After a successful VSView exit, the parent reads the last saved
 result. Navigation never grants evidence authority or writes results.
-`alignment_vsview` owns availability policy, expected-comparison construction from raw source counts, result acceptance, and
-applying confirmed offsets; its service, persistence, override, cache, and CLI/config
-boundaries remain unchanged and it does not parse terminal input. The
-`frame_compare.vsview.adapter` remains the composition boundary for the current
-interpreter, exact panel entry point, bounded startup-readiness probe, and bounded
-child-process lifetime. `frame_compare.vsview.launcher` loads the selected VapourSynth
-environment before VSView on every runtime. For Qt's headless `offscreen` platform on
+`alignment_vsview` owns availability policy, expected-comparison construction from
+raw source counts, result acceptance through the typed review contract, and
+confirmed offset application and override policy. It does not parse terminal input.
+`frame_compare.vsview.adapter` owns the current-interpreter launch boundary,
+including the exact panel entry point in that environment, bounded startup-readiness
+probe, and bounded child-process lifetime. It does not discover VSView executables
+on PATH or in other environments. `frame_compare.vsview.launcher` loads the selected
+VapourSynth environment before VSView on every runtime. For Qt's headless `offscreen` platform on
 Windows portable only, the launcher skips VSView's CJK font-cache warmup because that
 upstream worker stalls in the non-display Windows runtime; visible launches retain it.
 
@@ -1056,8 +1060,8 @@ The host open helper is also container-boundary aware rather than a CLI contract
 change. It does not alter in-container report auto-open or slow.pics browser
 behavior. Instead, it runs on the host, translates only the default compose
 mount `/workspace/generated` -> `./generated`, rejects `/workspace/config`,
-`/workspace/comparison_videos`, and the removed `/workspace/screenshots` output
-root, and allows remote opening only for explicit `https://slow.pics/...` URLs.
+`/workspace/comparison_videos`, and `/workspace/screenshots`, and allows remote
+opening only for explicit `https://slow.pics/...` URLs.
 
 slow.pics publishing is service-owned. `frame_compare.services.publishers` owns
 the browser-compatible slow.pics client flow: `GET /comparison`,
@@ -1576,7 +1580,7 @@ Runtime ownership matrix:
 | VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
 | Coordinated media component identity, scoped cache/index fingerprints, and deployment runtime comparison | `frame_compare.vs.runtime_contract` |
 | Doctor execution and diagnostic result mapping | `frame_compare.orchestration.doctor` |
-| Doctor check ordering, categories, and check implementations | `frame_compare.orchestration.doctor_checks` |
+| Doctor check ordering, categories, and check implementations, including structured VSView and panel availability without launching a review or owning panel behavior | `frame_compare.orchestration.doctor_checks` |
 | Doctor diagnostic DTOs | `frame_compare.orchestration.doctor_types` |
 
 ## Public Boundaries
@@ -1607,25 +1611,13 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/vsview/adapter.py`, `session_script.py`, `session_runtime.py`,
   `alignment_review_contract.py`, and `alignment_review_panel.py`
 
-Working rule: changes to these files should usually trigger full verification and, when they reshape behavior or ownership, a same-pass update to this document.
+Changes to these files usually need full verification.
 
-The render scheduler hotspot now owns only per-clip job scheduling, progress, and
+The render scheduler is limited to per-clip job scheduling, progress, and
 stop/drain behavior. Selection/request identity belongs to `PreparedClipRender`,
-selection/result identity belongs to `RenderedScreenshot`, and report cardinality
-remains guarded by `ReportData`. Orchestration no longer reconstructs or validates
-parallel path/fact maps.
-
-Native alignment-review hotspot dispositions for the current implementation:
-
-| Hotspot | Disposition |
-| --- | --- |
-| `src/frame_compare/vsview/session_script.py` | Owns script-path reservation, deterministic session data and the installed-package bootstrap. The generated path remains the session identity. |
-| `src/frame_compare/vsview/session_runtime.py` | Loads L-SMASH preview sources, applies preview defaults, prints console guidance, and registers the complete reference and ordered comparison set with metadata v6. |
-| `src/frame_compare/vsview/alignment_review_contract.py` | Validates workspace topology, v6 metadata fields, and result-v1 decisions. Derives the session UUID and sibling sidecar path from the generated script and writes results atomically. |
-| `src/frame_compare/vsview/alignment_review_panel.py` | Responsibility unchanged: it owns the native review UI lifecycle, validated evidence presentation, public callback observation/readiness, source-lineup draft, manual fallback, whole-set actions, and safe contract-rejection feedback. |
-| `src/frame_compare/vsview/adapter.py` | Responsibility reduced: it remains the current-interpreter launch/readiness/process boundary and requires the same-environment panel entry point; removed PATH/external executable discovery is no longer an owner. |
-| `src/frame_compare/services/alignment_vsview.py` | Responsibility reduced: it parses and validates the native result through the typed contract, accepts it, and applies existing offset/override policy; terminal confirmation parsing is no longer an owner. |
-| `src/frame_compare/orchestration/doctor_checks.py` | Responsibility unchanged: it reports the existing structured VSView/panel availability check and does not launch a review or own panel behavior. |
+selection/result identity belongs to `RenderedScreenshot`, and `ReportData` guards
+report cardinality. Orchestration consumes ordered render records without
+reconstructing or validating parallel path/fact maps.
 
 ## Working Rules That Follow From The Codebase
 
@@ -1644,4 +1636,3 @@ Native alignment-review hotspot dispositions for the current implementation:
 ## Unknowns And Maintainer Decisions Still Open
 
 - Whether any import-level package APIs should be promoted from convenience-only to supported/stable.
-- Whether a durable multi-session plan workflow should become active again in this repo. The runbook currently keeps `docs/plans/` inactive by default.

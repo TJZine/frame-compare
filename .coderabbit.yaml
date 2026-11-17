@@ -42,13 +42,10 @@ reviews:
         Review complete specialist verification and release procedures. Preserve required Docker, Windows, distribution, signing, and platform claims and their evidence. Generic methodology belongs to shared skills; local facts and test selection belong to .agents/project.md. Flag gaps that permit unverified claims or conflicting command ownership.
     - path: "docs/current-architecture.md"
       instructions: |
-        Review as present-day architecture truth. Check composition roots, import layers, persistence owners, external integration owners, runtime phase ordering, and hotspot lists. Flag stale ownership claims, missing same-pass doc updates, or changes that would let hotspots absorb new responsibilities.
+        Review as present-day architecture truth. Check composition roots, import layers, persistence owners, external integration owners, runtime phase ordering, and hotspot lists. Flag ownership claims the change makes stale, or changes that would let hotspots absorb new responsibilities.
     - path: "docs/current-cli-contract.md"
       instructions: |
-        Review as the public CLI/config contract. Flag drift in command names, option semantics, stdout/stderr behavior, JSON payloads, exit codes, path resolution, config persistence, or report auto-open rules. Ensure tests and docs stay in lockstep.
-    - path: "docs/plans/**/*.md"
-      instructions: |
-        Review tracked plans as scoped handoff memory, not global policy. Flag plans that lack explicit status, treat inactive or closed plans as current authority, duplicate runbook policy, or omit verification and rollback notes for active implementation work.
+        Review as the public CLI/config contract. Flag drift in command names, option semantics, stdout/stderr behavior, JSON payloads, exit codes, path resolution, config persistence, or report auto-open rules. Flag documented behavior that the change makes false.
     - path: ".agents/project.md"
       instructions: |
         Review as the single repository profile for shared skills. Check current source/command facts, product obligations, relevant evidence routes, and explicit limits. Existing architecture can be deliberately redesigned; equal error output alone does not prove redundant tests. Do not add model bindings, mandatory role pipelines, or duplicate authorities.
@@ -108,10 +105,10 @@ reviews:
         Review tests for behavior-focused coverage, tmp_path isolation, declared markers, no real network in default tests, honest runtime skips, deterministic subprocess usage, and public-seam assertions. Flag brittle Rich/help snapshots, private probes, or tests that only mirror implementation.
     - path: "tests/cli/**/*.py"
       instructions: |
-        Review CLI tests for exit codes, stdout/stderr placement, JSON parsing, help semantics, config persistence, report auto-open gating, and docs lockstep with docs/current-cli-contract.md. Prefer result.stdout/result.stderr over mixed result.output when stream placement matters.
+        Review CLI tests for exit codes, stdout/stderr placement, JSON parsing, help semantics, config persistence, and report auto-open gating. Prefer result.stdout/result.stderr over mixed result.output when stream placement matters.
     - path: "tests/test_cli_contract_docs.py"
       instructions: |
-        Review as the CLI docs lockstep guard. Ensure new public CLI/config behavior is represented here when the contract doc, override map, command surface, or canonical test file list changes.
+        Review as the check that the CLI contract doc matches the override map and command surface. Ensure new public CLI/config behavior is represented here when the contract doc, override map, or command surface changes.
     - path: "tests/config/**/*.py"
       instructions: |
         Review config tests for schema validation, persistence behavior, override mapping, invalid/missing values, atomic writes, and public compatibility decisions.

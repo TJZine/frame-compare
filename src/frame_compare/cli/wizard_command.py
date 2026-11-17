@@ -20,9 +20,7 @@ from frame_compare.config.loader import (
 )
 from frame_compare.config.persistence import strip_nonpersistable_config_values
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.error_categories import InputError
-from frame_compare.error_context import ErrorContext
-from frame_compare.errors import FrameCompareError
+from frame_compare.errors import ErrorContext, FrameCompareError, InputError
 from frame_compare.orchestration.errors import NoVideosFoundError, SourceSelectionError
 from frame_compare.orchestration.preflight import (
     discover_inputs,
