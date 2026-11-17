@@ -1638,7 +1638,10 @@ function singleModeAlignment() {
     const single = loadViewer({ clipCount: 1 }).viewer;
     single.setMode('overlay');
     single.viewport.setManualAlignment(9, -4);
-    assert.equal(single.dom.alignmentStatus.hidden, true);
+    single.render();
+    single.updateImages();
+    assert.equal(single.dom.alignmentStatus.hidden, false);
+    assert.equal(single.dom.leftLayer.classList.contains('rv-layer--aligned-active'), true);
 }
 
 function directionalFourClip() {

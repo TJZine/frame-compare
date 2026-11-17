@@ -487,7 +487,7 @@ const ReportViewer = {
         document.querySelectorAll(
             '.rv-controls button, .rv-controls select, .rv-controls input, .rv-viewport-palette button, .rv-viewport-palette select, .rv-viewport-palette input, .rv-bottom-panel button, .rv-bottom-panel select, .rv-bottom-panel input, .rv-inspector button, .rv-inspector select, .rv-inspector input'
         ).forEach(control => {
-            if (control === this.dom.btnHelp || control.closest('.rv-bar-actions')) return;
+            if (control.closest('.rv-bar-actions')) return;
             control.disabled = disabled;
         });
     },
@@ -1981,7 +1981,7 @@ const ReportViewer = {
         );
         this.dom.leftLayer.classList.toggle(
             'rv-layer--aligned-active',
-            isOverlay && this.state.activeClipIdx === this.state.rightClipIdx
+            this.singleShowsPairRight()
         );
         this.dom.rightLayer.classList.toggle(
             'active',
@@ -1990,6 +1990,10 @@ const ReportViewer = {
         this.refreshMainImageAvailability();
         this.viewport.applyFitMode();
         this.lens?.sync();
+    },
+
+    singleShowsPairRight() {
+        return this.state.mode === 'overlay' && this.state.activeClipIdx === this.state.rightClipIdx;
     },
 
     updateImages() {

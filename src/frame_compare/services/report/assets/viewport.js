@@ -711,8 +711,7 @@ const Viewport = {
         const alignment = this.currentAlignment();
         const state = this.viewer.state;
         const pairIsShown = ['slider', 'diff', 'blink'].includes(state.mode)
-            || (state.mode === 'overlay' && state.leftClipIdx !== state.rightClipIdx
-                && state.activeClipIdx === state.rightClipIdx);
+            || this.viewer.singleShowsPairRight();
         if (!pairIsShown || (alignment.alignX === 0 && alignment.alignY === 0)) {
             status.hidden = true;
             status.replaceChildren();

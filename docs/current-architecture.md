@@ -1204,16 +1204,15 @@ controls (plus continued support for a restored width-fit preference without a v
 control), reveal, and adjacent-frame preloading. The toolbar combines the title,
 frame stepper and filter badge, mode switch, context controls, offset status, and
 report actions. At 1280 px and wider it stays on one row, with a stable mode-switch
-position and bar height across modes, including wrapped offsets and coarse-pointer
-Grid paging. From 769 to 1599 px it uses smaller text
-and padding. Intermediate widths put the title and stepper above the other
+position and bar height across modes at zero offset, including coarse-pointer
+Grid paging. From 769 to 1599 px it uses smaller text and padding. Intermediate widths put the title and stepper above the other
 controls. Through 768 px the stacked controls follow DOM and keyboard order,
 with report actions last. The offset status appears for a visible pair with a
-nonzero offset, including Single when it shows the pair's right source. It is
-hidden for the left or an unrelated Single source. Offset appearance can shift
-the mode switch; the toolbar reserves no inactive status space. At compact widths
-the full value can wrap
-inside the status without covering adjacent controls. Frame arrow shortcuts select the adjacent visible frame while suppressing
+nonzero offset, including Single when it shows the selected right source. It is
+hidden for Single sources other than the selected right source. Offset appearance can shift
+the mode switch; the toolbar reserves no inactive status space. Below 1280 px
+the full value can wrap inside the status without covering adjacent controls.
+Frame arrow shortcuts select the adjacent visible frame while suppressing
 native document and filmstrip scrolling; the selected filmstrip item owns its roving
 tab stop. Custom view-mode, fit, filmstrip-size, and lens-option radio groups use
 standard arrow and Home/End selection. The toolbar Help dialog is the single persistent

@@ -186,7 +186,7 @@ body {
     align-items: center;
     gap: 0.5rem;
     min-width: 0;
-    min-height: 36px;
+    min-block-size: var(--rv-context-min-block-size, 36px);
 }
 
 .rv-control-group {
@@ -2344,32 +2344,30 @@ body.rv-inspector-open .rv-viewer-stage {
 
 /* 11. Responsive adaptation */
 @media (width >= 1280px) {
-    /* Reserve the pair group's two selects, 2rem swap button, padding/border and
-       responsive child margins before sizing the title and frame control.
-       Other modes keep this footprint; a visible offset can still grow it. */
+    /* Keep the pair controls in the first track so their actual width
+       reserves space even when another mode is selected. */
     .rv-context-zone {
-        /* Keep every mode tall enough for coarse paging: a 44px button plus
-           the control group's 3px padding and 1px border on each side.
-           This also accommodates the wrapped offset without reserving width. */
-        min-block-size: calc(44px + 2 * (3px + 1px));
         display: grid;
-        grid-template-columns: calc(2 * var(--rv-source-select-width) + 2rem + 10px + var(--rv-pair-control-margins, 0px)) auto;
+        grid-template-columns: auto auto;
+        flex: none;
         gap: 0;
     }
 
     .rv-context-controls {
         grid-area: 1 / 1;
         justify-self: end;
+        flex: none;
+    }
+
+    .rv-context-controls[hidden] {
+        display: flex !important;
+        visibility: hidden;
     }
 
     .rv-alignment-status {
         grid-area: 1 / 2;
         margin-inline-start: 0.5rem;
-    }
-
-    .rv-context-zone,
-    .rv-context-controls {
-        flex: none;
+        align-self: center;
     }
 
     .rv-frame-controls {
@@ -2388,7 +2386,6 @@ body.rv-inspector-open .rv-viewer-stage {
     .rv-controls {
         /* Compact controls keep the toolbar on one row from 1280px. */
         --rv-source-select-width: 11rem;
-        --rv-pair-control-margins: 4px;
         --rv-frame-select-min-width: 3.5rem;
         gap: 0.3125rem;
         padding-inline: 0.75rem;
@@ -2444,20 +2441,10 @@ body.rv-inspector-open .rv-viewer-stage {
         padding-inline: 5px;
     }
 
-    /* Bound the status before the source selects reach their minimum widths. */
     .rv-alignment-status {
-        max-inline-size: 8.625rem;
         padding-inline: 0.25rem;
-        white-space: normal;
     }
 
-    .rv-offset-label {
-        flex: none;
-    }
-
-    .rv-offset-value {
-        overflow-wrap: anywhere;
-    }
 }
 
 @media (width < 1280px) {
@@ -2492,11 +2479,16 @@ body.rv-inspector-open .rv-viewer-stage {
     }
 
     .rv-context-zone {
-        justify-content: flex-start;
         gap: 0.375rem;
     }
 
     .rv-alignment-status {
+        flex: none;
+        max-inline-size: 8.625rem;
+        white-space: normal;
+    }
+
+    .rv-offset-label {
         flex: none;
     }
 }
@@ -2529,7 +2521,9 @@ body.rv-inspector-open .rv-viewer-stage {
 
 @media (max-width: 768px) {
     .rv-stage-label-meta {
-        display: block;
+        display: inline-block;
+        max-inline-size: 100%;
+        vertical-align: top;
         overflow: hidden;
         text-overflow: ellipsis;
     }
@@ -2713,6 +2707,13 @@ body.rv-inspector-open .rv-viewer-stage {
     .rv-viewport-palette {
         transition: none !important;
         animation: none !important;
+    }
+}
+
+@media (width >= 1280px) and (pointer: coarse) {
+    .rv-context-zone {
+        /* 44px paging target plus the control group's padding and border. */
+        --rv-context-min-block-size: calc(44px + 2 * (3px + 1px));
     }
 }
 
