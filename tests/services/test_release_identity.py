@@ -114,6 +114,7 @@ def test_screenshots_it_file_descriptor() -> None:
         "WEB-DL",
         ("DV", "HDR"),
         "ThisBlockHasProblems",
+        has_terminal_release_group=True,
     )
     assert (
         format_release_descriptor(identity) == "2160p | iT WEB-DL | DV HDR | ThisBlockHasProblems"
@@ -155,7 +156,13 @@ def test_guessit_streaming_service_names_map_to_display_codes(
 
 def test_hlg_claim_is_not_duplicated_in_release_descriptor() -> None:
     identity = ReleaseIdentity(
-        ContentIdentity("Show", season=1, episode=5), "1080p", "AMZN", "WEBRip", ("HLG",), "GROUP"
+        ContentIdentity("Show", season=1, episode=5),
+        "1080p",
+        "AMZN",
+        "WEBRip",
+        ("HLG",),
+        "GROUP",
+        has_terminal_release_group=True,
     )
 
     assert format_release_descriptor(identity) == "1080p | AMZN WEBRip | HLG | GROUP"
@@ -236,9 +243,24 @@ def test_combined_parse_preserves_canonical_fallback_and_merged_release_facts(
 
 def test_formatters_and_common_content() -> None:
     content = ContentIdentity("Avatar Aang The Last Airbender", 2026)
-    first = ReleaseIdentity(content, "2160p", "PMTP", "WEB-DL", ("DV", "HDR10+"), "Kitsune")
+    first = ReleaseIdentity(
+        content,
+        "2160p",
+        "PMTP",
+        "WEB-DL",
+        ("DV", "HDR10+"),
+        "Kitsune",
+        has_terminal_release_group=True,
+    )
     second = ReleaseIdentity(
-        content, "2160p", "ATV", "WEB-DL", ("DV", "HDR10+"), "Kitsune", ("REPACK",)
+        content,
+        "2160p",
+        "ATV",
+        "WEB-DL",
+        ("DV", "HDR10+"),
+        "Kitsune",
+        ("REPACK",),
+        has_terminal_release_group=True,
     )
     assert format_release_descriptor(first) == "2160p | PMTP WEB-DL | DV HDR10+ | Kitsune"
     assert format_compact_identity(second).startswith(
@@ -265,6 +287,7 @@ def test_separator_keyword_applies_to_inner_and_outer_joins() -> None:
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
         release_group="Kitsune",
+        has_terminal_release_group=True,
     )
     assert format_release_descriptor(identity, separator=" · ") == (
         "2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
@@ -305,7 +328,7 @@ def _short_name_source(
 
 
 @pytest.mark.parametrize(
-    ("sources", "roles", "expected"),
+    ("sources", "expected"),
     [
         pytest.param(
             [
@@ -319,7 +342,6 @@ def _short_name_source(
                     "c.mkv",
                 ),
             ],
-            ["Reference", "Comparison 1", "Comparison 2"],
             [
                 "SCOPE",
                 "ThisBlockHasProblems",
@@ -332,7 +354,6 @@ def _short_name_source(
                 _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "a.mkv"),
                 _short_name_source(_short_name_identity("iT", "scope", ("DV", "HDR")), "b.mkv"),
             ],
-            ["Reference", "Comparison 1"],
             [
                 "AMZN WEB-DL · HDR · SCOPE",
                 "iT WEB-DL · DV HDR · scope",
@@ -346,7 +367,6 @@ def _short_name_source(
                 ),
                 _short_name_source(_short_name_identity("iT", "OTHER", ("DV", "HDR")), "b.mkv"),
             ],
-            ["Reference", "Comparison 1"],
             [
                 "My Cut",
                 "OTHER",
@@ -358,7 +378,6 @@ def _short_name_source(
                 _short_name_source(None, "reference.mkv"),
                 _short_name_source(_short_name_identity("iT", "OTHER", ("DV", "HDR")), "b.mkv"),
             ],
-            ["Reference", "Comparison 1"],
             [
                 "reference.mkv",
                 "OTHER",
@@ -370,7 +389,6 @@ def _short_name_source(
                 _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "a.mkv"),
                 _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "b.mkv"),
             ],
-            ["Reference", "Comparison 1"],
             [
                 "Reference | AMZN WEB-DL · HDR · SCOPE",
                 "Comparison 1 | AMZN WEB-DL · HDR · SCOPE",
@@ -379,8 +397,8 @@ def _short_name_source(
         ),
     ],
 )
-def test_short_names(sources: list[ShortNameSource], roles: list[str], expected: list[str]) -> None:
-    assert short_source_names(sources, roles=roles) == expected
+def test_short_names(sources: list[ShortNameSource], expected: list[str]) -> None:
+    assert short_source_names(sources) == expected
 
 
 _EBP = "Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv"
@@ -406,7 +424,8 @@ _DEMON_SLAYER_COPY = "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv"
             ],
             ["delay-500ms", "starts-500ms-in-sync"],
         ),
-        (["Movie.x264-Group.mkv", "Movie.1080p.BluRay-Group-copy.mkv"], ["Group", "BluRay"]),
+        (["Movie.x264-Group.mkv", "Movie.1080p.BluRay-Group-copy.mkv"], ["Group", "Group-copy"]),
+        (["Movie.1080p.BluRay.x264-D-Z0N3.mkv", "Movie.1080p.x264-EbP.mkv"], ["D-Z0N3", "EbP"]),
         (["Movie.cutA.final.mkv", "Movie.cutB.final.mkv"], ["cutA", "cutB"]),
         (["Movie.mkv", "Movie.alternate.mkv"], ["Canonical 1", "alternate"]),
     ],
@@ -422,9 +441,17 @@ def test_short_names_for_real_filenames(filenames: list[str], expected: list[str
         for index, filename in enumerate(filenames, start=1)
     ]
 
-    assert (
-        short_source_names(sources, roles=[f"Source {i}" for i in range(len(sources))]) == expected
-    )
+    assert short_source_names(sources) == expected
+    for source, short in zip(sources, expected, strict=True):
+        assert source.identity is not None
+        descriptor = format_release_descriptor(source.identity, separator=" · ", short_name=short)
+        compact = format_compact_identity(source.identity, separator=" · ", short_name=short)
+        assert descriptor.endswith(short)
+        assert compact.endswith(descriptor)
+        if not source.identity.has_terminal_release_group:
+            assert format_micro_descriptor(
+                source.identity, include_group=True
+            ) == format_micro_descriptor(source.identity, include_group=False)
 
 
 def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> None:

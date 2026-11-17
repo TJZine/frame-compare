@@ -36,7 +36,7 @@ from frame_compare.orchestration.phase_selection import (
     shared_source_frame_range,
     source_frames_for_reference_base_domain,
 )
-from frame_compare.orchestration.presentation import clip_role, join_source_names
+from frame_compare.orchestration.presentation import join_source_names
 from frame_compare.render.prepare import resolve_tonemap_settings
 from frame_compare.services.alignment import (
     align_clips_from_request,
@@ -384,14 +384,6 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         if all(identity is not None for identity in identities)
         else None
     )
-    presentation_names = [
-        _alignment_presentation_name(clip, common_content is not None) for clip in clips
-    ]
-    counts = {name: presentation_names.count(name) for name in presentation_names}
-    presentation_names = [
-        clip.path.name if not name or counts[name] > 1 else name
-        for clip, name in zip(clips, presentation_names, strict=True)
-    ]
     short_names = short_source_names(
         [
             ShortNameSource(
@@ -402,9 +394,17 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
             )
             for clip in clips
         ],
-        roles=[clip_role(index) for index in range(len(clips))],
     )
     short_names = [short or clip.path.name for short, clip in zip(short_names, clips, strict=True)]
+    presentation_names = [
+        _alignment_presentation_name(clip, common_content is not None, short_names[index])
+        for index, clip in enumerate(clips)
+    ]
+    counts = {name: presentation_names.count(name) for name in presentation_names}
+    presentation_names = [
+        clip.path.name if not name or counts[name] > 1 else name
+        for clip, name in zip(clips, presentation_names, strict=True)
+    ]
     return AlignmentRequest(
         reference=_alignment_clip_request(
             ctx.reference,
@@ -437,13 +437,15 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
     )
 
 
-def _alignment_presentation_name(clip: ClipState, has_common_content: bool) -> str:
+def _alignment_presentation_name(clip: ClipState, has_common_content: bool, short_name: str) -> str:
     if clip.label_is_explicit and clip.label.strip():
         return clip.label.strip()
     if clip.release_identity is None:
         return clip.path.name
     formatter = format_release_descriptor if has_common_content else format_compact_identity
-    return formatter(clip.release_identity, separator=" · ") or clip.path.name
+    return (
+        formatter(clip.release_identity, separator=" · ", short_name=short_name) or clip.path.name
+    )
 
 
 def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedReferenceRelationship:

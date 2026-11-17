@@ -24,7 +24,6 @@ from frame_compare.orchestration.execution_types import (
     RenderArtifacts,
     ReportPhaseOutput,
 )
-from frame_compare.orchestration.presentation import clip_role
 from frame_compare.orchestration.selection_rows import selection_rows
 from frame_compare.orchestration.slowpics_metadata import (
     resolve_slowpics_collection_metadata,
@@ -39,6 +38,7 @@ from frame_compare.services.metadata_parsing import parse_filename
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.release_identity import (
     ShortNameSource,
+    clip_role,
     format_compact_identity,
     format_release_descriptor,
     short_source_names,
@@ -255,12 +255,21 @@ def run_confirm_slowpics_upload_phase(
 
 def _slowpics_upload_clips(ctx: RunContext) -> list[SlowpicsUploadClip]:
     clips = [ctx.reference, *ctx.comparisons]
+    short_names = short_source_names(
+        [
+            ShortNameSource(
+                clip.release_identity, clip.label, clip.label_is_explicit, clip.path.stem
+            )
+            for clip in clips
+        ]
+    )
     image_names = unique_presentation_names(
         [
             clip.label
             if clip.label_is_explicit or clip.release_identity is None
-            else format_release_descriptor(clip.release_identity) or clip.label
-            for clip in clips
+            else format_release_descriptor(clip.release_identity, short_name=short_names[index])
+            or clip.label
+            for index, clip in enumerate(clips)
         ],
         roles=[clip_role(index) for index in range(len(clips))],
         protected=[clip.label_is_explicit for clip in clips],
@@ -297,26 +306,6 @@ def run_report_phase(
             protected=protected,
         )
 
-    releases = [
-        format_release_descriptor(clip.release_identity, separator=" · ")
-        if clip.release_identity
-        else ""
-        for clip in clips
-    ]
-    primaries = distinct_report_names(
-        [
-            clip.label
-            if clip.label_is_explicit or clip.release_identity is None
-            else format_compact_identity(clip.release_identity, separator=" · ") or clip.label
-            for clip in clips
-        ]
-    )
-    controls = distinct_report_names(
-        [
-            clip.label if clip.label_is_explicit else releases[index] or primaries[index]
-            for index, clip in enumerate(clips)
-        ]
-    )
     micros = short_source_names(
         [
             ShortNameSource(
@@ -327,8 +316,30 @@ def run_report_phase(
             )
             for clip in clips
         ],
-        roles=roles,
         show_bidi_controls=True,
+    )
+    releases = [
+        format_release_descriptor(clip.release_identity, separator=" · ", short_name=micros[index])
+        if clip.release_identity
+        else ""
+        for index, clip in enumerate(clips)
+    ]
+    primaries = distinct_report_names(
+        [
+            clip.label
+            if clip.label_is_explicit or clip.release_identity is None
+            else format_compact_identity(
+                clip.release_identity, separator=" · ", short_name=micros[index]
+            )
+            or clip.label
+            for index, clip in enumerate(clips)
+        ]
+    )
+    controls = distinct_report_names(
+        [
+            clip.label if clip.label_is_explicit else releases[index] or primaries[index]
+            for index, clip in enumerate(clips)
+        ]
     )
     clip_info: list[ClipInfo] = []
     for clip_index, (clip, rendered_clip) in enumerate(zip(clips, render.clips, strict=True)):
@@ -356,7 +367,6 @@ def run_report_phase(
                 images=images,
                 label=clip.label,
                 release_identity=clip.release_identity,
-                label_is_explicit=clip.label_is_explicit,
                 source_identity=source_identity_from_fingerprint(
                     replace(clip.probe.fingerprint, path=clip.path)
                 ),

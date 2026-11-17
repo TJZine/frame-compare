@@ -303,7 +303,6 @@ def _generated_report(
         clips[1] = replace(
             clip,
             label=comparison_explicit_label,
-            label_is_explicit=True,
             display=replace(
                 clip.display,
                 primary=comparison_explicit_label,
@@ -1892,13 +1891,13 @@ def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path:
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable")
-    title = "Black Sails S01E08 Comparison Reference!"
+    title = "Black Sails Comparison Reference!"
     report_path = _generated_report(
         tmp_path,
         frames=(10, 12),
         frame_details=(FrameDetail(category="dark"), FrameDetail(category="selected")),
         comparison_micro="english-dub-only-copy",
-        comparison_control="only-copy",
+        comparison_control="english-dub-only-copy",
         third_source=True,
         metadata=TmdbMetadata(
             tmdb_id=1, title=title, original_title=title, year=2026, media_type="movie"
@@ -2058,7 +2057,7 @@ def test_report_labels_clear_viewport_controls(tmp_path: Path, width: int, heigh
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable")
-    title = "Black Sails S01E08 Comparison Reference!"
+    title = "Black Sails Comparison Reference!"
     report_path = _generated_report(
         tmp_path,
         third_source=True,

@@ -258,15 +258,16 @@ work. Derived collisions are qualified deterministically with source stems and
 then stable source order. Resolved labels drive overlays, reports, alignment display,
 and render artifact keys, but do not change source/cache/alignment identity or physical
 PNG filenames. The Sources and alignment summaries use explicit short labels first.
-A parsed release group qualifies as a short label when it is the final hyphen-delimited
-token and the filename also identifies a resolution, source, or codec. Otherwise the
+A parsed release group qualifies as a short label when it is unique among the sources,
+the filename ends with a hyphen followed by the complete group, and the filename
+also identifies a resolution, source, or codec. Hyphenated groups are supported. Otherwise the
 summary uses the compact release details, then the differing filename text after removing
 shared leading and trailing tokens. If the full stem remains, a matching parsed-title
 prefix can be removed. An empty remainder falls back to the resolved label.
 Live render progress uses exact explicit labels or unique role-prefixed micro release
 descriptors. slow.pics columns use exact explicit labels or unique full
-release descriptors, with the canonical resolved label as the uninformative-parser
-fallback. Orchestrated rendering continues to use the source stem as `filename_label`. When the resulting
+release descriptors. Descriptors show only usable groups; without one, they end
+with the shared short source name. Orchestrated rendering continues to use the source stem as `filename_label`. When the resulting
 absolute screenshot path would exceed the legacy Windows browser-safe boundary, the
 physical filename retains a readable source-stem prefix and adds a deterministic
 digest suffix so local `file://` reports remain loadable without identity collisions.
@@ -1047,13 +1048,17 @@ recovery requirement.
   even when media input is external.
 - Run-folder names contain the TMDB title and reference episode when available, the
   shared filename-derived content title, or up to two different parsed content titles.
+  Movie titles include the year from TMDB or the parsed reference when available.
   The title is followed by ` - ` and the comma-separated short source labels. If no
-  title is available, the name uses the short labels alone. If a label becomes empty
-  or clashes after filename sanitization, its source role keeps it distinct. Names
+  title is available, the name uses the short labels alone. If a label becomes empty,
+  equals the content title, or clashes after filename sanitization, its source role
+  keeps it distinct. Names
   are capped at 64 characters. If the name is too long, Frame Compare drops trailing labels, adds
   ` +N` for the omitted labels, and shortens the title at a token boundary if needed.
+  A single overlong label is shortened at a token boundary.
   A collision adds the local timestamp ` (YYYY-MM-DD HH.MM)`. A further collision
-  adds seconds, then a short UUID if that second is already taken.
+  adds seconds, then a short UUID if that second is already taken. The suffix and
+  `run_info.toml` creation time use the same clock reading.
   Exact creation time and run identity are written to root-level
   `<run-folder>/run_info.toml` immediately after reservation and before probing
   or rendering. Version 2 stores `version`, UTC `created_at` with a `Z` suffix,
@@ -1200,7 +1205,7 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
   mode-specific controls, and report actions. It uses one row on wide screens,
   two rows at intermediate widths, and a stack on narrow screens. Native source
   options show the short label first, then distinct control detail. A repeated trailing
-  alias is omitted from the option. Long labels can
+  descriptor segment equal to the short label is omitted from the option. Long labels can
   clip in the closed control. The full option title and accessible name remain available.
 - Viewer spatial translation is labeled `Offset`, distinct from temporal source-frame
   alignment. The toolbar shows it for the displayed pair when the offset is nonzero.
@@ -1215,16 +1220,18 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
   Category identification uses text in captions and filters; filters keep their counts,
   and the selected thumbnail retains its brass border.
 - The report title uses the TMDB title when available, with the reference filename's
-  season and episode for television. Otherwise it uses the shared filename-derived
+  season and episode for television. Movie titles include the year from TMDB or the
+  filename when available. Otherwise it uses the shared filename-derived
   content title from the CLI Sources header, or the first two short labels joined by
   ` vs ` with ` +N more` for additional sources. Filenames remain in Clips and Report
   Information. Report Information shows the localized generation date and time, frame
   count, and source count. The exact ISO timestamp remains in the report payload and
   in the Generated value's `datetime` and `title` attributes. Unparseable date text is
   shown unchanged.
-- Report identity includes the comparison title and output-affecting overlay, geometry,
+- Report identity includes the comparison title, including short labels used in its
+  fallback, and output-affecting overlay, geometry,
   tonemap, presentation, signal, and per-image provenance facts. It excludes absolute paths, image bytes or
-  `src` values, timestamps, transient browser state, clip display strings, requested
+  `src` values, timestamps, transient browser state, other clip display strings, requested
   tonemap settings, and fallback causes. Applied implementation, algorithm, effective
   controls and resolved per-clip peaks participate in identity. Identical output via
   different fallback causes shares identity. Payload 1.4 changes report IDs because

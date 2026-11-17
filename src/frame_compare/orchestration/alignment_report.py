@@ -68,7 +68,6 @@ def build_frame_alignment_report(
             )
             for clip in clips
         ],
-        roles=["Reference", *(f"Comparison {index}" for index in range(1, len(clips)))],
     )
     reference_short_name = short_names[0] if short_names else reference.label
     return tuple(
@@ -88,7 +87,11 @@ def build_frame_alignment_report(
                 comparison.label
                 if comparison.label_is_explicit
                 else (
-                    format_release_descriptor(comparison.release_identity, separator=" · ")
+                    format_release_descriptor(
+                        comparison.release_identity,
+                        separator=" · ",
+                        short_name=short_names[index + 1],
+                    )
                     if comparison.release_identity is not None
                     else comparison.label
                 )

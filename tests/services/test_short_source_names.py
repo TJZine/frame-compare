@@ -11,23 +11,20 @@ from frame_compare.services.release_identity import (
 
 
 @pytest.mark.parametrize(
-    ("sources", "roles", "expected"),
+    ("sources", "expected"),
     [
         pytest.param(
             [ShortNameSource(None, "  Encode A  ", True, "Movie")],
-            ["Reference"],
             ["  Encode A  "],
             id="  Encode A  ",
         ),
         pytest.param(
             [ShortNameSource(None, "\tEncode A\t", True, "Movie")],
-            ["Reference"],
             ["\tEncode A\t"],
             id="\tEncode A\t",
         ),
         pytest.param(
             [ShortNameSource(None, "\xa0Encode A\xa0", True, "Movie")],
-            ["Reference"],
             ["\xa0Encode A\xa0"],
             id="\xa0Encode A\xa0",
         ),
@@ -44,7 +41,6 @@ from frame_compare.services.release_identity import (
                     stem="Movie.1080p-GROUP",
                 )
             ],
-            ["Reference"],
             ["  My encode  "],
             id="test_explicit_short_name_is_not_replaced_by_release_group",
         ),
@@ -61,7 +57,6 @@ from frame_compare.services.release_identity import (
                     stem="Movie.1080p-GROUP",
                 )
             ],
-            ["Reference"],
             ["GROUP"],
             id="test_blank_explicit_short_name_uses_available_release_identity",
         ),
@@ -79,16 +74,13 @@ from frame_compare.services.release_identity import (
                     stem="Movie.1080p-GROUP",
                 ),
             ],
-            ["Reference", "Comparison"],
             [
                 "GROUP",
-                "Comparison | GROUP",
+                "Comparison 1 | GROUP",
             ],
             id="test_derived_short_name_collision_does_not_rewrite_explicit_label",
         ),
     ],
 )
-def test_explicit_short_names(
-    sources: list[ShortNameSource], roles: list[str], expected: list[str]
-) -> None:
-    assert short_source_names(sources, roles=roles) == expected
+def test_explicit_short_names(sources: list[ShortNameSource], expected: list[str]) -> None:
+    assert short_source_names(sources) == expected

@@ -363,12 +363,10 @@ def _release_identity(filename: str, fields: _ParsedFilenameFields) -> ReleaseId
         )
         if terminal_group is not None:
             inference_suffix = inference_suffix[: terminal_group.start()].rstrip("._- ")
-    prefix, separator, final_token = stem.rpartition("-")
     has_terminal_release_group = bool(
-        separator
-        and prefix
-        and release_group
-        and final_token.casefold() == release_group.casefold()
+        release_group
+        and len(stem) > len(release_group) + 1
+        and stem.casefold().endswith(f"-{release_group.casefold()}")
         and (resolution or source_type or fields.source or fields.codec)
     )
     release_tokens = _release_tokens(inference_suffix)

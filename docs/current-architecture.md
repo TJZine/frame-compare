@@ -234,14 +234,18 @@ coordinates during this allocation.
 
 `frame_compare.orchestration.source_labels` resolves presentation labels after
 selector/override resolution and before probing or run-folder reservation.
-`frame_compare.orchestration.presentation` owns the stable reference/comparison
-role labels and bounded console-width policy shared by orchestration reports.
+`frame_compare.orchestration.presentation` owns the bounded console-width policy
+shared by orchestration reports.
 `frame_compare.services.release_identity` owns dependency-light, non-persisted
-content/release identity types and plain formatters. Preparation invokes the existing
+content/release identity types, reference/comparison role names, shared comparison
+titles, and plain formatters. Preparation invokes the existing
 GuessIt/Anitopy parser seam once per source and attaches the resulting presentation
 metadata and explicit-label provenance to `ClipState`; these fields are excluded from
-source, cache, selection, and report identity. Release identity records whether a
-parsed group qualifies for short names. The short-name formatter uses the ordered
+source, cache, and selection identity. Report titles can use the derived content
+identity or short labels and participate in report identity. Release identity records
+whether a parsed group qualifies for display. Every release formatter applies that
+policy; without a usable group, long descriptors end with the shared short name.
+The short-name formatter uses the ordered
 filename stems for shared-token fallback and resolves presentation collisions after
 choosing the names.
 `selection_domain` receives the resolved per-path map when constructing
@@ -666,8 +670,11 @@ Run-folder naming consumes the prepared release identities and explicit-label pr
 It shares the report's TMDB and shared content title formatting and uses short labels
 to distinguish sources. It reserves the unsuffixed name first, then the local minute,
 local second, and a UUID for a same-second collision. The 64-character budget includes
-the suffix. Source roles distinguish labels that are empty or collide after filename
-sanitization. Trailing labels are omitted before title truncation at a token boundary.
+the suffix. Reservation and `run_info.toml` share one reading of the injected run clock.
+Movie titles include the TMDB year or parsed reference year when available. Source
+roles distinguish labels that are empty or collide after filename
+sanitization, or repeat the title. A single long label is shortened at a token
+boundary. Other trailing labels are omitted before title truncation at a token boundary.
 Windows reserved basenames are rewritten before reservation. Preparation validates the reserved immediate-child path and completes
 the `WorkspacePaths` transition before writing metadata. The exact creation time
 then lives in `<run-folder>/run_info.toml`, which is written before probing,
@@ -1325,8 +1332,8 @@ separator; burned-in screenshot text is the clip label and does not use release
 descriptors). The micro profile uses the same short source names as terminal
 summaries, with bidi controls made visible before collision handling. Grid, the lens,
 and compact inspector rows consume this profile. Native source options start with
-the short name and append distinct control detail. A detail that repeats a complete
-trailing alias in the short name is omitted. The closed select caps its
+the short name and append distinct control detail. A final descriptor segment equal
+to the short name is omitted. The closed select caps its
 width and can clip long names. The option title and accessible name retain the
 primary identity and displayed basename. Stage chips and source details continue
 to use their existing profiles.

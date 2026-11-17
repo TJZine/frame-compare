@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -60,37 +60,65 @@ def format_content_identity(content: ContentIdentity) -> str:
     return label
 
 
-def format_tmdb_content_title(metadata: TmdbMetadata, reference: ReleaseIdentity | None) -> str:
-    """Format a resolved title with the reference's episode marker for television."""
-    if metadata.media_type == "tv" and reference is not None:
+def clip_role(index: int) -> str:
+    """Return the stable presentation role for an ordered clip."""
+    return "Reference" if index == 0 else f"Comparison {index}"
+
+
+def comparison_title(
+    identities: Sequence[ReleaseIdentity | None], metadata: TmdbMetadata | None
+) -> str | None:
+    """Return the resolved or shared content title, before surface-specific fallbacks."""
+    if metadata is not None and metadata.title.strip():
+        reference = identities[0] if identities else None
+        content = reference.content if reference is not None else None
         return format_content_identity(
             ContentIdentity(
                 metadata.title,
-                season=reference.content.season,
-                episode=reference.content.episode,
+                year=(metadata.year or (content.year if content is not None else None))
+                if metadata.media_type == "movie"
+                else None,
+                season=content.season
+                if content is not None and metadata.media_type == "tv"
+                else None,
+                episode=content.episode
+                if content is not None and metadata.media_type == "tv"
+                else None,
             )
         )
-    return metadata.title
+    common = common_content_identity(identities)
+    return format_content_identity(common) if common is not None else None
 
 
-def format_release_descriptor(identity: ReleaseIdentity, separator: str = " | ") -> str:
+def _usable_release_group(identity: ReleaseIdentity) -> str | None:
+    return identity.release_group if identity.has_terminal_release_group else None
+
+
+def format_release_descriptor(
+    identity: ReleaseIdentity, separator: str = " | ", *, short_name: str = ""
+) -> str:
     """Format release facts without repeating content identity."""
     source = " ".join(part for part in (identity.service, identity.source_type) if part)
     parts = [identity.resolution, source or None]
     parts.extend((" ".join(identity.dynamic_range_claims) or None,))
     parts.extend(identity.revision_tags)
     parts.extend(identity.variant_tags)
-    parts.append(identity.release_group)
-    return separator.join(part for part in parts if part)
+    descriptor = separator.join(part for part in parts if part)
+    ending = _usable_release_group(identity) or short_name.replace(" · ", separator)
+    if ending and not (descriptor == ending or descriptor.endswith(separator + ending)):
+        return separator.join(part for part in (descriptor, ending) if part)
+    return descriptor
 
 
-def format_compact_identity(identity: ReleaseIdentity, separator: str = " | ") -> str:
+def format_compact_identity(
+    identity: ReleaseIdentity, separator: str = " | ", *, short_name: str = ""
+) -> str:
     """Format content and release facts in one compact line."""
     return separator.join(
         part
         for part in (
             format_content_identity(identity.content),
-            format_release_descriptor(identity, separator),
+            format_release_descriptor(identity, separator, short_name=short_name),
         )
         if part
     )
@@ -107,7 +135,7 @@ def format_micro_descriptor(
             source or None,
             " ".join(identity.dynamic_range_claims) or None,
             *identity.revision_tags,
-            identity.release_group if include_group else None,
+            _usable_release_group(identity) if include_group else None,
         )
         if part
     )
@@ -134,14 +162,11 @@ class ShortNameSource:
 def short_source_names(
     sources: Sequence[ShortNameSource],
     *,
-    roles: Sequence[str] | None = None,
     show_bidi_controls: bool = False,
 ) -> list[str]:
     """Prefer explicit labels, unique usable groups, micro descriptors, then filename text."""
     groups = [
-        source.identity.release_group
-        if source.identity is not None and source.identity.has_terminal_release_group
-        else None
+        _usable_release_group(source.identity) if source.identity is not None else None
         for source in sources
     ]
     stems = [normalize_release_text(source.stem) for source in sources]
@@ -178,10 +203,7 @@ def short_source_names(
         )
         names.append(micro or differing or label)
         protected.append(False)
-    if roles is None:
-        roles = [
-            "Reference" if index == 0 else f"Comparison {index}" for index in range(len(sources))
-        ]
+    roles = [clip_role(index) for index in range(len(sources))]
     if show_bidi_controls:
         names = [show_bidi_formatting_controls(name) for name in names]
     return unique_presentation_names(names, roles=list(roles), protected=protected)
@@ -217,7 +239,11 @@ def _release_group_is_unique(group: str, groups: Sequence[str | None]) -> bool:
 
 
 def unique_presentation_names(
-    names: list[str], *, roles: list[str], protected: list[bool] | None = None
+    names: list[str],
+    *,
+    roles: list[str],
+    protected: list[bool] | None = None,
+    collision_key: Callable[[str], str] = str,
 ) -> list[str]:
     """Resolve display-only collisions deterministically without changing identities."""
     if len(names) != len(roles):
@@ -225,20 +251,22 @@ def unique_presentation_names(
     protected = [False] * len(names) if protected is None else protected
     if len(names) != len(protected):
         raise ValueError("names and protected must have equal lengths")
-    counts = Counter(names)
+    counts = Counter(collision_key(name) for name in names)
     resolved = [
-        f"{roles[index]} | {name}" if counts[name] > 1 and not protected[index] else name
+        f"{roles[index]} | {name}"
+        if counts[collision_key(name)] > 1 and not protected[index]
+        else name
         for index, name in enumerate(names)
     ]
-    used = {name for index, name in enumerate(resolved) if protected[index]}
+    used = {collision_key(name) for index, name in enumerate(resolved) if protected[index]}
     for index, name in enumerate(resolved):
         if protected[index]:
             continue
         suffix = 2
-        while resolved[index] in used:
+        while collision_key(resolved[index]) in used:
             resolved[index] = f"{name} ({suffix})"
             suffix += 1
-        used.add(resolved[index])
+        used.add(collision_key(resolved[index]))
     return resolved
 
 
@@ -279,7 +307,8 @@ __all__ = [
     "format_content_identity",
     "format_micro_descriptor",
     "format_release_descriptor",
-    "format_tmdb_content_title",
+    "clip_role",
+    "comparison_title",
     "short_source_names",
     "unique_presentation_names",
 ]

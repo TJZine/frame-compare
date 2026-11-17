@@ -90,20 +90,15 @@ compact release descriptors. For slow.pics, it turns them into unique full relea
 descriptors.
 
 Sources length comparisons, alignment summaries, and compact report captions use
-short source names. An explicit label takes priority. Otherwise a release group can
-supply the short name when it is unique, it is the final hyphen-delimited token, and
-the preceding filename contains a recognized resolution, source, or codec.
+short source names. An explicit label takes priority. Otherwise a unique release
+group supplies the name when it appears at the end of a filename that also has
+release details such as a resolution, source, or codec. Without a usable group,
+Frame Compare uses compact release details or the part of the filename that differs
+between sources. Source roles distinguish any remaining collisions.
 
-When the group cannot supply the name, Frame Compare uses available compact release
-details. If those are empty, it removes shared leading and trailing filename tokens.
-Periods, hyphens, underscores, and spaces separate the tokens. If the full stem
-remains, Frame Compare removes a parsed title prefix when its tokens match the
-start of the stem. An empty remainder falls back to the resolved source label.
-Frame Compare qualifies remaining collisions by source role and preserves explicit
-labels.
-
-The source selectors start with the short name and append release details that add
-information. An alias already at the end of the short name appears once.
+Long release labels show only usable groups. Without one, they end with the source's
+short name. Source selectors show the short name first, followed by release details,
+with a repeated final short name shown once.
 Hover over a selector for the full identity. Grid, the lens, and the inspector's
 compact source views use the short name. The report keeps the exact
 basename and canonical source label in its embedded metadata. It displays any

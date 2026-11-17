@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import tomllib
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -160,6 +161,8 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
         generated_root: Path,
         sources: list[ShortNameSource],
         tmdb_metadata: TmdbMetadata | None,
+        *,
+        now: datetime,
     ) -> RunFolderReservation:
         del generated_root, tmdb_metadata
         reserve_calls.append([source.stem for source in sources])
@@ -205,11 +208,24 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
     captured_tmdb_metadata: list[TmdbMetadata | None] = []
     resolve_calls: list[list[str]] = []
     cache_paths: list[Path] = []
+    clock_reads: list[datetime] = []
+    reserved_at: list[datetime] = []
+    fixed_time = datetime.fromisoformat("2026-11-17T11:30:42-05:00")
+
+    def clock() -> datetime:
+        value = fixed_time + timedelta(seconds=len(clock_reads))
+        clock_reads.append(value)
+        return value
 
     def _capture_reserve_run_folder(
-        generated_root: Path, sources: list[ShortNameSource], tmdb_metadata: TmdbMetadata | None
+        generated_root: Path,
+        sources: list[ShortNameSource],
+        tmdb_metadata: TmdbMetadata | None,
+        *,
+        now: datetime,
     ) -> RunFolderReservation:
         del sources
+        reserved_at.append(now)
         captured_tmdb_metadata.append(tmdb_metadata)
         return RunFolderReservation(
             path=generated_root / "Fight Club (1999)",
@@ -241,15 +257,21 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
                 skip_metadata=False,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            deps=RunDependencies(
+                vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner(), clock=clock
+            ),
         )
     )
 
     assert result.success is True
     assert result.screenshot_dir is not None
+    assert result.screenshot_dir is not None
     run_info = tomllib.loads(
-        (tmp_path / "generated" / "Fight Club (1999)" / "run_info.toml").read_text(encoding="utf-8")
+        (result.screenshot_dir.parent / "run_info.toml").read_text(encoding="utf-8")
     )
+    assert len(reserved_at) == 1
+    assert reserved_at[0] in clock_reads
+    assert datetime.fromisoformat(run_info["created_at"]) == reserved_at[0]
     assert run_info["source_filenames"] == ["source.mkv"]
     assert run_info["tmdb"] == {
         "enabled": True,
@@ -341,8 +363,9 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
             "error": "[FC-5005] TMDB error: temporary metadata failure\nHint: Check API key",
         }
     ]
+    assert result.screenshot_dir is not None
     run_info = tomllib.loads(
-        (tmp_path / "generated" / "source - source" / "run_info.toml").read_text(encoding="utf-8")
+        (result.screenshot_dir.parent / "run_info.toml").read_text(encoding="utf-8")
     )
     assert run_info["tmdb"] == {
         "enabled": True,

@@ -97,13 +97,11 @@ def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int)
         selected_attr = " selected" if i == selected_index else ""
         short_name = _clip_display(clip, "micro")
         detail = _clip_display(clip, "control")
-        prefix, match, tail = (
-            short_name.casefold().rpartition(detail.casefold()) if detail else ("", "", "")
-        )
-        redundant_detail = detail == short_name or (
-            " · " not in detail and match and not tail and prefix.endswith((".", "-", "_", " "))
-        )
-        text = f"{short_name} · {detail}" if detail and not redundant_detail else short_name
+        segments = detail.split(" · ")
+        if segments[-1].casefold() == short_name.casefold():
+            segments.pop()
+        detail = " · ".join(segments)
+        text = f"{short_name} · {detail}" if detail else short_name
         accessible_name = _esc_attr(_clip_accessible_name(clip))
         options.append(
             f'<option value="{_esc_attr(i)}"{selected_attr} title="{accessible_name}" '

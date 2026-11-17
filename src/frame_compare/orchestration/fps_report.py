@@ -14,7 +14,6 @@ from rich.text import Text
 
 from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.presentation import (
-    clip_role,
     join_source_names,
     report_console_width,
 )
@@ -22,6 +21,7 @@ from frame_compare.services.release_identity import (
     ContentIdentity,
     ReleaseIdentity,
     ShortNameSource,
+    clip_role,
     common_content_identity,
     format_compact_identity,
     format_content_identity,
@@ -193,14 +193,18 @@ def _common_content_identity(clips: Sequence[FpsReportClip]) -> ContentIdentity 
     )
 
 
-def _source_display_name(clip: FpsReportClip, *, common_content: ContentIdentity | None) -> str:
+def _source_display_name(
+    clip: FpsReportClip, *, common_content: ContentIdentity | None, short_name: str
+) -> str:
     if clip.label_is_explicit:
         standard = clip.label
     elif clip.release_identity is not None:
         standard = (
-            format_release_descriptor(clip.release_identity, separator=" · ")
+            format_release_descriptor(clip.release_identity, separator=" · ", short_name=short_name)
             if common_content is not None
-            else format_compact_identity(clip.release_identity, separator=" · ")
+            else format_compact_identity(
+                clip.release_identity, separator=" · ", short_name=short_name
+            )
         )
     else:
         standard = ""
@@ -214,12 +218,13 @@ def _add_clip_overview(
     verbose: bool,
 ) -> None:
     common_content = _common_content_identity(clips)
+    short_names = _clip_short_names(clips)
     for index, clip in enumerate(clips):
         if index > 0:
             section.add_line()
 
         filename = clip.path.name
-        name_row = f"[bold]{escape(_source_display_name(clip, common_content=common_content))}[/]"
+        name_row = f"[bold]{escape(_source_display_name(clip, common_content=common_content, short_name=short_names[index]))}[/]"
         if index == 0:
             name_row += "  [dim]reference[/]"
         section.add_line(name_row)
@@ -259,7 +264,6 @@ def _clip_short_names(clips: Sequence[FpsReportClip]) -> list[str]:
             )
             for clip in clips
         ],
-        roles=[clip_role(index) for index in range(len(clips))],
     )
 
 
@@ -355,6 +359,7 @@ def _add_fps_rows(
     if not clips:
         return
     reference_fps = clips[0].effective_fps
+    short_names = _clip_short_names(clips)
     for index, clip in enumerate(clips):
         status_text = _fps_status(clip, reference_fps=reference_fps)
         notes = [note for note in (clip.note, clip.fps_reason) if note is not None]
@@ -365,7 +370,9 @@ def _add_fps_rows(
             clip.label
             if clip.label_is_explicit
             else (
-                format_release_descriptor(clip.release_identity, separator=" · ")
+                format_release_descriptor(
+                    clip.release_identity, separator=" · ", short_name=short_names[index]
+                )
                 if clip.release_identity is not None
                 else clip.label
             )

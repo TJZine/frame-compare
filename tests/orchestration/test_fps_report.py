@@ -112,6 +112,7 @@ def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts
             source_type="WEB-DL",
             dynamic_range_claims=("DV", "HDR10+"),
             release_group="Kitsune",
+            has_terminal_release_group=True,
         ),
         label_is_explicit=True,
     )
@@ -128,6 +129,7 @@ def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts
             dynamic_range_claims=("DV", "HDR10+"),
             revision_tags=("REPACK",),
             release_group="Kitsune",
+            has_terminal_release_group=True,
         ),
     )
 
@@ -164,6 +166,7 @@ def test_sources_standard_name_uses_dot_separator_without_common_content(
             service="AMZN",
             source_type="WEB-DL",
             release_group="SCOPE",
+            has_terminal_release_group=True,
         ),
     )
     comparison = _make_clip_state(
@@ -177,6 +180,7 @@ def test_sources_standard_name_uses_dot_separator_without_common_content(
             service="AMZN",
             source_type="WEB-DL",
             release_group="SIGMA",
+            has_terminal_release_group=True,
         ),
     )
 

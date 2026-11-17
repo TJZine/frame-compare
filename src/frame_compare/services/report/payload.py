@@ -18,11 +18,7 @@ from frame_compare.errors import PathEscapesRootError
 from frame_compare.services.errors import ReportError
 from frame_compare.services.release_identity import (
     ReleaseIdentity,
-    ShortNameSource,
-    common_content_identity,
-    format_content_identity,
-    format_tmdb_content_title,
-    short_source_names,
+    comparison_title,
 )
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.media_facts import (
@@ -267,7 +263,6 @@ class ClipInfo:
     label: str | None = None
     source_identity: str | None = None
     release_identity: ReleaseIdentity | None = None
-    label_is_explicit: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,24 +353,10 @@ def build_report_payload(
 
 def _comparison_title(data: ReportData) -> str:
     identities = [clip.release_identity for clip in data.clips]
-    if data.metadata is not None:
-        return format_tmdb_content_title(data.metadata, identities[0])
-
-    common = common_content_identity(identities)
-    if common is not None:
-        return format_content_identity(common)
-
-    names = short_source_names(
-        [
-            ShortNameSource(
-                identity=clip.release_identity,
-                label=clip.label or clip.name,
-                label_is_explicit=clip.label_is_explicit,
-                stem=clip.path.stem,
-            )
-            for clip in data.clips
-        ]
-    )
+    shared = comparison_title(identities, data.metadata)
+    if shared is not None:
+        return shared
+    names = [clip.display.micro for clip in data.clips]
     title = " vs ".join(names[:2])
     if len(names) > 2:
         title += f" +{len(names) - 2} more"

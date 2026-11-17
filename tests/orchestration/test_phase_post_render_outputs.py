@@ -296,6 +296,7 @@ def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
         release_group="Kitsune",
+        has_terminal_release_group=True,
     )
     comparison = _clip(
         tmp_path / "comparison_videos" / "encode.mkv",
@@ -388,20 +389,24 @@ def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path
     assert [clip["display"]["micro"] for clip in payload["clips"]] == short_names
     assert [clip["display"]["control"] for clip in payload["clips"]] == [
         "1080p · BluRay · EbP",
-        "only",
-        "only-copy",
+        "english-dub-only",
+        "english-dub-only-copy",
     ]
     assert [clip["display"]["filename"] for clip in payload["clips"]] == [
         path.name for path in paths
     ]
     assert [clip["label"] for clip in payload["clips"]] == [path.stem for path in paths]
 
+    assert [clip.image_name for clip in phase_post_render._slowpics_upload_clips(ctx)] == [
+        "1080p | BluRay | EbP",
+        *short_names[1:],
+    ]
     parser = SelectParser()
     parser.feed(html)
     for select_id in ("left-select", "right-select", "active-select"):
         options = parser.selects[select_id].options
         assert [option.text for option in options] == [
-            "EbP · 1080p · BluRay · EbP",
+            "EbP · 1080p · BluRay",
             *short_names[1:],
         ]
         assert [option.attrs["value"] for option in options] == ["0", "1", "2"]

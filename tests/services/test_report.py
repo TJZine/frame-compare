@@ -289,7 +289,13 @@ def test_report_shows_bidi_formatting_in_filename_without_changing_identity(
     visible_filename = "מקור [U+202E]CBA[U+202C].mkv"
     original = report_data.clips[0]
     assert original.label is not None
-    clip = replace(original, name=filename, label=filename, path=tmp_path / filename)
+    clip = replace(
+        original,
+        name=filename,
+        label=filename,
+        path=tmp_path / filename,
+        display=replace(original.display, micro=filename),
+    )
     geometry_by_label = dict(report_data.rendering.geometry_by_label)
     geometry_by_label[filename] = geometry_by_label.pop(original.label)
     report = replace(
@@ -308,7 +314,7 @@ def test_report_shows_bidi_formatting_in_filename_without_changing_identity(
     output = generate_report(report, ReportConfig(), output_path=tmp_path / "report.html")
     payload = _json_payload_from_report(output)
     assert payload["clips"][0]["display"]["filename"] == filename
-    title = "מקור [U+202E]CBA[U+202C] vs clip2"
+    title = "מקור [U+202E]CBA[U+202C].mkv vs CLIP2"
     assert payload["title"] == title
     for profile in ("primary", "release", "control", "micro"):
         assert payload["clips"][0]["display"][profile] == visible_filename

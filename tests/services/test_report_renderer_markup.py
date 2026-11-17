@@ -347,11 +347,8 @@ def test_build_html_generated_timestamp(report_payload: ReportPayload, timestamp
     assert parse_info_modal(html).general["Generated"] == timestamp
 
 
-@pytest.mark.parametrize(
-    "title",
-    ["Les Voiles Noires S01E08", "Black Sails S01E08", "EbP vs english-dub-only +1 more"],
-)
-def test_build_html_renders_header_metadata(report_payload: ReportPayload, title: str) -> None:
+def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
+    title = "EbP vs english-dub-only +1 more"
     html = build_html({**report_payload, "title": title})
     tags = parse_start_tags(html)
     info_modal = parse_info_modal(html)

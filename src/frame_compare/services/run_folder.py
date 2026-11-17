@@ -4,7 +4,6 @@ import logging
 import ntpath
 import re
 import uuid
-from collections import Counter
 from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -16,10 +15,11 @@ from frame_compare.errors import PathEscapesRootError
 from frame_compare.services.errors import GeneratedDataReservationError
 from frame_compare.services.release_identity import (
     ShortNameSource,
-    common_content_identity,
+    clip_role,
+    comparison_title,
     format_content_identity,
-    format_tmdb_content_title,
     short_source_names,
+    unique_presentation_names,
 )
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.paths import require_managed_immediate_child
@@ -27,6 +27,7 @@ from frame_compare.utils.paths import require_managed_immediate_child
 _UNNAMED_RUN_BASE = "unnamed_run"
 _MAX_FOLDER_NAME_LENGTH = 64
 _TOKEN_SEPARATORS = " .-,"
+_STEM_WORDS = re.compile(r"[^.\-_ ()]+")
 
 # Characters illegal in Windows filenames (also avoid on Unix for portability)
 _ILLEGAL_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -73,12 +74,14 @@ def _folder_title(
         return "", "unnamed"
 
     identities = [source.identity for source in sources]
-    if tmdb_metadata is not None and tmdb_metadata.title:
-        return format_tmdb_content_title(tmdb_metadata, identities[0]), "tmdb"
-
-    common = common_content_identity(identities)
-    if common is not None:
-        return format_content_identity(common), "parsed_metadata"
+    title = comparison_title(identities, tmdb_metadata)
+    if title is not None:
+        source = (
+            "tmdb"
+            if tmdb_metadata is not None and tmdb_metadata.title.strip()
+            else "parsed_metadata"
+        )
+        return title, source
 
     titles = list(
         dict.fromkeys(
@@ -90,24 +93,6 @@ def _folder_title(
     return " + ".join(titles[:2]), "filename_stems"
 
 
-def _distinct_folder_labels(labels: list[str]) -> list[str]:
-    counts = Counter(label.casefold() for label in labels)
-    used = {label for label, count in counts.items() if label and count == 1}
-    for index, label in enumerate(labels):
-        if label and counts[label.casefold()] == 1:
-            continue
-        role = "Reference" if index == 0 else f"Comparison {index}"
-        base = f"{role} - {label}" if label else role
-        name = base
-        suffix = 2
-        while name.casefold() in used:
-            name = f"{base} ({suffix})"
-            suffix += 1
-        labels[index] = name
-        used.add(name.casefold())
-    return labels
-
-
 def _label_summary(labels: Sequence[str], kept: int) -> str:
     summary = ", ".join(labels[:kept])
     omitted = len(labels) - kept
@@ -117,6 +102,11 @@ def _label_summary(labels: Sequence[str], kept: int) -> str:
 
 
 def _fit_folder_name(title: str, labels: Sequence[str], limit: int) -> str:
+    if len(labels) == 1:
+        budget = limit - (len(title) + 3 if title else 0)
+        shortened = _token_prefix(labels[0], max(budget, 0))
+        if shortened:
+            return " - ".join(part for part in (title, shortened) if part)
     for kept in range(len(labels), -1, -1):
         summary = _label_summary(labels, kept)
         name = " - ".join(part for part in (title, summary) if part)
@@ -136,14 +126,30 @@ def reserve_run_folder(
     sources: Sequence[ShortNameSource],
     tmdb_metadata: TmdbMetadata | None = None,
     *,
-    now: datetime | None = None,
+    now: datetime,
 ) -> RunFolderReservation:
     raw_title, naming_source = _folder_title(sources, tmdb_metadata)
     title = _clean_folder_text(raw_title)
     cleaned_labels = [_clean_folder_text(name) for name in short_source_names(sources)]
     if not title and not any(cleaned_labels):
         naming_source = "unnamed"
-    labels = _distinct_folder_labels(cleaned_labels)
+    roles = [clip_role(index) for index in range(len(sources))]
+    title_tokens = _STEM_WORDS.findall(title.casefold())
+    for index, source in enumerate(sources):
+        # A lone filename can leave only its year after removing the parsed title.
+        if title_tokens and any(
+            _STEM_WORDS.findall(value.casefold()) == title_tokens
+            for value in (cleaned_labels[index], source.label)
+        ):
+            cleaned_labels[index] = ""
+    labels = [
+        _clean_folder_text(label)
+        for label in unique_presentation_names(
+            [label or roles[index] for index, label in enumerate(cleaned_labels)],
+            roles=roles,
+            collision_key=lambda value: _clean_folder_text(value).casefold(),
+        )
+    ]
 
     def _candidate_name(suffix: str = "") -> str:
         limit = _MAX_FOLDER_NAME_LENGTH - len(suffix)
@@ -165,7 +171,7 @@ def reserve_run_folder(
             generated_root / base_name,
         )
 
-    local_time = (now or datetime.now()).astimezone()
+    local_time = now.astimezone()
     minute = local_time.strftime("%Y-%m-%d %H.%M")
     second = local_time.strftime("%Y-%m-%d %H.%M.%S")
     for stamp in (minute, second):

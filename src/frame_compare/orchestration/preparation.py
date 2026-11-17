@@ -164,10 +164,12 @@ async def _resolve_run_directory(
 
     filenames = [video.name for video in input_videos]
     raise_if_cancelling()
+    created_at = deps.clock()
     run_dir = reserve_run_folder(
         generated_root=workspace.generated_root,
         sources=naming_sources,
         tmdb_metadata=metadata,
+        now=created_at,
     )
     try:
         resolved_run_dir = require_managed_immediate_child(
@@ -200,7 +202,7 @@ async def _resolve_run_directory(
         write_run_info(
             run_info_path,
             RunInfo(
-                created_at=deps.clock(),
+                created_at=created_at,
                 folder_name=run_dir.folder_name,
                 naming_source=run_dir.naming_source,
                 source_filenames=filenames,

@@ -128,7 +128,17 @@ def test_report_payload_title(
             path=Path(filename),
             label=filename,
             release_identity=parse_filename_with_release_identity(filename)[1],
-            display=replace(base.clips[0].display, filename=filename),
+            display=replace(
+                base.clips[0].display,
+                filename=filename,
+                micro=(
+                    "english-dub-only"
+                    if filename == _DUB
+                    else "GNOME"
+                    if filename == _GNOME
+                    else "EbP"
+                ),
+            ),
         )
         for filename in filenames
     ]
@@ -148,6 +158,15 @@ def test_report_payload_title(
     payload = build_report_payload(data, ReportConfig(), report_dir=tmp_path)
 
     assert payload["title"] == expected
+    if tmdb_title is None and _DUB in filenames:
+        renamed = replace(
+            data.clips[0], display=replace(data.clips[0].display, micro="My reference")
+        )
+        updated = build_report_payload(
+            replace(data, clips=[renamed, *data.clips[1:]]), ReportConfig(), report_dir=tmp_path
+        )
+        assert updated["title"].startswith("My reference vs ")
+        assert updated["report_id"] != payload["report_id"]
     assert [clip["display"]["filename"] for clip in payload["clips"]] == filenames
 
 
@@ -158,3 +177,29 @@ def test_report_input_rejects_image_fact_frame_mismatch(tmp_path: Path) -> None:
             source_frame=9,
             facts=RenderedFrameFacts(source_frame=8),
         )
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        None,
+        TmdbMetadata(1, "Inception", "Inception", 2010, "movie"),
+        TmdbMetadata(1, "Inception", "Inception", 0, "movie"),
+        TmdbMetadata(1, "", "Inception", 2010, "movie"),
+    ],
+)
+def test_movie_report_title_keeps_year_from_metadata_or_filename(
+    tmp_path: Path, metadata: TmdbMetadata | None
+) -> None:
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"png")
+    data = _report_data(image)
+    clip = replace(
+        data.clips[0],
+        release_identity=parse_filename_with_release_identity("Inception.2010.mkv")[1],
+    )
+    data = replace(data, clips=[clip], metadata=metadata)
+    assert (
+        build_report_payload(data, ReportConfig(), report_dir=tmp_path)["title"]
+        == "Inception (2010)"
+    )

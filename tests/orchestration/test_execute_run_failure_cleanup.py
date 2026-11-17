@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Never
 
@@ -83,11 +84,14 @@ def test_execute_run_post_reservation_resolution_failure_cleans_run_directory(
         generated_root: Path,
         sources: list[ShortNameSource],
         tmdb_metadata: TmdbMetadata | None = None,
+        *,
+        now: datetime,
     ) -> RunFolderReservation:
         reservation = real_reserve_run_folder(
             generated_root,
             sources,
             tmdb_metadata,
+            now=now,
         )
         reserved_paths.append(reservation.path)
 

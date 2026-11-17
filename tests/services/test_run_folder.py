@@ -59,7 +59,7 @@ def _explicit(*labels: str) -> list[ShortNameSource]:
     ],
 )
 def test_reserve_run_folder_sanitizes_names(tmp_path: Path, label: str, expected: str) -> None:
-    reservation = reserve_run_folder(tmp_path, _explicit(label))
+    reservation = reserve_run_folder(tmp_path, _explicit(label), now=_NOW)
 
     assert reservation.folder_name == expected
     assert reservation.path.is_dir()
@@ -68,7 +68,7 @@ def test_reserve_run_folder_sanitizes_names(tmp_path: Path, label: str, expected
 def test_reserve_run_folder_uses_tmdb_series_title_and_reference_episode(tmp_path: Path) -> None:
     metadata = TmdbMetadata(123, "Les Voiles Noires", "Black Sails", 2014, "tv")
 
-    result = reserve_run_folder(tmp_path, _sources(_EBP, _GNOME), metadata)
+    result = reserve_run_folder(tmp_path, _sources(_EBP, _GNOME), metadata, now=_NOW)
 
     assert result.path == tmp_path / "Les Voiles Noires S01E08 - EbP, GNOME"
     assert result.naming_source == "tmdb"
@@ -89,7 +89,7 @@ def test_reserve_run_folder_uses_tmdb_series_title_and_reference_episode(tmp_pat
 def test_reserve_run_folder_derives_titles_from_prepared_filenames(
     tmp_path: Path, filenames: tuple[str, ...], name: str, naming_source: str
 ) -> None:
-    result = reserve_run_folder(tmp_path, _sources(*filenames))
+    result = reserve_run_folder(tmp_path, _sources(*filenames), now=_NOW)
 
     assert result.folder_name == name
     assert result.naming_source == naming_source
@@ -97,7 +97,7 @@ def test_reserve_run_folder_derives_titles_from_prepared_filenames(
 
 
 def test_reserve_run_folder_preserves_explicit_labels_when_no_title_parses(tmp_path: Path) -> None:
-    result = reserve_run_folder(tmp_path, _explicit("Reference encode", "Candidate"))
+    result = reserve_run_folder(tmp_path, _explicit("Reference encode", "Candidate"), now=_NOW)
 
     assert result.folder_name == "Reference encode, Candidate"
     assert result.naming_source == "filename_stems"
@@ -107,14 +107,16 @@ def test_reserve_run_folder_preserves_explicit_labels_when_no_title_parses(tmp_p
     ("labels", "name"),
     [
         (("???", "GNOME"), "Reference, GNOME"),
-        (("A|B", "A?B"), "Reference - A B, Comparison 1 - A B"),
-        (("???", "Reference"), "Reference (2), Reference"),
+        (("A|B", "A?B"), "Reference A B, Comparison 1 A B"),
+        (("A|B", "A?B", "Reference A B"), "Reference A B, Comparison 1 A B, Reference A B (2)"),
+        (("A|B", "a?b"), "Reference A B, Comparison 1 a b"),
+        (("???", "Reference"), "Reference Reference, Comparison 1 Reference"),
     ],
 )
 def test_reserve_run_folder_keeps_sources_distinct_after_sanitizing(
-    tmp_path: Path, labels: tuple[str, str], name: str
+    tmp_path: Path, labels: tuple[str, ...], name: str
 ) -> None:
-    result = reserve_run_folder(tmp_path, _explicit(*labels))
+    result = reserve_run_folder(tmp_path, _explicit(*labels), now=_NOW)
 
     assert result.path == tmp_path / name
     assert result.path.is_dir()
@@ -125,14 +127,14 @@ def test_reserve_run_folder_counts_role_label_omitted_for_length(tmp_path: Path)
     title = "A Motion Picture With An Unusually Long Name"
     metadata = TmdbMetadata(1, title, "Original", 2026, "movie")
 
-    result = reserve_run_folder(tmp_path, _explicit("GNOME", "???"), metadata)
+    result = reserve_run_folder(tmp_path, _explicit("GNOME", "???"), metadata, now=_NOW)
 
-    assert result.folder_name == f"{title} - GNOME +1"
+    assert result.folder_name == f"{title} (2026) - GNOME +1"
     assert result.path.is_dir()
 
 
 def test_reserve_run_folder_empty_sources_uses_canonical_fallback(tmp_path: Path) -> None:
-    result = reserve_run_folder(tmp_path, [])
+    result = reserve_run_folder(tmp_path, [], now=_NOW)
 
     assert result.path == tmp_path / "unnamed_run"
     assert result.naming_source == "unnamed"
@@ -169,9 +171,9 @@ def test_reserve_run_folder_drops_trailing_labels_before_cutting_title(tmp_path:
     metadata = TmdbMetadata(1, "The Longest Movie Title", "Original", 2026, "movie")
     sources = _explicit("First encode", "Second encode", "An unreasonably long third encode")
 
-    result = reserve_run_folder(tmp_path, sources, metadata)
+    result = reserve_run_folder(tmp_path, sources, metadata, now=_NOW)
 
-    assert result.folder_name == "The Longest Movie Title - First encode, Second encode +1"
+    assert result.folder_name == "The Longest Movie Title (2026) - First encode, Second encode +1"
     assert result.path.is_dir()
 
 
@@ -183,14 +185,16 @@ def test_reserve_run_folder_fits_collisions_at_title_token_boundaries(
     metadata = TmdbMetadata(1, title, "Original", 2026, "movie")
     sources = _explicit("A", "B")
 
-    first = reserve_run_folder(tmp_path, sources, metadata)
+    first = reserve_run_folder(tmp_path, sources, metadata, now=_NOW)
     second = reserve_run_folder(tmp_path, sources, metadata, now=_NOW)
 
-    assert first.folder_name == f"{title} - A, B"
-    assert (
-        second.folder_name
-        == f"{separator.join(('This', 'title', 'must', 'fit', 'without', 'splitting', 'a'))} - +2{_MINUTE}"
-    )
+    assert first.folder_name == f"{title} (2026) - A, B"
+    assert second.folder_name.endswith(f" - +2{_MINUTE}")
+    shortened_title = second.folder_name.removesuffix(f" - +2{_MINUTE}")
+    assert shortened_title in [
+        separator.join(title.split(separator)[:count])
+        for count in range(1, len(title.split(separator)) + 1)
+    ]
     assert len(second.folder_name) <= 64
     assert second.path.is_dir()
 
@@ -198,7 +202,7 @@ def test_reserve_run_folder_fits_collisions_at_title_token_boundaries(
 def test_reserve_run_folder_keeps_labels_when_title_is_one_overlong_token(tmp_path: Path) -> None:
     metadata = TmdbMetadata(1, "A" * 200, "Original", 2026, "movie")
 
-    result = reserve_run_folder(tmp_path, _explicit("Source A", "Source B"), metadata)
+    result = reserve_run_folder(tmp_path, _explicit("Source A", "Source B"), metadata, now=_NOW)
 
     assert result.folder_name == "Source A, Source B"
     assert result.path.is_dir()
@@ -220,7 +224,7 @@ def test_reserve_run_folder_maps_destination_failure_without_fallback(
     monkeypatch.setattr(Path, "mkdir", _fail_reservation)
 
     with pytest.raises(GeneratedDataReservationError) as exc_info:
-        reserve_run_folder(tmp_path, _SOURCE)
+        reserve_run_folder(tmp_path, _SOURCE, now=_NOW)
 
     assert exc_info.value.code == "FC-3018"
     assert str(tmp_path) in str(exc_info.value)
@@ -231,7 +235,7 @@ def test_reserve_run_folder_maps_destination_failure_without_fallback(
 def test_reserve_run_folder_creates_missing_real_owner_chain(tmp_path: Path) -> None:
     generated_root = tmp_path / "missing" / "generated"
 
-    reservation = reserve_run_folder(generated_root, _SOURCE)
+    reservation = reserve_run_folder(generated_root, _SOURCE, now=_NOW)
 
     assert generated_root.is_dir()
     assert reservation.path == generated_root / "source"
@@ -246,7 +250,7 @@ def test_reserve_run_folder_rejects_unresolved_owner_before_creating_directories
     generated_root = unresolved_parent / ".." / resolved_generated_root.name
 
     with pytest.raises(GeneratedDataReservationError) as exc_info:
-        reserve_run_folder(generated_root, _SOURCE)
+        reserve_run_folder(generated_root, _SOURCE, now=_NOW)
 
     assert exc_info.value.code == "FC-3018"
     assert not unresolved_parent.exists()
@@ -260,7 +264,7 @@ def test_reserve_run_folder_maps_non_directory_owner_without_collision_retries(
     generated_root.write_text("not a directory", encoding="utf-8")
 
     with pytest.raises(GeneratedDataReservationError) as exc_info:
-        reserve_run_folder(generated_root, _SOURCE)
+        reserve_run_folder(generated_root, _SOURCE, now=_NOW)
 
     assert exc_info.value.code == "FC-3018"
     details = exc_info.value.context.details
@@ -280,7 +284,7 @@ def test_reserve_run_folder_rejects_unresolved_symlink_owner_without_writing_tar
     generated_root.symlink_to(target, target_is_directory=True)
 
     with pytest.raises(GeneratedDataReservationError) as exc_info:
-        reserve_run_folder(generated_root, _SOURCE)
+        reserve_run_folder(generated_root, _SOURCE, now=_NOW)
 
     assert exc_info.value.code == "FC-3018"
     assert not (target / "source").exists()
@@ -296,7 +300,7 @@ def test_reserve_run_folder_rejects_redirected_owner_ancestor_before_writing_tar
     generated_root = linked_parent / "generated"
 
     with pytest.raises(GeneratedDataReservationError) as exc_info:
-        reserve_run_folder(generated_root, _SOURCE)
+        reserve_run_folder(generated_root, _SOURCE, now=_NOW)
 
     assert exc_info.value.code == "FC-3018"
     assert not (target / "generated").exists()
@@ -311,7 +315,7 @@ def test_reserve_run_folder_rejects_junctioned_owner(
     monkeypatch.setattr(Path, "is_junction", lambda path: path == generated_root)
 
     with pytest.raises(GeneratedDataReservationError) as exc_info:
-        reserve_run_folder(generated_root, _SOURCE)
+        reserve_run_folder(generated_root, _SOURCE, now=_NOW)
 
     assert exc_info.value.code == "FC-3018"
     assert not (generated_root / "source").exists()
@@ -323,14 +327,14 @@ def test_reserve_run_folder_rejects_symlinked_candidate_escape(tmp_path: Path) -
     (tmp_path / "source").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(PathEscapesRootError):
-        reserve_run_folder(tmp_path, _SOURCE)
+        reserve_run_folder(tmp_path, _SOURCE, now=_NOW)
 
 
 def test_reserve_run_folder_rejects_junctioned_candidate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    candidate = tmp_path / "Movie - source"
+    candidate = tmp_path / "Movie (2024) - source"
     tmdb = TmdbMetadata(
         tmdb_id=1,
         title="Movie",
@@ -342,7 +346,7 @@ def test_reserve_run_folder_rejects_junctioned_candidate(
     monkeypatch.setattr(Path, "is_junction", lambda path: path == candidate)
 
     with pytest.raises(PathEscapesRootError):
-        reserve_run_folder(tmp_path, _SOURCE, tmdb_metadata=tmdb)
+        reserve_run_folder(tmp_path, _SOURCE, tmdb_metadata=tmdb, now=_NOW)
 
     assert not candidate.exists()
 
@@ -361,9 +365,35 @@ def test_reserve_run_folder_maps_resolve_failure_without_fallback(
     monkeypatch.setattr(Path, "resolve", _fail_owner_resolve)
 
     with pytest.raises(GeneratedDataReservationError) as exc_info:
-        reserve_run_folder(tmp_path, _SOURCE)
+        reserve_run_folder(tmp_path, _SOURCE, now=_NOW)
 
     assert exc_info.value.code == "FC-3018"
     assert str(tmp_path) in str(exc_info.value)
     assert "symlink loop" in cast(str, (exc_info.value.context.details or {}).get("error", ""))
     assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        None,
+        TmdbMetadata(1, "Inception", "Inception", 2010, "movie"),
+        TmdbMetadata(1, "", "Inception", 2010, "movie"),
+    ],
+)
+def test_folder_title_and_single_source_label_do_not_repeat(
+    tmp_path: Path, metadata: TmdbMetadata | None
+) -> None:
+    result = reserve_run_folder(tmp_path, _sources("Inception.2010.mkv"), metadata, now=_NOW)
+    assert result.folder_name == "Inception (2010) - Reference"
+
+
+def test_single_long_folder_label_keeps_its_words(tmp_path: Path) -> None:
+    result = reserve_run_folder(
+        tmp_path,
+        _explicit("A detailed encode label " * 8),
+        TmdbMetadata(1, "Film", "Film", 2024, "movie"),
+        now=_NOW,
+    )
+    assert result.folder_name == "Film (2024) - A detailed encode label A detailed encode label A"
+    assert len(result.folder_name) <= 64
