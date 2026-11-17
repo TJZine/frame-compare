@@ -486,10 +486,10 @@ unchanged.
   the comparison names. With one comparison, it stays beneath that comparison.
   The row uses `aligned …` or
   `aligned frame 0 (1 total)` for one frame at index 0.
-  The `offset` and `source` rows are removed; the Align phase summary carries the
-  final offsets and origins. A comparison with an alignment warning gets a
-  `! see warnings` note. The warning itself appears in the final Warnings section.
-  Verbose `details` rows are unchanged. The existing evidence still reports normalized
+  The Align phase summary gives the final offsets and origins in place of
+  `offset` and `source` rows. A comparison with an alignment warning gets a
+  `! see warnings` note. The warning appears in the final Warnings section.
+  Verbose output includes `details` rows. The evidence reports normalized
   source-frame row 0, final trim ranges, selected aligned frames, and alignment
   warning context. Stability is derived from credible chunk runs; unobserved
   planned chunks remain unassessed. Individual diagnostic chunks are never printed.
@@ -532,8 +532,8 @@ unchanged.
   authority. Verbose evidence remains as dim key/value rows,
   including the original attempt and stream/chunk/video facts without fabricating
   current details for reused results. Plain mode prints `{short}: {line 1 state}`
-  and indents following lines two spaces. The
-  pre-review `✓ Align … alignment applied` line is removed. Quiet mode retains
+  and indents following lines two spaces. No
+  `✓ Align … alignment applied` line appears before review. Quiet mode shows
   only actionable entries and the final screenshots line.
 - When previous offsets are reused interactively, the prompt section is
   `› Reuse previous offsets?`. Each line is bold `{short}`, two spaces,
@@ -605,30 +605,6 @@ unchanged.
   for warnings, `–` for skipped items, and dim, indented details when present.
   Rejected comparisons use the short label and a plain-language reason, followed
   by a note that frames use the reference's frame numbers.
-- The output redesign moves information rather than dropping it:
-
-  | Removed or changed | Information now shown in |
-  | --- | --- |
-  | Pre-review `✓ Align … alignment applied` line | Audio alignment entries |
-  | `No additional confirmation needed.` | `applied` when no review follows; it was wrong when a review followed |
-  | `Comparison N - ` prefixes and `Comparison N \|` in progress | Short names, unique by construction |
-  | Historical chunk and selected-stream details are unavailable | `no audio analysis ran this time` |
-  | Historical audio details are unavailable on manual results | The origin (`previously confirmed`, `manual offset`) and absent evidence line |
-  | `Align manually or keep the current alignment.` when review follows | The VSView steps |
-  | VSView `hints` rows | The third column of VSView `outputs` rows; the VSView overlay keeps its full detail |
-  | `VSView alignment review / Accepted N confirmed pairs.` | The Align line with per-source offsets and origins |
-  | Frame alignment `offset` and `source` rows | Align line offsets and origins, and the completion `alignment` row |
-  | `After Alignment` stage labels | These panels only exist after alignment |
-  | `✓ frame rates match · …` line | Per-source fps in Sources; mismatch or adjustment still prints Frame rates |
-  | Sources body title line | The section title |
-  | `analysis source` and `diagnostic` keys | `analysis` key and `!` notes with the same text |
-  | Reuse prompt `Content` and `reference` rows | Sources title and the `reference` tag in Sources |
-  | Reuse prompt per-row `File`, `Path`, and seconds | `--verbose`; normal mode uses unique short names and Sources lists every filename |
-  | Publish prompt `Visibility` row | The question `Upload to {visibility} slow.pics?` |
-  | Completion `slow.pics  not uploaded (declined)` row | `– Publish  declined` phase line |
-  | Completion `cache hit` / `cache miss` | `analysis cached` / `analysis computed` |
-  | `Execution` rules | The step map in the live footer |
-  | `Hint:` prefix in VSView unavailable text | The same sentence without the prefix |
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs,
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
@@ -653,15 +629,15 @@ unchanged.
 
 - Rich phase lines use `{glyph} {Label:<16}{summary}`, so the summary begins at
   column 18. The duration is appended inline in dim as `{summary} · {dur}`; with
-  no summary, the duration alone begins at column 18. Retention rules are
-  unchanged for completed top-level phases of 10 seconds or more, runtime
-  skips, warned and failed phases, and successful uploads. Plain mode uses
+  no summary, the duration alone begins at column 18. Retained lines include
+  completed top-level phases of 10 seconds or more, runtime skips, warned and
+  failed phases, and successful uploads. Plain mode keeps
   `[OK] ALIGN  Completed in …`. Human durations use one decimal below a minute
   (`0.3 s`, `12.9 s`), minutes and seconds from a minute (`1m 08s`), and hours
   and minutes from an hour (`1h 02m`). The run plan, the full-window prompt,
   and its warning show authored sub-minute exclusion values with their available
   precision, such as `0.03 s`. Timecodes show positions within media.
-- Phase summaries are unchanged except for Align: Analyze uses `{N} frames
+- Analyze uses `{N} frames
   selected`, Render uses `{N} screenshots ({F} frames × {S} sources)`, Publish
   uses `{N} screenshots uploaded · {visibility}`, and a skipped phase uses its
   lower-cased detail, such as `– Publish          declined`. Config- or
