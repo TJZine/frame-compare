@@ -79,7 +79,10 @@ def test_execute_run_returns_success_and_records_preflight_timing(
 
     assert result.success is True
     assert result.warnings == []
-    assert result.screenshot_dir == (tmp_path / "generated" / "source" / "screenshots").resolve()
+    assert (
+        result.screenshot_dir
+        == (tmp_path / "generated" / "source - source" / "screenshots").resolve()
+    )
     assert result.frame_count == 10
     assert result.clips_processed == 1
     assert result.duration_seconds >= 0.0
@@ -1237,7 +1240,9 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
     assert list((tmp_path / "generated").rglob("clip_probe.toml")) == []
     records = list((tmp_path / "generated").rglob(RUN_RESULT_FILENAME))
     assert len(records) == 1
-    assert read_run_result(records[0]).status == "failed"
+    record = read_run_result(records[0])
+    assert record.status == "failed"
+    assert record.was_interrupted
 
 
 def test_real_render_failure_wins_over_queued_sigint_and_client_close(tmp_path: Path) -> None:

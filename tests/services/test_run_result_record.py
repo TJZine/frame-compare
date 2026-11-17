@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+from asyncio import CancelledError
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -216,6 +217,33 @@ def test_failed_record_preserves_only_bounded_generic_warning_facts(tmp_path: Pa
     payload["failure"]["message"] = "Caller supplied but punctuation-safe text"
     with pytest.raises(ValueError, match="failure.message"):
         parse_run_result(payload)
+
+
+@pytest.mark.parametrize(
+    ("error", "name"),
+    [
+        (CancelledError(), "RUN_INTERRUPTED"),
+        (KeyboardInterrupt(), "RUN_INTERRUPTED"),
+        (RuntimeError("an ordinary error"), "INTERNAL_ERROR"),
+    ],
+)
+def test_failed_record_serializes_interruption_without_changing_status(
+    error: BaseException,
+    name: str,
+) -> None:
+    instant = datetime(2026, 7, 14, 12, tzinfo=UTC)
+    record = failed_record(error=error, started_at=instant, completed_at=instant)
+    payload = tomllib.loads(serialize_run_result(record))
+
+    assert payload["version"] == 1
+    assert payload["status"] == "failed"
+    assert payload["failure"] == {
+        "code": "FC-0001",
+        "name": name,
+        "category": "internal",
+        "message": "The run failed because of an internal error.",
+    }
+    assert parse_run_result(payload).was_interrupted is (name == "RUN_INTERRUPTED")
 
 
 def test_failed_record_uses_run_relative_artifact_paths(tmp_path: Path) -> None:

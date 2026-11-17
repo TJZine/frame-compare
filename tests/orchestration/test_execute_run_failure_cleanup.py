@@ -13,6 +13,7 @@ from frame_compare.orchestration import preparation
 from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.orchestration.run_inputs import acquire_run_config, resolve_run_workspace
 from frame_compare.services.errors import GeneratedDataReservationError
+from frame_compare.services.release_identity import ShortNameSource
 from frame_compare.services.run_folder import (
     RunFolderReservation,
 )
@@ -80,12 +81,12 @@ def test_execute_run_post_reservation_resolution_failure_cleans_run_directory(
 
     def _reserve_then_break_shared_probe_path(
         generated_root: Path,
-        filenames: list[str],
+        sources: list[ShortNameSource],
         tmdb_metadata: TmdbMetadata | None = None,
     ) -> RunFolderReservation:
         reservation = real_reserve_run_folder(
             generated_root,
-            filenames,
+            sources,
             tmdb_metadata,
         )
         reserved_paths.append(reservation.path)

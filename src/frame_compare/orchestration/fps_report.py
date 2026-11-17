@@ -270,6 +270,7 @@ def _clip_short_names(clips: Sequence[FpsReportClip]) -> list[str]:
                 identity=clip.release_identity,
                 label=clip.label,
                 label_is_explicit=clip.label_is_explicit,
+                stem=clip.path.stem,
             )
             for clip in clips
         ],

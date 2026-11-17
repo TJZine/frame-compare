@@ -16,6 +16,14 @@ from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.config.text_validation import show_bidi_formatting_controls
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services.errors import ReportError
+from frame_compare.services.release_identity import (
+    ReleaseIdentity,
+    ShortNameSource,
+    common_content_identity,
+    format_content_identity,
+    format_tmdb_content_title,
+    short_source_names,
+)
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
@@ -258,6 +266,8 @@ class ClipInfo:
     display: ReportClipDisplayInfo
     label: str | None = None
     source_identity: str | None = None
+    release_identity: ReleaseIdentity | None = None
+    label_is_explicit: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,7 +323,7 @@ def build_report_payload(
 ) -> ReportPayload:
     """Shape validated report data into the embedded v1.4 JSON payload."""
     _validate_report_cardinality(data)
-    title = data.metadata.title if data.metadata else data.clips[0].name
+    title = _comparison_title(data)
     clips = build_clip_payloads(data.clips)
     frames = build_frame_payloads(data, config, report_dir=report_dir)
     rendering = build_rendering_payload(data.rendering, [clip.tonemap for clip in data.clips])
@@ -344,6 +354,32 @@ def build_report_payload(
         "frames": frames,
         "rendering": rendering,
     }
+
+
+def _comparison_title(data: ReportData) -> str:
+    identities = [clip.release_identity for clip in data.clips]
+    if data.metadata is not None:
+        return format_tmdb_content_title(data.metadata, identities[0])
+
+    common = common_content_identity(identities)
+    if common is not None:
+        return format_content_identity(common)
+
+    names = short_source_names(
+        [
+            ShortNameSource(
+                identity=clip.release_identity,
+                label=clip.label or clip.name,
+                label_is_explicit=clip.label_is_explicit,
+                stem=clip.path.stem,
+            )
+            for clip in data.clips
+        ]
+    )
+    title = " vs ".join(names[:2])
+    if len(names) > 2:
+        title += f" +{len(names) - 2} more"
+    return title
 
 
 def _validate_report_cardinality(data: ReportData) -> None:

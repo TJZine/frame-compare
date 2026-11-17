@@ -235,7 +235,10 @@ role labels and bounded console-width policy shared by orchestration reports.
 content/release identity types and plain formatters. Preparation invokes the existing
 GuessIt/Anitopy parser seam once per source and attaches the resulting presentation
 metadata and explicit-label provenance to `ClipState`; these fields are excluded from
-source, cache, selection, and report identity.
+source, cache, selection, and report identity. Release identity records whether a
+parsed group qualifies for short names. The short-name formatter uses the ordered
+filename stems for shared-token fallback and resolves presentation collisions after
+choosing the names.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
 through presentation surfaces while source paths, fingerprints,
@@ -521,7 +524,10 @@ identity is not persisted.
   `frame_compare.services.run_result_record` and written atomically only after a
   reserved run completes or fails. It stores sanitized run-folder-relative output
   facts, UTC lifecycle timing, bounded warning summaries, cache/phase facts,
-  slow.pics outcome, and a sanitized typed failure when applicable. A failed run
+  slow.pics outcome, and a sanitized typed failure when applicable. Cancellation
+  records use `RUN_INTERRUPTED` in the existing `failure.name` field and retain the
+  stored status `failed`. The CLI uses this marker to show `interrupted` in the
+  human table. The JSON projector exposes the stored status. A failed run
   can still record an uploaded slow.pics outcome and URL when the publisher
   confirmed remote success before cancellation. Orchestration captures that fact
   synchronously before optional post-upload work or another cancellation
@@ -641,13 +647,13 @@ selection domain before metadata prefetch or run-folder reservation. Report gene
 receives the explicit canonical `<run-folder>/report.html` path from post-render
 orchestration; no report-specific output directory or fallback placement exists.
 
-Run-folder names are title-first and capped at 64 characters for Windows path
-headroom. The base name comes from resolved TMDB title/year, common parsed
-metadata, combined filename stems, or `unnamed_run`. Windows reserved basenames
-are rewritten before reservation. Exact timestamps are not
-part of folder names; collisions use compact numeric suffixes such as `_2` and
-`_3`, then a short random suffix if bounded numeric claiming cannot reserve a
-directory. Preparation validates the reserved immediate-child path and completes
+Run-folder naming consumes the prepared release identities and explicit-label provenance.
+It shares the report's TMDB and shared content title formatting and uses short labels
+to distinguish sources. It reserves the unsuffixed name first, then the local minute,
+local second, and a UUID for a same-second collision. The 64-character budget includes
+the suffix. Source roles distinguish labels that are empty or collide after filename
+sanitization. Trailing labels are omitted before title truncation at a token boundary.
+Windows reserved basenames are rewritten before reservation. Preparation validates the reserved immediate-child path and completes
 the `WorkspacePaths` transition before writing metadata. The exact creation time
 then lives in `<run-folder>/run_info.toml`, which is written before probing,
 rendering, or other runtime-heavy work. If reservation validation, the workspace
@@ -1214,7 +1220,10 @@ source-frame alignment. View-mode controls and the Help dialog state each mode's
 (reveal spatial differences, inspect one source, locate changed pixels, alternate the
 selected pair, scan sources together).
 Keyboard focus uses a neutral light outline, and the image canvas has no decorative
-shadow. The renderer emits the header generation timestamp as a `<time>` element
+shadow. Report payload generation derives the comparison title from resolved TMDB
+metadata and reference episode numbers, shared content identity, or source short
+labels, in that order. The renderer uses the payload title and labels the header
+count as sources. The renderer emits the header generation timestamp as a `<time>` element
 carrying the exact ISO timestamp in `datetime` and `title`; the viewer localizes its
 text to medium date plus short time. The exact timestamp remains available in the
 tooltip, Report Information, and payload.
@@ -1290,8 +1299,10 @@ per clip. `phase_post_render` reuses prepared release identities, explicit-label
 provenance, shared formatters, stable roles, and set-level collision handling once per
 report, joining profile segments with `·` (slow.pics image names keep the `|`
 separator; burned-in screenshot text is the clip label and does not use release
-descriptors). Report controls consume control or micro names,
-while Inspector/info and ARIA surfaces use the primary identity and the displayed basename.
+descriptors). The micro profile uses the same short source names as terminal
+summaries, with bidi controls made visible before collision handling. Grid, the lens,
+and compact inspector rows consume this profile. Regular controls and source details
+use the control and primary profiles and the displayed basename.
 Per-clip presentation contains applied tonemap facts; the rendering summary derives a
 shared implementation/algorithm/control projection, excluding clip-specific peaks and
 causes. Identity includes applied output facts and excludes requested settings and

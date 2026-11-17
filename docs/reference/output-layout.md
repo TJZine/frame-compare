@@ -35,6 +35,13 @@ that Frame Compare can reuse.
 The intermediate files in a run folder vary with the enabled features. Write scripts
 that rely only on documented artifacts.
 
+Run folders combine the comparison title and short source labels, for example
+`Black Sails S01E08 - EbP, GNOME`. If the same name is already present,
+Frame Compare appends the local date and time, such as ` (2026-11-16 13.25)`.
+Source roles keep labels distinct when characters are removed or replaced to make
+a valid folder name. Long names can omit trailing source labels and show their
+count as `+N`.
+
 ## Ownership
 
 | Path | Owner and purpose |

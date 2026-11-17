@@ -89,20 +89,23 @@ For live render progress, Frame Compare turns automatic labels into unique role-
 compact release descriptors. For slow.pics, it turns them into unique full release
 descriptors.
 
-Terminal surfaces (the Sources length-difference lines and the Align summary) use
-short source names: a source's release group when no other source shares it
-(case-insensitive), otherwise its compact release descriptor, or its label when
-neither is available. Explicit labels stay exact, and Frame Compare qualifies remaining
-collisions deterministically.
+Sources length comparisons, alignment summaries, and compact report captions use
+short source names. An explicit label takes priority. Otherwise a release group can
+supply the short name when it is unique, it is the final hyphen-delimited token, and
+the preceding filename contains a recognized resolution, source, or codec.
 
-The report derives collision-safe control and compact labels from the
-prepared release identity while retaining the canonical label for keys and mappings.
-The report keeps the exact basename in its embedded metadata. The **Clips** inspector
-shows that basename with any bidirectional formatting controls rendered as code points,
-such as `[U+202E]`. An explicit source label remains the primary report presentation name.
+When the group cannot supply the name, Frame Compare uses available compact release
+details. If those are empty, it removes shared leading and trailing filename tokens.
+Periods, hyphens, underscores, and spaces separate the tokens. If the full stem
+remains, Frame Compare removes a parsed title prefix when its tokens match the
+start of the stem. An empty remainder falls back to the resolved source label.
+Frame Compare qualifies remaining collisions by source role and preserves explicit
+labels.
 
-None of these presentation choices changes baked overlays, local screenshot names,
-report mappings, or the slow.pics collection title.
+The report uses detailed release labels in its regular controls and short names in
+Grid, the lens, and the inspector's compact source views. The report keeps the exact
+basename and canonical source label in its embedded metadata. It displays any
+bidirectional formatting controls in names as code points such as `[U+202E]`.
 
 ## Apply trims without modifying media
 

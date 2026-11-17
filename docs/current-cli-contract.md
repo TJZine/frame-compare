@@ -251,8 +251,14 @@ before probing, metadata prefetch, run-folder reservation, rendering, or HTTP
 work. Derived collisions are qualified deterministically with source stems and
 then stable source order. Resolved labels drive overlays, reports, alignment display,
 and render artifact keys, but do not change source/cache/alignment identity or physical
-PNG filenames. Live render progress uses exact explicit labels or unique role-prefixed
-micro release descriptors. slow.pics columns use exact explicit labels or unique full
+PNG filenames. The Sources and alignment summaries use explicit short labels first.
+A parsed release group qualifies as a short label when it is the final hyphen-delimited
+token and the filename also identifies a resolution, source, or codec. Otherwise the
+summary uses the compact release details, then the differing filename text after removing
+shared leading and trailing tokens. If the full stem remains, a matching parsed-title
+prefix can be removed. An empty remainder falls back to the resolved label.
+Live render progress uses exact explicit labels or unique role-prefixed micro release
+descriptors. slow.pics columns use exact explicit labels or unique full
 release descriptors, with the canonical resolved label as the uninformative-parser
 fallback. Orchestrated rendering continues to use the source stem as `filename_label`. When the resulting
 absolute screenshot path would exceed the legacy Windows browser-safe boundary, the
@@ -303,8 +309,12 @@ unchanged.
   search permission.
   History does not create the root, return a JSON success document, or fall back
   to the workspace or portable bundle.
-- Human `history list` output goes to stdout and exposes the exact run name,
-  status, persisted time, and report availability. Diagnostics and warnings use
+- Human `history list` writes a table to stdout with the exact run name, local date
+  and time, source and frame counts when recorded, status, and report availability
+  as `yes` or `no`. It uses completion time when known, then start time. Statuses include `completed`, `completed with warnings`, `failed`,
+  `interrupted`, and `unavailable`. Unreadable entries have empty count cells.
+  Count columns appear when at least one record supplies counts. An existing empty
+  root prints `No recorded runs in <generated dir>.` Diagnostics and warnings use
   stderr.
 - `history list --json` writes exactly one compact object to stdout with top-level
   key `runs`. Every entry has exactly `name`, `status`, `started_at`,
@@ -995,9 +1005,15 @@ recovery requirement.
   folders are not reused to satisfy analysis cache hits. Screenshots, run-local
   generated state, and the canonical report remain beneath that reserved folder
   even when media input is external.
-- Run-folder names are capped at 64 characters and do not include exact timestamps.
-  The first successful reservation uses the title-first base name, and collisions use
-  compact numeric suffixes such as `_2` and `_3`.
+- Run-folder names contain the TMDB title and reference episode when available, the
+  shared filename-derived content title, or up to two different parsed content titles.
+  The title is followed by ` - ` and the comma-separated short source labels. If no
+  title is available, the name uses the short labels alone. If a label becomes empty
+  or clashes after filename sanitization, its source role keeps it distinct. Names
+  are capped at 64 characters. If the name is too long, Frame Compare drops trailing labels, adds
+  ` +N` for the omitted labels, and shortens the title at a token boundary if needed.
+  A collision adds the local timestamp ` (YYYY-MM-DD HH.MM)`. A further collision
+  adds seconds, then a short UUID if that second is already taken.
   Exact creation time and run identity are written to root-level
   `<run-folder>/run_info.toml` immediately after reservation and before probing
   or rendering. Version 2 stores `version`, UTC `created_at` with a `Z` suffix,
@@ -1022,8 +1038,11 @@ recovery requirement.
   the final outcome without modifying `run_info.toml`. Successful records are
   written after all post-run phases settle and the coordinator's HTTP client
   closes. Their status is `completed` or `completed_with_warnings`. Failures
-  after reservation get one best-effort `failed` record. Failures before
-  reservation write no record. An ordinary
+  after reservation get one best-effort `failed` record. New records for
+  `asyncio.CancelledError` and `KeyboardInterrupt` use `RUN_INTERRUPTED` in
+  `failure.name`. Human history displays those records as `interrupted`.
+  History JSON and older undifferentiated failures continue to use `failed`.
+  Failures before reservation write no record. An ordinary
   completed-run result-write failure is warning-only and leaves the run successful;
   an ordinary failed-run result-write failure preserves the identical original
   exception and exit mapping. `KeyboardInterrupt` and `SystemExit` raised while
@@ -1103,8 +1122,8 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
 
 - Newly generated standalone reports use payload version `1.4`. Each clip carries a
   presentation-only `display` object with full primary identity, release descriptor,
-  ordinary-control label, constrained micro label, and the exact basename. Display
-  names are assembled from prepared release identity and explicit-label state.
+  ordinary-control label, shared short source label for compact captions, and the
+  exact basename. Display names use prepared release identity and explicit-label state.
   Filename-derived bidirectional formatting controls appear as code points such as
   `[U+202E]` in the UI. Frame Compare qualifies collisions between the resulting
   display names while preserving explicit labels, canonical clip labels, report
@@ -1148,12 +1167,16 @@ and `╰─`; `<visibility>` is `public` or `unlisted`, with `default=False`.
   gradient without reducing thumbnail image space or increasing card height.
   Category identification uses text in captions and filters; filters keep their counts,
   and the selected thumbnail retains its brass border.
-- The header shows the generation date and time localized by the browser. The exact
-  ISO timestamp remains in the report payload and in the `<time>` element's `datetime`
-  and `title` attributes; hover over the header or Generated value to inspect it.
+- The report title uses the TMDB title when available, with the reference filename's
+  season and episode for television. Otherwise it uses the shared filename-derived
+  content title from the CLI Sources header, or the first two short labels joined by
+  ` vs ` with ` +N more` for additional sources. Filenames remain in Clips and Report
+  Information. The second header line shows the localized generation date and time,
+  frame count, and source count. The exact ISO timestamp remains in the report payload
+  and in the `<time>` element's `datetime` and `title` attributes; hover over the header or Generated value to inspect it.
   Unparseable date text is shown unchanged.
-- Report identity includes output-affecting overlay, geometry, tonemap, presentation,
-  signal, and per-image provenance facts. It excludes absolute paths, image bytes or
+- Report identity includes the comparison title and output-affecting overlay, geometry,
+  tonemap, presentation, signal, and per-image provenance facts. It excludes absolute paths, image bytes or
   `src` values, timestamps, transient browser state, clip display strings, requested
   tonemap settings, and fallback causes. Applied implementation, algorithm, effective
   controls and resolved per-clip peaks participate in identity. Identical output via

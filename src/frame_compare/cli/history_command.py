@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 import typer
+from rich.cells import cell_len
 
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema
@@ -51,6 +52,46 @@ def history_entry_json(entry: HistoryEntry) -> dict[str, str | float | bool | No
     }
 
 
+def _print_history_table(entries: list[HistoryEntry], generated_root: Path) -> None:
+    if not entries:
+        typer.echo(f"No recorded runs in {generated_root}.")
+        return
+
+    include_counts = any(entry.record is not None for entry in entries)
+    headers = ["Name", "When"]
+    if include_counts:
+        headers.extend(("Sources", "Frames"))
+    headers.extend(("Status", "Report"))
+    rows = [headers]
+    for entry in entries:
+        timestamp = entry.completed_at or entry.started_at
+        when = timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") if timestamp else "unknown"
+        row = [entry.name, when]
+        record = entry.record
+        if include_counts:
+            counts = (
+                ("", "")
+                if record is None
+                else (str(record.clip_count), str(record.selected_frame_count))
+            )
+            row.extend(counts)
+        status = (
+            "interrupted"
+            if record is not None and record.was_interrupted
+            else entry.status.replace("_", " ")
+        )
+        row.extend((status, "yes" if entry.report_available else "no"))
+        rows.append(row)
+
+    widths = [max(map(cell_len, column)) for column in zip(*rows, strict=True)]
+    for row in rows:
+        cells: list[str] = []
+        for index, (value, width) in enumerate(zip(row, widths, strict=True)):
+            padding = " " * (width - cell_len(value))
+            cells.append(padding + value if include_counts and index in (2, 3) else value + padding)
+        typer.echo("  ".join(cells).rstrip())
+
+
 def handle_history_list(
     root: Path,
     config_path: Path | None,
@@ -72,10 +113,7 @@ def handle_history_list(
                 )
             )
         else:
-            for entry in entries:
-                time = _timestamp(entry.completed_at or entry.started_at) or "unknown"
-                report = "yes" if entry.report_available else "no"
-                typer.echo(f"{entry.name}\t{entry.status}\t{time}\treport={report}")
+            _print_history_table(entries, generated_root)
         for entry in entries:
             if entry.warning is not None:
                 typer.echo(

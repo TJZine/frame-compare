@@ -78,7 +78,7 @@ from frame_compare.services.errors import (
     TmdbRateLimitedError,
 )
 from frame_compare.services.metadata_parsing import parse_filename_with_release_identity
-from frame_compare.services.release_identity import ReleaseIdentity
+from frame_compare.services.release_identity import ReleaseIdentity, ShortNameSource
 from frame_compare.services.run_folder import reserve_run_folder
 from frame_compare.services.run_info import (
     RunInfo,
@@ -123,6 +123,7 @@ async def _resolve_run_directory(
     workspace: WorkspacePaths,
     config: ConfigSchema,
     input_videos: list[Path],
+    naming_sources: list[ShortNameSource],
     deps: RunDependencies,
     preflight_duration: float,
     preflight_warnings: list[RunWarning],
@@ -165,7 +166,7 @@ async def _resolve_run_directory(
     raise_if_cancelling()
     run_dir = reserve_run_folder(
         generated_root=workspace.generated_root,
-        filenames=filenames,
+        sources=naming_sources,
         tmdb_metadata=metadata,
     )
     try:
@@ -662,6 +663,15 @@ async def execute_prep(
         workspace=workspace,
         config=config,
         input_videos=input_videos,
+        naming_sources=[
+            ShortNameSource(
+                identity=release_identities_by_path[path],
+                label=labels_by_path[path],
+                label_is_explicit=explicit_labels_by_path[path],
+                stem=path.stem,
+            )
+            for path in input_videos
+        ],
         deps=deps,
         preflight_duration=preflight_duration,
         preflight_warnings=[],
