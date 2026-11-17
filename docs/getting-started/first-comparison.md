@@ -163,14 +163,14 @@ Use the report and screenshot paths in the completed-run summary.
 
 ``` { .text .fc-output title="Output · frame-compare run" }
 ╭─ ! Comparison complete · 1 warning
-│ report          generated/Black Sails/report.html
-│ screenshots     generated/Black Sails/screenshots  30 files
+│ report          generated/Black Sails S01E08 - EbP, GNOME, NOGRP/report.html
+│ screenshots     generated/Black Sails S01E08 - EbP, GNOME, NOGRP/screenshots  30 files
 │ alignment       GNOME +147f · NOGRP +0f · audio
-│ diagnostics     generated/Black Sails/alignment_diagnostics
+│ diagnostics     generated/Black Sails S01E08 - EbP, GNOME, NOGRP/alignment_diagnostics
 │
 │ run             10 of 12 frames · 3 sources · analysis computed
-│ time            7m 35s total
-│   phases        setup 29.6 s · analyze 5m 06s · align 1m 46s · render 12.8 s
+│ time            8m 56s total
+│   phases        setup 1m 00s · analyze 5m 33s · align 2m 10s · render 12.4 s
 ╰─
 
 ╭─ ! Warnings
