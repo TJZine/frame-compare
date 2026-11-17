@@ -84,17 +84,14 @@ body {
 }
 
 /* 3. App Shell */
-.rv-header {
-    padding: 0.5rem 1rem;
-    background: var(--bg-surface);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    min-height: 52px;
-}
-
 .rv-title {
+    grid-area: title;
+    flex: 0 20 auto;
+    min-width: 3ch;
+    max-width: 22rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: var(--text-lg);
     font-weight: 600;
     color: var(--text-primary);
@@ -102,17 +99,14 @@ body {
     line-height: 1.25;
 }
 
-.rv-meta {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    margin-top: 0.15rem;
-}
-
-.rv-header-right {
+.rv-bar-actions {
+    grid-area: actions;
+    flex: none;
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.5rem;
     font-size: var(--text-xs);
+    white-space: nowrap;
 }
 
 .rv-link {
@@ -169,17 +163,17 @@ body {
 
 /* 4. Controls Toolbar */
 .rv-controls {
+    --rv-source-select-width: 11.5rem;
+    display: flex;
+    gap: 0.375rem;
+    align-items: center;
     padding: 0.375rem 1rem;
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
 }
 
-.rv-primary-controls {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    grid-template-areas: "frame mode context";
-    gap: 0.5rem;
-    align-items: center;
+.rv-title-stepper {
+    display: contents;
 }
 
 .rv-frame-controls { grid-area: frame; }
@@ -250,6 +244,9 @@ body {
 }
 
 .rv-mode-controls {
+    flex: none;
+    margin-inline-start: auto;
+    min-width: max-content;
     justify-self: center;
 }
 
@@ -259,9 +256,11 @@ body {
 }
 
 .rv-context-controls select {
-    flex: 1 1 0;
+    flex: 1 1 var(--rv-source-select-width);
+    width: var(--rv-source-select-width);
     min-width: 0;
-    max-width: 20rem;
+    max-width: var(--rv-source-select-width);
+    padding-inline: 0.3rem 1.5rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -273,7 +272,7 @@ body {
     align-items: center;
     gap: 0.25rem;
     min-height: 28px;
-    padding: 0.2rem 0.65rem;
+    padding: 0.2rem 0.45rem;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: transparent;
@@ -488,6 +487,7 @@ select optgroup {
 
 /* 5. Viewer Stage */
 .rv-viewer-stage {
+    --stage-inset: 12px;
     flex: 1 1 0;
     min-width: 0;
     min-height: 0;
@@ -503,7 +503,6 @@ select optgroup {
     transition: margin-right 0.18s ease;
 }
 
-body:fullscreen .rv-header,
 body:fullscreen .rv-controls,
 body:fullscreen .rv-bottom-panel {
     display: none;
@@ -683,14 +682,73 @@ body:fullscreen .rv-inspector {
     z-index: 2;
 }
 
-/* Grid mode: a deterministic contact sheet over the shared viewport state. */
-.rv-mode-grid .rv-canvas {
+/* Lay out the contact sheet and palette in separate tracks inside the stage. */
+.rv-viewer-stage.rv-mode-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+.rv-mode-grid .rv-canvas,
+.rv-mode-grid .rv-stage-labels,
+.rv-mode-grid .rv-stage-overlay-info {
     display: none;
 }
 
+body:fullscreen .rv-mode-grid .rv-stage-overlay-info {
+    display: flex;
+}
+
+.rv-mode-grid .rv-stage-chrome {
+    display: contents;
+}
+
+.rv-mode-grid .rv-stage-bottom-controls {
+    grid-row: 2;
+    padding-bottom: var(--stage-inset);
+}
+
+/* Narrow screens keep the horizontal layout even with a saved vertical preference. */
+@media (width > 768px) {
+    .rv-viewer-stage.rv-mode-grid:has(.rv-viewport-palette[data-orientation="vertical"]) {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: minmax(0, 1fr);
+    }
+
+    .rv-mode-grid:has(.rv-viewport-palette[data-orientation="vertical"]) .rv-stage-bottom-controls {
+        grid-column: 2;
+        grid-row: 1;
+    }
+
+    /* In fullscreen the selector is hidden, so give the frame chip its own track. */
+    body:fullscreen .rv-viewer-stage.rv-mode-grid:has(.rv-viewport-palette[data-orientation="vertical"]) {
+        grid-template-rows: minmax(0, 1fr) auto;
+        column-gap: var(--stage-inset);
+        padding-inline-end: var(--stage-inset);
+        padding-bottom: var(--stage-inset);
+    }
+
+    body:fullscreen .rv-mode-grid:has(.rv-viewport-palette[data-orientation="vertical"]) .rv-stage-bottom-controls {
+        display: contents;
+    }
+
+    body:fullscreen .rv-mode-grid:has(.rv-viewport-palette[data-orientation="vertical"]) .rv-stage-overlay-info {
+        grid-area: 2 / 1;
+        justify-self: start;
+        margin-inline-start: var(--stage-inset);
+    }
+
+    body:fullscreen .rv-mode-grid .rv-viewport-palette[data-orientation="vertical"] {
+        grid-area: 1 / 2 / -1;
+        align-self: end;
+    }
+}
+
 .rv-grid {
-    position: absolute;
-    inset: 0;
+    position: relative;
+    grid-row: 1;
     z-index: 5;
     min-width: 0;
     min-height: 0;
@@ -857,15 +915,63 @@ body:fullscreen .rv-inspector {
     white-space: nowrap;
 }
 
-.rv-stage-labels {
+.rv-stage-chrome {
     position: absolute;
     inset: 0;
-    z-index: 10;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto minmax(0, max-content);
+    padding-bottom: var(--stage-inset);
     pointer-events: none;
 }
 
-.rv-mode-grid .rv-stage-labels {
-    display: none;
+.rv-stage-labels {
+    grid-row: 2;
+    z-index: 10;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 12px;
+    margin: 0 var(--stage-inset) 6px;
+}
+
+.rv-stage-bottom-controls {
+    grid-row: 3;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    min-height: 0;
+    padding-inline: var(--stage-inset);
+}
+
+/* A vertical palette sits beside the chips, leaving their bottom position
+   independent of its height. The entire chrome layer still floats. */
+@media (width > 768px) {
+    .rv-stage-chrome:has(.rv-viewport-palette[data-orientation="vertical"]):not(.rv-mode-grid *) {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: minmax(0, 1fr) auto auto;
+        padding-inline-end: var(--stage-inset);
+    }
+
+    .rv-stage-chrome:has(.rv-viewport-palette[data-orientation="vertical"]):not(.rv-mode-grid *) .rv-stage-labels {
+        grid-column: 1;
+        margin-inline-end: 8px;
+    }
+
+    .rv-stage-chrome:has(.rv-viewport-palette[data-orientation="vertical"]):not(.rv-mode-grid *) .rv-stage-bottom-controls {
+        display: contents;
+    }
+
+    .rv-stage-chrome:has(.rv-viewport-palette[data-orientation="vertical"]):not(.rv-mode-grid *) .rv-stage-overlay-info {
+        grid-area: 3 / 1;
+        justify-self: start;
+        margin-inline-start: var(--stage-inset);
+    }
+
+    .rv-stage-chrome:not(.rv-mode-grid *) .rv-viewport-palette[data-orientation="vertical"] {
+        grid-area: 1 / 2 / -1;
+        align-self: end;
+    }
 }
 
 .rv-lens-target {
@@ -1126,9 +1232,6 @@ body:fullscreen .rv-inspector {
 
 /* Labels overlay on image */
 .rv-overlay-label {
-    position: absolute;
-    top: 12px;
-    left: 12px;
     background: var(--bg-floating);
     padding: 4px 10px;
     border-radius: 4px;
@@ -1137,14 +1240,13 @@ body:fullscreen .rv-inspector {
     pointer-events: none;
     border: 1px solid var(--border);
     color: var(--text-primary);
-    max-width: calc(50% - 18px);
+    max-width: calc(50% - 6px);
     white-space: normal;
     overflow-wrap: anywhere;
 }
 
 .rv-overlay-label.right {
-    left: auto;
-    right: 12px;
+    margin-left: auto;
     text-align: right;
 }
 
@@ -1176,10 +1278,6 @@ body:fullscreen .rv-inspector {
 
 /* 6. Floating Overlay Stage Info (Dynamic Metadata overlay) */
 .rv-stage-overlay-info {
-    position: absolute;
-    right: auto;
-    bottom: 12px;
-    left: 12px;
     z-index: 10;
     background: var(--bg-floating);
     border: 1px solid var(--border);
@@ -1192,7 +1290,7 @@ body:fullscreen .rv-inspector {
     color: var(--text-secondary);
     pointer-events: none;
     justify-content: center;
-    max-width: min(calc(100% - 12rem), 34rem);
+    max-width: min(50%, 34rem);
     transition: opacity 0.15s ease, visibility 0.15s ease;
 }
 
@@ -1225,14 +1323,16 @@ body:fullscreen .rv-inspector {
 }
 
 .rv-viewport-palette {
-    position: absolute;
-    right: 16px;
-    bottom: 16px;
+    position: relative;
+    margin: 0 4px 4px auto;
     z-index: 35;
     display: flex;
     align-items: center;
     gap: 4px;
-    max-width: min(calc(100% - 2rem), 58rem);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+    max-width: 58rem;
     padding: 4px;
     border: 1px solid var(--border-hover);
     border-radius: 6px;
@@ -1346,7 +1446,7 @@ body:fullscreen .rv-inspector {
     flex-wrap: nowrap;
     align-items: stretch;
     max-width: none;
-    max-height: calc(100% - 2rem);
+    max-height: calc(100% - 4px);
     width: auto;
     overflow-y: auto;
 }
@@ -2246,28 +2346,145 @@ body.rv-inspector-open .rv-viewer-stage {
 }
 
 /* 11. Responsive adaptation */
-@media (max-width: 70rem) {
-    .rv-primary-controls {
-        grid-template-columns: minmax(0, 1fr) auto;
+@media (width >= 1280px) {
+    /* Keep room for the audit prefixes before allocating space to the title and frame control. */
+    .rv-context-zone,
+    .rv-context-controls {
+        flex: none;
+    }
+
+    .rv-frame-controls {
+        display: grid;
+        grid-template-columns: auto minmax(var(--rv-frame-select-min-width, 4rem), 1fr) auto auto;
+        min-width: min-content;
+    }
+
+    .rv-frame-controls #frame-select {
+        width: auto;
+        max-width: 22rem;
+    }
+}
+
+@media (768px < width < 1600px) {
+    .rv-controls {
+        --rv-source-select-width: 11rem;
+        --rv-frame-select-min-width: 3.5rem;
+        gap: 0.3125rem;
+        padding-inline: 0.75rem;
+    }
+
+    .rv-title {
+        min-width: 2ch;
+    }
+
+    .rv-active-filter-badge {
+        margin-inline-start: 0.25rem;
+        padding-inline: 0.4rem;
+    }
+
+    .rv-mode-controls button,
+    .rv-frame-controls button {
+        padding-inline: 0.25rem;
+        font-size: var(--text-xs);
+    }
+
+    .rv-mode-controls button + button,
+    .rv-frame-controls button + select,
+    .rv-frame-controls select + button,
+    .rv-context-controls select + button,
+    .rv-context-controls button + select {
+        margin-inline-start: 0.125rem;
+    }
+
+    .rv-mode-controls button + button,
+    .rv-frame-controls select + button,
+    .rv-context-controls select + button {
+        padding-inline-start: 0.25rem;
+    }
+
+    .rv-bar-actions {
+        gap: 0.25rem;
+    }
+
+    .rv-bar-actions,
+    .rv-bar-actions button,
+    .rv-active-filter-badge,
+    .rv-alignment-status {
+        font-size: 0.6875rem;
+    }
+
+    .rv-header-help-btn,
+    .rv-header-info-btn {
+        width: 24px;
+    }
+
+    .rv-header-inspector-btn {
+        gap: 4px;
+        padding-inline: 5px;
+    }
+
+    /* Bound the status before the source selects reach their minimum widths. */
+    .rv-alignment-status {
+        max-inline-size: 8.625rem;
+        padding-inline: 0.25rem;
+        white-space: normal;
+    }
+
+    .rv-offset-label {
+        flex: none;
+    }
+
+    .rv-offset-value {
+        overflow-wrap: anywhere;
+    }
+}
+
+@media (width < 1280px) {
+    .rv-controls {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
         grid-template-areas:
-            "frame mode"
-            "context context";
-        gap: 0.4rem;
+            "heading heading heading"
+            "mode context actions";
+    }
+
+    .rv-title-stepper {
+        grid-area: heading;
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        min-width: 0;
+    }
+
+    .rv-title {
+        min-width: 0;
+    }
+
+    .rv-mode-controls {
+        margin-inline-start: 0;
+    }
+}
+
+@media (768px < width < 1280px) {
+    .rv-context-controls select {
+        min-width: 3rem;
     }
 
     .rv-context-zone {
-        width: 100%;
+        justify-content: flex-start;
+        gap: 0.375rem;
+    }
+
+    .rv-alignment-status {
+        flex: none;
     }
 }
 
 @media (max-width: 992px) {
 
     .rv-viewport-palette {
-        right: 12px;
-        bottom: 12px;
-        max-width: calc(100% - 1.5rem);
-        flex-wrap: wrap;
-        justify-content: flex-end;
+        margin-right: 0;
+        margin-bottom: 0;
     }
 
     .rv-stage-overlay-info {
@@ -2296,19 +2513,29 @@ body.rv-inspector-open .rv-viewer-stage {
         overflow-y: auto;
     }
 
-    .rv-header {
-        padding: 0.5rem 1rem;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0.5rem;
-    }
-    .rv-primary-controls {
+    .rv-controls {
         grid-template-columns: minmax(0, 1fr);
         grid-template-areas:
+            "title"
+            "actions"
             "frame"
             "mode"
             "context";
+        padding-inline: 0.5rem;
     }
+
+    .rv-title-stepper {
+        display: contents;
+    }
+
+    .rv-title {
+        max-width: none;
+    }
+
+    .rv-bar-actions {
+        gap: 0.75rem;
+    }
+
     .rv-control-group {
         width: 100%;
         flex-wrap: wrap;
@@ -2321,6 +2548,7 @@ body.rv-inspector-open .rv-viewer-stage {
     }
 
     .rv-mode-controls {
+        min-width: 0;
         justify-content: center;
     }
 
@@ -2344,18 +2572,8 @@ body.rv-inspector-open .rv-viewer-stage {
         width: 100%;
     }
 
-    .rv-overlay-label {
-        top: 8px;
-        left: 8px;
-        max-width: calc(50% - 12px);
-    }
-
-    .rv-overlay-label.right {
-        right: 8px;
-        left: auto;
-    }
-
     .rv-viewer-stage {
+        --stage-inset: 8px;
         flex: 0 0 50vh;
         min-height: 18rem;
     }
@@ -2374,6 +2592,13 @@ body.rv-inspector-open .rv-viewer-stage {
 
     .rv-control-group[data-control-scope="pair"] select {
         width: 100%;
+        padding-inline-start: 0.2rem;
+        font-size: 0.71875rem;
+    }
+
+    .rv-control-group[data-control-scope="pair"] select + button,
+    .rv-control-group[data-control-scope="pair"] button + select {
+        margin-left: 0;
     }
 
     .rv-alignment-status {
@@ -2382,11 +2607,7 @@ body.rv-inspector-open .rv-viewer-stage {
     }
 
     .rv-viewport-palette {
-        right: 8px;
-        bottom: 8px;
-        max-width: calc(100% - 1rem);
         flex-wrap: wrap !important;
-        justify-content: flex-end;
         flex-direction: row !important;
         width: auto !important;
         height: auto !important;

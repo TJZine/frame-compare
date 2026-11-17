@@ -5,7 +5,6 @@ from __future__ import annotations
 import html
 import json
 from collections.abc import Mapping
-from datetime import datetime
 from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
@@ -92,20 +91,23 @@ def _render_frame_options(
     )
 
 
-def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int | None) -> str:
-    if selected_index is None:
-        return "".join(
-            f'<option value="{_esc_attr(i)}" title="{_esc_attr(_clip_accessible_name(clip))}">'
-            f"{_esc_text(_clip_display(clip, 'control'))}</option>"
-            for i, clip in enumerate(clips)
-        )
+def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int) -> str:
     options: list[str] = []
     for i, clip in enumerate(clips):
         selected_attr = " selected" if i == selected_index else ""
+        short_name = _clip_display(clip, "micro")
+        detail = _clip_display(clip, "control")
+        prefix, match, tail = (
+            short_name.casefold().rpartition(detail.casefold()) if detail else ("", "", "")
+        )
+        redundant_detail = detail == short_name or (
+            " · " not in detail and match and not tail and prefix.endswith((".", "-", "_", " "))
+        )
+        text = f"{short_name} · {detail}" if detail and not redundant_detail else short_name
+        accessible_name = _esc_attr(_clip_accessible_name(clip))
         options.append(
-            f'<option value="{_esc_attr(i)}"{selected_attr} '
-            f'title="{_esc_attr(_clip_accessible_name(clip))}">'
-            f"{_esc_text(_clip_display(clip, 'control'))}</option>"
+            f'<option value="{_esc_attr(i)}"{selected_attr} title="{accessible_name}" '
+            f'aria-label="{accessible_name}">{_esc_text(text)}</option>'
         )
     return "".join(options)
 
@@ -478,57 +480,34 @@ def _render_info_modal(data: ReportPayload) -> str:
     </div>"""
 
 
-def _render_header(
-    title: str,
-    generated_at: str,
-    frame_count: int,
-    clip_count: int,
-    slowpics_link: str,
-) -> str:
-    try:
-        generated_date = datetime.fromisoformat(generated_at).date().isoformat()
-    except ValueError:
-        generated_date = generated_at
+def _render_bar_actions(slowpics_link: str) -> str:
     inspector_button = f'<button id="btn-inspector" class="rv-header-inspector-btn" type="button" aria-controls="rv-inspector" aria-expanded="false" aria-label="Open Inspector" title="Inspector (I)">{_render_icon("M3 3h14v14H3z M12 3v14")}<span>Inspector</span></button>'
     info_button = f'<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report information">{_render_icon("M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14 M10 9v4 M10 6.5v.1")}</button>'
     help_button = f'<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">{_render_icon("M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14 M8 7a2 2 0 0 1 4 0c0 2-2 2-2 4 M10 13.5v.1")}</button>'
-    slowpics_block = f"{slowpics_link} • " if slowpics_link else ""
-    try:
-        datetime.fromisoformat(generated_at)
-        generated_time = (
-            f'<time datetime="{_esc_attr(generated_at)}" '
-            f'title="{_esc_attr(generated_at)}">{_esc_text(generated_at)}</time>'
-        )
-    except ValueError:
-        generated_time = (
-            f'<span title="{_esc_attr(generated_at)}">{_esc_text(generated_date)}</span>'
-        )
-    return f"""        <header class="rv-header">
-            <div>
-                <div class="rv-title">{_esc_text(title)}</div>
-                <div class="rv-meta">Generated {generated_time} • {frame_count} frames • {clip_count} sources</div>
-            </div>
-            <div class="rv-header-right">
-                {slowpics_block}{inspector_button} {info_button} {help_button}
-            </div>
-        </header>"""
+    return f"""        <div class="rv-bar-actions">
+            {slowpics_link}{inspector_button} {info_button} {help_button}
+        </div>"""
 
 
 def _render_controls(
+    title: str,
+    slowpics_link: str,
     frame_options: str,
     left_clip_options: str,
     right_clip_options: str,
     active_clip_options: str,
 ) -> str:
     return f"""    <div class="rv-controls" role="toolbar" aria-label="Viewer controls">
-        <div class="rv-primary-controls" aria-label="Primary viewer controls">
-        <div class="rv-control-group rv-frame-controls">
-            <button id="btn-prev" aria-label="Previous frame">←</button>
-            <select id="frame-select" aria-label="Select frame">
-                {frame_options}
-            </select>
-            <button id="btn-next" aria-label="Next frame">→</button>
-            <span id="active-filter-badge" class="rv-active-filter-badge" hidden></span>
+        <div class="rv-title-stepper">
+            <div class="rv-title" title="{_esc_attr(title)}">{_esc_text(title)}</div>
+            <div class="rv-control-group rv-frame-controls">
+                <button id="btn-prev" aria-label="Previous frame">←</button>
+                <select id="frame-select" aria-label="Select frame">
+                    {frame_options}
+                </select>
+                <button id="btn-next" aria-label="Next frame">→</button>
+                <span id="active-filter-badge" class="rv-active-filter-badge" hidden></span>
+            </div>
         </div>
 
         <div class="rv-control-group rv-mode-controls" role="radiogroup" aria-label="View mode">
@@ -561,9 +540,9 @@ def _render_controls(
                 {active_clip_options}
             </select>
         </div>
-        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite" title="Spatial image offset for the selected pair"><span class="rv-offset-label">Offset:</span><span class="rv-offset-value"> none</span></div>
+        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite" title="Spatial image offset for the selected pair" hidden></div>
         </div>
-        </div>
+{_render_bar_actions(slowpics_link)}
     </div>"""
 
 
@@ -697,10 +676,6 @@ def _render_stage() -> str:
             </div>
             <div class="rv-divider"><div class="rv-divider-handle"></div></div>
         </div>
-        <div class="rv-stage-labels">
-            <div id="label-left" class="rv-overlay-label"></div>
-            <div id="label-right" class="rv-overlay-label right"></div>
-        </div>
         <span id="rv-lens-target" class="rv-lens-target" aria-hidden="true" hidden><i></i><i></i><i></i><i></i></span>
         <section id="rv-grid" class="rv-grid" aria-label="Grid comparison" hidden>
             <div class="rv-grid-frame-error" data-grid-frame-error hidden></div>
@@ -717,12 +692,20 @@ def _render_stage() -> str:
             <div class="rv-lens-caption" data-lens-caption-row hidden><span class="rv-lens-identity" data-lens-identity="active"></span><span class="rv-lens-identity" data-lens-identity="second" hidden aria-hidden="true"></span></div>
             <button class="rv-lens-grip" type="button" data-lens-drag-handle aria-label="Move lens window" title="Drag to move lens; use arrow keys when focused"><span aria-hidden="true">⠿</span></button>
         </aside>
-        <div class="rv-stage-overlay-info">
-            <span class="rv-info-label" data-current-frame-label></span>
-            <span class="rv-info-divider" data-current-frame-category-divider>•</span>
-            <span class="rv-info-category" data-current-frame-category></span>
-        </div>
+        <div class="rv-stage-chrome">
+            <div class="rv-stage-labels">
+                <div id="label-left" class="rv-overlay-label"></div>
+                <div id="label-right" class="rv-overlay-label right"></div>
+            </div>
+            <div class="rv-stage-bottom-controls">
+                <div class="rv-stage-overlay-info">
+                    <span class="rv-info-label" data-current-frame-label></span>
+                    <span class="rv-info-divider" data-current-frame-category-divider>•</span>
+                    <span class="rv-info-category" data-current-frame-category></span>
+                </div>
 {_render_viewport_palette()}
+            </div>
+        </div>
 {_render_lens_settings()}
     </div>"""
 
@@ -864,8 +847,6 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
     json_str = _json_for_script_tag(data)
 
     title = data["title"]
-    generated_at = data["generated_at"]
-    stats = data["stats"]
     slowpics_url = data["slowpics_url"]
     frames = data["frames"]
     clips = data["clips"]
@@ -901,14 +882,9 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
         include_filmstrip=include_filmstrip,
     )
 
-    header_html = _render_header(
-        title=title,
-        generated_at=generated_at,
-        frame_count=stats["frame_count"],
-        clip_count=stats["clip_count"],
-        slowpics_link=slowpics_link,
-    )
     controls_html = _render_controls(
+        title,
+        slowpics_link,
         frame_options,
         left_clip_options,
         right_clip_options,
@@ -929,7 +905,6 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
     <style>{get_css()}</style>
 </head>
 <body>
-{header_html}
 <div id="viewer-status" class="rv-status" role="status" aria-live="polite" hidden></div>
 <div id="viewer-live" class="rv-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 {controls_html}

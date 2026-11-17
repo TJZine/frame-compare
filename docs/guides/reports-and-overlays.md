@@ -52,27 +52,31 @@ embed_images = true
 
 Move between frames with the frame selector, the arrow buttons, or the filmstrip, which
 filters by category and has **Compact**, **Normal**, and **Large** sizes. Choose the
-pair
-with the two source selectors and swap them with the button between them.
+pair with the two source selectors and swap them with the button between them.
+Each selector starts with the short source name. Hover over the closed selector
+to see the full name.
 
-The floating palette over the image holds zoom, fit, viewport reset, fullscreen,
-**Source labels**, and **Lens**. `report.include_filmstrip = false` hides the filmstrip.
-`Offset: none` in the toolbar refers to a spatial image offset; it does not change
-timing
-alignment.
+The viewport palette holds zoom, fit, viewport reset, fullscreen, **Source labels**,
+and **Lens**. In Grid, the palette sits below or beside the cells, keeping footer
+labels clear. The frame selector shows the current frame in the toolbar. In
+fullscreen Grid, the frame chip shows it below the cells. In the other modes the
+palette floats over the image. `report.include_filmstrip = false` hides the filmstrip.
+The toolbar shows **Offset** when the displayed pair has a spatial adjustment.
+Image offset moves the picture while leaving timing alignment as it was.
 
-Selectors identify the source at the point of selection. Source labels stay
-anchored to the viewport while zooming and panning, and are useful when baked text is
-outside the visible area. Baked text stays with screenshots uploaded to slow.pics and is
-unaffected by the source-labels toggle.
+Selectors identify the source at the point of selection. In Slider, Single, Diff,
+and Blink, source labels stay near the bottom while you zoom and pan. They sit
+above the frame chip and above a horizontal palette or beside a vertical one.
+Baked text stays with screenshots uploaded to slow.pics and is unaffected by the
+source-labels toggle.
 
 When baked text already provides enough context, hide source labels to reduce
 overlapping
 text.
 
 Source labels show each source's complete file size. Use file size as context; it does
-not measure bitrate or quality. The header shows when the report was generated in your
-browser's locale; hover it for the exact timestamp.
+not measure bitrate or quality. Open **Report Information** to see when the report was generated in your browser's
+locale. Hover over **Generated** for the exact timestamp.
 
 ### Inspector
 

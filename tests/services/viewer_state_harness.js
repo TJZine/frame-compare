@@ -1476,13 +1476,14 @@ function pairSwitchFourClip() {
     const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
 
     viewer.viewport.setManualAlignment(4, 5);
+    assert.equal(viewer.dom.alignmentStatus.hidden, false);
     assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: custom +4x +5y');
     viewer.setRightClip(2);
     assert.equal(viewer.state.leftClipIdx, 0);
     assert.equal(viewer.state.rightClipIdx, 2);
     assert.equal(viewer.viewport.currentAlignment().alignX, 0);
     assert.equal(viewer.viewport.currentAlignment().alignY, 0);
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
+    assert.equal(viewer.dom.alignmentStatus.hidden, true);
 
     viewer.viewport.setManualAlignment(-1, 8);
     viewer.setRightClip(1);
@@ -1574,7 +1575,7 @@ function alignmentStatus() {
     const { viewer, storage, storageKey } = loadViewer({ clipCount: 4 });
     viewer.bindAlignmentEvents();
     viewer.inspector.bind();
-    assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
+    assert.equal(viewer.dom.alignmentStatus.hidden, true);
     viewer.swapPairClips();
     viewer.viewport.setManualAlignment(5, -2);
     viewer.swapPairClips();
@@ -1582,9 +1583,15 @@ function alignmentStatus() {
     for (const reset of [viewer.dom.btnAlignmentReset, viewer.dom.btnInspectorResetCurrentAlign]) {
         viewer.viewport.setAlignmentPreset('left-1');
         assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: preset left 1px');
+        for (const mode of ['overlay', 'grid']) {
+            viewer.setMode(mode);
+            assert.equal(viewer.dom.alignmentStatus.hidden, true);
+        }
+        viewer.setMode('slider');
+        assert.equal(viewer.dom.alignmentStatus.hidden, false);
         viewer.viewport.setRawAlignmentInput('x', '3.');
         reset.dispatch('click');
-        assert.equal(renderedText(viewer.dom.alignmentStatus), 'Offset: none');
+        assert.equal(viewer.dom.alignmentStatus.hidden, true);
         assert.equal(viewer.state.rawAlignX, null);
         assert.deepEqual(JSON.parse(storage.get(storageKey)).pairAlignments, {
             '1:0': { alignmentPreset: 'custom', alignX: 5, alignY: -2 },
