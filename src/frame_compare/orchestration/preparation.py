@@ -316,13 +316,7 @@ def _cached_probe_snapshots_for_cache_only(
     snapshots: dict[Path, ClipProbeSnapshot] = {}
     for path in input_videos:
         raise_if_cancelling()
-        try:
-            fingerprint = live_probe_fingerprint(path).fingerprint
-        except SourceLoadError as error:
-            raise AnalysisCacheMissError(
-                "Cached clip probe data is required to validate --from-cache-only "
-                "analysis cache: current source authority could not be verified."
-            ) from error
+        fingerprint = live_probe_fingerprint(path).fingerprint
         snapshot = (
             entries_by_key.get(compute_probe_cache_key(fingerprint))
             if fingerprint.source_token is not None

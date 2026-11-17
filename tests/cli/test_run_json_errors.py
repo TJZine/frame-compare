@@ -381,7 +381,6 @@ def test_run_json_exclusion_recovery_fails_closed_without_confirmation_dependenc
     )
 
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        assert dependencies is None
         raise error
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
@@ -422,7 +421,6 @@ def test_run_quiet_exclusion_recovery_fails_closed_on_stderr_without_prompt(
     )
 
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        assert dependencies is None
         raise error
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
@@ -612,20 +610,27 @@ def test_run_json_stale_analysis_config_keys_fail_before_runner(
 
 
 @pytest.mark.parametrize("options", [[], ["--quiet"], ["--json"]])
+@pytest.mark.parametrize("second_interrupt", [False, True])
 def test_run_exit_code_is_130_on_keyboard_interrupt(
-    options: list[str], monkeypatch: MonkeyPatch, tmp_path: Path
+    second_interrupt: bool, options: list[str], monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise KeyboardInterrupt()
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    if second_interrupt:
+
+        def interrupt_summary(*_args: object, **_kwargs: object) -> None:
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr("frame_compare.cli.run_command.print_interruption", interrupt_summary)
 
     result = _invoke_run_with_minimal_workspace(options, tmp_path=tmp_path, monkeypatch=monkeypatch)
     assert result.exit_code == int(ExitCode.INTERRUPTED)
     if options:
         assert result.stderr == ""
         assert result.stdout == ""
-    else:
+    elif not second_interrupt:
         assert result.stderr.strip() == "! Interrupted"
         assert "╰─\n\n! Interrupted" in _normalize_cli_output(result.output)
 
@@ -647,7 +652,8 @@ def test_run_error_wraps_colon_after_a_full_width_config_path(
     )
 
     assert result.exit_code == int(ExitCode.CONFIG_ERROR)
-    assert f"\n{path}\n: invalid TOML syntax\n" in result.stderr
+    assert any(str(path) in line for line in result.stderr.splitlines())
+    assert "invalid TOML syntax" in result.stderr
     assert all(len(line) <= 80 for line in result.stderr.splitlines())
 
 

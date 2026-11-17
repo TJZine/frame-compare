@@ -27,8 +27,12 @@ from frame_compare.render.types import (
     RenderRequest,
     ScreenshotBatchRequest,
 )
-from frame_compare.utils.cancellation import is_cancelling, is_run_interruption, raise_if_cancelling
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.utils.cancellation import is_cancelling, raise_if_cancelling
+from frame_compare.utils.progress_protocol import (
+    ProgressPhaseStatus,
+    ProgressReporter,
+    failure_progress_status,
+)
 from frame_compare.utils.subproc import SubprocessAborted
 
 if TYPE_CHECKING:
@@ -205,11 +209,7 @@ def render_clip_jobs(
             completed.append(result)
         return tuple(completed)
     except BaseException as error:
-        status = (
-            ProgressPhaseStatus.INTERRUPTED
-            if is_run_interruption(error)
-            else ProgressPhaseStatus.FAILED
-        )
+        status = failure_progress_status(error)
         raise
     finally:
         if reporter is not None:

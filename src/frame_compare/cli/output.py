@@ -34,7 +34,6 @@ from frame_compare.utils.terminal_theme import (
 )
 
 if TYPE_CHECKING:
-    from frame_compare.config.schema import AnalysisConfig
     from frame_compare.orchestration.coordinator import RunResult
     from frame_compare.orchestration.run_inputs import AcquiredRunConfig
     from frame_compare.orchestration.types import InterruptedRun
@@ -161,6 +160,8 @@ def print_at_a_glance(
     bright_frame_count = analysis.bright_frame_count
     motion_frame_count = analysis.motion_frame_count
     random_seed = analysis.random_seed
+    from frame_compare.orchestration.phase_selection import planned_frame_count
+
     requested_total = planned_frame_count(analysis)
     overlay_mode = config.screenshots.overlay_mode
     tonemap_enabled = config.color.enable_tonemap
@@ -363,16 +364,6 @@ def print_at_a_glance(
     table.print(console)
 
 
-def planned_frame_count(analysis: AnalysisConfig) -> int:
-    return (
-        len(analysis.user_frames)
-        + analysis.random_frame_count
-        + analysis.dark_frame_count
-        + analysis.bright_frame_count
-        + analysis.motion_frame_count
-    )
-
-
 def _add_time_rows(table: Section, *, result: RunResult) -> None:
     timings = result.phase_timings
     review_seconds = max(0.0, result.vsview_review_seconds)
@@ -520,7 +511,7 @@ def print_result_summary(
 
     table.title = title
     table.rail_style = border_style
-    table.print(console, trailing_space=not warnings)
+    table.print(console)
 
     if warnings:
         warning_text = _format_warning_panel_text(warnings, glyphs=glyphs)
@@ -619,7 +610,7 @@ def _format_warning_panel_text(warnings: list[RunWarning], *, glyphs: GlyphSet) 
                 lines.append("")
             lines.append(f"[bold {ACCENT}]{escape(warning.source)}[/]")
             current_source = warning.source
-        message = escape(warning.human_message or warning.message)
+        message = escape(warning.message)
         if warning.severity == "skipped":
             lines.append(f"[dim]{glyphs.skipped} {message}[/]")
         else:

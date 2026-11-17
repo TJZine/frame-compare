@@ -192,7 +192,6 @@ def test_handle_run_injects_confirmation_dependency_only_for_prompt_required_pat
     normal_deps = normal_runner.dependencies[0]
     assert normal_deps is not None
     assert normal_deps.confirm_slowpics_upload is None
-    assert normal_deps.on_interrupted is not None
 
 
 @pytest.mark.parametrize(

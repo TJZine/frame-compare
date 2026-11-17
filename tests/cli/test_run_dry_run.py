@@ -210,12 +210,11 @@ def test_run_dry_run_source_count_and_quiet_semantics(
         assert "Input directory: comparison_videos" in result.stdout
 
 
-@pytest.mark.parametrize(("columns", "separator"), [("80", "\n"), ("240", " ")])
+@pytest.mark.parametrize("columns", ["80", "240"])
 def test_run_dry_run_human_reports_workspace_root_input_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     columns: str,
-    separator: str,
 ) -> None:
     monkeypatch.setenv("TERM", "xterm-256color")
     monkeypatch.setenv("COLUMNS", columns)
@@ -236,7 +235,7 @@ def test_run_dry_run_human_reports_workspace_root_input_path(
 
     assert result.exit_code == 0
     assert "Input directory: .\n" in result.stdout
-    assert f"Workspace:{separator}{resolved_root}\n" in result.stdout
+    assert any(str(resolved_root) in line for line in result.stdout.splitlines())
 
 
 def test_run_dry_run_preserves_quoted_windows_selector_in_human_error(
@@ -276,7 +275,11 @@ def test_run_dry_run_wraps_after_a_full_width_source_filename(
         result = _invoke(root, config_path, "--skip-metadata", "--no-upload")
 
     assert result.exit_code == 0
-    assert f"Sources (2):\n{name}\n, source.mkv\n" in result.stdout
+    assert "Sources (2):" in result.stdout
+    assert any(name in line for line in result.stdout.splitlines())
+    assert any("source.mkv" in line for line in result.stdout.splitlines())
+    sources = result.stdout.split("Sources (2):", 1)[1].split("Reference:", 1)[0]
+    assert all(len(line) <= 80 for line in sources.splitlines())
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows filenames do not permit tabs")

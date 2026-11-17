@@ -1122,7 +1122,7 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
     elif owner == "render":
         assert observed["calls"] in ([0], [0, 1])
         stderr = observed["stderr"]
-        assert "– Render          interrupted" in stderr
+        assert "[STOP] RENDER  Interrupted" in stderr
         assert "! Interrupted during Render" in stderr
         assert f"{len(observed['calls'])} of 10 screenshots" in stderr
         assert "[FAIL] RENDER" not in stderr

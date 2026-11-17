@@ -435,8 +435,8 @@ def test_run_analyze_phase_full_window_retry_failure_does_not_prompt_twice(
 
     assert prompt_calls == 1
     assert len(ctx.run_warnings) == 1
-    assert "configured lead=1.66667s" in ctx.run_warnings[0].text
-    assert "effective lead=0s" in ctx.run_warnings[0].text
+    assert "configured lead=1.6666666666666667 s" in ctx.run_warnings[0].text
+    assert "effective lead=0.0 s" in ctx.run_warnings[0].text
 
 
 @pytest.mark.parametrize(
@@ -544,7 +544,7 @@ def test_full_window_retry_active_rect_sampling_failure_is_fatal(
 
     assert isinstance(exc_info.value.__cause__, MetricsCalculationError)
     assert len(ctx.run_warnings) == 1
-    assert "configured lead=1s, trail=1s" in ctx.run_warnings[0].text
+    assert "configured lead=1.0 s, trail=1.0 s" in ctx.run_warnings[0].text
 
 
 def test_run_analyze_phase_cache_only_exclusion_failure_does_not_offer_retry(

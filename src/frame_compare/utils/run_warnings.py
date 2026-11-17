@@ -27,7 +27,6 @@ class RunWarning:
     detail: str | None = None
     comparison_path: Path | None = field(default=None, compare=False, repr=False)
     dropped_user_frames: tuple[int, ...] = field(default=(), compare=False, repr=False)
-    human_message: str | None = field(default=None, compare=False, repr=False)
 
     @property
     def text(self) -> str:

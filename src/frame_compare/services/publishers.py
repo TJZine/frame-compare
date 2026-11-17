@@ -31,9 +31,12 @@ from frame_compare.services.slowpics_url import (
     is_slowpics_identifier,
 )
 from frame_compare.services.types import SlowpicsCollectionMetadata
-from frame_compare.utils.cancellation import is_run_interruption
 from frame_compare.utils.progress import UPLOAD_PRESENTATION
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.utils.progress_protocol import (
+    ProgressPhaseStatus,
+    ProgressReporter,
+    failure_progress_status,
+)
 
 log = structlog.get_logger()
 
@@ -515,8 +518,7 @@ async def publish_to_slowpics(
         )
         upload_progress_status = ProgressPhaseStatus.COMPLETED
     except BaseException as error:
-        if is_run_interruption(error):
-            upload_progress_status = ProgressPhaseStatus.INTERRUPTED
+        upload_progress_status = failure_progress_status(error)
         raise
     finally:
         if progress is not None:

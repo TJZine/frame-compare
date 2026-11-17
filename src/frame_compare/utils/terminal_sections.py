@@ -58,11 +58,11 @@ def print_plain_run_block(text: str, *, file: TextIO) -> None:
         spacing.after_block = True
 
 
-def _finish_section(console: Console, *, trailing_space: bool = True) -> None:
+def _finish_section(console: Console) -> None:
     spacing = _run_spacing.get()
     if spacing is not None:
         spacing.after_block = True
-    elif trailing_space:
+    else:
         console.print()
 
 
@@ -112,10 +112,10 @@ class Section:
         yield from self.render_body(console, options)
         yield Text("+-" if ascii_only else "╰─", style=self.rail_style)
 
-    def print(self, console: Console, *, trailing_space: bool = True) -> None:
+    def print(self, console: Console) -> None:
         console.print()
         console.print(self)
-        _finish_section(console, trailing_space=trailing_space)
+        _finish_section(console)
 
     def prompt(self, console: Console, question: str, ask: Callable[[str], _T]) -> _T:
         """Print an in-rail prompt, closing the section even on interruption.

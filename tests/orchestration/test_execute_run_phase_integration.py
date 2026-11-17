@@ -42,7 +42,7 @@ from tests.cli.cli_helpers import _normalize_cli_output, _write_minimal_config, 
 from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
 from tests.services.alignment_request_test_support import vsview_session
-from tests.services.test_alignment_workflow_vsview import _configure_computed_alignment
+from tests.services.alignment_resolution_test_support import configure_computed_alignment
 
 from .execute_run_helpers import (
     FakeFFmpegRunner,
@@ -171,7 +171,7 @@ def real_cli_runner(monkeypatch: pytest.MonkeyPatch) -> list[RunResult]:
 def test_cli_reports_alignment_diagnostics_from_the_actual_write(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str
 ) -> None:
-    _configure_computed_alignment(monkeypatch)
+    configure_computed_alignment(monkeypatch)
     forced = mode == "forced-failure"
     if forced:
         monkeypatch.setattr("frame_compare.cli.entry._sys_stream_isatty", lambda *_: True)
@@ -300,7 +300,8 @@ enabled = false
         )
         (run_result,) = real_cli_runner
         assert any(
-            "(configured lead=12s, trail=0.03s; effective lead=0s, trail=0s)" in warning.text
+            "(configured lead=12.0 s, trail=0.03 s; effective lead=0.0 s, trail=0.0 s)"
+            in warning.text
             for warning in run_result.warnings
         )
     else:
@@ -314,7 +315,7 @@ enabled = false
 def test_render_failure_reports_written_alignment_diagnostics_once_in_human_output(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, transport: str
 ) -> None:
-    _configure_computed_alignment(monkeypatch)
+    configure_computed_alignment(monkeypatch)
 
     def _fail_render(*_args: object, **_kwargs: object) -> Never:
         raise RenderError("test render failure")
@@ -636,3 +637,55 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
         ("Encode 1", 80),
     ]
     assert captured["report_config"] == config.report
+
+
+@pytest.mark.usefixtures("real_cli_runner")
+@pytest.mark.parametrize("alignment_enabled", [False, True])
+def test_cli_dropped_frames_notice_uses_shared_run_spacing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, alignment_enabled: bool
+) -> None:
+    if alignment_enabled:
+        configure_computed_alignment(monkeypatch)
+    root = tmp_path / "workspace"
+    config_path = _write_minimal_config(root)
+    with config_path.open("a", encoding="utf-8") as stream:
+        stream.write(
+            f"\n[audio_alignment]\nenable = {str(alignment_enabled).lower()}\n"
+            "[screenshots]\nuse_ffmpeg = true\n[report]\nenable = false\n"
+        )
+    create_video_files(root / "comparison_videos", "reference.mkv", "encode.mkv")
+    monkeypatch.setattr("frame_compare.cli.entry._sys_stream_isatty", lambda *_: True)
+    monkeypatch.setattr("frame_compare.orchestration.progress.stream_is_tty", lambda *_: True)
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--root",
+            str(root),
+            "--skip-analysis",
+            "--skip-metadata",
+            "--no-upload",
+            "--frames",
+            "0,120",
+            "--random-frame-count",
+            "1",
+            "--no-color",
+        ],
+        env={"TERM": "xterm-256color", "COLUMNS": "120"},
+    )
+    output = _normalize_cli_output(result.output)
+    assert result.exit_code == 0, output
+    message = (
+        "2 requested frames fall outside the shared range and were skipped: 0, 120"
+        if alignment_enabled
+        else "1 requested frame falls outside the shared range and was skipped: 120"
+    )
+    assert output.count(message) == 2
+    warnings = output[output.index("Warnings") :]
+    assert warnings.count(message) == 1
+    notice = output[: output.index("Warnings")]
+    if alignment_enabled:
+        assert notice.index(message) > notice.index("Align")
+    else:
+        assert f"╰─\n\n! {message}" in notice
+        assert f"╰─\n\n\n! {message}" not in notice

@@ -314,10 +314,7 @@ def test_emit_frame_alignment_report_caps_selected_frame_list(
     assert "aligned 0, 1, 2, 3, 4, 5, 6, 7, … (12 total)" in captured.err
 
 
-@pytest.mark.parametrize("distinct_lists", [False, True])
-def test_aligned_frame_rows_follow_shared_or_per_comparison_trims(
-    capsys: pytest.CaptureFixture[str], distinct_lists: bool
-) -> None:
+def test_aligned_frames_belong_to_the_whole_block(capsys: pytest.CaptureFixture[str]) -> None:
     first = AlignmentReportComparison(
         label="First",
         alignment_source="manual",
@@ -330,7 +327,6 @@ def test_aligned_frame_rows_follow_shared_or_per_comparison_trims(
     second = replace(
         first,
         label="Second",
-        selected_frames=(3, 9) if distinct_lists else (4, 8),
     )
     emit_frame_alignment_report(
         stage="after_align",
@@ -346,11 +342,9 @@ def test_aligned_frame_rows_follow_shared_or_per_comparison_trims(
     assert output.count("trims") == 2
     second_heading = output.index("Second")
     first_frames = output.index("aligned 4, 8")
-    if distinct_lists:
-        assert first_frames < second_heading < output.index("aligned 3, 9")
-    else:
-        assert second_heading < output.rindex("trims") < first_frames
-    assert output.count("  frames ") == (2 if distinct_lists else 1)
+    assert second_heading < output.rindex("trims") < first_frames
+    assert output.count("frames ") == 1
+    assert "\n│\n│ frames" in output
 
 
 def test_emit_frame_alignment_report_shows_material_stability_concisely(

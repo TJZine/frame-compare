@@ -505,8 +505,10 @@ unchanged.
 - Material alignment information is printed in a dim-rail `Frame alignment`
   section when accepted or rejected frame-alignment changes need explanation. Each
   comparison has a bold short-name line, `trims`, and `stability` when present.
-  The shared `frames` row follows the last comparison. When aligned frame lists
-  differ, each comparison shows its own list. The row uses `aligned …` or
+  The shared `frames` row follows the last comparison. With multiple comparisons,
+  a blank line separates it from the comparison rows and its label aligns with
+  the comparison names. With one comparison, it stays beneath that comparison.
+  The row uses `aligned …` or
   `aligned frame 0 (1 total)` for one frame at index 0.
   The `offset` and `source` rows are removed; the Align phase summary carries the
   final offsets and origins. A comparison with an alignment warning gets a
@@ -687,7 +689,8 @@ unchanged.
 - Non-TTY human runs use those product phase labels in chronological ASCII
   progress lines on stderr. Each enabled top-level phase emits once when it completes;
   successful lines include elapsed time, skips preserve their detail, and failed
-  phases emit `[FAIL]` before the existing typed error presentation. Successful
+  phases emit `[FAIL]` before the existing typed error presentation. Interrupted
+  phases emit `[STOP] RENDER  Interrupted` (with the current phase name). Successful
   nested work and percentage milestones remain silent. Warned or failed nested
   work may emit one line when needed to preserve a material outcome. Expected
   warn-only phase failures do not add a console traceback or duplicate warning
@@ -1112,6 +1115,8 @@ recovery requirement.
   its later acquisition fails, the run exits with the typed cache/analysis error
   before rendering or publishing; it does not complete with only the initial
   user/random frame plan.
+- An unreadable source under `--from-cache-only` retains its source-load error
+  and hint. A missing compatible probe snapshot reports an analysis cache miss.
 - `--from-cache-only` does not require or prohibit TMDB network access after analysis
   cache prevalidation succeeds. `--skip-metadata`, disabled TMDB, and a missing API
   key perform no TMDB cache reads or writes.

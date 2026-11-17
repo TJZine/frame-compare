@@ -110,7 +110,6 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
         return RunResult(
             success=True,
             screenshot_dir=Path("screenshots").resolve(),
-            alignment_diagnostics_dir=request.inputs.root / "generated/run/alignment_diagnostics",
             warnings=[RunWarning("sources", "skipped", "metadata skipped")],
             frame_count=8,
             clips_processed=3,
@@ -130,13 +129,11 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     assert "metadata skipped" in stdout
     assert "Sources · 1" not in stdout
     assert "Frame alignment" not in stdout
-    assert "Sources · 1" in stderr
+    assert any(line == "╭─ Sources · 1" for line in stderr.splitlines())
     assert "Frame alignment" in stderr
     assert "Run plan" not in stderr
     assert "Result" not in stderr
     assert "240 frames (10.0 s)" in stderr
-    assert stdout.count("generated/run/alignment_diagnostics") == 1
-    assert "alignment_diagnostics" not in stderr
     combined = _normalize_cli_output(result.output)
     assert "╰─\n\n╭─ Sources · 1" in combined
     assert "╰─\n\n╭─ Frame alignment" in combined

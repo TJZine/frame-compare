@@ -18,6 +18,7 @@ from frame_compare.services.types import AlignmentConfig, AlignmentReviewSummary
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import stream_is_tty
+from frame_compare.utils.terminal_sections import take_run_block_separator
 from frame_compare.utils.types import AlignmentClipRequest
 from frame_compare.vs.loader import DefaultVSLoader
 from frame_compare.vsview.adapter import (
@@ -417,6 +418,9 @@ def maybe_launch_alignment_vsview(
                 verbose=verbose,
             ),
         )
+        if launch_decision.enabled:
+            # The child printed its own waiting block and trailing separator.
+            take_run_block_separator()
         review_seconds = max(0.0, wait_seconds)
         if launch_decision.no_tty:
             _log_no_tty(session.script_path, tty_status)

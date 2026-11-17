@@ -342,7 +342,7 @@ def _extra_footage_note(
 ) -> str | None:
     if len({clip.probe.num_frames for clip in originals}) <= 1:
         return None
-    sources_by_extent: dict[tuple[Fraction, Fraction], list[str]] = {}
+    sources_by_extent: dict[tuple[str | None, str | None], list[str]] = {}
     for source, original, final in zip(
         [request.reference, *request.comparisons], originals, aligned, strict=True
     ):
@@ -350,18 +350,21 @@ def _extra_footage_note(
         original_end = original.trim.trim_start_frames + original.effective_num_frames()
         final_end = final.trim.trim_start_frames + final.effective_num_frames()
         end = original_end - final_end
-        extent = (max(start, 0) / original.effective_fps, max(end, 0) / original.effective_fps)
+        extent = (
+            format_duration(float(start / original.effective_fps)) if start > 0 else None,
+            format_duration(float(end / original.effective_fps)) if end > 0 else None,
+        )
         sources_by_extent.setdefault(extent, []).append(_request_short_name(source))
 
-    shared_sources = sources_by_extent.pop((Fraction(0), Fraction(0)), [])
+    shared_sources = sources_by_extent.pop((None, None), [])
     comparator = f" than {shared_sources[0]}" if len(shared_sources) == 1 else ""
     parts: list[str] = []
     for (start, end), names in sources_by_extent.items():
         extents: list[str] = []
-        if start > 0:
-            extents.append(f"{format_duration(float(start))} more at the start")
-        if end > 0:
-            extents.append(f"{format_duration(float(end))} more at the end")
+        if start is not None:
+            extents.append(f"{start} more at the start")
+        if end is not None:
+            extents.append(f"{end} more at the end")
         verb = "has" if len(names) == 1 else "have"
         parts.append(f"{join_source_names(names)} {verb} {' and '.join(extents)}{comparator}")
     return "; ".join(parts) + "; frames come from the shared range." if parts else None

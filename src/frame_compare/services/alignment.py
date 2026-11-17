@@ -52,6 +52,7 @@ from frame_compare.services.alignment_presentation import (
 )
 from frame_compare.services.alignment_previous_offsets import (
     apply_shared_reuse,
+    can_reuse_written_offsets_without_confirmation,
     prompt_for_previous_alignment_offset_reuse,
     validate_previous_offsets_policy,
 )
@@ -1228,8 +1229,11 @@ async def align_clips_from_request(
             review_outcome=initial_outcome,
             emit_success_log=json_output,
         )
-        if diagnostic_keys and on_diagnostics_written is not None:
-            assert request.alignment_diagnostics_dir is not None
+        if (
+            diagnostic_keys
+            and on_diagnostics_written is not None
+            and request.alignment_diagnostics_dir is not None
+        ):
             on_diagnostics_written(request.alignment_diagnostics_dir)
         present_alignment_evidence(
             request=request,
@@ -1307,16 +1311,8 @@ async def align_clips_from_request(
                 if (
                     written
                     and on_reusable_cache_written is not None
-                    and (
-                        request.previous_offsets == "always"
-                        or all(
-                            resolution.origin != "interactive_confirmed_this_run"
-                            or (
-                                resolution.computed_fallback is not None
-                                and resolution.computed_fallback.applied
-                            )
-                            for resolution in candidate.resolutions
-                        )
+                    and can_reuse_written_offsets_without_confirmation(
+                        request, candidate.resolutions
                     )
                 ):
                     on_reusable_cache_written()

@@ -690,7 +690,7 @@ def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
         (screenshots / name).write_bytes(b"\x89PNG\r\n\x1a\n")
     (screenshots / "notes.txt").write_text("not an image")
 
-    console = _console()
+    console = _console_at_width(240)
     print_result_summary(
         console,
         result=RunResult(
@@ -704,7 +704,7 @@ def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
 
     assert "3 files" in _render(console)
 
-    missing_console = _console()
+    missing_console = _console_at_width(240)
     print_result_summary(
         missing_console,
         result=RunResult(
@@ -1326,14 +1326,30 @@ def test_result_summary_time_rows(
 
 
 def test_warning_deduplication_includes_source() -> None:
-    from frame_compare.cli.output import _warning_presentations
-
     action_warning = RunWarning("slow.pics", "warning", "same emitted text")
     other_warning = RunWarning("history", "warning", "same emitted text")
-    assert action_warning.text == other_warning.text
-    assert action_warning != other_warning
-    rows = _warning_presentations(
-        [other_warning, replace(action_warning)],
-        (PostUploadActionResult(kind="webhook", success=False, warning=action_warning),),
+    console = _console_at_width(240)
+    print_result_summary(
+        console,
+        result=RunResult(success=True, warnings=[other_warning, replace(action_warning)]),
+        post_upload_actions=(
+            PostUploadActionResult(kind="webhook", success=False, warning=action_warning),
+        ),
+        quiet=False,
     )
-    assert rows == [other_warning, action_warning]
+    output = _render(console)
+    assert output.count("same emitted text") == 2
+    assert "history" in output and "slow.pics" in output
+
+
+def test_interruption_receipt_names_both_written_caches() -> None:
+    from frame_compare.cli.output import print_interruption
+    from frame_compare.orchestration.types import InterruptedRun
+
+    console = _console_at_width(240)
+    print_interruption(
+        console,
+        InterruptedRun(phase="Render", analysis_cache_written=True, alignment_cache_written=True),
+        root=Path.cwd(),
+    )
+    assert "next run  reuses cached analysis and alignment" in _render(console)

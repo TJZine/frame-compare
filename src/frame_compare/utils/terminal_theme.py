@@ -198,7 +198,7 @@ def use_ascii_fallback_on_non_utf_streams() -> None:
 
 def format_duration(seconds: float) -> str:
     """Format elapsed time or a source duration for human output."""
-    total_seconds = max(0.0, seconds)
+    total_seconds = round(max(0.0, seconds), 1)
     if total_seconds < 60.0:
         return f"{total_seconds:.1f} s"
 

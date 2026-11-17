@@ -50,6 +50,7 @@ _DURABLE_STATUS_MARKERS = {
     ProgressPhaseStatus.SKIPPED: "[SKIP]",
     ProgressPhaseStatus.WARNED: "[WARN]",
     ProgressPhaseStatus.FAILED: "[FAIL]",
+    ProgressPhaseStatus.INTERRUPTED: "[STOP]",
 }
 _DURABLE_STATUS_GLYPHS = {
     ProgressPhaseStatus.COMPLETED: "ok",
@@ -364,14 +365,7 @@ class PlainProgressReporter:
                 return
             task = self._task
             nested = bool(self._task_stack)
-            if status == ProgressPhaseStatus.INTERRUPTED:
-                if not nested:
-                    console = human_console(stderr=True, no_color=True)
-                    glyph = glyphs_for_console(console).skipped
-                    if take_run_block_separator():
-                        console.print()
-                    console.print(f"{glyph} {task.label.title():<16}interrupted")
-            elif not nested or status in {
+            if not nested or status in {
                 ProgressPhaseStatus.WARNED,
                 ProgressPhaseStatus.FAILED,
             }:
@@ -380,6 +374,8 @@ class PlainProgressReporter:
                     if status == ProgressPhaseStatus.COMPLETED
                     else ""
                 )
+                if status == ProgressPhaseStatus.INTERRUPTED:
+                    detail = "  Interrupted"
                 line = f"{_DURABLE_STATUS_MARKERS[status]} {task.label}{detail}"
                 if take_run_block_separator():
                     print(file=sys.stderr)

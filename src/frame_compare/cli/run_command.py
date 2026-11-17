@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -16,7 +17,6 @@ from rich.console import Console
 
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.cli.output import (
-    planned_frame_count,
     print_at_a_glance,
     print_interruption,
     print_result_summary,
@@ -347,10 +347,8 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
             deps=deps,
             console=console,
             inputs=inputs,
-            on_interrupted=(None if args.quiet or args.json_output else _capture_interruption),
-            on_failed_alignment_diagnostics=(
-                None if args.quiet or args.json_output else _capture_failed_alignment_diagnostics
-            ),
+            on_interrupted=_capture_interruption,
+            on_failed_alignment_diagnostics=_capture_failed_alignment_diagnostics,
         )
         result = deps.runner.run(request, dependencies=run_dependencies)
     except FrameCompareError as error:
@@ -361,11 +359,12 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         if not (args.quiet or args.json_output) and (
             interrupted is not None or isinstance(error, KeyboardInterrupt)
         ):
-            print_interruption(
-                deps.console_factory(stderr=True, no_color=effective_no_color),
-                interrupted,
-                root=args.resolved_root,
-            )
+            with suppress(KeyboardInterrupt):
+                print_interruption(
+                    deps.console_factory(stderr=True, no_color=effective_no_color),
+                    interrupted,
+                    root=args.resolved_root,
+                )
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
     except Exception as error:
         if failure_diagnostics is None:
@@ -381,8 +380,9 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         return
 
     if not result.success:
-        _print_failure_diagnostics(result.alignment_diagnostics_dir)
         raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
+
+    from frame_compare.orchestration.phase_selection import planned_frame_count
 
     post_upload_actions = collect_interactive_slowpics_actions(
         result,

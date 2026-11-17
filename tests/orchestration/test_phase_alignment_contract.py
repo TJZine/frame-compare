@@ -677,6 +677,7 @@ def test_final_summary_shows_changed_audio_offset_and_unapplied_state(tmp_path: 
         ),
         ((240, 252), 24, "Reference has 1.0 s more at the start; Alpha has 1.5 s more at the end"),
         ((240, 216, 240), 0, "Reference and Beta have 1.0 s more at the end than Alpha"),
+        ((240, 216, 241), 0, "Reference and Beta have 1.0 s more at the end than Alpha"),
         (
             (240, 216, 240, 240),
             0,

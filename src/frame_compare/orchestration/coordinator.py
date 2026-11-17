@@ -27,7 +27,7 @@ from frame_compare.orchestration.fps_report import (
     emit_consolidated_fps_report,
 )
 from frame_compare.orchestration.phase_selection import (
-    generated_frame_count,
+    planned_frame_count,
     shared_range_drop_warning,
     user_frames_outside_shared_range,
 )
@@ -58,6 +58,7 @@ from frame_compare.utils.cancellation import (
     is_run_interruption,
 )
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.terminal_sections import take_run_block_separator
 from frame_compare.utils.terminal_theme import WARN, glyphs_for_console, human_console
 from frame_compare.utils.types import WorkspacePaths
 
@@ -68,6 +69,8 @@ def _emit_dropped_frames_notice(request: RunRequest, frames: tuple[int, ...]) ->
     if frames and not (request.json_output or request.quiet):
         console = human_console(stderr=True, no_color=request.no_color)
         glyph = glyphs_for_console(console).warning
+        if take_run_block_separator():
+            console.print()
         console.print(f"[{WARN}]{glyph}[/] {shared_range_drop_warning(frames).message}")
 
 
@@ -386,7 +389,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             planned_frames = selected_frame_count
             if planned_frames is None:
                 analysis = request.inputs.config.analysis
-                planned_frames = len(analysis.user_frames) + generated_frame_count(analysis)
+                planned_frames = planned_frame_count(analysis)
             with suppress(Exception):
                 local_deps.on_interrupted(
                     InterruptedRun(

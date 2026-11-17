@@ -583,9 +583,7 @@ def test_run_keeps_admission_config_and_refreshes_only_report_preference(
             assert request.inputs.config.audio_alignment.use_vsview is False
             assert request.inputs.config.analysis.ignore_lead_seconds == 5
             assert request.inputs.config.slowpics.auto_upload is False
-            if json_output:
-                assert dependencies is None
-            else:
+            if not json_output:
                 assert dependencies is not None
                 assert dependencies.confirm_full_window_retry is not None
                 assert dependencies.confirm_slowpics_upload is None

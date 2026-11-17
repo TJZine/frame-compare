@@ -296,8 +296,7 @@ def _override_warning(ignore_lead_seconds: float, ignore_trail_seconds: float) -
     return RunWarning(
         "analysis",
         "warning",
-        message(f"{ignore_lead_seconds:g}s", f"{ignore_trail_seconds:g}s", "0s"),
-        human_message=message(
+        message(
             format_exclusion_duration(ignore_lead_seconds),
             format_exclusion_duration(ignore_trail_seconds),
             format_exclusion_duration(0.0),

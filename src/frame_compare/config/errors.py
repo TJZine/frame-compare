@@ -70,7 +70,7 @@ def _config_validation_message(
             lines.append(f"{key}: unknown key")
             continue
         problem = str(error.get("msg", "invalid value")).removeprefix("Value error, ")
-        if "input" in error:
+        if "input" in error and not isinstance(error["input"], dict):
             problem += f" (given {error['input']!r})"
         lines.append(f"{key}: {problem}")
     if effective:

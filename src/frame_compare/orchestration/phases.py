@@ -23,13 +23,13 @@ from frame_compare.orchestration.progress import (
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
-    is_run_interruption,
 )
-from frame_compare.utils.progress import LogProgressReporter, PlainProgressReporter
+from frame_compare.utils.progress import LogProgressReporter
 from frame_compare.utils.progress_protocol import (
     AlignmentSummary,
     ProgressPhaseStatus,
     ProgressReporter,
+    failure_progress_status,
 )
 
 log = structlog.get_logger()
@@ -105,9 +105,7 @@ async def execute_phases(
                 if callable(phase.skip_detail)
                 else phase.skip_detail
             )
-            if skip_detail == CONFIG_DISABLED and (
-                uses_rich_progress(reporter) or isinstance(reporter, PlainProgressReporter)
-            ):
+            if skip_detail == CONFIG_DISABLED and not isinstance(reporter, LogProgressReporter):
                 continue
             start_phase_progress(
                 reporter,
@@ -163,12 +161,8 @@ async def execute_phases(
                     exc_info=exc,
                 )
         except BaseException as error:
-            if is_run_interruption(error):
-                phase.status = PhaseStatus.INTERRUPTED
-                phase_progress_status = ProgressPhaseStatus.INTERRUPTED
-            else:
-                phase.status = PhaseStatus.FAILED
-                phase_progress_status = ProgressPhaseStatus.FAILED
+            phase_progress_status = failure_progress_status(error)
+            phase.status = PhaseStatus(phase_progress_status.value)
             raise
         else:
             phase.status = PhaseStatus.COMPLETED
