@@ -94,11 +94,11 @@ def _render(console: Console) -> str:
     return console.export_text(styles=False)
 
 
-def _rendered_row_value(output: str, row_label: str) -> str:
+def _rendered_row_value(output: str, row_label: str, *, indent: int = 3) -> str:
     lines = output.splitlines()
     for index, line in enumerate(lines):
         content = line.partition("│")[2].partition("│")[0]
-        row_prefix = f"   {row_label}"
+        row_prefix = f"{' ' * indent}{row_label}"
         if not content.startswith(row_prefix):
             continue
         value_start = len(row_prefix)
@@ -111,9 +111,9 @@ def _rendered_row_value(output: str, row_label: str) -> str:
             continuation_content = continuation.partition("│")[2].partition("│")[0]
             if not continuation_content.strip():
                 break
-            if not continuation_content.startswith("   "):
+            if not continuation_content.startswith(" " * indent):
                 break
-            if len(continuation_content) > 3 and not continuation_content[3].isspace():
+            if len(continuation_content) > indent and not continuation_content[indent].isspace():
                 break
             rendered_lines.append(continuation)
         return "\n".join(rendered_lines)
@@ -702,7 +702,10 @@ def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
         quiet=False,
     )
 
-    assert "3 files" in _render(console)
+    screenshots_row = _rendered_row_value(_render(console), "screenshots", indent=1)
+    row_cells = [line.partition("│")[2].strip() for line in screenshots_row.splitlines()]
+    assert str(screenshots) in "".join(row_cells)
+    assert "3 files" in " ".join(row_cells)
 
     missing_console = _console_at_width(240)
     print_result_summary(
