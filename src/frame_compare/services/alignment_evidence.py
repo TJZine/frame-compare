@@ -61,7 +61,6 @@ AUDIO_UNAVAILABLE_REASON_PHRASES: dict[str, str] = {
     "selected_audio_timeline_unavailable": "selected audio timeline unavailable",
     "retime_rate_unsupported": "retimed audio rate unsupported",
     "analysis_budget_exceeded": "analysis budget exceeded",
-    "source_identity_changed": "source changed during analysis",
 }
 AUDIO_COLLECTION_FAILURE_PHRASE = "audio collection failed"
 

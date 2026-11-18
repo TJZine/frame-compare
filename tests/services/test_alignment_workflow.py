@@ -17,7 +17,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from frame_compare.services import alignment, alignment_audio, alignment_streaming
+from frame_compare.services import alignment, alignment_audio
 from frame_compare.services.alignment import _estimate_audio_pair
 from frame_compare.services.alignment import (
     align_clips_from_request as _align_clips_from_request,
@@ -37,7 +37,6 @@ from frame_compare.services.alignment_streaming import (
     PairedAudioCollectionFailure,
 )
 from frame_compare.services.errors import (
-    AlignmentSourceIdentityError,
     AudioAlignmentCancellationError,
     AudioAlignmentCleanupError,
 )
@@ -380,107 +379,6 @@ def test_cleanup_failure_is_fatal(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         _align(reference, comparison, _config(), tmp_path)
 
 
-def test_identity_change_mid_collection_is_aborted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reference, comparison = _media(tmp_path)
-    program = make_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
-    real_collect = alignment_streaming.collect_paired_audio_chunks
-
-    def touching_collect(*args: Any, **kwargs: Any) -> Any:
-        with open(comparison, "ab") as handle:
-            handle.write(b"mutated")
-        return real_collect(*args, **kwargs)
-
-    monkeypatch.setattr(alignment, "collect_paired_audio_chunks", touching_collect)
-
-    computed_results: list[AlignmentResult] = []
-    real_estimate = alignment._estimate_audio_pair
-
-    def capture(*args: Any, **kwargs: Any) -> AlignmentResult:
-        result = real_estimate(*args, **kwargs)
-        computed_results.append(result)
-        return result
-
-    monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
-    with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
-        _align(reference, comparison, _config(), tmp_path)
-
-    (result,) = computed_results
-    assert result.applied is False
-    assert result.diagnostic == "source_identity_changed"
-    assert result.audio_attempt is not None
-    assert result.audio_attempt.status == "aborted"
-
-
-def test_pre_collection_identity_change_is_aborted_per_comparison(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reference = tmp_path / "reference.mkv"
-    ok = tmp_path / "ok.mkv"
-    mutated = tmp_path / "mutated.mkv"
-    manual = tmp_path / "manual.mkv"
-    for path in (reference, ok, mutated, manual):
-        path.write_bytes(b"media-" + path.stem.encode())
-    program = make_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
-
-    def mutating_probe(path: Path, *args: Any, **kwargs: Any) -> ProbedStreams:
-        if Path(path) == mutated:
-            with open(mutated, "ab") as handle:
-                handle.write(b"mutated")
-        return _probe()
-
-    monkeypatch.setattr(alignment_audio, "probe_streams", mutating_probe)
-    generated = tmp_path / "generated"
-    generated.mkdir(parents=True)
-    save_manual_override(
-        generated,
-        ManualOverride(
-            reference_clip=reference.stem,
-            comparison_clip=manual.stem,
-            frame_offset=3,
-            timestamp="2026-09-25T00:00:00Z",
-        ),
-    )
-    config = _config()
-    request = alignment_request(
-        reference=reference,
-        comparisons=[ok, mutated, manual],
-        generated_dir=generated,
-        fps_num=FPS.numerator,
-        fps_den=FPS.denominator,
-    )
-    computed_results: list[AlignmentResult] = []
-    real_estimate = alignment._estimate_audio_pair
-
-    def capture(*args: Any, **kwargs: Any) -> AlignmentResult:
-        result = real_estimate(*args, **kwargs)
-        computed_results.append(result)
-        return result
-
-    monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
-    with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
-        run_request(request, config)
-    by_name = {result.comparison_clip: result for result in computed_results}
-
-    changed = by_name[mutated.name]
-    assert changed.applied is False
-    assert changed.diagnostic == "source_identity_changed"
-    assert changed.audio_attempt is not None
-    assert changed.audio_attempt.status == "aborted"
-    assert changed.audio_attempt.collection_observation == "not_observed"
-    assert changed.audio_attempt.collection == ()
-
-    untouched = by_name[ok.name]
-    assert untouched.applied is False
-    assert untouched.diagnostic == "video_check_unavailable"
-
-    # Existing manual authority cannot make the drifted source set applicable.
-    assert manual.name not in by_name
-
-
 def test_no_computed_cache_write_without_video_loader(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -552,39 +450,6 @@ def test_manual_override_wins_without_decoding(
     assert result.source == "manual"
     assert result.frame_offset == 3
     assert result.time_offset_seconds == pytest.approx(3 / float(request_fps))
-
-
-def test_entry_identity_mismatch_has_no_attempt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reference, comparison = _media(tmp_path)
-    program = make_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
-    config = _config()
-    request = alignment_request(
-        reference=reference,
-        comparisons=[comparison],
-        generated_dir=tmp_path / "generated",
-        fps_num=FPS.numerator,
-        fps_den=FPS.denominator,
-    )
-    comparison.write_bytes(b"comparison-mutated")
-    computed_results: list[AlignmentResult] = []
-    real_estimate = alignment._estimate_audio_pair
-
-    def capture(*args: Any, **kwargs: Any) -> AlignmentResult:
-        result = real_estimate(*args, **kwargs)
-        computed_results.append(result)
-        return result
-
-    monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
-    with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
-        run_request(request, config)
-
-    (result,) = computed_results
-    assert result.applied is False
-    assert result.diagnostic == "source_identity_changed"
-    assert result.audio_attempt is None
 
 
 def test_cancelled_collection_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

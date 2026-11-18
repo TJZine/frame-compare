@@ -39,7 +39,6 @@ from frame_compare.services.alignment_review_projection import build_audio_revie
 from frame_compare.services.alignment_video import VideoClipRequest
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.subproc import run_subprocess
-from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.env import detect_plugins, ensure_vs_environment
 from frame_compare.vs.errors import VapourSynthError, VapourSynthNotFoundError
 from frame_compare.vs.loader import DefaultVSLoader
@@ -621,12 +620,7 @@ def test_configured_match_fps_retimed_insert_still_refuses(
 
 
 def _video_request(path: Path) -> VideoClipRequest:
-    resolved_path = path.resolve(strict=True)
-    stat = resolved_path.stat()
-    return VideoClipRequest(
-        path=path,
-        identity=AlignmentClipIdentity(resolved_path, stat.st_size, stat.st_mtime_ns),
-    )
+    return VideoClipRequest(path)
 
 
 def _audio_channel_count(path: Path) -> int:

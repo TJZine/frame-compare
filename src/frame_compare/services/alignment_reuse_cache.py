@@ -20,7 +20,6 @@ from frame_compare.services.alignment_evidence import (
     AlignmentStabilitySummary,
 )
 from frame_compare.services.alignment_keys import alignment_key
-from frame_compare.services.alignment_sources import require_current_alignment_sources
 from frame_compare.services.types import (
     AlignmentResult,
     AlignmentReuseCacheOrigin,
@@ -439,7 +438,6 @@ def load_reusable_offset_entries(
     comparisons: list[AlignmentClipRequest] | None = None,
 ) -> dict[str, ReusableAlignmentEntry] | None:
     """Load complete reusable previous-offset entries, or return ``None``."""
-    require_current_alignment_sources(request)
     if _has_duplicate_comparison_keys(request):
         return None
     cache_path = _cache_path(request)
@@ -514,7 +512,6 @@ def load_reusable_offset_entries(
                 exc_info=exc,
             )
             return None
-    require_current_alignment_sources(request)
     return results
 
 
@@ -630,8 +627,7 @@ def save_reusable_offsets(
     *,
     accepted_at: str | None = None,
 ) -> None:
-    """Persist a prepared source set after rechecking source freshness."""
-    require_current_alignment_sources(request)
+    """Persist reusable offsets for the prepared source set."""
     if candidate.source_set_key != source_set_cache_key(request):
         raise ValueError("alignment candidate belongs to a different source set")
 
@@ -655,14 +651,12 @@ def save_reusable_offsets(
 
     def guard_publication() -> None:
         raise_if_cancelling()
-        require_current_alignment_sources(request)
 
     try:
         with exclusive_file_lock(_cache_lock_path(cache_path), abort_check=raise_if_cancelling):
             data = _initial_write_data(cache_path)
             source_sets = cast(dict[str, object], data["source_sets"])
             source_sets[source_set_key] = source_set
-            require_current_alignment_sources(request)
             try:
                 content = tomli_w.dumps(data).encode("utf-8")
             except (RecursionError, TypeError, ValueError) as exc:

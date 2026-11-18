@@ -28,7 +28,6 @@ from frame_compare.services.alignment_reuse_cache import (
     load_reusable_offset_entries,
     source_set_cache_key,
 )
-from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentResult,
     ComparisonResolution,
@@ -804,14 +803,7 @@ def test_shared_reuse_cache_identity_drift_is_miss(
     _write_computed(request)
 
     changed_request = mutate(request, tmp_path)
-    if all(
-        clip.identity_is_current()
-        for clip in [changed_request.reference, *changed_request.comparisons]
-    ):
-        assert load_reusable_offset_entries(changed_request) is None
-    else:
-        with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-            load_reusable_offset_entries(changed_request)
+    assert load_reusable_offset_entries(changed_request) is None
 
 
 @pytest.mark.parametrize(
@@ -1160,27 +1152,6 @@ def test_shared_reuse_cache_rejects_cross_wired_identity_or_warns_on_scalar(
     assert warn.call_args.args[0] == expected
 
 
-def test_source_change_during_atomic_write_preserves_cache(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    request = _request(tmp_path)
-    _write_computed(request)
-    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
-    original = cache_file.read_bytes()
-    real_fsync = os.fsync
-
-    def change_source_at_fsync(fd: int) -> None:
-        real_fsync(fd)
-        request.comparisons[0].path.write_bytes(b"new source with a different size")
-
-    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", change_source_at_fsync)
-    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-        save_resolutions(request, [_resolution(request, result=_result(request, frame_offset=8))])
-
-    assert cache_file.read_bytes() == original
-    assert list(cache_file.parent.glob(f".{cache_file.name}.*")) == []
-
-
 @pytest.mark.parametrize(
     ("boundary", "error"),
     [
@@ -1322,26 +1293,6 @@ def test_shared_reuse_cache_ignores_unrelated_ineligible_resolution_items(
 
     assert loaded is not None
     assert len(loaded) == 1
-
-
-@pytest.mark.parametrize("changed_role", ["reference", "comparison"])
-def test_frozen_source_drift_rejects_primed_cache_and_write(
-    tmp_path: Path,
-    changed_role: str,
-) -> None:
-    request = _request(tmp_path)
-    _write_computed(request)
-    assert load_reusable_offset_entries(request) is not None
-    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
-    original_cache = cache_file.read_bytes()
-    clip = request.reference if changed_role == "reference" else request.comparisons[0]
-    clip.path.write_bytes(b"replacement source with different size")
-
-    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-        load_reusable_offset_entries(request)
-    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-        save_resolutions(request, [_resolution(request)])
-    assert cache_file.read_bytes() == original_cache
 
 
 def test_computed_result_requires_matching_current_time_but_cached_evidence_is_historical() -> None:

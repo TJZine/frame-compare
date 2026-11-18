@@ -601,30 +601,3 @@ def test_native_review_never_reads_terminal_input(
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
         {}, "keep_current", comparisons_kept=1
     )
-
-
-@pytest.mark.parametrize("changed_role", ["reference", "comparison"])
-def test_source_changed_during_review_cannot_save_new_manual_authority(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    changed_role: str,
-) -> None:
-    _set_interactive(monkeypatch)
-
-    def launch(*_args: object, **_kwargs: object):
-        session = _session(tmp_path)
-        write_alignment_review_result(
-            session,
-            AlignmentReviewResult(
-                session_id=session.session_id,
-                decisions=(ConfirmedAlignmentReviewDecision("ref:comparison", 120, 108),),
-            ),
-        )
-        changed = tmp_path / ("ref.mkv" if changed_role == "reference" else "comparison.mkv")
-        changed.write_bytes(b"changed after frozen request")
-        return session, 0.0
-
-    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
-    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-        _call(tmp_path, config=AlignmentConfig(use_vsview=True))
-    assert load_manual_overrides(tmp_path) == {}

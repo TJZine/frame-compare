@@ -11,7 +11,7 @@ import pytest
 
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import phase_alignment
-from frame_compare.orchestration.context import ClipState, RunContext
+from frame_compare.orchestration.context import ClipState
 from frame_compare.services import alignment as alignment_service
 from frame_compare.services.types import (
     AlignmentConfig,
@@ -28,7 +28,6 @@ from tests.alignment_review_test_support import (
 from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
 from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
-from tests.services.alignment_resolution_test_support import save_resolutions
 
 
 @pytest.mark.parametrize("speed, enabled", [("quality", True), ("fast", True), ("fast", False)])
@@ -288,97 +287,13 @@ def test_tampered_diagnostic_cannot_authorize_provisional_alignment_or_trims(
     assert output.comparisons[0].audio_attempt == attempt
 
 
-@pytest.mark.parametrize("changed_role", ["reference", "comparison"])
-def test_primed_cache_source_drift_after_request_freezing_cannot_apply_trims(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    changed_role: str,
-) -> None:
-    from frame_compare.services.alignment_reuse_cache import (
-        CACHE_FILE_NAME,
-        comparison_cache_key,
-        load_reusable_offset_entries,
-    )
-    from frame_compare.services.errors import AudioAlignmentError
-    from frame_compare.services.types import ComparisonResolution
-    from tests.alignment_review_test_support import frame_lag, trusted_audio_attempt
-
-    comparison_path = tmp_path / "comparison_videos" / "encode.mkv"
-    comparison_path.parent.mkdir(parents=True)
-    comparison_path.write_bytes(b"comparison")
-    ctx = _context(tmp_path, comparisons=[_clip(comparison_path, label="Encode")])
-    ctx.config.audio_alignment.cache_results = True
-    ctx.config.audio_alignment.use_vsview = False
-
-    def prepared(clip: ClipState) -> ClipState:
-        stat = clip.path.stat()
-        return replace(
-            clip,
-            probe=replace(
-                clip.probe,
-                fingerprint=replace(
-                    clip.probe.fingerprint,
-                    size_bytes=stat.st_size,
-                    mtime_ns=stat.st_mtime_ns,
-                ),
-            ),
-        )
-
-    ctx.reference = prepared(ctx.reference)
-    ctx.comparisons = [prepared(ctx.comparisons[0])]
-    frozen = phase_alignment._alignment_request_from_context(ctx)
-    accepted = AlignmentResult(
-        reference_clip=frozen.reference.path.name,
-        comparison_clip=frozen.comparisons[0].path.name,
-        frame_offset=3,
-        time_offset_seconds=frame_lag(3) / 8000,
-        correlation_score=1.0,
-        algorithm="cross_correlation",
-        source="computed",
-        audio_attempt=trusted_audio_attempt(frame_offset=3),
-        stability=trusted_audio_attempt(frame_offset=3).stability,
-    )
-    save_resolutions(
-        frozen,
-        [
-            ComparisonResolution(
-                result=accepted,
-                comparison_cache_key=comparison_cache_key(frozen.comparisons[0]),
-                origin="computed_this_run",
-            )
-        ],
-    )
-    assert load_reusable_offset_entries(frozen) is not None
-    cache_file = frozen.shared_alignment_cache_dir / CACHE_FILE_NAME
-    original_cache = cache_file.read_bytes()
-    real_request_factory = phase_alignment._alignment_request_from_context
-
-    def freeze_then_change(context: RunContext) -> AlignmentRequest:
-        request = real_request_factory(context)
-        changed = request.reference if changed_role == "reference" else request.comparisons[0]
-        changed.path.write_bytes(b"changed source after request freezing")
-        return request
-
-    monkeypatch.setattr(phase_alignment, "_alignment_request_from_context", freeze_then_change)
-    calculate_trims = pytest.fail
-    monkeypatch.setattr(phase_alignment, "calculate_alignment_trims", calculate_trims)
-    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-        _run_align_phase(ctx, selected_frames=[0])
-    assert ctx.reference.trim.trim_start_frames == 0
-    assert ctx.comparisons[0].trim.trim_start_frames == 0
-    assert ctx.comparisons[0].alignment is None
-    assert cache_file.read_bytes() == original_cache
-
-
 @pytest.mark.parametrize(
     "unavailable_kind", ["stream", "timeline", "ffmpeg_error", "ffmpeg_missing"]
 )
-@pytest.mark.parametrize("changed_role", ["reference", "comparison", None])
 @pytest.mark.parametrize("cache_results", [False, True])
-def test_optional_alignment_source_drift_stops_downstream_phases(
+def test_unavailable_alignment_warns_and_rendering_continues(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    changed_role: str | None,
     cache_results: bool,
     unavailable_kind: str,
 ) -> None:
@@ -389,7 +304,6 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
     from frame_compare.orchestration.execution_types import ExecutionState, MetadataPrefetch
     from frame_compare.orchestration.phases import PhaseStatus, execute_phases
     from frame_compare.services import alignment_audio
-    from frame_compare.services.errors import AlignmentSourceIdentityError
     from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
     from frame_compare.utils.progress import NullProgressReporter
     from tests.orchestration.execute_run_helpers import FakeFFmpegRunner
@@ -422,9 +336,6 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
     ctx.comparisons = [prepared(ctx.comparisons[0])]
 
     def unavailable_probe(_path: Path, **_kwargs: object) -> alignment_audio.ProbedStreams:
-        if changed_role is not None:
-            changed = ctx.reference if changed_role == "reference" else ctx.comparisons[0]
-            changed.path.write_bytes(b"changed prepared source during unavailable audio probe")
         if unavailable_kind == "ffmpeg_error":
             raise FFmpegError("probe failed", returncode=1)
         if unavailable_kind == "ffmpeg_missing":
@@ -478,32 +389,21 @@ def test_optional_alignment_source_drift_stops_downstream_phases(
         metadata_prefetch=MetadataPrefetch(metadata=None, was_attempted=False),
     )
     run = execute_phases([align, *downstream], ctx, NullProgressReporter())
-    if changed_role is None:
-        asyncio.run(run)
-        assert align.status == (
-            PhaseStatus.COMPLETED if unavailable_kind == "timeline" else PhaseStatus.WARNED
-        ), state.warnings
-        assert downstream[0].status == PhaseStatus.COMPLETED
-        assert state.artifacts.render is not None
-        assert paths_by_label(state.artifacts.render.clips)
-        assert ctx.comparisons[0].alignment is None
-        detail = {
-            "stream": "audio stream override",
-            "timeline": "selected_audio_timeline_unavailable",
-            "ffmpeg_error": "FFmpeg failed with exit code 1",
-            "ffmpeg_missing": "FFmpeg binary not found",
-        }[unavailable_kind]
-        assert any(detail in warning.text for warning in state.warnings)
-    else:
-        with pytest.raises(AlignmentSourceIdentityError, match="Start a fresh run") as caught:
-            asyncio.run(run)
-        assert caught.value.code == "FC-4005"
-        assert caught.value.category == "source_identity_changed"
-        assert align.status == PhaseStatus.FAILED
-        assert all(phase.status == PhaseStatus.PENDING for phase in downstream)
-        assert state.artifacts.render is None
-        assert ctx.reference.trim.trim_start_frames == 0
-        assert ctx.comparisons[0].trim.trim_start_frames == 0
+    asyncio.run(run)
+    assert align.status == (
+        PhaseStatus.COMPLETED if unavailable_kind == "timeline" else PhaseStatus.WARNED
+    ), state.warnings
+    assert downstream[0].status == PhaseStatus.COMPLETED
+    assert state.artifacts.render is not None
+    assert paths_by_label(state.artifacts.render.clips)
+    assert ctx.comparisons[0].alignment is None
+    detail = {
+        "stream": "audio stream override",
+        "timeline": "selected_audio_timeline_unavailable",
+        "ffmpeg_error": "FFmpeg failed with exit code 1",
+        "ffmpeg_missing": "FFmpeg binary not found",
+    }[unavailable_kind]
+    assert any(detail in warning.text for warning in state.warnings)
 
 
 @pytest.mark.parametrize(

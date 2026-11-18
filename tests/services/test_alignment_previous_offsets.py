@@ -3,14 +3,11 @@
 # pyright: reportPrivateUsage=false
 
 import asyncio
-import errno
 import json
-import multiprocessing
 import tomllib
 from dataclasses import replace
-from functools import partial
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import pytest
@@ -30,7 +27,7 @@ from frame_compare.services.alignment_reuse_cache import (
 )
 from frame_compare.services.alignment_reuse_prompt import PreviousOffsetPromptInput
 from frame_compare.services.alignment_vsview import AlignmentVSViewOutcome
-from frame_compare.services.errors import AlignmentSourceIdentityError, AudioAlignmentError
+from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentResult,
@@ -38,7 +35,6 @@ from frame_compare.services.types import (
     PreviousOffsetReusePolicy,
     ReusableAlignmentEntry,
 )
-from frame_compare.utils import file_lock
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import (
     AlignmentCacheSettings,
@@ -922,68 +918,6 @@ def test_align_clips_from_request_rejects_invalid_previous_offset_policy_combina
         align_clips_from_request(request, config)
 
 
-class _ProcessEvent(Protocol):
-    def set(self) -> None: ...
-
-    def wait(self, timeout: float | None = None) -> bool: ...
-
-
-def _hold_shared_cache_lock(lock: Path, acquired: _ProcessEvent, release: _ProcessEvent) -> None:
-    with file_lock.exclusive_file_lock(lock):
-        acquired.set()
-        assert release.wait(10), "parent did not release the lock holder"
-
-
-def test_cache_lock_timeout_after_source_change_rejects_live_offsets(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ref = tmp_path / "ref.mkv"
-    comp = tmp_path / "comp.mkv"
-    ref.touch()
-    comp.touch()
-    request = _alignment_request(tmp_path, reference=ref, comparisons=[comp])
-    cache_file = request.shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME
-    context = multiprocessing.get_context("spawn")
-    acquired = context.Event()
-    release = context.Event()
-    holder = context.Process(
-        target=_hold_shared_cache_lock,
-        args=(cache_file.with_suffix(".toml.lock"), acquired, release),
-    )
-    real_acquire = file_lock._acquire_platform_lock
-
-    def change_source_on_contention(fd: int) -> None:
-        try:
-            real_acquire(fd)
-        except OSError as exc:
-            if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}:
-                comp.write_bytes(b"source changed during the contended cache write")
-            raise
-
-    monkeypatch.setattr(file_lock, "_acquire_platform_lock", change_source_on_contention)
-    monkeypatch.setattr(
-        "frame_compare.services.alignment_reuse_cache.exclusive_file_lock",
-        partial(file_lock.exclusive_file_lock, timeout_seconds=0),
-    )
-    holder.start()
-    try:
-        assert acquired.wait(5), "child did not acquire the shared cache lock"
-        with patch("frame_compare.services.alignment_reuse_cache.log.warning") as warn:
-            with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
-                align_clips_from_request(request, AlignmentConfig())
-            assert warn.call_args.args[0] == "alignment_reuse_cache_write_failed"
-            assert isinstance(warn.call_args.kwargs["exc_info"], file_lock.FileLockTimeoutError)
-        assert comp.stat().st_size > 0
-        assert not cache_file.exists()
-    finally:
-        release.set()
-        holder.join(timeout=5)
-        if holder.is_alive():
-            holder.kill()
-            holder.join(timeout=5)
-        assert holder.exitcode == 0
-
-
 def test_serialization_failure_preserves_cache_and_returns_live_alignment(tmp_path: Path) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
@@ -1065,50 +999,3 @@ def test_prompt_mode_admits_only_normalizable_confirmation_timestamps(
         entries = load_reusable_offset_entries(request)
         assert entries is not None and entries[key].accepted_at == expected_utc
         warn.assert_not_called()
-
-
-def test_confirmed_cache_reuse_rechecks_sources_before_early_return(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    reference = tmp_path / "ref.mkv"
-    comparison = tmp_path / "comp.mkv"
-    reference.touch()
-    comparison.touch()
-    request = _alignment_request(
-        tmp_path,
-        reference=reference,
-        comparisons=[comparison],
-        previous_offsets="always",
-    )
-    accepted = AlignmentResult(
-        reference_clip=reference.name,
-        comparison_clip=comparison.name,
-        frame_offset=0,
-        time_offset_seconds=0.0,
-        correlation_score=1.0,
-        algorithm=None,
-        source="manual",
-    )
-    save_resolutions(
-        request,
-        [
-            ComparisonResolution(
-                result=accepted,
-                comparison_cache_key=comparison_cache_key(request.comparisons[0]),
-                origin="interactive_confirmed_this_run",
-            )
-        ],
-    )
-    cache_file = request.shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME
-    original_cache = cache_file.read_bytes()
-
-    def change_source(**_kwargs: Any) -> None:
-        comparison.write_bytes(b"changed after cache application")
-
-    monkeypatch.setattr(
-        "frame_compare.services.alignment.present_alignment_evidence", change_source
-    )
-    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-        align_clips_from_request(request, AlignmentConfig())
-    assert cache_file.read_bytes() == original_cache

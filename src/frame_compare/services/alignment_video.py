@@ -42,7 +42,6 @@ from frame_compare.services.alignment_policy import (
 from frame_compare.services.alignment_policy import (
     position_winner as _position_winner,
 )
-from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.luma import luma_plane
 
@@ -64,10 +63,9 @@ _BASE_POSITION_COUNT = 12
 
 @dataclass(frozen=True, slots=True)
 class VideoClipRequest:
-    """Path, freshness identity, and resolved active rectangle for one source."""
+    """Path and resolved active rectangle for one source."""
 
     path: Path
-    identity: AlignmentClipIdentity
     active_rect: ActiveRect | None = None
 
 
@@ -129,8 +127,6 @@ def check_video_alignment(
         return _failed()
     if _is_cancelled(cancellation):
         return _failed()
-    if not _identities_match(reference) or not _identities_match(comparison):
-        return _failed()
 
     if on_stage is not None:
         on_stage("indexing video")
@@ -139,13 +135,9 @@ def check_video_alignment(
         reference_source = _load_source(loader, reference.path, cancellation)
         if _is_cancelled(cancellation):
             return _failed()
-        if not _identities_match(reference):
-            return _failed()
 
         comparison_source = _load_source(loader, comparison.path, cancellation)
         if _is_cancelled(cancellation):
-            return _failed()
-        if not _identities_match(reference) or not _identities_match(comparison):
             return _failed()
         index_build_seconds = time.monotonic() - load_started
     except RuntimeError:
@@ -191,8 +183,6 @@ def check_video_alignment(
         if scored_positions is None:
             return _failed()
         if _is_cancelled(cancellation):
-            return _failed()
-        if not _identities_match(reference) or not _identities_match(comparison):
             return _failed()
         reference_frames.clear()
         base_positions, winners, margins = scored_positions
@@ -275,8 +265,6 @@ def check_video_alignment(
                 for frame in selected:
                     if _is_cancelled(cancellation):
                         return _failed()
-                    if not _identities_match(reference) or not _identities_match(comparison):
-                        return _failed()
                     scored = _score_hypotheses(
                         reference_node,
                         comparison_node,
@@ -334,8 +322,6 @@ def check_video_alignment(
         )
         if _is_cancelled(cancellation):
             return _failed()
-        if not _identities_match(reference) or not _identities_match(comparison):
-            return _failed()
         return VideoCheckObservation(
             observation="observed",
             scored_offsets=scored_offsets,
@@ -362,16 +348,6 @@ def _failed() -> VideoCheckObservation:
 
 def _is_cancelled(cancellation: Event | None) -> bool:
     return cancellation is not None and cancellation.is_set()
-
-
-def _identities_match(clip: VideoClipRequest) -> bool:
-    try:
-        stat = clip.path.stat()
-        return clip.path.resolve() == clip.identity.path.resolve() and (
-            stat.st_size == clip.identity.size_bytes and stat.st_mtime_ns == clip.identity.mtime_ns
-        )
-    except OSError:
-        return False
 
 
 def _prepare_luma(clip: vs.VideoNode, active_rect: ActiveRect | None) -> vs.VideoNode:
