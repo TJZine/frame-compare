@@ -40,7 +40,7 @@ from frame_compare.services.errors import (
     TmdbError,
     TmdbRateLimitedError,
 )
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.cache_errors import CacheCorruptionError
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.vs.errors import (
     PluginNotFoundError,
@@ -84,7 +84,6 @@ def _render_rich_markup(markup: str) -> str:
         (RenderError, (), "FC-4004"),
         (AudioAlignmentError, ("test",), "FC-4005"),
         (CacheCorruptionError, (Path("/cache"),), "FC-4006"),
-        (CacheVersionMismatchError, ("1.0", "2.0"), "FC-4007"),
         (SelectionError, ("reason", 10, 5), "FC-4012"),
         (EncodingError, (Path("/out.png"), "test"), "FC-4013"),
         (OverlayError, ("test",), "FC-4014"),

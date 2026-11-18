@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-CacheLoadReason = Literal["not_found", "corrupted", "version_mismatch", "mismatched_inputs"]
+CacheLoadReason = Literal["not_found", "corrupted", "mismatched_inputs"]
 ActiveRectSource = Literal[
     "explicit",
     "dimension-derived",
@@ -30,14 +30,11 @@ class ClipIdentity:
         path: Original input path
         size: File size in bytes
         mtime: Modification time
-        sha1: Legacy optional serialized diagnostic. Current analysis key generation
-            neither populates nor consults this field.
     """
 
     path: str
     size: int
     mtime: float
-    sha1: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +96,6 @@ class MetricsMetadata:
         active_rect_source: Provenance for the metric active rectangle
         active_rect_detection_mode: Active-rect detection mode used by preparation
         active_rect_algorithm_id: Resolver algorithm ID used by preparation
-        version: Cache schema version
     """
 
     frame_count: int
@@ -118,7 +114,6 @@ class MetricsMetadata:
     active_rect_source: ActiveRectSource = "full-frame"
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio"
     active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v3"
-    version: int = 8
 
     def __post_init__(self) -> None:
         if self.source_frame_count == -1:

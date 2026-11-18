@@ -150,7 +150,6 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
                         path=str(source_path),
                         size=source_path.stat().st_size,
                         mtime=source_path.stat().st_mtime,
-                        sha1=None,
                     )
                 ],
             ),
@@ -495,7 +494,6 @@ enable = false
                 metric_backend=metric_backend(config),
                 algorithm_identity_json=stable_metric_algorithm_identity_json(config),
                 metric_active_rect=metric_active_rect,
-                version=cache_io.CACHE_VERSION,
             ),
         )
         cache_io.save_metrics_cache(metrics, cache_dir)

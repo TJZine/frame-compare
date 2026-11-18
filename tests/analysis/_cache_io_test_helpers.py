@@ -4,7 +4,7 @@ import os
 from fractions import Fraction
 from pathlib import Path
 
-from frame_compare.analysis.cache_io import CACHE_VERSION, metrics_cache_filename
+from frame_compare.analysis.cache_io import metrics_cache_filename
 from frame_compare.analysis.metric_identity import (
     metric_algorithm_id,
     metric_backend,
@@ -38,7 +38,6 @@ def valid_cache_metadata_payload(
         "metric_source_start": 0,
         "metric_source_end_exclusive": frame_count,
         "fps": "24",
-        "config_fingerprint": "fp",
         "analysis_source_path": "",
         "clips": [],
         "performance_mode": config.performance_mode.value,
@@ -49,7 +48,6 @@ def valid_cache_metadata_payload(
         "active_rect_source": active_rect_source,
         "active_rect_detection_mode": active_rect_detection_mode,
         "active_rect_algorithm_id": active_rect_algorithm_id,
-        "version": CACHE_VERSION,
     }
 
 
@@ -95,5 +93,4 @@ def metrics_metadata(
         active_rect_source=active_rect_source,
         active_rect_detection_mode=active_rect_detection_mode,
         active_rect_algorithm_id=active_rect_algorithm_id,
-        version=CACHE_VERSION,
     )

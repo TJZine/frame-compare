@@ -12,11 +12,6 @@ from frame_compare.analysis.types import (
 )
 
 
-def test_metrics_metadata_default_schema_version() -> None:
-    mm = MetricsMetadata(frame_count=100, fps=Fraction(24), config_fingerprint="fp", clips=[])
-    assert mm.version == 8
-
-
 def test_performance_metrics_require_a_sorted_explicit_source_map() -> None:
     metadata = MetricsMetadata(
         frame_count=2,
