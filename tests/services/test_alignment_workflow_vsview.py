@@ -16,14 +16,18 @@ import tomli_w
 
 import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
-from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME,
     comparison_cache_key,
     source_set_cache_key,
 )
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentResult, ComparisonResolution
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentOperationOutcome,
+    AlignmentResult,
+    ComparisonResolution,
+)
 from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from frame_compare.vsview.alignment_review_contract import (
@@ -89,7 +93,9 @@ def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, frame_offset:
     )
 
 
-def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, config: AlignmentConfig):
+def _run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, config: AlignmentConfig
+) -> AlignmentOperationOutcome:
     reference = tmp_path / "ref.mkv"
     comparison = tmp_path / "comparison.mkv"
     reference.touch()
@@ -100,10 +106,10 @@ def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, config: AlignmentCo
         comparisons=[comparison],
         generated_dir=tmp_path,
     )
-    return align_clips_from_request(request, config)
+    return asyncio.run(_align_clips_from_request(request, config))
 
 
-def test_confirmed_native_pair_replaces_computed_offset_and_persists_override(
+def test_confirmed_native_pair_replaces_computed_offset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def launch(*_args: object, **_kwargs: object):
@@ -125,14 +131,16 @@ def test_confirmed_native_pair_replaces_computed_offset_and_persists_override(
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    results = _run(
+    outcome = _run(
         tmp_path,
         monkeypatch,
         config=AlignmentConfig(use_vsview=True, cache_results=False),
     )
 
-    assert results[0].frame_offset == 12
-    assert load_manual_overrides(tmp_path)["ref:comparison"].frame_offset == 12
+    assert outcome.results[0].frame_offset == 12
+    (resolution,) = outcome.resolutions
+    assert resolution.origin == "interactive_confirmed_this_run"
+    assert resolution.accepted_offset == 12
 
 
 def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
@@ -257,13 +265,13 @@ def test_optional_native_review_retains_computed_offset(
         return session, 0.0
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
-    results = _run(
+    outcome = _run(
         tmp_path,
         monkeypatch,
         config=AlignmentConfig(use_vsview=True, cache_results=False),
     )
-    assert results[0].frame_offset == 3
-    assert load_manual_overrides(tmp_path) == {}
+    assert outcome.results[0].frame_offset == 3
+    assert outcome.resolutions[0].origin == "computed_this_run"
 
 
 def test_forced_missing_result_stops_alignment(
@@ -336,11 +344,11 @@ def test_decode_limits_retain_computed_authority_or_fail_forced_review(
         with pytest.raises(AudioAlignmentError, match="valid VSView review result"):
             _run(tmp_path, monkeypatch, config=config)
     else:
-        results = _run(tmp_path, monkeypatch, config=config)
-        assert results[0].frame_offset == 3
-        assert results[0].source == "computed"
-        assert results[0].applied
-    assert load_manual_overrides(tmp_path) == {}
+        outcome = _run(tmp_path, monkeypatch, config=config)
+        assert outcome.results[0].frame_offset == 3
+        assert outcome.results[0].source == "computed"
+        assert outcome.results[0].applied
+        assert outcome.resolutions[0].origin == "computed_this_run"
 
 
 def test_trusted_manual_confirmation_keeps_original_computed_fallback_on_disk(
@@ -449,15 +457,15 @@ def test_aliased_comparisons_keep_distinct_run_local_confirmations(
         return session, 0.0
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
-    results = align_clips_from_request(request, AlignmentConfig(use_vsview=True))
-    assert [(item.comparison_clip, item.frame_offset) for item in results] == [
+    outcome = asyncio.run(_align_clips_from_request(request, AlignmentConfig(use_vsview=True)))
+    assert [(item.comparison_clip, item.frame_offset) for item in outcome.results] == [
         (first.name, 0),
         (second.name, 4),
     ]
-    assert {key: row.frame_offset for key, row in load_manual_overrides(tmp_path).items()} == {
-        "ref:first": 0,
-        "ref:second": 4,
-    }
+    assert [(item.origin, item.accepted_offset) for item in outcome.resolutions] == [
+        ("interactive_confirmed_this_run", 0),
+        ("interactive_confirmed_this_run", 4),
+    ]
     if existing_bytes is None:
         assert not cache_file.exists()
         assert not cache_file.with_suffix(".toml.lock").exists()

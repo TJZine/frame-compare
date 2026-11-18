@@ -421,7 +421,7 @@ def test_unavailable_alignment_warns_and_rendering_continues(
             "Alpha +0f · Beta +0f · previously confirmed",
         ),
         (
-            ("preexisting_manual_override", "preexisting_manual_override"),
+            ("interactive_confirmed_this_run", "interactive_confirmed_this_run"),
             False,
             "Alpha +0f · Beta +0f · manual offset",
         ),
@@ -436,7 +436,7 @@ def test_unavailable_alignment_warns_and_rendering_continues(
             "Alpha +0f confirmed in VSView · Beta +0f kept",
         ),
         (
-            ("preexisting_manual_override", "computed_this_run"),
+            ("interactive_confirmed_this_run", "computed_this_run"),
             False,
             "Alpha +0f manual offset · Beta +0f audio",
         ),

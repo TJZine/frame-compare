@@ -418,7 +418,6 @@ def test_generated_ready_block_fits_narrow_terminal(
         ("shared_computed_offsets", -2, None, "audio -2f · reused", False),
         ("interactive_confirmed_this_run", 3, None, "previously confirmed +3f", False),
         ("shared_previous_offsets", 5, None, "previously confirmed +5f", False),
-        ("preexisting_manual_override", -1, None, "manual offset -1f", False),
         ("none", None, "provisional", "audio +6f · not applied", True),
         ("none", None, "unavailable", "no audio match", True),
     ],

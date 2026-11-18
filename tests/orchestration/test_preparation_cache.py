@@ -41,7 +41,6 @@ from frame_compare.orchestration.probing.probe_cache import (
     live_probe_fingerprint,
     save_clip_probe_cache,
 )
-from frame_compare.services.alignment_manual_overrides import MANUAL_OVERRIDES_FILE
 from tests.orchestration.execute_run_helpers import (
     analysis_selection_domain_for_cache_inputs,
     metric_cache_fingerprint,
@@ -124,9 +123,6 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
     metrics_path.write_text("{}", encoding="utf-8")
     other_metrics_path = metrics_dir / "other__other.compframes"
     other_metrics_path.write_text("{}", encoding="utf-8")
-    manual_overrides_path = tmp_path / "generated" / MANUAL_OVERRIDES_FILE
-    manual_overrides_path.parent.mkdir(parents=True, exist_ok=True)
-    manual_overrides_path.write_text('version = "1"\n', encoding="utf-8")
     alignment_cache_path = workspace.shared_alignment_cache_dir / "shared_prev_offset"
     alignment_cache_path.parent.mkdir(parents=True, exist_ok=True)
     alignment_cache_path.write_text("preserve me\n", encoding="utf-8")
@@ -140,7 +136,6 @@ def test_execute_prep_no_cache_removes_only_matching_shared_metrics_cache(tmp_pa
 
     assert not metrics_path.exists()
     assert other_metrics_path.exists()
-    assert manual_overrides_path.exists()
     assert alignment_cache_path.exists()
 
 

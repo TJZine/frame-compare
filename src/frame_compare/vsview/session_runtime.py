@@ -178,8 +178,6 @@ class SessionConsole:
             and offset is not None
         ):
             return f"previously confirmed {offset:+d}f", False
-        if origin == "preexisting_manual_override" and offset is not None:
-            return f"manual offset {offset:+d}f", False
         if state == "provisional" and isinstance(candidate_offset, int):
             return f"audio {candidate_offset:+d}f · not applied", True
         return "no audio match", True

@@ -44,7 +44,6 @@ from frame_compare.services.alignment_evidence import (
     analysis_stream_start,
 )
 from frame_compare.services.alignment_keys import alignment_key
-from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.alignment_presentation import (
     panel_audio_review_lines,
     present_alignment_evidence,
@@ -58,7 +57,6 @@ from frame_compare.services.alignment_resolution import (
     confirm_manual,
     ordered_results,
     resolution_from_computation,
-    resolution_from_override,
 )
 from frame_compare.services.alignment_reuse_cache import (
     comparison_cache_key,
@@ -190,35 +188,6 @@ def _check_duplicate_stems(comparisons: list[Path]) -> None:
         raise AudioAlignmentError(
             "Duplicate comparison clip stems detected (alignment keys use filename stems). "
             f"Rename clips to be unique. Duplicates: {formatted}"
-        )
-
-
-def _apply_manual_overrides(
-    *,
-    reference: Path,
-    comparisons: list[AlignmentClipRequest],
-    cache_dir: Path,
-    resolutions: dict[str, ComparisonResolution],
-    fps_reference: Fraction,
-) -> None:
-    manual_overrides = load_manual_overrides(cache_dir)
-
-    for comp in comparisons:
-        key = alignment_key(reference, comp.path)
-        if key not in manual_overrides:
-            continue
-        override = manual_overrides[key]
-        result = AlignmentResult(
-            reference_clip=reference.name,
-            comparison_clip=comp.path.name,
-            frame_offset=override.frame_offset,
-            time_offset_seconds=override.frame_offset / float(fps_reference),
-            correlation_score=1.0,
-            algorithm=None,
-            source="manual",
-        )
-        resolutions[key] = resolution_from_override(
-            result, comparison_cache_key=comparison_cache_key(comp)
         )
 
 
@@ -1077,34 +1046,18 @@ async def align_clips_from_request(
         if progress:
             progress.set_description("Align · checking saved offsets")
 
-        resolutions: dict[str, ComparisonResolution] = {}
         fps_reference = Fraction(
             request.reference.effective_fps_num,
             request.reference.effective_fps_den,
         )
-        _apply_manual_overrides(
-            reference=reference,
-            comparisons=request.comparisons,
-            cache_dir=request.generated_dir,
-            resolutions=resolutions,
-            fps_reference=fps_reference,
-        )
-        unresolved_comparisons = [
-            comparison
-            for comparison in request.comparisons
-            if alignment_key(reference, comparison.path) not in resolutions
-        ]
-
-        reused, completed_confirmed_reuse = apply_shared_reuse(
+        resolutions, completed_confirmed_reuse = apply_shared_reuse(
             request=request,
-            unresolved_comparisons=unresolved_comparisons,
+            unresolved_comparisons=request.comparisons,
             cache_results=config.cache_results,
             progress=progress,
             no_color=config.no_color,
             verbose=verbose,
         )
-
-        resolutions.update(reused)
 
         requested_comparisons = [
             comparison

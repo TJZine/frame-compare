@@ -105,7 +105,6 @@ def _normal_evidence_rows(
             "shared_computed_offsets": "reused from last run",
             "shared_previous_offsets": "previously confirmed",
             "interactive_confirmed_this_run": "manual offset",
-            "preexisting_manual_override": "manual offset",
         }.get(origin, "" if review_pending else "applied")
         heading = f"{result.frame_offset:+d}f" + (f" · {state}" if state else "")
         rows.append(Text(heading + pending, style=OK))

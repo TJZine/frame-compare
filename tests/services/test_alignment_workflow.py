@@ -30,7 +30,6 @@ from frame_compare.services.alignment_audio import (
     VideoStreamStart,
 )
 from frame_compare.services.alignment_evidence import MAX_AUDIO_CHUNKS
-from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
 from frame_compare.services.alignment_streaming import (
     CollectionCleanup,
     CollectionFacts,
@@ -400,56 +399,6 @@ def test_no_computed_cache_write_without_video_loader(
     assert result.applied is False
     assert result.diagnostic == "video_check_unavailable"
     assert not (generated / "shared" / "alignment_reuse.toml").exists()
-
-
-def test_manual_override_wins_without_decoding(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reference, comparison = _media(tmp_path)
-    generated = tmp_path / "generated"
-    generated.mkdir(parents=True)
-    save_manual_override(
-        generated,
-        ManualOverride(
-            reference_clip=reference.stem,
-            comparison_clip=comparison.stem,
-            frame_offset=3,
-            timestamp="2026-09-25T00:00:00Z",
-        ),
-    )
-    monkeypatch.setattr(
-        alignment,
-        "collect_paired_audio_chunks",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("manual wins; no decode")),
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "probe_streams",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("manual wins; no probe")),
-    )
-    monkeypatch.setattr(
-        alignment_audio,
-        "run_subprocess",
-        lambda *a, **k: (_ for _ in ()).throw(
-            AssertionError("manual wins; no fallback transport probe")
-        ),
-    )
-    config = _config()
-    request_fps = Fraction(25, 1)
-
-    request = alignment_request(
-        reference=reference,
-        comparisons=[comparison],
-        generated_dir=generated,
-        fps_num=request_fps.numerator,
-        fps_den=request_fps.denominator,
-    )
-    (result,) = run_request(request, config)
-
-    assert result.applied is True
-    assert result.source == "manual"
-    assert result.frame_offset == 3
-    assert result.time_offset_seconds == pytest.approx(3 / float(request_fps))
 
 
 def test_cancelled_collection_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

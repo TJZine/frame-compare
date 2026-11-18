@@ -53,7 +53,6 @@ type _AuthorityOrigin = Literal[
     "shared_computed_offsets",
     "interactive_confirmed_this_run",
     "shared_previous_offsets",
-    "preexisting_manual_override",
     "none",
 ]
 type AlignmentReviewDecisionState = Literal["trusted_automatic", "provisional", "unavailable"]
@@ -62,7 +61,6 @@ MANUAL_AUTHORITY_ORIGINS: frozenset[_AuthorityOrigin] = frozenset(
     {
         "interactive_confirmed_this_run",
         "shared_previous_offsets",
-        "preexisting_manual_override",
     }
 )
 

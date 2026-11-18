@@ -932,14 +932,7 @@ def test_shared_reuse_cache_replaces_v1_without_migrating_entries(tmp_path: Path
     assert "legacy" not in source_sets
 
 
-@pytest.mark.parametrize(
-    "provenance",
-    ["shared_previous_offsets", "preexisting_manual_override"],
-)
-def test_shared_reuse_cache_does_not_write_ineligible_resolution(
-    tmp_path: Path,
-    provenance: str,
-) -> None:
+def test_shared_reuse_cache_does_not_write_ineligible_resolution(tmp_path: Path) -> None:
     request = _request(tmp_path)
 
     save_resolutions(
@@ -948,7 +941,7 @@ def test_shared_reuse_cache_does_not_write_ineligible_resolution(
             _resolution(
                 request,
                 result=_result(request, source="cached"),
-                provenance=provenance,
+                provenance="shared_previous_offsets",
             )
         ],
         accepted_at="2026-06-06T12:00:00Z",

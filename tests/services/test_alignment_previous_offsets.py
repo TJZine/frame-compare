@@ -11,7 +11,6 @@ from typing import Any, cast
 from unittest.mock import Mock, patch
 
 import pytest
-import tomli_w
 
 from frame_compare.services.alignment import align_clips_from_request as _align_clips_from_request
 from frame_compare.services.alignment_evidence import (
@@ -42,7 +41,11 @@ from frame_compare.utils.types import (
     AlignmentClipRequest,
     AlignmentRequest,
 )
-from tests.alignment_review_test_support import frame_lag, trusted_audio_attempt
+from tests.alignment_review_test_support import (
+    frame_lag,
+    provisional_audio_attempt,
+    trusted_audio_attempt,
+)
 from tests.services.alignment_resolution_test_support import save_resolutions
 
 
@@ -689,97 +692,6 @@ def test_align_clips_from_request_prompt_passes_real_shared_prompt_metadata(
     assert rows[0].source == "confirmed"
 
 
-def test_align_clips_from_request_reuses_shared_offsets_for_unresolved_only_after_manual_override(
-    tmp_path: Path,
-) -> None:
-    ref = tmp_path / "ref.mkv"
-    comp_manual = tmp_path / "comp_manual.mkv"
-    comp_shared = tmp_path / "comp_shared.mkv"
-    generated_dir = tmp_path / "generated"
-    shared_cache_dir = tmp_path / "shared-alignment"
-    ref.touch()
-    comp_manual.touch()
-    comp_shared.touch()
-    generated_dir.mkdir()
-    shared_cache_dir.mkdir()
-
-    config = AlignmentConfig()
-    request = _alignment_request(
-        tmp_path,
-        reference=ref,
-        comparisons=[comp_manual, comp_shared],
-        previous_offsets="always",
-        generated_dir=generated_dir,
-        shared_cache_dir=shared_cache_dir,
-    )
-
-    save_resolutions(
-        request,
-        [
-            ComparisonResolution(
-                result=AlignmentResult(
-                    reference_clip=ref.name,
-                    comparison_clip=comp_manual.name,
-                    frame_offset=4,
-                    time_offset_seconds=frame_lag(4) / 8000,
-                    correlation_score=0.91,
-                    algorithm="cross_correlation",
-                    source="computed",
-                    stability=_DEFAULT_STABILITY,
-                    audio_attempt=trusted_audio_attempt(frame_offset=4),
-                ),
-                comparison_cache_key=comparison_cache_key(request.comparisons[0]),
-                origin="computed_this_run",
-            ),
-            ComparisonResolution(
-                result=AlignmentResult(
-                    reference_clip=ref.name,
-                    comparison_clip=comp_shared.name,
-                    frame_offset=7,
-                    time_offset_seconds=frame_lag(7) / 8000,
-                    correlation_score=0.93,
-                    algorithm="cross_correlation",
-                    source="computed",
-                    stability=_DEFAULT_STABILITY,
-                    audio_attempt=trusted_audio_attempt(frame_offset=7),
-                ),
-                comparison_cache_key=comparison_cache_key(request.comparisons[1]),
-                origin="computed_this_run",
-            ),
-        ],
-        accepted_at="2026-06-06T12:00:00Z",
-    )
-
-    manual_overrides = {
-        "version": "2",
-        "ref:comp_manual": {
-            "reference_clip": "ref",
-            "comparison_clip": "comp_manual",
-            "frame_offset": 2,
-            "timestamp": "2026-06-06T12:30:00Z",
-        },
-    }
-    (generated_dir / "manual_overrides.toml").write_text(
-        tomli_w.dumps(manual_overrides),
-        encoding="utf-8",
-    )
-
-    with (
-        patch("frame_compare.services.alignment._estimate_audio_pair"),
-        patch("frame_compare.services.alignment.maybe_launch_alignment_vsview") as mock_vs,
-    ):
-        mock_vs.return_value = AlignmentVSViewOutcome(None, "no_result")
-        results = align_clips_from_request(
-            request,
-            config,
-        )
-
-    assert [(result.source, result.frame_offset) for result in results] == [
-        ("manual", 2),
-        ("cached", 7),
-    ]
-
-
 def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_cache(
     tmp_path: Path,
 ) -> None:
@@ -825,17 +737,15 @@ def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_ca
     assert entry["stability"]["classification"] == "insufficient_evidence"
 
 
-def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_eligible(
+def test_align_clips_from_request_persists_confirmation_without_computed_fallback(
     tmp_path: Path,
 ) -> None:
     ref = tmp_path / "ref.mkv"
     comp_manual = tmp_path / "comp_manual.mkv"
     comp_computed = tmp_path / "comp_computed.mkv"
-    generated_dir = tmp_path / "generated"
     ref.touch()
     comp_manual.touch()
     comp_computed.touch()
-    generated_dir.mkdir()
 
     config = AlignmentConfig(use_vsview=True)
     request = _alignment_request(
@@ -843,23 +753,28 @@ def test_align_clips_from_request_reconfirmed_manual_override_becomes_write_elig
         reference=ref,
         comparisons=[comp_manual, comp_computed],
         previous_offsets="always",
-        generated_dir=generated_dir,
     )
-    manual_overrides = {
-        "version": "2",
-        "ref:comp_manual": {
-            "reference_clip": "ref",
-            "comparison_clip": "comp_manual",
-            "frame_offset": 2,
-            "timestamp": "2026-06-06T12:30:00Z",
-        },
-    }
-    (generated_dir / "manual_overrides.toml").write_text(
-        tomli_w.dumps(manual_overrides),
-        encoding="utf-8",
-    )
+    attempt = provisional_audio_attempt()
+
+    def estimate(reference: Path, comparison: Path, **_kwargs: object) -> AlignmentResult:
+        if comparison == comp_computed:
+            return _trusted_computed_result(reference, comparison)
+        return AlignmentResult(
+            reference_clip=reference.name,
+            comparison_clip=comparison.name,
+            frame_offset=None,
+            time_offset_seconds=None,
+            correlation_score=0.99,
+            algorithm="cross_correlation",
+            source="computed",
+            applied=False,
+            diagnostic=attempt.decision.primary_reason,
+            stability=attempt.stability,
+            audio_attempt=attempt,
+        )
 
     with (
+        patch("frame_compare.services.alignment._estimate_audio_pair", side_effect=estimate),
         patch(
             "frame_compare.services.alignment.maybe_launch_alignment_vsview",
             return_value=AlignmentVSViewOutcome({"ref:comp_manual": 5}, "confirmed"),

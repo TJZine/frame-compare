@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -13,7 +14,6 @@ import pytest
 import frame_compare.services.alignment_vsview as alignment_vsview
 from frame_compare.services.alignment import _build_audio_review_map, align_clips_from_request
 from frame_compare.services.alignment_keys import alignment_key
-from frame_compare.services.alignment_manual_overrides import load_manual_overrides
 from frame_compare.services.alignment_vsview import (
     AlignmentVSViewOutcome,
     maybe_launch_alignment_vsview,
@@ -29,6 +29,7 @@ from frame_compare.vsview.alignment_review_contract import (
     write_alignment_review_result,
 )
 from frame_compare.vsview.errors import VSViewError
+from tests.alignment_review_test_support import trusted_audio_attempt
 from tests.services.alignment_request_test_support import (
     VSVIEW_SESSION_ID as _SESSION_ID,
 )
@@ -201,20 +202,46 @@ def test_native_result_applies_confirmed_pair_and_keeps_other_pair(
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    outcome = _call(
-        tmp_path,
-        config=AlignmentConfig(use_vsview=True),
+    reference = _clip(tmp_path / "ref.mkv")
+    request = replace(
+        alignment_request(
+            reference=reference.path,
+            comparisons=[comparison.path for comparison in comparisons],
+            generated_dir=tmp_path,
+        ),
+        reference=reference,
         comparisons=comparisons,
     )
+    attempt = trusted_audio_attempt(frame_offset=3)
 
-    assert outcome.summary.review_ran is True
-    assert outcome.summary.pairs_confirmed == 1
-    assert outcome.summary.comparisons_kept == 1
-    assert outcome.summary.review_unresolved is False
+    def compute(reference: Path, comparison: Path, **_kwargs: object) -> AlignmentResult:
+        return AlignmentResult(
+            reference.name,
+            comparison.name,
+            3,
+            3 / 24,
+            1.0,
+            "cross_correlation",
+            "computed",
+            stability=attempt.stability,
+            audio_attempt=attempt,
+        )
 
-    overrides = load_manual_overrides(tmp_path)
-    assert set(overrides) == {"ref:first"}
-    assert overrides["ref:first"].frame_offset == 12
+    monkeypatch.setattr("frame_compare.services.alignment._estimate_audio_pair", compute)
+    outcome = asyncio.run(
+        align_clips_from_request(request, AlignmentConfig(use_vsview=True, cache_results=False))
+    )
+
+    assert outcome.review.review_ran is True
+    assert outcome.review.pairs_confirmed == 1
+    assert outcome.review.comparisons_kept == 1
+    assert outcome.review.review_unresolved is False
+
+    confirmed, kept = outcome.resolutions
+    assert confirmed.origin == "interactive_confirmed_this_run"
+    assert confirmed.accepted_offset == 12
+    assert kept.origin == "computed_this_run"
+    assert kept.accepted_offset == 3
 
 
 @pytest.mark.parametrize("wait_seconds", [42.5, 0.0])
@@ -390,7 +417,7 @@ def test_pending_review_without_launch_marks_review_unresolved(
     ],
     ids=("malformed", "deep", "integer-limit", "stale-session", "partial", "out-of-bounds"),
 )
-def test_optional_invalid_result_is_rejected_without_persisting_override(
+def test_optional_invalid_result_is_rejected(
     payload: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -407,7 +434,6 @@ def test_optional_invalid_result_is_rejected_without_persisting_override(
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
         None, "rejected_result"
     )
-    assert load_manual_overrides(tmp_path) == {}
 
 
 def test_close_without_finish_is_optional_cancellation(
@@ -554,7 +580,6 @@ def test_optional_session_setup_failure_retains_offsets(
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
         None, "no_result"
     )
-    assert load_manual_overrides(tmp_path) == {}
 
 
 def test_forced_process_failure_propagates_typed_vsview_error(
