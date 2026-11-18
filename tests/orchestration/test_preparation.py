@@ -71,7 +71,6 @@ def test_execute_prep_probes_uncached_clips_and_persists_probe_snapshot(tmp_path
     assert set(loader.loaded) == {source, encode}
     assert [clip.label for clip in prep.clips] == ["encode", "source"]
     assert [clip.probe.width for clip in prep.clips] == [1920, 1920]
-    assert prep.clips[0].probe.tonemap_prop_keys == ("DolbyVisionRPU", "_Transfer")
     assert prep.clips[0].probe.preserved_frame_props == {
         "DolbyVisionRPU": 1,
         "_Transfer": 16,

@@ -30,6 +30,7 @@ from frame_compare.utils.media_facts import (
     RenderedFrameFacts,
     RenderedGeometryFacts,
 )
+from frame_compare.vs.props import parse_mastering_display_luminance
 from frame_compare.vs.types import HDRMetadata
 from tests.orchestration.phase_task_helpers import _clip, _context, _RenderRunner
 from tests.render_test_support import facts_by_label, rendered_clips
@@ -168,27 +169,30 @@ def test_run_render_phase_maps_multiple_clips_in_stable_order(
 
 
 @pytest.mark.parametrize(
-    ("mastering_props", "expected_nits", "expected_mdl"),
+    ("mastering_props", "expected_nits", "expected_mdl", "cache_hit"),
     [
         pytest.param(
             {"MasteringDisplayMinLuminance": 0.005, "MasteringDisplayMaxLuminance": 1000.0},
             (0.005, 1000.0),
             "0.005–1000",
+            True,
             id="numeric-precedence",
         ),
         pytest.param(
             {"MasteringDisplayMinLuminance": 0, "MasteringDisplayMaxLuminance": 1000},
             (0.0, 1000.0),
             "0–1000",
+            True,
             id="zero-minimum",
         ),
         pytest.param(
             {"MasteringDisplayMinLuminance": 0, "MasteringDisplayMaxLuminance": 10**400},
             (0.01, 600.0),
             "0.01–600",
-            id="oversized-cached-integer",
+            False,
+            id="oversized-integer-cache-miss-live-fallback",
         ),
-        pytest.param({}, (0.01, 600.0), "0.01–600", id="text-fallback"),
+        pytest.param({}, (0.01, 600.0), "0.01–600", True, id="text-fallback"),
     ],
 )
 def test_run_render_phase_maps_canonical_clip_facts(
@@ -197,6 +201,7 @@ def test_run_render_phase_maps_canonical_clip_facts(
     mastering_props: dict[str, int | float],
     expected_nits: tuple[float, float],
     expected_mdl: str,
+    cache_hit: bool,
 ) -> None:
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode")
     ctx = _context(tmp_path, comparisons=[comparison])
@@ -227,12 +232,17 @@ def test_run_render_phase_maps_canonical_clip_facts(
     cache_path = tmp_path / "probe-cache.toml"
     cache_key = compute_probe_cache_key(probe.fingerprint)
     save_clip_probe_cache(cache_path, {cache_key: probe})
-    cached_probe = load_clip_probe_cache(cache_path)[cache_key]
-    assert cached_probe.preserved_frame_props == probe.preserved_frame_props
+    cached_probes = load_clip_probe_cache(cache_path)
+    if cache_hit:
+        cached_probe = cached_probes[cache_key]
+        assert cached_probe.preserved_frame_props == probe.preserved_frame_props
+        probe = cached_probe
+    else:
+        assert cache_key not in cached_probes
     ctx.reference = replace(
         ctx.reference,
         active_rect=ClipActiveRect(0, 140, 1920, 800, "explicit", "provided"),
-        probe=cached_probe,
+        probe=probe,
     )
     captured = _capture_detailed_render(monkeypatch, tmp_path)
 
@@ -322,7 +332,7 @@ def test_run_render_phase_uses_observed_signal_then_hdr_fallback(
 def test_mastering_luminance_accepts_known_encodings(
     value: str, expected: tuple[float | None, float | None]
 ) -> None:
-    actual = phase_render._mastering_luminance(value)
+    actual = parse_mastering_display_luminance(value)
     if expected[0] is None or expected[1] is None:
         assert actual == expected
     else:

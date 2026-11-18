@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from math import inf
 from typing import TYPE_CHECKING
 
@@ -20,13 +19,11 @@ from frame_compare.utils.media_facts import (
     SourceSignalFacts,
 )
 from frame_compare.utils.run_warnings import RunWarning
-from frame_compare.vs.props import range_label_from_props
+from frame_compare.vs.props import parse_mastering_display_luminance, range_label_from_props
 from frame_compare.vs.types import FallbackTonemap
 
 if TYPE_CHECKING:
     from frame_compare.vs.loader import VSLoader
-
-_MASTERING_LUMINANCE = re.compile(r"L\((\d+(?:\.\d+)?|\.\d+),(\d+(?:\.\d+)?|\.\d+)\)")
 
 
 def run_render_phase(
@@ -161,7 +158,10 @@ def _source_signal_facts(probe: ClipProbeSnapshot) -> SourceSignalFacts:
         matrix = _observed_int(hdr.matrix)
     mastering_min, mastering_max = _mastering_luminance_from_props(props)
     if mastering_min is None and hdr is not None:
-        mastering_min, mastering_max = _mastering_luminance(hdr.mastering_display)
+        try:
+            mastering_min, mastering_max = parse_mastering_display_luminance(hdr.mastering_display)
+        except ValueError:
+            mastering_min, mastering_max = None, None
     max_cll = hdr.max_cll if hdr is not None else None
     max_fall = hdr.max_fall if hdr is not None else None
     static = None
@@ -208,22 +208,6 @@ def _mastering_luminance_from_props(
     if not 0 <= minimum_nits < maximum_nits < inf:
         return None, None
     return minimum_nits, maximum_nits
-
-
-def _mastering_luminance(value: str | None) -> tuple[float | None, float | None]:
-    if value is None or (match := _MASTERING_LUMINANCE.search(value)) is None:
-        return None, None
-    maximum_token, minimum_token = match.groups()
-    try:
-        if "." in maximum_token or "." in minimum_token:
-            maximum = float(maximum_token)
-            minimum = float(minimum_token)
-        else:
-            maximum = int(maximum_token) / 10000
-            minimum = int(minimum_token) / 10000
-    except ValueError:
-        return None, None
-    return minimum, maximum
 
 
 def _active_picture_facts(clip: ClipState) -> ActivePictureFacts:
