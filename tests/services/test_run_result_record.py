@@ -265,6 +265,50 @@ def test_history_rejects_noninteger_record_version(tmp_path: Path, version: bool
         resolve_history_report(generated, run_dir.name)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("started_at", 0), ("completed_at", "0")],
+    ids=["integer-started-at", "numeric-text-completed-at"],
+)
+def test_history_rejects_epoch_record_timestamp(
+    tmp_path: Path, field: str, value: int | str
+) -> None:
+    generated = tmp_path / "generated"
+    run_dir = generated / "run"
+    run_dir.mkdir(parents=True)
+    payload = tomllib.loads(serialize_run_result(_record(tmp_path, run_dir)))
+    payload[field] = value
+    (run_dir / RUN_RESULT_FILENAME).write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+    (entry,) = list_history(generated)
+
+    assert entry.status == "unavailable"
+    assert entry.report_available is False
+    with pytest.raises(HistoryOpenError, match="result record is unavailable"):
+        resolve_history_report(generated, run_dir.name)
+
+
+def test_history_normalizes_explicit_record_timestamp_offsets(tmp_path: Path) -> None:
+    generated = tmp_path / "generated"
+    run_dir = generated / "run"
+    run_dir.mkdir(parents=True)
+    record = _record(tmp_path, run_dir)
+    payload = tomllib.loads(serialize_run_result(record))
+    payload["started_at"] = "2026-07-14T14:30:00+02:30"
+    payload["completed_at"] = "2026-07-14T08:00:10-04:00"
+    (run_dir / RUN_RESULT_FILENAME).write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+    (entry,) = list_history(generated)
+
+    assert entry.status == record.status
+    assert entry.started_at == record.started_at
+    assert entry.completed_at == record.completed_at
+    assert entry.started_at is not None and entry.started_at.tzinfo is UTC
+    assert entry.completed_at is not None and entry.completed_at.tzinfo is UTC
+    assert entry.report_available is True
+    assert resolve_history_report(generated, run_dir.name) == run_dir / "report.html"
+
+
 @pytest.mark.parametrize("field", ["duration_seconds", "phase_timings"])
 def test_history_isolates_oversized_numeric_record(tmp_path: Path, field: str) -> None:
     generated = tmp_path / "generated"

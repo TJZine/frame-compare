@@ -423,6 +423,13 @@ class _StoredRunResult(BaseModel):
             raise ValueError("run-result version must be an integer")
         return value
 
+    @field_validator("started_at", "completed_at", mode="before")
+    @classmethod
+    def parse_timestamp_text(cls, value: object) -> datetime:
+        if not isinstance(value, str):
+            raise ValueError("run-result timestamp must be ISO datetime text")
+        return datetime.fromisoformat(value)
+
     def to_record(self) -> RunResultRecord:
         return RunResultRecord(
             version=self.version,
