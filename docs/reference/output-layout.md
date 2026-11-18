@@ -97,11 +97,11 @@ Mount a custom container path to a host-owned location to preserve its files.
 
 ## Cache identity caveat
 
-For performance, Frame Compare checks source freshness by path, size, and modification
-time. It does
-not hash the full source file. Frame Compare considers a replacement that preserves
-all three to be the same source. Advance the modification time or clear the relevant
-cache when such a replacement occurs.
+Analysis and alignment reuse identify sources by path, size, and modification
+time without hashing the full source file. A replacement that preserves all three
+can reuse cached data. Advance the modification time or clear the relevant cache
+when such a replacement occurs. Probe facts and decoder indexes use a stronger
+filesystem identity that includes change time for reuse between runs.
 
 For exact schemas and persistence behavior, see [Current architecture](../current-architecture.md)
 and the [CLI behavioral contract](../current-cli-contract.md).
