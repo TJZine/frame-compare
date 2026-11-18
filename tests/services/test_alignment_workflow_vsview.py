@@ -19,6 +19,7 @@ from frame_compare.services.alignment import align_clips_from_request as _align_
 from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME,
     comparison_cache_key,
+    load_reusable_offset_entries,
     source_set_cache_key,
 )
 from frame_compare.services.errors import AudioAlignmentError
@@ -433,14 +434,17 @@ def test_aliased_comparisons_keep_distinct_run_local_confirmations(
                 )
             ],
         )
+        single_entries = load_reusable_offset_entries(single)
+        assert single_entries is not None
+        assert single_entries[key].origin == "interactive_confirmed"
+        assert single_entries[key].result.frame_offset == 4
         data = tomllib.loads(cache_file.read_text(encoding="utf-8"))
         source_sets = data["source_sets"]
         alias_set = source_sets.pop(source_set_cache_key(single))
-        identity = alias_set["identity"]
-        identity["comparisons"] *= 2
         source_sets[source_set_cache_key(request)] = alias_set
         existing_bytes = tomli_w.dumps(data).encode()
         cache_file.write_bytes(existing_bytes)
+        assert load_reusable_offset_entries(request) is None
 
     def launch(*_args: object, **_kwargs: object):
         session = _session(tmp_path)
