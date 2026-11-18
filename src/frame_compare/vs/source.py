@@ -159,10 +159,7 @@ def _load_lwlibav_source(
         # L-SMASH interprets a .lwi source argument as an index, overriding cachefile.
         if source.suffix.lower() == ".lwi":
             raise SourceLoadError(path, "an L-SMASH index cannot be used as source media")
-        admission.verify(source)
-        clip = loader.LWLibavSource(str(source), cache=cache, cachefile=str(index), **loader_kwargs)
-        admission.verify(source)
-        return clip
+        return loader.LWLibavSource(str(source), cache=cache, cachefile=str(index), **loader_kwargs)
 
     if index_cache is not None:
         clip = index_cache.try_load(

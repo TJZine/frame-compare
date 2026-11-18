@@ -300,12 +300,9 @@ def load_preview_source(
     def open_source(source: Path, mode: int, index: Path) -> vs.VideoNode:
         if source.suffix.lower() == ".lwi":
             raise ValueError("An L-SMASH index cannot be used as source media")
-        admission.verify(source)
-        clip = loader.LWLibavSource(
+        return loader.LWLibavSource(
             str(source), cache=mode, cachefile=str(index), ff_options=ff_options
         )
-        admission.verify(source)
-        return clip
 
     if managed_index_path is not None and source_index_generated_root is not None:
         cache = ManagedSourceIndexCache(Path(source_index_generated_root))

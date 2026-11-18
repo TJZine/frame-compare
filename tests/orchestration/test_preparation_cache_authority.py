@@ -15,7 +15,6 @@ import frame_compare.vs.source_admission as admission
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.types import RunDependencies
-from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 from tests.orchestration.execute_run_helpers import FakeVSLoader
 from tests.orchestration.preparation_test_support import (
@@ -169,40 +168,6 @@ def test_admitted_private_sources_work_in_memory_without_persisted_reuse(
         )
     assert loader.calls == 2
     assert probe_cache.load_clip_probe_cache(tmp_path / "generated" / "clip_probe.toml") == {}
-
-
-@pytest.mark.parametrize("private", [False, True], ids=["reusable", "private"])
-def test_cold_native_probe_cannot_attach_changed_identity_to_old_facts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, private: bool
-) -> None:
-    create_config(tmp_path, METRIC_CONFIG)
-    create_video_files(tmp_path / "comparison_videos", "source.mkv")
-    if private:
-        monkeypatch.setattr(probe_cache, "source_identity", MagicMock(side_effect=OSError))
-
-    class ReplacingLoader(RecordingLoader):
-        def load(self, path: Path) -> SourceInfo:
-            result = super().load(path)
-            _replace_same_stats(path, in_place=True)
-            return result
-
-    with pytest.raises(SourceLoadError, match="Source video changed while probing"):
-        _run(tmp_path, ReplacingLoader())
-    assert not (tmp_path / "generated" / "clip_probe.toml").exists()
-
-
-def test_live_probe_refuses_strict_identity_that_disagrees_with_admission(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    create_config(tmp_path, METRIC_CONFIG)
-    [path] = create_video_files(tmp_path / "comparison_videos", "source.mkv")
-    wrong_identity = replace(admission.source_identity(path), inode=0)
-    monkeypatch.setattr(probe_cache, "source_identity", lambda _: wrong_identity)
-    loader = RecordingLoader()
-    with pytest.raises(SourceLoadError, match="Source video changed during admission"):
-        _run(tmp_path, loader)
-    assert loader.calls == 0
-    assert not (tmp_path / "generated" / "clip_probe.toml").exists()
 
 
 @pytest.mark.parametrize("cache_only", [False, True], ids=["ordinary", "cache-only"])

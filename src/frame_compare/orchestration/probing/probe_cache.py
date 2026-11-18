@@ -58,15 +58,11 @@ def live_probe_fingerprint(path: Path) -> LiveProbeFingerprint:
         except OSError:
             # An admitted private source remains usable without persisted authority.
             identity = None
-        if identity is not None:
-            if identity != admission.stamp:
-                raise ValueError("Source video changed during admission")
-            if admission.geometry_probe_token is not None:
-                payload = (asdict(identity), admission.geometry_probe_token)
-                token = hashlib.sha256(
-                    json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
-                ).hexdigest()
-        admission.verify(resolved)
+        if identity is not None and admission.geometry_probe_token is not None:
+            payload = (asdict(identity), admission.geometry_probe_token)
+            token = hashlib.sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+            ).hexdigest()
         return LiveProbeFingerprint(
             ClipFingerprint(resolved, admission.stamp.size, admission.stamp.mtime_ns, token),
             admission,

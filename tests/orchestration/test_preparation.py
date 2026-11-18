@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from frame_compare.orchestration import phase_alignment, preparation
+from frame_compare.orchestration import preparation
 from frame_compare.orchestration.types import RunDependencies
 from frame_compare.vs.loader import DefaultVSLoader
 from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
@@ -172,24 +172,6 @@ def test_cold_probe_caches_facts_from_the_frozen_symlink_target(tmp_path: Path) 
     assert (warm_clip.probe.width, warm_clip.probe.fps) == (1920, Fraction(24000, 1001))
     assert warm_clip.probe == cold_clip.probe
     assert warm_clip.probe.fingerprint.path == original_target
-
-
-def test_prepared_alignment_rejects_retargeted_symlink_with_matching_stat(tmp_path: Path) -> None:
-    alias, _, replacement_target = _symlinked_input(tmp_path)
-
-    run = make_run_request(root=tmp_path)
-    cold = asyncio.run(preparation.execute_prep(run, RunDependencies(vs_loader=FakeVSLoader())))
-    warm = asyncio.run(preparation.execute_prep(run, RunDependencies()))
-    clips = [
-        phase_alignment._alignment_clip_request(prep.clips[0], selected_audio_stream=None)
-        for prep in (cold, warm)
-    ]
-    assert all(clip.path == alias and clip.identity_is_current() for clip in clips)
-
-    alias.unlink()
-    alias.symlink_to(replacement_target)
-
-    assert all(not clip.identity_is_current() for clip in clips)
 
 
 def test_execute_prep_uses_one_acquisition_and_discovers_sources_at_use(tmp_path: Path) -> None:

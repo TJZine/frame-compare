@@ -393,8 +393,7 @@ def _probe_input_videos(
 
     for path in input_videos:
         raise_if_cancelling()
-        live = live_probe_fingerprint(path)
-        fingerprint = live.fingerprint
+        fingerprint = live_probe_fingerprint(path).fingerprint
         resolved_path = fingerprint.path
         cache_key = compute_probe_cache_key(fingerprint)
         snapshot = entries_by_key.get(cache_key) if fingerprint.source_token is not None else None
@@ -402,14 +401,6 @@ def _probe_input_videos(
             if deps.vs_loader is None:
                 raise RuntimeError("VS loader must be initialized before probing clips.")
             source_info = deps.vs_loader.load(resolved_path)
-            verified = live_probe_fingerprint(resolved_path)
-            if (
-                verified.fingerprint != fingerprint
-                or verified.admission.stamp != live.admission.stamp
-            ):
-                raise SourceLoadError(
-                    resolved_path, "Source video changed while probing native source facts"
-                )
             tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
             preserved_props = compute_preserved_frame_props(source_info.frame_props)
             snapshot = ClipProbeSnapshot(
