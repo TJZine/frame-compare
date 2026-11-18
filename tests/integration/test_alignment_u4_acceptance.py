@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from frame_compare.analysis.window import SelectionWindow
-from frame_compare.orchestration import preparation
+from frame_compare.orchestration import phase_alignment, preparation
 from frame_compare.orchestration.context import (
     ClipActiveRect,
     ClipFingerprint,
@@ -35,10 +35,17 @@ from frame_compare.services.alignment_audio import (
     select_audio_pair,
 )
 from frame_compare.services.alignment_policy import position_winner
+from frame_compare.services.alignment_reuse_cache import (
+    CACHE_FILE_NAME,
+    comparison_cache_key,
+    load_reusable_offset_entries,
+    source_set_cache_key,
+)
 from frame_compare.services.alignment_review_projection import build_audio_review_presentation
 from frame_compare.services.alignment_video import VideoClipRequest
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.subproc import run_subprocess
+from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vs.env import detect_plugins, ensure_vs_environment
 from frame_compare.vs.errors import VapourSynthError, VapourSynthNotFoundError
 from frame_compare.vs.loader import DefaultVSLoader
@@ -247,6 +254,23 @@ def _phase_context(
     )
 
 
+def _assert_cached_comparison(request: AlignmentRequest, expected_offset: int) -> None:
+    path = request.shared_alignment_cache_dir / CACHE_FILE_NAME
+    cache = tomllib.loads(path.read_text(encoding="utf-8"))
+    source_key = source_set_cache_key(request)
+    comparison = request.comparisons[0]
+    entry_key = comparison_cache_key(comparison)
+    assert set(cache["source_sets"]) == {source_key}
+    entries = cache["source_sets"][source_key]["entries"]
+    assert set(entries) == {entry_key}
+    assert entries[entry_key]["origin"] == "computed"
+    assert entries[entry_key]["frame_offset"] == expected_offset
+
+    loaded = load_reusable_offset_entries(request)
+    assert loaded is not None
+    assert loaded[entry_key].result.comparison_clip == comparison.path.name
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
     (
@@ -357,6 +381,7 @@ def test_real_phase_v6_cache_matrix(
 ) -> None:
     ctx = _phase_context(u4_media, name, tmp_path, crop=crop)
 
+    request = phase_alignment._alignment_request_from_context(ctx)
     output = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
     comparison = output.comparisons[0]
     attempt = comparison.audio_attempt
@@ -384,17 +409,7 @@ def test_real_phase_v6_cache_matrix(
     cache_path = ctx.workspace.shared_alignment_cache_dir / "alignment_reuse.toml"
     assert cache_path.exists() is (state == "trusted_automatic")
     if state == "trusted_automatic":
-        cache = tomllib.loads(cache_path.read_text(encoding="utf-8"))
-        source_sets = cache["source_sets"]
-        assert isinstance(source_sets, dict) and len(source_sets) == 1
-        source_set = next(iter(source_sets.values()))
-        assert isinstance(source_set, dict)
-        entries = source_set["entries"]
-        assert isinstance(entries, dict) and len(entries) == 1
-        entry = next(iter(entries.values()))
-        assert isinstance(entry, dict)
-        assert entry["frame_offset"] == 0
-        assert entry["comparison_clip"] == ctx.comparisons[0].path.name
+        _assert_cached_comparison(request, 0)
 
 
 _RETIMED_RECIPE = (
@@ -463,6 +478,7 @@ def test_retimed_sources_align_on_the_effective_timeline(
         reference_fps=reference_fps,
         comparison_source_fps=comparison_source_fps,
     )
+    request = phase_alignment._alignment_request_from_context(ctx)
     output = _run_align_phase(ctx, selected_frames=[100], vs_loader=DefaultVSLoader())
     comparison = output.comparisons[0]
     attempt = comparison.audio_attempt
@@ -480,17 +496,7 @@ def test_retimed_sources_align_on_the_effective_timeline(
 
     cache_path = ctx.workspace.shared_alignment_cache_dir / "alignment_reuse.toml"
     assert cache_path.exists()
-    cache = tomllib.loads(cache_path.read_text(encoding="utf-8"))
-    source_sets = cache["source_sets"]
-    assert isinstance(source_sets, dict) and len(source_sets) == 1
-    source_set = next(iter(source_sets.values()))
-    assert isinstance(source_set, dict)
-    entries = source_set["entries"]
-    assert isinstance(entries, dict) and len(entries) == 1
-    entry = next(iter(entries.values()))
-    assert isinstance(entry, dict)
-    assert entry["frame_offset"] == 48
-    assert entry["comparison_clip"] == ctx.comparisons[0].path.name
+    _assert_cached_comparison(request, 48)
 
 
 @pytest.mark.integration
