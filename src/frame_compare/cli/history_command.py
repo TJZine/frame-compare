@@ -59,7 +59,7 @@ def handle_history_list(
     handle_error: HandleErrorFn,
     no_color: bool,
 ) -> None:
-    """Resolve config and print contained run history."""
+    """Resolve config and print run history."""
     try:
         generated_root = _resolve_history_generated_root(root, config_path)
         entries = list_history(generated_root)
@@ -97,7 +97,7 @@ def handle_history_open(
     handle_error: HandleErrorFn,
     no_color: bool,
 ) -> None:
-    """Open one exact-name, contained recorded report."""
+    """Open one exact-name run's recorded report."""
     try:
         generated_root = _resolve_history_generated_root(root, config_path)
         report_path = resolve_history_report(generated_root, run_name)
