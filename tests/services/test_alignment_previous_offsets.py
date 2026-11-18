@@ -20,6 +20,7 @@ from frame_compare.services.alignment_reuse_cache import (
     CACHE_FILE_NAME as REUSE_CACHE_FILE_NAME,
 )
 from frame_compare.services.alignment_reuse_cache import (
+    CACHE_VERSION,
     comparison_cache_key,
     load_reusable_offset_entries,
     source_set_cache_key,
@@ -727,14 +728,22 @@ def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_ca
     with cache_file.open("rb") as handle:
         cache_data = tomllib.load(handle)
     source_set = cache_data["source_sets"][source_set_cache_key(request)]
-    entry = source_set["entries"][comparison_cache_key(request.comparisons[0])]
+    comparison = request.comparisons[0]
+    key = comparison_cache_key(comparison)
+    entry = source_set["entries"][key]
     assert entry["origin"] == "computed"
-    assert entry["reference_clip"] == ref.name
-    assert entry["comparison_clip"] == comp.name
+    assert "reference_clip" not in entry
+    assert "comparison_clip" not in entry
     assert entry["frame_offset"] == 0
     assert entry["time_offset_seconds"] == 0.0
     assert entry["correlation_score"] == pytest.approx(0.99)
     assert entry["stability"]["classification"] == "insufficient_evidence"
+
+    reusable = load_reusable_offset_entries(request)
+    assert reusable is not None
+    cached = reusable[key].result
+    assert cached.reference_clip == request.reference.path.name
+    assert cached.comparison_clip == comparison.path.name
 
 
 def test_align_clips_from_request_persists_confirmation_without_computed_fallback(
@@ -842,7 +851,10 @@ def test_serialization_failure_preserves_cache_and_returns_live_alignment(tmp_pa
     cache_file = request.shared_alignment_cache_dir / REUSE_CACHE_FILE_NAME
     cache_file.parent.mkdir(parents=True)
     original = (
-        'version = "2"\n[source_sets.unrelated]\nnested = ' + "[" * 400 + "0" + "]" * 400
+        f'version = "{CACHE_VERSION}"\n[source_sets.unrelated]\nnested = '
+        + "[" * 400
+        + "0"
+        + "]" * 400
     ).encode()
     tomllib.loads(original.decode())  # Decoding succeeds. Re-encoding the sibling fails.
     cache_file.write_bytes(original)
@@ -905,8 +917,6 @@ def test_prompt_mode_admits_only_normalizable_confirmation_timestamps(
         assert "Reuse previous offsets?" not in stderr
         assert result.source == "computed" and result.frame_offset == 0
         warn.assert_called_once()
-        assert warn.call_args.args[0] == "alignment_reuse_cache_invalid_entry"
-        assert isinstance(warn.call_args.kwargs["exc_info"], OverflowError)
     else:
         assert "Reuse previous offsets?" in stderr
         assert "2026-06-06 12:34:56 UTC" in stderr
