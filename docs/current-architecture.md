@@ -1203,9 +1203,10 @@ and Review tabs; fullscreen support; viewport pan, zoom, actual size and fit hei
 controls (plus continued support for a restored width-fit preference without a visible
 control), reveal, and adjacent-frame preloading. The toolbar combines the title,
 frame stepper and filter badge, mode switch, context controls, offset status, and
-report actions. At 1280 px and wider it stays on one row, with a stable mode-switch
-position and bar height across modes at zero offset, including coarse-pointer
-Grid paging. From 769 to 1599 px it uses smaller text and padding. Intermediate widths put the title and stepper above the other
+report actions. At 1280 px and wider it stays on one row while the controls fit,
+with a stable mode-switch position and bar height across modes at zero offset,
+including coarse-pointer Grid paging. The title shrinks first; when the row still
+does not fit, the report actions wrap onto a second row. From 769 to 1599 px it uses smaller text and padding. Intermediate widths put the title and stepper above the other
 controls, which wrap onto another row when they do not fit; the source selects keep
 their width. Through 768 px the stacked controls follow DOM and keyboard order,
 with report actions last. The offset status appears for a visible pair with a

@@ -2006,7 +2006,8 @@ def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path:
                 assert.equal(state.optionText, 'english-dub-only-copy', message);
                 assert.ok(state.available >= state.labelWidth, message);
                 if (width >= 1280) {
-                    assert.ok(inOneRow(controls), message);
+                    // A typical bar fits one row; a filter and offset may wrap the actions.
+                    if (!active) assert.ok(inOneRow(controls), message);
                 } else {
                     // Below 1280px the stepper leads; the rest may wrap but never shrinks.
                     const stepperIds = ['btn-prev','frame-select','btn-next','active-filter-badge'];
