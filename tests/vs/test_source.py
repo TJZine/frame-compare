@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import sys
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
 from fractions import Fraction
@@ -294,42 +293,6 @@ def test_load_source_rejects_an_index_as_media_before_probing(
     with pytest.raises(SourceLoadError, match="cannot be used as source media"):
         load_source(tmp_path / "video.mkv.lwi")
     probe.assert_not_called()
-
-
-@pytest.mark.parametrize("changed_before_open", [True, False])
-def test_load_source_rejects_change_at_native_open(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed_before_open: bool
-) -> None:
-    video = tmp_path / "video.mkv"
-    video.write_bytes(b"fixture")
-    streams = [{"index": 0, "width": 64, "height": 64, "coded_width": 64, "coded_height": 64}]
-    monkeypatch.setattr(source_module, "admit_source", admission_module.admit_source)
-    monkeypatch.setattr(
-        admission_module, "resolve_optional_executable", lambda _name: sys.executable
-    )
-    monkeypatch.setattr(
-        admission_module,
-        "probe_admission_headers",
-        lambda *_args, **_kwargs: (streams, {"format": {"format_name": "matroska,webm"}}),
-    )
-    monkeypatch.setattr(admission_module, "_scan_video_frames", lambda *_args: b"")
-
-    def change_before_open(*_args: object) -> None:
-        video.write_bytes(b"changed before native open")
-
-    def change_during_open(*_args: object, **_kwargs: object) -> MockClip:
-        video.write_bytes(b"changed during native open")
-        return MockClip()
-
-    if changed_before_open:
-        monkeypatch.setattr(source_module, "require_plugin", change_before_open)
-    loader = MagicMock(side_effect=change_during_open)
-    core = SimpleNamespace(lsmas=SimpleNamespace(LWLibavSource=loader))
-
-    with pytest.raises(SourceLoadError, match="Source video changed during admission"):
-        load_source(video, cast(Core, core))
-
-    assert loader.call_count == (0 if changed_before_open else 1)
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,4 @@
-"""Literal keys/tokens/v8 bytes captured from the fixed analysis identity."""
+"""Frozen analysis request identity with cache keys and bytes projected to schema v9."""
 
 import json
 import os

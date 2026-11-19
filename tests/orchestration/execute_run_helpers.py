@@ -138,7 +138,6 @@ def write_metrics_cache(
             active_rect_source=metric_request.active_rect_source,
             active_rect_detection_mode=metric_request.active_rect_detection_mode,
             active_rect_algorithm_id=metric_request.active_rect_algorithm_id,
-            version=cache_io.CACHE_VERSION,
         ),
         sampled_source_frames=sampled_source_frames,
     )

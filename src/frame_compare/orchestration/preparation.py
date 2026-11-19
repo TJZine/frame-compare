@@ -53,10 +53,7 @@ from frame_compare.orchestration.probing.probe_cache import (
     merge_shared_clip_probe_cache,
     save_clip_probe_cache,
 )
-from frame_compare.orchestration.probing.probe_props import (
-    compute_preserved_frame_props,
-    compute_tonemap_prop_keys,
-)
+from frame_compare.orchestration.probing.probe_props import compute_preserved_frame_props
 from frame_compare.orchestration.run_inputs import resolve_run_workspace
 from frame_compare.orchestration.selection_domain import (
     PreparedSelectionDomain,
@@ -95,7 +92,6 @@ from frame_compare.utils.paths import (
 )
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
-from frame_compare.vs.errors import SourceLoadError
 
 log = structlog.get_logger()
 
@@ -335,22 +331,6 @@ def _shared_probe_cache_path(workspace: WorkspacePaths) -> Path:
     return workspace.generated_root / "clip_probe.toml"
 
 
-def _probe_cache_paths_for_run(workspace: WorkspacePaths) -> list[Path]:
-    paths = [workspace.generated_dir / "clip_probe.toml", _shared_probe_cache_path(workspace)]
-    unique_paths: list[Path] = []
-    for path in paths:
-        if path not in unique_paths:
-            unique_paths.append(path)
-    return unique_paths
-
-
-def _load_probe_cache_entries(cache_paths: list[Path]) -> dict[str, ClipProbeSnapshot]:
-    entries_by_key: dict[str, ClipProbeSnapshot] = {}
-    for cache_path in reversed(cache_paths):
-        entries_by_key.update(dict(load_clip_probe_cache(cache_path)))
-    return entries_by_key
-
-
 def _persist_probe_snapshots_for_run(
     *,
     workspace: WorkspacePaths,
@@ -384,14 +364,12 @@ def _probe_input_videos(
     release_identities_by_path: dict[Path, ReleaseIdentity],
     explicit_labels_by_path: dict[Path, bool],
 ) -> tuple[list[ClipState], list[str], list[RunWarning]]:
-    cache_paths = _probe_cache_paths_for_run(workspace)
-    entries_by_key = _load_probe_cache_entries(cache_paths)
+    entries_by_key = load_clip_probe_cache(_shared_probe_cache_path(workspace))
     snapshots_by_path: dict[Path, ClipProbeSnapshot] = {}
 
     for path in input_videos:
         raise_if_cancelling()
-        live = live_probe_fingerprint(path)
-        fingerprint = live.fingerprint
+        fingerprint = live_probe_fingerprint(path).fingerprint
         resolved_path = fingerprint.path
         cache_key = compute_probe_cache_key(fingerprint)
         snapshot = entries_by_key.get(cache_key) if fingerprint.source_token is not None else None
@@ -399,15 +377,6 @@ def _probe_input_videos(
             if deps.vs_loader is None:
                 raise RuntimeError("VS loader must be initialized before probing clips.")
             source_info = deps.vs_loader.load(resolved_path)
-            verified = live_probe_fingerprint(resolved_path)
-            if (
-                verified.fingerprint != fingerprint
-                or verified.admission.stamp != live.admission.stamp
-            ):
-                raise SourceLoadError(
-                    resolved_path, "Source video changed while probing native source facts"
-                )
-            tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
             preserved_props = compute_preserved_frame_props(source_info.frame_props)
             snapshot = ClipProbeSnapshot(
                 fingerprint=fingerprint,
@@ -418,7 +387,6 @@ def _probe_input_videos(
                 is_hdr=source_info.is_hdr,
                 hdr_metadata=source_info.hdr_metadata,
                 preserved_frame_props=preserved_props,
-                tonemap_prop_keys=tonemap_prop_keys,
             )
             del source_info
             entries_by_key[cache_key] = snapshot

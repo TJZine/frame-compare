@@ -117,11 +117,11 @@ manager. Keep them out of committed TOML files.
 
 ## Cache maintenance
 
-Frame Compare uses path, size, and modification time to identify sources for cache
-reuse.
-It avoids hashing multi-gigabyte media to reduce the work needed to reuse a cache. If a
-workflow replaces media while preserving all three values, clear the relevant cache or
-advance the modification time.
+Analysis and alignment reuse identify sources by path, size, and modification
+time without hashing the full source file. If a workflow replaces media while
+preserving all three values, clear the relevant cache or advance the modification
+time. Probe facts and decoder indexes use a stronger filesystem identity that
+includes change time for reuse between runs.
 
 For unmanaged native runtimes, clear generated caches and Frame Compare-owned indexes
 after replacing FFmpeg, VapourSynth, or decoder/plugin binaries outside the managed

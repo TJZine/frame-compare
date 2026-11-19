@@ -61,7 +61,6 @@ AUDIO_UNAVAILABLE_REASON_PHRASES: dict[str, str] = {
     "selected_audio_timeline_unavailable": "selected audio timeline unavailable",
     "retime_rate_unsupported": "retimed audio rate unsupported",
     "analysis_budget_exceeded": "analysis budget exceeded",
-    "source_identity_changed": "source changed during analysis",
     "competing_offset_confirmed_by_video": "video confirmed a different offset",
     "competing_offset": "audio suggests more than one offset",
     "unresolved_audio_disagreement": "audio offsets disagree",

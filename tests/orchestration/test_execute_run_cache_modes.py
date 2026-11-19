@@ -40,7 +40,7 @@ from frame_compare.orchestration.types import (
     FullWindowRetryConfirmationDecision,
     FullWindowRetryConfirmationRequest,
 )
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.cache_errors import CacheCorruptionError
 from tests.e2e.harness import read_report_data
 from tests.run_request_support import make_run_request
 
@@ -166,7 +166,6 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
                         path=str(source_path),
                         size=source_path.stat().st_size,
                         mtime=source_path.stat().st_mtime,
-                        sha1=None,
                     )
                 ],
             ),
@@ -211,19 +210,7 @@ def test_execute_run_from_cache_only_fails_when_probe_cache_missing(
         asyncio.run(execute_run(request, deps=deps))
 
 
-@pytest.mark.parametrize(
-    "second_read",
-    [
-        "valid",
-        "missing",
-        "corrupted",
-        "version_mismatch",
-        "enum-list",
-        "enum-dict",
-        "deep",
-        "integer-limit",
-    ],
-)
+@pytest.mark.parametrize("second_read", ["valid", "missing", "corrupted"])
 def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -265,18 +252,6 @@ def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
                 cache_path.unlink()
             elif second_read == "corrupted":
                 cache_path.write_text("invalid JSON", encoding="utf-8")
-            elif second_read in {"deep", "integer-limit"}:
-                cache_path.write_text(
-                    "[" * 10000 if second_read == "deep" else "1" * 5000, encoding="utf-8"
-                )
-            elif second_read.startswith("enum"):
-                payload = json.loads(cache_path.read_text(encoding="utf-8"))
-                payload["metadata"]["active_rect_source"] = [] if second_read == "enum-list" else {}
-                cache_path.write_text(json.dumps(payload), encoding="utf-8")
-            elif second_read == "version_mismatch":
-                payload = json.loads(cache_path.read_text(encoding="utf-8"))
-                payload["version"] = cache_io.CACHE_VERSION + 1
-                cache_path.write_text(json.dumps(payload), encoding="utf-8")
         return result
 
     compute_calls: list[str] = []
@@ -309,11 +284,6 @@ def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
         expected_error = {
             "missing": MetricsCalculationError,
             "corrupted": CacheCorruptionError,
-            "enum-list": CacheCorruptionError,
-            "enum-dict": CacheCorruptionError,
-            "deep": CacheCorruptionError,
-            "integer-limit": CacheCorruptionError,
-            "version_mismatch": CacheVersionMismatchError,
         }[second_read]
         with pytest.raises(expected_error):
             asyncio.run(execute_run(request, deps=deps))
@@ -760,35 +730,17 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
     create_video_files(input_dir, "source.mkv")
 
     cache_dir = tmp_path / "generated" / "cache" / "analysis"
-    cache_dir.mkdir(parents=True, exist_ok=True)
     config = load_config(tmp_path / "config" / "config.toml")
     source_path = input_dir / "source.mkv"
-    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
-    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = metric_cache_fingerprint(
-        video_paths=[source_path], config=config, selection_domain=selection_domain
+    write_metrics_cache(
+        cache_dir,
+        source_path=source_path,
+        video_paths=[source_path],
+        config=config,
     )
-    cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
-    cache_payload = {
-        "version": cache_io.CACHE_VERSION + 1,
-        "fingerprint": fingerprint,
-        "luminance": [0.1],
-        "motion": [0.2],
-        "metadata": {
-            "frame_count": 1,
-            "fps": "24",
-            "config_fingerprint": "test",
-            "clips": [
-                {
-                    "path": str(input_dir / "source.mkv"),
-                    "size": 0,
-                    "mtime": 0.0,
-                    "sha1": None,
-                }
-            ],
-            "version": cache_io.CACHE_VERSION,
-        },
-    }
+    (cache_path,) = cache_dir.glob("*.compframes")
+    cache_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    cache_payload["version"] = cache_io.CACHE_VERSION + 1
     cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
 
     request = make_run_request(
@@ -800,8 +752,9 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
-    with pytest.raises(CacheVersionMismatchError):
+    with pytest.raises(CacheCorruptionError) as exc:
         asyncio.run(execute_run(request, deps=deps))
+    assert exc.value.context.code == "FC-4006"
 
 
 def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_alignment_enabled(

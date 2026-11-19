@@ -21,8 +21,7 @@ def make_metrics(luminance: list[float], motion: list[float]) -> FrameMetrics:
             frame_count=len(luminance),
             fps=Fraction(24),
             config_fingerprint="fp",
-            clips=[ClipIdentity(path="video.mkv", size=1, mtime=1.0, sha1=None)],
-            version=2,
+            clips=[ClipIdentity(path="video.mkv", size=1, mtime=1.0)],
         ),
     )
 

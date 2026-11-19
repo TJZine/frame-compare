@@ -54,7 +54,7 @@ def test_native_label_copy_is_source_and_number_only():
 def test_workspace_authority_precedence_identity_names_and_mixed_reference():
     reviews = (
         AlignmentReviewAudioReview(
-            AlignmentReviewCurrentAuthority("preexisting_manual_override", 0),
+            AlignmentReviewCurrentAuthority("interactive_confirmed_this_run", 0),
             "provisional",
             504,
             (),

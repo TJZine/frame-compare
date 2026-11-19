@@ -176,7 +176,7 @@ sanitized warning summaries.
 
 Analysis metric algorithm identity is analysis-owned. `frame_compare.analysis.metric_identity`
 builds the stable cache identity for `analysis.performance_mode`; cache I/O stores that
-identity in schema v8 payload metadata, and orchestration only passes the effective
+identity in schema v9 payload metadata, and orchestration only passes the effective
 analysis config, active-rect-aware selection-domain token, and one intact
 `MetricCacheRequest` into the analysis/cache owner. Computation and metadata consume
 that same request. Keying fills an absent analysis-source path only; absent range/FPS
@@ -323,13 +323,12 @@ The repo uses filesystem persistence, not a database.
 
 ### Source freshness and runtime identity
 
-Source freshness for the analysis, probe, and alignment reuse caches follows one
-performance-first policy: source identity uses path, byte size, and modification
-time (nanosecond precision where available), and does not hash media contents.
-Reading multi-gigabyte sources solely for cache lookup would defeat the cache's
-purpose. A replacement that preserves all three identity fields is intentionally
-treated as the same source and can reuse cached data; workflows that replace media
-while preserving size and mtime must advance the mtime or remove the relevant cache.
+Analysis and alignment reuse identify a source by path, byte size, and
+modification time (nanosecond precision where available). Media bytes are never
+hashed for these lookups. A replacement that preserves all three fields can reuse
+cached data. Advance the mtime or clear the relevant cache when replacing media
+while preserving size and mtime. Probe facts and decoder indexes use the stronger
+identity described in [Shared caches and decoder indexes](#shared-caches-and-decoder-indexes).
 
 Automatic decoder/tool cache invalidation and decoder-ABI index isolation are
 guaranteed for the managed Windows portable and Debian/Docker profiles, whose
@@ -376,9 +375,9 @@ never searches parent directories.
   `reference_path`, source identities, source trims, effective FPS values,
   configured analysis ignore windows, active-rect resolver policy, each clip's
   resolved active rectangle, and the final shared selectable window.
-  Cache schema v8 stores `analysis_source_path`, `performance_mode`,
+  Cache schema v9 stores `analysis_source_path`, `performance_mode`,
   `algorithm_id`, `metric_backend`, stable `algorithm_identity_json`, and
-  the scoped media-runtime analysis fingerprint through that algorithm identity. A
+  the scoped media-runtime analysis fingerprint through that algorithm identity.
   For the managed Windows portable and Debian/Docker profiles, a selected decoder
   lineage change cannot satisfy the previous metric cache, while tone-mapping-only
   and standalone FFmpeg changes do not invalidate metric arrays. It also stores
@@ -415,23 +414,17 @@ never searches parent directories.
   L-SMASH-Works decoder identity. Interactively confirmed
   entries may also retain the computed
   audio alignment result that produced the viewer suggestion; provisional audio
-  candidates are never written as computed authority. Cache schema v2 stores only `computed` and
-  `interactive_confirmed`
-  origins, requires a bounded scalar stability summary for computed entries and
-  embedded computed results, and persists no per-chunk evidence or audio. A v1
-  cache is ignored and recomputed; there is no v1 migration or compatibility reader.
-  The canonical clip identity also carries an active-rectangle identity revision.
-  Entries written before that dependency was recorded cannot authorize reuse,
-  including for a request with no rectangle: their original video region is
-  unknown. Their source sets remain in the v2 container as historical information
-  when current entries are saved, but require fresh computation or confirmation
-  before reuse. Detector provenance is not part of the key when the resolved
-  geometry is unchanged.
-  Lookup verifies that the stored source-set identity matches its key before
-  admitting entries. Entry timestamps must convert to UTC. Unreadable, corrupt,
-  unsupported-version, malformed source-table, or invalid-entry shared reuse data
-  degrades to the normal alignment path with a warning log event. Ordinary
-  no-match, incomplete, or stale source-set misses can continue silently.
+  candidates are never written as computed authority. Schema "3" stores
+  `computed` and `interactive_confirmed` origins and requires a bounded scalar
+  stability summary for computed entries and embedded computed results. Lookup
+  uses source-set and comparison keys and takes display names from the current
+  request. The cache stores offsets and scalar summaries without per-chunk evidence
+  or audio. Older formats miss and offsets are recomputed. Resolved active-rectangle
+  geometry participates in the key independently of detector provenance.
+  Entry timestamps must convert to UTC. Unreadable, corrupt, or unsupported
+  shared reuse data degrades to the normal alignment path with a warning log
+  event. Ordinary no-match, incomplete, or stale source-set misses can continue
+  silently.
   A source set with duplicate comparison cache keys is ineligible for both
   shared lookup and publication. Its individual alignment pairs retain their
   run-local results. A read I/O error during a locked update or a serialization
@@ -463,7 +456,10 @@ never searches parent directories.
   FPS numerator and denominator use positive signed-64-bit components matching R82's
   `VSVideoInfo` representation. Filesystem size/mtime and cache-safety bounds remain
   deliberate signed-64-bit limits rather than claims about decoder field widths;
-  malformed entries are skipped individually.
+  malformed entries are skipped individually and those sources are probed again.
+  Probe reuse reads only the shared file. A locked merge replaces a corrupt or
+  unsupported shared file with current entries. A read I/O error aborts the
+  merge and preserves the file.
 - `<resolved paths.generated_dir>/cache/source-indexes/`: `ManagedSourceIndexCache`
   owns persistent L-SMASH-Works indexes. The entry key binds the resolved media
   path and the profile's decoder token: `lsw1310-47d07506e489` for managed Windows,
@@ -485,11 +481,10 @@ never searches parent directories.
   ahead of the system clock gives no reusable identity.
   A miss or invalid entry builds with `cache=1` in an unpredictable private
   staging directory beneath the cache root. Publication replaces the stable
-  index and commits its metadata last, after rechecking the same source identity
-  at the commit boundary. Older cache metadata is rebuilt on demand. A valid
-  stable index opens with `cache=0`. A generated VSView session may reuse a
-  validated parent-owned index with `cache=0`. The child checks its own probe
-  token and re-establishes cache authority under the lease through the native open.
+  index and commits its metadata last. Older cache metadata is rebuilt on demand.
+  A valid stable index opens with `cache=0`. A generated VSView session may reuse
+  a parent-owned index with `cache=0` after matching the source identity and its
+  own probe token under the index lease.
   Missing or rejected indexes use a private cache-free path. Cache-free opens
   explicitly direct L-SMASH-Works
   to a disposable private directory. The managed loader never reads,
@@ -551,23 +546,13 @@ identity is not persisted.
   confirmed remote success before cancellation. Orchestration captures that fact
   synchronously before optional post-upload work or another cancellation
   checkpoint; it does not turn interruption into success or start new work.
-  The service
-  also owns strict TOML validation, immediate-child history discovery that admits
-  only folders containing a supported result record, malformed-record isolation,
-  deterministic ordering, exact run-name validation, record-file/run-directory
-  containment, and report-path containment. Recordless folders and symlinked
-  run-directory aliases are not history entries. An unavailable selected generated
-  root raises a typed actionable history error; the service never creates a missing
-  root, falls back, or mutates `run_info.toml`.
-- `<run-folder>/generated/clip_probe.toml`: current-run clip probe cache
-- `<run-folder>/generated/manual_overrides.toml`: persisted interactively confirmed
-  manual alignment overrides for the current run. Canonical version "2" stores
-  `reference_clip`, `comparison_clip`, `frame_offset`, and `timestamp` under
-  reference:comparison keys. Record presence represents confirmed manual authority;
-  there is no separate confirmation flag. Unsupported versions are recoverable
-  cache misses and are replaced on the next save without migration. A read I/O
-  error or serialization failure during a save warns and preserves the existing
-  manual overrides.
+  The service loads TOML into a typed V1 record, normalizes lifecycle timestamps
+  to UTC, and ignores unknown fields. History discovers immediate child directories
+  with a result record, isolates unreadable or unsupported records as unavailable,
+  and orders entries deterministically. A report is available when the record names
+  `report.html` and that file exists in the run directory. An unavailable generated
+  root raises a typed history error. History validates exact run names and is read-only.
+- `<run-folder>/generated/clip_probe.toml`: current-run clip probe snapshot
 - `<run-folder>/alignment_diagnostics/comparison-<ordinal>.json`: diagnostic-only
   schema v5, written by `frame_compare.services.alignment_diagnostics` using the full
   attempt defined in `frame_compare.services.alignment_evidence`. The diagnostic
@@ -658,8 +643,8 @@ workspace-level `<resolved paths.generated_dir>/cache/alignment` path. The
 
 Normal runs and cache-only runs that proceed reserve a fresh run folder beneath the
 resolved `paths.generated_dir`. Existing run folders are not reused for analysis cache
-hits. Screenshots, slow.pics upload inputs, manual overrides, and VSView
-artifacts remain scoped to the current run folder. Probe snapshots
+hits. Screenshots, slow.pics upload inputs, and VSView artifacts remain scoped to
+the current run folder. Probe snapshots
 are written to both the current run folder and the shared generated probe cache
 so future `--from-cache-only` runs can validate the exact all-source analysis
 selection domain before metadata prefetch or run-folder reservation. Report generation
@@ -717,12 +702,11 @@ summary's counts, elapsed wait, and unresolved status through its returned outco
 the phase adapter reads that telemetry without a mutable output parameter. This
 telemetry remains memory-only and adds no persisted or result-JSON fields.
 
-Prepared identities remain frozen. Cached acceptance and persistence validate
-current path, size, and mtime against them; prompts and native review do not permit
-changed sources to authorize trims or newly saved offsets. Applied
+Alignment uses the source identities captured during preparation. Applied
 `AlignmentResult` values require both an integer frame offset and a finite time
-offset; unapplied results carry neither. Zero remains a valid applied offset,
-and historical cached/manual evidence remains distinct from fresh computation.
+offset. Unapplied results carry neither. Zero remains a valid applied offset.
+Authority can come from fresh audio/video confirmation, interactive confirmation,
+or accepted shared reuse.
 
 `frame_compare.services.alignment` owns alignment entrypoint sequencing and
 precedence and carries the immutable original audio attempt and diagnostic-only
@@ -736,9 +720,7 @@ worker and collector cleanup to finish, and then re-raises the original cancella
 unless that cleanup failed; no partial worker result reaches phase-output application.
 Incomplete child, reader, pipe, or handle cleanup is a distinct fatal alignment error,
 including after cancellation, even when ordinary dependency or decode failures remain
-warning-only for optional alignment. Prepared-source identity invalidation is also
-fatal: after owned cleanup and cancellation handling, even unavailable audio results
-must pass source-currentness validation before downstream rendering can proceed.
+warning-only for optional alignment.
 The attempt retains resolved pathless stream
 facts, per-chunk columnar evidence, contiguous chunk runs, the global lag, start
 compensation, the sub-frame estimate, the A4b authority recount, the video
@@ -857,7 +839,7 @@ token is part of the shared source-set identity. Whole-set shared cache entries
 under a different policy token miss, including their interactive confirmations.
 `alignment_video` owns V1-V5a: bounded five-offset base scoring, targeted run/chunk
 hypothesis checks, L-SMASH loading through the injected run `VSLoader`, active-rect
-crop/downscale/rank scoring, cancellation and source-identity checks, and bounded
+crop/downscale/rank scoring, cancellation checks, and bounded
 review check-point construction. Base and examined-target positions are motion-selected
 from the reference alone, selecting the highest-motion measurable candidate in each
 slot and omitting slots without a measurable candidate. Both checks require an
@@ -887,11 +869,10 @@ result as the fallback when appropriate.
 `alignment_reuse_cache.prepare_reusable_source_set` admits complete source sets with
 matching comparison identities, trusted current-run or shared-computed authority,
 required stability, and at least one current-run computation or confirmation. The
-writer consumes that prepared candidate and rechecks source freshness before and
-inside locked atomic publication. A mixed publication refreshes the shared acceptance
-time for all entries. Shared cache schema v2 remains accepted-authority-only and does
-not serialize the richer attempt. Warm cache entries therefore report historical
-stream/chunk details as unavailable rather than inventing them.
+writer publishes the prepared candidate atomically under a lock and checks for
+cancellation. A mixed publication refreshes the shared acceptance time for all
+entries. Shared cache schema "3" stores eligible authority and scalar summaries.
+Warm cache entries report historical stream and chunk details as unavailable.
 
 `vsview.session_script` reserves the script path and generates deterministic session
 data and a bootstrap that imports the installed Frame Compare package.
@@ -959,7 +940,7 @@ the existing sidecar. After a successful VSView exit, the parent reads the last 
 result. Navigation never grants evidence authority or writes results.
 `alignment_vsview` owns availability policy, expected-comparison construction from
 raw source counts, result acceptance through the typed review contract, and
-confirmed offset application and override policy. It does not parse terminal input.
+confirmed offset application. It does not parse terminal input.
 `frame_compare.vsview.adapter` owns the current-interpreter launch boundary,
 including the exact panel entry point in that environment, bounded startup-readiness
 probe, and bounded child-process lifetime. It does not discover VSView executables
@@ -1627,7 +1608,7 @@ Runtime ownership matrix:
 | Shared open-rail human section rendering and ASCII fallback | `frame_compare.utils.terminal_sections` |
 | Human artifact-path display and terminal hyperlinks | `frame_compare.utils.artifact_paths` |
 | Memory-only final alignment summary carried to phase and completion output | `frame_compare.utils.progress_protocol` |
-| Native VSView result acceptance, offset computation, and override policy | `frame_compare.services.alignment_vsview` |
+| Native VSView result acceptance and offset computation | `frame_compare.services.alignment_vsview` |
 | Native VSView workspace metadata v6 validation, script-derived identity, and result-v1 validation and atomic persistence | `frame_compare.vsview.alignment_review_contract` |
 | Native VSView alignment-review panel, public callback observation, and source-lineup decisions | `frame_compare.vsview.alignment_review_panel` |
 | VSView availability, launch adapter, and selected media-runtime preload | `frame_compare.vsview.adapter`, `frame_compare.vsview.launcher` |

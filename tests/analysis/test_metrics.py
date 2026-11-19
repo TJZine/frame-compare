@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from fractions import Fraction
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
@@ -11,7 +12,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from vapoursynth import VideoFormat, VideoNode
 
-from frame_compare.analysis.cache_io import CACHE_VERSION
+from frame_compare.analysis.cache_io import (
+    CACHE_VERSION,
+    load_cached_metrics_for_request,
+)
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.metric_strategies import MetricComputationResult
 from frame_compare.analysis.metrics import calculate_metrics, slice_frame_metrics
@@ -261,16 +265,12 @@ def test_calculate_metrics_computes_on_cache_miss(
 @patch("frame_compare.analysis.metrics.calculate_metric_strategy")
 @patch("frame_compare.analysis.metrics.DefaultVSLoader")
 @patch("frame_compare.analysis.metrics.compute_cache_key")
-@pytest.mark.parametrize(
-    "corruption", ["numeric", "enum-list", "enum-dict", "deep", "integer-limit"]
-)
 def test_calculate_metrics_recomputes_after_oversized_cache_entry(
     mock_key,
     mock_loader_cls,
     mock_strategy,
     mock_save,
     tmp_path: Path,
-    corruption: str,
 ) -> None:
     mock_key.return_value = "fp"
     video_path = tmp_path / "v1.mkv"
@@ -290,14 +290,6 @@ def test_calculate_metrics_recomputes_after_oversized_cache_entry(
         ),
         encoding="utf-8",
     )
-    path = cache_file(tmp_path, "fp")
-    if corruption in {"deep", "integer-limit"}:
-        path.write_text("[" * 10000 if corruption == "deep" else "1" * 5000, encoding="utf-8")
-    elif corruption.startswith("enum"):
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        payload["luminance"] = [0.5]
-        payload["metadata"]["active_rect_source"] = [] if corruption == "enum-list" else {}
-        path.write_text(json.dumps(payload), encoding="utf-8")
     source = mock_loader_cls.return_value.load.return_value
     source.clip.num_frames = 1
     source.fps = Fraction(24, 1)
@@ -313,6 +305,57 @@ def test_calculate_metrics_recomputes_after_oversized_cache_entry(
     assert result.disposition == "computed"
     mock_strategy.assert_called_once()
     mock_save.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_score"),
+    [
+        pytest.param("luminance", 1.1, id="luminance-above-one"),
+        pytest.param("motion", -0.1, id="motion-below-zero"),
+    ],
+)
+@patch("frame_compare.analysis.metrics.calculate_metric_strategy")
+@patch("frame_compare.analysis.metrics.DefaultVSLoader")
+def test_calculate_metrics_repairs_out_of_range_cached_score(
+    mock_loader_cls, mock_strategy, tmp_path: Path, field: str, invalid_score: float
+) -> None:
+    video_path = tmp_path / "v1.mkv"
+    video_path.touch()
+    cache_dir = tmp_path / "cache"
+    config = AnalysisConfig()
+    request = MetricCacheRequest(analysis_source_path=video_path)
+    source = mock_loader_cls.return_value.load.return_value
+    source.clip.num_frames = 2
+    source.fps = Fraction(24)
+    mock_strategy.return_value = _quality_strategy_result(frame_count=2)
+    acquire = partial(
+        calculate_metrics, request, video_paths=[video_path], config=config, cache_dir=cache_dir
+    )
+
+    fresh = acquire()
+    assert fresh.disposition == "computed"
+    warm = acquire()
+    assert warm.disposition == "hit"
+    assert warm.metrics == fresh.metrics
+
+    fingerprint = fresh.metrics.metadata.config_fingerprint
+    path = cache_file(cache_dir, fingerprint, video_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["version"] == 9
+    payload[field][1] = invalid_score
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    invalid = load_cached_metrics_for_request(cache_dir, fingerprint, request)
+    assert invalid.reason == "corrupted"
+
+    repaired = acquire()
+    assert repaired.disposition == "computed"
+    assert repaired.metrics == fresh.metrics
+
+    warm = acquire()
+    assert warm.disposition == "hit"
+    assert warm.metrics == fresh.metrics
+    assert mock_strategy.call_count == 2
 
 
 @patch("frame_compare.analysis.metrics.save_metrics_cache")

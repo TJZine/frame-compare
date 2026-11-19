@@ -13,7 +13,6 @@ from frame_compare.services.alignment_resolution import (
     confirm_manual,
     ordered_results,
     resolution_from_computation,
-    resolution_from_override,
     resolution_from_reuse,
 )
 from frame_compare.services.alignment_reuse_cache import (
@@ -88,10 +87,6 @@ def test_historical_resolution_derives_evidence_and_preserves_zero() -> None:
     assert reused.accepted_offset == 0
     manual = replace(historical, source="manual", algorithm=None)
     assert (
-        resolution_from_override(manual, comparison_cache_key="comp").origin
-        == "preexisting_manual_override"
-    )
-    assert (
         resolution_from_reuse(manual, comparison_cache_key="comp", computed=False).origin
         == "shared_previous_offsets"
     )
@@ -107,7 +102,6 @@ def test_historical_resolution_derives_evidence_and_preserves_zero() -> None:
     [
         "shared_computed_offsets",
         "shared_previous_offsets",
-        "preexisting_manual_override",
         "interactive_confirmed_this_run",
     ],
 )
@@ -159,7 +153,6 @@ def _resolutions(alignment_case: AlignmentRequest) -> dict[str, ComparisonResolu
         "wrong-key",
         "wrong-identity",
         "previous",
-        "override",
         "unapplied",
         "no-attempt",
         "no-stability",
@@ -182,13 +175,8 @@ def test_candidate_refuses_each_ineligible_source_set(
         records["foreign"] = records.pop(key)
     elif fault == "wrong-identity":
         records[key] = replace(item, comparison_cache_key="foreign")
-    elif fault in {"previous", "override"}:
-        records[key] = replace(
-            item,
-            origin="shared_previous_offsets"
-            if fault == "previous"
-            else "preexisting_manual_override",
-        )
+    elif fault == "previous":
+        records[key] = replace(item, origin="shared_previous_offsets")
     elif fault == "unapplied":
         records[key] = replace(item, result=_computed(provisional_audio_attempt()))
     elif fault == "no-attempt":
@@ -219,7 +207,7 @@ def test_candidate_orders_requested_records_and_ignores_unrelated(
     records = _resolutions(alignment_case)
     keys = list(records)
     records[keys[1]] = replace(records[keys[1]], origin="shared_computed_offsets")
-    records["unrelated"] = replace(records[keys[0]], origin="preexisting_manual_override")
+    records["unrelated"] = replace(records[keys[0]], origin="shared_previous_offsets")
     candidate = prepare_reusable_source_set(alignment_case, dict(reversed(list(records.items()))))
     assert candidate is not None
     assert tuple(item.result for item in candidate.resolutions) == ordered_results(

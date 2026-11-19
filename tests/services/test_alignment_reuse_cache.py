@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import errno
-import hashlib
 import os
 import tomllib
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 from typing import IO, Any
@@ -18,6 +19,7 @@ import pytest
 import tomli_w
 
 import frame_compare.services.alignment_reuse_cache as reuse_cache
+from frame_compare.services.alignment import align_clips_from_request
 from frame_compare.services.alignment_evidence import (
     AlignmentStabilitySummary,
 )
@@ -28,8 +30,8 @@ from frame_compare.services.alignment_reuse_cache import (
     load_reusable_offset_entries,
     source_set_cache_key,
 )
-from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
+    AlignmentConfig,
     AlignmentResult,
     ComparisonResolution,
 )
@@ -117,12 +119,11 @@ def _result(
     frame_offset: int = 42,
     correlation_score: float = 0.987,
     source: str = "computed",
-    comparison_clip: str | None = None,
 ) -> AlignmentResult:
     comparison = request.comparisons[comparison_index]
     return AlignmentResult(
         reference_clip=request.reference.path.name,
-        comparison_clip=comparison.path.name if comparison_clip is None else comparison_clip,
+        comparison_clip=comparison.path.name,
         frame_offset=frame_offset,
         time_offset_seconds=frame_lag(frame_offset) / 8000,
         correlation_score=correlation_score,
@@ -314,7 +315,7 @@ def test_stale_estimator_policy_shared_entry_misses_without_schema_change(
             ],
         )
 
-    assert _cache_data(request)["version"] == CACHE_VERSION == "2"
+    assert _cache_data(request)["version"] == CACHE_VERSION == "3"
     assert load_reusable_offset_entries(request) is None
 
 
@@ -420,123 +421,40 @@ def test_shared_reuse_cache_identity_distinguishes_active_rect_absence(
         assert changed_comparison_key == original_comparison_key
 
 
-def test_shared_reuse_cache_identity_persists_resolved_geometry_and_explicit_absence(
+def test_shared_reuse_cache_separates_active_rect_variants_and_preserves_both(
     tmp_path: Path,
 ) -> None:
-    request = _request(tmp_path)
-    _write_computed(request)
-
-    data = _cache_data(request)
-    entry = _first_entry(data)
-    reference = entry["reference"]
-    comparison = entry["comparison"]
-    assert isinstance(reference, dict)
-    assert isinstance(comparison, dict)
-    assert reference["active_rect_identity_version"] == "1"
-    assert reference["active_rect"] == "absent"
-    assert comparison["active_rect_identity_version"] == "1"
-    assert comparison["active_rect"] == "absent"
-    assert not any(
-        key.startswith("active_rect_") for key in reference if key != "active_rect_identity_version"
+    without_rect = _request(tmp_path)
+    with_rect = replace(
+        without_rect,
+        comparisons=[_with_active_rect(without_rect.comparisons[0], (10, 20, 100, 80))],
     )
-
-    resolved = replace(
-        request,
-        reference=_with_active_rect(request.reference, (10, 20, 100, 80)),
-        comparisons=[_with_active_rect(request.comparisons[0], (10, 20, 100, 80))],
-    )
-    _write_computed(resolved)
-    resolved_data = _cache_data(resolved)
-    resolved_source_sets = resolved_data["source_sets"]
-    assert isinstance(resolved_source_sets, dict)
-    resolved_source_set = resolved_source_sets[source_set_cache_key(resolved)]
-    assert isinstance(resolved_source_set, dict)
-    resolved_entries = resolved_source_set["entries"]
-    assert isinstance(resolved_entries, dict)
-    resolved_entry = next(iter(resolved_entries.values()))
-    assert isinstance(resolved_entry, dict)
-    resolved_reference = resolved_entry["reference"]
-    assert isinstance(resolved_reference, dict)
-    assert resolved_reference["active_rect"] == "resolved"
-    assert {
-        resolved_reference["active_rect_x"],
-        resolved_reference["active_rect_y"],
-        resolved_reference["active_rect_width"],
-        resolved_reference["active_rect_height"],
-    } == {10, 20, 80, 100}
-
-
-def test_shared_reuse_cache_legacy_no_rect_entry_misses_and_is_preserved_on_write(
-    tmp_path: Path,
-) -> None:
-    request = _request(tmp_path)
     save_resolutions(
-        request,
+        without_rect,
         [
             _resolution(
-                request,
-                result=_result(request, source="manual"),
+                without_rect,
+                result=_result(without_rect, frame_offset=47, source="manual"),
                 provenance="interactive_confirmed_this_run",
             )
         ],
         accepted_at="2026-06-06T12:00:00Z",
     )
-    data = _cache_data(request)
-    source_sets = data["source_sets"]
-    assert isinstance(source_sets, dict)
-    current_source_set_key = source_set_cache_key(request)
-    source_set = source_sets.pop(current_source_set_key)
-    assert isinstance(source_set, dict)
-    identity = source_set["identity"]
-    entries = source_set["entries"]
-    assert isinstance(identity, dict)
-    assert isinstance(entries, dict)
-    current_comparison_key = comparison_cache_key(request.comparisons[0])
-    entry = entries.pop(current_comparison_key)
-    assert isinstance(entry, dict)
 
-    identity_comparisons = identity["comparisons"]
-    assert isinstance(identity_comparisons, list)
-    identity_comparison = identity_comparisons[0]
-    assert isinstance(identity_comparison, dict)
-    identity_reference = identity["reference"]
-    assert isinstance(identity_reference, dict)
-    entry_reference = entry["reference"]
-    entry_comparison = entry["comparison"]
-    assert isinstance(entry_reference, dict)
-    assert isinstance(entry_comparison, dict)
-    for table in (identity_reference, identity_comparison, entry_reference, entry_comparison):
-        for field_name in tuple(table):
-            if field_name.startswith("active_rect"):
-                del table[field_name]
+    assert load_reusable_offset_entries(with_rect) is None
+    _write_computed(with_rect)
 
-    legacy_comparison_identity = {
-        key: value for key, value in identity_comparison.items() if key != "key"
-    }
-    legacy_comparison_key = hashlib.sha256(
-        tomli_w.dumps(legacy_comparison_identity).encode("utf-8")
-    ).hexdigest()
-    identity_comparison["key"] = legacy_comparison_key
-    entries[legacy_comparison_key] = entry
-    legacy_source_set_key = hashlib.sha256(tomli_w.dumps(identity).encode("utf-8")).hexdigest()
-    source_sets[legacy_source_set_key] = source_set
-    _persist_cache_data(request, data)
+    confirmed_entries = load_reusable_offset_entries(without_rect)
+    assert confirmed_entries is not None
+    confirmed = confirmed_entries[comparison_cache_key(without_rect.comparisons[0])]
+    assert confirmed.origin == "interactive_confirmed"
+    assert confirmed.result.frame_offset == 47
 
-    assert legacy_source_set_key != current_source_set_key
-    assert load_reusable_offset_entries(request) is None
-
-    _write_computed(request)
-    rewritten_source_sets = _cache_data(request)["source_sets"]
-    assert isinstance(rewritten_source_sets, dict)
-    assert legacy_source_set_key in rewritten_source_sets
-    assert current_source_set_key in rewritten_source_sets
-    legacy_source_set = rewritten_source_sets[legacy_source_set_key]
-    assert isinstance(legacy_source_set, dict)
-    legacy_entries = legacy_source_set["entries"]
-    assert isinstance(legacy_entries, dict)
-    legacy_entry = next(iter(legacy_entries.values()))
-    assert isinstance(legacy_entry, dict)
-    assert legacy_entry["origin"] == "interactive_confirmed"
+    computed_entries = load_reusable_offset_entries(with_rect)
+    assert computed_entries is not None
+    computed = computed_entries[comparison_cache_key(with_rect.comparisons[0])]
+    assert computed.origin == "computed"
+    assert computed.result.frame_offset == 42
 
 
 def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
@@ -558,26 +476,6 @@ def test_shared_reuse_cache_round_trips_computed_entry(tmp_path: Path) -> None:
     assert f'version = "{CACHE_VERSION}"' in content
     assert 'origin = "computed"' in content
     assert 'accepted_at = "2026-06-06T12:00:00Z"' in content
-
-
-def test_shared_reuse_cache_settings_key_uses_estimator_recipe_identity(
-    tmp_path: Path,
-) -> None:
-    """The settings key is exactly the estimator policy plus probe/recipe facts."""
-    request = _request(tmp_path)
-    _write_computed(request)
-
-    data = _cache_data(request)
-    settings = _first_entry(data)["settings"]
-    assert isinstance(settings, dict)
-    assert settings == {
-        "estimator_policy": "whole-track-chunked-phat-video-check-score-floor-20261107",
-        "max_offset_seconds": 30.0,
-        "channel_strategy": "mono_downmix",
-    }
-    comparison = _first_entry(data)["comparison"]
-    assert isinstance(comparison, dict)
-    assert comparison["selected_audio_stream"] == 1
 
 
 def test_shared_cache_persists_confirmed_entry_while_shared_computed_stays_computed(
@@ -804,84 +702,68 @@ def test_shared_reuse_cache_identity_drift_is_miss(
     _write_computed(request)
 
     changed_request = mutate(request, tmp_path)
-    if all(
-        clip.identity_is_current()
-        for clip in [changed_request.reference, *changed_request.comparisons]
-    ):
-        assert load_reusable_offset_entries(changed_request) is None
+    assert load_reusable_offset_entries(changed_request) is None
+
+
+_MALFORMED_STABILITY_CLASSIFICATION = "synthetic-cache-warning-sentinel"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("frame_offset", True, id="bool-frame-offset"),
+        pytest.param("frame_offset", 1.5, id="float-frame-offset"),
+        pytest.param("frame_offset", 2**40, id="out-of-range-frame-offset"),
+        pytest.param("origin", "other", id="unknown-origin"),
+        pytest.param("time_offset_seconds", float("nan"), id="nan-time-offset"),
+        pytest.param("time_offset_seconds", True, id="bool-time-offset"),
+        pytest.param("time_offset_seconds", "1.5", id="string-time-offset"),
+        pytest.param("stability", None, id="missing-computed-stability"),
+        pytest.param(
+            "stability",
+            {"classification": _MALFORMED_STABILITY_CLASSIFICATION, "valid_windows": 0},
+            id="unknown-stability-classification",
+        ),
+        pytest.param("accepted_at", 0, id="numeric-timestamp"),
+        pytest.param("accepted_at", "0", id="numeric-timestamp-string"),
+        pytest.param(
+            "accepted_at", datetime(2026, 6, 6, tzinfo=UTC), id="toml-native-aware-datetime"
+        ),
+    ],
+)
+def test_malformed_reuse_entry_is_a_miss_and_recomputes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, value: object
+) -> None:
+    request = _request(tmp_path)
+    _write_computed(request)
+    key = comparison_cache_key(request.comparisons[0])
+    reusable = load_reusable_offset_entries(request)
+    assert reusable is not None and reusable[key].result.frame_offset == 42
+
+    data = _cache_data(request)
+    entry = _first_entry(data)
+    if value is None:
+        del entry[field]
     else:
-        with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-            load_reusable_offset_entries(changed_request)
+        entry[field] = value
+    _persist_cache_data(request, data)
 
+    estimate = Mock(return_value=_result(request, frame_offset=0))
+    monkeypatch.setattr("frame_compare.services.alignment._estimate_audio_pair", estimate)
 
-@pytest.mark.parametrize(
-    ("request_variant", "table_name", "field_name", "field_value"),
-    [
-        ("default", "reference", "trim_end_frame_inclusive", 120),
-        ("default", "comparison", "trim_end_frame_inclusive", 95),
-        ("no_streams", "reference", "selected_audio_stream", 0),
-        ("no_streams", "comparison", "selected_audio_stream", 1),
-        ("default", "settings", "unrecognized_future_setting", "reserved"),
-    ],
-)
-def test_shared_reuse_cache_optional_fields_present_in_cache_but_absent_in_request_miss(
-    tmp_path: Path,
-    request_variant: str,
-    table_name: str,
-    field_name: str,
-    field_value: object,
-) -> None:
-    base_request = _request(tmp_path)
-    if request_variant == "no_streams":
-        base_request = replace(
-            base_request,
-            reference=replace(base_request.reference, selected_audio_stream=None),
-            comparisons=[replace(base_request.comparisons[0], selected_audio_stream=None)],
-        )
+    with patch.object(reuse_cache.log, "warning") as warn:
+        outcome = asyncio.run(align_clips_from_request(request, AlignmentConfig(use_vsview=False)))
 
-    _write_computed(base_request)
-    data = _cache_data(base_request)
-    entry = _first_entry(data)
-    table = entry[table_name]
-    assert isinstance(table, dict)
-    table[field_name] = field_value
-    _persist_cache_data(base_request, data)
-
-    assert load_reusable_offset_entries(base_request) is None
-
-
-@pytest.mark.parametrize(
-    ("request_variant", "table_name", "field_name"),
-    [
-        ("trim_end_present", "reference", "trim_end_frame_inclusive"),
-        ("trim_end_present", "comparison", "trim_end_frame_inclusive"),
-        ("default", "reference", "selected_audio_stream"),
-        ("default", "comparison", "selected_audio_stream"),
-    ],
-)
-def test_shared_reuse_cache_optional_fields_present_in_request_but_absent_in_cache_miss(
-    tmp_path: Path,
-    request_variant: str,
-    table_name: str,
-    field_name: str,
-) -> None:
-    base_request = _request(tmp_path)
-    if request_variant == "trim_end_present":
-        base_request = replace(
-            base_request,
-            reference=replace(base_request.reference, trim_end_frame_inclusive=120),
-            comparisons=[replace(base_request.comparisons[0], trim_end_frame_inclusive=95)],
-        )
-
-    _write_computed(base_request)
-    data = _cache_data(base_request)
-    entry = _first_entry(data)
-    table = entry[table_name]
-    assert isinstance(table, dict)
-    table.pop(field_name, None)
-    _persist_cache_data(base_request, data)
-
-    assert load_reusable_offset_entries(base_request) is None
+    estimate.assert_called_once()
+    warn.assert_called_once()
+    assert _MALFORMED_STABILITY_CLASSIFICATION not in str(warn.call_args)
+    assert "exc_info" not in warn.call_args.kwargs
+    assert "exception" not in warn.call_args.kwargs
+    (result,) = outcome.results
+    assert result.source == "computed"
+    assert result.applied
+    assert result.frame_offset == 0
+    assert result.time_offset_seconds == 0.0
 
 
 def test_shared_reuse_cache_corrupt_data_warns_and_misses(
@@ -922,32 +804,37 @@ def test_shared_reuse_cache_invalid_utf8_warns_and_misses(
     assert warnings == ["alignment_reuse_cache_unreadable"]
 
 
-def test_shared_reuse_cache_replaces_v1_without_migrating_entries(tmp_path: Path) -> None:
+@pytest.mark.parametrize("old_version", ["1", "2"], ids=["v1", "v2"])
+def test_shared_reuse_cache_replaces_old_versions_without_migrating_entries(
+    tmp_path: Path, old_version: str
+) -> None:
     request = _request(tmp_path)
-    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
-    cache_file.parent.mkdir(parents=True)
-    cache_file.write_text(
-        'version = "1"\n[source_sets.legacy]\nmarker = "must-not-survive"\n',
-        encoding="utf-8",
-    )
-
-    save_resolutions(request, [_resolution(request)])
+    _write_computed(request)
+    key = comparison_cache_key(request.comparisons[0])
+    entries = load_reusable_offset_entries(request)
+    assert entries is not None and entries[key].result.frame_offset == 42
 
     data = _cache_data(request)
-    assert data["version"] == "2"
+    data["version"] = old_version
+    source_sets = data["source_sets"]
+    assert isinstance(source_sets, dict)
+    source_sets["legacy"] = {"marker": "must-not-survive"}
+    _persist_cache_data(request, data)
+
+    assert load_reusable_offset_entries(request) is None
+
+    save_resolutions(request, [_resolution(request, result=_result(request, frame_offset=12))])
+
+    data = _cache_data(request)
+    assert data["version"] == CACHE_VERSION == "3"
     source_sets = data["source_sets"]
     assert isinstance(source_sets, dict)
     assert "legacy" not in source_sets
+    entries = load_reusable_offset_entries(request)
+    assert entries is not None and entries[key].result.frame_offset == 12
 
 
-@pytest.mark.parametrize(
-    "provenance",
-    ["shared_previous_offsets", "preexisting_manual_override"],
-)
-def test_shared_reuse_cache_does_not_write_ineligible_resolution(
-    tmp_path: Path,
-    provenance: str,
-) -> None:
+def test_shared_reuse_cache_does_not_write_ineligible_resolution(tmp_path: Path) -> None:
     request = _request(tmp_path)
 
     save_resolutions(
@@ -956,7 +843,7 @@ def test_shared_reuse_cache_does_not_write_ineligible_resolution(
             _resolution(
                 request,
                 result=_result(request, source="cached"),
-                provenance=provenance,
+                provenance="shared_previous_offsets",
             )
         ],
         accepted_at="2026-06-06T12:00:00Z",
@@ -1128,10 +1015,8 @@ def test_shared_reuse_cache_read_error_preserves_existing_source_set(
     assert load_reusable_offset_entries(new) is None
 
 
-@pytest.mark.parametrize("damage", ["identity", "source_set", "entry"])
-def test_shared_reuse_cache_rejects_cross_wired_identity_or_warns_on_scalar(
-    tmp_path: Path, damage: str
-) -> None:
+@pytest.mark.parametrize("damage", ["source_set", "entry"])
+def test_shared_reuse_cache_warns_and_misses_on_scalar(tmp_path: Path, damage: str) -> None:
     request = _request(tmp_path)
     _write_computed(request)
     assert load_reusable_offset_entries(request) is not None
@@ -1140,10 +1025,7 @@ def test_shared_reuse_cache_rejects_cross_wired_identity_or_warns_on_scalar(
     assert isinstance(source_sets, dict)
     source_set_key = source_set_cache_key(request)
     source_set = source_sets[source_set_key]
-    if damage == "identity":
-        # The outer key and the per-entry clip facts still match the current request.
-        source_set["identity"]["media_runtime_fingerprint"] = "older-runtime"
-    elif damage == "source_set":
+    if damage == "source_set":
         source_sets[source_set_key] = 7
     else:
         source_set["entries"][comparison_cache_key(request.comparisons[0])] = 7
@@ -1158,27 +1040,6 @@ def test_shared_reuse_cache_rejects_cross_wired_identity_or_warns_on_scalar(
         else "alignment_reuse_cache_corrupt_source_set"
     )
     assert warn.call_args.args[0] == expected
-
-
-def test_source_change_during_atomic_write_preserves_cache(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    request = _request(tmp_path)
-    _write_computed(request)
-    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
-    original = cache_file.read_bytes()
-    real_fsync = os.fsync
-
-    def change_source_at_fsync(fd: int) -> None:
-        real_fsync(fd)
-        request.comparisons[0].path.write_bytes(b"new source with a different size")
-
-    monkeypatch.setattr("frame_compare.utils.atomic_write.os.fsync", change_source_at_fsync)
-    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-        save_resolutions(request, [_resolution(request, result=_result(request, frame_offset=8))])
-
-    assert cache_file.read_bytes() == original
-    assert list(cache_file.parent.glob(f".{cache_file.name}.*")) == []
 
 
 @pytest.mark.parametrize(
@@ -1204,72 +1065,6 @@ def test_shared_reuse_cache_write_boundary_failure_warns_without_raising(
     monkeypatch.setattr(reuse_cache.log, "warning", warning)
     _write_computed(request)
     assert warnings == ["alignment_reuse_cache_write_failed"]
-
-
-@pytest.mark.parametrize(
-    ("request_mutate", "table_name", "field_name", "field_value"),
-    [
-        (
-            lambda request: request,
-            "comparison",
-            "selected_audio_stream",
-            True,
-        ),
-        (
-            lambda request: request,
-            "settings",
-            "max_offset_seconds",
-            True,
-        ),
-    ],
-)
-def test_shared_reuse_cache_boolean_identity_fields_warn_and_miss(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    request_mutate: Callable[[AlignmentRequest], AlignmentRequest],
-    table_name: str,
-    field_name: str,
-    field_value: bool,
-) -> None:
-    request = request_mutate(_request(tmp_path))
-    _write_computed(request)
-    data = _cache_data(request)
-    entry = _first_entry(data)
-    table = entry[table_name]
-    assert isinstance(table, dict)
-    table[field_name] = field_value
-    _persist_cache_data(request, data)
-    warnings: list[str] = []
-
-    def _warning(event: str, **_kwargs: object) -> None:
-        warnings.append(event)
-
-    monkeypatch.setattr("frame_compare.services.alignment_reuse_cache.log.warning", _warning)
-
-    assert load_reusable_offset_entries(request) is None
-    assert warnings == ["alignment_reuse_cache_invalid_entry"]
-
-
-def test_shared_reuse_cache_writes_by_typed_comparison_identity_not_result_label(
-    tmp_path: Path,
-) -> None:
-    request = _request(tmp_path)
-
-    save_resolutions(
-        request,
-        [
-            _resolution(
-                request,
-                result=_result(request, comparison_clip="Encode (display label)"),
-            )
-        ],
-        accepted_at="2026-06-06T12:00:00Z",
-    )
-
-    data = _cache_data(request)
-    entry = _first_entry(data)
-
-    assert entry["comparison_clip"] == request.comparisons[0].path.name
 
 
 def test_shared_reuse_cache_identity_excludes_display_labels(tmp_path: Path) -> None:
@@ -1322,26 +1117,6 @@ def test_shared_reuse_cache_ignores_unrelated_ineligible_resolution_items(
 
     assert loaded is not None
     assert len(loaded) == 1
-
-
-@pytest.mark.parametrize("changed_role", ["reference", "comparison"])
-def test_frozen_source_drift_rejects_primed_cache_and_write(
-    tmp_path: Path,
-    changed_role: str,
-) -> None:
-    request = _request(tmp_path)
-    _write_computed(request)
-    assert load_reusable_offset_entries(request) is not None
-    cache_file = request.shared_alignment_cache_dir / CACHE_FILE_NAME
-    original_cache = cache_file.read_bytes()
-    clip = request.reference if changed_role == "reference" else request.comparisons[0]
-    clip.path.write_bytes(b"replacement source with different size")
-
-    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-        load_reusable_offset_entries(request)
-    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-        save_resolutions(request, [_resolution(request)])
-    assert cache_file.read_bytes() == original_cache
 
 
 def test_computed_result_requires_matching_current_time_but_cached_evidence_is_historical() -> None:

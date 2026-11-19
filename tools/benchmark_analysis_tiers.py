@@ -30,7 +30,11 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from frame_compare.analysis.cache_io import compute_cache_key, delete_metrics_cache_entry
+from frame_compare.analysis.cache_io import (
+    CACHE_VERSION,
+    compute_cache_key,
+    delete_metrics_cache_entry,
+)
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.selection import select_frames
@@ -940,7 +944,7 @@ def _metrics_metadata_json(metrics: FrameMetrics) -> JsonObject:
         "algorithm_id": metadata.algorithm_id,
         "metric_backend": metadata.metric_backend,
         "algorithm_identity_json": metadata.algorithm_identity_json,
-        "cache_version": metadata.version,
+        "cache_version": CACHE_VERSION,
     }
 
 

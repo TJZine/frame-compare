@@ -93,7 +93,6 @@ def _attempt_audio_review(
         "shared_computed_offsets": "cached",
         "interactive_confirmed_this_run": "manual",
         "shared_previous_offsets": "manual",
-        "preexisting_manual_override": "manual",
     }[origin]
     candidate = attempt.decision.candidate if attempt is not None else None
     seconds = frame_offset / 24 if applied else None
@@ -138,7 +137,7 @@ def _unavailable_audio_review(ordinal: int = 1) -> str:
 
 def _manual_audio_review(offset: int = 0) -> str:
     return _attempt_audio_review(
-        None, applied=True, origin="preexisting_manual_override", frame_offset=offset
+        None, applied=True, origin="shared_previous_offsets", frame_offset=offset
     )
 
 
@@ -849,11 +848,6 @@ def test_manual_authority_stays_distinct_from_retained_provisional_attempt(
         ),
         (
             "shared_previous_offsets",
-            True,
-            "Manually confirmed alignment: +0f — APPLIED",
-        ),
-        (
-            "preexisting_manual_override",
             True,
             "Manually confirmed alignment: +0f — APPLIED",
         ),

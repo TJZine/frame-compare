@@ -208,26 +208,6 @@ def test_cold_write_warm_hit_and_same_length_source_overwrite(
     assert cache.validated_index(source) == stable
 
 
-def test_source_overwrite_after_index_replace_prevents_metadata_commit(
-    cache: ManagedSourceIndexCache,
-    source: Path,
-    admission: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    replace = os.replace
-
-    def overwrite_after_index_replace(src: Path, dst: Path) -> None:
-        replace(src, dst)
-        if dst.suffix == ".lwi":
-            _overwrite_with_restored_mtime(source)
-
-    monkeypatch.setattr(os, "replace", overwrite_after_index_replace)
-    assert cache.try_load(source, _create_index, admission=admission) is None
-    assert cache.validated_index(source) is None
-    assert not list(cache.root.glob("*.json"))
-    assert not list(cache.root.glob(".stage-*"))
-
-
 def test_validated_consumer_holds_lease_and_rejects_wrong_expected_path(
     cache: ManagedSourceIndexCache, source: Path, admission: MagicMock, tmp_path: Path
 ) -> None:
@@ -252,9 +232,7 @@ def test_validated_consumer_holds_lease_and_rejects_wrong_expected_path(
     assert observed == [(source, 0, stable)]
 
 
-@pytest.mark.parametrize(
-    "failure", ["source-mutated", "native-error", "cancelled", "publish-error"]
-)
+@pytest.mark.parametrize("failure", ["native-error", "cancelled", "publish-error"])
 def test_failed_transaction_cleans_staging_and_never_commits(
     cache: ManagedSourceIndexCache,
     source: Path,
@@ -271,9 +249,7 @@ def test_failed_transaction_cleans_staging_and_never_commits(
     def open_source(path: Path, mode: int, index: Path) -> bool:
         assert mode == 1
         _create_index(path, mode, index)
-        if failure == "source-mutated":
-            path.write_bytes(b"changed source")
-        elif failure == "native-error":
+        if failure == "native-error":
             raise RuntimeError("failed to construct index")
         elif failure == "cancelled":
             cancelled.set()

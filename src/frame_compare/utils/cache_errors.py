@@ -18,18 +18,3 @@ class CacheCorruptionError(ProcessingError):
                 details={"path": str(path)},
             )
         )
-
-
-class CacheVersionMismatchError(ProcessingError):
-    """Cache schema version mismatch (FC-4007)."""
-
-    def __init__(self, found: str, expected: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4007",
-                name="CACHE_VERSION_MISMATCH",
-                message=f"Cache version mismatch (found {found}, expected {expected})",
-                hint="Clear cache directory",
-                details={"found": found, "expected": expected},
-            )
-        )

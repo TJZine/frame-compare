@@ -4,20 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
+import tomllib
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+import tomli_w
 
 import frame_compare.orchestration.probing.probe_cache as probe_cache
 import frame_compare.vs.source_admission as admission
 from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.orchestration import preparation
+from frame_compare.orchestration.phase_render import _source_signal_facts
 from frame_compare.orchestration.types import RunDependencies
+from frame_compare.utils.media_facts import HDRStaticFacts, SourceSignalFacts
 from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.types import HDRMetadata, SourceInfo
-from tests.orchestration.execute_run_helpers import FakeVSLoader
+from tests.orchestration.execute_run_helpers import FakeHDRVSLoader, FakeVSLoader
 from tests.orchestration.preparation_test_support import (
     METRIC_CONFIG,
     create_config,
@@ -83,7 +89,6 @@ def test_same_size_and_mtime_replacement_invalidates_all_probe_facts(
     assert unchanged == first
     assert first.fingerprint.source_token is not None
     assert first.is_hdr and first.hdr_metadata is not None
-    assert "DolbyVisionRPU" in first.tonemap_prop_keys
 
     _replace_same_stats(path, in_place=in_place)
     sdr_loader = RecordingLoader()
@@ -95,7 +100,6 @@ def test_same_size_and_mtime_replacement_invalidates_all_probe_facts(
     assert not current.is_hdr
     assert current.hdr_metadata is None
     assert current.preserved_frame_props == {"_Transfer": 1}
-    assert current.tonemap_prop_keys == ("_Transfer",)
 
 
 @pytest.mark.parametrize("authority", ["stale", "private", "non-strict", "no-probe", "refused"])
@@ -182,49 +186,11 @@ def test_admitted_private_sources_work_in_memory_without_persisted_reuse(
     assert probe_cache.load_clip_probe_cache(tmp_path / "generated" / "clip_probe.toml") == {}
 
 
-@pytest.mark.parametrize("private", [False, True], ids=["reusable", "private"])
-def test_cold_native_probe_cannot_attach_changed_identity_to_old_facts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, private: bool
-) -> None:
-    create_config(tmp_path, METRIC_CONFIG)
-    create_video_files(tmp_path / "comparison_videos", "source.mkv")
-    if private:
-        monkeypatch.setattr(probe_cache, "source_identity", MagicMock(side_effect=OSError))
-
-    class ReplacingLoader(RecordingLoader):
-        def load(self, path: Path) -> SourceInfo:
-            result = super().load(path)
-            _replace_same_stats(path, in_place=True)
-            return result
-
-    with pytest.raises(SourceLoadError, match="Source video changed while probing"):
-        _run(tmp_path, ReplacingLoader())
-    assert not (tmp_path / "generated" / "clip_probe.toml").exists()
-
-
-def test_live_probe_refuses_strict_identity_that_disagrees_with_admission(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    create_config(tmp_path, METRIC_CONFIG)
-    [path] = create_video_files(tmp_path / "comparison_videos", "source.mkv")
-    wrong_identity = replace(admission.source_identity(path), inode=0)
-    monkeypatch.setattr(probe_cache, "source_identity", lambda _: wrong_identity)
-    loader = RecordingLoader()
-    with pytest.raises(SourceLoadError, match="Source video changed during admission"):
-        _run(tmp_path, loader)
-    assert loader.calls == 0
-    assert not (tmp_path / "generated" / "clip_probe.toml").exists()
-
-
 @pytest.mark.parametrize("cache_only", [False, True], ids=["ordinary", "cache-only"])
 @pytest.mark.parametrize("token", [None, "malformed"], ids=["legacy-missing-token", "bad-token"])
 def test_untrusted_persisted_token_misses_at_both_preparation_entrypoints(
     tmp_path: Path, cache_only: bool, token: str | None
 ) -> None:
-    import tomllib
-
-    import tomli_w
-
     create_config(tmp_path, METRIC_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     _run(tmp_path, RecordingLoader(hdr=True))
@@ -253,3 +219,134 @@ def test_untrusted_persisted_token_misses_at_both_preparation_entrypoints(
         assert loader.calls == 1
         assert not probe.is_hdr and probe.hdr_metadata is None
         assert probe.preserved_frame_props == {"_Transfer": 1}
+
+
+@pytest.fixture
+def probe_workspace(tmp_path: Path) -> Path:
+    input_dir = tmp_path / "input"
+    config = METRIC_CONFIG.replace(
+        next(line for line in METRIC_CONFIG.splitlines() if line.startswith("input_dir =")),
+        f'input_dir = "{input_dir.name}"',
+    )
+    create_config(tmp_path, config)
+    create_video_files(input_dir, f"{tmp_path.name}.mkv")
+    return tmp_path
+
+
+def test_hdr_entry_without_metadata_is_skipped_and_reprobed(probe_workspace: Path) -> None:
+    loader = RecordingLoader(hdr=True)
+    cold = _run(probe_workspace, loader).clips[0].probe
+    key = probe_cache.compute_probe_cache_key(cold.fingerprint)
+    cache_path = probe_workspace / "generated" / "clip_probe.toml"
+    payload = tomllib.loads(cache_path.read_text(encoding="utf-8"))
+    del payload[key]["hdr_metadata"]
+    cache_path.write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+    assert probe_cache.load_clip_probe_cache(cache_path) == {}
+    reprobed = _run(probe_workspace, loader).clips[0].probe
+
+    assert loader.calls == 2
+    assert reprobed == cold
+    assert probe_cache.load_clip_probe_cache(cache_path) == {key: cold}
+
+
+@pytest.fixture
+def preview_decimal_conversion_limit() -> Iterator[None]:
+    original = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(sys.int_info.str_digits_check_threshold)
+    try:
+        yield
+    finally:
+        sys.set_int_max_str_digits(original)
+
+
+@pytest.mark.usefixtures("preview_decimal_conversion_limit")
+@pytest.mark.parametrize(
+    ("table", "field", "invalid_value", "mastering_display"),
+    [
+        pytest.param("preserved_frame_props", "_ColorRange", True, None, id="bool-prop"),
+        pytest.param("preserved_frame_props", "_ColorRange", -(2**63) - 1, None, id="prop-int64"),
+        pytest.param("hdr_metadata", "transfer", 2**63, None, id="hdr-int64"),
+        pytest.param(
+            "preserved_frame_props",
+            "Transfer",
+            "0" * (sys.int_info.str_digits_check_threshold + 1),
+            None,
+            id="preview-decimal-conversion",
+        ),
+        pytest.param(
+            "hdr_metadata",
+            "mastering_display",
+            f"L({'9' * 320},50)",
+            "L(10000000,50)",
+            id="scaled-luminance-overflow",
+        ),
+        pytest.param(
+            "hdr_metadata",
+            "mastering_display",
+            f"L({'9' * 320}.0,0.005)",
+            "L(1000.0,0.005)",
+            id="decimal-luminance-nonfinite",
+        ),
+    ],
+)
+def test_corrupt_probe_entry_is_reprobed_with_identical_facts(
+    probe_workspace: Path,
+    table: str,
+    field: str,
+    invalid_value: str | int | bool,
+    mastering_display: str | None,
+) -> None:
+    class SignalLoader(FakeHDRVSLoader):
+        def load(self, path: Path) -> SourceInfo:
+            source = super().load(path)
+            frame_props: dict[str, object] = {
+                "_ColorRange": 1,
+                "Transfer": " 016 ",
+                "DolbyVisionRPU": b"rpu",
+            }
+            hdr = source.hdr_metadata
+            assert hdr is not None
+            if mastering_display is None:
+                frame_props.update(
+                    MasteringDisplayMinLuminance=0.005, MasteringDisplayMaxLuminance=1000.0
+                )
+            else:
+                hdr = replace(hdr, mastering_display=mastering_display)
+            return replace(source, frame_props=frame_props, hdr_metadata=hdr)
+
+    loader = SignalLoader()
+    cache_path = probe_workspace / "generated" / "clip_probe.toml"
+    with patch.object(loader, "load", wraps=loader.load) as load:
+        cold = _run(probe_workspace, loader).clips[0].probe
+        key = probe_cache.compute_probe_cache_key(cold.fingerprint)
+        payload = tomllib.loads(cache_path.read_text(encoding="utf-8"))
+        payload[key][table][field] = invalid_value
+        cache_path.write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+        reprobed = _run(probe_workspace, loader).clips[0].probe
+        warm = _run(probe_workspace, loader).clips[0].probe
+
+    assert load.call_count == 2
+    cold_facts = _source_signal_facts(cold)
+    assert cold_facts == SourceSignalFacts(
+        is_hdr=True,
+        primaries=9,
+        transfer=16,
+        matrix=9,
+        color_range="limited",
+        dolby_vision_rpu=True,
+        hdr_static=HDRStaticFacts(
+            mastering_min_nits=0.005,
+            mastering_max_nits=1000.0,
+            max_cll=1000,
+            max_fall=400,
+        ),
+    )
+    assert _source_signal_facts(reprobed) == _source_signal_facts(warm) == cold_facts
+    assert warm.preserved_frame_props == cold.preserved_frame_props
+    assert warm.hdr_metadata is not None
+    assert cold.hdr_metadata is not None
+    assert warm.hdr_metadata.mastering_display == cold.hdr_metadata.mastering_display
+    assert type(warm.hdr_metadata.max_cll) is int
+    assert type(warm.hdr_metadata.max_fall) is int

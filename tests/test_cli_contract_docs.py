@@ -59,7 +59,9 @@ def test_current_authorities_describe_run_relative_records_and_clean_history_cut
 
     assert "run-folder-relative output" in architecture
     assert "workspace-relative output" not in architecture
-    assert "Folders without a supported `run_result.toml` are omitted" in cli_contract
+    normalized_contract = " ".join(cli_contract.split())
+    assert "Folders without a `run_result.toml` are omitted" in normalized_contract
+    assert "Malformed or unsupported records report `unavailable`" in normalized_contract
     assert "`FC-3016`" in cli_contract
     assert "does not create the root" in cli_contract
 

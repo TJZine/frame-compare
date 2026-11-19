@@ -54,7 +54,6 @@ class ClipProbeSnapshot:
     hdr_metadata: HDRMetadata | None = None
 
     preserved_frame_props: dict[str, str | int | float] = field(default_factory=lambda: {})
-    tonemap_prop_keys: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

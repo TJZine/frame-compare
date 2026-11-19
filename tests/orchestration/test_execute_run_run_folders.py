@@ -30,7 +30,6 @@ from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration import phase_selection, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
-from frame_compare.services.alignment_manual_overrides import MANUAL_OVERRIDES_FILE
 from frame_compare.services.run_folder import RunFolderReservation
 from frame_compare.vs.types import SourceInfo
 from tests.run_request_support import make_run_request
@@ -123,8 +122,6 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
 
     run_generated_dir.mkdir(parents=True, exist_ok=True)
-    manual_overrides_path = run_generated_dir / MANUAL_OVERRIDES_FILE
-    manual_overrides_path.write_text('version = "1"\n', encoding="utf-8")
 
     request = make_run_request(
         root=tmp_path,
@@ -149,7 +146,6 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
                         path=str(source_path),
                         size=source_path.stat().st_size,
                         mtime=source_path.stat().st_mtime,
-                        sha1=None,
                     )
                 ],
             ),
@@ -162,7 +158,6 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     asyncio.run(execute_run(request, deps=deps))
 
     assert not cast(Path, analysis_cache_path).exists()
-    assert manual_overrides_path.exists()
 
 
 def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_probe_cache_missing(
@@ -495,7 +490,6 @@ enable = false
                 metric_backend=metric_backend(config),
                 algorithm_identity_json=stable_metric_algorithm_identity_json(config),
                 metric_active_rect=metric_active_rect,
-                version=cache_io.CACHE_VERSION,
             ),
         )
         cache_io.save_metrics_cache(metrics, cache_dir)

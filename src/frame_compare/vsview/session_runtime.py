@@ -178,8 +178,6 @@ class SessionConsole:
             and offset is not None
         ):
             return f"previously confirmed {offset:+d}f", False
-        if origin == "preexisting_manual_override" and offset is not None:
-            return f"manual offset {offset:+d}f", False
         if state == "provisional" and isinstance(candidate_offset, int):
             return f"audio {candidate_offset:+d}f · not applied", True
         return "no audio match", True
@@ -300,12 +298,9 @@ def load_preview_source(
     def open_source(source: Path, mode: int, index: Path) -> vs.VideoNode:
         if source.suffix.lower() == ".lwi":
             raise ValueError("An L-SMASH index cannot be used as source media")
-        admission.verify(source)
-        clip = loader.LWLibavSource(
+        return loader.LWLibavSource(
             str(source), cache=mode, cachefile=str(index), ff_options=ff_options
         )
-        admission.verify(source)
-        return clip
 
     if managed_index_path is not None and source_index_generated_root is not None:
         cache = ManagedSourceIndexCache(Path(source_index_generated_root))

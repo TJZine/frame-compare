@@ -9,12 +9,6 @@ from frame_compare.services.types import AlignmentResult, ComparisonResolution
 from frame_compare.utils.types import AlignmentRequest
 
 
-def resolution_from_override(
-    result: AlignmentResult, *, comparison_cache_key: str
-) -> ComparisonResolution:
-    return ComparisonResolution(result, comparison_cache_key, "preexisting_manual_override")
-
-
 def resolution_from_reuse(
     result: AlignmentResult, *, comparison_cache_key: str, computed: bool
 ) -> ComparisonResolution:

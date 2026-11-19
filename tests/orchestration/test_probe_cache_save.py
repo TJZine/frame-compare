@@ -56,7 +56,6 @@ def hdr_snapshot() -> ClipProbeSnapshot:
         is_hdr=True,
         hdr_metadata=metadata,
         preserved_frame_props={"scenecut": 1},
-        tonemap_prop_keys=("masteringdisplay",),
     )
 
 
@@ -74,31 +73,7 @@ def sample_snapshot() -> ClipProbeSnapshot:
         fps=Fraction(24000, 1001),
         is_hdr=False,
         preserved_frame_props=cast(Any, {"some_prop": 1.0, "bad_prop": [1, 2]}),
-        tonemap_prop_keys=("props",),
     )
-
-
-def test_save_clip_probe_cache_writes_version_first_and_keys_sorted(
-    tmp_path: Path, sample_snapshot: ClipProbeSnapshot
-):
-    """Version header must be first and table keys must be sorted."""
-    f = tmp_path / "ordering.toml"
-
-    key_a = "a_key"
-    key_b = "b_key"
-
-    entries = {
-        key_b: sample_snapshot,
-        key_a: sample_snapshot,
-    }
-
-    save_clip_probe_cache(f, entries)
-
-    contents = f.read_text(encoding="utf-8")
-    lines = [line for line in contents.splitlines() if line.strip()]
-
-    assert lines[0].startswith('version = "1"')
-    assert contents.index(f"[{key_a}]") < contents.index(f"[{key_b}]")
 
 
 @pytest.mark.parametrize(
@@ -173,30 +148,34 @@ def test_merge_shared_clip_probe_cache_read_failure_aborts_without_replacing(
 
 
 @pytest.mark.parametrize(
-    "existing_content",
+    ("existing_content", "warning_event"),
     [
-        pytest.param("invalid [ toml", id="malformed-toml"),
-        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
-        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+        pytest.param("invalid [ toml", "probe_cache_parse_error", id="malformed-toml"),
+        pytest.param('version = "unknown"', "probe_cache_version_mismatch", id="unknown-version"),
+        pytest.param("version = 1", "probe_cache_version_mismatch", id="integer-version"),
+        pytest.param(
+            "x = " + "{x=" * 1500 + "0" + "}" * 1500,
+            "probe_cache_parse_error",
+            id="deep",
+        ),
+        pytest.param("x = " + "1" * 5000, "probe_cache_parse_error", id="integer-limit"),
     ],
 )
-def test_merge_shared_clip_probe_cache_invalid_state_aborts_without_replacing(
+def test_merge_shared_clip_probe_cache_replaces_invalid_state(
     tmp_path: Path,
-    sample_snapshot: ClipProbeSnapshot,
+    hdr_snapshot: ClipProbeSnapshot,
     existing_content: str,
+    warning_event: str,
 ) -> None:
     cache_path = tmp_path / "cache.toml"
     cache_path.write_text(existing_content, encoding="utf-8")
-    existing_bytes = cache_path.read_bytes()
-    current_key = compute_probe_cache_key(sample_snapshot.fingerprint)
+    current_key = compute_probe_cache_key(hdr_snapshot.fingerprint)
 
-    with patch(
-        "frame_compare.orchestration.probing.probe_cache.write_bytes_atomic"
-    ) as atomic_write:
-        merge_shared_clip_probe_cache(cache_path, {current_key: sample_snapshot})
+    with patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning:
+        merge_shared_clip_probe_cache(cache_path, {current_key: hdr_snapshot})
 
-    assert cache_path.read_bytes() == existing_bytes
-    atomic_write.assert_not_called()
+    warning.assert_called_once_with(warning_event, path=str(cache_path))
+    assert load_clip_probe_cache(cache_path) == {current_key: hdr_snapshot}
 
 
 def test_save_clip_probe_cache_creates_parent_directories(

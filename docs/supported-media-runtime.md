@@ -219,13 +219,9 @@ The Windows portable `alignment` fingerprint also changes because the retained B
 FFmpeg artifact moved to the October 2026 build. Existing entries and indexes under the previous
 fingerprints miss and rebuild under the normal cache policy; there is no migration.
 
-The shared alignment reuse cache is schema v2 after the viewer migration. It stores
-neutral `computed` and `interactive_confirmed` origins. Existing schema-v1 entries are
-ignored and recomputed; no v1 migration or compatibility reader is provided. Run-local
-`manual_overrides.toml` uses canonical version "2" without a `confirmed` field,
-retaining its path, ordering, atomic-write behavior, and offset semantics. Older or
-unsupported versions are recoverable cache misses without migration; the next
-manual save replaces them.
+The shared alignment reuse cache uses schema "3". It stores eligible computed
+offsets with origin `computed` and eligible offsets confirmed in VSView with origin
+`interactive_confirmed`. Older formats miss and offsets are recomputed.
 
 Frame Compare keys its managed L-SMASH-Works cache under
 `<resolved paths.generated_dir>/cache/source-indexes/` by resolved source path and

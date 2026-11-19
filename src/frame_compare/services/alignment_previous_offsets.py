@@ -16,7 +16,6 @@ from frame_compare.services.alignment_reuse_prompt import (
     previous_offset_prompt_input_from_rows,
     prompt_for_previous_offset_reuse,
 )
-from frame_compare.services.alignment_sources import require_current_alignment_sources
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import (
     AlignmentConfig,
@@ -96,7 +95,6 @@ def _apply_cached_alignment_result(
     computed_cache_hit: bool,
 ) -> None:
     raise_if_cancelling()
-    require_current_alignment_sources(request)
     key = _alignment_key_from_request(request, comparison)
     comparison_key = comparison_cache_key(comparison)
     resolutions[key] = resolution_from_reuse(

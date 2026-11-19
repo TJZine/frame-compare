@@ -165,12 +165,6 @@ class SourceAdmission:
     geometry_probe_token: str | None
     _scan_complete: bool = field(default=False, init=False, repr=False, compare=False)
 
-    def verify(self, path: Path) -> None:
-        if _source_stamp(path) != self.stamp:
-            raise ValueError("Source video changed during admission")
-        if self.probe_stamp is not None and _probe_stamp(self.executable) != self.probe_stamp:
-            raise ValueError("FFprobe executable changed during source admission")
-
     def scan(self, path: Path, *, abort_check: Callable[[], None]) -> None:
         def abort() -> bool:
             abort_check()
@@ -179,13 +173,11 @@ class SourceAdmission:
         stderr = b""
         try:
             abort_check()
-            self.verify(path)
             if self._scan_complete:
                 return
             stderr = _scan_video_frames(
                 path.absolute(), self.stream_indices, abort, self.executable
             )
-            self.verify(path)
             abort_check()
         except (OSError, ValueError) as error:
             raise SourceGeometryError(_scan_refusal(str(error), stderr)) from error
@@ -331,8 +323,6 @@ def _scan_video_frames(
     except CalledProcessError as exc:
         raise ValueError(_scan_refusal(_MISSING_FRAME_DIMENSIONS, exc.stderr)) from exc
     try:
-        if Path(result.args[0]).resolve() != executable:
-            raise ValueError("FFprobe executable changed during source admission")
         if _PROBE_PIXEL_LIMIT_FAILURE.search(result.stderr):
             raise ValueError("FFprobe rejected a source video picture at its pixel limit")
         scan.finish()
@@ -386,7 +376,7 @@ def admit_source(path: Path, *, abort_check: Callable[[], None]) -> SourceAdmiss
     indices = frozenset(index for stream in streams if type(index := stream.get("index")) is int)
     if len(indices) != len(streams) or min(indices) < 0:
         raise ValueError("Source video stream indices could not be verified")
-    admission = SourceAdmission(
+    return SourceAdmission(
         video_stream,
         format_name,
         stamp,
@@ -395,8 +385,6 @@ def admit_source(path: Path, *, abort_check: Callable[[], None]) -> SourceAdmiss
         probe_stamp,
         _probe_token(executable, probe_stamp, payload, format_name) if coded_header_known else None,
     )
-    admission.verify(path)
-    return admission
 
 
 def bounded_decoder_options(options: str | None = None) -> str:

@@ -201,9 +201,8 @@ Absolute paths, Windows drive paths, UNC paths, empty selectors, and selectors
 with `.` or `..` path segments are rejected. Missing or ambiguous selectors fail
 with the standard typed input/config error path before runtime work proceeds.
 
-Duplicate discovered source stems fail early. This remains true until alignment
-cache/manual override persistence moves from stem-based keys to versioned stable
-source IDs.
+Duplicate discovered source stems fail early. In-run alignment pair keys use the
+reference and comparison stems. Shared alignment reuse hashes the request identity.
 
 Configured source trims define each clip's base renderable domain. Alignment
 trims compose on top of those base trims rather than replacing them. Explicit
@@ -274,12 +273,9 @@ unchanged.
 - History is read-only. Stage 1 provides only `list`, `list --json`, and exact-name
   `open`; it does not migrate, replay, delete, rename, search, paginate, or fuzzy
   match runs.
-- Discovery inspects contained real immediate-child directories of the configured
-  generated-data root. Folders without a supported `run_result.toml` are omitted;
-  they are not interpreted through `run_info.toml` or reported as compatibility
-  history. Symlinked run directories are ignored, and a result record is trusted
-  only when its final regular-file target remains inside that run directory. The
-  shared `cache` directory is not a run entry.
+- Discovery inspects immediate child directories of the configured generated-data
+  root. Folders without a `run_result.toml` are omitted. Discovery skips the
+  shared `cache` directory and names containing control characters.
 - Valid V1 `run_result.toml` entries report `completed`,
   `completed_with_warnings`, or `failed`. Malformed or unsupported records report
   `unavailable`; each warning goes to stderr and does not hide other entries.
@@ -304,13 +300,11 @@ unchanged.
   `completed_at`, `duration_seconds`, and `report_available`; unavailable facts
   are JSON null and no warnings, paths, exception details, or logs are added.
 - `history open RUN_NAME` accepts one exact child folder name only. Empty names,
-  dot segments, separators, absolute/drive/UNC forms, traversal, missing or
-  non-directory entries, and symlinked run directories fail through the typed CLI error
-  path. The command reads run-relative artifact facts from a valid V1 record,
-  resolves the canonical `report.html` from that run folder, and requires the final
-  existing file to remain beneath the configured generated root after symlink
-  resolution. Browser refusal or browser integration failure is a typed actionable
-  failure and never produces a success claim.
+  dot segments, separators, control characters, absolute/drive/UNC forms, and
+  missing or non-directory entries fail with a typed CLI error. The command requires
+  a valid V1 record that names `report.html` and an existing regular file at that
+  path in the run directory. Browser refusal or browser integration failure
+  produces a typed actionable error.
 
 ## `version` Command Contract
 
@@ -515,7 +509,8 @@ unchanged.
   with spaces; `possible drift`, `possible discontinuity`, and `variable` are
   yellow, and other classifications are dim. A present `noted_line` follows this
   evidence in dim text. Reused computed results instead say `no audio analysis ran
-  this time`; reused manual results and manual offsets have no second line.
+  this time`. A reused confirmation and an `interactive_confirmed_this_run`
+  result have no second line.
   Provisional and no-candidate entries retain these exact reason sentences:
   `The video confirms {+Nf} in <range>, so the sources likely differ by an edit
   there.`; `Audio in <range> points to {+Nf}, and the video could not settle which
@@ -548,7 +543,7 @@ unchanged.
 - The VSView hand-off section is `› VSView is open · waiting for you`, with the
   three numbered steps, then an `outputs` table. The table's third column uses
   `reference`, `audio {+Nf}`, `audio {+Nf} · not applied`, `audio {+Nf} · reused`,
-  `previously confirmed {+Nf}`, `manual offset {+Nf}`, or `no audio match` as
+  `previously confirmed {+Nf}`, or `no audio match` as
   applicable. The table has no separate `hints` rows; the VSView overlay shows
   the full detail. Display assumptions follow the outputs after a blank line as
   a `! VSView display assumptions` note and the
@@ -564,9 +559,10 @@ unchanged.
 - The Align phase summary always prints when Align ran. It uses
   `{short} {+Nf} · {short} {+Nf} · {origin}` when origins are shared, or per-entry
   origins when they differ. Origins are `confirmed in VSView`, `audio`, `reused
-  from last run`, `previously confirmed`, `manual offset`, and `kept`. A changed
-  final offset is shown as `{short} +2f (audio +0f)`. A comparison without an
-  applied offset is `{short} not applied`, or `{short} not applied (kept)` after
+  from last run`, `previously confirmed`, `manual offset`, and `kept`. The
+  `manual offset` summary label applies to `interactive_confirmed_this_run`
+  when no review ran. A changed final offset is shown as `{short} +2f (audio +0f)`.
+  A comparison without an applied offset is `{short} not applied`, or `{short} not applied (kept)` after
   a keep-current review; `not applied` is yellow. If the value wraps, the rows
   form is `{accepted} of {N} comparisons aligned · {origin}` followed by one row per
   comparison at column 18; the wrapped `{origin}` appears only when every comparison
@@ -893,13 +889,11 @@ CLI drains the executor before exit. No new TMDB request starts after the interr
 
 ### Cache Mode Semantics
 
-- Analysis, probe, and alignment reuse caches use a performance-first source
-  freshness policy: path, byte size, and modification time identify source content;
-  media bytes are not hashed. A same-path, same-size, same-mtime replacement is
-  intentionally eligible to reuse cached data. Workflows that replace media while
-  preserving those fields must advance the mtime or remove the relevant shared
-  cache entry. This bounded stale-data risk is accepted to avoid reading potentially
-  multi-gigabyte media solely for cache lookup.
+- Analysis and alignment reuse identify sources by path, byte size, and
+  modification time. A replacement that preserves all three fields can reuse cached
+  data. Advance the mtime or remove the relevant cache entry when replacing media
+  while preserving size and mtime. Probe facts and decoder indexes use the stronger
+  identity of device, inode, size, mtime, and change time.
 - Automatic decoder/tool cache invalidation and decoder-ABI index isolation are
   guaranteed for the managed Windows portable and Debian/Docker profiles, whose
   identities include their selected packaged runtime lineages. Unmanaged Windows,
@@ -917,7 +911,7 @@ recovery requirement.
   `analysis_source_path`, `reference_path`, source identities, source trims,
   effective FPS values, the configured analysis ignore-window settings,
   active-rect resolver policy, each clip's resolved active rectangle, and the final
-  shared selectable window. Cache schema v8 stores
+  shared selectable window. Cache schema v9 stores
   `analysis_source_path`, `performance_mode`, `algorithm_id`, `metric_backend`,
   stable `algorithm_identity_json`, `metric_active_rect`, active-rect source,
   detection mode, and active-rect resolver algorithm ID, original source frame count,
@@ -947,8 +941,12 @@ recovery requirement.
   active-rect domain before runtime side effects. If content probing cannot run,
   the command fails through the standard typed metrics/preparation error path
   rather than silently validating a full-frame cache identity.
-- The full fingerprint remains inside the cache payload and is validated on load.
-  Run-folder `cache.compframes` files do not count as analysis cache hits.
+- The full fingerprint is stored at the top level of the cache payload and is
+  validated on load. Only the shared analysis cache can supply analysis cache hits.
+  In normal mode, corrupt or unknown-version cache files are recomputed. When
+  analysis is required, a corrupt or unsupported payload at the matching path
+  fails `--from-cache-only` with `FC-4006`. A missing or nonmatching entry fails
+  with `MetricsCalculationError`.
 - Probe-cache files remain on-disk format version 1, but key schema 4 includes the
   scoped decoder and standalone FFmpeg/ffprobe runtime fingerprint plus a strong
   source/probe token. The token binds device, inode, size, mtime and change time to
@@ -958,22 +956,14 @@ recovery requirement.
   decoder or FFmpeg/ffprobe lineage is a normal miss, including under
   `--from-cache-only` validation. Entries keyed by a discovered symlink miss
   and require a normal run to cold-probe the resolved target before cache-only reuse.
+  Normal runs re-probe sources whose entries fail validation. The shared merge
+  replaces corrupt or unknown-version files with current entries. A read I/O error
+  aborts the merge and preserves the file. The run-local file is a written snapshot.
 - Shared alignment reuse source-set identity includes the scoped alignment runtime
   fingerprint: the selected standalone FFmpeg/ffprobe lineage and the selected
   VapourSynth and L-SMASH-Works decoder identity. In the managed Windows portable and
   Debian/Docker profiles, a selected supported FFmpeg or decoder lineage change cannot
   reuse an offset computed under the previous build.
-- Preparation freezes each source's resolved path, size, and mtime. Alignment
-  rechecks these facts at cache acceptance, immediately before publishing shared
-  offsets, and after attempting to save them. Retargeting a source symlink
-  invalidates the prepared identity even if the replacement has the same size and
-  mtime. A source change after preparation cannot authorize cached trims
-  or newly saved offsets; the typed alignment failure requires a fresh run rather
-  than silently replacing the prepared fingerprint. This failure stops downstream
-  rendering and publishing even when alignment is optional or audio is unavailable;
-  ordinary unavailable audio remains recoverable when the prepared sources are current.
-  The existing same-path,
-  same-size, same-mtime cache reuse policy remains unchanged.
 - Successful low-level TMDB search and alternative-title responses are reused from
   `<resolved paths.generated_dir>/cache/tmdb.toml`. Ordered normalized response data
   is cached rather than the final ranked match, so current resolver policy always
@@ -1470,7 +1460,7 @@ still span the whole eligible window.
 Both modes apply the prepared active picture rectangle for the selected analysis
 source before metric calculation and use active-rect-specific cache identity.
 Both stay inside the prepared shared selectable window, and `performance` is
-cache-isolated from `quality` through its mode and algorithm identity. Cache schema v8 records
+cache-isolated from `quality` through its mode and algorithm identity. Cache schema v9 records
 that window and, for performance, the explicit source-frame map for every stored
 metric value. The prepared rectangle can come from an explicit
 `sources.overrides.<selector>.active_rect`, configured dimension/aspect-ratio
@@ -1623,8 +1613,8 @@ is:
    `› VSView is open · waiting for you`, three numbered instruction lines, then
    an `outputs` section (one row per output with the short name padded to the
    longest and a third column using `reference`, `audio {+Nf}`, `audio {+Nf} ·
-   not applied`, `audio {+Nf} · reused`, `previously confirmed {+Nf}`, `manual
-   offset {+Nf}`, or `no audio match`). Separate `hints` rows are not printed.
+   not applied`, `audio {+Nf} · reused`, `previously confirmed {+Nf}`, or
+   `no audio match`). Separate `hints` rows are not printed.
    After a blank line inside the same section, display assumptions (when
    present) are a `! VSView display assumptions` note followed by the existing
    `source`/`preview`/`range`/`impact` rows.
@@ -1634,7 +1624,7 @@ is:
 
 Normal VSView labels reuse the release-aware presentation identities prepared by the
 typed alignment request. Paths and stems remain the internal source, comparison,
-manual-override, and alignment-result identities. The generated workspace
+and alignment-result identities. The generated workspace
 contains each source exactly once: one `Reference` and one ordered `Comparison N`
 output per comparison. In the native panel, generated review sessions automatically
 unlink their own playheads. Browse each source to the same visible moment, inspect
@@ -1721,12 +1711,9 @@ out-of-bounds frames. A directory at that path is reported as unreadable. Reload
 saved session reactivates the panel. Another save atomically overwrites the sidecar.
 After a successful VSView exit, the parent reads the last saved result.
 
-Accepted manual offsets are persisted separately in the current run's
-`generated/manual_overrides.toml`. Its canonical version "2" stores source names,
-signed frame offsets, and timestamps; record presence represents confirmed manual
-authority. There is no separate confirmation flag. Unsupported older versions are
-ignored as recoverable cache state and replaced on the next save without migration.
-This format is separate from the unchanged native result sidecar schema v1.
+Eligible interactive confirmations are persisted in the shared alignment reuse
+cache as `interactive_confirmed` entries when alignment caching is enabled.
+
 This generated-session/panel workflow adds no `run` flag, configuration field,
 successful JSON field, terminal input protocol, or CLI schema change.
 `audio_alignment.use_vsview = true` is optional; forced mode fails closed when
@@ -1966,13 +1953,12 @@ shared reference-frame domain and is rendered best-effort, not as an aligned sou
 - Successful `run --json` output remains unchanged by previous-offset reuse.
 - Shared publication is a whole-set snapshot, so a newly published set can replace an
   earlier confirmation for a comparison that was not freshly reviewed in that run.
-- Cached stability summaries are diagnostic-only scalar evidence. The current
-  alignment reuse cache schema is v2. It stores neutral `computed` and
-  `interactive_confirmed` origins and requires summaries for computed entries and
-  embedded computed results and uses the reference-minus-comparison sign convention.
-  Schema-v1 entries and other unsupported versions, plus entries missing required
-  summaries, are ignored; there is no cache migration or compatibility path. Summaries do not affect cache identity,
-  selected offsets, or trims.
+- The alignment reuse cache uses schema "3" with `computed` and
+  `interactive_confirmed` origins and the reference-minus-comparison sign
+  convention. Computed entries and embedded computed results require
+  diagnostic-only scalar stability summaries. Those summaries do not affect cache
+  identity, selected offsets, or trims. Older formats and entries missing required
+  summaries miss and offsets are recomputed.
 - `channel_strategy = "mono_downmix" | "best_channel"` selects the audio channel
   handling used during extraction. `mono_downmix` is the default.
 - `reference_stream` is either `null` or a non-negative audio stream ordinal,
@@ -2084,10 +2070,9 @@ states under `whole-track-chunked-phat-video-check-score-floor-20261107`:
 - `unavailable`: no candidate can be established. Final reasons include
   `no_single_offset`, `search_edge`, `no_usable_audio`,
   `selected_audio_timeline_unavailable`, `analysis_budget_exceeded`,
-  `source_identity_changed`, and bounded collection failure categories. If a raw
-  global lag exists, video still runs; a confirmed video frame may turn the result
-  into a provisional review hint, but never into trusted authority unless every V6
-  conjunct passes.
+  and bounded collection failure categories. Video still runs when a raw global
+  lag exists. A confirmed video frame may turn the result into a provisional
+  review hint. Trusted authority requires every V6 conjunct to pass.
 
 A provisional value never applies, trims,
 writes the computed cache, prefills manual fields, moves a VSView playhead, marks a
@@ -2101,10 +2086,8 @@ authority depends on decoded frame numbering, the selected VapourSynth and
 L-SMASH-Works identity. A change misses the cache and recomputes. Each source's
 resolved active rectangle, or its explicit absence, also enters the identity
 because that region supplies video-confirmation evidence. Changing either region
-misses the cache without requiring manual clearing. Entries written before the
-active-rectangle identity revision remain on disk as historical information but
-cannot authorize reuse: their original scoring region is unknown. Unchanged
-resolved geometry remains reusable regardless of detector provenance.
+misses the cache. Unchanged resolved geometry remains reusable regardless of
+detector provenance.
 
 ## Persistence Rules
 
@@ -2135,7 +2118,7 @@ authority and opening hints. The full structured attempt remains in the run
 diagnostic. Missing, edited, corrupt, or unsupported artifacts cannot authorize an
 offset or act as a negative cache. Ordinary write failure warns and leaves in-memory
 authority unchanged; a containment or symlink escape remains fail-closed. The shared
-alignment cache remains schema v2 and stores eligible authority only. Only fresh
+alignment cache uses schema "3" and stores eligible authority only. Only fresh
 `trusted_automatic` results are written as computed authority; provisional and
 unavailable attempts are never written;
 the policy token participates in the full shared source-set identity, so stale policy

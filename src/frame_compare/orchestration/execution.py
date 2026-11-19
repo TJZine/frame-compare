@@ -58,7 +58,7 @@ from frame_compare.orchestration.types import (
     SlowpicsUploadConfirmationFn,
 )
 from frame_compare.render.backend.ffmpeg import FFmpegRunner
-from frame_compare.services.errors import AlignmentSourceIdentityError, AudioAlignmentCleanupError
+from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
@@ -240,7 +240,6 @@ def build_phases_before_align(
             fatal_exceptions=(
                 ExclusionRecoverySelectionError,
                 AudioAlignmentCleanupError,
-                AlignmentSourceIdentityError,
             ),
             progress_total=max(1, len(input_videos)),
             skip_detail=CONFIG_DISABLED,
