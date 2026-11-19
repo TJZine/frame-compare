@@ -502,6 +502,7 @@ def test_windows_portable_direct_placebo_smoke_respects_runtime_probe(
         ("runtime_contract", "prove_runtime_contract"),
         ("vapoursynth_environment", "prove_vapoursynth_environment"),
         ("lwlibavsource_frame", "prove_lwlibavsource"),
+        ("vapoursynth_screenshot", "prove_vapoursynth_screenshot"),
         ("placebo_tonemap_api", "prove_placebo_tonemap_api"),
         ("apply_tonemap_frame", "prove_apply_tonemap_frame"),
         ("placebo_tonemap_frame", "prove_placebo_tonemap_frame"),
@@ -545,7 +546,9 @@ def test_windows_portable_python_phase_dispatch_is_fail_closed(
             exec(compile(dispatcher, "runtime_smoke.py", "exec"), namespace)
         assert len(calls) == 1
         expected_args = (
-            (Path("fixture.mp4"),) if phase in {"lwlibavsource_frame", "vsview_runtime"} else ()
+            (Path("fixture.mp4"),)
+            if phase in {"lwlibavsource_frame", "vapoursynth_screenshot", "vsview_runtime"}
+            else ()
         )
         assert calls[0] == expected_args
 
@@ -668,6 +671,7 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         "runtime_contract",
         "vapoursynth_environment",
         "lwlibavsource_frame",
+        "vapoursynth_screenshot",
         "placebo_tonemap_api",
         "apply_tonemap_frame",
         "placebo_tonemap_frame",
