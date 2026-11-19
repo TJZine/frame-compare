@@ -7,7 +7,7 @@ import json
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -337,7 +337,7 @@ def test_execute_run_optional_analysis_failure_retains_initial_frame_plan(
         (53, "random"),
     ]
     assert sorted(
-        (cast(FakeVSNode, r.clip).source_path.name, r.frame_number) for r in recorded
+        (cast(FakeVSNode, cast(Any, r.clip)).source_path.name, r.frame_number) for r in recorded
     ) == [
         ("a_source.mkv", 9),
         ("a_source.mkv", 53),
@@ -426,7 +426,7 @@ def test_execute_run_metric_selection_survives_dropped_user_frame(
     frames = read_report_data(result.report_path)["frames"]
     assert [(frame["number"], frame["category"]) for frame in frames] == [(0, "quantile_dark")]
     assert sorted(
-        (cast(FakeVSNode, r.clip).source_path.name, r.frame_number) for r in recorded
+        (cast(FakeVSNode, cast(Any, r.clip)).source_path.name, r.frame_number) for r in recorded
     ) == [
         ("a_source.mkv", 0),
         ("b_comp.mkv", 0),

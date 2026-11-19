@@ -51,20 +51,6 @@ class PluginNotFoundError(DependencyError):
         )
 
 
-class TonemapRequiresVapourSynthError(DependencyError):
-    """HDR tonemapping requires VapourSynth rendering (FC-2009)."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-2009",
-                name="TONEMAP_REQUIRES_VAPOURSYNTH",
-                message="HDR tonemapping requires VapourSynth rendering",
-                hint="Disable [color].enable_tonemap for FFmpeg-only extraction, or use VapourSynth",
-            )
-        )
-
-
 class SourceLoadError(ProcessingError):
     """Failed to initialize source engine (FC-4015)."""
 

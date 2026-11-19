@@ -35,7 +35,6 @@ from frame_compare.vs.types import SourceInfo
 from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
     create_video_files,
@@ -244,7 +243,6 @@ def test_execute_prep_external_input_reserves_outputs_only_under_generated(
             ),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
             ),
         )
     )

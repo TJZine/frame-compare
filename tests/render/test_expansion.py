@@ -44,7 +44,6 @@ def _prepared(*, state: PresentationState = PresentationState.SDR) -> PreparedRe
         prepared_clip=MagicMock(name="prepared"),
         source_dimensions=(1920, 1080),
         source_total_frames=101,
-        source_is_hdr=state != PresentationState.SDR,
         presentation_state=state,
         tonemap=None,
     )
@@ -76,8 +75,6 @@ def test_expansion_preserves_source_mapping_and_prepared_source(
         output_dir=tmp_path / "out",
         config=get_default_config(),
         overlay_mode=OverlayMode.NONE,
-        renderer="vapoursynth",
-        ffmpeg_runner=MagicMock(),
     )
     requests = [request for job in jobs for request in job.requests]
     facts = {job.label: job.clip_facts for job in jobs}
@@ -89,7 +86,6 @@ def test_expansion_preserves_source_mapping_and_prepared_source(
     ]
     assert all(request.diagnostic_source is prepared.diagnostic_source for request in requests)
     assert all(request.clip is prepared.prepared_clip for request in requests)
-    assert mock_prepare.call_args.kwargs["source_is_hdr"] is False
     assert facts["ref"].source_total_frames == 101
     assert facts["ref"].presentation_state is PresentationState.SDR
 
@@ -108,8 +104,6 @@ def test_expansion_uses_actual_preparation_state_and_overlay_facts(
         output_dir=tmp_path / "out",
         config=get_default_config(),
         overlay_mode=OverlayMode.DIAGNOSTIC,
-        renderer="vapoursynth",
-        ffmpeg_runner=MagicMock(),
     )
     requests = [request for job in jobs for request in job.requests]
     facts = {job.label: job.clip_facts for job in jobs}
@@ -135,8 +129,6 @@ def test_expansion_rejects_out_of_range_source_frame(
             output_dir=tmp_path / "out",
             config=get_default_config(),
             overlay_mode=OverlayMode.NONE,
-            renderer="vapoursynth",
-            ffmpeg_runner=MagicMock(),
         )
 
 
@@ -156,8 +148,6 @@ def test_final_output_collisions_refused_before_preparation(
             output_dir=tmp_path,
             config=get_default_config(),
             overlay_mode=OverlayMode.NONE,
-            renderer="vapoursynth",
-            ffmpeg_runner=MagicMock(),
         )
     assert caught.value.code == "FC-4021"
     assert caught.value.name == "SCREENSHOT_OUTPUT_COLLISION"
@@ -180,8 +170,6 @@ def test_final_duplicate_frame_refused_before_preparation(
             output_dir=tmp_path,
             config=get_default_config(),
             overlay_mode=OverlayMode.NONE,
-            renderer="vapoursynth",
-            ffmpeg_runner=MagicMock(),
         )
     mock_prepare.assert_not_called()
 
@@ -228,8 +216,6 @@ def test_source_stem_aliases_follow_output_filesystem(
                 output_dir=tmp_path / "screenshots",
                 config=get_default_config(),
                 overlay_mode=OverlayMode.NONE,
-                renderer="vapoursynth",
-                ffmpeg_runner=MagicMock(),
             )
             requests = [request for job in jobs for request in job.requests]
             assert [request.output_path.name for request in requests] == [
@@ -242,7 +228,7 @@ def test_source_stem_aliases_follow_output_filesystem(
                     batches,
                     tmp_path / "screenshots",
                     get_default_config(),
-                    BatchRenderOptions(renderer="vapoursynth"),
+                    BatchRenderOptions(),
                 )
             mock_prepare.assert_not_called()
             render.assert_not_called()
@@ -269,8 +255,6 @@ def test_expansion_stops_source_admission_after_interruption(
                 output_dir=tmp_path,
                 config=get_default_config(),
                 overlay_mode=OverlayMode.NONE,
-                renderer="vapoursynth",
-                ffmpeg_runner=MagicMock(),
             )
         assert mock_prepare.call_count == 1
         assert task.cancelling() == 1

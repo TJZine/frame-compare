@@ -35,7 +35,6 @@ from frame_compare.services.types import AlignmentOperationOutcome, AlignmentRes
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.types import AlignmentRequest
 from tests.orchestration.execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
     install_fake_frame_render,
 )
@@ -886,7 +885,6 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
     )
     request = make_run_request(root=tmp_path, skip_metadata=True)
     state = ExecutionState()
-    runner = FakeFFmpegRunner()
     before_align = build_phases_before_align(
         request=request,
         config=ctx.config,
@@ -898,7 +896,6 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
     render, *_ = build_phases_after_align(
         request=request,
         monotonic_timer=monotonic,
-        ffmpeg_runner=runner,
         vs_loader=FakeVSLoader(),
         http_client=None,
         state=state,

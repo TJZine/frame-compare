@@ -1,10 +1,11 @@
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 
-from frame_compare.config.schema import ColorConfig, ConfigSchema, ScreenshotsConfig
+from frame_compare.config.schema import ColorConfig, ConfigSchema
 from frame_compare.render.batch.orchestrator import (
     render_screenshots_from_batch_detailed,
 )
@@ -26,7 +27,6 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
     SourceSignalFacts,
 )
-from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from tests.render_test_support import facts_by_label, paths_by_label, selections
 
 
@@ -85,8 +85,8 @@ def _expanded(
             batch.frames,
             tuple(
                 RenderRequest(
-                    clip=batch.clip_path,
-                    diagnostic_source=batch.clip_path,
+                    clip=cast(Any, batch.clip_path),
+                    diagnostic_source=cast(Any, batch.clip_path),
                     frame_number=selection.source_frame,
                     output_path=tmp_path / f"{batch.label}-{selection.source_frame}.png",
                     overlay=None,
@@ -140,7 +140,6 @@ def test_render_screenshots_from_batch_happy_path(tmp_path: Path) -> None:
                 requests,
                 tmp_path,
                 config,
-                BatchRenderOptions(renderer="ffmpeg", ffmpeg_runner=MagicMock()),
             )
         )
     assert result == {
@@ -201,71 +200,10 @@ def test_render_screenshots_from_batch_passes_clamped_parallelism(
             [request],
             tmp_path,
             config,
-            BatchRenderOptions(
-                renderer="ffmpeg", ffmpeg_runner=MagicMock(), parallelism=parallelism
-            ),
+            BatchRenderOptions(parallelism=parallelism),
         )
     assert render_batch.call_args.kwargs["parallelism"] == expected
     assert render_batch.call_args.args[0] == expanded
-
-
-def test_render_screenshots_from_batch_constructs_configured_default_runner(
-    tmp_path: Path,
-) -> None:
-    config = ConfigSchema(
-        color=ColorConfig(enable_tonemap=False),
-        screenshots=ScreenshotsConfig(ffmpeg_timeout_seconds=47.0),
-    )
-    request = _batch_request("clip.mkv", "clip", [1])
-    expanded = _expanded(tmp_path, [request])
-    with (
-        patch(
-            "frame_compare.render.batch.expansion.DefaultFFmpegRunner",
-            return_value=MagicMock(),
-        ) as default_runner,
-        patch(
-            "frame_compare.render.batch.orchestrator.expand_batch_render_requests",
-            return_value=expanded,
-        ) as expand_batch,
-        patch(
-            "frame_compare.render.batch.orchestrator.render_clip_jobs",
-            return_value=_rendered(expanded),
-        ),
-    ):
-        render_screenshots_from_batch_detailed([request], tmp_path, config)
-    default_runner.assert_called_once_with(extraction_timeout_seconds=47.0)
-    assert expand_batch.call_args.kwargs["ffmpeg_runner"] is default_runner.return_value
-
-
-def test_render_screenshots_from_batch_preserves_injected_runner(tmp_path: Path) -> None:
-    config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
-    request = _batch_request("clip.mkv", "clip", [1])
-    expanded = _expanded(tmp_path, [request])
-    injected = MagicMock()
-    with (
-        patch("frame_compare.render.batch.expansion.DefaultFFmpegRunner") as default_runner,
-        patch(
-            "frame_compare.render.batch.orchestrator.expand_batch_render_requests",
-            return_value=expanded,
-        ),
-        patch(
-            "frame_compare.render.batch.orchestrator.render_clip_jobs",
-            return_value=_rendered(expanded),
-        ),
-    ):
-        render_screenshots_from_batch_detailed(
-            [request], tmp_path, config, BatchRenderOptions(ffmpeg_runner=injected)
-        )
-    default_runner.assert_not_called()
-
-
-def test_render_screenshots_from_batch_rejects_hdr_ffmpeg_tonemap(tmp_path: Path) -> None:
-    config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
-    request = _batch_request("vid.mkv", "vid", [42], is_hdr=True)
-    with pytest.raises(TonemapRequiresVapourSynthError):
-        render_screenshots_from_batch_detailed(
-            [request], tmp_path, config, BatchRenderOptions(renderer="ffmpeg")
-        )
 
 
 def test_render_screenshots_from_batch_requires_positive_source_facts(tmp_path: Path) -> None:
@@ -278,99 +216,3 @@ def test_render_screenshots_from_batch_requires_positive_source_facts(tmp_path: 
     )
     with pytest.raises(ValueError, match="requires positive source dimensions"):
         render_screenshots_from_batch_detailed([request], tmp_path, config)
-
-
-def test_real_ffmpeg_batch_result_is_paired_with_selected_source_frame(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from PIL import Image
-
-    from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
-    from frame_compare.render.batch.orchestrator import render_clip_jobs
-    from tests.render_test_support import prepared_jobs
-
-    calls: list[list[int]] = []
-
-    def extract(_self, _video, frames, output_dir, **_kwargs):
-        calls.append(frames)
-        for index in range(len(frames)):
-            Image.new("RGB", (2, 2)).save(output_dir / f"{index:09d}.png")
-        return [
-            RenderedFrameFacts(source_frame=99, picture_type="I"),
-            RenderedFrameFacts(source_frame=2, picture_type="P"),
-        ]
-
-    monkeypatch.setattr(DefaultFFmpegRunner, "extract_frames", extract)
-    runner = DefaultFFmpegRunner()
-    requests = tuple(
-        RenderRequest(
-            Path("clip.mkv"),
-            Path("clip.mkv"),
-            frame,
-            tmp_path / f"{frame}.png",
-            None,
-            EncoderSettings(),
-            runner,
-        )
-        for frame in (1, 2)
-    )
-    with pytest.raises(ValueError, match="rendered source frame differs"):
-        render_clip_jobs(prepared_jobs(requests))
-    assert calls == [[1, 2]]
-    assert not list(tmp_path.glob(".frame-compare-ffmpeg-*"))
-
-
-@pytest.mark.parametrize("count", [240, None], ids=["count-known", "count-unknown"])
-@pytest.mark.parametrize("width", [1920, 1280], ids=["unchanged", "equal-count-new-geometry"])
-def test_batch_validates_live_source_once_before_any_render_job(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, count: int | None, width: int
-) -> None:
-    import json
-    import subprocess
-
-    from frame_compare.config.schema_enums import OverlayMode
-    from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
-    from frame_compare.render.batch.expansion import expand_batch_render_requests
-    from frame_compare.render.errors import FrameExtractionError
-
-    probe = MagicMock(
-        return_value=subprocess.CompletedProcess(
-            ["ffprobe"],
-            0,
-            json.dumps(
-                {"streams": [{"width": width, "height": 1080, "nb_read_frames": "240"}]}
-            ).encode(),
-            b"",
-        )
-    )
-    header = MagicMock(return_value=[{"width": width, "height": 1080}])
-    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", probe)
-    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.probe_video_streams", header)
-    runner = DefaultFFmpegRunner()
-    config = ConfigSchema(color=ColorConfig(enable_tonemap=False))
-    batches = [
-        _batch_request("clip.mkv", "clip", [1, 2, 3], total_frames=count),
-        _batch_request("empty.mkv", "empty", [], total_frames=count),
-    ]
-
-    def expand():
-        return expand_batch_render_requests(
-            batches,
-            output_dir=tmp_path,
-            config=config,
-            overlay_mode=OverlayMode.NONE,
-            renderer="ffmpeg",
-            ffmpeg_runner=runner,
-        )
-
-    if width == 1920:
-        jobs = expand()
-        assert len(jobs[0].requests) == 3
-        assert not jobs[1].requests
-    else:
-        with pytest.raises(FrameExtractionError, match="disagree with prepared"):
-            expand()
-    assert probe.call_count == (0 if count is None else 1)
-    assert header.call_count == (1 if count is None else 0)
-    assert not list(tmp_path.glob("*.png"))

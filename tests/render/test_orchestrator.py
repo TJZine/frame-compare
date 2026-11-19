@@ -3,7 +3,7 @@ import json
 import subprocess
 import sys
 import textwrap
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from concurrent.futures import CancelledError, Future
 from concurrent.futures import wait as real_wait
 from contextlib import suppress
@@ -14,10 +14,8 @@ from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PIL import Image
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema
-from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.batch.orchestrator import (
     ProgressReporter,
     render_clip_jobs,
@@ -32,29 +30,11 @@ from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from tests.render_test_support import frame_results, prepared_jobs
 
 
-class _CustomFFmpegRunner(DefaultFFmpegRunner):
-    def __init__(self) -> None:
-        super().__init__()
-        self.single_calls: list[int] = []
-
-    def extract_frame(
-        self,
-        video: Path,
-        frame_num: int,
-        output: Path,
-        **_kwargs: object,
-    ) -> RenderedFrameFacts:
-        _ = video
-        self.single_calls.append(frame_num)
-        Image.new("RGB", (2, 2), color=(frame_num, 0, 0)).save(output)
-        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
-
-
 @pytest.fixture
 def mock_render_request(tmp_path):
     return RenderRequest(
-        clip=Path("video.mkv"),
-        diagnostic_source=Path("video.mkv"),
+        clip=cast(Any, Path("video.mkv")),
+        diagnostic_source=cast(Any, Path("video.mkv")),
         frame_number=42,
         output_path=tmp_path / "out.png",
         overlay=None,
@@ -74,8 +54,8 @@ def test_render_jobs_parallel_preserves_job_and_frame_order(mock_render_request)
     frame_one_completed = Event()
     requests = [
         RenderRequest(
-            clip=Path("video.mkv"),
-            diagnostic_source=Path("video.mkv"),
+            clip=cast(Any, Path("video.mkv")),
+            diagnostic_source=cast(Any, Path("video.mkv")),
             frame_number=i,
             output_path=Path(f"out_{i}.png"),
             overlay=None,
@@ -185,8 +165,8 @@ def test_render_batch_parallel_prefers_real_failure_to_cancelled_sibling(
     controlled_executors: list[ControlledExecutor] = []
     requests = [
         RenderRequest(
-            clip=tmp_path / f"clip_{index}.mkv",
-            diagnostic_source=tmp_path / f"clip_{index}.mkv",
+            clip=cast(Any, tmp_path / f"clip_{index}.mkv"),
+            diagnostic_source=cast(Any, tmp_path / f"clip_{index}.mkv"),
             frame_number=index,
             output_path=tmp_path / f"out_{index}.jpg",
             overlay=None,
@@ -240,8 +220,8 @@ def test_render_batch_parallel_propagates_worker_cancellation(tmp_path: Path) ->
             return cancelled
 
     request = RenderRequest(
-        clip=tmp_path / "clip.mkv",
-        diagnostic_source=tmp_path / "clip.mkv",
+        clip=cast(Any, tmp_path / "clip.mkv"),
+        diagnostic_source=cast(Any, tmp_path / "clip.mkv"),
         frame_number=0,
         output_path=tmp_path / "out.jpg",
         overlay=None,
@@ -280,16 +260,16 @@ def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None
 
     requests = [
         RenderRequest(
-            clip=Path("video.mkv"),
-            diagnostic_source=Path("video.mkv"),
+            clip=cast(Any, Path("video.mkv")),
+            diagnostic_source=cast(Any, Path("video.mkv")),
             frame_number=0,
             output_path=Path("out_0.png"),
             overlay=None,
             encoder_settings=EncoderSettings(),
         ),
         RenderRequest(
-            clip=Path("video.mkv"),
-            diagnostic_source=Path("video.mkv"),
+            clip=cast(Any, Path("video.mkv")),
+            diagnostic_source=cast(Any, Path("video.mkv")),
             frame_number=1,
             output_path=Path("out_1.png"),
             overlay=None,
@@ -346,8 +326,8 @@ def test_render_jobs_parallel_reports_lowest_job_index_failure(
     exceptions: list[BaseException] = []
     requests = [
         RenderRequest(
-            clip=tmp_path / f"clip_{frame}.mkv",
-            diagnostic_source=tmp_path / f"clip_{frame}.mkv",
+            clip=cast(Any, tmp_path / f"clip_{frame}.mkv"),
+            diagnostic_source=cast(Any, tmp_path / f"clip_{frame}.mkv"),
             frame_number=frame,
             output_path=tmp_path / f"out_{frame}.png",
             overlay=None,
@@ -434,198 +414,6 @@ def test_render_clip_jobs_empty() -> None:
     assert render_clip_jobs(()) == ()
 
 
-def test_render_batch_sequential_preserves_default_runner_subclass_override(
-    tmp_path: Path,
-) -> None:
-    runner = _CustomFFmpegRunner()
-    requests = [
-        RenderRequest(
-            clip=Path("video.mkv"),
-            diagnostic_source=Path("video.mkv"),
-            frame_number=frame,
-            output_path=tmp_path / f"out_{frame}.png",
-            overlay=None,
-            encoder_settings=EncoderSettings(),
-            ffmpeg_runner=runner,
-        )
-        for frame in [1, 2]
-    ]
-
-    render_clip_jobs(prepared_jobs(requests), parallelism=1)
-
-    assert runner.single_calls == [1, 2]
-
-
-def test_render_batch_sequential_does_not_batch_non_png_outputs(tmp_path: Path) -> None:
-    runner = DefaultFFmpegRunner()
-    requests = [
-        RenderRequest(
-            clip=Path("video.mkv"),
-            diagnostic_source=Path("video.mkv"),
-            frame_number=frame,
-            output_path=tmp_path / f"out_{frame}.jpg",
-            overlay=None,
-            encoder_settings=EncoderSettings(),
-            ffmpeg_runner=runner,
-        )
-        for frame in [1, 2]
-    ]
-
-    with (
-        patch(
-            "frame_compare.render.batch.orchestrator.render_frame_detailed",
-            side_effect=_rendered,
-        ) as render_frame,
-        patch(
-            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed"
-        ) as render_ffmpeg_batch,
-    ):
-        render_clip_jobs(prepared_jobs(requests), parallelism=1)
-
-    assert render_frame.call_count == 2
-    render_ffmpeg_batch.assert_not_called()
-
-
-def test_render_batch_sequential_does_not_batch_negative_frame(tmp_path: Path) -> None:
-    runner = DefaultFFmpegRunner()
-    requests = [
-        RenderRequest(
-            clip=Path("video.mkv"),
-            diagnostic_source=Path("video.mkv"),
-            frame_number=frame,
-            output_path=tmp_path / f"out_{index}.png",
-            overlay=None,
-            encoder_settings=EncoderSettings(),
-            ffmpeg_runner=runner,
-        )
-        for index, frame in enumerate((-1, 0))
-    ]
-
-    with (
-        patch(
-            "frame_compare.render.batch.orchestrator.render_frame_detailed",
-            side_effect=RuntimeError("single-frame path"),
-        ) as render_frame,
-        patch(
-            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed"
-        ) as render_ffmpeg_batch,
-        pytest.raises(RuntimeError, match="single-frame path"),
-    ):
-        render_clip_jobs(prepared_jobs(requests), parallelism=1)
-
-    render_frame.assert_called_once_with(requests[0])
-    render_ffmpeg_batch.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    "incompatibility",
-    ["clip", "runner", "geometry", "output-directory", "duplicate", "decreasing"],
-)
-def test_render_clip_job_serializes_all_frames_when_any_request_is_incompatible(
-    incompatibility: str,
-    tmp_path: Path,
-) -> None:
-    runner = DefaultFFmpegRunner()
-    requests = [
-        RenderRequest(
-            clip=Path("video.mkv"),
-            diagnostic_source=Path("video.mkv"),
-            frame_number=frame,
-            output_path=tmp_path / f"out_{frame}.png",
-            overlay=None,
-            encoder_settings=EncoderSettings(),
-            ffmpeg_runner=runner,
-        )
-        for frame in (1, 2, 3)
-    ]
-    if incompatibility == "clip":
-        requests[2].clip = Path("other.mkv")
-    elif incompatibility == "runner":
-        requests[2].ffmpeg_runner = DefaultFFmpegRunner()
-    elif incompatibility == "geometry":
-        requests[2].geometry_plan = MagicMock()
-    elif incompatibility == "output-directory":
-        requests[2].output_path = tmp_path / "other" / "out_2.png"
-    elif incompatibility == "duplicate":
-        requests[2].frame_number = requests[1].frame_number
-    elif incompatibility == "decreasing":
-        requests[2].frame_number = 0
-
-    with (
-        patch(
-            "frame_compare.render.batch.orchestrator.render_frame_detailed",
-            side_effect=_rendered,
-        ) as render_frame,
-        patch(
-            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed"
-        ) as render_ffmpeg_batch,
-    ):
-        render_clip_jobs(prepared_jobs(requests), parallelism=1)
-
-    assert render_frame.call_count == len(requests)
-    render_ffmpeg_batch.assert_not_called()
-
-
-def test_render_batch_parallel_overlaps_ffmpeg_groups_and_preserves_order_and_progress(
-    tmp_path: Path,
-) -> None:
-    runner = DefaultFFmpegRunner()
-    requests = [
-        RenderRequest(
-            clip=Path(clip_name),
-            diagnostic_source=Path(clip_name),
-            frame_number=frame,
-            output_path=tmp_path / f"{clip_name}-{frame}.png",
-            overlay=None,
-            encoder_settings=EncoderSettings(),
-            ffmpeg_runner=runner,
-        )
-        for clip_name, frames in (("reference.mkv", [10, 20]), ("comparison.mkv", [30, 40, 50]))
-        for frame in frames
-    ]
-    both_groups_started = Barrier(2)
-    reporter = MagicMock(spec=ProgressReporter)
-
-    def render_ffmpeg_group(
-        group: list[RenderRequest],
-        *,
-        abort: Callable[[], bool] | None = None,
-    ) -> list[RenderedFrameResult]:
-        both_groups_started.wait(timeout=1.0)
-        return [_rendered(request) for request in group]
-
-    with (
-        patch(
-            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed",
-            side_effect=render_ffmpeg_group,
-        ) as render_batch,
-        patch("frame_compare.render.batch.orchestrator.render_frame_detailed") as render_frame,
-    ):
-        results = frame_results(
-            render_clip_jobs(
-                prepared_jobs(
-                    *[
-                        tuple(requests[index] for index in indices)
-                        for indices in [range(0, 2), range(2, 5)]
-                    ]
-                ),
-                parallelism=2,
-                reporter=reporter,
-            )
-        )
-
-    assert sorted(
-        tuple(request.frame_number for request in call.args[0])
-        for call in render_batch.call_args_list
-    ) == [(10, 20), (30, 40, 50)]
-    render_frame.assert_not_called()
-    assert [result.path for result in results] == [request.output_path for request in requests]
-    assert [result.facts.source_frame for result in results] == [10, 20, 30, 40, 50]
-    reporter.start_phase.assert_called_once_with("Screenshots", len(requests))
-    reporter.set_description.assert_not_called()
-    assert sorted(call.args[0] for call in reporter.advance.call_args_list) == [2, 3]
-
-
 def test_render_clip_jobs_admits_at_most_two_blocked_clips(
     mock_render_request: RenderRequest,
 ) -> None:
@@ -682,8 +470,8 @@ def test_render_batch_parallelizes_clip_units_but_serializes_each_clip(
 ) -> None:
     requests = [
         RenderRequest(
-            clip=Path(clip_name),
-            diagnostic_source=Path(clip_name),
+            clip=cast(Any, Path(clip_name)),
+            diagnostic_source=cast(Any, Path(clip_name)),
             frame_number=frame,
             output_path=tmp_path / f"{clip_name}-{frame}.jpg",
             overlay=None,
@@ -752,8 +540,8 @@ def test_clip_unit_failure_preserves_partial_serialized_progress_and_admission(
     exceptions: list[BaseException] = []
     requests = [
         RenderRequest(
-            clip=Path(clip_name),
-            diagnostic_source=Path(clip_name),
+            clip=cast(Any, Path(clip_name)),
+            diagnostic_source=cast(Any, Path(clip_name)),
             frame_number=frame,
             output_path=tmp_path / f"{clip_name}-{frame}.jpg",
             overlay=None,
@@ -842,139 +630,6 @@ def test_clip_unit_failure_preserves_partial_serialized_progress_and_admission(
     reporter.complete_phase.assert_called_once_with(ProgressPhaseStatus.FAILED)
 
 
-def test_render_batch_parallel_mixes_indivisible_ffmpeg_groups_and_singletons(
-    tmp_path: Path,
-) -> None:
-    default_runner = DefaultFFmpegRunner()
-    singleton_runner = _CustomFFmpegRunner()
-    requests = [
-        RenderRequest(
-            clip=Path(clip_name),
-            diagnostic_source=Path(clip_name),
-            frame_number=frame,
-            output_path=tmp_path / f"{clip_name}-{frame}.png",
-            overlay=None,
-            encoder_settings=EncoderSettings(),
-            ffmpeg_runner=runner,
-        )
-        for clip_name, frames, runner in (
-            ("first.mkv", [1, 2], default_runner),
-            ("single.mkv", [3], singleton_runner),
-            ("last.mkv", [4, 5], default_runner),
-        )
-        for frame in frames
-    ]
-    batches: list[list[int]] = []
-    singletons: list[int] = []
-
-    def render_ffmpeg_group(
-        group: list[RenderRequest],
-        *,
-        abort: Callable[[], bool] | None = None,
-    ) -> list[RenderedFrameResult]:
-        batches.append([request.frame_number for request in group])
-        return [_rendered(request) for request in group]
-
-    def render_single(request: RenderRequest) -> RenderedFrameResult:
-        singletons.append(request.frame_number)
-        return _rendered(request)
-
-    with (
-        patch(
-            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed",
-            side_effect=render_ffmpeg_group,
-        ),
-        patch(
-            "frame_compare.render.batch.orchestrator.render_frame_detailed",
-            side_effect=render_single,
-        ),
-    ):
-        results = frame_results(
-            render_clip_jobs(
-                prepared_jobs(requests[:2], requests[2:3], requests[3:]), parallelism=2
-            )
-        )
-
-    assert sorted(batches) == [[1, 2], [4, 5]]
-    assert singletons == [3]
-    assert [result.facts.source_frame for result in results] == [1, 2, 3, 4, 5]
-
-
-def test_render_batch_parallel_failure_does_not_schedule_later_work(tmp_path: Path) -> None:
-    failing_runner = DefaultFFmpegRunner()
-    singleton_runner = _CustomFFmpegRunner()
-    requests = [
-        RenderRequest(
-            clip=Path(clip_name),
-            diagnostic_source=Path(clip_name),
-            frame_number=frame,
-            output_path=tmp_path / f"{clip_name}-{frame}.png",
-            overlay=None,
-            encoder_settings=EncoderSettings(),
-            ffmpeg_runner=runner,
-        )
-        for clip_name, frames, runner in (
-            ("failing.mkv", [0, 1], failing_runner),
-            ("in-flight.mkv", [2], singleton_runner),
-            ("later.mkv", [3], singleton_runner),
-        )
-        for frame in frames
-    ]
-    failure_reported = Event()
-    in_flight_started = Event()
-    release_in_flight = Event()
-    exceptions: list[BaseException] = []
-    invoked_singletons: list[int] = []
-
-    def render_failing_group(
-        _group: list[RenderRequest], *, abort: Callable[[], bool] | None = None
-    ) -> list[RenderedFrameResult]:
-        assert in_flight_started.wait(timeout=1.0)
-        failure_reported.set()
-        raise RuntimeError("failed batch")
-
-    def render_single(request: RenderRequest) -> RenderedFrameResult:
-        invoked_singletons.append(request.frame_number)
-        if request.frame_number == 2:
-            in_flight_started.set()
-            assert release_in_flight.wait(timeout=1.0)
-        return _rendered(request)
-
-    def run_render() -> None:
-        try:
-            render_clip_jobs(
-                prepared_jobs(requests[:2], requests[2:3], requests[3:]), parallelism=2
-            )
-        except BaseException as exc:
-            exceptions.append(exc)
-
-    with (
-        patch(
-            "frame_compare.render.batch.orchestrator.render_ffmpeg_batch_detailed",
-            side_effect=render_failing_group,
-        ),
-        patch(
-            "frame_compare.render.batch.orchestrator.render_frame_detailed",
-            side_effect=render_single,
-        ),
-    ):
-        thread = Thread(target=run_render, daemon=True)
-        thread.start()
-        try:
-            assert failure_reported.wait(timeout=1.0)
-            assert in_flight_started.wait(timeout=1.0)
-            assert 3 not in invoked_singletons
-        finally:
-            release_in_flight.set()
-            thread.join(timeout=1.0)
-
-    assert not thread.is_alive()
-    assert len(exceptions) == 1
-    assert isinstance(exceptions[0], RuntimeError)
-    assert str(exceptions[0]) == "failed batch"
-    assert 3 not in invoked_singletons
-
-
 @pytest.mark.parametrize("real_failure", [False, True])
 def test_clip_workers_stop_before_next_frame_and_preserve_first_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, real_failure: bool
@@ -988,7 +643,7 @@ def test_clip_workers_stop_before_next_frame_and_preserve_first_failure(
     requests = [
         RenderRequest(
             clip=MagicMock(),
-            diagnostic_source=tmp_path / "video.mkv",
+            diagnostic_source=cast(Any, tmp_path / "video.mkv"),
             frame_number=frame,
             output_path=tmp_path / f"{frame}.png",
             overlay=None,
@@ -1063,80 +718,6 @@ def test_clip_workers_stop_before_next_frame_and_preserve_first_failure(
         asyncio.run(run())
 
 
-@pytest.mark.parametrize("parallelism", [1, 2])
-def test_ffmpeg_batch_stop_reaps_child_without_publishing_partial_results(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, parallelism: int
-) -> None:
-    import subprocess
-    import sys
-
-    from frame_compare.utils.cancellation import _RunInterrupt, cancellation_checkpoint
-
-    ready = tmp_path / "ready"
-    runner = DefaultFFmpegRunner(extraction_timeout_seconds=3)
-    requests = [
-        RenderRequest(
-            clip=tmp_path / "clip.mkv",
-            diagnostic_source=tmp_path / "clip.mkv",
-            frame_number=frame,
-            output_path=tmp_path / f"{frame}.png",
-            overlay=None,
-            encoder_settings=EncoderSettings(),
-            ffmpeg_runner=runner,
-        )
-        for frame in range(3)
-    ]
-    processes: list[subprocess.Popen[bytes]] = []
-    original_popen = subprocess.Popen
-    task: asyncio.Task[None] | None = None
-    requested_cancel = False
-
-    def popen(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
-        process = cast("subprocess.Popen[bytes]", original_popen(argv, **kwargs))
-        if kwargs.get("stdout") == subprocess.PIPE:
-            processes.append(process)
-        return process
-
-    def cancel_when_ready() -> bool:
-        nonlocal requested_cancel
-        if ready.exists() and not requested_cancel:
-            assert task is not None
-            task.cancel()
-            requested_cancel = True
-        return task is not None and task.cancelling() > 0
-
-    monkeypatch.setattr(subprocess, "Popen", popen)
-    monkeypatch.setattr(
-        "frame_compare.render.backend.ffmpeg.probe_video_streams",
-        lambda _path, **_kwargs: [{"width": 64, "height": 64}],
-    )
-    monkeypatch.setattr("frame_compare.render.batch.orchestrator.is_cancelling", cancel_when_ready)
-    monkeypatch.setattr(
-        "frame_compare.render.backend.ffmpeg.build_extract_frames_argv",
-        lambda **kwargs: [
-            sys.executable,
-            "-c",
-            "import pathlib,sys,time; pathlib.Path(sys.argv[1]).touch(); time.sleep(30)",
-            str(ready),
-        ],
-    )
-
-    async def run() -> None:
-        nonlocal task
-        task = asyncio.current_task()
-        with pytest.raises(_RunInterrupt):
-            render_clip_jobs(prepared_jobs(requests), parallelism=parallelism)
-        await cancellation_checkpoint()
-
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(run())
-    assert requested_cancel
-    assert len(processes) == 1
-    assert processes[0].returncode is not None
-    assert not any(request.output_path.exists() for request in requests)
-    assert not list(tmp_path.glob(".frame-compare-ffmpeg-*"))
-
-
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="POSIX SIGINT injection; Windows console behavior requires physical acceptance",
@@ -1154,6 +735,7 @@ def test_real_sigint_stops_frame_admission_within_150ms() -> None:
         from contextlib import suppress
         from pathlib import Path
         from threading import Event, Lock, Thread
+        from typing import Any, cast
         from unittest.mock import MagicMock
 
         from frame_compare.render.batch import orchestrator
@@ -1170,7 +752,7 @@ def test_real_sigint_stops_frame_admission_within_150ms() -> None:
         interrupt_observed = []
         sender_errors = []
         requests = [
-            RenderRequest(clip=MagicMock(), diagnostic_source=Path('probe.mkv'),
+            RenderRequest(clip=MagicMock(), diagnostic_source=cast(Any, Path('probe.mkv')),
                           frame_number=i, output_path=Path(f'{i}.png'), overlay=None,
                           encoder_settings=EncoderSettings())
             for i in range(120)

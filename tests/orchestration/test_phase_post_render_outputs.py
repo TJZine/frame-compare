@@ -8,6 +8,7 @@ from typing import Any, cast
 
 import httpx
 import pytest
+from PIL import Image
 
 from frame_compare.analysis.types import (
     SelectionBreakdown,
@@ -51,7 +52,6 @@ from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
     _render_artifacts,
-    _RenderRunner,
 )
 from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
@@ -372,8 +372,9 @@ def test_report_resolves_visible_bidi_collisions_in_stem_mode(tmp_path: Path) ->
         explicit: [screenshot_dir / "left.png"],
         derived.value: [screenshot_dir / "right.png"],
     }
+    screenshot_dir.mkdir(parents=True, exist_ok=True)
     for clip in [ctx.reference, *ctx.comparisons]:
-        _RenderRunner().extract_frame(clip.path, 5, screenshots[clip.label][0])
+        Image.new("RGB", (10, 10)).save(screenshots[clip.label][0])
     render = _render_artifacts(screenshots_by_label=screenshots, screenshot_dir=screenshot_dir)
     output = phase_post_render.run_report_phase(
         ctx, frames=[5], render=render, metadata=None, slowpics_url=None
@@ -733,7 +734,6 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
         phases = build_phases_after_align(
             request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
-            ffmpeg_runner=cast(Any, _RenderRunner()),
             vs_loader=FakeVSLoader(),
             http_client=client,
             state=state,
@@ -795,7 +795,6 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
         phases = build_phases_after_align(
             request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
-            ffmpeg_runner=cast(Any, _RenderRunner()),
             vs_loader=FakeVSLoader(),
             http_client=client,
             state=state,
@@ -851,7 +850,6 @@ async def test_report_confirmed_report_payload_uses_no_slowpics_url(
     phases = build_phases_after_align(
         request=make_run_request(root=tmp_path),
         monotonic_timer=lambda: 0.0,
-        ffmpeg_runner=cast(Any, _RenderRunner()),
         vs_loader=FakeVSLoader(),
         http_client=None,
         state=state,
@@ -1001,7 +999,6 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
         phases = build_phases_after_align(
             request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
-            ffmpeg_runner=cast(Any, _RenderRunner()),
             vs_loader=FakeVSLoader(),
             http_client=client,
             state=state,

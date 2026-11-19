@@ -120,7 +120,7 @@ enable = false
 
     by_video: dict[str, list[int]] = {}
     for render_request in recorded:
-        source_name = cast(FakeVSNode, render_request.clip).source_path.name
+        source_name = cast(FakeVSNode, cast(Any, render_request.clip)).source_path.name
         by_video.setdefault(source_name, []).append(render_request.frame_number)
 
     assert by_video["a_ref.mkv"] == [32, 66, 83]

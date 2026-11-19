@@ -15,10 +15,9 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.execution import run_render_phase
 from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
-from frame_compare.render.geometry import RenderGeometryPlan
 from frame_compare.render.types import RenderedFrameResult
 from frame_compare.utils.media_facts import RenderedFrameFacts
-from frame_compare.vs.types import HDRMetadata, SourceInfo
+from frame_compare.vs.types import SourceInfo
 from tests.render_test_support import paths_by_label
 
 from .execute_run_helpers import clip_state
@@ -48,31 +47,6 @@ class FakeVSLoader:
 
     def ensure_core(self) -> vs.Core:
         raise RuntimeError("ensure_core should not be called in tests")
-
-
-class FakeFFmpegRunner:
-    def extract_frame(
-        self,
-        video: Path,
-        frame_num: int,
-        output: Path,
-        *,
-        geometry_plan: RenderGeometryPlan | None = None,
-        **_kwargs: object,
-    ) -> RenderedFrameFacts:
-        _, _, _ = video, frame_num, output
-        raise AssertionError("FFmpeg extraction path is not exercised in this test")
-
-    def probe_hdr(self, video: Path) -> HDRMetadata | None:
-        _ = video
-        return HDRMetadata(
-            mastering_display=None,
-            max_cll=None,
-            max_fall=None,
-            color_primaries=1,
-            transfer=1,
-            matrix=1,
-        )
 
 
 def test_overlay_display_frame_number_matches_aligned_output_filename(
@@ -136,7 +110,6 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
     output = run_render_phase(
         ctx=ctx,
         frames=[10],
-        runner=FakeFFmpegRunner(),
         vs_loader=loader,
     )
 

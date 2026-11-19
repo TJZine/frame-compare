@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from frame_compare.config.schema import ConfigSchema, OverlayMode
 from frame_compare.config.schema_enums import ScreenshotAlignedScalePolicy, ScreenshotGeometryMode
-from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
 from frame_compare.render.errors import RenderError
 from frame_compare.render.geometry import (
     GeometryRect,
@@ -24,7 +23,6 @@ from frame_compare.render.types import (
     PreparedClipRender,
     PreparedRenderSource,
     RenderedClipFacts,
-    Renderer,
     RenderRequest,
     ScreenshotBatchRequest,
 )
@@ -36,33 +34,6 @@ from frame_compare.utils.media_facts import (
 
 if TYPE_CHECKING:
     from frame_compare.vs.loader import VSLoader
-
-
-def resolve_target_renderer(config: ConfigSchema, renderer: Renderer) -> Renderer:
-    if renderer == "auto" and config.screenshots.use_ffmpeg:
-        return "ffmpeg"
-    return renderer
-
-
-def resolve_batch_ffmpeg_runner(
-    ffmpeg_runner: FFmpegRunner | None, *, extraction_timeout_seconds: float = 30.0
-) -> FFmpegRunner:
-    return ffmpeg_runner or DefaultFFmpegRunner(
-        extraction_timeout_seconds=extraction_timeout_seconds
-    )
-
-
-def validate_ffmpeg_batch_tonemap_gate(
-    batch_requests: list[ScreenshotBatchRequest], config: ConfigSchema, renderer: Renderer
-) -> None:
-    if (
-        renderer == "ffmpeg"
-        and config.color.enable_tonemap
-        and any(request.signal.is_hdr for request in batch_requests)
-    ):
-        from frame_compare.vs.errors import TonemapRequiresVapourSynthError
-
-        raise TonemapRequiresVapourSynthError()
 
 
 def validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> None:
@@ -90,8 +61,6 @@ def expand_batch_render_requests(
     output_dir: Path,
     config: ConfigSchema,
     overlay_mode: OverlayMode,
-    renderer: Renderer,
-    ffmpeg_runner: FFmpegRunner,
     vs_loader: VSLoader | None = None,
 ) -> tuple[PreparedClipRender, ...]:
     output_paths = [
@@ -107,16 +76,7 @@ def expand_batch_render_requests(
     prepared: list[PreparedRenderSource] = []
     for request in batch_requests:
         raise_if_cancelling()
-        prepared.append(
-            prepare_clip_for_render(
-                request.clip_path,
-                renderer,
-                config,
-                ffmpeg_runner=ffmpeg_runner,
-                source_is_hdr=request.signal.is_hdr,
-                vs_loader=vs_loader,
-            )
-        )
+        prepared.append(prepare_clip_for_render(request.clip_path, config, vs_loader=vs_loader))
     raise_if_cancelling()
     plans = _geometry_plans(batch_requests, prepared, config)
     jobs: list[PreparedClipRender] = []
@@ -130,22 +90,7 @@ def expand_batch_render_requests(
             if all(dimension > 0 for dimension in source.source_dimensions)
             else batch.source_resolution
         )
-        source_total_frames = (
-            source.source_total_frames
-            if source.source_total_frames is not None
-            else batch.source_total_frames
-        )
-        if (
-            isinstance(source.prepared_clip, Path)
-            and isinstance(ffmpeg_runner, DefaultFFmpegRunner)
-            and batch.frames
-        ):
-            ffmpeg_runner.validate_source(
-                source.prepared_clip,
-                (plan.source.width, plan.source.height),
-                source_total_frames,
-                batch.frames[0].source_frame,
-            )
+        source_total_frames = source.source_total_frames
         # Preparation owns this state: it reflects the actual source and whether
         # the resolved tonemap was applied, rather than re-deriving it from the
         # request's clip-level signal snapshot.
@@ -162,7 +107,7 @@ def expand_batch_render_requests(
         requests: list[RenderRequest] = []
         for selection, output_path in zip(batch.frames, paths, strict=True):
             source_frame = selection.source_frame
-            if source_total_frames is not None and not (0 <= source_frame < source_total_frames):
+            if not 0 <= source_frame < source_total_frames:
                 raise ValueError(
                     f"ScreenshotBatchRequest {batch.label!r} requested source frame "
                     f"{source_frame} outside valid range"
@@ -198,7 +143,6 @@ def expand_batch_render_requests(
                         compression=config.screenshots.png_compression,
                         vs_writer=config.screenshots.vs_writer,
                     ),
-                    ffmpeg_runner=ffmpeg_runner,
                     geometry_plan=plan,
                     source_signal=batch.signal,
                 )

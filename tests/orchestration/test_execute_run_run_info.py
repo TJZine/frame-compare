@@ -15,7 +15,6 @@ from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
     create_video_files,
     install_fake_frame_render,
@@ -48,7 +47,6 @@ def test_execute_prep_writes_run_info_with_clock_and_no_http_client_skip(
     )
     deps = RunDependencies(
         vs_loader=FakeVSLoader(),
-        ffmpeg_runner=FakeFFmpegRunner(),
         clock=lambda: datetime(2026, 6, 8, 15, 30, 45, tzinfo=UTC),
     )
 

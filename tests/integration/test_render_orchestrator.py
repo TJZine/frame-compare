@@ -1,28 +1,28 @@
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
 
-from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode
-from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
+from frame_compare.config.schema import ColorConfig, ConfigSchema
 from frame_compare.render.batch.orchestrator import (
     render_screenshots_from_batch_detailed,
 )
-from frame_compare.render.types import BatchRenderOptions, ScreenshotBatchRequest
+from frame_compare.render.types import ScreenshotBatchRequest
 from frame_compare.utils.media_facts import ActivePictureFacts, SourceSignalFacts
-from frame_compare.utils.subproc import run_subprocess
-from tests.render_test_support import facts_by_label, paths_by_label, selections
+from frame_compare.vs.env import detect_plugins
+from tests.render_test_support import paths_by_label, selections
 
-
-class _NonBatchingFFmpegRunner(DefaultFFmpegRunner):
-    """Force the compatibility path so parity tests retain a real per-frame baseline."""
-
-    pass
+vs = pytest.importorskip("vapoursynth")
+if isinstance(vs, MagicMock):
+    pytest.skip("vapoursynth is mocked", allow_module_level=True)
+if not detect_plugins(vs.core).get("lsmas", False):
+    pytest.skip("lsmas plugin not available", allow_module_level=True)
 
 
 @pytest.fixture
 def integration_config() -> ConfigSchema:
-    """Config with tonemap disabled for FFmpeg-only integration tests."""
+    """Config for screenshot integration tests with tonemapping disabled."""
     return ConfigSchema(color=ColorConfig(enable_tonemap=False))
 
 
@@ -31,7 +31,6 @@ def _request(
     label: str,
     frames: list[int],
     *,
-    is_hdr: bool = False,
     size: tuple[int, int] = (100, 100),
 ) -> ScreenshotBatchRequest:
     return ScreenshotBatchRequest(
@@ -41,12 +40,7 @@ def _request(
         size_bytes=clip_path.stat().st_size,
         source_resolution=size,
         source_total_frames=3,
-        signal=SourceSignalFacts(
-            is_hdr=is_hdr,
-            primaries=9 if is_hdr else 1,
-            transfer=16 if is_hdr else 1,
-            matrix=9 if is_hdr else 1,
-        ),
+        signal=SourceSignalFacts(is_hdr=False, primaries=1, transfer=1, matrix=1),
         active_picture=ActivePictureFacts(0, 0, *size, "full_frame", True),
         filename_label=clip_path.stem,
     )
@@ -65,7 +59,6 @@ def test_render_screenshots_naming_and_output(
             [_request(mock_video_path, "TestLabel", frames)],
             output_dir,
             integration_config,
-            BatchRenderOptions(renderer="ffmpeg"),
         )
     )
 
@@ -84,100 +77,6 @@ def test_render_screenshots_naming_and_output(
 
 
 @pytest.mark.integration
-def test_ffmpeg_one_pass_batch_matches_per_frame_pixels_and_facts(
-    mock_video_path: Path, tmp_path: Path, integration_config: ConfigSchema
-) -> None:
-    request = _request(mock_video_path, "TestLabel", [0, 1, 2])
-    batched = render_screenshots_from_batch_detailed(
-        [request],
-        tmp_path / "batched",
-        integration_config,
-        BatchRenderOptions(renderer="ffmpeg", parallelism=1),
-    )
-    per_frame = render_screenshots_from_batch_detailed(
-        [request],
-        tmp_path / "per-frame",
-        integration_config,
-        BatchRenderOptions(
-            renderer="ffmpeg", parallelism=2, ffmpeg_runner=_NonBatchingFFmpegRunner()
-        ),
-    )
-
-    batched_paths = paths_by_label(batched)["TestLabel"]
-    per_frame_paths = paths_by_label(per_frame)["TestLabel"]
-    assert [path.read_bytes() for path in batched_paths] == [
-        path.read_bytes() for path in per_frame_paths
-    ]
-    assert facts_by_label(batched) == facts_by_label(per_frame)
-
-
-@pytest.mark.integration
-def test_ffmpeg_one_pass_batch_matches_per_frame_hdr_pixels_and_facts(
-    tmp_path: Path, require_ffmpeg: None, integration_config: ConfigSchema
-) -> None:
-    fixture = tmp_path / "hdr.mkv"
-    run_subprocess(
-        [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc2=size=320x240:rate=10",
-            "-frames:v",
-            "3",
-            "-c:v",
-            "ffv1",
-            "-pix_fmt",
-            "yuv420p10le",
-            "-color_primaries",
-            "bt2020",
-            "-color_trc",
-            "smpte2084",
-            "-colorspace",
-            "bt2020nc",
-            str(fixture),
-        ],
-        timeout_seconds=20,
-    )
-    request = _request(fixture, "HDR", [0, 1, 2], is_hdr=True, size=(320, 240))
-    batched = render_screenshots_from_batch_detailed(
-        [request],
-        tmp_path / "hdr-batched",
-        integration_config,
-        BatchRenderOptions(renderer="ffmpeg", parallelism=1),
-    )
-    per_frame = render_screenshots_from_batch_detailed(
-        [request],
-        tmp_path / "hdr-per-frame",
-        integration_config,
-        BatchRenderOptions(
-            renderer="ffmpeg", parallelism=2, ffmpeg_runner=_NonBatchingFFmpegRunner()
-        ),
-    )
-
-    batched_paths = paths_by_label(batched)["HDR"]
-    per_frame_paths = paths_by_label(per_frame)["HDR"]
-    assert [path.read_bytes() for path in batched_paths] == [
-        path.read_bytes() for path in per_frame_paths
-    ]
-    assert facts_by_label(batched) == facts_by_label(per_frame)
-
-    clean = render_screenshots_from_batch_detailed(
-        [request],
-        tmp_path / "hdr-clean",
-        integration_config,
-        BatchRenderOptions(renderer="ffmpeg", overlay_mode=OverlayMode.NONE),
-    )
-    for baked_path, clean_path in zip(batched_paths, paths_by_label(clean)["HDR"], strict=True):
-        assert clean_path.read_bytes()[24:26] == baked_path.read_bytes()[24:26] == bytes((8, 2))
-        with Image.open(baked_path) as baked, Image.open(clean_path) as plain:
-            bottom_row = (0, plain.height - 1, plain.width, plain.height)
-            assert baked.crop(bottom_row).tobytes() == plain.crop(bottom_row).tobytes()
-            assert baked.tobytes() != plain.tobytes()
-
-
-@pytest.mark.integration
 def test_render_screenshots_empty_frames_returns_label_with_empty_list(
     mock_video_path: Path, integration_output_dir: Path, integration_config: ConfigSchema
 ):
@@ -186,7 +85,6 @@ def test_render_screenshots_empty_frames_returns_label_with_empty_list(
             [_request(mock_video_path, "EmptyFrames", [])],
             integration_output_dir,
             integration_config,
-            BatchRenderOptions(renderer="ffmpeg"),
         )
     )
 
@@ -213,7 +111,6 @@ def test_render_screenshots_from_batch_uses_supplied_label(
             [_request(mock_video_path, mock_video_path.stem, [])],
             integration_output_dir,
             integration_config,
-            BatchRenderOptions(renderer="ffmpeg"),
         )
     )
 

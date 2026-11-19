@@ -394,9 +394,6 @@ min_window_seconds = 0.0
 [audio_alignment]
 enable = false
 
-[screenshots]
-use_ffmpeg = true
-
 [color]
 enable_tonemap = false
 

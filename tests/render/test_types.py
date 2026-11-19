@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -74,10 +75,8 @@ def test_overlay_config_is_immutable_and_keeps_source_domain() -> None:
 
 def test_batch_render_options_defaults() -> None:
     options = BatchRenderOptions()
-    assert options.renderer == "auto"
     assert options.overlay_mode == OverlayMode.STANDARD
     assert options.reporter is None
-    assert options.ffmpeg_runner is None
 
 
 @pytest.mark.parametrize("frames", [(), (3,)])
@@ -86,7 +85,12 @@ def test_prepared_clip_rejects_selection_request_disagreement(frames: tuple[int,
     from tests.render_test_support import selections
 
     request = RenderRequest(
-        Path("clip.mkv"), Path("clip.mkv"), 1, Path("frame.png"), None, EncoderSettings()
+        cast(Any, Path("clip.mkv")),
+        cast(Any, Path("clip.mkv")),
+        1,
+        Path("frame.png"),
+        None,
+        EncoderSettings(),
     )
     with pytest.raises(ValueError, match="one request per selected|source frame differs"):
         PreparedClipRender("ref", _clip_facts(), selections(frames), (request,))

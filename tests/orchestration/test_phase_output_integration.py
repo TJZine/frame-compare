@@ -26,7 +26,6 @@ from tests.orchestration.phase_task_helpers import (
     _context,
     _frame_metrics,
     _render_artifacts,
-    _RenderRunner,
     _run_align_phase,
 )
 
@@ -136,7 +135,6 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     render_output = phase_render.run_render_phase(
         ctx,
         frames=list(ctx.selection.frames),
-        runner=cast(Any, _RenderRunner()),
         vs_loader=FakeVSLoader(),
     )
     apply_phase_output(ctx=ctx, state=state, output=render_output)
@@ -238,7 +236,6 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
     render_output = phase_render.run_render_phase(
         ctx,
         frames=frames,
-        runner=cast(Any, _RenderRunner()),
         vs_loader=FakeVSLoader(),
     )
     phase_post_render.run_report_phase(
@@ -310,7 +307,6 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
     render_output = phase_render.run_render_phase(
         ctx,
         frames=list(ctx.selection.frames),
-        runner=cast(Any, _RenderRunner()),
         vs_loader=FakeVSLoader(),
     )
     apply_phase_output(ctx=ctx, state=state, output=render_output)

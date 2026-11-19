@@ -249,7 +249,6 @@ def test_schema_model_section_defaults_are_representative() -> None:
     assert audio.comparison_streams == {}
     assert screenshots.overlay_mode == OverlayMode.STANDARD
     assert screenshots.png_compression == 6
-    assert screenshots.ffmpeg_timeout_seconds == 30.0
     assert screenshots.geometry_mode == ScreenshotGeometryMode.NATIVE
     assert screenshots.active_rect_detection == ScreenshotActiveRectDetection.AUTO
     assert screenshots.aligned_scale_policy == ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
@@ -289,13 +288,6 @@ def test_root_config_ignores_removed_diagnostics_section() -> None:
 
     assert "diagnostics" not in config.model_fields_set
     assert not hasattr(config, "diagnostics")
-
-
-def test_screenshot_ffmpeg_timeout_keeps_five_second_minimum() -> None:
-    assert ScreenshotsConfig(ffmpeg_timeout_seconds=5.0).ffmpeg_timeout_seconds == 5.0
-
-    with pytest.raises(ValidationError, match="greater than or equal to 5"):
-        ScreenshotsConfig(ffmpeg_timeout_seconds=4.9)
 
 
 @pytest.mark.parametrize("mode", ["majority", "nearest"])
@@ -679,7 +671,6 @@ def test_runtime_memory_limit_rejects_invalid_values(value: object) -> None:
 @pytest.mark.parametrize(
     "model, field",
     [
-        (ScreenshotsConfig, "ffmpeg_timeout_seconds"),
         (SlowpicsConfig, "timeout_seconds"),
         (SlowpicsConfig, "image_upload_timeout_seconds"),
         (TmdbConfig, "timeout_seconds"),

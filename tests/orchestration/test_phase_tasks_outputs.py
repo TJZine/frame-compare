@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -33,7 +33,7 @@ from frame_compare.utils.media_facts import (
 from frame_compare.vs.props import parse_mastering_display_luminance
 from frame_compare.vs.types import HDRMetadata
 from tests.orchestration.execute_run_helpers import FakeVSLoader, install_fake_frame_render
-from tests.orchestration.phase_task_helpers import _clip, _context, _RenderRunner
+from tests.orchestration.phase_task_helpers import _clip, _context
 from tests.render_test_support import facts_by_label, rendered_clips
 
 
@@ -118,9 +118,7 @@ def test_run_render_phase_maps_comparison_and_source_frames_and_preserves_facts(
         picture_types={"Reference": ["B"], "Encode 1": ["P"]},
     )
 
-    output = phase_render.run_render_phase(
-        ctx, frames=[1], runner=cast(Any, _RenderRunner()), vs_loader=FakeVSLoader()
-    )
+    output = phase_render.run_render_phase(ctx, frames=[1], vs_loader=FakeVSLoader())
 
     requests = captured["batch_requests"]
     assert [
@@ -157,9 +155,7 @@ def test_run_render_phase_maps_multiple_clips_in_stable_order(
     ]
     captured = _capture_detailed_render(monkeypatch, tmp_path)
 
-    phase_render.run_render_phase(
-        ctx, frames=[1, 2], runner=cast(Any, _RenderRunner()), vs_loader=FakeVSLoader()
-    )
+    phase_render.run_render_phase(ctx, frames=[1, 2], vs_loader=FakeVSLoader())
 
     requests = captured["batch_requests"]
     assert [
@@ -254,9 +250,7 @@ def test_run_render_phase_maps_canonical_clip_facts(
     )
     captured = _capture_detailed_render(monkeypatch, tmp_path)
 
-    output = phase_render.run_render_phase(
-        ctx, frames=[2], runner=cast(Any, _RenderRunner()), vs_loader=FakeVSLoader()
-    )
+    output = phase_render.run_render_phase(ctx, frames=[2], vs_loader=FakeVSLoader())
 
     request = captured["batch_requests"][0]
     rendered = output.render.clips[0]
@@ -326,9 +320,7 @@ def test_run_render_phase_uses_observed_signal_then_hdr_fallback(
     )
     captured = _capture_detailed_render(monkeypatch, tmp_path)
 
-    phase_render.run_render_phase(
-        ctx, frames=[2], runner=cast(Any, _RenderRunner()), vs_loader=FakeVSLoader()
-    )
+    phase_render.run_render_phase(ctx, frames=[2], vs_loader=FakeVSLoader())
 
     request = captured["batch_requests"][0]
     assert (request.signal.primaries, request.signal.transfer, request.signal.matrix) == expected
@@ -364,9 +356,7 @@ def test_run_render_phase_aggregates_missing_picture_type_once_per_clip(
         picture_types={"Reference": [None, None], "Encode": ["I", None]},
     )
 
-    output = phase_render.run_render_phase(
-        ctx, frames=[1, 2], runner=cast(Any, _RenderRunner()), vs_loader=FakeVSLoader()
-    )
+    output = phase_render.run_render_phase(ctx, frames=[1, 2], vs_loader=FakeVSLoader())
 
     assert [warning.text for warning in output.render.warnings] == [
         "render: picture type unavailable for 2 selected frame(s) in Reference; "
@@ -433,9 +423,7 @@ def test_render_phase_emits_one_warning_for_mixed_applied_tonemap(
     monkeypatch.setattr(
         "frame_compare.render.batch.orchestrator.render_screenshots_from_batch_detailed", render
     )
-    output = phase_render.run_render_phase(
-        ctx, frames=[1], runner=cast(Any, _RenderRunner()), vs_loader=FakeVSLoader()
-    )
+    output = phase_render.run_render_phase(ctx, frames=[1], vs_loader=FakeVSLoader())
     assert output.render is not None
     assert len(output.render.warnings) == 1
     warning = output.render.warnings[0]

@@ -466,7 +466,6 @@ assert sys.getrecursionlimit() == 1000
 @pytest.mark.parametrize(
     "section, field",
     [
-        ("screenshots", "ffmpeg_timeout_seconds"),
         ("slowpics", "timeout_seconds"),
         ("slowpics", "image_upload_timeout_seconds"),
         ("tmdb", "timeout_seconds"),

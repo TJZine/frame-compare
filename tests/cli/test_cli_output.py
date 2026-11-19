@@ -148,7 +148,6 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(
         return f"/usr/bin/{command}"
 
     config = _config()
-    config.screenshots.use_ffmpeg = True
     console = _console()
 
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _resolve)
@@ -186,13 +185,13 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(
     assert "do not reuse" in _rendered_row_value(output, "offsets")
     assert "HTML report" in output
     assert "BT.2390 reference" in _rendered_row_value(output, "tone map")
-    assert "FFmpeg" in output
+    assert any("Rendering" in line and "VapourSynth" in line for line in output.splitlines())
     assert "disabled by --no-upload" in output
     assert "opens when done" in output
     assert "VSView" not in output
 
 
-def test_run_plan_reports_auto_renderer_when_ffmpeg_is_not_forced(
+def test_run_plan_reports_vapoursynth_renderer(
     monkeypatch: MonkeyPatch,
 ) -> None:
     console = _console()
@@ -214,8 +213,7 @@ def test_run_plan_reports_auto_renderer_when_ffmpeg_is_not_forced(
 
     output = _render(console)
     assert "Rendering" in output
-    assert "automatic" in output
-    assert "VapourSynth preferred" in output
+    assert any("Rendering" in line and "VapourSynth" in line for line in output.splitlines())
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")

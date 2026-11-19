@@ -364,7 +364,7 @@ def install_fake_frame_render(monkeypatch: pytest.MonkeyPatch) -> list[RenderReq
     recorded: list[RenderRequest] = []
 
     def render(request: RenderRequest) -> RenderedFrameResult:
-        assert not isinstance(request.clip, Path), "render reached the FFmpeg path"
+        assert not isinstance(cast(object, request.clip), Path), "expected a prepared video node"
         recorded.append(request)
         Image.new("RGB", (10, 10)).save(request.output_path)
         return RenderedFrameResult(
@@ -395,29 +395,6 @@ class FakeHDRVSLoader(FakeVSLoader):
                 transfer=16,
                 matrix=9,
             ),
-        )
-
-
-class FakeFFmpegRunner:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, int, str]] = []
-
-    def extract_frame(
-        self, video: Path, frame_num: int, output: Path, **_kwargs: object
-    ) -> RenderedFrameFacts:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
-        self.calls.append((video.name, frame_num, output.name))
-        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
-
-    def probe_hdr(self, video: Path) -> HDRMetadata | None:
-        return HDRMetadata(
-            mastering_display=None,
-            max_cll=None,
-            max_fall=None,
-            color_primaries=1,
-            transfer=1,
-            matrix=1,
         )
 
 

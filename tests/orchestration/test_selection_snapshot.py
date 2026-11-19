@@ -27,7 +27,6 @@ from frame_compare.orchestration.selection_domain import (
 from frame_compare.orchestration.selection_rows import selection_rows
 from frame_compare.services.report.payload import ReportData
 from tests.orchestration.execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
     install_fake_frame_render,
 )
@@ -107,7 +106,6 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
     )
     state = ExecutionState(artifacts=RunArtifacts())
     request = make_run_request(root=tmp_path, config=ctx.config)
-    runner = FakeFFmpegRunner()
     before = execution.build_phases_before_align(
         request=request,
         config=ctx.config,
@@ -120,7 +118,6 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
         request=request,
         config=ctx.config,
         monotonic_timer=monotonic,
-        ffmpeg_runner=runner,
         vs_loader=FakeVSLoader(),
         http_client=None,
         state=state,

@@ -1,11 +1,10 @@
-"""Frame rendering encoders and dispatch logic."""
+"""VapourSynth frame rendering and screenshot encoding."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 import numpy as np
@@ -14,11 +13,9 @@ from PIL.PngImagePlugin import PngInfo
 
 from frame_compare.config.schema_enums import VsScreenshotWriter
 from frame_compare.errors import ErrorDetails, FrameCompareError
-from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.color import BT2020_CL_TRANSFER, MATRIX_TO_ZIMG, untagged_matrix
 from frame_compare.render.errors import (
     EncodingError,
-    FrameExtractionError,
     OverlayError,
     RenderError,
 )
@@ -28,7 +25,6 @@ from frame_compare.render.types import (
     EncoderSettings,
     OverlayMode,
     RenderedFrameResult,
-    Renderer,
     RenderRequest,
 )
 from frame_compare.utils.canvas import validate_canvas_size
@@ -37,8 +33,6 @@ from frame_compare.utils.media_facts import (
     SourceSignalFacts,
     normalize_picture_type,
 )
-from frame_compare.utils.subproc import SubprocessAborted
-from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.props import props_indicate_limited_range
 
 if TYPE_CHECKING:
@@ -82,140 +76,25 @@ def _should_expand_tonemapped_limited_rgb(frame_props: Mapping[str, object]) -> 
     return props_indicate_limited_range(frame_props) is True
 
 
-def render_frame_detailed(
-    request: RenderRequest, renderer: Renderer = "auto"
-) -> RenderedFrameResult:
+def render_frame_detailed(request: RenderRequest) -> RenderedFrameResult:
     """Render one frame and retain its exact source identity facts."""
-    use_vs = _use_vapoursynth_renderer(request, renderer)
     facts = RenderedFrameFacts(source_frame=request.frame_number)
 
     try:
-        facts = _execute_frame_render(request, use_vs, facts)
-
-    except (EncodingError, FrameExtractionError, RenderError, SourceLoadError):
+        facts = _execute_vapoursynth_render(request, facts)
+    except (EncodingError, RenderError):
         raise
     except Exception as e:
-        details = _render_error_details(request, renderer, use_vs)
+        details = _render_error_details(request)
         raise RenderError(reason=_render_error_reason(e), details=details) from e
 
     return RenderedFrameResult(path=request.output_path, facts=facts)
 
 
-def is_ffmpeg_batch_compatible(
-    first: RenderRequest,
-    candidate: RenderRequest,
-    *,
-    previous_frame: int,
-) -> bool:
-    """Return whether a request can join one ordered FFmpeg decode pass."""
-    runner = first.ffmpeg_runner
-    return (
-        isinstance(first.clip, Path)
-        and type(runner) is DefaultFFmpegRunner
-        and candidate.clip == first.clip
-        and candidate.ffmpeg_runner is runner
-        and candidate.geometry_plan is first.geometry_plan
-        and candidate.source_signal == first.source_signal
-        and candidate.output_path.parent == first.output_path.parent
-        and candidate.output_path.suffix.casefold() == ".png"
-        and candidate.frame_number > previous_frame
-    )
-
-
-def render_ffmpeg_batch_detailed(
-    requests: list[RenderRequest], *, abort: Callable[[], bool] | None = None
-) -> list[RenderedFrameResult]:
-    """Render one clip's ordered FFmpeg requests through a single decode pass."""
-    if not requests:
-        return []
-
-    first = requests[0]
-    runner = first.ffmpeg_runner
-    previous_frame = -1
-    for request in requests:
-        if not is_ffmpeg_batch_compatible(
-            first,
-            request,
-            previous_frame=previous_frame,
-        ):
-            raise ValueError("FFmpeg batch requests must be compatible and strictly ordered")
-        previous_frame = request.frame_number
-    clip = cast(Path, first.clip)
-    batch_runner = cast(DefaultFFmpegRunner, runner)
-
-    active_request = first
-    try:
-        output_parent = first.output_path.parent
-        output_parent.mkdir(parents=True, exist_ok=True)
-        with TemporaryDirectory(prefix=".frame-compare-ffmpeg-", dir=output_parent) as temp_dir:
-            staging_dir = Path(temp_dir)
-            facts = batch_runner.extract_frames(
-                clip,
-                [request.frame_number for request in requests],
-                staging_dir,
-                geometry_plan=first.geometry_plan,
-                source_signal=first.source_signal,
-                abort=abort,
-            )
-            if len(facts) != len(requests):
-                raise FrameExtractionError(first.frame_number, str(clip))
-
-            rendered: list[RenderedFrameResult] = []
-            for index, (request, frame_facts) in enumerate(zip(requests, facts, strict=True)):
-                if abort is not None and abort():
-                    raise SubprocessAborted()
-                active_request = request
-                staged_path = staging_dir / f"{index:09d}.png"
-                if not staged_path.is_file():
-                    raise FrameExtractionError(request.frame_number, str(clip))
-                staged_path.replace(request.output_path)
-                if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:
-                    apply_overlay_to_file(request.output_path, request.overlay, frame_facts)
-                rendered.append(RenderedFrameResult(path=request.output_path, facts=frame_facts))
-            return rendered
-    except (SubprocessAborted, EncodingError, FrameExtractionError, RenderError, SourceLoadError):
-        raise
-    except Exception as exc:
-        details = _render_error_details(active_request, "auto", False)
-        raise RenderError(reason=_render_error_reason(exc), details=details) from exc
-
-
-def _use_vapoursynth_renderer(request: RenderRequest, renderer: Renderer) -> bool:
-    clip = request.clip
-    is_path = isinstance(clip, Path)
-
-    if renderer == "vapoursynth":
-        if is_path:
-            raise FrameExtractionError(
-                frame_number=request.frame_number,
-                clip_name=str(clip),
-            )
-        return True
-
-    if renderer == "ffmpeg":
-        if not is_path:
-            raise FrameExtractionError(
-                frame_number=request.frame_number,
-                clip_name=repr(clip),
-            )
-        return False
-
-    return not is_path
-
-
-def _execute_frame_render(
-    request: RenderRequest, use_vapoursynth: bool, facts: RenderedFrameFacts
-) -> RenderedFrameFacts:
-    if use_vapoursynth:
-        return _execute_vapoursynth_render(request, facts)
-
-    return _execute_ffmpeg_render(request)
-
-
 def _execute_vapoursynth_render(
     request: RenderRequest, facts: RenderedFrameFacts
 ) -> RenderedFrameFacts:
-    node = cast("vs.VideoNode", request.clip)
+    node = request.clip
     validate_canvas_size(node.width, node.height, label="Source video")
     if request.geometry_plan is not None:
         request.geometry_plan.validate_sizes()
@@ -233,22 +112,6 @@ def _execute_vapoursynth_render(
     return facts
 
 
-def _execute_ffmpeg_render(request: RenderRequest) -> RenderedFrameFacts:
-    path = cast(Path, request.clip)
-    runner = request.ffmpeg_runner or DefaultFFmpegRunner()
-    extracted_facts = runner.extract_frame(
-        path,
-        request.frame_number,
-        request.output_path,
-        geometry_plan=request.geometry_plan,
-        source_signal=request.source_signal,
-    )
-
-    if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:
-        apply_overlay_to_file(request.output_path, request.overlay, extracted_facts)
-    return extracted_facts
-
-
 def _facts_from_vapoursynth_source(
     request: RenderRequest, facts: RenderedFrameFacts
 ) -> RenderedFrameFacts:
@@ -259,8 +122,6 @@ def _facts_from_vapoursynth_source(
     Metadata failure is non-fatal because the image itself remains renderable.
     """
     source = request.diagnostic_source
-    if isinstance(source, Path):
-        return facts
     validate_canvas_size(source.width, source.height, label="Source video")
     try:
         frame = source.get_frame(request.frame_number)
@@ -283,19 +144,11 @@ def _render_error_reason(exc: Exception) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def _render_error_details(
-    request: RenderRequest, renderer: Renderer, use_vapoursynth: bool
-) -> ErrorDetails:
-    details: ErrorDetails = {
-        "renderer": renderer,
+def _render_error_details(request: RenderRequest) -> ErrorDetails:
+    return {
         "frame": request.frame_number,
         "output_path": str(request.output_path),
-    }
-    if use_vapoursynth:
-        return details | _vapoursynth_format_details(cast("vs.VideoNode", request.clip))
-
-    details["clip"] = str(request.clip)
-    return details
+    } | _vapoursynth_format_details(request.clip)
 
 
 def _vapoursynth_format_details(clip: vs.VideoNode) -> ErrorDetails:
@@ -568,24 +421,6 @@ def _map_fpng_compression(level: int) -> int:
     return 2
 
 
-def _apply_overlay_to_file(
-    path: Path, config: OverlayConfig, frame_facts: RenderedFrameFacts
-) -> None:
-    """Helper to apply overlay to an existing image file."""
-    try:
-        with Image.open(path) as img:
-            validate_canvas_size(*img.size, label="Rendered image")
-            img.load()
-            base = img.copy()
-
-        result = apply_overlay(base, config, frame_facts)
-
-        result.save(path, format="PNG")
-
-    except Exception as e:
-        raise OverlayError(f"Failed to apply overlay to {path}: {e}") from e
-
-
 def _apply_geometry_plan(
     image: Image.Image,
     geometry_plan: RenderGeometryPlan | None,
@@ -658,21 +493,3 @@ def _apply_geometry_plan_to_vs_clip(
             ),
         )
     return work
-
-
-def apply_overlay_to_file(
-    path: Path, overlay: OverlayConfig, frame_facts: RenderedFrameFacts
-) -> None:
-    """Apply an overlay to an existing image file in place.
-
-    Args:
-        path: Path to an existing image file (PNG expected).
-        overlay: Overlay rendering configuration.
-        frame_facts: Exact-source-frame facts used to compose the overlay.
-
-    Raises:
-        OverlayError: If the overlay cannot be applied.
-    """
-    if overlay.mode == OverlayMode.NONE:
-        return
-    _apply_overlay_to_file(path, overlay, frame_facts)

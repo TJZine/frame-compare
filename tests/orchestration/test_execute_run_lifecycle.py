@@ -39,22 +39,19 @@ from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
-from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.loader import DefaultVSLoader
 from frame_compare.vs.types import SourceInfo
 from tests.render_test_support import prepared_jobs
 from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
-    FakeHDRVSLoader,
     FakeVSLoader,
     clip_state,
     create_video_files,
     install_fake_frame_render,
 )
 from .phase_task_helpers import _render_artifacts, _workspace
-from .preparation_test_support import MINIMAL_CONFIG, create_config
+from .preparation_test_support import create_config
 
 
 def _zero_monotonic_timer() -> float:
@@ -232,10 +229,8 @@ def test_execute_run_propagates_collection_warning_once_through_result_summary_a
         _ctx: RunContext,
         *,
         frames: list[int],
-        runner: object,
         vs_loader: object,
     ) -> RenderPhaseOutput:
-        del runner
         assert vs_loader is prepared_loader
         screenshot_dir = workspace.screenshots_dir
         assert screenshot_dir is not None
@@ -678,28 +673,6 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
     assert uploaded.exists()
 
 
-def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
-    tmp_path: Path,
-) -> None:
-    create_config(
-        tmp_path,
-        content=MINIMAL_CONFIG.replace("[screenshots]", "[screenshots]\nuse_ffmpeg = true"),
-    )
-    input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv")
-
-    request = make_run_request(
-        root=tmp_path,
-        skip_analysis=True,
-        skip_metadata=True,
-        overrides=CLIConfigOverrides(no_upload=True),
-    )
-    deps = RunDependencies(vs_loader=FakeHDRVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
-
-    with pytest.raises(TonemapRequiresVapourSynthError):
-        asyncio.run(execute_run(request, deps=deps))
-
-
 def test_run_acquisition_propagates_config_not_found_error(tmp_path: Path) -> None:
     from frame_compare.orchestration.run_inputs import build_run_request
 
@@ -1015,8 +988,8 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
         else:
             requests = [
                 RenderRequest(
-                    clip=root / "reference.mkv",
-                    diagnostic_source=root / "reference.mkv",
+                    clip=cast(Any, root / "reference.mkv"),
+                    diagnostic_source=cast(Any, root / "reference.mkv"),
                     frame_number=index,
                     output_path=root / f"{index}.png",
                     overlay=None,
@@ -1447,11 +1420,9 @@ async def test_confirmed_upload_facts_survive_cancellation(
         )
         return prep
 
-    def fake_render(
-        _ctx: RunContext, *, frames: list[int], runner: object, vs_loader: object
-    ) -> RenderPhaseOutput:
+    def fake_render(_ctx: RunContext, *, frames: list[int], vs_loader: object) -> RenderPhaseOutput:
         nonlocal uploaded_paths
-        del runner, vs_loader
+        del vs_loader
         screenshots = workspace.screenshots_dir
         assert screenshots is not None
         screenshots.mkdir()

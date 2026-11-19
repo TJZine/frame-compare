@@ -307,7 +307,6 @@ def test_unavailable_alignment_warns_and_rendering_continues(
     from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
     from frame_compare.utils.progress import NullProgressReporter
     from tests.orchestration.execute_run_helpers import (
-        FakeFFmpegRunner,
         FakeVSLoader,
         install_fake_frame_render,
     )
@@ -388,7 +387,6 @@ def test_unavailable_alignment_warns_and_rendering_continues(
         request=request,
         config=ctx.config,
         monotonic_timer=monotonic,
-        ffmpeg_runner=FakeFFmpegRunner(),
         vs_loader=FakeVSLoader(),
         http_client=None,
         state=state,

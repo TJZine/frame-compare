@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from PIL import Image
-
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
@@ -38,7 +36,6 @@ from tests.render_test_support import rendered_clips
 
 __all__ = [
     "_run_align_phase",
-    "_RenderRunner",
     "_render_artifacts",
     "_workspace",
     "_create_config",
@@ -89,15 +86,6 @@ def _run_align_phase(*args: Any, **kwargs: Any) -> AlignPhaseOutput:
             return await phase_alignment.run_align_phase(*args, **kwargs)
 
     return asyncio.run(invoke())
-
-
-class _RenderRunner:
-    def extract_frame(
-        self, _video: Path, frame_num: int, output: Path, **_kwargs: object
-    ) -> RenderedFrameFacts:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
-        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
 
 
 def _render_artifacts(
