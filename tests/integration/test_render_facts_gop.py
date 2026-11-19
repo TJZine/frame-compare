@@ -265,7 +265,7 @@ def test_deterministic_gop_picture_facts_from_vapoursynth(tmp_path: Path) -> Non
         ),
     ],
 )
-def test_renderers_choose_matrix_from_tag_hdr_or_coded_size(
+def test_vapoursynth_chooses_matrix_from_tag_hdr_or_coded_size(
     tmp_path: Path,
     require_ffmpeg: None,
     size: tuple[int, int],
@@ -333,7 +333,7 @@ def test_renderers_choose_matrix_from_tag_hdr_or_coded_size(
         pytest.param("bt2020c", 10, None, (161, 101, 41), id="bt2020-cl-implicit-transfer"),
     ],
 )
-def test_renderers_preserve_tagged_matrix_through_geometry(
+def test_vapoursynth_preserves_tagged_matrix_through_geometry(
     tmp_path: Path,
     require_ffmpeg: None,
     matrix_name: str,

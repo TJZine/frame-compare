@@ -336,6 +336,21 @@ async function reviewControllerContracts() {
     dom.reviewExport.click();
     assert.equal(status(), `Review JSON exported. ${warning}`);
 
+    // An unsuccessful import keeps the notes and the active persistence warning.
+    const memoryRecords = JSON.parse(JSON.stringify(model.all()));
+    confirmed = false;
+    await chooseFile(replacement);
+    assert.equal(status(), `Import cancelled. No changes were made. ${warning}`);
+    assert.equal(dom.reviewStatus.dataset.tone, 'warning');
+    assert.deepEqual(JSON.parse(JSON.stringify(model.all())), memoryRecords);
+    assert.equal(storage.value, replacedBytes);
+
+    await chooseFile(file('invalid.json', '{bad'));
+    assert.equal(status(), `Import is not valid JSON. No changes were made. ${warning}`);
+    assert.equal(dom.reviewStatus.dataset.tone, 'warning');
+    assert.deepEqual(JSON.parse(JSON.stringify(model.all())), memoryRecords);
+    assert.equal(storage.value, replacedBytes);
+
     // Each startup warning is announced once, including on a forced render.
     for (const [unavailableStorage, expected] of [
         [null, warning],

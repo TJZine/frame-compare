@@ -243,9 +243,9 @@ const ReviewState = (() => {
             if (announce) viewer.announce?.(message);
         }
 
-        function messageWithPersistence(message) {
-            const status = model.status();
-            return status.warning ? `${message} ${status.warning}` : message;
+        function showActionMessage(message, isError = false) {
+            const { warning } = model.status();
+            showMessage(warning ? `${message} ${warning}` : message, isError || Boolean(warning));
         }
 
         function updateStatus(announce = false) {
@@ -284,7 +284,7 @@ const ReviewState = (() => {
                 updateStatus(!model.mutate(viewer.state.currentFrameIdx, patch));
             } catch (error) {
                 render({ force: true });
-                showMessage(error.message, true);
+                showActionMessage(error.message, true);
             }
         }
 
@@ -297,10 +297,9 @@ const ReviewState = (() => {
                 link.download = `${viewer.state.data.report_id}-review.json`;
                 link.click();
                 window.setTimeout(() => URL.revokeObjectURL(url), 0);
-                const message = messageWithPersistence('Review JSON exported.');
-                showMessage(message, Boolean(model.status().warning));
+                showActionMessage('Review JSON exported.');
             } catch (error) {
-                showMessage(error.message, true);
+                showActionMessage(error.message, true);
             }
         }
 
@@ -322,18 +321,18 @@ const ReviewState = (() => {
                     if (!window.confirm(
                         `Replace ${count} saved review ${savedLabel} with ${imported.length} imported ${importedLabel}?`,
                     )) {
-                        showMessage('Import cancelled. No changes were made.');
+                        showActionMessage('Import cancelled. No changes were made.');
                         return;
                     }
                 }
                 model.replaceAll(imported);
                 render({ force: true });
-                showMessage(messageWithPersistence('Review import applied.'), Boolean(model.status().warning));
+                showActionMessage('Review import applied.');
             } catch (error) {
                 if (generation !== importGeneration) return;
                 const message = error.message || String(error);
                 const suffix = message.includes('No changes were made.') ? '' : ' No changes were made.';
-                showMessage(message + suffix, true);
+                showActionMessage(message + suffix, true);
             } finally {
                 if (generation === importGeneration) input.value = '';
             }
