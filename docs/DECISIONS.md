@@ -35,6 +35,8 @@ renderer fallback behavior unchanged.
 **Rationale:** Operator diagnostics should identify the policy constraint without
 misreporting how the runtime dependency was discovered.
 
+Superseded on 2026-11-19: the FFmpeg screenshot renderer was removed, so FC-2009 no longer exists.
+
 ## 2026-02-17 — Remove Legacy Environment Aliases
 
 **Context:** Configuration loading and doctor diagnostics accepted both canonical

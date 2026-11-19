@@ -61,18 +61,19 @@ its Chrome child.
 For the transfer route, use these manual steps, consistent with the runbook's
 browser/manual evidence guidance: edit a
 note/bookmark, use **Export review JSON** and observe the downloaded file, copy the
-report, assets and review file to the destination, open with fresh storage, select
-**Import review JSON**, choose merge/replace and reload. Capture the action, file,
-resulting state and matching report ID/payload version. Record both environments. If a second
-machine or observable download/import control is unavailable, report that route
-unverified; the smoke module does not stand in for it.
+report, assets and review file to the destination, open with fresh storage and
+save a temporary review note. Select **Import review JSON**, confirm the replacement
+and reload. Capture the action, file, resulting state and matching report
+ID/payload version. Record both environments. If a second machine or observable
+download/import control is unavailable, report that route unverified; the smoke
+module does not stand in for it.
 
 ## Gotchas
 
 - The generated images are synthetic one-pixel PNGs. Browser success does not
   establish real-media rendering, subjective visual quality or another browser.
 - Node-based `tests/services/test_report_viewer_state.py` and
-  `test_report_review_state.py` cover additional state/merge contracts, not the
+  `test_report_review_state.py` cover the state and import contracts, not the
   download and transfer journey in a browser.
 - A matching report ID and payload version are required for review imports.
   Browser storage availability matters; carrying the HTML/assets alone does not

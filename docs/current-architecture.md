@@ -151,9 +151,8 @@ retain completed frame results as cleanup outcomes; real-failure ordering remain
 The accepted admission bound is one poll interval plus 100 ms scheduling slack
 after main-thread interrupt observation; additional frame counts inside that
 window are observations rather than acceptance limits.
-FFmpeg batch extraction receives the event as an abort callable, stops staging
-promotion, and boundedly terminates and reaps its child. Sequential render frames
-also check admission. VSView polls its blocking waits and reaps owned work.
+Sequential render frames also check admission. VSView polls its blocking waits
+and reaps owned work.
 A native frame request already in flight has no guaranteed finite drain deadline;
 see the CLI contract's Run Interruption section for that limit and the separately
 owned shared-TMDB response-cache exception.
@@ -500,10 +499,8 @@ decoder options cannot remove. Absent
 ffprobe, invalid header dimensions, and multiple real video streams fail with a
 typed source-load error on the managed loader path. A requested scan also
 rejects missing or changing frame dimensions.
-HDR probing and FFmpeg screenshots use the
-first video stream that is not an attached picture; extraction explicitly maps
-`0:V:0`. Selected-video
-identity is not persisted.
+HDR probing uses the first video stream that is not an attached picture.
+Selected-video identity is not persisted.
 
 ### Run records and review artifacts
 
@@ -1239,9 +1236,8 @@ defaults: BT.2390 1.0, spline 0.5, and Reinhard 0.5. Every preset takes its
 `render.prepare.resolve_tonemap_settings` applies authored overrides. An explicit
 curve equal to the preset curve keeps the preset's parameter; a different curve
 uses `CURVE_PARAMETER_DEFAULTS` for the new curve. Thus `highlight_guard` with an
-explicit BT.2390 override uses knee 1.0. Applied tonemap/report identity continues
-to contain the resolved preset and `knee_offset`; the report payload key and
-renderer label remain unchanged.
+explicit BT.2390 override uses knee 1.0. Applied tonemap/report identity contains
+the resolved preset and `knee_offset`.
 
 Configured VSView previews receive immutable settings resolved by
 `render.prepare.resolve_tonemap_settings` in the alignment orchestration phase,
@@ -1420,30 +1416,29 @@ Viewport owner directly instead of relying on a root forwarding facade. The root
 continues to register events, route shortcuts and mode/source/frame transitions, and
 sequence rendering.
 
-`assets/review_state.js` owns the exact report-scoped local review schema, bounded
-bookmark/tag/note/preferred-clip records, fail-closed localStorage reads, deterministic
-V1 JSON export, strict import validation, a selected merge/replace candidate shared by
-preview and atomic apply, stale-preview rejection, and
-the Review tab's dedicated edit/import/export interaction lifecycle. Saves and
-import Apply share a per-report Web Lock and a same-tab queue. The owner checks
-the expected storage snapshot inside the exclusive operation before replacing
-it; a stale writer keeps its local draft for export rather than overwriting
-another tab's saved records. External changes invalidate import previews too.
-Pending Apply can be cancelled before its write by changing choices, editing,
-choosing another file, or cancelling the import. That controller is
-the single editor-limit owner: notes are bounded to 1000 Unicode scalars in editing,
-stored records, and V1 import/export. The textarea has no native maxlength because
-browsers count UTF-16 code units rather than Unicode scalars. The controller is
-created on first visible Review use, keeps form rendering stable across unrelated viewer
-refreshes, and routes transition announcements through the existing shared polite live
-region. A persistent status line states how many review records are saved in this
-browser (singular/plural and the zero count are each phrased truthfully) beside a static
-reminder that notes live in browser storage, not the report file. Pending writes
-remain unsaved until the exclusive write finishes. A conflict warns the user to
-export local drafts before reloading saved changes; it does not merge or reload
-automatically. Unavailable storage or Web Locks uses the memory-only/export
-fallback, and failed writes never claim persistence they did not achieve. Its storage is
-separate from viewport preferences and never writes into the report or run directory.
+`assets/review_state.js` owns report-scoped review state, V1 JSON export, and the
+Review tab's bookmark, tag, note, preferred clip, and import/export controls.
+It validates stored and imported documents as objects with format
+`frame-compare-review`, schema version 1, and a report object with the matching
+ID and payload version. The reviews array must contain records with unique,
+in-range frame ordinals, a boolean bookmark, a supported tag, a string note, and
+a preferred clip of null or an in-range `clip:<n>` ID. All-default records are
+rejected. Invalid stored data is ignored with a warning.
+
+The editor counts and limits notes to 1000 Unicode scalars. Validation applies
+the same limit to stored and imported notes after normalizing line endings.
+Review JSON exports order records by frame and include an export timestamp.
+A valid import replaces the full record set after confirmation if there are
+saved notes. An invalid or cancelled import leaves the records intact.
+
+Each save writes the full record set synchronously to the report's localStorage
+entry, `frame-compare:report-review:v1:<report_id>`. Across tabs for the same
+report, the last save wins. If storage is unavailable or a read or write fails,
+the viewer keeps edits in memory for the session, shows a warning, and allows
+export. The Review tab's status line normally shows the saved record count or
+a storage warning. Review storage is separate from viewport preferences and
+never writes into the report or run directory.
+
 `assets/viewer.js` caches the Review DOM and composes those focused owners with the
 existing canonical report, mode, viewport, alignment, and Inspector state
 rather than owning duplicate Inspector rendering/focus policy or
@@ -1487,20 +1482,15 @@ required canonical active-picture facts as resolved for every batch request and
 checks containment against the prepared dimensions before planning. `SourceGeometry`
 requires a rectangle and canonical provenance; render has no inference mode, candidate
 ranking, or provenance translation. Orchestration projects its cache-stable
-`ClipActiveRectSource` vocabulary to canonical provenance at the render boundary. Native screenshot
-render remains full-frame. FFmpeg extraction uses coded orientation and applies geometry filters after
-exact frame selection. FFmpeg negotiates full chroma before odd-origin crops and
-padding, retains high-depth samples through geometry, and can pad RGB in its
-original color family. Both renderers emit 8-bit RGB PNGs, with FFmpeg selecting
-RGB24 at the end of its filter chain. The render color policy uses a recognized
-source matrix first, then BT.2020 non-constant luminance for HDR, then BT.601 for
-untagged SDR at or below 1024×576 on both coded axes and BT.709 otherwise. Batch
-expansion carries prepared signal facts and coded dimensions into both FFmpeg
-extraction paths. FFmpeg applies prepared matrix authority at RGB conversion,
-using its `zscale` filter for YCgCo and BT.2020 constant luminance. VapourSynth
-prefers recognized native frame matrix tags and uses prepared facts to fill gaps.
-The VapourSynth path chooses between the Pillow writer
-and eligible `core.fpng.Write` output without changing CLI import-time behavior.
+`ClipActiveRectSource` vocabulary to canonical provenance at the render boundary.
+The `native` geometry mode renders the full source frame.
+VapourSynth emits 8-bit RGB PNGs. The render color
+policy uses a recognized source matrix first, then BT.2020 non-constant
+luminance for HDR, then BT.601 for untagged SDR at or below 1024×576 on both
+coded axes and BT.709 otherwise. VapourSynth prefers recognized native frame matrix tags and uses
+prepared facts to fill gaps. It selects the Pillow writer or eligible
+`core.fpng.Write` output without loading VapourSynth at CLI import time.
+
 Render selection crosses the batch boundary as `SelectedScreenshot` records containing
 comparison frame, source frame, and selection label. Expansion validates all physical
 output paths before native preparation and produces one `PreparedClipRender` per clip,
@@ -1509,24 +1499,16 @@ and source-frame identity. The scheduler returns ordered `RenderedClip` records;
 each `RenderedScreenshot` checks that its result facts identify the selected source
 frame. There are no flattened request ranges or label-map reconstruction steps.
 
-Before FFmpeg extraction, batch expansion compares the decoded video frame count
-with the prepared L-SMASH count. The count scan observes run cancellation. Its
-deadline is the greater of the configured extraction timeout and 30 seconds plus
-one second per four prepared frames. A mismatch fails extraction and directs the
-caller to the VapourSynth renderer. The scheduler runs at most two clip jobs at once. A clip
-uses one FFmpeg extraction pass when every request is compatible and source frames
-are ordered. Otherwise its frames render sequentially while another clip may overlap.
-FFmpeg refuses a filter graph reset before promoting staged images to their literal
-output paths. Singleton extraction also requires a fresh, nonempty staging image.
-Screenshot progress
-is count-only and locked across workers: each serialized frame advances the count,
-or a completed FFmpeg batch advances it together. Parallel cancellation polls every
-50 ms, closes admission, signals FFmpeg abort, cancels unstarted work, and drains
-owned work before returning. Real failures are selected by lowest clip-job index.
+The scheduler runs at most two clip jobs at once. Each clip renders its frames
+in order. Each completed frame advances the screenshot count under a lock.
+Parallel cancellation polls every 50 ms, closes admission to new frames,
+cancels unstarted work, and drains owned work before returning. Real failures
+are selected by lowest clip-job index.
+
 Report orchestration pairs context clips with rendered clips using strict ordered
 iteration and label checks, then consumes their screenshot records directly. The
 publishing boundary projects plain path dictionaries for services without importing
-render types into the service layer. Overlay, geometry, and color policy are unchanged.
+render types into the service layer.
 
 Runtime ownership matrix:
 
