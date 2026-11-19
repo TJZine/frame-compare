@@ -314,7 +314,6 @@ def _align_success_summary(
         "computed_this_run": "audio",
         "shared_computed_offsets": "reused from last run",
         "shared_previous_offsets": "previously confirmed",
-        "preexisting_manual_override": "manual offset",
         "interactive_confirmed_this_run": "confirmed in VSView" if review_ran else "manual offset",
     }
     for comparison, resolution in zip(request.comparisons, resolutions, strict=False):

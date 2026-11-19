@@ -205,19 +205,6 @@ class AlignmentClipRequest:
                     "active rectangle fields must describe a positive source rectangle"
                 )
 
-    def identity_is_current(self) -> bool:
-        """Check prepared path/size/mtime without refreshing the frozen identity."""
-        try:
-            resolved_path = self.path.resolve(strict=True)
-            stat = resolved_path.stat()
-            return (
-                resolved_path == self.identity.path
-                and stat.st_size == self.identity.size_bytes
-                and stat.st_mtime_ns == self.identity.mtime_ns
-            )
-        except OSError:
-            return False
-
     @property
     def timeline_scale(self) -> Fraction:
         """Native-to-analysis time factor: source fps over effective fps (1 when not retimed)."""

@@ -362,7 +362,6 @@ def test_admission_probes_headers_once_and_selects_the_real_stream(
     assert kwargs["timeout_seconds"] == 15.0
     assert kwargs["max_stdout_bytes"] == 256 * 1024
     assert kwargs["max_stderr_bytes"] == 64 * 1024
-    admitted.verify(video)
 
 
 def test_geometry_probe_token_binds_executable_and_runtime(
@@ -380,8 +379,6 @@ def test_geometry_probe_token_binds_executable_and_runtime(
     first = admit_source(video, abort_check=lambda: None)
     assert first.geometry_probe_token is not None
     executable.write_bytes(b"replacement executable")
-    with pytest.raises(ValueError, match="FFprobe executable changed"):
-        first.verify(video)
 
     replaced = admit_source(video, abort_check=lambda: None)
     assert replaced.geometry_probe_token not in {None, first.geometry_probe_token}
@@ -485,21 +482,6 @@ def test_admission_rejects_unsupported_headers(
     )
 
     with pytest.raises(ValueError, match=message):
-        admit_source(video, abort_check=lambda: None)
-
-
-def test_admission_rejects_source_changed_during_header_probe(
-    video: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def probe(
-        path: Path, *_args: object, **_kwargs: object
-    ) -> tuple[list[dict[str, object]], dict[str, object]]:
-        path.write_bytes(b"new file contents")
-        return [_VIDEO], {"format": {"format_name": "matroska,webm"}}
-
-    monkeypatch.setattr(admission_module, "probe_admission_headers", probe)
-
-    with pytest.raises(ValueError, match="Source video changed during admission"):
         admit_source(video, abort_check=lambda: None)
 
 

@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import structlog
 
 from frame_compare.analysis.cache_io import (
-    CACHE_VERSION,
     compute_cache_key,
     keyed_metric_request,
     load_cached_metrics_for_request,
@@ -132,7 +131,6 @@ def _build_metrics(
             active_rect_source=request.active_rect_source,
             active_rect_detection_mode=request.active_rect_detection_mode,
             active_rect_algorithm_id=request.active_rect_algorithm_id,
-            version=CACHE_VERSION,
         ),
         sampled_source_frames=result.sampled_source_frames,
     )

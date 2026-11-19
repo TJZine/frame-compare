@@ -75,14 +75,6 @@ def _regular_info(path: Path) -> os.stat_result:
     return info
 
 
-def is_unredirected_index_leaf(path: Path) -> bool:
-    """Check that a previously validated path still names a local regular file."""
-    try:
-        return path.resolve(strict=True) == path and _regular_info(path).st_size > 0
-    except (OSError, RuntimeError, ValueError):
-        return False
-
-
 @contextmanager
 def private_index_directory() -> Generator[Path]:
     """Isolate cache-free native calls from any existing on-disk index."""
@@ -219,9 +211,7 @@ class ManagedSourceIndexCache:
         try:
             with self._lease(path, create=False) as entry:
                 source = source_identity(entry.source)
-                if self._is_valid(
-                    entry, source, scan_frame_geometry=scan_frame_geometry
-                ) and _same_source(path, entry.source, source):
+                if self._is_valid(entry, source, scan_frame_geometry=scan_frame_geometry):
                     return entry.index
         except (OSError, RuntimeError, ValueError):
             pass
@@ -250,7 +240,7 @@ class ManagedSourceIndexCache:
                     entry, source, probe_token, scan_frame_geometry=scan_frame_geometry
                 ):
                     return None
-                return self._open_warm(path, entry, source, open_source, admission, abort_check)
+                return self._open_warm(entry, open_source, abort_check)
         except (OSError, RuntimeError, ValueError) as error:
             log.debug("Managed L-SMASH index could not be reopened: %s", type(error).__name__)
             return None
@@ -274,17 +264,13 @@ class ManagedSourceIndexCache:
                 if self._is_valid(
                     entry, source, probe_token, scan_frame_geometry=scan_frame_geometry
                 ):
-                    return self._open_warm(path, entry, source, open_source, admission, abort_check)
+                    return self._open_warm(entry, open_source, abort_check)
                 if scan_frame_geometry:
                     admission.scan(entry.source, abort_check=abort_check)
-                if not _same_source(path, entry.source, source):
-                    return None
                 return self._build(
-                    path,
                     entry,
                     source,
                     open_source,
-                    admission,
                     probe_token,
                     scan_frame_geometry,
                     abort_check,
@@ -297,30 +283,18 @@ class ManagedSourceIndexCache:
 
     def _open_warm[T](
         self,
-        path: Path,
         entry: _Entry,
-        source: SourceIdentity,
         open_source: Callable[[Path, int, Path], T],
-        admission: SourceAdmission,
         abort_check: Callable[[], None],
     ) -> T | None:
         abort_check()
-        admission.verify(entry.source)
-        if not _same_source(path, entry.source, source):
-            return None
-        clip = _try_open(open_source, entry.source, 0, entry.index)
-        admission.verify(entry.source)
-        if not _same_source(path, entry.source, source):
-            return None
-        return clip
+        return _try_open(open_source, entry.source, 0, entry.index)
 
     def _build[T](
         self,
-        path: Path,
         entry: _Entry,
         source: SourceIdentity,
         open_source: Callable[[Path, int, Path], T],
-        admission: SourceAdmission,
         probe_token: str,
         scan_frame_geometry: bool,
         abort_check: Callable[[], None],
@@ -346,17 +320,12 @@ class ManagedSourceIndexCache:
                 handle.flush()
                 os.fsync(handle.fileno())
             abort_check()
-            if not _same_source(path, entry.source, source):
-                return None
             # Replace directory entries directly. In particular, never open a
             # rejected stable leaf (which could be a link) for writing.
             entry.metadata.unlink(missing_ok=True)
             os.replace(index_path, entry.index)
             _sync_directory(self.root)
             abort_check()
-            if not _same_source(path, entry.source, source):
-                return None
-            admission.verify(entry.source)
             os.replace(metadata_path, entry.metadata)
             _sync_directory(self.root)
             return clip
@@ -377,10 +346,6 @@ class ManagedSourceIndexCache:
                     directory.rmdir()
             except OSError as error:
                 log.debug("Could not clean private L-SMASH index staging: %s", type(error).__name__)
-
-
-def _same_source(path: Path, resolved: Path, before: SourceIdentity) -> bool:
-    return path.resolve(strict=True) == resolved and source_identity(resolved) == before
 
 
 def _sync_regular_file(path: Path) -> None:

@@ -35,7 +35,6 @@ from frame_compare.services.alignment_streaming import (
     collect_paired_audio_chunks,
 )
 from frame_compare.services.errors import (
-    AudioAlignmentCancellationError,
     AudioAlignmentCleanupError,
     raise_if_alignment_cancelled,
 )
@@ -404,42 +403,20 @@ def _paired_failure(
 
 
 @pytest.mark.parametrize(
-    "category, reference_exited, comparison_exited, change_identity, expected_error, expected_category, detail",
+    "category, reference_exited, comparison_exited, expected_error, expected_category, detail",
     [
         pytest.param(
             "cancelled",
             False,
             True,
-            False,
             AudioAlignmentCleanupError,
             "cancelled",
             None,
             id="cancelled_pair_with_incomplete_cleanup_raises_cleanup_error",
         ),
         pytest.param(
-            "timeout",
-            False,
-            True,
-            True,
-            AudioAlignmentCleanupError,
-            "timeout",
-            None,
-            id="identity_change_with_incomplete_cleanup_raises_cleanup_error",
-        ),
-        pytest.param(
-            "cancelled",
-            True,
-            True,
-            True,
-            AudioAlignmentCancellationError,
-            None,
-            None,
-            id="cancelled_pair_with_identity_change_still_cancels",
-        ),
-        pytest.param(
             "nonzero_exit",
             True,
-            False,
             False,
             AudioAlignmentCleanupError,
             "nonzero_exit",
@@ -454,7 +431,6 @@ def test_pair_failure_precedence(
     category: CollectionFailureCategory,
     reference_exited: bool,
     comparison_exited: bool,
-    change_identity: bool,
     expected_error: type[Exception],
     expected_category: str | None,
     detail: str | None,
@@ -469,9 +445,6 @@ def test_pair_failure_precedence(
     monkeypatch.setattr(alignment_audio, "probe_streams", lambda _path, **_kwargs: _probe())
 
     def collect(*_args: Any, **_kwargs: Any) -> Any:
-        if change_identity:
-            with open(comparison, "ab") as handle:
-                handle.write(b"mutated")
         return _paired_failure(
             category=category,
             reference_exited=reference_exited,

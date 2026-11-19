@@ -19,7 +19,6 @@ type AlignmentWriteProvenance = Literal[
     "interactive_confirmed_this_run",
     "shared_computed_offsets",
     "shared_previous_offsets",
-    "preexisting_manual_override",
 ]
 type AlignmentEvidenceAvailability = Literal[
     "current_attempt",

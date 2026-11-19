@@ -132,8 +132,8 @@ offscreen proof, distinct from visible desktop and packaged acceptance.
   matter. Missing/stale/mixed/incomplete results fail closed.
 - Valid zero, provisional zero and unavailable evidence are distinct. A visible
   audio candidate does not authorize trims or computed-cache reuse.
-- Session result sidecars, persisted manual overrides and decoder indexes have
-  different lifetimes. L-SMASH may write indexes beside source files. Keep all of
+- Session result sidecars, interactively confirmed offsets in the shared alignment
+  reuse cache, and decoder indexes have different lifetimes. L-SMASH may write indexes beside source files. Keep all of
   them in the disposable media/root/cache; preserve useful evidence before deleting
   scratch, and never remove original user media or shared caches.
 - Without a compatible runtime and desktop, record the real journey as blocked

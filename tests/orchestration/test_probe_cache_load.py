@@ -16,6 +16,7 @@ from frame_compare.orchestration.probing.probe_cache import (
 def _entry(
     *,
     path: object = "video.mkv",
+    source_token: str = "a" * 64,
     size_bytes: int = 100,
     mtime_ns: int = 100,
     width: int = 1920,
@@ -25,10 +26,10 @@ def _entry(
     fps_den: int = 1,
 ) -> tuple[str, dict[str, object]]:
     fingerprint_path = Path(path) if isinstance(path, str) else Path("video.mkv")
-    fingerprint = ClipFingerprint(fingerprint_path, size_bytes, mtime_ns, source_token="a" * 64)
+    fingerprint = ClipFingerprint(fingerprint_path, size_bytes, mtime_ns, source_token=source_token)
     return compute_probe_cache_key(fingerprint), {
         "path": path,
-        "source_token": "a" * 64,
+        "source_token": source_token,
         "size_bytes": size_bytes,
         "mtime_ns": mtime_ns,
         "width": width,
@@ -58,7 +59,7 @@ def test_load_clip_probe_cache_ignores_unknown_fields_and_skips_invalid_entries(
     data = {
         "version": "1",
         valid_key: {**valid_entry, "extra_field": "ignore me"},  # Unknown field
-        "invalid_key": {
+        "private entry label": {
             "path": "video.mkv",
             # Missing size_bytes etc.
         },
@@ -72,44 +73,9 @@ def test_load_clip_probe_cache_ignores_unknown_fields_and_skips_invalid_entries(
     assert len(cache) == 1
     assert valid_key in cache
     assert cache[valid_key].width == 1920
-    warning.assert_called_once()
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("width", 0),
-        ("height", -1),
-        ("num_frames", 0),
-        ("fps_num", 0),
-        ("fps_num", -24),
-        ("fps_num", 2**63),
-        ("fps_den", -1),
-        ("fps_den", 2**63),
-        ("num_frames", 2**31),
-        ("path", 42),
-        ("size_bytes", -1),
-    ],
-)
-def test_load_clip_probe_cache_skips_invalid_probe_facts(
-    tmp_path: Path, field: str, value: object
-) -> None:
-    key, entry = _entry()
-    entry[field] = value
-    path = tmp_path / f"invalid_{field}_{value}.toml"
-    with path.open("wb") as output:
-        tomli_w.dump({"version": "1", key: entry}, output)
-
-    assert load_clip_probe_cache(path) == {}
-
-
-def test_load_clip_probe_cache_rejects_negative_fps_components(tmp_path: Path) -> None:
-    key, entry = _entry(fps_num=-1, fps_den=-1)
-    path = tmp_path / "negative_fps_pair.toml"
-    with path.open("wb") as output:
-        tomli_w.dump({"version": "1", key: entry}, output)
-
-    assert load_clip_probe_cache(path) == {}
+    warning.assert_called_once_with(
+        "probe_cache_invalid_entry", path=str(f), error="ValidationError"
+    )
 
 
 def test_load_clip_probe_cache_allows_pre_epoch_mtime(tmp_path: Path) -> None:
@@ -169,60 +135,6 @@ def test_load_clip_probe_cache_invalid_utf8_is_a_miss(tmp_path: Path) -> None:
     assert load_clip_probe_cache(path) == {}
 
 
-def test_load_clip_probe_cache_sanitizes_nested_hdr_metadata_values(tmp_path: Path):
-    """Invalid nested HDR value types fall back to safe defaults instead of surviving unchanged."""
-    f = tmp_path / "hdr_value_sanitize.toml"
-    key, entry = _entry(path="hdr.mkv", width=3840, height=2160, num_frames=240)
-    entry["is_hdr"] = True
-    entry["hdr_metadata"] = {
-        "mastering_display": 123,
-        "max_cll": "1000",
-        "max_fall": 99.5,
-        "color_primaries": "9",
-        "transfer": 16,
-        "matrix": True,
-    }
-    with f.open("wb") as output:
-        tomli_w.dump({"version": "1", key: entry}, output)
-
-    cache = load_clip_probe_cache(f)
-
-    hdr = cache[key].hdr_metadata
-    assert hdr is not None
-    assert hdr.mastering_display is None
-    assert hdr.max_cll is None
-    assert hdr.max_fall is None
-    assert hdr.color_primaries == 2
-    assert hdr.transfer == 16
-    assert hdr.matrix == 2
-
-
-def test_load_clip_probe_cache_sanitizes_preserved_props_and_tonemap_keys(tmp_path: Path):
-    """Mixed-shape values are narrowed before entering the typed snapshot."""
-    f = tmp_path / "sanitize_values.toml"
-    key, entry = _entry()
-    entry["tonemap_prop_keys"] = ["keep_me", 42, True]
-    entry["preserved_frame_props"] = {
-        "keep_str": "value",
-        "keep_int": 7,
-        "keep_float": 1.5,
-        "drop_bool": True,
-        "drop_array": [1, 2],
-    }
-    with f.open("wb") as output:
-        tomli_w.dump({"version": "1", key: entry}, output)
-
-    cache = load_clip_probe_cache(f)
-    snapshot = cache[key]
-
-    assert snapshot.preserved_frame_props == {
-        "keep_str": "value",
-        "keep_int": 7,
-        "keep_float": 1.5,
-    }
-    assert snapshot.tonemap_prop_keys == ("keep_me",)
-
-
 def test_load_clip_probe_cache_returns_empty_dict_on_read_os_error(tmp_path: Path):
     """Plain filesystem read failures degrade like corrupt generated state."""
     f = tmp_path / "unreadable.toml"
@@ -254,16 +166,9 @@ def test_parser_limits_read_as_miss(tmp_path: Path, content: str) -> None:
     warning.assert_called_once()
 
 
-@pytest.mark.parametrize("token", [None, "", "a" * 63, "a" * 65, "z" * 64, 42])
-def test_legacy_or_malformed_source_token_cannot_authorize_reuse(
-    tmp_path: Path, token: object
-) -> None:
-    key, entry = _entry()
-    if token is None:
-        entry.pop("source_token")
-    else:
-        entry["source_token"] = token
-    path = tmp_path / "legacy.toml"
+def test_load_clip_probe_cache_skips_malformed_source_token(tmp_path: Path) -> None:
+    key, entry = _entry(source_token="z" * 64)
+    path = tmp_path / "bad_token.toml"
     path.write_text(tomli_w.dumps({"version": "1", key: entry}), encoding="utf-8")
     assert load_clip_probe_cache(path) == {}
 

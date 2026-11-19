@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import structlog
 
 from frame_compare.services.alignment_keys import alignment_key
-from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
-from frame_compare.services.alignment_sources import require_current_alignment_clips
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentReviewSummary
 from frame_compare.utils.cancellation import raise_if_cancelling
@@ -202,30 +199,6 @@ def _present_optional_launch_failed(
         force_interactive=config.force_interactive,
         use_vsview=config.use_vsview,
     )
-
-
-def _save_confirmed_offsets(
-    *,
-    reference: Path,
-    comparisons: list[Path],
-    cache_dir: Path,
-    confirmed_offsets_by_key: dict[str, int],
-) -> None:
-    timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    for comparison in comparisons:
-        raise_if_cancelling()
-        key = alignment_key(reference, comparison)
-        if key not in confirmed_offsets_by_key:
-            continue
-        save_manual_override(
-            cache_dir,
-            ManualOverride(
-                reference_clip=reference.stem,
-                comparison_clip=comparison.stem,
-                frame_offset=confirmed_offsets_by_key[key],
-                timestamp=timestamp,
-            ),
-        )
 
 
 def _suspend_progress_for_interaction(progress: ProgressReporter | None) -> bool:
@@ -430,14 +403,6 @@ def maybe_launch_alignment_vsview(
 
         raise_if_cancelling()
         confirmed_offsets = _confirmed_offsets(result)
-        if confirmed_offsets:
-            require_current_alignment_clips([reference, *comparisons])
-        _save_confirmed_offsets(
-            reference=reference_path,
-            comparisons=comparison_paths,
-            cache_dir=cache_dir,
-            confirmed_offsets_by_key=confirmed_offsets,
-        )
         kept_count = len(result.decisions) - len(confirmed_offsets)
         return AlignmentVSViewOutcome(
             confirmed_offsets,

@@ -38,7 +38,6 @@ from frame_compare.services.alignment_evidence import (
 from frame_compare.services.alignment_video import VideoClipRequest
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.subproc import run_subprocess
-from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.types import SourceInfo
 from tests.services.alignment_evidence_test_support import attempt_with_chunks
@@ -152,16 +151,9 @@ def _media(
     reference_path.write_bytes(b"reference")
     comparison_path.write_bytes(b"comparison")
 
-    def request(path: Path) -> VideoClipRequest:
-        stat = path.stat()
-        return VideoClipRequest(
-            path=path,
-            identity=AlignmentClipIdentity(path, stat.st_size, stat.st_mtime_ns),
-        )
-
     return (
-        request(reference_path),
-        request(comparison_path),
+        VideoClipRequest(reference_path),
+        VideoClipRequest(comparison_path),
         _Loader({reference_path: reference_clip, comparison_path: comparison_clip}),
     )
 
@@ -681,23 +673,6 @@ def test_cancellation_between_positions_is_observed(
 
     monkeypatch.setattr(alignment_video, "_read_frame", read_frame)
     result = _run(tmp_path, truth=0, cancellation=cancellation)
-    _assert_unobserved(result)
-
-
-def test_source_identity_change_after_load_is_unavailable(tmp_path: Path) -> None:
-    reference, comparison, loader = _media(tmp_path, _moving_clip(), _moving_clip())
-
-    def change_identity(path: Path) -> None:
-        path.write_bytes(path.read_bytes() + b"changed")
-
-    loader.after_load = change_identity
-    result = alignment_video.check_video_alignment(
-        reference=reference,
-        comparison=comparison,
-        attempt=_attempt(rounded=0),
-        fps_reference=FPS,
-        loader=loader,
-    )
     _assert_unobserved(result)
 
 

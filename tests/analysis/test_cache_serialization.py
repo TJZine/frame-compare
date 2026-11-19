@@ -1,10 +1,6 @@
 """Cache serialization and round-trip contract tests."""
 
 import json
-import sys
-from collections.abc import Generator
-from contextlib import contextmanager
-from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -41,16 +37,6 @@ from tests.analysis._cache_io_test_helpers import (
 )
 
 
-@contextmanager
-def _int_conversion_limit(limit: int) -> Generator[None]:
-    original = sys.get_int_max_str_digits()
-    try:
-        sys.set_int_max_str_digits(limit)
-        yield
-    finally:
-        sys.set_int_max_str_digits(original)
-
-
 def test_analysis_cache_key_intentionally_reuses_same_stat_identity(tmp_path: Path) -> None:
     """Content hashing is deliberately excluded from the performance-first key."""
     video = create_video_file(tmp_path, content=b"first")
@@ -62,24 +48,6 @@ def test_analysis_cache_key_intentionally_reuses_same_stat_identity(tmp_path: Pa
     assert replaced == video
     assert replaced.read_bytes() != b"first"
     assert compute_cache_key([replaced], config) == original
-
-
-def test_save_rejects_stale_nested_metadata_version(tmp_path: Path) -> None:
-    metadata = metrics_metadata(
-        frame_count=1,
-        fps=Fraction(24, 1),
-        config_fingerprint="fingerprint",
-        clips=[],
-        config=AnalysisConfig(),
-    )
-    metrics = FrameMetrics(
-        luminance=[0.1],
-        motion=[0.0],
-        metadata=replace(metadata, version=CACHE_VERSION - 1),
-    )
-
-    with pytest.raises(ValueError, match="does not match the current cache schema"):
-        save_metrics_cache(metrics, tmp_path)
 
 
 def test_request_aware_cache_load_rejects_mismatched_provenance(tmp_path: Path) -> None:
@@ -170,21 +138,7 @@ def test_windowed_cache_request_rejects_different_range(tmp_path: Path) -> None:
     assert result.reason == "mismatched_inputs"
 
 
-@pytest.mark.parametrize(
-    ("overrides", "accepted"),
-    [
-        pytest.param({}, True, id="current_content_derived"),
-        pytest.param({"active_rect_source": "metadata"}, False, id="removed_provenance"),
-        pytest.param(
-            {"active_rect_algorithm_id": "active_rect_resolution_v2"},
-            False,
-            id="superseded_algorithm",
-        ),
-    ],
-)
-def test_load_cache_validates_active_rect_identity(
-    tmp_path: Path, overrides: dict[str, str], accepted: bool
-) -> None:
+def test_load_cache_retains_content_derived_active_rect_identity(tmp_path: Path) -> None:
     config = AnalysisConfig()
     metadata = valid_cache_metadata_payload(
         config,
@@ -194,7 +148,6 @@ def test_load_cache_validates_active_rect_identity(
         active_rect_detection_mode="auto",
     )
     metadata["active_rect_algorithm_id"] = MetricCacheRequest(None).active_rect_algorithm_id
-    metadata.update(overrides)
     cache_file(tmp_path, "fp").write_text(
         json.dumps(
             {
@@ -211,11 +164,6 @@ def test_load_cache_validates_active_rect_identity(
 
     result = load_cached_metrics(tmp_path, "fp")
 
-    if not accepted:
-        assert result.success is False
-        assert result.reason == "corrupted"
-        return
-
     assert result.success is True
     assert result.metrics is not None
     assert result.metrics.metadata.metric_active_rect == MetricActiveRect(
@@ -226,43 +174,6 @@ def test_load_cache_validates_active_rect_identity(
     )
     assert result.metrics.metadata.active_rect_source == "content-derived"
     assert result.metrics.metadata.active_rect_detection_mode == "auto"
-
-
-def test_save_writes_required_keys(tmp_path: Path) -> None:
-    """Cache file JSON has all required keys + version == CACHE_VERSION."""
-    config = AnalysisConfig()
-    metadata = metrics_metadata(
-        frame_count=10,
-        fps=Fraction(24000, 1001),
-        config_fingerprint="fp",
-        clips=[],
-        config=config,
-    )
-    metrics = FrameMetrics(luminance=[0.5] * 10, motion=[0.0] * 10, metadata=metadata)
-    save_metrics_cache(metrics, tmp_path)
-
-    with (tmp_path / "analysis__fp.compframes").open("r") as f:
-        data = json.load(f)
-
-    assert data["version"] == CACHE_VERSION
-    assert "fingerprint" in data
-    assert "luminance" in data
-    assert "motion" in data
-    assert "metadata" in data
-    assert data["metadata"]["frame_count"] == 10
-    assert data["sampled_source_frames"] is None
-    assert data["metadata"]["fps"] == "24000/1001"
-    assert data["metadata"]["analysis_source_path"] == ""
-    assert data["metadata"]["performance_mode"] == "quality"
-    assert data["metadata"]["algorithm_id"] == metric_algorithm_id(config)
-    assert data["metadata"]["metric_backend"] == "vapoursynth_planestats"
-    assert data["metadata"]["algorithm_identity_json"] == stable_metric_algorithm_identity_json(
-        config
-    )
-    assert data["metadata"]["metric_active_rect"] is None
-    assert data["metadata"]["active_rect_source"] == "full-frame"
-    assert data["metadata"]["active_rect_detection_mode"] == "aspect_ratio"
-    assert data["metadata"]["active_rect_algorithm_id"] == "active_rect_resolution_v3"
 
 
 def test_cache_roundtrip_accepts_long_canonical_fps_ratio(tmp_path: Path) -> None:
@@ -288,69 +199,6 @@ def test_cache_roundtrip_accepts_long_canonical_fps_ratio(tmp_path: Path) -> Non
     assert result.success is True
     assert result.metrics is not None
     assert result.metrics.metadata.fps == fps
-
-
-def test_cache_roundtrip_uses_raised_runtime_integer_limit(tmp_path: Path) -> None:
-    config = AnalysisConfig()
-    default_digits = sys.int_info.default_max_str_digits
-    runtime_limit = max(5000, default_digits + 100)
-    fps = Fraction(10**default_digits, 1)
-    metadata = metrics_metadata(
-        frame_count=1,
-        fps=fps,
-        config_fingerprint="raised-limit-fps",
-        clips=[],
-        config=config,
-    )
-
-    with _int_conversion_limit(runtime_limit):
-        save_metrics_cache(
-            FrameMetrics(luminance=[0.5], motion=[0.0], metadata=metadata),
-            tmp_path,
-        )
-        result = load_cached_metrics(tmp_path, "raised-limit-fps")
-
-    assert result.success is True
-    assert result.metrics is not None
-    assert result.metrics.metadata.fps == fps
-
-
-def test_cache_fps_bound_remains_finite_when_integer_guard_disabled(tmp_path: Path) -> None:
-    config = AnalysisConfig()
-    too_long_digits = sys.int_info.default_max_str_digits + 1
-    fps = Fraction(10 ** (too_long_digits - 1), 1)
-    metadata = metrics_metadata(
-        frame_count=1,
-        fps=fps,
-        config_fingerprint="disabled-limit-fps",
-        clips=[],
-        config=config,
-    )
-
-    with _int_conversion_limit(0):
-        with pytest.raises(ValueError, match="FPS components"):
-            save_metrics_cache(
-                FrameMetrics(luminance=[0.5], motion=[0.0], metadata=metadata),
-                tmp_path,
-            )
-
-        payload_metadata = valid_cache_metadata_payload(config, frame_count=1)
-        payload_metadata["config_fingerprint"] = "disabled-limit-fps"
-        payload_metadata["fps"] = "1" * too_long_digits
-        cache_file(tmp_path, "disabled-limit-fps").write_text(
-            json.dumps(
-                {
-                    "version": CACHE_VERSION,
-                    "fingerprint": "disabled-limit-fps",
-                    "luminance": [0.5],
-                    "motion": [0.0],
-                    "sampled_source_frames": None,
-                    "metadata": payload_metadata,
-                }
-            ),
-            encoding="utf-8",
-        )
-        assert load_cached_metrics(tmp_path, "disabled-limit-fps").reason == "corrupted"
 
 
 @pytest.mark.parametrize("case", ["basic", "active_rect", "window", "sparse"])

@@ -8,10 +8,20 @@ import tomllib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
-from typing import Literal, NotRequired, TypedDict, cast
+from stat import S_ISREG
+from typing import Annotated, Literal, NotRequired, TypedDict
 from urllib.parse import urlsplit
 
 import tomli_w
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+)
 
 from frame_compare.errors import FrameCompareError
 from frame_compare.services.errors import HistoryAccessError, HistoryOpenError
@@ -136,7 +146,6 @@ class HistoryEntry:
     completed_at: datetime | None
     duration_seconds: float | None
     report_available: bool
-    record: RunResultRecord | None = None
     warning: str | None = None
 
 
@@ -149,36 +158,6 @@ def _normalize_utc(value: datetime) -> datetime:
 def _format_utc(value: datetime) -> str:
     normalized = _normalize_utc(value)
     return normalized.isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
-def _parse_utc(value: object, field: str) -> datetime:
-    if not isinstance(value, str) or not value.endswith("Z"):
-        raise ValueError(f"{field} must be a UTC timestamp ending in Z")
-    try:
-        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
-    except ValueError as exc:
-        raise ValueError(f"{field} must be a valid UTC timestamp") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() != UTC.utcoffset(parsed):
-        raise ValueError(f"{field} must be UTC")
-    return parsed.astimezone(UTC)
-
-
-def _nonnegative_int(value: object, field: str) -> int:
-    if type(value) is not int or value < 0:
-        raise ValueError(f"{field} must be a nonnegative integer")
-    return value
-
-
-def _nonnegative_float(value: object, field: str) -> float:
-    if type(value) not in (int, float):
-        raise ValueError(f"{field} must be a number")
-    try:
-        result = float(cast(int | float, value))
-    except OverflowError as exc:
-        raise ValueError(f"{field} must be a finite nonnegative number") from exc
-    if result < 0 or result != result or result in (float("inf"), float("-inf")):
-        raise ValueError(f"{field} must be a finite nonnegative number")
-    return result
 
 
 def _relative_path(value: object, field: str) -> str:
@@ -379,7 +358,7 @@ def serialize_run_result(record: RunResultRecord) -> str:
             "category": record.failure.category,
             "message": record.failure.message,
         }
-    parse_run_result(payload)
+    _StoredRunResult.model_validate(payload)
     return tomli_w.dumps(payload)
 
 
@@ -395,155 +374,93 @@ def write_run_result(run_dir: Path, record: RunResultRecord) -> None:
     )
 
 
-def _require_keys(table: dict[str, object], allowed: set[str], required: set[str]) -> None:
-    if not required.issubset(table) or not set(table).issubset(allowed):
-        raise ValueError("record fields do not match the supported schema")
+_NonnegativeCount = Annotated[StrictInt, Field(ge=0)]
+_NonnegativeSeconds = Annotated[StrictFloat, Field(ge=0, allow_inf_nan=False)]
 
 
-def parse_run_result(payload: object) -> RunResultRecord:
-    """Validate an untrusted decoded TOML object as the exact V1 schema."""
-    if not isinstance(payload, dict):
-        raise ValueError("record root must be a table")
-    table = cast(dict[str, object], payload)
-    required = {
-        "version",
-        "status",
-        "started_at",
-        "completed_at",
-        "duration_seconds",
-        "clip_count",
-        "selected_frame_count",
-        "warning_count",
-        "warning_summaries",
-        "metrics_cache_status",
-        "phase_timings",
-        "slowpics",
-    }
-    _require_keys(table, required | {"report_path", "screenshot_dir", "failure"}, required)
-    if type(table["version"]) is not int or table["version"] != _VERSION:
-        raise ValueError("unsupported run-result version")
-    status = table["status"]
-    if status not in ("completed", "completed_with_warnings", "failed"):
-        raise ValueError("status is invalid")
-    started_at = _parse_utc(table["started_at"], "started_at")
-    completed_at = _parse_utc(table["completed_at"], "completed_at")
-    if completed_at < started_at:
-        raise ValueError("completed_at precedes started_at")
-    summaries_value = table["warning_summaries"]
-    if not isinstance(summaries_value, list):
-        raise ValueError("warning_summaries must be a bounded list")
-    summary_items = cast(list[object], summaries_value)
-    if len(summary_items) > _MAX_WARNING_SUMMARIES:
-        raise ValueError("warning_summaries must be a bounded list")
-    if any(item != "A run warning was reported." for item in summary_items):
-        raise ValueError("warning_summaries contains unsafe text")
-    summaries = tuple(cast(str, item) for item in summary_items)
-    warning_count = _nonnegative_int(table["warning_count"], "warning_count")
-    if len(summaries) != min(warning_count, _MAX_WARNING_SUMMARIES):
-        raise ValueError("warning_summaries does not match warning_count")
-    if status == "completed" and warning_count != 0:
-        raise ValueError("completed records cannot contain warnings")
-    if status == "completed_with_warnings" and warning_count == 0:
-        raise ValueError("completed_with_warnings requires a warning")
-    cache_status = table["metrics_cache_status"]
-    if cache_status not in ("skipped", "hit", "miss"):
-        raise ValueError("metrics_cache_status is invalid")
-    timings_value = table["phase_timings"]
-    if not isinstance(timings_value, dict):
-        raise ValueError("phase_timings must be a table")
-    timings: dict[str, float] = {}
-    for key, value in cast(dict[object, object], timings_value).items():
-        if not isinstance(key, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", key):
-            raise ValueError("phase timing name is invalid")
-        timings[key] = _nonnegative_float(value, f"phase_timings.{key}")
-    slowpics_value = table["slowpics"]
-    if not isinstance(slowpics_value, dict):
-        raise ValueError("slowpics must be a table")
-    slowpics = cast(dict[str, object], slowpics_value)
-    _require_keys(slowpics, {"outcome", "url"}, {"outcome"})
-    outcome = slowpics["outcome"]
-    if outcome not in ("not_uploaded", "uploaded", "declined", "report_unavailable"):
-        raise ValueError("slowpics.outcome is invalid")
-    url = _slowpics_url(slowpics["url"]) if "url" in slowpics else None
-    if (outcome == "uploaded") != (url is not None):
-        raise ValueError("slowpics uploaded outcome and URL must agree")
-    failure_value = table.get("failure")
-    failure: RunFailure | None = None
-    if failure_value is not None:
-        if not isinstance(failure_value, dict):
-            raise ValueError("failure must be a table")
-        failure_table = cast(dict[str, object], failure_value)
-        _require_keys(
-            failure_table,
-            {"code", "name", "category", "message"},
-            {"code", "name", "category", "message"},
+class _StoredSlowpics(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    outcome: SlowpicsOutcome
+    url: str | None = None
+
+
+class _StoredFailure(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    code: str
+    name: str
+    category: FailureCategory
+    message: str
+
+    def to_failure(self) -> RunFailure:
+        return RunFailure(self.code, self.name, self.category, self.message)
+
+
+class _StoredRunResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    version: Literal[1]
+    status: RunStatus
+    started_at: AwareDatetime
+    completed_at: AwareDatetime
+    duration_seconds: _NonnegativeSeconds
+    clip_count: _NonnegativeCount
+    selected_frame_count: _NonnegativeCount
+    warning_count: _NonnegativeCount
+    warning_summaries: tuple[str, ...]
+    metrics_cache_status: Literal["skipped", "hit", "miss"]
+    phase_timings: dict[str, _NonnegativeSeconds]
+    report_path: str | None = None
+    screenshot_dir: str | None = None
+    slowpics: _StoredSlowpics
+    failure: _StoredFailure | None = None
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def require_integer_version(cls, value: object) -> int:
+        if type(value) is not int:
+            raise ValueError("run-result version must be an integer")
+        return value
+
+    @field_validator("started_at", "completed_at", mode="before")
+    @classmethod
+    def parse_timestamp_text(cls, value: object) -> datetime:
+        if not isinstance(value, str):
+            raise ValueError("run-result timestamp must be ISO datetime text")
+        return datetime.fromisoformat(value)
+
+    def to_record(self) -> RunResultRecord:
+        return RunResultRecord(
+            version=self.version,
+            status=self.status,
+            started_at=self.started_at.astimezone(UTC),
+            completed_at=self.completed_at.astimezone(UTC),
+            duration_seconds=self.duration_seconds,
+            clip_count=self.clip_count,
+            selected_frame_count=self.selected_frame_count,
+            warning_count=self.warning_count,
+            warning_summaries=self.warning_summaries,
+            metrics_cache_status=self.metrics_cache_status,
+            phase_timings=dict(sorted(self.phase_timings.items())),
+            report_path=self.report_path,
+            screenshot_dir=self.screenshot_dir,
+            slowpics_outcome=self.slowpics.outcome,
+            slowpics_url=self.slowpics.url,
+            failure=self.failure.to_failure() if self.failure is not None else None,
         )
-        code, name, category, message = (
-            failure_table["code"],
-            failure_table["name"],
-            failure_table["category"],
-            failure_table["message"],
-        )
-        if not isinstance(code, str) or not re.fullmatch(r"FC-[0-9]{4}", code):
-            raise ValueError("failure.code is invalid")
-        if not isinstance(name, str) or not _SAFE_NAME.fullmatch(name):
-            raise ValueError("failure.name is invalid")
-        if category not in (
-            "configuration",
-            "dependency",
-            "input",
-            "processing",
-            "network",
-            "internal",
-        ):
-            raise ValueError("failure.category is invalid")
-        if not isinstance(message, str) or message != _FAILURE_MESSAGES.get(category):
-            raise ValueError("failure.message is unsafe")
-        failure = RunFailure(code, name, category, message)
-    if (status == "failed") != (failure is not None):
-        raise ValueError("failed status and failure table must agree")
-    return RunResultRecord(
-        version=_VERSION,
-        status=status,
-        started_at=started_at,
-        completed_at=completed_at,
-        duration_seconds=_nonnegative_float(table["duration_seconds"], "duration_seconds"),
-        report_path=_relative_path(table["report_path"], "report_path")
-        if "report_path" in table
-        else None,
-        screenshot_dir=_relative_path(table["screenshot_dir"], "screenshot_dir")
-        if "screenshot_dir" in table
-        else None,
-        clip_count=_nonnegative_int(table["clip_count"], "clip_count"),
-        selected_frame_count=_nonnegative_int(
-            table["selected_frame_count"], "selected_frame_count"
-        ),
-        warning_count=warning_count,
-        warning_summaries=summaries,
-        metrics_cache_status=cache_status,
-        phase_timings=dict(sorted(timings.items())),
-        slowpics_outcome=outcome,
-        slowpics_url=url,
-        failure=failure,
-    )
 
 
 def read_run_result(path: Path) -> RunResultRecord:
     """Read and validate one result record."""
+    if not S_ISREG(path.stat().st_mode):
+        raise ValueError("run result is not a regular file")
     with path.open("rb") as handle:
         try:
             payload = tomllib.load(handle)
         except RecursionError:
             raise ValueError("run result exceeds TOML parser limits") from None
-    return parse_run_result(payload)
-
-
-def _report_path(record: RunResultRecord, run_dir: Path) -> Path | None:
-    if record.report_path is None:
-        return None
-    if record.report_path != "report.html":
-        return None
-    return _contained_regular_file(run_dir / record.report_path, run_dir)
+    return _StoredRunResult.model_validate(payload).to_record()
 
 
 _HISTORY_ROOT_HINT = (
@@ -575,20 +492,7 @@ def _require_history_root(generated_root: Path) -> Path:
     return root
 
 
-def _contained_regular_file(path: Path, owner_dir: Path) -> Path:
-    try:
-        owner = owner_dir.resolve(strict=True)
-        resolved = path.resolve(strict=True)
-    except RuntimeError as exc:
-        raise ValueError("persisted record file has an invalid symlink chain") from exc
-    if not resolved.is_relative_to(owner) or not resolved.is_file():
-        raise ValueError("persisted record file escapes its run directory")
-    return resolved
-
-
-def _history_entry(
-    run_dir: Path,
-) -> HistoryEntry | None:
+def _history_entry(run_dir: Path) -> HistoryEntry | None:
     record_path = run_dir / RUN_RESULT_FILENAME
     try:
         record_path.lstat()
@@ -605,26 +509,8 @@ def _history_entry(
             warning="A run result record could not be read.",
         )
     try:
-        record = read_run_result(_contained_regular_file(record_path, run_dir))
-        report = None
-        if record.report_path is not None:
-            try:
-                report = _report_path(record, run_dir)
-            except (OSError, RuntimeError, ValueError):
-                report = None
-        available = False
-        if report is not None:
-            available = True
-        return HistoryEntry(
-            run_dir.name,
-            record.status,
-            record.started_at,
-            record.completed_at,
-            record.duration_seconds,
-            available,
-            record=record,
-        )
-    except (OSError, ValueError, tomllib.TOMLDecodeError):
+        record = read_run_result(record_path)
+    except Exception:
         return HistoryEntry(
             run_dir.name,
             "unavailable",
@@ -635,9 +521,24 @@ def _history_entry(
             warning="A run result record is unreadable or unsupported.",
         )
 
+    try:
+        report_available = (
+            record.report_path == "report.html" and (run_dir / "report.html").is_file()
+        )
+    except OSError:
+        report_available = False
+    return HistoryEntry(
+        run_dir.name,
+        record.status,
+        record.started_at,
+        record.completed_at,
+        record.duration_seconds,
+        report_available,
+    )
+
 
 def list_history(generated_root: Path) -> list[HistoryEntry]:
-    """List contained immediate run-folder children newest first."""
+    """List recorded immediate run-folder children newest first."""
     root = _require_history_root(generated_root)
     if os.name == "posix" and not os.access(root, os.X_OK):
         raise _history_root_unavailable(root)
@@ -652,10 +553,7 @@ def list_history(generated_root: Path) -> list[HistoryEntry]:
         ):
             continue
         try:
-            if child.is_symlink() or child.is_junction():
-                continue
-            resolved = child.resolve(strict=True)
-            if not resolved.is_relative_to(root) or not resolved.is_dir():
+            if not child.is_dir():
                 continue
         except (OSError, RuntimeError) as exc:
             if (
@@ -676,7 +574,7 @@ def list_history(generated_root: Path) -> list[HistoryEntry]:
                 )
             )
             continue
-        entry = _history_entry(resolved)
+        entry = _history_entry(child)
         if entry is not None:
             entries.append(entry)
     entries.sort(key=lambda entry: entry.name)
@@ -708,44 +606,26 @@ def resolve_run_directory(generated_root: Path, run_name: str) -> Path:
     root = _require_history_root(generated_root)
     candidate = root / run_name
     try:
-        if candidate.is_symlink() or candidate.is_junction():
-            raise ValueError("symlinked run directories are not history entries")
-        resolved = candidate.resolve(strict=True)
-    except FileNotFoundError as exc:
-        raise HistoryAccessError(
-            "Run was not found.", "Use an exact folder name shown by 'history list'."
-        ) from exc
+        is_dir = candidate.is_dir()
     except OSError as exc:
         raise _history_root_unavailable(root) from exc
-    except ValueError as exc:
+    if not is_dir:
         raise HistoryAccessError(
-            "Run is outside the configured history directory.",
-            "Use an exact folder name shown by 'history list'.",
-        ) from exc
-    except RuntimeError as exc:
-        raise HistoryAccessError(
-            "Run is outside the configured history directory.",
-            "Use an exact folder name shown by 'history list'.",
-        ) from exc
-    if not resolved.is_relative_to(root) or not resolved.is_dir():
-        raise HistoryAccessError(
-            "Run is outside the configured history directory.",
-            "Use an exact folder name shown by 'history list'.",
+            "Run was not found.", "Use an exact folder name shown by 'history list'."
         )
-    return resolved
+    return candidate
 
 
 def resolve_history_report(generated_root: Path, run_name: str) -> Path:
-    """Resolve a valid record's report and enforce generated-root containment."""
+    """Find the canonical report named by a run's result record."""
     run_dir = resolve_run_directory(generated_root, run_name)
     try:
-        record_path = _contained_regular_file(run_dir / RUN_RESULT_FILENAME, run_dir)
-        record = read_run_result(record_path)
+        record = read_run_result(run_dir / RUN_RESULT_FILENAME)
     except FileNotFoundError as exc:
         raise HistoryOpenError(
             "This run has no result record.", "Only completed recorded reports can be opened."
         ) from exc
-    except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, ValueError, OverflowError) as exc:
         raise HistoryOpenError(
             "This run's result record is unavailable.", "Inspect or recreate the run."
         ) from exc
@@ -753,22 +633,20 @@ def resolve_history_report(generated_root: Path, run_name: str) -> Path:
         raise HistoryOpenError(
             "This run has no recorded report.", "Enable report generation for a future run."
         )
+    if record.report_path != "report.html":
+        raise HistoryOpenError(
+            "The result record does not name the canonical report.html.",
+            "Inspect or recreate the run.",
+        )
+    report = run_dir / "report.html"
     try:
-        report = _report_path(record, run_dir)
-        if report is None:
-            raise ValueError("recorded report is not the canonical run-root report")
-    except (OSError, RuntimeError) as exc:
+        report_exists = report.is_file()
+    except OSError as exc:
         raise HistoryOpenError(
             "The recorded report is missing.", "Check whether generated files were moved."
         ) from exc
-    except ValueError as exc:
+    if not report_exists:
         raise HistoryOpenError(
-            "The recorded report is outside the configured history directory.",
-            "Open that report directly only if you trust its location.",
-        ) from exc
-    if not report.is_file():
-        raise HistoryOpenError(
-            "The recorded report is outside the configured history directory.",
-            "Open that report directly only if you trust its location.",
+            "The recorded report is missing.", "Check whether generated files were moved."
         )
     return report

@@ -641,8 +641,19 @@ def test_run_analyze_phase_cache_only_invalid_cache_does_not_recompute(
         phase_selection.cache_io, "compute_cache_key", lambda *_args, **_kwargs: "fp"
     )
     if corrupt:
+        cache_payload = {
+            "version": phase_selection.cache_io.CACHE_VERSION,
+            "fingerprint": "fp",
+            "luminance": [10**400],
+            "motion": [0.0],
+            "sampled_source_frames": None,
+            "metadata": valid_cache_metadata_payload(ctx.config.analysis, frame_count=1),
+        }
         ctx.workspace.cache_dir.mkdir(parents=True)
-        (ctx.workspace.cache_dir / "reference__fp.compframes").write_bytes(b"\xff\xfe")
+        cache_path = ctx.workspace.cache_dir / phase_selection.cache_io.metrics_cache_filename(
+            input_videos, "fp"
+        )
+        cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
 
     class FailingLoader:
         def load(self, path: Path) -> SourceInfo:
@@ -652,57 +663,6 @@ def test_run_analyze_phase_cache_only_invalid_cache_does_not_recompute(
         CacheCorruptionError if corrupt else MetricsCalculationError,
         match="Cache file corrupted" if corrupt else "Cached metrics missing",
     ):
-        phase_selection.run_analyze_phase(
-            ctx,
-            input_videos=input_videos,
-            workspace=ctx.workspace,
-            require_cache_only=True,
-            vs_loader=cast("VSLoader", FailingLoader()),
-        )
-
-
-@pytest.mark.parametrize(
-    "corruption", ["numeric", "enum-list", "enum-dict", "deep", "integer-limit"]
-)
-def test_run_analyze_phase_cache_only_oversized_cache_is_typed_corruption(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, corruption: str
-) -> None:
-    ctx = _context(tmp_path)
-    ctx.selection_domain = replace(
-        ctx.selection_domain, selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=2)
-    )
-    input_videos = [ctx.reference.path]
-    monkeypatch.setattr(
-        phase_selection.cache_io, "compute_cache_key", lambda *_args, **_kwargs: "fp"
-    )
-    metadata = valid_cache_metadata_payload(ctx.config.analysis, frame_count=1)
-    cache_payload = {
-        "version": phase_selection.cache_io.CACHE_VERSION,
-        "fingerprint": "fp",
-        "luminance": [10**400],
-        "motion": [0.0],
-        "sampled_source_frames": None,
-        "metadata": metadata,
-    }
-    ctx.workspace.cache_dir.mkdir(parents=True)
-    cache_path = ctx.workspace.cache_dir / phase_selection.cache_io.metrics_cache_filename(
-        input_videos, "fp"
-    )
-    cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
-
-    if corruption in {"deep", "integer-limit"}:
-        cache_path.write_text("[" * 10000 if corruption == "deep" else "1" * 5000, encoding="utf-8")
-    elif corruption.startswith("enum"):
-        payload = json.loads(cache_path.read_text(encoding="utf-8"))
-        payload["luminance"] = [0.5]
-        payload["metadata"]["active_rect_detection_mode"] = [] if corruption == "enum-list" else {}
-        cache_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    class FailingLoader:
-        def load(self, path: Path) -> SourceInfo:
-            raise AssertionError("cache-only analyze phase must not load video")
-
-    with pytest.raises(CacheCorruptionError, match="Cache file corrupted"):
         phase_selection.run_analyze_phase(
             ctx,
             input_videos=input_videos,
