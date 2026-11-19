@@ -34,7 +34,11 @@ from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentOperationOutcome, AlignmentResult
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.types import AlignmentRequest
-from tests.orchestration.execute_run_helpers import FakeFFmpegRunner
+from tests.orchestration.execute_run_helpers import (
+    FakeFFmpegRunner,
+    FakeVSLoader,
+    install_fake_frame_render,
+)
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
@@ -834,6 +838,7 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
 def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offset: int, accepted_retry: bool
 ) -> None:
+    recorded = install_fake_frame_render(monkeypatch)
     comparison = _clip(
         tmp_path / "comparison_videos" / "encode.mkv",
         label="Encode 1",
@@ -894,6 +899,7 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
         request=request,
         monotonic_timer=monotonic,
         ffmpeg_runner=runner,
+        vs_loader=FakeVSLoader(),
         http_client=None,
         state=state,
         metadata_prefetch=MetadataPrefetch(None, False),
@@ -906,7 +912,7 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
     assert caught.value.context.code == "FC-4012"
     assert isinstance(caught.value.__cause__, AudioAlignmentError)
     assert render.status is PhaseStatus.PENDING
-    assert runner.calls == []
+    assert recorded == []
 
 
 def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rejected(

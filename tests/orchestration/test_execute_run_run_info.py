@@ -7,6 +7,8 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.coordinator import RunDependencies, execute_run
@@ -16,6 +18,7 @@ from .execute_run_helpers import (
     FakeFFmpegRunner,
     FakeVSLoader,
     create_video_files,
+    install_fake_frame_render,
 )
 from .preparation_test_support import MINIMAL_CONFIG, create_config
 
@@ -67,7 +70,9 @@ def test_execute_prep_writes_run_info_with_clock_and_no_http_client_skip(
 
 def test_execute_run_writes_run_info_with_skip_metadata_facts(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=TMDB_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -78,7 +83,7 @@ def test_execute_run_writes_run_info_with_skip_metadata_facts(
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     result = asyncio.run(execute_run(request, deps=deps))
 

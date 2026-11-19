@@ -67,9 +67,6 @@ channel_strategy = "best_channel"
 reference_stream = 1
 comparison_streams = { encode = 2 }
 
-[screenshots]
-use_ffmpeg = true
-
 [report]
 enable = false
 """

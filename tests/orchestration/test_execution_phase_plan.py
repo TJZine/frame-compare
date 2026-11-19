@@ -38,13 +38,21 @@ from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.run_warnings import RunWarning
 from tests.run_request_support import make_run_request
 
-from .execute_run_helpers import FakeFFmpegRunner, FakeVSLoader, clip_state, execution_context
+from .execute_run_helpers import (
+    FakeFFmpegRunner,
+    FakeVSLoader,
+    clip_state,
+    execution_context,
+    install_fake_frame_render,
+)
 from .phase_task_helpers import _context, _frame_metrics, _render_artifacts, _workspace
 
 
 def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     workspace = _workspace(
         tmp_path,
         input_subdir="comparison_videos",
@@ -84,7 +92,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
 
     plan = build_execution_phase_plan(
         request=make_run_request(config=get_default_config(), root=tmp_path),
-        deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
+        deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner(), vs_loader=FakeVSLoader()),
         prep=prep,
         state=ExecutionState(artifacts=prep.artifacts),
     )
@@ -106,7 +114,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     config.audio_alignment.force_interactive = True
     forced_plan = build_execution_phase_plan(
         request=make_run_request(config=get_default_config(), root=tmp_path),
-        deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
+        deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner(), vs_loader=FakeVSLoader()),
         prep=prep,
         state=ExecutionState(artifacts=prep.artifacts),
     )

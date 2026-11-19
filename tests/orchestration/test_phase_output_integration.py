@@ -20,6 +20,7 @@ from frame_compare.services.slowpics_post_upload import (
 )
 from frame_compare.services.types import AlignmentOperationOutcome, AlignmentResult
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from tests.orchestration.execute_run_helpers import FakeVSLoader, install_fake_frame_render
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
@@ -64,6 +65,7 @@ def render_capture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str,
 def test_output_phases_use_reselected_metric_metadata_after_real_initial_selection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, render_capture: dict[str, Any]
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
@@ -135,6 +137,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
         ctx,
         frames=list(ctx.selection.frames),
         runner=cast(Any, _RenderRunner()),
+        vs_loader=FakeVSLoader(),
     )
     apply_phase_output(ctx=ctx, state=state, output=render_output)
     report_output = phase_post_render.run_report_phase(
@@ -166,6 +169,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
 async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membership(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     comp_a = _clip(tmp_path / "comparison_videos" / "encode_a.mkv", label="Encode 1")
     comp_b = _clip(tmp_path / "comparison_videos" / "encode_b.mkv", label="Encode 2")
     ctx = _context(tmp_path, comparisons=[comp_a, comp_b])
@@ -235,6 +239,7 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
         ctx,
         frames=frames,
         runner=cast(Any, _RenderRunner()),
+        vs_loader=FakeVSLoader(),
     )
     phase_post_render.run_report_phase(
         ctx,
@@ -260,6 +265,7 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
 def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_frame(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, render_capture: dict[str, Any]
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.analysis = ctx.config.analysis.model_copy(
@@ -305,6 +311,7 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
         ctx,
         frames=list(ctx.selection.frames),
         runner=cast(Any, _RenderRunner()),
+        vs_loader=FakeVSLoader(),
     )
     apply_phase_output(ctx=ctx, state=state, output=render_output)
     output = phase_post_render.run_report_phase(

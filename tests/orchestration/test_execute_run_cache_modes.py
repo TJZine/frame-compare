@@ -45,10 +45,11 @@ from tests.e2e.harness import read_report_data
 from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
+    FakeVSNode,
     analysis_selection_domain_for_cache_inputs,
     create_video_files,
+    install_fake_frame_render,
     metric_cache_fingerprint,
     write_metrics_cache,
     write_probe_cache_for_inputs,
@@ -83,12 +84,13 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
     monkeypatch: pytest.MonkeyPatch,
     performance: bool,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(
         tmp_path,
         content=_cache_config(
             analysis="random_frame_count = 0\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         ),
     )
@@ -173,7 +175,7 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
         )
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     asyncio.run(execute_run(request, deps=deps))
 
@@ -190,7 +192,7 @@ def test_execute_run_from_cache_only_fails_when_probe_cache_missing(
         content=_cache_config(
             analysis="random_frame_count = 0\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         ),
     )
@@ -221,7 +223,7 @@ def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
         content=_cache_config(
             analysis="random_frame_count = 1\nrandom_seed = 42\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         )
         + "\n[slowpics]\nauto_upload = true\n",
@@ -269,16 +271,16 @@ def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
     monkeypatch.setattr(cache_io, "load_cached_metrics_for_request", _load_then_invalidate)
     monkeypatch.setattr(phase_selection, "calculate_metrics", _unexpected_compute)
     monkeypatch.setattr("frame_compare.orchestration.execution.run_publish_phase", _publish)
-    runner = FakeFFmpegRunner()
+    recorded = install_fake_frame_render(monkeypatch)
     request = make_run_request(root=tmp_path, from_cache_only=True, skip_metadata=True)
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=runner)
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     if second_read == "valid":
         result = asyncio.run(execute_run(request, deps=deps))
         assert result.success is True
         assert result.cache_hit is True
         assert result.frame_count == 2
-        assert len(runner.calls) == 4
+        assert len(recorded) == 4
         assert publish_calls == ["publish"]
     else:
         expected_error = {
@@ -287,7 +289,7 @@ def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
         }[second_read]
         with pytest.raises(expected_error):
             asyncio.run(execute_run(request, deps=deps))
-        assert runner.calls == []
+        assert recorded == []
         assert publish_calls == []
 
     assert len(reads) == 2
@@ -304,7 +306,7 @@ def test_execute_run_optional_analysis_failure_retains_initial_frame_plan(
         content=_cache_config(
             analysis="user_frames = [9]\nrandom_frame_count = 1\nrandom_seed = 7\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = true\nauto_open = false",
         ),
     )
@@ -314,7 +316,7 @@ def test_execute_run_optional_analysis_failure_retains_initial_frame_plan(
         raise MetricsCalculationError("analysis unavailable")
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fail_metrics)
-    runner = FakeFFmpegRunner()
+    recorded = install_fake_frame_render(monkeypatch)
     result = asyncio.run(
         execute_run(
             make_run_request(
@@ -322,7 +324,7 @@ def test_execute_run_optional_analysis_failure_retains_initial_frame_plan(
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=runner),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
 
@@ -334,7 +336,9 @@ def test_execute_run_optional_analysis_failure_retains_initial_frame_plan(
         (9, "user"),
         (53, "random"),
     ]
-    assert sorted((clip, frame) for clip, frame, _ in runner.calls) == [
+    assert sorted(
+        (cast(FakeVSNode, r.clip).source_path.name, r.frame_number) for r in recorded
+    ) == [
         ("a_source.mkv", 9),
         ("a_source.mkv", 53),
         ("b_comp.mkv", 9),
@@ -355,7 +359,7 @@ def test_execute_run_analysis_failure_without_initial_frames_is_fatal(
         content=_cache_config(
             analysis="random_frame_count = 0\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         ),
     )
@@ -366,7 +370,7 @@ def test_execute_run_analysis_failure_without_initial_frames_is_fatal(
         raise error
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fail_metrics)
-    runner = FakeFFmpegRunner()
+    recorded = install_fake_frame_render(monkeypatch)
     with pytest.raises(MetricsCalculationError) as caught:
         asyncio.run(
             execute_run(
@@ -375,22 +379,23 @@ def test_execute_run_analysis_failure_without_initial_frames_is_fatal(
                     skip_metadata=True,
                     overrides=CLIConfigOverrides(no_upload=True),
                 ),
-                deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=runner),
+                deps=RunDependencies(vs_loader=FakeVSLoader()),
             )
         )
     assert caught.value is error
-    assert runner.calls == []
+    assert recorded == []
 
 
 def test_execute_run_metric_selection_survives_dropped_user_frame(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     create_config(
         tmp_path,
         content=_cache_config(
             analysis="user_frames = [120]\nrandom_frame_count = 0\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = true\nauto_open = false",
         ),
     )
@@ -403,7 +408,7 @@ def test_execute_run_metric_selection_survives_dropped_user_frame(
         video_paths=[input_dir / "a_source.mkv", input_dir / "b_comp.mkv"],
         config=config,
     )
-    runner = FakeFFmpegRunner()
+    recorded = install_fake_frame_render(monkeypatch)
     result = asyncio.run(
         execute_run(
             make_run_request(
@@ -411,7 +416,7 @@ def test_execute_run_metric_selection_survives_dropped_user_frame(
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=runner),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
 
@@ -420,7 +425,9 @@ def test_execute_run_metric_selection_survives_dropped_user_frame(
     assert result.report_path is not None
     frames = read_report_data(result.report_path)["frames"]
     assert [(frame["number"], frame["category"]) for frame in frames] == [(0, "quantile_dark")]
-    assert sorted((clip, frame) for clip, frame, _ in runner.calls) == [
+    assert sorted(
+        (cast(FakeVSNode, r.clip).source_path.name, r.frame_number) for r in recorded
+    ) == [
         ("a_source.mkv", 0),
         ("b_comp.mkv", 0),
     ]
@@ -441,7 +448,7 @@ def test_execute_run_no_cache_recomputes_warm_full_window_retry(
                 "ignore_lead_seconds = 1.0\nignore_trail_seconds = 1.0\nmin_window_seconds = 0"
             ),
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         ),
     )
@@ -501,7 +508,7 @@ def test_execute_run_no_cache_recomputes_warm_full_window_retry(
         ),
     )
     monkeypatch.setattr(metrics_owner, "calculate_metric_strategy", compute_strategy)
-    runner = FakeFFmpegRunner()
+    install_fake_frame_render(monkeypatch)
     result = asyncio.run(
         execute_run(
             make_run_request(
@@ -512,7 +519,6 @@ def test_execute_run_no_cache_recomputes_warm_full_window_retry(
             ),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),
-                ffmpeg_runner=runner,
                 confirm_full_window_retry=confirm,
             ),
         )
@@ -527,13 +533,15 @@ def test_execute_run_no_cache_recomputes_warm_full_window_retry(
 
 def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(
         tmp_path,
         content=_cache_config(
             analysis='random_frame_count = 0\ndark_frame_count = 1\nperformance_mode = "performance"',
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         ),
     )
@@ -561,7 +569,7 @@ def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     with pytest.raises(MetricsCalculationError, match="Cached metrics missing or mismatched"):
         asyncio.run(execute_run(request, deps=deps))
@@ -597,11 +605,12 @@ def test_execute_run_from_cache_only_uses_scoped_cache(
     filenames: tuple[str, ...],
     analysis_filename: str,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config_content = (
         _cache_config(
             analysis="random_frame_count = 0\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         )
         + source_config
@@ -638,10 +647,7 @@ def test_execute_run_from_cache_only_uses_scoped_cache(
     result = asyncio.run(
         execute_run(
             request,
-            deps=RunDependencies(
-                vs_loader=FakeVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
-            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
 
@@ -674,7 +680,6 @@ dark_frame_count = 1
 enable = false
 
 [screenshots]
-use_ffmpeg = true
 active_rect_detection = "aspect_ratio"
 
 [report]
@@ -721,7 +726,7 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
         content=_cache_config(
             analysis="random_frame_count = 0\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         ),
     )
@@ -758,11 +763,13 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
 
 def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_alignment_enabled(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config_content = _cache_config(
         analysis="random_frame_count = 0\ndark_frame_count = 1",
         audio_alignment="enable = true",
-        screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+        screenshots='active_rect_detection = "aspect_ratio"',
         report="enable = false",
     )
     create_config(tmp_path, content=config_content)
@@ -776,7 +783,7 @@ def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
         asyncio.run(execute_run(request, deps=deps))

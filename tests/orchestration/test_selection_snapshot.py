@@ -25,10 +25,12 @@ from frame_compare.orchestration.selection_domain import (
     metric_request_for_domain,
 )
 from frame_compare.orchestration.selection_rows import selection_rows
-from frame_compare.render.types import OverlayConfig
 from frame_compare.services.report.payload import ReportData
-from frame_compare.utils.media_facts import RenderedFrameFacts
-from tests.orchestration.execute_run_helpers import FakeFFmpegRunner
+from tests.orchestration.execute_run_helpers import (
+    FakeFFmpegRunner,
+    FakeVSLoader,
+    install_fake_frame_render,
+)
 from tests.orchestration.phase_task_helpers import _context, _frame_metrics
 from tests.run_request_support import make_run_request
 
@@ -37,6 +39,7 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    recorded = install_fake_frame_render(monkeypatch)
     ctx = _context(tmp_path)
     ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=99)
     ctx.workspace = replace(
@@ -49,7 +52,6 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
     )
     ctx.selection = SelectionSnapshot(analysis_metrics=metrics)
     observed: dict[str, object] = {}
-    labels: list[str | None] = []
 
     def frame_plan(_ctx: RunContext, **_kwargs) -> FramePlanPhaseOutput:
         return FramePlanPhaseOutput(
@@ -96,9 +98,6 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
         observed["details"] = [(detail.label, detail.category) for detail in data.frame_details]
         return output_path
 
-    def overlay(_path: Path, config: OverlayConfig, _facts: RenderedFrameFacts) -> None:
-        labels.append(config.selection_label)
-
     monkeypatch.setattr(execution, "select_initial_frame_plan", frame_plan)
     monkeypatch.setattr(execution, "run_analyze_phase", analyze)
     monkeypatch.setattr(execution, "run_align_phase", align)
@@ -106,7 +105,6 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
     monkeypatch.setattr(
         "frame_compare.orchestration.phase_post_render.generate_report", generate_report
     )
-    monkeypatch.setattr("frame_compare.render.encoders.apply_overlay_to_file", overlay)
     state = ExecutionState(artifacts=RunArtifacts())
     request = make_run_request(root=tmp_path, config=ctx.config)
     runner = FakeFFmpegRunner()
@@ -123,6 +121,7 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
         config=ctx.config,
         monotonic_timer=monotonic,
         ffmpeg_runner=runner,
+        vs_loader=FakeVSLoader(),
         http_client=None,
         state=state,
         metadata_prefetch=MetadataPrefetch(None, False),
@@ -153,8 +152,10 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
         "report": [5],
         "details": [("Aligned latest", "motion")],
     }
-    assert labels == ["Aligned latest"]
-    assert [call[1] for call in runner.calls] == [25]
+    assert [r.overlay.selection_label if r.overlay is not None else None for r in recorded] == [
+        "Aligned latest"
+    ]
+    assert [r.frame_number for r in recorded] == [25]
     assert ctx.selection.frames == (5,)
 
 

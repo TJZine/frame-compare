@@ -392,9 +392,6 @@ config_dir = "config"
 [audio_alignment]
 enable = false
 
-[screenshots]
-use_ffmpeg = true
-
 [report]
 enable = false
 """

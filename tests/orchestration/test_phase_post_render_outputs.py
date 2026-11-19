@@ -46,6 +46,7 @@ from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import LogProgressReporter, NullProgressReporter
 from frame_compare.utils.progress_protocol import AlignmentSummary, ProgressPhaseStatus
 from frame_compare.vs.types import TonemapSettings
+from tests.orchestration.execute_run_helpers import FakeVSLoader, install_fake_frame_render
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
@@ -700,6 +701,7 @@ async def test_run_publish_phase_rejects_duplicate_clip_labels_at_translation_se
 async def test_report_confirmed_available_report_confirms_then_publishes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     ctx = _context(tmp_path)
     ctx.config.slowpics.auto_upload = True
     ctx.config.slowpics.confirm_upload_after_report = True
@@ -732,6 +734,7 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
             request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
+            vs_loader=FakeVSLoader(),
             http_client=client,
             state=state,
             metadata_prefetch=MetadataPrefetch(None, False),
@@ -757,6 +760,7 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
 async def test_report_confirmed_report_failure_skips_prompt_and_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     ctx = _context(tmp_path)
     ctx.config.slowpics.auto_upload = True
     ctx.config.slowpics.confirm_upload_after_report = True
@@ -792,6 +796,7 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
             request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
+            vs_loader=FakeVSLoader(),
             http_client=client,
             state=state,
             metadata_prefetch=MetadataPrefetch(None, False),
@@ -824,6 +829,7 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
 async def test_report_confirmed_report_payload_uses_no_slowpics_url(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     ctx = _context(tmp_path)
     ctx.config.slowpics.auto_upload = True
     ctx.config.slowpics.confirm_upload_after_report = True
@@ -846,6 +852,7 @@ async def test_report_confirmed_report_payload_uses_no_slowpics_url(
         request=make_run_request(root=tmp_path),
         monotonic_timer=lambda: 0.0,
         ffmpeg_runner=cast(Any, _RenderRunner()),
+        vs_loader=FakeVSLoader(),
         http_client=None,
         state=state,
         metadata_prefetch=MetadataPrefetch(None, False),
@@ -958,6 +965,7 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.slowpics.auto_upload = True
@@ -994,6 +1002,7 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
             request=make_run_request(root=tmp_path),
             monotonic_timer=lambda: 0.0,
             ffmpeg_runner=cast(Any, _RenderRunner()),
+            vs_loader=FakeVSLoader(),
             http_client=client,
             state=state,
             metadata_prefetch=MetadataPrefetch(None, False),
