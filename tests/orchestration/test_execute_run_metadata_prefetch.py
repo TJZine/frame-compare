@@ -24,10 +24,10 @@ from frame_compare.utils.cache_errors import CacheCorruptionError
 from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
     create_video_files,
+    install_fake_frame_render,
     metric_cache_fingerprint,
     write_probe_cache_for_inputs,
 )
@@ -76,6 +76,7 @@ def test_execute_run_from_cache_only_missing_probe_cache_skips_metadata_prefetch
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METADATA_CACHE_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -107,7 +108,7 @@ def test_execute_run_from_cache_only_missing_probe_cache_skips_metadata_prefetch
         skip_metadata=False,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     with pytest.raises(MetricsCalculationError):
         asyncio.run(execute_run(request, deps=deps))
@@ -119,6 +120,7 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METADATA_CACHE_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -179,7 +181,7 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
         skip_metadata=False,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     with pytest.raises(CacheCorruptionError):
         asyncio.run(execute_run(request, deps=deps))
@@ -191,6 +193,7 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -240,7 +243,7 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
                 skip_metadata=False,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
 
@@ -273,6 +276,7 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
     monkeypatch: pytest.MonkeyPatch,
     unattended: bool,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(
         tmp_path,
         content=METADATA_RETRY_CONFIG.replace(
@@ -326,7 +330,7 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
                 skip_metadata=False,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
 
@@ -364,6 +368,7 @@ def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METADATA_UNEXPECTED_ERROR_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -389,7 +394,7 @@ def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
                     skip_metadata=False,
                     overrides=CLIConfigOverrides(no_upload=True),
                 ),
-                deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+                deps=RunDependencies(vs_loader=FakeVSLoader()),
             )
         )
 
@@ -397,8 +402,10 @@ def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
 @pytest.mark.parametrize("in_flight", [False, True])
 def test_interrupt_stops_tmdb_request_admission_and_cancels_inflight_http(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     in_flight: bool,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(
         tmp_path,
         content=METADATA_RETRY_CONFIG.replace(
@@ -430,9 +437,7 @@ def test_interrupt_stops_tmdb_request_admission_and_cancels_inflight_http(
                 skip_analysis=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             )
-            deps = RunDependencies(
-                http_client=client, vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()
-            )
+            deps = RunDependencies(http_client=client, vs_loader=FakeVSLoader())
 
             async def run() -> None:
                 if not in_flight:

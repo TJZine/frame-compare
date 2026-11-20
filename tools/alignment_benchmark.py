@@ -237,9 +237,6 @@ cache_results = false
 channel_strategy = "mono_downmix"
 previous_offsets = "disabled"
 
-[screenshots]
-use_ffmpeg = true
-
 [report]
 enable = false
 

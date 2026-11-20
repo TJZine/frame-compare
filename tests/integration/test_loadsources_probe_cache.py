@@ -54,9 +54,6 @@ random_frame_count = 1
 [audio_alignment]
 enable = false
 
-[screenshots]
-use_ffmpeg = true
-
 [color]
 enable_tonemap = false
 
@@ -123,12 +120,17 @@ async def test_loadsources_writes_clip_probe_cache_file(
     assert cached_names == {path.name for path in input_videos}
 
 
-class _RaisingVSLoader(VSLoader):
+class _CountingVSLoader(VSLoader):
+    def __init__(self) -> None:
+        self._loader = DefaultVSLoader()
+        self.load_count = 0
+
     def load(self, path: Path) -> SourceInfo:
-        raise AssertionError(f"VS loader should not be called: {path}")
+        self.load_count += 1
+        return self._loader.load(path)
 
     def ensure_core(self) -> vs.Core:
-        raise AssertionError("VS core should not be requested when cache is warm")
+        return self._loader.ensure_core()
 
 
 @pytest.mark.integration
@@ -140,7 +142,7 @@ async def test_loadsources_reuses_clip_probe_cache_file(
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     _write_minimal_config(workspace_root)
-    _prepare_workspace(workspace_root, mock_video_path)
+    clip_count = len(_prepare_workspace(workspace_root, mock_video_path))
 
     request = make_run_request(
         root=workspace_root,
@@ -149,18 +151,21 @@ async def test_loadsources_reuses_clip_probe_cache_file(
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=DefaultVSLoader())
+    loader = _CountingVSLoader()
+    deps = RunDependencies(vs_loader=loader)
     result = await execute_run(request, deps=deps)
     assert result.success is True
+    cold_loads = loader.load_count
 
     cache_path = workspace_root / "generated" / "clip_probe.toml"
-    cache_before = cache_path.read_text(encoding="utf-8")
+    cache_before = cache_path.read_bytes()
 
-    reuse_deps = RunDependencies(vs_loader=_RaisingVSLoader())
-    reuse_result = await execute_run(request, deps=reuse_deps)
+    reuse_result = await execute_run(request, deps=deps)
+    warm_loads = loader.load_count - cold_loads
     assert reuse_result.success is True
+    assert warm_loads == cold_loads - clip_count
 
-    cache_after = cache_path.read_text(encoding="utf-8")
+    cache_after = cache_path.read_bytes()
     assert cache_after == cache_before
 
 
@@ -203,7 +208,7 @@ def test_configured_run_uses_shared_real_loader(
         runtime + '\n[paths]\ninput_dir = "input"\n'
         "[analysis]\nuser_frames = [0]\nrandom_frame_count = 0\ndark_frame_count = 1\n"
         "[audio_alignment]\nenable = false\n"
-        '[screenshots]\nuse_ffmpeg = true\nactive_rect_detection = "aspect_ratio"\n'
+        '[screenshots]\nactive_rect_detection = "aspect_ratio"\n'
         "[color]\nenable_tonemap = false\n[report]\nenable = false\n",
         encoding="utf-8",
     )
@@ -251,8 +256,7 @@ def test_real_render_and_metric_fallbacks_apply_cache_limit(
     config.runtime = RuntimeConfig(memory_limit_mb=1024)
     config.color.enable_tonemap = False
     try:
-        prepared = prepare_clip_for_render(runtime_clip, "vapoursynth", config)
-        assert not isinstance(prepared.prepared_clip, Path)
+        prepared = prepare_clip_for_render(runtime_clip, config)
         cast(_ClosableFrame, prepared.prepared_clip.get_frame(0)).close()
         assert core.max_cache_size == 1024
         core.max_cache_size = original

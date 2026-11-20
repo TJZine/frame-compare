@@ -812,6 +812,7 @@ def test_build_html_renders_inspector_drawer(report_payload: ReportPayload) -> N
     assert "data-inspector-export-slowpics" not in html
     assert "data-inspector-export-summary" not in html
     review_panel = require_first(inspector, element_id="inspector-panel-review")
+    assert not find_all(review_panel, attr_name="data-review-preview")
     review_note = require_first(review_panel, tag="textarea", attr_name="data-review-note")
     review_note_count = require_first(review_panel, tag="span", attr_name="data-review-note-count")
     assert "maxlength" not in review_note.attrs  # The controller limits Unicode scalars.

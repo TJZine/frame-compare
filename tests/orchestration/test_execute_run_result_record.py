@@ -17,9 +17,9 @@ from frame_compare.services.run_result_record import read_run_result
 from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
     create_video_files,
+    install_fake_frame_render,
 )
 from .preparation_test_support import MINIMAL_CONFIG, create_config
 
@@ -57,14 +57,17 @@ def _request(root: Path) -> RunRequest:
     )
 
 
-def test_success_writes_completed_result_after_run(tmp_path: Path) -> None:
+def test_success_writes_completed_result_after_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
     result = asyncio.run(
         execute_run(
             _request(tmp_path),
-            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
 
@@ -78,7 +81,9 @@ def test_success_writes_completed_result_after_run(tmp_path: Path) -> None:
 
 def test_success_uses_monotonic_durations_during_forward_wall_clock_jump(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     wall_times = iter(
@@ -94,7 +99,6 @@ def test_success_uses_monotonic_durations_during_forward_wall_clock_jump(
             _request(tmp_path),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
                 clock=lambda: next(wall_times),
                 monotonic_timer=AdvancingTimer(step=0.25),
             ),
@@ -115,7 +119,9 @@ def test_success_uses_monotonic_durations_during_forward_wall_clock_jump(
 
 def test_failure_after_reservation_during_prep_writes_failed_and_reraises_identical(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("secret=/Users/private?token=abc")
@@ -124,10 +130,7 @@ def test_failure_after_reservation_during_prep_writes_failed_and_reraises_identi
         asyncio.run(
             execute_run(
                 _request(tmp_path),
-                deps=RunDependencies(
-                    vs_loader=FailingVSLoader(original),
-                    ffmpeg_runner=FakeFFmpegRunner(),
-                ),
+                deps=RunDependencies(vs_loader=FailingVSLoader(original)),
             )
         )
 
@@ -146,7 +149,9 @@ def test_failure_after_reservation_during_prep_writes_failed_and_reraises_identi
 
 def test_failure_uses_monotonic_duration_during_backward_wall_clock_jump(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("loader failed")
@@ -164,7 +169,6 @@ def test_failure_uses_monotonic_duration_during_backward_wall_clock_jump(
                 _request(tmp_path),
                 deps=RunDependencies(
                     vs_loader=FailingVSLoader(original),
-                    ffmpeg_runner=FakeFFmpegRunner(),
                     clock=lambda: next(wall_times),
                     monotonic_timer=AdvancingTimer(step=0.5),
                 ),
@@ -201,6 +205,7 @@ def test_empty_input_failure_before_reservation_creates_no_result(tmp_path: Path
 def test_completed_result_write_failure_is_warning_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, logger_fails: bool
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
@@ -220,10 +225,7 @@ def test_completed_result_write_failure_is_warning_only(
     result = asyncio.run(
         execute_run(
             _request(tmp_path),
-            deps=RunDependencies(
-                vs_loader=FakeVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
-            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
 
@@ -248,6 +250,7 @@ def test_result_process_control_write_failure_propagates(
     execution_fails: bool,
     control_error: BaseException,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
@@ -262,10 +265,7 @@ def test_result_process_control_write_failure_propagates(
         asyncio.run(
             execute_run(
                 _request(tmp_path),
-                deps=RunDependencies(
-                    vs_loader=loader,
-                    ffmpeg_runner=FakeFFmpegRunner(),
-                ),
+                deps=RunDependencies(vs_loader=loader),
             )
         )
 
@@ -275,6 +275,7 @@ def test_result_process_control_write_failure_propagates(
 def test_failed_result_write_failure_preserves_original_exception(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("original")
@@ -290,10 +291,7 @@ def test_failed_result_write_failure_preserves_original_exception(
         asyncio.run(
             execute_run(
                 _request(tmp_path),
-                deps=RunDependencies(
-                    vs_loader=FailingVSLoader(original),
-                    ffmpeg_runner=FakeFFmpegRunner(),
-                ),
+                deps=RunDependencies(vs_loader=FailingVSLoader(original)),
             )
         )
 
@@ -303,6 +301,7 @@ def test_failed_result_write_failure_preserves_original_exception(
 def test_failure_after_alignment_records_known_selected_frame_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     original = RuntimeError("post-alignment failure")
@@ -315,10 +314,7 @@ def test_failure_after_alignment_records_known_selected_frame_count(
         asyncio.run(
             execute_run(
                 _request(tmp_path),
-                deps=RunDependencies(
-                    vs_loader=FakeVSLoader(),
-                    ffmpeg_runner=FakeFFmpegRunner(),
-                ),
+                deps=RunDependencies(vs_loader=FakeVSLoader()),
             )
         )
 

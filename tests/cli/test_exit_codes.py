@@ -6,10 +6,9 @@ from frame_compare.cli.entry import handle_error
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import ErrorContext, FrameCompareError
 from frame_compare.orchestration.errors import NoVideosFoundError
-from frame_compare.render.errors import FrameExtractionError
+from frame_compare.render.errors import RenderError
 from frame_compare.services.errors import SlowpicsError
 from frame_compare.vs.errors import (
-    TonemapRequiresVapourSynthError,
     VapourSynthNotFoundError,
 )
 
@@ -19,9 +18,8 @@ from frame_compare.vs.errors import (
     [
         pytest.param(ConfigNotFoundError(Path("/x")), 2, id="config"),
         pytest.param(VapourSynthNotFoundError(), 3, id="vapoursynth"),
-        pytest.param(TonemapRequiresVapourSynthError(), 3, id="tonemap"),
         pytest.param(NoVideosFoundError(Path("/x")), 4, id="input"),
-        pytest.param(FrameExtractionError(0, "clip"), 5, id="processing"),
+        pytest.param(RenderError(reason="x"), 5, id="processing"),
         pytest.param(SlowpicsError("timeout"), 6, id="network"),
         pytest.param(
             FrameCompareError(ErrorContext(code="FC-9000", name="INTERNAL", message="fail")),

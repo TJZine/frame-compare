@@ -97,6 +97,7 @@ runs:
           "runtime_contract",
           "vapoursynth_environment",
           "lwlibavsource_frame",
+          "vapoursynth_screenshot",
           "placebo_tonemap_api",
           "apply_tonemap_frame",
           "placebo_tonemap_frame",

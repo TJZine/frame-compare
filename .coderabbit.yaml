@@ -81,7 +81,7 @@ reviews:
         Review orchestration for phase ordering, cancellation/error behavior, run-folder/cache handling, typed RunContext use, and hotspot growth. Flag raw integration details or config/env policy leaking into orchestration when a lower owner should handle it.
     - path: "src/frame_compare/render/**/*.py"
       instructions: |
-        Review render changes for deterministic filenames/output, FFmpeg/VapourSynth boundary behavior, overlay correctness, resource cleanup, and runtime verification requirements. Flag tests that mock away the behavior being changed.
+        Review render changes for deterministic filenames/output, VapourSynth render behavior, overlay correctness, resource cleanup, and runtime verification requirements. Flag tests that mock away the behavior being changed.
     - path: "src/frame_compare/vs/**/*.py"
       instructions: |
         Review VapourSynth code for lazy import expectations, plugin/runtime assumptions, HDR/tonemap correctness, typed source/props handling, and honest skip/verification behavior when VS is unavailable locally.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from frame_compare.config.schema import OverlayMode
 from frame_compare.config.schema_enums import VsScreenshotWriter
@@ -18,7 +18,6 @@ from frame_compare.vs.types import AppliedTonemap
 if TYPE_CHECKING:
     import vapoursynth as vs
 
-    from frame_compare.render.backend.ffmpeg import FFmpegRunner
     from frame_compare.render.geometry import RenderGeometryPlan
     from frame_compare.utils.progress_protocol import ProgressReporter
     from frame_compare.vs.loader import VSLoader
@@ -58,11 +57,10 @@ class OverlayConfig:
 class PreparedRenderSource:
     """Original diagnostic source and prepared image-producing render graph."""
 
-    diagnostic_source: vs.VideoNode | Path
-    prepared_clip: vs.VideoNode | Path
+    diagnostic_source: vs.VideoNode
+    prepared_clip: vs.VideoNode
     source_dimensions: tuple[int, int]
-    source_total_frames: int | None
-    source_is_hdr: bool
+    source_total_frames: int
     presentation_state: PresentationState
     tonemap: AppliedTonemap | None
 
@@ -99,13 +97,12 @@ class SelectedScreenshot:
 class RenderRequest:
     """Single exact-source-frame render job."""
 
-    clip: vs.VideoNode | Path
-    diagnostic_source: vs.VideoNode | Path
+    clip: vs.VideoNode
+    diagnostic_source: vs.VideoNode
     frame_number: int
     output_path: Path
     overlay: OverlayConfig | None
     encoder_settings: EncoderSettings
-    ffmpeg_runner: FFmpegRunner | None = None
     geometry_plan: RenderGeometryPlan | None = None
     source_signal: SourceSignalFacts | None = None
 
@@ -157,17 +154,12 @@ class RenderedClip:
     screenshots: tuple[RenderedScreenshot, ...]
 
 
-Renderer = Literal["vapoursynth", "ffmpeg", "auto"]
-
-
 @dataclass(frozen=True)
 class BatchRenderOptions:
     """Options for rendering pre-expanded screenshot batch requests."""
 
-    renderer: Renderer = "auto"
     overlay_mode: OverlayMode = OverlayMode.STANDARD
     reporter: ProgressReporter | None = None
-    ffmpeg_runner: FFmpegRunner | None = None
     parallelism: int = 1
     vs_loader: VSLoader | None = None
 
@@ -184,6 +176,5 @@ __all__ = [
     "RenderedClip",
     "RenderedClipFacts",
     "RenderedFrameResult",
-    "Renderer",
     "ScreenshotBatchRequest",
 ]

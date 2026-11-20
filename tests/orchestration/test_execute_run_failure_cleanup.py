@@ -23,10 +23,7 @@ from frame_compare.services.types import TmdbMetadata
 from frame_compare.vs.types import SourceInfo
 from tests.run_request_support import make_run_request
 
-from .execute_run_helpers import (
-    FakeFFmpegRunner,
-    create_video_files,
-)
+from .execute_run_helpers import create_video_files, install_fake_frame_render
 from .preparation_test_support import MINIMAL_CONFIG, create_config
 
 
@@ -43,6 +40,7 @@ def test_execute_run_run_info_write_failure_happens_before_probing_and_cleans_em
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -59,7 +57,7 @@ def test_execute_run_run_info_write_failure_happens_before_probing_and_cleans_em
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=NoProbeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=NoProbeVSLoader())
 
     with pytest.raises(OSError, match="disk full"):
         asyncio.run(execute_run(request, deps=deps))
@@ -72,6 +70,7 @@ def test_execute_run_post_reservation_resolution_failure_cleans_run_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -116,10 +115,7 @@ def test_execute_run_post_reservation_resolution_failure_cleans_run_directory(
                     skip_metadata=True,
                     overrides=CLIConfigOverrides(no_upload=True),
                 ),
-                deps=RunDependencies(
-                    vs_loader=NoProbeVSLoader(),
-                    ffmpeg_runner=FakeFFmpegRunner(),
-                ),
+                deps=RunDependencies(vs_loader=NoProbeVSLoader()),
             )
         )
 

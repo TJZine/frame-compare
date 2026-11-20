@@ -52,7 +52,6 @@ from frame_compare.orchestration.types import (
     RunRequest,
     SlowpicsUploadConfirmationFn,
 )
-from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
@@ -242,7 +241,6 @@ def build_phases_after_align(
     *,
     request: RunRequest,
     monotonic_timer: Callable[[], float],
-    ffmpeg_runner: FFmpegRunner,
     http_client: httpx.AsyncClient | None,
     state: ExecutionState,
     metadata_prefetch: MetadataPrefetch,
@@ -300,9 +298,7 @@ def build_phases_after_align(
         )
 
     def _run_render_with_current_selection(ctx: RunContext):
-        return run_render_phase(
-            ctx, frames=list(ctx.selection.frames), runner=ffmpeg_runner, vs_loader=vs_loader
-        )
+        return run_render_phase(ctx, frames=list(ctx.selection.frames), vs_loader=vs_loader)
 
     render_metadata_phases = [
         _create_timed_phase(
@@ -440,14 +436,9 @@ def build_execution_phase_plan(
         vs_loader=deps.vs_loader,
     )
 
-    ffmpeg_runner = deps.ffmpeg_runner
-    if ffmpeg_runner is None:
-        raise RuntimeError("FFmpeg runner must be initialized before execution.")
-
     after_align = build_phases_after_align(
         request=request,
         monotonic_timer=deps.monotonic_timer,
-        ffmpeg_runner=ffmpeg_runner,
         http_client=deps.http_client,
         state=state,
         metadata_prefetch=prep.metadata_prefetch,

@@ -378,6 +378,69 @@ def prove_apply_tonemap_frame() -> None:
     )
 
 
+def prove_vapoursynth_screenshot(media_path: Path) -> None:
+    import vapoursynth as vs
+    from PIL import Image
+
+    from frame_compare.config.schema import ConfigSchema, OverlayMode
+    from frame_compare.render.batch.orchestrator import render_screenshots_from_batch_detailed
+    from frame_compare.render.types import (
+        BatchRenderOptions,
+        ScreenshotBatchRequest,
+        SelectedScreenshot,
+    )
+    from frame_compare.utils.media_facts import (
+        ActivePictureFacts,
+        PresentationState,
+        SourceSignalFacts,
+    )
+    from frame_compare.vs.env import try_load_lsmas_plugin
+    from frame_compare.vs.loader import DefaultVSLoader
+    from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
+
+    core = vs.core
+    if not (hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource")):
+        try_load_lsmas_plugin(core)
+
+    cache_root = (media_path.parent / "runtime-smoke-cache").resolve()
+    config = ConfigSchema()
+    loader = DefaultVSLoader(index_cache=ManagedSourceIndexCache(cache_root))
+    output_dir = cache_root / "screenshots"
+    request = ScreenshotBatchRequest(
+        clip_path=media_path,
+        label="Smoke",
+        frames=(SelectedScreenshot(comparison_frame=1, source_frame=1, selection_label=None),),
+        size_bytes=media_path.stat().st_size,
+        source_resolution=(64, 64),
+        source_total_frames=3,
+        signal=SourceSignalFacts(is_hdr=False),
+        active_picture=ActivePictureFacts(0, 0, 64, 64, "full_frame", True),
+    )
+    clips = render_screenshots_from_batch_detailed(
+        [request],
+        output_dir,
+        config,
+        BatchRenderOptions(overlay_mode=OverlayMode.NONE, vs_loader=loader, parallelism=1),
+    )
+
+    assert_true(len(clips) == 1, f"expected one rendered clip, got {len(clips)}")
+    screenshots = clips[0].screenshots
+    assert_true(len(screenshots) == 1, f"expected one screenshot, got {len(screenshots)}")
+    result = screenshots[0].result
+    with Image.open(result.path) as image:
+        assert_true(image.format == "PNG", f"unexpected screenshot format: {image.format}")
+        assert_true(image.mode == "RGB", f"unexpected screenshot mode: {image.mode}")
+        assert_true(image.size == (64, 64), f"unexpected screenshot dimensions: {image.size}")
+        colors = image.getcolors(maxcolors=64 * 64)
+        assert_true(colors is not None and len(colors) >= 16, "screenshot has fewer than 16 colors")
+    presentation_state = clips[0].clip_facts.presentation_state
+    assert_true(
+        presentation_state == PresentationState.SDR,
+        f"unexpected screenshot presentation state: {presentation_state}",
+    )
+    proof("vapoursynth_screenshot=ok renderer=vapoursynth size=64x64")
+
+
 def prove_bestsource_frame(media_path: Path) -> None:
     import vapoursynth as vs
 
@@ -702,6 +765,8 @@ elif phase == "vapoursynth_environment":
     prove_vapoursynth_environment()
 elif phase == "lwlibavsource_frame":
     prove_lwlibavsource(media_path)
+elif phase == "vapoursynth_screenshot":
+    prove_vapoursynth_screenshot(media_path)
 elif phase == "placebo_tonemap_api":
     prove_placebo_tonemap_api()
 elif phase == "apply_tonemap_frame":

@@ -64,9 +64,6 @@ sources and the separately identified degraded fallback keep their existing
 interpretation; they are not assigned the native mapper's black point or passed
 through this conversion.
 
-The FFmpeg fallback leaves ambiguous transfer or primaries metadata unknown. It does
-not treat that metadata as ordinary SDR.
-
 ## Runtime requirements
 
 HDR tonemapping requires:
@@ -131,9 +128,7 @@ target_nits = 160
 
 This keeps the `spline` curve and replaces only its target.
 
-`enable_tonemap = false` renders HDR sources without conversion; the FFmpeg screenshot
-path (`screenshots.use_ffmpeg = true`) requires it for HDR sources (source:
-`src/frame_compare/render/prepare.py:283`, `src/frame_compare/vs/errors.py:63`).
+`enable_tonemap = false` renders HDR sources without tonemapping.
 
 Use one consistent target and preset for every source in a comparison unless the goal is
 specifically to study different conversions. See the

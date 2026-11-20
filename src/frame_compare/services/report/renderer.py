@@ -792,21 +792,6 @@ def _render_inspector() -> str:
                 <button type="button" data-review-import-trigger tabindex="-1">Import review JSON</button>
                 <input type="file" data-review-import accept=".json,application/json" hidden tabindex="-1">
             </div>
-            <div class="rv-review-preview" data-review-preview hidden>
-                <p data-review-preview-counts></p>
-                <fieldset><legend>Apply mode</legend>
-                    <label><input type="radio" name="review-import-mode" value="merge" checked> Merge</label>
-                    <label><input type="radio" name="review-import-mode" value="replace"> Replace</label>
-                </fieldset>
-                <fieldset><legend>Conflicts</legend>
-                    <label><input type="radio" name="review-import-conflict" value="keep-local" checked> Keep local</label>
-                    <label><input type="radio" name="review-import-conflict" value="use-imported"> Use imported</label>
-                </fieldset>
-                <div class="rv-inspector-actions">
-                    <button type="button" data-review-import-apply>Apply import</button>
-                    <button type="button" data-review-import-cancel>Cancel</button>
-                </div>
-            </div>
         </section>
     </aside>"""
 

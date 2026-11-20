@@ -1,4 +1,4 @@
-"""Color matrix policy shared by the screenshot renderers."""
+"""Color matrix policy for VapourSynth screenshot rendering."""
 
 from __future__ import annotations
 

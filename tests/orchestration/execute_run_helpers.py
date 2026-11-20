@@ -44,11 +44,13 @@ from frame_compare.orchestration.selection_domain import (
     compute_selection_window_for_clips,
 )
 from frame_compare.orchestration.source_selection import SourceSelection, resolve_source_selection
+from frame_compare.render.types import RenderedFrameResult, RenderRequest
 from frame_compare.utils.media_facts import RenderedFrameFacts
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
 if TYPE_CHECKING:
+    import pytest
     import vapoursynth as vs
 
 
@@ -330,10 +332,15 @@ def clip_state(
     )
 
 
+class FakeVSNode:
+    def __init__(self, source_path: Path) -> None:
+        self.source_path = source_path
+
+
 class FakeVSLoader:
     def load(self, path: Path) -> SourceInfo:
         return SourceInfo(
-            clip=cast(Any, object()),
+            clip=cast("vs.VideoNode", FakeVSNode(path)),
             width=1920,
             height=1080,
             num_frames=100,
@@ -346,6 +353,27 @@ class FakeVSLoader:
 
     def ensure_core(self) -> vs.Core:
         raise RuntimeError("ensure_core should not be called in tests")
+
+
+def install_fake_frame_render(monkeypatch: pytest.MonkeyPatch) -> list[RenderRequest]:
+    """Replace only the per-frame VapourSynth encode.
+
+    Preparation (with FakeVSLoader), expansion, geometry, overlay facts and the
+    scheduler stay real. Each call writes a 10x10 PNG and returns exact-frame facts.
+    """
+    recorded: list[RenderRequest] = []
+
+    def render(request: RenderRequest) -> RenderedFrameResult:
+        assert not isinstance(cast(object, request.clip), Path), "expected a prepared video node"
+        recorded.append(request)
+        Image.new("RGB", (10, 10)).save(request.output_path)
+        return RenderedFrameResult(
+            path=request.output_path,
+            facts=RenderedFrameFacts(source_frame=request.frame_number, picture_type="I"),
+        )
+
+    monkeypatch.setattr("frame_compare.render.batch.orchestrator.render_frame_detailed", render)
+    return recorded
 
 
 class FakeHDRVSLoader(FakeVSLoader):
@@ -367,29 +395,6 @@ class FakeHDRVSLoader(FakeVSLoader):
                 transfer=16,
                 matrix=9,
             ),
-        )
-
-
-class FakeFFmpegRunner:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, int, str]] = []
-
-    def extract_frame(
-        self, video: Path, frame_num: int, output: Path, **_kwargs: object
-    ) -> RenderedFrameFacts:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
-        self.calls.append((video.name, frame_num, output.name))
-        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
-
-    def probe_hdr(self, video: Path) -> HDRMetadata | None:
-        return HDRMetadata(
-            mastering_display=None,
-            max_cll=None,
-            max_fall=None,
-            color_primaries=1,
-            transfer=1,
-            matrix=1,
         )
 
 

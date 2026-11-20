@@ -377,9 +377,8 @@ unchanged.
   `{mode lower} profile · {policy} source` plus `· skipped for this run` when
   applicable, `cache` as `read and write` / `cache only` / `refresh current
   entry`, `skip` as `first {lead} · last {trail}` / `none`, and `seed`.
-  `Rendering` is `automatic · VapourSynth preferred` or `FFmpeg`, with `overlay`
-  as `{mode lower}` and `geometry` as `{geometry lower} geometry · active area
-  {mode lower}`. `tone map` is `{curve} {preset lower} · {N} nits` (for example,
+  `Rendering` is `VapourSynth`, with `overlay` as `{mode lower}` and `geometry`
+  as `{geometry lower} geometry · active area {mode lower}`. `tone map` is `{curve} {preset lower} · {N} nits` (for example,
   `BT.2390 reference · 100 nits`) or `disabled`. `Alignment` is `audio, then
   VSView review` / `audio, VSView required` / `audio` / `disabled`, with a
   `tools` row of `{glyph} FFmpeg audio · {glyph} VSView`; unavailable tools are
@@ -685,8 +684,7 @@ BT.2390 1.0, spline 0.5, and Reinhard 0.5. Every preset takes its `knee_offset`
 from that table. `render.prepare.resolve_tonemap_settings` keeps the preset's
 parameter when an explicit curve equals the preset curve. A different curve takes
 its parameter from the same table, so `highlight_guard` with `--tm-curve bt2390`
-uses knee 1.0. Existing explicit color overrides retain precedence. The field name
-`knee_offset`, report payload key, and renderer label remain unchanged.
+uses knee 1.0. Existing explicit color overrides retain precedence.
 
 ### CLI Choice, Frame, And Count Validation
 
@@ -757,7 +755,7 @@ error before rendering.
 
 ### Run Interruption
 
-After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. In-flight FFmpeg batch extraction is stopped and reaped with bounded cleanup; frame extraction keeps its existing timeout. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
+After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
 
 The interrupted run follows the failure-record path and exits 130. On Windows,
 once the standalone CLI has completed its Python cleanup and selected exit 130,
@@ -1703,41 +1701,22 @@ dedicated `run` flags for them:
   padding on the final canvas. Derived policy targets are normalized downward to
   mod-safe dimensions; explicit-size targets preserve the exact configured
   canvas after validation.
-- `vs_writer = "auto" | "pillow" | "fpng"` selects the VapourSynth screenshot writer
-  policy. `auto` is the default and preserves current behavior until a writer-specific
-  runtime path is eligible. `pillow` means the existing Pillow PNG writer policy, and
-  `fpng` is the explicit VapourSynth `core.fpng.Write` writer selection for the
-  screenshot runtime path. When `use_ffmpeg = false` and renderer selection is `auto`,
-  explicit `fpng` requires successful VapourSynth loading and does not silently fall
-  back to FFmpeg. `use_ffmpeg = true` still forces the FFmpeg path. FFmpeg extracts
-  screenshots in coded orientation and fails with a VapourSynth hint when its
-  decoded frame count differs from the prepared L-SMASH count or its filter graph
-  reconfigures during extraction.
-- Screenshots use 8-bit RGB PNG with or without baked overlays. This depth applies to
-  the final PNG. FFmpeg applies a recognized prepared matrix at RGB conversion.
-  FFmpeg rendering of YCgCo and BT.2020 constant-luminance sources requires the
-  `zscale` filter. VapourSynth prefers recognized native frame matrix tags and
-  fills missing matrix and HDR evidence from the prepared source. Both renderers
-  use BT.2020 non-constant luminance for HDR without a recognized tag. Untagged SDR
-  uses BT.601 when the coded source is at most 1024 pixels wide and 576 pixels high,
-  and BT.709 otherwise. The decision uses the prepared source dimensions before any
-  crop, resize, padding, or display-aspect expansion.
-- FFmpeg validates the current selected stream dimensions against the prepared
-  source before extraction, including when a geometry plan is supplied. Batch
-  rendering performs its decoded frame-count and geometry check once per nonempty
-  clip before constructing render jobs; direct extraction repeats the bounded
-  header check before publishing output.
+- `vs_writer = "auto" | "pillow" | "fpng"` selects the VapourSynth screenshot writer.
+  The default, `auto`, uses `core.fpng.Write` when eligible and Pillow otherwise.
+  `pillow` selects the Pillow PNG writer. `fpng` requires `core.fpng.Write`.
+- VapourSynth screenshots use 8-bit RGB PNG with or without baked overlays.
+  VapourSynth prefers recognized native frame matrix tags and fills missing matrix
+  and HDR evidence from the prepared source. HDR without a recognized matrix uses
+  BT.2020 non-constant luminance. Untagged SDR uses BT.601 when the coded source is
+  at most 1024 pixels wide and 576 pixels high, and BT.709 otherwise. The decision
+  uses the prepared source dimensions before any crop, resize, padding, or
+  display-aspect expansion.
 - `png_compression` remains an integer from `0` through `9`. It is the public
   compression input for Pillow and VapourSynth fpng. Pillow receives the value
   directly. Fpng maps `0..3` to `0`, `4..6` to `1`, and `7..9` to `2`;
   unsupported values fail config validation rather than being silently clamped.
-- `ffmpeg_timeout_seconds` defaults to `30.0` and must be finite and at least `5.0`. It
-  sets the deadline for each FFmpeg extraction, whether singleton or batch. The
-  decoded frame count check uses the greater of this setting and 30 seconds plus
-  one second per four prepared frames. If the count check times out, the error
-  reports its budget and suggests using the VapourSynth renderer or raising this
-  setting. The separate ffprobe HDR metadata probe keeps its fixed `15.0` second
-  timeout.
+
+The ffprobe HDR metadata probe has a fixed 15-second timeout.
 
 ## Config Validation, Logging, And Migration
 
