@@ -1,10 +1,11 @@
-"""Selection replacements propagate through a plan built before selection exists."""
+"""Selection replacements propagate through the fixed run steps."""
 
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from time import monotonic
 
+import httpx
 import pytest
 
 from frame_compare.analysis.types import SelectionBreakdown, SelectionDetail
@@ -16,7 +17,6 @@ from frame_compare.orchestration.execution_types import (
     AnalyzePhaseOutput,
     ExecutionState,
     FramePlanPhaseOutput,
-    MetadataPrefetch,
     PublishPhaseOutput,
     RunArtifacts,
 )
@@ -25,13 +25,17 @@ from frame_compare.orchestration.selection_domain import (
     metric_request_for_domain,
 )
 from frame_compare.orchestration.selection_rows import selection_rows
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.services.report.payload import ReportData
+from frame_compare.utils.progress import NullProgressReporter
 from tests.orchestration.execute_run_helpers import (
     FakeVSLoader,
     install_fake_frame_render,
 )
 from tests.orchestration.phase_task_helpers import _context, _frame_metrics
 from tests.run_request_support import make_run_request
+
+from .test_run_steps import prep_for_context
 
 
 async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
@@ -44,8 +48,10 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
     ctx.workspace = replace(
         ctx.workspace, run_dir=tmp_path / "run", screenshots_dir=tmp_path / "run/screenshots"
     )
+    ctx.config.analysis.dark_frame_count = 1
     ctx.config.report.enable = True
     ctx.config.slowpics.auto_upload = True
+    ctx.config.slowpics.confirm_upload_after_report = False
     metrics = _frame_metrics(
         luminance=[0.1] * 10, motion=[0.0] * 10, frame_count=10, fps=Fraction(24)
     )
@@ -54,14 +60,20 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
 
     def frame_plan(_ctx: RunContext, **_kwargs) -> FramePlanPhaseOutput:
         return FramePlanPhaseOutput(
-            selected_frames=[1], selection_breakdown=SelectionBreakdown(user=[11])
+            selected_frames=[2], selection_breakdown=SelectionBreakdown(user=[12])
         )
 
     def analyze(current: RunContext, **_kwargs) -> AnalyzePhaseOutput:
         assert current.selection.frames == (2,)
+        assert current.selection.analysis_metrics is None
         return AnalyzePhaseOutput(
-            selected_frames=[3],
-            selection_breakdown=SelectionBreakdown(quantile_dark=[13]),
+            selected_frames=[4],
+            selection_breakdown=SelectionBreakdown(quantile_dark=[14]),
+            selection_details_by_source_frame={
+                14: SelectionDetail(
+                    frame_index=14, label="After analysis", source="test", notes="motion"
+                )
+            },
             metrics_cache_hit=False,
             analysis_metrics=metrics,
         )
@@ -69,6 +81,7 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
     async def align(
         current: RunContext, *, selected_frames: list[int], **_kwargs
     ) -> AlignPhaseOutput:
+        assert current.selection.analysis_metrics == metrics
         observed["align"] = selected_frames
         rows = selection_rows(current, frames=selected_frames)
         assert [(row.reference_source_frame, row.label) for row in rows] == [(14, "After analysis")]
@@ -105,44 +118,25 @@ async def test_late_snapshot_replacements_reach_align_render_publish_and_report(
         "frame_compare.orchestration.phase_post_render.generate_report", generate_report
     )
     state = ExecutionState(artifacts=RunArtifacts())
-    request = make_run_request(root=tmp_path, config=ctx.config)
-    before = execution.build_phases_before_align(
-        request=request,
-        config=ctx.config,
-        monotonic_timer=monotonic,
-        state=state,
-        input_videos=[ctx.reference.path],
-        workspace=ctx.workspace,
+    request = make_run_request(root=tmp_path, config=ctx.config, skip_metadata=True)
+    prep = prep_for_context(ctx, state)
+    steps = execution.RunSteps(
+        reporter=NullProgressReporter(), state=state, monotonic_timer=monotonic
     )
-    after = execution.build_phases_after_align(
-        request=request,
-        config=ctx.config,
-        monotonic_timer=monotonic,
-        vs_loader=FakeVSLoader(),
-        http_client=None,
-        state=state,
-        metadata_prefetch=MetadataPrefetch(None, False),
-    )
+
+    def reject_request(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("unexpected network request")
+
     assert ctx.selection.frames == ()
-    await before[0].execute(ctx)
-    assert ctx.selection.analysis_metrics is None
-    ctx.selection = replace(ctx.selection, frames=(2,))
-    await before[1].execute(ctx)
-    assert ctx.selection.analysis_metrics == metrics
-    ctx.selection = replace(
-        ctx.selection,
-        frames=(4,),
-        details_by_source_frame={
-            14: SelectionDetail(
-                frame_index=14, label="After analysis", source="test", notes="motion"
-            )
-        },
-    )
-    await before[2].execute(ctx)
-    assert ctx.reference.trim.trim_start_frames == 20
-    for name in ["render", "publish", "report"]:
-        phase = next(phase for phase in after if phase.name == name)
-        await phase.execute(ctx)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reject_request)) as client:
+        deps = RunDependencies(http_client=client, vs_loader=FakeVSLoader())
+        await execution.run_selection_steps(
+            ctx, steps, request=request, prep=prep, state=state, deps=deps
+        )
+        assert ctx.reference.trim.trim_start_frames == 20
+        await execution.run_output_steps(
+            ctx, steps, request=request, prep=prep, state=state, deps=deps
+        )
     assert observed == {
         "align": [4],
         "publish": [5],

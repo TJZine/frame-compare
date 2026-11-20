@@ -15,7 +15,10 @@ from frame_compare.orchestration.alignment_report import (
 )
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.execution import (
-    build_execution_phase_plan,
+    RunSteps,
+    progress_step_names,
+    run_output_steps,
+    run_selection_steps,
 )
 from frame_compare.orchestration.execution_types import (
     ExecutionState,
@@ -25,10 +28,8 @@ from frame_compare.orchestration.fps_report import (
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
 )
-from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import (
-    rich_phase_label,
     select_reporter,
     uses_rich_progress,
 )
@@ -198,28 +199,11 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         if prep.config.slowpics.auto_upload and prep.config.slowpics.confirm_upload_after_report:
             state.phase_timings["confirm_slowpics_upload"] = 0.0
 
-        phase_plan = build_execution_phase_plan(
-            request=request,
-            deps=local_deps,
-            prep=prep,
-            state=state,
+        steps = RunSteps(reporter=reporter, state=state, monotonic_timer=local_deps.monotonic_timer)
+        reporter.set_phase_steps(progress_step_names(request, prep.config))
+        await run_selection_steps(
+            context, steps, request=request, prep=prep, state=state, deps=local_deps
         )
-
-        # Publish can be skipped later by confirmation or availability; only its
-        # config switch excludes it from the initial run map.
-        reporter.set_phase_steps(
-            [
-                rich_phase_label(phase.name)
-                for phase in [*phase_plan.before_align, *phase_plan.after_align]
-                if phase.name in {"analyze", "align", "render", "report", "publish"}
-                and (
-                    prep.config.slowpics.auto_upload
-                    if phase.name == "publish"
-                    else phase.skip_condition is None or not phase.skip_condition(prep.config)
-                )
-            ]
-        )
-        await execute_phases(phase_plan.before_align, context, reporter)
         selected_frame_count = len(list(context.selection.frames))
         emit_final_selection_report(
             selected_frames=list(context.selection.frames),
@@ -253,7 +237,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             no_color=request.no_color,
             verbose=request.verbose,
         )
-        await execute_phases(phase_plan.after_align, context, reporter)
+        await run_output_steps(
+            context, steps, request=request, prep=prep, state=state, deps=local_deps
+        )
         duration_seconds = max(0.0, local_deps.monotonic_timer() - run_timer_start)
         run_end = local_deps.clock()
         result = _assemble_run_result(

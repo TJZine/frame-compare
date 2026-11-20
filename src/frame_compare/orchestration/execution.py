@@ -1,38 +1,22 @@
-"""Orchestration execution phases and runner mappings."""
+"""Run the fixed selection and output steps."""
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
-from functools import partial
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Literal, cast, overload
 
-if TYPE_CHECKING:
-    from frame_compare.vs.loader import VSLoader
-
-import httpx
+import structlog
 
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError
 from frame_compare.analysis.metrics import ANALYZE_PROGRESS_TOTAL
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.analysis_policy import needs_analysis
-from frame_compare.orchestration.context import RunContext
-from frame_compare.orchestration.execution_types import (
-    AlignPhaseOutput,
-    ConfirmSlowpicsUploadPhaseOutput,
-    ExecutionPhasePlan,
-    ExecutionState,
-    MetadataPrefetch,
-    PhaseOutput,
-    PostReportCleanupPhaseOutput,
-    PrepState,
-    PublishPhaseOutput,
-    ReportPhaseOutput,
-)
+from frame_compare.orchestration.context import RunContext, SelectionSnapshot
+from frame_compare.orchestration.execution_types import AlignPhaseOutput, ExecutionState, PrepState
 from frame_compare.orchestration.phase_alignment import run_align_phase
-from frame_compare.orchestration.phase_output_application import apply_phase_output
 from frame_compare.orchestration.phase_post_render import (
     run_confirm_slowpics_upload_phase,
     run_metadata_phase,
@@ -46,407 +30,473 @@ from frame_compare.orchestration.phase_selection import (
     select_initial_frame_plan,
     selection_label_for_frame,
 )
-from frame_compare.orchestration.phases import Phase, PhaseSkipDetail, PhaseWarnOnly
-from frame_compare.orchestration.types import (
-    RunDependencies,
-    RunRequest,
-    SlowpicsUploadConfirmationFn,
+from frame_compare.orchestration.progress import (
+    phase_display_label,
+    rich_phase_label,
+    start_phase_progress,
+    uses_rich_progress,
 )
+from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.cancellation import (
-    _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
+    is_cancelling,
+    raise_if_cancelling,
 )
-from frame_compare.utils.progress import align_phase_duration_text
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus
+from frame_compare.utils.progress import LogProgressReporter, align_phase_duration_text
+from frame_compare.utils.progress_protocol import (
+    AlignmentSummary,
+    ProgressPhaseStatus,
+    ProgressReporter,
+)
 from frame_compare.utils.run_warnings import RunWarning, WarningSource
-from frame_compare.utils.types import WorkspacePaths
 
 __all__ = [
-    "build_execution_phase_plan",
-    "build_phases_after_align",
-    "build_phases_before_align",
+    "RunSteps",
+    "StepCompletion",
+    "progress_step_names",
+    "run_output_steps",
     "run_render_phase",
+    "run_selection_steps",
     "selection_label_for_frame",
 ]
 
-
-_PHASE_WARNING_SOURCES: dict[str, WarningSource] = {
-    "frame_plan": "frame selection",
-    "analyze": "analysis",
-    "align": "alignment",
-    "render": "render",
-    "metadata": "sources",
-    "publish": "slow.pics",
-    "report": "render",
-    "confirm_slowpics_upload": "slow.pics",
-    "post_report_cleanup": "cleanup",
-}
+log = structlog.get_logger()
 
 
-def _create_timed_phase(
-    name: str,
-    timing_key: str,
-    skip_condition: Callable[[ConfigSchema], bool] | None,
-    executor: Callable[[RunContext], PhaseOutput | Awaitable[PhaseOutput]],
-    state: ExecutionState,
-    monotonic_timer: Callable[[], float],
-    phase_timings: dict[str, float],
-    warnings: list[RunWarning],
-    *,
-    warn_only: PhaseWarnOnly = False,
-    fatal_exceptions: tuple[type[BaseException], ...] = (),
-    progress_total: int = 1,
-    retain_on_success: bool | None = None,
-    retain_if: Callable[[PhaseOutput], bool] | None = None,
-    skip_detail: PhaseSkipDetail | None = None,
-) -> Phase:
-    phase: Phase | None = None
+@dataclass
+class StepCompletion:
+    """Optional details for a successful step's progress line."""
 
-    async def _execute(ctx: RunContext) -> None:
-        start = monotonic_timer()
-        align_output: AlignPhaseOutput | None = None
+    summary: str | None = None
+    retain: bool | None = None
+    alignment_summary: AlignmentSummary | None = None
+    duration_text: str | None = None
+    success_status: ProgressPhaseStatus | None = None
+
+
+class RunSteps:
+    """Progress, timing and warn-only handling for the run's fixed steps."""
+
+    def __init__(
+        self,
+        *,
+        reporter: ProgressReporter,
+        state: ExecutionState,
+        monotonic_timer: Callable[[], float],
+    ) -> None:
+        self._reporter = reporter
+        self._state = state
+        self._monotonic_timer = monotonic_timer
+
+    async def skip(self, name: str, *, detail: str | None, total: int = 1) -> None:
+        await cancellation_checkpoint()
+        label = phase_display_label(name)
+        start_phase_progress(
+            self._reporter,
+            name=name,
+            display_label=label if detail is None else f"{label}  {detail}",
+            total=total,
+        )
+        self._reporter.set_description("Skipped")
+        summary = detail[:1].lower() + detail[1:] if detail else detail
+        self._reporter.complete_phase(ProgressPhaseStatus.SKIPPED, summary=summary)
+
+    @overload
+    async def run[T](
+        self,
+        name: str,
+        call: Callable[[], T | Awaitable[T]],
+        *,
+        warning_source: WarningSource,
+        warn_only: Literal[False] = False,
+        fatal: tuple[type[BaseException], ...] = (),
+        total: int = 1,
+        retain: bool | None = None,
+        describe: Callable[[T, float], StepCompletion] | None = None,
+    ) -> T: ...
+
+    @overload
+    async def run[T](
+        self,
+        name: str,
+        call: Callable[[], T | Awaitable[T]],
+        *,
+        warning_source: WarningSource,
+        warn_only: bool,
+        fatal: tuple[type[BaseException], ...] = (),
+        total: int = 1,
+        retain: bool | None = None,
+        describe: Callable[[T, float], StepCompletion] | None = None,
+    ) -> T | None: ...
+
+    async def run[T](
+        self,
+        name: str,
+        call: Callable[[], T | Awaitable[T]],
+        *,
+        warning_source: WarningSource,
+        warn_only: bool = False,
+        fatal: tuple[type[BaseException], ...] = (),
+        total: int = 1,
+        retain: bool | None = None,
+        describe: Callable[[T, float], StepCompletion] | None = None,
+    ) -> T | None:
+        await cancellation_checkpoint()
+        reporter = self._reporter
+        start_phase_progress(
+            reporter, name=name, display_label=phase_display_label(name), total=total
+        )
+        start = self._monotonic_timer()
+        completion = StepCompletion()
+        status = ProgressPhaseStatus.FAILED
         try:
-            await cancellation_checkpoint()
-            maybe_awaitable = executor(ctx)
-            if inspect.isawaitable(maybe_awaitable):
-                output = await maybe_awaitable
-            else:
-                output = maybe_awaitable
-            await cancellation_checkpoint()
-            apply_phase_output(ctx=ctx, state=state, output=output)
-            summary = getattr(output, "success_summary", None)
-            if isinstance(summary, str):
-                if phase is None:
-                    raise RuntimeError("timed phase was not initialized")
-                phase.success_summary = summary
-            if timing_key == "align" and isinstance(output, AlignPhaseOutput):
-                align_output = output
-                if phase is None:
-                    raise RuntimeError("timed phase was not initialized")
-                phase.alignment_summary = output.alignment_summary
-                if output.review_unresolved or output.has_unapplied_offsets:
-                    phase.success_status = ProgressPhaseStatus.WARNED
-            if retain_if is not None:
-                if phase is None:
-                    raise RuntimeError("timed phase was not initialized")
-                phase.retain_on_success = retain_if(output)
-        except _RunInterrupt:
-            await cancellation_checkpoint()
-            raise asyncio.CancelledError() from None
-        except Exception as exc:
-            if phase is not None and phase.warns_on_error(ctx):
-                warnings.append(
-                    RunWarning(_PHASE_WARNING_SOURCES[name], "warning", f"{name}: {exc}")
-                )
-            raise
-        finally:
-            phase_timings[timing_key] = max(0.0, monotonic_timer() - start)
-            if align_output is not None:
-                if phase is None:
-                    raise RuntimeError("timed phase was not initialized")
-                duration_text = align_phase_duration_text(
-                    align_seconds=phase_timings[timing_key],
-                    review_seconds=align_output.review_seconds,
-                )
-                if duration_text is not None:
-                    phase.duration_text = duration_text
-
-    phase = Phase(
-        name=name,
-        execute=_execute,
-        skip_condition=skip_condition,
-        progress_total=progress_total,
-        warn_only=warn_only,
-        fatal_exceptions=fatal_exceptions,
-        retain_on_success=retain_on_success,
-        skip_detail=skip_detail,
-    )
-    return phase
-
-
-def build_phases_before_align(
-    *,
-    request: RunRequest,
-    config: ConfigSchema,
-    monotonic_timer: Callable[[], float],
-    state: ExecutionState,
-    input_videos: list[Path],
-    workspace: WorkspacePaths,
-    vs_loader: VSLoader | None = None,
-) -> list[Phase]:
-    def _run_align_with_current_selection(ctx: RunContext):
-        return run_align_phase(
-            ctx,
-            selected_frames=list(ctx.selection.frames),
-            vs_loader=vs_loader,
-            verbose=request.verbose,
-            quiet=request.quiet,
-            json_output=request.json_output,
-        )
-
-    return [
-        _create_timed_phase(
-            "frame_plan",
-            "frame_plan",
-            None,
-            partial(select_initial_frame_plan, vs_loader=vs_loader),
-            state=state,
-            monotonic_timer=monotonic_timer,
-            phase_timings=state.phase_timings,
-            warnings=state.warnings,
-        ),
-        _create_timed_phase(
-            "analyze",
-            "analyze",
-            lambda config: request.skip_analysis or not needs_analysis(config.analysis),
-            partial(
-                run_analyze_phase,
-                input_videos=input_videos,
-                workspace=workspace,
-                require_cache_only=request.from_cache_only,
-                force_recompute=request.no_cache,
-                vs_loader=vs_loader,
-            ),
-            state=state,
-            monotonic_timer=monotonic_timer,
-            phase_timings=state.phase_timings,
-            warnings=state.warnings,
-            warn_only=lambda ctx: not request.from_cache_only and bool(ctx.selection.frames),
-            fatal_exceptions=(ExclusionRecoverySelectionError,),
-            progress_total=ANALYZE_PROGRESS_TOTAL,
-            skip_detail="Disabled" if request.skip_analysis else "Not required",
-        ),
-        _create_timed_phase(
-            "align",
-            "align",
-            lambda config: not config.audio_alignment.enable,
-            _run_align_with_current_selection,
-            state=state,
-            monotonic_timer=monotonic_timer,
-            phase_timings=state.phase_timings,
-            warnings=state.warnings,
-            warn_only=not config.audio_alignment.force_interactive,
-            fatal_exceptions=(
-                ExclusionRecoverySelectionError,
-                AudioAlignmentCleanupError,
-            ),
-            progress_total=max(1, len(input_videos)),
-            skip_detail="Disabled",
-        ),
-    ]
-
-
-def build_phases_after_align(
-    *,
-    request: RunRequest,
-    monotonic_timer: Callable[[], float],
-    http_client: httpx.AsyncClient | None,
-    state: ExecutionState,
-    metadata_prefetch: MetadataPrefetch,
-    config: ConfigSchema,
-    confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None,
-    vs_loader: VSLoader | None = None,
-) -> list[Phase]:
-    def _retain_confirmed_upload(url: str, uploaded_file_paths: tuple[Path, ...]) -> None:
-        state.artifacts.slowpics_url = url
-        state.artifacts.uploaded_slowpics_file_paths = uploaded_file_paths
-
-    async def _run_publish_with_current_artifacts(ctx: RunContext) -> PublishPhaseOutput:
-        if (
-            _requires_report_confirmed_slowpics(ctx.config)
-            and state.artifacts.slowpics_upload_confirmation_status != "confirmed"
-        ):
-            return PublishPhaseOutput(slowpics_url=None)
-        return await run_publish_phase(
-            ctx,
-            client=http_client,
-            metadata=state.artifacts.resolved_metadata,
-            render=state.artifacts.render,
-            selected_frames=list(ctx.selection.frames),
-            on_upload_confirmed=_retain_confirmed_upload,
-        )
-
-    def _run_report_with_current_artifacts(ctx: RunContext) -> ReportPhaseOutput:
-        return run_report_phase(
-            ctx,
-            frames=list(ctx.selection.frames),
-            render=state.artifacts.render,
-            metadata=state.artifacts.resolved_metadata,
-            slowpics_url=None
-            if _requires_report_confirmed_slowpics(ctx.config)
-            else state.artifacts.slowpics_url,
-        )
-
-    def _run_confirm_slowpics_upload_with_current_artifacts(
-        ctx: RunContext,
-    ) -> ConfirmSlowpicsUploadPhaseOutput:
-        return run_confirm_slowpics_upload_phase(
-            ctx,
-            report_path=state.artifacts.report_path,
-            report_succeeded=state.artifacts.report_succeeded,
-            confirm_slowpics_upload=confirm_slowpics_upload,
-        )
-
-    def _run_post_report_cleanup_with_current_artifacts(
-        ctx: RunContext,
-    ) -> PostReportCleanupPhaseOutput:
-        return run_post_report_cleanup_phase(
-            ctx,
-            uploaded_file_paths=state.artifacts.uploaded_slowpics_file_paths,
-            report_succeeded=state.artifacts.report_succeeded,
-        )
-
-    def _run_render_with_current_selection(ctx: RunContext):
-        return run_render_phase(ctx, frames=list(ctx.selection.frames), vs_loader=vs_loader)
-
-    render_metadata_phases = [
-        _create_timed_phase(
-            "render",
-            "render",
-            None,
-            _run_render_with_current_selection,
-            state=state,
-            monotonic_timer=monotonic_timer,
-            phase_timings=state.phase_timings,
-            warnings=state.warnings,
-        ),
-        _create_timed_phase(
-            "metadata",
-            "metadata",
-            lambda config: request.skip_metadata,
-            partial(
-                run_metadata_phase,
-                client=http_client,
-                metadata_prefetch=metadata_prefetch,
-            ),
-            state=state,
-            monotonic_timer=monotonic_timer,
-            phase_timings=state.phase_timings,
-            warnings=state.warnings,
-            warn_only=True,
-            skip_detail="Disabled",
-        ),
-    ]
-    publish_phase = _create_timed_phase(
-        "publish",
-        "publish",
-        lambda config: (
-            not config.slowpics.auto_upload
-            or http_client is None
-            or (
-                _requires_report_confirmed_slowpics(config)
-                and state.artifacts.slowpics_upload_confirmation_status != "confirmed"
+            # Starting progress can request cancellation before the body runs.
+            raise_if_cancelling()
+            pending = call()
+            output = (
+                await cast(Awaitable[T], pending)
+                if inspect.isawaitable(pending)
+                else cast(T, pending)
             )
-        ),
-        _run_publish_with_current_artifacts,
-        state=state,
-        monotonic_timer=monotonic_timer,
-        phase_timings=state.phase_timings,
-        warnings=state.warnings,
-        warn_only=True,
-        retain_if=lambda output: (
-            isinstance(output, PublishPhaseOutput) and output.slowpics_url is not None
-        ),
-        skip_detail=lambda effective_config: (
-            "Disabled"
-            if not effective_config.slowpics.auto_upload
-            else "Unavailable"
-            if http_client is None
-            else "Declined"
-            if state.artifacts.slowpics_upload_confirmation_status == "declined"
-            else "Report unavailable"
-            if state.artifacts.slowpics_upload_confirmation_status == "report_unavailable"
-            else None
-        ),
-    )
-    report_phase = _create_timed_phase(
-        "report",
-        "report",
-        lambda config: not config.report.enable,
-        _run_report_with_current_artifacts,
-        state=state,
-        monotonic_timer=monotonic_timer,
-        phase_timings=state.phase_timings,
-        warnings=state.warnings,
-        warn_only=True,
-        skip_detail="Disabled",
-    )
-    confirm_slowpics_upload_phase = _create_timed_phase(
-        "confirm_slowpics_upload",
-        "confirm_slowpics_upload",
-        None,
-        _run_confirm_slowpics_upload_with_current_artifacts,
-        state=state,
-        monotonic_timer=monotonic_timer,
-        phase_timings=state.phase_timings,
-        warnings=state.warnings,
-        retain_on_success=False,
-    )
-    post_report_cleanup_phase = _create_timed_phase(
-        "post_report_cleanup",
-        "post_report_cleanup",
-        None,
-        _run_post_report_cleanup_with_current_artifacts,
-        state=state,
-        monotonic_timer=monotonic_timer,
-        phase_timings=state.phase_timings,
-        warnings=state.warnings,
-    )
-    if not _requires_report_confirmed_slowpics(config):
-        return [
-            *render_metadata_phases,
-            publish_phase,
-            report_phase,
-            post_report_cleanup_phase,
-        ]
+            await cancellation_checkpoint()
+        except BaseException as exc:
+            self._state.phase_timings[name] = max(0.0, self._monotonic_timer() - start)
+            cancelling = is_cancelling()
+            if warn_only and isinstance(exc, Exception) and not cancelling:
+                self._state.warnings.append(RunWarning(warning_source, "warning", f"{name}: {exc}"))
+            if (
+                not warn_only
+                or isinstance(exc, fatal)
+                or cancelling
+                or not isinstance(exc, Exception)
+            ):
+                raise
+            status = ProgressPhaseStatus.WARNED
+            if isinstance(reporter, LogProgressReporter):
+                log.warning(
+                    "phase_warned",
+                    phase=name,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                    exc_info=exc,
+                )
+            return None
+        else:
+            elapsed = max(0.0, self._monotonic_timer() - start)
+            self._state.phase_timings[name] = elapsed
+            if describe is not None:
+                completion = describe(output, elapsed)
+            status = ProgressPhaseStatus.COMPLETED
+            reporter.advance(1)
+            return output
+        finally:
+            if completion.retain is not None:
+                retain = completion.retain
+            if uses_rich_progress(reporter):
+                if (
+                    status == ProgressPhaseStatus.COMPLETED
+                    and completion.success_status is not None
+                ):
+                    status = completion.success_status
+                if name == "align":
+                    retain = True
+            if completion.alignment_summary is not None:
+                reporter.complete_phase(
+                    status,
+                    retain=retain,
+                    summary=completion.summary,
+                    duration_text=completion.duration_text,
+                    alignment_summary=completion.alignment_summary,
+                )
+            elif retain is None:
+                reporter.complete_phase(
+                    status, summary=completion.summary, duration_text=completion.duration_text
+                )
+            else:
+                reporter.complete_phase(
+                    status,
+                    retain=retain,
+                    summary=completion.summary,
+                    duration_text=completion.duration_text,
+                )
 
-    return [
-        *render_metadata_phases,
-        report_phase,
-        confirm_slowpics_upload_phase,
-        publish_phase,
-        post_report_cleanup_phase,
-    ]
+
+def _skip_analysis(request: RunRequest, config: ConfigSchema) -> bool:
+    return request.skip_analysis or not needs_analysis(config.analysis)
 
 
 def _requires_report_confirmed_slowpics(config: ConfigSchema) -> bool:
     return config.slowpics.auto_upload and config.slowpics.confirm_upload_after_report
 
 
-def build_execution_phase_plan(
+def _describe_align(output: AlignPhaseOutput, elapsed: float) -> StepCompletion:
+    return StepCompletion(
+        summary=output.success_summary,
+        alignment_summary=output.alignment_summary,
+        success_status=(
+            ProgressPhaseStatus.WARNED
+            if output.review_unresolved or output.has_unapplied_offsets
+            else None
+        ),
+        duration_text=align_phase_duration_text(
+            align_seconds=elapsed, review_seconds=output.review_seconds
+        ),
+    )
+
+
+async def run_selection_steps(
+    ctx: RunContext,
+    steps: RunSteps,
     *,
     request: RunRequest,
-    deps: RunDependencies,
     prep: PrepState,
     state: ExecutionState,
-) -> ExecutionPhasePlan:
-    """Build the split execution plan around the post-align reporting boundary.
+    deps: RunDependencies,
+) -> None:
+    frame_plan = await steps.run(
+        "frame_plan",
+        lambda: select_initial_frame_plan(ctx, vs_loader=deps.vs_loader),
+        warning_source="frame selection",
+    )
+    ctx.selection = SelectionSnapshot(
+        frames=tuple(frame_plan.selected_frames),
+        breakdown=frame_plan.selection_breakdown,
+        details_by_source_frame=frame_plan.selection_details_by_source_frame,
+    )
+    state.frame_plan_warnings[:] = frame_plan.warnings
+    state.warnings.extend(frame_plan.warnings)
 
-    The before/after align split is intentional: coordinator emits the
-    consolidated FPS report after align completes and before render starts.
-    """
-    before_align = build_phases_before_align(
-        request=request,
-        config=prep.config,
-        monotonic_timer=deps.monotonic_timer,
-        state=state,
-        input_videos=prep.input_videos,
-        workspace=prep.workspace,
-        vs_loader=deps.vs_loader,
-    )
+    if _skip_analysis(request, ctx.config):
+        await steps.skip(
+            "analyze",
+            detail="Disabled" if request.skip_analysis else "Not required",
+            total=ANALYZE_PROGRESS_TOTAL,
+        )
+    else:
+        analysis = await steps.run(
+            "analyze",
+            lambda: run_analyze_phase(
+                ctx,
+                input_videos=prep.input_videos,
+                workspace=prep.workspace,
+                require_cache_only=request.from_cache_only,
+                force_recompute=request.no_cache,
+                vs_loader=deps.vs_loader,
+            ),
+            warning_source="analysis",
+            warn_only=not request.from_cache_only and bool(ctx.selection.frames),
+            fatal=(ExclusionRecoverySelectionError,),
+            total=ANALYZE_PROGRESS_TOTAL,
+            describe=lambda out, _: StepCompletion(summary=out.success_summary),
+        )
+        if analysis is not None:
+            if analysis.replaces_frame_plan_selection:
+                for warning in state.frame_plan_warnings:
+                    if warning in state.warnings:
+                        state.warnings.remove(warning)
+                state.frame_plan_warnings.clear()
+            state.artifacts.metrics_cache_hit = analysis.metrics_cache_hit
+            state.artifacts.metrics_cache_status = "hit" if analysis.metrics_cache_hit else "miss"
+            ctx.selection = SelectionSnapshot(
+                frames=tuple(analysis.selected_frames),
+                breakdown=analysis.selection_breakdown,
+                details_by_source_frame=analysis.selection_details_by_source_frame,
+                analysis_metrics=analysis.analysis_metrics,
+            )
+            state.warnings.extend(analysis.warnings)
 
-    after_align = build_phases_after_align(
-        request=request,
-        monotonic_timer=deps.monotonic_timer,
-        http_client=deps.http_client,
-        state=state,
-        metadata_prefetch=prep.metadata_prefetch,
-        config=prep.config,
-        confirm_slowpics_upload=deps.confirm_slowpics_upload,
-        vs_loader=deps.vs_loader,
+    align_total = max(1, len(prep.input_videos))
+    if not ctx.config.audio_alignment.enable:
+        await steps.skip("align", detail="Disabled", total=align_total)
+        return
+
+    alignment = await steps.run(
+        "align",
+        lambda: run_align_phase(
+            ctx,
+            selected_frames=list(ctx.selection.frames),
+            vs_loader=deps.vs_loader,
+            verbose=request.verbose,
+            quiet=request.quiet,
+            json_output=request.json_output,
+        ),
+        warning_source="alignment",
+        warn_only=not prep.config.audio_alignment.force_interactive,
+        fatal=(ExclusionRecoverySelectionError, AudioAlignmentCleanupError),
+        total=align_total,
+        describe=_describe_align,
     )
-    return ExecutionPhasePlan(
-        before_align=before_align,
-        after_align=after_align,
+    if alignment is not None:
+        ctx.reference = alignment.reference
+        ctx.comparisons = alignment.comparisons
+        ctx.selection = replace(
+            ctx.selection,
+            frames=tuple(alignment.selected_frames),
+            breakdown=alignment.selection_breakdown
+            if alignment.selection_breakdown is not None
+            else ctx.selection.breakdown,
+            details_by_source_frame=alignment.selection_details_by_source_frame
+            if alignment.selection_details_by_source_frame is not None
+            else ctx.selection.details_by_source_frame,
+        )
+        state.warnings.extend(alignment.warnings)
+        state.artifacts.alignment_summary = alignment.alignment_summary
+        state.artifacts.alignment_diagnostics_dir = alignment.alignment_diagnostics_dir
+        state.vsview_review_seconds = max(0.0, alignment.review_seconds)
+
+
+async def _report(ctx: RunContext, steps: RunSteps, state: ExecutionState) -> None:
+    if not ctx.config.report.enable:
+        await steps.skip("report", detail="Disabled")
+        return
+    artifacts = state.artifacts
+    report = await steps.run(
+        "report",
+        lambda: run_report_phase(
+            ctx,
+            frames=list(ctx.selection.frames),
+            render=artifacts.render,
+            metadata=artifacts.resolved_metadata,
+            slowpics_url=None
+            if _requires_report_confirmed_slowpics(ctx.config)
+            else artifacts.slowpics_url,
+        ),
+        warning_source="render",
+        warn_only=True,
     )
+    if report is not None:
+        artifacts.report_path = report.report_path
+        artifacts.report_succeeded = report.report_succeeded
+
+
+async def _publish(
+    ctx: RunContext, steps: RunSteps, state: ExecutionState, deps: RunDependencies
+) -> None:
+    artifacts = state.artifacts
+    client = deps.http_client
+    confirmation = artifacts.slowpics_upload_confirmation_status
+    if not ctx.config.slowpics.auto_upload:
+        await steps.skip("publish", detail="Disabled")
+        return
+    if client is None:
+        await steps.skip("publish", detail="Unavailable")
+        return
+    if _requires_report_confirmed_slowpics(ctx.config) and confirmation != "confirmed":
+        detail = {"declined": "Declined", "report_unavailable": "Report unavailable"}.get(
+            confirmation
+        )
+        await steps.skip("publish", detail=detail)
+        return
+
+    def on_upload_confirmed(url: str, uploaded_file_paths: tuple[Path, ...]) -> None:
+        state.artifacts.slowpics_url = url
+        state.artifacts.uploaded_slowpics_file_paths = uploaded_file_paths
+
+    publish = await steps.run(
+        "publish",
+        lambda: run_publish_phase(
+            ctx,
+            client=client,
+            metadata=artifacts.resolved_metadata,
+            render=artifacts.render,
+            selected_frames=list(ctx.selection.frames),
+            on_upload_confirmed=on_upload_confirmed,
+        ),
+        warning_source="slow.pics",
+        warn_only=True,
+        describe=lambda out, _: StepCompletion(
+            summary=out.success_summary, retain=out.slowpics_url is not None
+        ),
+    )
+    if publish is not None:
+        artifacts.slowpics_url = publish.slowpics_url
+        artifacts.uploaded_slowpics_file_paths = publish.uploaded_file_paths
+        artifacts.post_upload_actions = publish.post_upload_actions
+        state.warnings.extend(publish.warnings)
+        state.warnings.extend(
+            action.warning for action in publish.post_upload_actions if action.warning is not None
+        )
+
+
+async def run_output_steps(
+    ctx: RunContext,
+    steps: RunSteps,
+    *,
+    request: RunRequest,
+    prep: PrepState,
+    state: ExecutionState,
+    deps: RunDependencies,
+) -> None:
+    report_first = _requires_report_confirmed_slowpics(prep.config)
+    artifacts = state.artifacts
+    render = await steps.run(
+        "render",
+        lambda: run_render_phase(ctx, frames=list(ctx.selection.frames), vs_loader=deps.vs_loader),
+        warning_source="render",
+        describe=lambda out, _: StepCompletion(summary=out.success_summary),
+    )
+    artifacts.render = render.render
+    state.warnings.extend(render.render.warnings)
+
+    if request.skip_metadata:
+        await steps.skip("metadata", detail="Disabled")
+    else:
+        metadata = await steps.run(
+            "metadata",
+            lambda: run_metadata_phase(
+                ctx, client=deps.http_client, metadata_prefetch=prep.metadata_prefetch
+            ),
+            warning_source="sources",
+            warn_only=True,
+        )
+        if metadata is not None:
+            artifacts.resolved_metadata = metadata.resolved_metadata
+
+    if report_first:
+        await _report(ctx, steps, state)
+        confirmation = await steps.run(
+            "confirm_slowpics_upload",
+            lambda: run_confirm_slowpics_upload_phase(
+                ctx,
+                report_path=artifacts.report_path,
+                report_succeeded=artifacts.report_succeeded,
+                confirm_slowpics_upload=deps.confirm_slowpics_upload,
+            ),
+            warning_source="slow.pics",
+            retain=False,
+        )
+        artifacts.slowpics_upload_confirmation_status = confirmation.status
+        state.warnings.extend(confirmation.warnings)
+        await _publish(ctx, steps, state, deps)
+    else:
+        await _publish(ctx, steps, state, deps)
+        await _report(ctx, steps, state)
+
+    cleanup = await steps.run(
+        "post_report_cleanup",
+        lambda: run_post_report_cleanup_phase(
+            ctx,
+            uploaded_file_paths=artifacts.uploaded_slowpics_file_paths,
+            report_succeeded=artifacts.report_succeeded,
+        ),
+        warning_source="cleanup",
+    )
+    state.warnings.extend(cleanup.warnings)
+
+
+def progress_step_names(request: RunRequest, config: ConfigSchema) -> list[str]:
+    names: list[str] = []
+    if not _skip_analysis(request, config):
+        names.append("analyze")
+    if config.audio_alignment.enable:
+        names.append("align")
+    names.append("render")
+    # Confirmation or client availability can still cause Publish to be skipped.
+    if config.slowpics.auto_upload and not _requires_report_confirmed_slowpics(config):
+        names.append("publish")
+    if config.report.enable:
+        names.append("report")
+    if _requires_report_confirmed_slowpics(config):
+        names.append("publish")
+    return [rich_phase_label(name) for name in names]

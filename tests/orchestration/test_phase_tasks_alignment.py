@@ -19,16 +19,13 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_alignment, phase_selection
-from frame_compare.orchestration.execution import (
-    build_phases_after_align,
-    build_phases_before_align,
-)
-from frame_compare.orchestration.execution_types import ExecutionState, MetadataPrefetch
+from frame_compare.orchestration.execution import RunSteps, run_output_steps, run_selection_steps
+from frame_compare.orchestration.execution_types import ExecutionState
 from frame_compare.orchestration.full_window_retry import (
     FullWindowRetryOverride,
     compute_selection_window_with_recovery,
 )
-from frame_compare.orchestration.phases import PhaseStatus, execute_phases
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.services.alignment_evidence import AlignmentStabilitySummary
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentOperationOutcome, AlignmentResult
@@ -45,6 +42,8 @@ from tests.orchestration.phase_task_helpers import (
     _run_align_phase,
 )
 from tests.run_request_support import make_run_request
+
+from .test_run_steps import prep_for_context
 
 
 def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
@@ -885,30 +884,21 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
     )
     request = make_run_request(root=tmp_path, skip_metadata=True)
     state = ExecutionState()
-    before_align = build_phases_before_align(
-        request=request,
-        config=ctx.config,
-        monotonic_timer=monotonic,
-        state=state,
-        input_videos=[ctx.reference.path, comparison.path],
-        workspace=ctx.workspace,
-    )
-    render, *_ = build_phases_after_align(
-        request=request,
-        monotonic_timer=monotonic,
-        vs_loader=FakeVSLoader(),
-        http_client=None,
-        state=state,
-        metadata_prefetch=MetadataPrefetch(None, False),
-        config=ctx.config,
-    )
+    prep = prep_for_context(ctx, state)
+    deps = RunDependencies(vs_loader=FakeVSLoader())
+    steps = RunSteps(reporter=NullProgressReporter(), state=state, monotonic_timer=monotonic)
+
+    async def run() -> None:
+        await run_selection_steps(ctx, steps, request=request, prep=prep, state=state, deps=deps)
+        await run_output_steps(ctx, steps, request=request, prep=prep, state=state, deps=deps)
 
     with pytest.raises(ExclusionRecoverySelectionError, match="full-window retry") as caught:
-        asyncio.run(execute_phases([*before_align, render], ctx, NullProgressReporter()))
+        asyncio.run(run())
 
     assert caught.value.context.code == "FC-4012"
     assert isinstance(caught.value.__cause__, AudioAlignmentError)
-    assert render.status is PhaseStatus.PENDING
+    assert "render" not in state.phase_timings
+    assert state.artifacts.render is None
     assert recorded == []
 
 

@@ -141,11 +141,12 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
     async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
         return prep
 
-    async def fake_execute_phases(*_args: object, **_kwargs: object) -> None:
+    async def fake_run_steps(*_args: object, **_kwargs: object) -> None:
         return None
 
     monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
-    monkeypatch.setattr(coordinator, "execute_phases", fake_execute_phases)
+    monkeypatch.setattr(coordinator, "run_selection_steps", fake_run_steps)
+    monkeypatch.setattr(coordinator, "run_output_steps", fake_run_steps)
     monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda *a, **kw: None)
 
     result = asyncio.run(
@@ -390,11 +391,11 @@ def test_execute_run_initializes_enabled_step_map_before_phase_failure(
     async def _execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
         return prep
 
-    async def _execute_phases(*_args: object, **_kwargs: object) -> None:
+    async def _fail_selection_steps(*_args: object, **_kwargs: object) -> None:
         raise phase_error
 
     monkeypatch.setattr(coordinator, "execute_prep", _execute_prep)
-    monkeypatch.setattr(coordinator, "execute_phases", _execute_phases)
+    monkeypatch.setattr(coordinator, "run_selection_steps", _fail_selection_steps)
     monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda **_kwargs: None)
     with pytest.raises(RuntimeError) as exc_info:
         asyncio.run(
@@ -719,13 +720,12 @@ enable = false
 
     captured: dict[str, object] = {}
 
-    async def _capture_execute_phases(
-        _phases: object, context: RunContext, _reporter: object
+    async def _capture_selection_config(
+        context: RunContext, _steps: object, **_kwargs: object
     ) -> None:
-        if "config" not in captured:
-            captured["config"] = context.config
+        captured["config"] = context.config
 
-    monkeypatch.setattr(coordinator, "execute_phases", _capture_execute_phases)
+    monkeypatch.setattr(coordinator, "run_selection_steps", _capture_selection_config)
 
     asyncio.run(execute_run(request, deps=deps))
 
@@ -852,11 +852,12 @@ def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
 
     phases_started = False
 
-    async def _unexpected_execute_phases(*_args: object, **_kwargs: object) -> None:
+    async def _unexpected_run_steps(*_args: object, **_kwargs: object) -> None:
         nonlocal phases_started
         phases_started = True
 
-    monkeypatch.setattr(coordinator, "execute_phases", _unexpected_execute_phases)
+    monkeypatch.setattr(coordinator, "run_selection_steps", _unexpected_run_steps)
+    monkeypatch.setattr(coordinator, "run_output_steps", _unexpected_run_steps)
 
     request = make_run_request(
         root=tmp_path,
@@ -885,7 +886,6 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
 
     from frame_compare.cli.entry import app
     from frame_compare.orchestration import execution
-    from frame_compare.orchestration.execution_types import ExecutionState, PhaseOutput
     from frame_compare.orchestration.types import ReservedRunCapture
     from frame_compare.render.batch import orchestrator as batch
     from frame_compare.render.errors import RenderError
@@ -907,7 +907,6 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
     release_render = threading.Event()
     close_completed: list[bool] = []
     calls: list[int] = []
-    applied: list[str] = []
     children: list[subprocess.Popen[Any]] = []
     later: list[str] = []
 
@@ -1018,13 +1017,6 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
             release_render.set()
         return done, pending
 
-    real_apply = execution.apply_phase_output
-
-    def apply(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
-        if isinstance(output, RenderPhaseOutput):
-            applied.append("render")
-        real_apply(ctx=ctx, state=state, output=output)
-
     def report(*_args: object, **_kwargs: object) -> Never:
         later.append("report")
         raise AssertionError("later phase admitted")
@@ -1034,7 +1026,6 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
         patch.setattr(coordinator, "execute_prep", prep)
         patch.setattr(execution, "run_render_phase", render)
         patch.setattr(execution, "run_report_phase", report)
-        patch.setattr(execution, "apply_phase_output", apply)
         patch.setattr(batch, "render_frame_detailed", render_frame)
         patch.setattr(adapter.subprocess, "Popen", popen)
         if owner in {"httpx", "failure"}:
@@ -1066,7 +1057,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                 "status": record.status,
                 "calls": sorted(calls),
                 "later": later,
-                "applied": applied,
+                "render_applied": artifacts.render is not None,
                 "reaped": all(child.poll() is not None for child in children),
                 "children": len(children),
                 "close_completed": close_completed,
@@ -1098,7 +1089,7 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
     observed = json.loads(result.stdout)
     assert observed["status"] == "failed"
     assert observed["later"] == []
-    assert observed["applied"] == []
+    assert observed["render_applied"] is False
     assert observed["reaped"] is True
     if owner in {"vsview", "startup"}:
         assert observed["children"] == 1
@@ -1256,7 +1247,7 @@ def test_real_render_failure_wins_over_queued_sigint_and_client_close(tmp_path: 
     observed = json.loads(result.stdout)
     assert observed["status"] == "failed"
     assert observed["later"] == []
-    assert observed["applied"] == []
+    assert observed["render_applied"] is False
     assert observed["close_completed"] == [True]
     assert observed["calls"] in ([0], [0, 1])
 
@@ -1321,8 +1312,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
 ) -> None:
     from frame_compare.orchestration import execution, phase_post_render
     from frame_compare.orchestration.execution_types import (
-        ExecutionState,
-        PhaseOutput,
         PostReportCleanupPhaseOutput,
         ReportPhaseOutput,
     )
@@ -1365,7 +1354,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
     uploaded_paths: tuple[Path, ...] = ()
     connector_started = asyncio.Event()
     connector_finished = asyncio.Event()
-    applied_publish: list[bool] = []
     post_upload_started: list[bool] = []
     cleanup_started: list[bool] = []
     image_uploads: set[str] = set()
@@ -1488,13 +1476,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
             return ()
         return await real_post_upload(request)
 
-    real_apply = execution.apply_phase_output
-
-    def apply(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
-        if isinstance(output, PublishPhaseOutput):
-            applied_publish.append(True)
-        real_apply(ctx=ctx, state=state, output=output)
-
     real_cleanup = execution.run_post_report_cleanup_phase
 
     def cleanup(
@@ -1517,7 +1498,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
         monkeypatch.setattr(coordinator, name, lambda *a, **kw: None)
     monkeypatch.setattr(execution, "run_render_phase", fake_render)
     monkeypatch.setattr(execution, "run_report_phase", fake_report)
-    monkeypatch.setattr(execution, "apply_phase_output", apply)
     monkeypatch.setattr(execution, "run_post_report_cleanup_phase", cleanup)
     if outcome != "final_image_progress":
         monkeypatch.setattr(phase_post_render, "publish_to_slowpics", fake_publish)
@@ -1585,7 +1565,7 @@ async def test_confirmed_upload_facts_survive_cancellation(
     assert record.slowpics_url == (known_url if confirmed else None)
     assert artifacts.slowpics_url == record.slowpics_url
     assert artifacts.uploaded_slowpics_file_paths == uploaded_paths
-    assert bool(applied_publish) == (outcome == "success")
+    assert bool(artifacts.post_upload_actions) == (outcome == "success")
     assert bool(cleanup_started) == (not cancelled)
     assert bool(post_upload_started) == (
         outcome not in {"publisher_handoff", "upload_failure", "final_image_progress"}

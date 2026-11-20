@@ -6,19 +6,24 @@ from fractions import Fraction
 from pathlib import Path
 from time import monotonic
 from typing import cast
+from unittest.mock import Mock, call
 
 import pytest
 
 from frame_compare.config.overrides import CLIConfigOverrides
-from frame_compare.orchestration import phase_alignment
+from frame_compare.orchestration import execution, phase_alignment
 from frame_compare.orchestration.context import ClipState
+from frame_compare.orchestration.execution import RunSteps
+from frame_compare.orchestration.execution_types import ExecutionState, FramePlanPhaseOutput
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.services import alignment as alignment_service
 from frame_compare.services.types import (
     AlignmentConfig,
     AlignmentOperationOutcome,
     AlignmentResult,
 )
-from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.progress import NullProgressReporter
+from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest, AlignmentRequest
 from frame_compare.vs.loader import VSLoader
 from tests.alignment_review_test_support import (
@@ -28,6 +33,8 @@ from tests.alignment_review_test_support import (
 from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
 from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
+
+from .test_run_steps import prep_for_context
 
 
 @pytest.mark.parametrize("speed, enabled", [("quality", True), ("fast", True), ("fast", False)])
@@ -297,15 +304,8 @@ def test_unavailable_alignment_warns_and_rendering_continues(
     cache_results: bool,
     unavailable_kind: str,
 ) -> None:
-    from frame_compare.orchestration.execution import (
-        build_phases_after_align,
-        build_phases_before_align,
-    )
-    from frame_compare.orchestration.execution_types import ExecutionState, MetadataPrefetch
-    from frame_compare.orchestration.phases import PhaseStatus, execute_phases
     from frame_compare.services import alignment_audio
     from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
-    from frame_compare.utils.progress import NullProgressReporter
     from tests.orchestration.execute_run_helpers import (
         FakeVSLoader,
         install_fake_frame_render,
@@ -375,29 +375,31 @@ def test_unavailable_alignment_warns_and_rendering_continues(
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    align = build_phases_before_align(
-        request=request,
-        config=ctx.config,
-        monotonic_timer=monotonic,
-        state=state,
-        input_videos=[ctx.reference.path, comparison_path],
-        workspace=ctx.workspace,
-    )[2]
-    downstream = build_phases_after_align(
-        request=request,
-        config=ctx.config,
-        monotonic_timer=monotonic,
-        vs_loader=FakeVSLoader(),
-        http_client=None,
-        state=state,
-        metadata_prefetch=MetadataPrefetch(metadata=None, was_attempted=False),
+    reporter = Mock(spec=NullProgressReporter)
+    steps = RunSteps(reporter=reporter, state=state, monotonic_timer=monotonic)
+    prep = prep_for_context(ctx, state)
+    deps = RunDependencies(vs_loader=FakeVSLoader())
+    monkeypatch.setattr(
+        execution, "select_initial_frame_plan", lambda *a, **kw: FramePlanPhaseOutput([0, 1, 2])
     )
-    run = execute_phases([align, *downstream], ctx, NullProgressReporter())
-    asyncio.run(run)
-    assert align.status == (
-        PhaseStatus.COMPLETED if unavailable_kind == "timeline" else PhaseStatus.WARNED
-    ), state.warnings
-    assert downstream[0].status == PhaseStatus.COMPLETED
+
+    async def run() -> None:
+        await execution.run_selection_steps(
+            ctx, steps, request=request, prep=prep, state=state, deps=deps
+        )
+        align_status = (
+            ProgressPhaseStatus.COMPLETED
+            if unavailable_kind == "timeline"
+            else ProgressPhaseStatus.WARNED
+        )
+        assert reporter.complete_phase.call_args.args == (align_status,), state.warnings
+        reporter.reset_mock()
+        await execution.run_output_steps(
+            ctx, steps, request=request, prep=prep, state=state, deps=deps
+        )
+        assert reporter.complete_phase.call_args_list[0].args == (ProgressPhaseStatus.COMPLETED,)
+
+    asyncio.run(run())
     assert state.artifacts.render is not None
     assert paths_by_label(state.artifacts.render.clips)
     assert ctx.comparisons[0].alignment is None
@@ -619,11 +621,22 @@ def test_extra_footage_describes_final_shared_range(
         expected + "; frames come from the range all sources share." if expected else None
     )
     from frame_compare.orchestration.coordinator import _assemble_run_result
-    from frame_compare.orchestration.execution_types import ExecutionState
-    from frame_compare.orchestration.phase_output_application import apply_phase_output
 
     state = ExecutionState()
-    apply_phase_output(ctx=ctx, state=state, output=output)
+    monkeypatch.setattr(
+        execution, "select_initial_frame_plan", lambda *a, **kw: FramePlanPhaseOutput([30])
+    )
+    monkeypatch.setattr(execution, "run_align_phase", lambda *a, **kw: output)
+    asyncio.run(
+        execution.run_selection_steps(
+            ctx,
+            RunSteps(reporter=NullProgressReporter(), state=state, monotonic_timer=lambda: 0.0),
+            request=make_run_request(root=tmp_path, config=ctx.config, skip_analysis=True),
+            prep=prep_for_context(ctx, state),
+            state=state,
+            deps=RunDependencies(),
+        )
+    )
     result = _assemble_run_result(
         artifacts=state.artifacts,
         selected_frames=output.selected_frames,
@@ -649,13 +662,9 @@ def test_unapplied_and_unresolved_review_warn_only_the_align_phase(
 
     from frame_compare.cli.output import print_result_summary
     from frame_compare.orchestration.coordinator import _assemble_run_result
-    from frame_compare.orchestration.execution import _create_timed_phase
-    from frame_compare.orchestration.execution_types import ExecutionState
-    from frame_compare.orchestration.phases import PhaseStatus, execute_phases
     from frame_compare.services.alignment import format_rejected_alignment_warning
     from frame_compare.services.types import AlignmentReviewSummary, ComparisonResolution
     from frame_compare.utils.progress import RichProgressReporter, alignment_summary_lines
-    from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 
     comparison = _clip(tmp_path / "encode.mkv", label="Encode [red]", label_is_explicit=True)
     mixed_comparison = _clip(tmp_path / "encode-2.mkv", label="Second", label_is_explicit=True)
@@ -749,19 +758,23 @@ def test_unapplied_and_unresolved_review_warn_only_the_align_phase(
     monkeypatch.setattr("frame_compare.utils.progress.human_console", lambda **_kwargs: console)
     reporter = RichProgressReporter(no_color=True)
     state = ExecutionState()
-    phase = _create_timed_phase(
-        "align",
-        "align",
-        None,
-        lambda _ctx: output,
-        state,
-        lambda: 0.0,
-        state.phase_timings,
-        state.warnings,
+    advance = Mock(wraps=reporter.advance)
+    monkeypatch.setattr(reporter, "advance", advance)
+    monkeypatch.setattr(
+        execution, "select_initial_frame_plan", lambda *a, **kw: FramePlanPhaseOutput([0])
     )
-    asyncio.run(execute_phases([phase], ctx, reporter))
-    assert phase.status == PhaseStatus.COMPLETED
-    assert phase.success_status == ProgressPhaseStatus.WARNED
+    monkeypatch.setattr(execution, "run_align_phase", lambda *a, **kw: output)
+    asyncio.run(
+        execution.run_selection_steps(
+            ctx,
+            RunSteps(reporter=reporter, state=state, monotonic_timer=lambda: 0.0),
+            request=make_run_request(root=tmp_path, config=ctx.config, skip_analysis=True),
+            prep=prep_for_context(ctx, state),
+            state=state,
+            deps=RunDependencies(),
+        )
+    )
+    assert advance.call_args_list == [call(1), call(1)]
     phase_line = next(
         line for line in Text.from_ansi(stream.getvalue()).plain.splitlines() if "! Align" in line
     )
