@@ -755,10 +755,20 @@ error before rendering.
 
 ### Run Interruption
 
-After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
+After the first Ctrl+C, Frame Compare stops starting new run steps. Frame and
+audio workers stop admitting work when they observe cancellation. Frames already
+being rendered or analysed finish first. No new result, cache or
+diagnostic entry is published except the failure record. Native operations already
+in flight (a VapourSynth frame request, render or audio worker native call, and
+native index or cache files those calls write) run to completion. They have no
+guaranteed finite drain deadline. PNGs already written may remain. A second Ctrl+C
+keeps its existing behavior.
 
-The interrupted run follows the failure-record path and exits 130. On Windows,
-once the standalone CLI has completed its Python cleanup and selected exit 130,
+The interrupted run exits 130 even if a step fails at the same moment. If an
+alignment child, reader, pipe or handle cannot be released, the alignment cleanup
+error keeps its own exit code. Once a run folder has been reserved, Frame Compare
+attempts to write a failed record. On Windows, once the standalone CLI has
+completed its Python cleanup and selected exit 130,
 it ignores further Ctrl+C during interpreter/native-module teardown to preserve
 that exit status. This does not change repeated-interrupt behavior while the run
 or its cleanup is active, or the signal policy of the reusable Typer application.
@@ -1243,34 +1253,24 @@ without a separate `Visibility` row. The question inside the rail is
   provider-specific payload adapters.
 - The request identifies Frame Compare with a versioned `User-Agent` compatible
   with Discord's HTTP API requirements.
-- The configured webhook URL must be a strict external HTTPS endpoint:
-  non-HTTPS URLs, localhost names, loopback, private, link-local, multicast,
-  reserved, unspecified, and otherwise non-public IP targets are rejected.
-  URL fragments are rejected because fragments are not transmitted in HTTP
-  requests.
-- Hostname targets are rejected when DNS resolution fails, returns no addresses,
-  includes an unparseable address, or includes any disallowed address.
-- Default DNS resolution has a separate 10-second deadline and runs in an owned
-  standard-library subprocess. Cancellation stops and reaps that resolver before
-  returning; no HTTP attempt starts after cancellation. The resolver receives only
-  the hostname and port, never the webhook URL or request payload. A resolution
-  timeout produces the warning-only `timeout` diagnostic category.
-- Delivery prevents validation-to-connect DNS rebinding by connecting to a
-  prevalidated pinned IP address while preserving TLS certificate verification
-  and SNI for the original hostname.
-- Delivery uses no redirects, a fixed 10 second absolute deadline per attempt,
-  and at most 3 attempts. Pre-send connection and transient TLS transport
-  failures plus 5xx responses use deterministic 1-second then 2-second backoff.
-  TLS certificate-verification failures are permanent and fail immediately.
+- The configured URL must be an HTTPS URL with a host. Local-network and
+  loopback addresses are allowed. URLs containing userinfo, a fragment or
+  non-ASCII characters are rejected.
+- Delivery follows no redirects, verifies certificates against the system trust
+  store, uses a 10-second timeout per network operation, and makes at most three
+  attempts. Connection errors and timeouts before sending, including TLS
+  certificate-verification failures, and HTTP 5xx responses use 1-second then
+  2-second backoff.
 - HTTP 429 is retried only when the endpoint returns a valid numeric
-  `Retry-After` of at most 10 seconds. Missing, invalid, or longer delays fail
-  warning-only instead of blocking the run beyond the webhook delivery budget.
-- Once request transmission begins, a transport or response failure is treated
-  as an unknown delivery outcome and is not retried, because another POST could
-  create a duplicate notification.
-- The webhook request path is isolated from the slow.pics upload client: it does
-  not reuse slow.pics cookies, headers, client state, redirect policy, proxy
-  settings, or environment trust.
+  `Retry-After` between 0 and 10 seconds inclusive. Otherwise delivery stops
+  with a warning.
+- A transport error after the request may have been sent leaves the delivery
+  outcome uncertain. Delivery stops to avoid a duplicate POST.
+- Delivery checks only the response status and headers. It leaves the response
+  body unread.
+- Each delivery uses a fresh HTTP client isolated from the slow.pics upload
+  client's cookies, headers and other state. The webhook client ignores proxy
+  settings from the environment.
 - Webhook URL details are redacted from warnings and logs.
 - Failed deliveries carry a typed safe diagnostic category and, for HTTP failures,
   the numeric response status into structured logs. Diagnostics never include the
