@@ -18,7 +18,7 @@ from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
-from frame_compare.orchestration import coordinator
+from frame_compare.orchestration import coordinator, execution
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.errors import MixedSourceFpsError
@@ -31,6 +31,8 @@ from frame_compare.orchestration.execution_types import (
 )
 from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.orchestration.types import ReservedRunCapture, RunResult
+from frame_compare.render.errors import RenderError
+from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.run_result_record import read_run_result
 from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
@@ -51,7 +53,7 @@ from .execute_run_helpers import (
     install_fake_frame_render,
 )
 from .phase_task_helpers import _render_artifacts, _workspace
-from .preparation_test_support import create_config
+from .preparation_test_support import ALIGNMENT_CONFIG, create_config
 
 
 def _zero_monotonic_timer() -> float:
@@ -885,10 +887,8 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
     from typer.testing import CliRunner
 
     from frame_compare.cli.entry import app
-    from frame_compare.orchestration import execution
     from frame_compare.orchestration.types import ReservedRunCapture
     from frame_compare.render.batch import orchestrator as batch
-    from frame_compare.render.errors import RenderError
     from frame_compare.render.types import EncoderSettings, RenderedFrameResult, RenderRequest
     from frame_compare.services.run_result_record import RUN_RESULT_FILENAME, read_run_result
     from frame_compare.utils.media_facts import RenderedFrameFacts
@@ -905,7 +905,6 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
     ready = threading.Event()
     interrupted = threading.Event()
     release_render = threading.Event()
-    close_completed: list[bool] = []
     calls: list[int] = []
     children: list[subprocess.Popen[Any]] = []
     later: list[str] = []
@@ -946,12 +945,9 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
     class DelayedCloseTransport(httpx.AsyncBaseTransport):
         async def aclose(self) -> None:
             await asyncio.sleep(0)
-            close_completed.append(True)
 
     def render_frame(request: RenderRequest) -> RenderedFrameResult:
         calls.append(request.frame_number)
-        if owner == "failure" and request.frame_number == 0:
-            raise RenderError("render failed before interrupt")
         ready.set()
         assert release_render.wait(3)
         return RenderedFrameResult(
@@ -1006,17 +1002,6 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
             )
         )
 
-    real_wait = batch.wait
-    failure_interrupted: list[bool] = []
-
-    def wait_for_failure(*args: Any, **kwargs: Any) -> Any:
-        done, pending = real_wait(*args, **kwargs)
-        if done and not failure_interrupted:
-            failure_interrupted.append(True)
-            signal.raise_signal(signal.SIGINT)
-            release_render.set()
-        return done, pending
-
     def report(*_args: object, **_kwargs: object) -> Never:
         later.append("report")
         raise AssertionError("later phase admitted")
@@ -1028,13 +1013,10 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
         patch.setattr(execution, "run_report_phase", report)
         patch.setattr(batch, "render_frame_detailed", render_frame)
         patch.setattr(adapter.subprocess, "Popen", popen)
-        if owner in {"httpx", "failure"}:
+        if owner == "httpx":
             client = httpx.AsyncClient(transport=DelayedCloseTransport())
             patch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
-        if owner == "failure":
-            patch.setattr(batch, "wait", wait_for_failure)
-        else:
-            sender.start()
+        sender.start()
         result = CliRunner().invoke(
             app,
             [
@@ -1047,8 +1029,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                 "--no-upload",
             ],
         )
-        if owner != "failure":
-            sender.join(3)
+        sender.join(3)
     record = read_run_result(workspace.run_dir / RUN_RESULT_FILENAME)
     print(
         json.dumps(
@@ -1060,7 +1041,6 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                 "render_applied": artifacts.render is not None,
                 "reaped": all(child.poll() is not None for child in children),
                 "children": len(children),
-                "close_completed": close_completed,
             }
         )
     )
@@ -1095,8 +1075,6 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
         assert observed["children"] == 1
     elif owner == "render":
         assert observed["calls"] in ([0], [0, 1])
-    else:
-        assert observed["close_completed"] == [True]
 
 
 async def test_first_cancellation_during_owned_client_close_records_only_failure(
@@ -1224,32 +1202,84 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
     assert read_run_result(records[0]).status == "failed"
 
 
-def test_real_render_failure_wins_over_queued_sigint_and_client_close(tmp_path: Path) -> None:
-    import json
-    import subprocess
-    import sys
+async def test_interrupt_takes_precedence_over_render_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_config(tmp_path)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
-    code = (
-        "from pathlib import Path; import sys; "
-        "from tests.orchestration.test_execute_run_lifecycle import first_sigint_lifecycle_probe; "
-        "first_sigint_lifecycle_probe(Path(sys.argv[1]), 'failure')"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code, str(tmp_path)],
-        cwd=Path(__file__).parents[2],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    from frame_compare.cli.errors import ExitCode
+    def interrupt_render(*_args: object, **_kwargs: object) -> Never:
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        raise RenderError("render failed during interrupt")
 
-    assert result.returncode == int(ExitCode.PROCESSING_ERROR), result.stderr
-    observed = json.loads(result.stdout)
-    assert observed["status"] == "failed"
-    assert observed["later"] == []
-    assert observed["render_applied"] is False
-    assert observed["close_completed"] == [True]
-    assert observed["calls"] in ([0], [0, 1])
+    monkeypatch.setattr(execution, "run_render_phase", interrupt_render)
+    worker = asyncio.create_task(
+        execute_run(
+            make_run_request(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                overrides=CLIConfigOverrides(no_upload=True),
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
+        )
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(worker, 3)
+
+    records = list(tmp_path.glob("generated/*/run_result.toml"))
+    assert len(records) == 1
+    record = read_run_result(records[0])
+    assert record.status == "failed"
+    assert record.failure is not None
+    assert record.failure.category == "internal"
+
+
+async def test_alignment_cleanup_error_survives_interrupt_during_client_close(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_config(tmp_path, ALIGNMENT_CONFIG)
+    create_video_files(tmp_path / "comparison_videos", "a_reference.mkv", "b_comparison.mkv")
+    close_events: list[str] = []
+
+    class YieldingCloseTransport(httpx.AsyncBaseTransport):
+        async def aclose(self) -> None:
+            close_events.append("started")
+            await asyncio.sleep(0)
+            close_events.append("completed")
+
+    async def interrupt_align(*_args: object, **_kwargs: object) -> Never:
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        raise AudioAlignmentCleanupError("alignment resource could not be released")
+
+    client = httpx.AsyncClient(transport=YieldingCloseTransport())
+    monkeypatch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
+    monkeypatch.setattr(execution, "run_align_phase", interrupt_align)
+    worker = asyncio.create_task(
+        execute_run(
+            make_run_request(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                overrides=CLIConfigOverrides(no_upload=True),
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
+        )
+    )
+    with pytest.raises(AudioAlignmentCleanupError):
+        await asyncio.wait_for(worker, 3)
+
+    assert close_events == ["started"]
+    records = list(tmp_path.glob("generated/*/run_result.toml"))
+    assert len(records) == 1
+    record = read_run_result(records[0])
+    assert record.status == "failed"
+    assert record.failure is not None
+    assert record.failure.code == "FC-4005"
 
 
 def test_reservation_is_captured_before_interrupted_run_info_writer(
