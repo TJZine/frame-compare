@@ -68,12 +68,15 @@ function reviewStateContracts() {
     assert.equal(recovered.status().warning, '');
 
     // A storage read exception enters memory-only mode before any write.
+    let deniedWrites = 0;
     const denied = create({
         getItem() { throw new SyntaxError('browser denied storage'); },
-        setItem() { assert.fail('memory-only mode must skip setItem'); },
+        setItem() { deniedWrites += 1; },
     });
     assert.deepEqual(denied.status(), { memoryOnly: true, warning: PERSISTENCE_WARNING, count: 0 });
     assert.equal(denied.mutate(2, { note: initial.note }), false);
+    assert.equal(deniedWrites, 0);
+    assert.deepEqual(denied.status(), { memoryOnly: true, warning: PERSISTENCE_WARNING, count: 1 });
     assert.deepEqual(denied.all(), [initial]);
 
     // Writes are synchronous, canonical, sorted and have the stored shape.

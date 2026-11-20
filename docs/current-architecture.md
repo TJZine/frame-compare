@@ -278,7 +278,7 @@ Package-root export policy:
 | `frame_compare.services` | Namespace-only root with empty `__all__`; import concrete owner modules directly. |
 | `frame_compare.utils` | Namespace-only root with empty `__all__`; import concrete owner modules directly. |
 | `frame_compare.vsview` | Namespace-only root with empty `__all__`; import concrete VSView owner modules directly. |
-| `frame_compare.cli`, `frame_compare.services.report`, `frame_compare.render.batch`, `frame_compare.render.backend`, `frame_compare.orchestration.probing` | Nested namespace-only roots with empty `__all__`; import concrete owner modules directly. |
+| `frame_compare.cli`, `frame_compare.services.report`, `frame_compare.render.batch`, `frame_compare.orchestration.probing` | Nested namespace-only roots with empty `__all__`; import concrete owner modules directly. |
 | `frame_compare.orchestration` | Curated lazy facade for existing run and doctor entry DTOs/functions. |
 | `frame_compare.vs` | Curated lazy facade for selected VapourSynth integration symbols; preserve light imports when VapourSynth is absent. |
 | `frame_compare.runner` | Convenience runtime entry surface, not a broad public package facade. |

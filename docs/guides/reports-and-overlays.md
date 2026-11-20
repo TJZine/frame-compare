@@ -153,6 +153,16 @@ If two tabs edit the same report, the last save wins. If browser storage is
 unavailable or fails, changes last for the current session. Export the notes
 before closing the report to keep a copy.
 
+For each report, this browser also remembers the current frame, view mode, left,
+right, and active sources, reveal position, viewport fit, zoom, and pan
+(including Grid pan), overlay visibility, filmstrip size and collapsed state,
+Inspector open state and selected tab, Blink speed, palette orientation, and
+pair alignments. The viewer keeps this state and review notes in browser storage
+outside the report and run folder. Clearing browser storage removes both, and
+opening the report from a different URL can make them unavailable. Each generated
+report embeds its viewer, so updating Frame Compare leaves existing report files
+as they are.
+
 ## Screenshot overlays
 
 Choose a baked screenshot overlay with the `--overlay` run option or

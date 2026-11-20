@@ -185,35 +185,13 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(
     assert "do not reuse" in _rendered_row_value(output, "offsets")
     assert "HTML report" in output
     assert "BT.2390 reference" in _rendered_row_value(output, "tone map")
-    assert any("Rendering" in line and "VapourSynth" in line for line in output.splitlines())
+    assert any(
+        line.partition("│")[2].split() == ["Rendering", "VapourSynth"]
+        for line in output.splitlines()
+    )
     assert "disabled by --no-upload" in output
     assert "opens when done" in output
     assert "VSView" not in output
-
-
-def test_run_plan_reports_vapoursynth_renderer(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    console = _console()
-    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
-
-    print_at_a_glance(
-        console,
-        inputs=AcquiredRunConfig(
-            _workspace_path(),
-            _workspace_path("config", "config.toml"),
-            apply_cli_overrides(_config(), CLIConfigOverrides(no_upload=False)),
-        ),
-        no_cache=False,
-        from_cache_only=False,
-        skip_analysis=False,
-        skip_metadata=False,
-        no_upload_flag=False,
-    )
-
-    output = _render(console)
-    assert "Rendering" in output
-    assert any("Rendering" in line and "VapourSynth" in line for line in output.splitlines())
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")
