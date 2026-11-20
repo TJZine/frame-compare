@@ -26,7 +26,6 @@ from frame_compare.orchestration.errors import (
 )
 from frame_compare.render.errors import (
     EncodingError,
-    FrameExtractionError,
     OverlayError,
     RenderError,
 )
@@ -46,7 +45,6 @@ from frame_compare.vs.errors import (
     PluginNotFoundError,
     SourceLoadError,
     TonemapError,
-    TonemapRequiresVapourSynthError,
     VapourSynthError,
     VapourSynthNotFoundError,
 )
@@ -72,13 +70,11 @@ def _render_rich_markup(markup: str) -> str:
         (FFmpegNotFoundError, (), "FC-2005"),
         (FFmpegError, ("test", 1), "FC-2006"),
         (VSViewNotFoundError, (), "FC-2008"),
-        (TonemapRequiresVapourSynthError, (), "FC-2009"),
         # InputError (FC-3xxx)
         (NoVideosFoundError, (Path("/test"),), "FC-3001"),
         (DirectoryNotFoundError, (Path("/test"),), "FC-3006"),
         (PathEscapesRootError, (Path("/root"), Path("/other")), "FC-3009"),
         # ProcessingError (FC-4xxx)
-        (FrameExtractionError, (42, "clip.mkv"), "FC-4001"),
         (MetricsCalculationError, ("test",), "FC-4002"),
         (TonemapError, ("test",), "FC-4003"),
         (RenderError, (), "FC-4004"),

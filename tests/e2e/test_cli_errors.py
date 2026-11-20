@@ -282,7 +282,7 @@ def test_cli_doctor_nonfinite_timeout_diagnostic_is_strict_json(
     run_cli: Callable[..., CommandResult],
     workspace: Callable[..., Workspace],
 ) -> None:
-    root = workspace({"screenshots": {"ffmpeg_timeout_seconds": float("inf")}})
+    root = workspace({"slowpics": {"timeout_seconds": float("inf")}})
     result = run_cli(root.root, ["doctor", "--json"])
 
     payload = json.loads(result.stdout, parse_constant=_reject_nonfinite_json)
@@ -291,7 +291,7 @@ def test_cli_doctor_nonfinite_timeout_diagnostic_is_strict_json(
     details = check["details"]
     assert details["exception_type"] == "ConfigValidationError"
     assert any(
-        error["loc"] == ["screenshots", "ffmpeg_timeout_seconds"] and error["input"] == "inf"
+        error["loc"] == ["slowpics", "timeout_seconds"] and error["input"] == "inf"
         for error in details["validation_errors"]
     )
     assert result.stderr == ""

@@ -448,16 +448,6 @@ Comparison audio stream numbers by filename stem.
 `[screenshots]` is explained in [Reports and overlays](../guides/reports-and-overlays.md)
 and the contract's [screenshot surface](../current-cli-contract.md#config-only-screenshot-surface).
 
-#### `screenshots.use_ffmpeg` { #screenshots.use_ffmpeg .fc-key }
-
-Values
-:   `true`, `false`
-
-Default
-:   `false`
-
-Render with FFmpeg instead of VapourSynth; HDR sources then need `color.enable_tonemap = false`.
-
 #### `screenshots.overlay_mode` { #screenshots.overlay_mode .fc-key }
 
 Values
@@ -487,18 +477,6 @@ Default
 :   `6`
 
 PNG compression level.
-
-#### `screenshots.ffmpeg_timeout_seconds` { #screenshots.ffmpeg_timeout_seconds .fc-key }
-
-Values
-:   finite number, at least `5`
-
-Default
-:   `30.0`
-
-Timeout in seconds for each FFmpeg extraction, whether singleton or batch. The
-preceding decoded frame count check uses the greater of this value and 30 seconds
-plus one second per four prepared frames.
 
 #### `screenshots.geometry_mode` { #screenshots.geometry_mode .fc-key }
 

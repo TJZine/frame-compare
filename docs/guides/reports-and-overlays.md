@@ -149,37 +149,27 @@ and payload version.
 
 ## Review notes
 
-Viewer state such as the current frame, mode, selected sources, reveal position,
-viewport,
-and review notes can persist in the browser for that report. It does not rewrite the
-report or run folder. Clearing browser storage or opening the report under a different
-URL can remove that local state.
+Review notes stay in this browser for this report. The **Review** tab lets you
+bookmark a frame, choose a tag or preferred clip, and write a note of up to
+1000 Unicode scalars.
 
-Exported review JSON applies only to the report it came from.
+Use **Export review JSON** to keep a copy and **Import review JSON** to load it.
+Import checks that the file matches this report and asks before replacing saved
+notes.
 
-The **Review** tab holds the bookmark, tag, note, and **Preferred clip** fields
-alongside
-**Export review JSON** and **Import review JSON**. Those controls are the only ways to
-keep
-or transfer notes outside the browser that made them.
+If two tabs edit the same report, the last save wins. If browser storage is
+unavailable or fails, changes last for the current session. Export the notes
+before closing the report to keep a copy.
 
-A persistent line states how many review records are saved in this browser, and a fixed
-note beside it reminds you that notes are not stored in the report file. When browser
-storage or Web Locks is unavailable, or a save fails, the viewer says changes are kept only for that
-session. Export review JSON while that message is showing to keep the notes.
-
-If another tab changes saved review data, the current tab keeps its local drafts
-and warns instead of overwriting the other tab's changes. Export those drafts
-before reloading. After reviewing the saved changes, you can import the exported
-JSON with the appropriate merge or replacement choices. Saving is asynchronous;
-the status remains unsaved until the write finishes.
-
-Import previews additions, changes, and removals before you apply a merge or
-replacement.
-An import that fails validation or a browser-storage write leaves existing records
-unchanged. If browser storage is unavailable, a validated import applies only to the
-current session. Previously generated reports retain their embedded viewer code;
-installing a newer Frame Compare does not update those HTML files.
+For each report, this browser also remembers the current frame, view mode, left,
+right, and active sources, reveal position, viewport fit, zoom, and pan
+(including Grid pan), overlay visibility, filmstrip size and collapsed state,
+Inspector open state and selected tab, Blink speed, palette orientation, and
+pair alignments. The viewer keeps this state and review notes in browser storage
+outside the report and run folder. Clearing browser storage removes both, and
+opening the report from a different URL can make them unavailable. Each generated
+report embeds its viewer, so updating Frame Compare leaves existing report files
+as they are.
 
 ## Screenshot overlays
 

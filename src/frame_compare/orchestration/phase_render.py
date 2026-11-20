@@ -12,7 +12,6 @@ from frame_compare.orchestration.phase_selection import (
     map_aligned_to_source_frame,
 )
 from frame_compare.orchestration.selection_rows import selection_rows
-from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     HDRStaticFacts,
@@ -30,7 +29,6 @@ def run_render_phase(
     ctx: RunContext,
     *,
     frames: list[int],
-    runner: FFmpegRunner,
     vs_loader: VSLoader | None = None,
 ) -> RenderPhaseOutput:
     from frame_compare.render.batch.orchestrator import render_screenshots_from_batch_detailed
@@ -76,7 +74,6 @@ def run_render_phase(
         config=ctx.config,
         options=BatchRenderOptions(
             overlay_mode=ctx.config.screenshots.overlay_mode,
-            ffmpeg_runner=runner,
             reporter=ctx.reporter,
             parallelism=2,
             vs_loader=vs_loader,

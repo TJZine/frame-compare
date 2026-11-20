@@ -1,4 +1,4 @@
-"""M1/M2: both real screenshot paths preserve metric selection and provenance."""
+"""M1: VapourSynth screenshots preserve metric selection and provenance."""
 
 from __future__ import annotations
 
@@ -15,14 +15,12 @@ from tests.e2e.harness import CommandResult, Workspace, render_summary
 
 @pytest.mark.e2e
 @pytest.mark.vs_required
-@pytest.mark.parametrize("use_ffmpeg", [False, True], ids=["M1-vapoursynth", "M2-ffmpeg"])
 def test_media_render(
     media_gate: None,
     media_files: dict[str, Path],
     run_cli: Callable[..., CommandResult],
     workspace: Callable[..., Workspace],
     record: Callable[..., None],
-    use_ffmpeg: bool,
 ) -> None:
     root = workspace(
         {
@@ -35,7 +33,6 @@ def test_media_render(
             "audio_alignment": {"enable": False},
             "sources": {"reference": "reference.mkv"},
             "screenshots": {
-                "use_ffmpeg": use_ffmpeg,
                 "overlay_mode": "none",
                 "active_rect_detection": "provided",
             },
@@ -76,7 +73,7 @@ def test_media_render(
         ],
     }
     record(
-        "M2-ffmpeg" if use_ffmpeg else "M1-vapoursynth",
+        "M1-vapoursynth",
         root,
         [(arguments, result)],
         summary,
@@ -104,7 +101,7 @@ def test_metric_only_selection_failure_stops_before_render(
             },
             "audio_alignment": {"enable": False},
             "sources": {"reference": "reference.mkv"},
-            "screenshots": {"use_ffmpeg": True, "active_rect_detection": "provided"},
+            "screenshots": {"active_rect_detection": "provided"},
         }
     )
     reference = root.input_dir / "reference.mkv"

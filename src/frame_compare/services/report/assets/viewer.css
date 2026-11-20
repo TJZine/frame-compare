@@ -2198,30 +2198,6 @@ body:fullscreen .rv-mode-grid .rv-stage-overlay-info {
     border-top: 1px solid var(--border);
 }
 
-.rv-review-preview {
-    display: grid;
-    gap: 0.5rem;
-    padding: 0.75rem;
-    border: 1px solid var(--border-hover);
-    border-radius: 4px;
-    background: var(--bg-primary);
-    font-size: var(--text-xs);
-}
-
-.rv-review-preview fieldset {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem 0.75rem;
-    padding: 0.5rem;
-    border: 1px solid var(--border);
-}
-
-.rv-review-preview legend {
-    padding-inline: 0.25rem;
-    color: var(--text-muted);
-}
-
-
 .rv-visually-hidden {
     position: absolute !important;
     width: 1px !important;
@@ -2765,9 +2741,7 @@ body.rv-inspector-open .rv-viewer-stage {
 
     .rv-review-field select,
     .rv-review-transfer button,
-    .rv-review-preview button,
-    .rv-review-check,
-    .rv-review-preview label {
+    .rv-review-check {
         min-width: 44px;
         min-height: 44px;
     }

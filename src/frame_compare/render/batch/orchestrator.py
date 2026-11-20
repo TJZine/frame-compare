@@ -8,16 +8,9 @@ from typing import TYPE_CHECKING
 
 from frame_compare.render.batch.expansion import (
     expand_batch_render_requests,
-    resolve_batch_ffmpeg_runner,
-    resolve_target_renderer,
     validate_batch_requests,
-    validate_ffmpeg_batch_tonemap_gate,
 )
-from frame_compare.render.encoders import (
-    is_ffmpeg_batch_compatible,
-    render_ffmpeg_batch_detailed,
-    render_frame_detailed,
-)
+from frame_compare.render.encoders import render_frame_detailed
 from frame_compare.render.types import (
     BatchRenderOptions,
     PreparedClipRender,
@@ -33,7 +26,6 @@ from frame_compare.utils.progress_protocol import (
     ProgressReporter,
     failure_progress_status,
 )
-from frame_compare.utils.subproc import SubprocessAborted
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
@@ -51,45 +43,17 @@ def _render_work_unit(
     on_progress: Callable[[int], None] | None = None,
     stop: Event | None = None,
 ) -> list[RenderedFrameResult]:
-    """Render one logical unit, batching FFmpeg or serializing its other frames."""
-    request_list = list(requests)
-    if not request_list:
-        return []
-    is_ffmpeg_batch = len(request_list) > 1 and _can_batch_clip(request_list)
-    rendered: list[RenderedFrameResult]
-    if is_ffmpeg_batch:
-        try:
-            rendered = render_ffmpeg_batch_detailed(
-                request_list, abort=is_cancelling if stop is None else stop.is_set
-            )
-        except SubprocessAborted:
-            if stop is None:
-                raise_if_cancelling()
-                raise
-            raise _RenderStopped() from None
-    else:
-        rendered = []
-        for request in request_list:
-            if stop is None:
-                raise_if_cancelling()
-            elif stop.is_set():
-                raise _RenderStopped()
-            rendered.append(render_frame_detailed(request))
-            if on_progress is not None:
-                on_progress(1)
-    if on_progress is not None and is_ffmpeg_batch:
-        on_progress(len(rendered))
-    return rendered
-
-
-def _can_batch_clip(requests: list[RenderRequest]) -> bool:
-    first = requests[0]
-    previous_frame = -1
+    """Render one clip's frames in order."""
+    rendered: list[RenderedFrameResult] = []
     for request in requests:
-        if not is_ffmpeg_batch_compatible(first, request, previous_frame=previous_frame):
-            return False
-        previous_frame = request.frame_number
-    return True
+        if stop is None:
+            raise_if_cancelling()
+        elif stop.is_set():
+            raise _RenderStopped()
+        rendered.append(render_frame_detailed(request))
+        if on_progress is not None:
+            on_progress(1)
+    return rendered
 
 
 def _completed_clip(job: PreparedClipRender, results: list[RenderedFrameResult]) -> RenderedClip:
@@ -226,13 +190,6 @@ def render_screenshots_from_batch_detailed(
     if not batch_requests:
         return ()
     resolved_options = options or BatchRenderOptions()
-    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(
-        resolved_options.ffmpeg_runner,
-        extraction_timeout_seconds=config.screenshots.ffmpeg_timeout_seconds,
-    )
-    target_renderer = resolve_target_renderer(config, resolved_options.renderer)
-
-    validate_ffmpeg_batch_tonemap_gate(batch_requests, config, target_renderer)
     validate_batch_requests(batch_requests)
 
     jobs = expand_batch_render_requests(
@@ -240,8 +197,6 @@ def render_screenshots_from_batch_detailed(
         output_dir=output_dir,
         config=config,
         overlay_mode=resolved_options.overlay_mode,
-        renderer=target_renderer,
-        ffmpeg_runner=resolved_ffmpeg_runner,
         vs_loader=resolved_options.vs_loader,
     )
 

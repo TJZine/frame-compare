@@ -49,7 +49,6 @@ from frame_compare.orchestration.types import (
     RunRequest,
     RunResult,
 )
-from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
@@ -177,10 +176,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         await cancellation_checkpoint()
         prep = await execute_prep(request, local_deps)
         await cancellation_checkpoint()
-        if local_deps.ffmpeg_runner is None:
-            local_deps.ffmpeg_runner = DefaultFFmpegRunner(
-                extraction_timeout_seconds=prep.config.screenshots.ffmpeg_timeout_seconds
-            )
         state = ExecutionState(artifacts=prep.artifacts)
         artifacts = prep.artifacts
         phase_timings = state.phase_timings

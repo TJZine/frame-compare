@@ -1,4 +1,3 @@
-import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -13,20 +12,16 @@ from PIL import Image
 from vapoursynth import VideoNode
 
 from frame_compare.config.schema_enums import VsScreenshotWriter
-from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.color import untagged_matrix
 from frame_compare.render.encoders import (
     _clip_to_rgb24_for_pillow,
     _map_fpng_compression,
     _maybe_expand_tonemapped_video_range,
     _resolve_matrix_in_s,
-    apply_overlay_to_file,
-    render_ffmpeg_batch_detailed,
     render_frame_detailed,
 )
 from frame_compare.render.errors import (
     EncodingError,
-    FrameExtractionError,
     OverlayError,
     RenderError,
 )
@@ -37,47 +32,19 @@ from frame_compare.render.geometry import (
     SourceGeometry,
 )
 from frame_compare.render.types import EncoderSettings, OverlayConfig, OverlayMode, RenderRequest
-from frame_compare.utils.ffmpeg_errors import FFmpegNotFoundError
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     PresentationState,
-    RenderedFrameFacts,
     RenderedGeometryFacts,
     SourceSignalFacts,
     normalize_picture_type,
 )
-from frame_compare.vs.errors import SourceLoadError
-
-
-@pytest.fixture
-def mock_run_subprocess(monkeypatch):
-    mock = MagicMock()
-    mock.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b"")
-    monkeypatch.setattr("frame_compare.render.encoders.run_subprocess", mock)
-    return mock
 
 
 @pytest.fixture
 def mock_render_vs(monkeypatch):
     mock = MagicMock()
     monkeypatch.setattr("frame_compare.render.encoders._render_vs", mock)
-    return mock
-
-
-@pytest.fixture
-def mock_ffmpeg_runner(monkeypatch):
-    mock = MagicMock()
-    mock.return_value = RenderedFrameFacts(source_frame=100)
-    monkeypatch.setattr(
-        "frame_compare.render.backend.ffmpeg.DefaultFFmpegRunner.extract_frame", mock
-    )
-    return mock
-
-
-@pytest.fixture
-def mock_apply_overlay_file(monkeypatch):
-    mock = MagicMock()
-    monkeypatch.setattr("frame_compare.render.encoders._apply_overlay_to_file", mock)
     return mock
 
 
@@ -224,34 +191,8 @@ def test_render_frame_vs_dispatch(mock_render_vs):
         overlay=None,
         encoder_settings=EncoderSettings(),
     )
-    render_frame_detailed(request, renderer="auto")
+    render_frame_detailed(request)
     mock_render_vs.assert_called_once()
-
-
-def test_render_frame_ffmpeg_dispatch(mock_ffmpeg_runner):
-    request = RenderRequest(
-        clip=Path("test.mp4"),
-        diagnostic_source=Path("test.mp4"),
-        frame_number=100,
-        output_path=Path("out.png"),
-        overlay=None,
-        encoder_settings=EncoderSettings(),
-    )
-    render_frame_detailed(request, renderer="auto")
-    mock_ffmpeg_runner.assert_called_once()
-
-
-def test_render_frame_mismatch_error():
-    request = RenderRequest(
-        clip=Path("test.mp4"),
-        diagnostic_source=Path("test.mp4"),
-        frame_number=100,
-        output_path=Path("out.png"),
-        overlay=None,
-        encoder_settings=EncoderSettings(),
-    )
-    with pytest.raises(FrameExtractionError, match="Failed to extract frame 100"):
-        render_frame_detailed(request, renderer="vapoursynth")
 
 
 def test_render_frame_overlay_integration(mock_render_vs):
@@ -265,25 +206,11 @@ def test_render_frame_overlay_integration(mock_render_vs):
         overlay=overlay,
         encoder_settings=EncoderSettings(),
     )
-    render_frame_detailed(request, renderer="auto")
+    render_frame_detailed(request)
 
     mock_render_vs.assert_called_once()
     call_args = mock_render_vs.call_args
     assert call_args[1]["overlay"] == overlay
-
-
-def test_render_frame_overlay_integration_ffmpeg(mock_ffmpeg_runner, mock_apply_overlay_file):
-    request = RenderRequest(
-        clip=Path("test.mp4"),
-        diagnostic_source=Path("test.mp4"),
-        frame_number=100,
-        output_path=Path("out.png"),
-        overlay=_overlay(frame=100),
-        encoder_settings=EncoderSettings(),
-    )
-    render_frame_detailed(request, renderer="ffmpeg")
-    mock_ffmpeg_runner.assert_called_once()
-    mock_apply_overlay_file.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -324,7 +251,6 @@ def test_render_frame_vs_auto_uses_fpng_for_geometry_without_overlay(
                 pad=GeometryMargins(left=1, right=1),
             ),
         ),
-        renderer="vapoursynth",
     )
 
     assert len(fpng.calls) == 1
@@ -362,7 +288,6 @@ def test_render_frame_vs_auto_preserves_pillow_for_native_geometry_without_overl
             encoder_settings=EncoderSettings(vs_writer=VsScreenshotWriter.AUTO),
             geometry_plan=None,
         ),
-        renderer="vapoursynth",
     )
 
     assert fpng.calls == []
@@ -391,7 +316,6 @@ def test_render_frame_vs_auto_falls_back_to_pillow_when_overlay_is_present(
             overlay=overlay,
             encoder_settings=EncoderSettings(vs_writer=VsScreenshotWriter.AUTO),
         ),
-        renderer="vapoursynth",
     )
 
     assert fpng.calls == []
@@ -419,7 +343,6 @@ def test_render_frame_vs_pillow_writer_ignores_available_fpng(
             overlay=None,
             encoder_settings=EncoderSettings(vs_writer=VsScreenshotWriter.PILLOW),
         ),
-        renderer="vapoursynth",
     )
 
     assert fpng.calls == []
@@ -442,7 +365,6 @@ def test_render_frame_vs_fpng_requires_plugin_when_explicit(
                 overlay=None,
                 encoder_settings=EncoderSettings(vs_writer=VsScreenshotWriter.FPNG),
             ),
-            renderer="vapoursynth",
         )
 
     assert "fpng.Write plugin is unavailable" in exc_info.value.context.message
@@ -468,7 +390,6 @@ def test_render_frame_vs_fpng_rejects_overlay_when_explicit(
                 overlay=_overlay(frame=3),
                 encoder_settings=EncoderSettings(vs_writer=VsScreenshotWriter.FPNG),
             ),
-            renderer="vapoursynth",
         )
 
     assert "cannot preserve overlays yet" in exc_info.value.context.message
@@ -496,7 +417,6 @@ def test_render_frame_vs_auto_falls_back_to_pillow_for_tonemapped_limited_rgb(
             overlay=None,
             encoder_settings=EncoderSettings(vs_writer=VsScreenshotWriter.AUTO),
         ),
-        renderer="vapoursynth",
     )
 
     assert fpng.calls == []
@@ -523,7 +443,6 @@ def test_render_frame_vs_fpng_rejects_tonemapped_limited_rgb_when_explicit(
                 overlay=None,
                 encoder_settings=EncoderSettings(vs_writer=VsScreenshotWriter.FPNG),
             ),
-            renderer="vapoursynth",
         )
 
     assert "cannot preserve tonemapped limited-range RGB expansion yet" in (
@@ -565,54 +484,6 @@ def _geometry_plan(
     )
 
 
-def test_render_frame_ffmpeg_passes_geometry_plan_to_runner() -> None:
-    plan = _geometry_plan()
-    runner = MagicMock()
-    request = RenderRequest(
-        clip=Path("test.mp4"),
-        diagnostic_source=Path("test.mp4"),
-        frame_number=100,
-        output_path=Path("out.png"),
-        overlay=None,
-        encoder_settings=EncoderSettings(),
-        ffmpeg_runner=runner,
-        geometry_plan=plan,
-    )
-
-    render_frame_detailed(request, renderer="ffmpeg")
-
-    runner.extract_frame.assert_called_once_with(
-        Path("test.mp4"),
-        100,
-        Path("out.png"),
-        geometry_plan=plan,
-        source_signal=None,
-    )
-
-
-def test_render_frame_ffmpeg_wraps_unrepresentable_geometry_as_render_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "frame_compare.render.backend.ffmpeg.probe_video_streams",
-        lambda _path, **_kwargs: [{"width": 4, "height": 4}],
-    )
-    request = RenderRequest(
-        clip=Path("test.mp4"),
-        diagnostic_source=Path("test.mp4"),
-        frame_number=100,
-        output_path=Path("out.png"),
-        overlay=None,
-        encoder_settings=EncoderSettings(),
-        geometry_plan=_geometry_plan(scaled_size=(0, 4)),
-    )
-
-    with pytest.raises(RenderError) as exc_info:
-        render_frame_detailed(request, renderer="ffmpeg")
-
-    assert "Scaled frame dimensions are out of bounds" in exc_info.value.context.message
-
-
 def test_oversized_padding_never_reaches_vapoursynth_frame_work(tmp_path: Path) -> None:
     clip = MagicMock(width=4, height=4)
     geometry = replace(_geometry_plan(), pad=GeometryMargins(left=10**1000))
@@ -628,130 +499,25 @@ def test_oversized_padding_never_reaches_vapoursynth_frame_work(tmp_path: Path) 
                 encoder_settings=EncoderSettings(),
                 geometry_plan=geometry,
             ),
-            renderer="vapoursynth",
         )
     clip.get_frame.assert_not_called()
     assert not output.exists()
 
 
-def test_oversized_rendered_image_fails_before_pillow_load(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    image = MagicMock(size=(7681, 2))
-    context = MagicMock()
-    context.__enter__.return_value = image
-    monkeypatch.setattr("frame_compare.render.encoders.Image.open", MagicMock(return_value=context))
-    with pytest.raises(OverlayError, match="7,680 pixels per axis"):
-        apply_overlay_to_file(tmp_path / "out.png", _overlay(), RenderedFrameFacts(source_frame=0))
-    image.load.assert_not_called()
-
-
-def _ffmpeg_batch_requests(
-    tmp_path: Path,
-    frame_numbers: tuple[int, ...],
-) -> tuple[DefaultFFmpegRunner, list[RenderRequest]]:
-    runner = DefaultFFmpegRunner()
-    return runner, [
-        RenderRequest(
-            clip=Path("test.mp4"),
-            diagnostic_source=Path("test.mp4"),
-            frame_number=frame,
-            output_path=tmp_path / f"out_{index}.png",
-            overlay=None,
-            encoder_settings=EncoderSettings(),
-            ffmpeg_runner=runner,
-        )
-        for index, frame in enumerate(frame_numbers)
-    ]
-
-
-@pytest.mark.parametrize("frame_numbers", [(-1, 0), (2, 2), (2, 1)])
-def test_render_ffmpeg_batch_rejects_invalid_frame_order(
-    frame_numbers: tuple[int, ...],
-    tmp_path: Path,
-) -> None:
-    _, requests = _ffmpeg_batch_requests(tmp_path, frame_numbers)
-
-    with pytest.raises(ValueError, match="compatible and strictly ordered"):
-        render_ffmpeg_batch_detailed(requests)
-
-
-def test_render_ffmpeg_batch_wraps_output_failure_with_active_request(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    runner, requests = _ffmpeg_batch_requests(tmp_path, (10, 20))
-
-    def extract_frames(
-        _video: Path,
-        frame_nums: list[int],
-        output_dir: Path,
-        *,
-        geometry_plan: RenderGeometryPlan | None = None,
-        source_signal: SourceSignalFacts | None = None,
-        abort: object = None,
-    ) -> list[RenderedFrameFacts]:
-        _ = geometry_plan, source_signal
-        for index in range(len(frame_nums)):
-            (output_dir / f"{index:09d}.png").touch()
-        return [RenderedFrameFacts(source_frame=frame) for frame in frame_nums]
-
-    original_replace = Path.replace
-
-    def replace(path: Path, target: Path) -> Path:
-        if target == requests[1].output_path:
-            raise OSError("second output failed")
-        return original_replace(path, target)
-
-    monkeypatch.setattr(runner, "extract_frames", extract_frames)
-    monkeypatch.setattr(Path, "replace", replace)
-
-    with pytest.raises(RenderError) as exc_info:
-        render_ffmpeg_batch_detailed(requests)
-
-    assert isinstance(exc_info.value.__cause__, OSError)
-    assert exc_info.value.context.details == {
-        "renderer": "auto",
-        "frame": 20,
-        "output_path": str(requests[1].output_path),
-        "clip": "test.mp4",
-    }
-
-
-def test_apply_overlay_to_file_none_mode_is_noop(monkeypatch) -> None:
-    overlay = _overlay(OverlayMode.NONE, frame=100)
-
-    def _should_not_call(_path: Path, _config: OverlayConfig, _facts: RenderedFrameFacts) -> None:
-        raise AssertionError("_apply_overlay_to_file should not be called for NONE mode")
-
-    monkeypatch.setattr("frame_compare.render.encoders._apply_overlay_to_file", _should_not_call)
-    apply_overlay_to_file(
-        Path("does-not-matter.png"), overlay, RenderedFrameFacts(source_frame=100)
+def test_error_wrapping(mock_render_vs):
+    error = OverlayError("overlay failed")
+    mock_render_vs.side_effect = error
+    clip = FakeClip()
+    rendered_node = SimpleNamespace(
+        width=clip.width,
+        height=clip.height,
+        format=SimpleNamespace(
+            name="RGB24", color_family=2, sample_type=0, bits_per_sample=8, num_planes=3
+        ),
     )
-
-
-def test_render_frame_overlay_none_mode_is_strict_noop_on_ffmpeg(
-    mock_ffmpeg_runner, mock_apply_overlay_file
-):
     request = RenderRequest(
-        clip=Path("test.mp4"),
-        diagnostic_source=Path("test.mp4"),
-        frame_number=100,
-        output_path=Path("out.png"),
-        overlay=_overlay(OverlayMode.NONE, frame=100),
-        encoder_settings=EncoderSettings(),
-    )
-    render_frame_detailed(request, renderer="ffmpeg")
-    mock_ffmpeg_runner.assert_called_once()
-    mock_apply_overlay_file.assert_not_called()
-
-
-def test_error_wrapping(mock_ffmpeg_runner):
-    mock_ffmpeg_runner.side_effect = FFmpegNotFoundError()
-
-    request = RenderRequest(
-        clip=Path("test.mp4"),
-        diagnostic_source=Path("test.mp4"),
+        clip=cast(VideoNode, rendered_node),
+        diagnostic_source=cast(VideoNode, clip),
         frame_number=100,
         output_path=Path("out.png"),
         overlay=None,
@@ -759,25 +525,21 @@ def test_error_wrapping(mock_ffmpeg_runner):
     )
 
     with pytest.raises(RenderError) as excinfo:
-        render_frame_detailed(request, renderer="ffmpeg")
+        render_frame_detailed(request)
 
-    assert isinstance(excinfo.value.__cause__, FFmpegNotFoundError)
-
-
-def test_render_frame_reraises_source_load_error(mock_ffmpeg_runner):
-    mock_ffmpeg_runner.side_effect = SourceLoadError(Path("test.mp4"), "ffprobe failed")
-
-    request = RenderRequest(
-        clip=Path("test.mp4"),
-        diagnostic_source=Path("test.mp4"),
-        frame_number=100,
-        output_path=Path("out.png"),
-        overlay=None,
-        encoder_settings=EncoderSettings(),
+    assert excinfo.value.__cause__ is error
+    assert (
+        excinfo.value.context.message == f"Final render composition failed: {error.context.message}"
     )
-
-    with pytest.raises(SourceLoadError, match="ffprobe failed"):
-        render_frame_detailed(request, renderer="ffmpeg")
+    assert excinfo.value.context.details == {
+        "frame": 100,
+        "output_path": str(request.output_path),
+        "clip_format": "RGB24",
+        "color_family": 2,
+        "sample_type": 0,
+        "bits_per_sample": 8,
+        "num_planes": 3,
+    }
 
 
 class _FakeResize:
@@ -995,7 +757,6 @@ def test_render_vs_reads_picture_type_from_exact_diagnostic_source(
             overlay=None,
             encoder_settings=EncoderSettings(),
         ),
-        renderer="vapoursynth",
     )
 
     assert result.facts.picture_type == "B"
@@ -1048,7 +809,6 @@ def test_render_vs_applies_geometry_plan_before_saving(
             encoder_settings=EncoderSettings(),
             geometry_plan=_geometry_plan(),
         ),
-        renderer="vapoursynth",
     )
 
     with Image.open(output) as image:
@@ -1088,7 +848,6 @@ def test_render_vs_missing_or_invalid_source_property_is_nonfatal(
             overlay=None,
             encoder_settings=EncoderSettings(),
         ),
-        renderer="vapoursynth",
     )
     assert result.facts.picture_type is None
     assert result.facts.dolby_vision_rpu is (None if source_case == "raises" else False)

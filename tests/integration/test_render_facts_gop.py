@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image, ImageDraw
 
-from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode, ReportConfig
+from frame_compare.config.schema import ConfigSchema, OverlayMode, ReportConfig
 from frame_compare.render.batch.orchestrator import render_screenshots_from_batch_detailed
 from frame_compare.render.encoders import render_frame_detailed
-from frame_compare.render.errors import FrameExtractionError
 from frame_compare.render.types import (
     BatchRenderOptions,
     EncoderSettings,
@@ -51,8 +49,8 @@ if not detect_plugins(vs.core).get("lsmas", False):
 
 @pytest.mark.integration
 @pytest.mark.vs_required
-def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> None:
-    """Compare test-only frame truth with both production exact-frame backends."""
+def test_deterministic_gop_picture_facts_from_vapoursynth(tmp_path: Path) -> None:
+    """Check VapourSynth screenshot facts and pixels against independent frame truth."""
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
         pytest.skip("ffmpeg/ffprobe unavailable")
     encoders = run_subprocess(
@@ -136,10 +134,7 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
         is_noop=True,
     )
     signal = SourceSignalFacts(is_hdr=False, primaries=1, transfer=1, matrix=1)
-    results_by_backend: dict[str, list[RenderedFrameResult]] = {
-        "VapourSynth": [],
-        "FFmpeg": [],
-    }
+    results: list[RenderedFrameResult] = []
     for index in selected:
         overlay = OverlayConfig(
             mode=OverlayMode.MINIMAL,
@@ -167,66 +162,48 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
                 overlay=overlay,
                 encoder_settings=EncoderSettings(),
             ),
-            renderer="vapoursynth",
-        )
-        ffmpeg_result = render_frame_detailed(
-            RenderRequest(
-                clip=fixture,
-                diagnostic_source=fixture,
-                frame_number=index,
-                output_path=tmp_path / f"ffmpeg-{index}.png",
-                overlay=overlay,
-                encoder_settings=EncoderSettings(),
-            ),
-            renderer="ffmpeg",
         )
         assert vs_result.facts.picture_type == expected[index]
-        assert ffmpeg_result.facts.picture_type == expected[index]
-        for result in (vs_result, ffmpeg_result):
-            with Image.open(result.path) as image:
-                luma = image.convert("L").tobytes()
-                ordinal = sum(
-                    1 << bit for bit in range(3) if luma[56 * image.width + 8 + 16 * bit] > 128
-                )
-            assert ordinal == index, result.path.name
-        results_by_backend["VapourSynth"].append(vs_result)
-        results_by_backend["FFmpeg"].append(ffmpeg_result)
+        with Image.open(vs_result.path) as image:
+            luma = image.convert("L").tobytes()
+            ordinal = sum(
+                1 << bit for bit in range(3) if luma[56 * image.width + 8 + 16 * bit] > 128
+            )
+        assert ordinal == index, vs_result.path.name
+        results.append(vs_result)
 
-    clips = [
-        ClipInfo(
-            name=backend.lower(),
-            path=fixture,
-            frame_count=len(expected),
-            resolution=(64, 64),
-            fps=24.0,
-            size_bytes=fixture.stat().st_size,
-            signal=signal,
-            presentation_state=PresentationState.SDR,
-            tonemap=None,
-            active_picture=geometry.active_picture,
-            images=[
-                ReportImageInfo(result.path, index, result.facts)
-                for index, result in zip(selected, results, strict=True)
-            ],
-            display=ReportClipDisplayInfo(
-                primary=backend,
-                release="",
-                control=backend,
-                micro=backend,
-                filename=fixture.name,
-            ),
-            label=backend,
-        )
-        for backend, results in results_by_backend.items()
-    ]
+    clip = ClipInfo(
+        name="vapoursynth",
+        path=fixture,
+        frame_count=len(expected),
+        resolution=(64, 64),
+        fps=24.0,
+        size_bytes=fixture.stat().st_size,
+        signal=signal,
+        presentation_state=PresentationState.SDR,
+        tonemap=None,
+        active_picture=geometry.active_picture,
+        images=[
+            ReportImageInfo(result.path, index, result.facts)
+            for index, result in zip(selected, results, strict=True)
+        ],
+        display=ReportClipDisplayInfo(
+            primary="VapourSynth",
+            release="",
+            control="VapourSynth",
+            micro="VapourSynth",
+            filename=fixture.name,
+        ),
+        label="VapourSynth",
+    )
     payload = build_report_payload(
         ReportData(
-            clips=clips,
+            clips=[clip],
             frames=selected,
             rendering=ReportRenderingInfo(
                 overlay_mode=OverlayMode.MINIMAL,
                 include_frame_number=True,
-                geometry_by_label=dict.fromkeys(results_by_backend, geometry),
+                geometry_by_label={"VapourSynth": geometry},
             ),
         ),
         ReportConfig(embed_images=False),
@@ -235,76 +212,7 @@ def test_deterministic_gop_picture_facts_match_vs_and_ffmpeg(tmp_path: Path) -> 
     for frame_index, frame in enumerate(payload["frames"]):
         assert [image["picture_type"] for image in frame["images"]] == [
             expected[selected[frame_index]],
-            expected[selected[frame_index]],
         ]
-
-
-@pytest.mark.integration
-@pytest.mark.vs_required
-def test_ffmpeg_refuses_repeat_flagged_mpeg2_on_lsmash_timeline(
-    tmp_path: Path, require_ffmpeg: None
-) -> None:
-    video = tmp_path / "repeat-first-field.m2v"
-    run_subprocess(
-        [
-            "ffmpeg",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc2=size=96x64:rate=25",
-            "-frames:v",
-            "4",
-            "-c:v",
-            "mpeg2video",
-            "-g",
-            "1",
-            "-f",
-            "mpeg2video",
-            str(video),
-        ],
-        timeout_seconds=10,
-    )
-
-    stream = video.read_bytes()
-    extension = b"\x00\x00\x01\xb5"
-    # Extension id 8 identifies a picture coding extension. Set repeat_first_field
-    # on only the first progressive picture, where it requests one extra display.
-    first_picture_extension = next(
-        offset
-        for offset in range(len(stream) - 7)
-        if stream.startswith(extension, offset) and stream[offset + 4] >> 4 == 8
-    )
-    data = bytearray(stream)
-    data[first_picture_extension + 7] |= 0b10
-    video.write_bytes(data)
-
-    source = DefaultVSLoader().load(video)
-    assert source.num_frames == 5
-    request = ScreenshotBatchRequest(
-        clip_path=video,
-        label="Repeated picture",
-        frames=(SelectedScreenshot(1, 1, None),),
-        size_bytes=video.stat().st_size,
-        source_resolution=(source.width, source.height),
-        source_total_frames=source.num_frames,
-        signal=SourceSignalFacts(is_hdr=False),
-        active_picture=ActivePictureFacts(0, 0, source.width, source.height, "full_frame", True),
-    )
-    output_dir = tmp_path / "screenshots"
-    with pytest.raises(
-        FrameExtractionError,
-        match="FFmpeg decoded 4 frames but the prepared L-SMASH timeline has 5",
-    ) as exc:
-        render_screenshots_from_batch_detailed(
-            [request],
-            output_dir,
-            ConfigSchema(color=ColorConfig(enable_tonemap=False)),
-            BatchRenderOptions(renderer="ffmpeg", overlay_mode=OverlayMode.NONE),
-        )
-
-    assert video.name in exc.value.context.message
-    assert exc.value.context.hint == "Use the VapourSynth renderer"
-    assert not list(output_dir.glob("*.png"))
 
 
 @pytest.mark.integration
@@ -357,7 +265,7 @@ def test_ffmpeg_refuses_repeat_flagged_mpeg2_on_lsmash_timeline(
         ),
     ],
 )
-def test_renderers_choose_matrix_from_tag_hdr_or_coded_size(
+def test_vapoursynth_chooses_matrix_from_tag_hdr_or_coded_size(
     tmp_path: Path,
     require_ffmpeg: None,
     size: tuple[int, int],
@@ -425,7 +333,7 @@ def test_renderers_choose_matrix_from_tag_hdr_or_coded_size(
         pytest.param("bt2020c", 10, None, (161, 101, 41), id="bt2020-cl-implicit-transfer"),
     ],
 )
-def test_renderers_preserve_tagged_matrix_through_geometry(
+def test_vapoursynth_preserves_tagged_matrix_through_geometry(
     tmp_path: Path,
     require_ffmpeg: None,
     matrix_name: str,
@@ -488,27 +396,22 @@ def _assert_rendered_patch(
     canvas: tuple[int, int],
     expected: tuple[int, int, int],
 ) -> None:
+    (clip,) = render_screenshots_from_batch_detailed(
+        [request],
+        tmp_path / "vapoursynth-2",
+        config,
+        BatchRenderOptions(overlay_mode=OverlayMode.NONE),
+    )
+    assert len(clip.screenshots) == 2
+    assert clip.clip_facts.signal == request.signal
     mismatches = []
-    for renderer in ("ffmpeg", "vapoursynth"):
-        # A single selection exercises FFmpeg singleton extraction. Two selections
-        # exercise its one-pass path with the same prepared signal and geometry.
-        for count in (1, 2) if renderer == "ffmpeg" else (2,):
-            (clip,) = render_screenshots_from_batch_detailed(
-                [replace(request, frames=request.frames[:count])],
-                tmp_path / f"{renderer}-{count}",
-                config,
-                BatchRenderOptions(renderer=renderer, overlay_mode=OverlayMode.NONE),
-            )
-            assert len(clip.screenshots) == count
-            assert clip.clip_facts.signal == request.signal
-            for screenshot in clip.screenshots:
-                with Image.open(screenshot.result.path) as image:
-                    assert image.size == canvas
-                    pixel = image.getpixel((canvas[0] // 2, canvas[1] // 2))
-                    assert isinstance(pixel, tuple)
-                    if any(
-                        abs(channel - target) > 3
-                        for channel, target in zip(pixel, expected, strict=True)
-                    ):
-                        mismatches.append((renderer, count, pixel, expected))
+    for screenshot in clip.screenshots:
+        with Image.open(screenshot.result.path) as image:
+            assert image.size == canvas
+            pixel = image.getpixel((canvas[0] // 2, canvas[1] // 2))
+            assert isinstance(pixel, tuple)
+            if any(
+                abs(channel - target) > 3 for channel, target in zip(pixel, expected, strict=True)
+            ):
+                mismatches.append((pixel, expected))
     assert not mismatches

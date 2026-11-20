@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Never
+from typing import Any, Never, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -45,11 +45,12 @@ from tests.services.alignment_request_test_support import vsview_session
 from tests.services.alignment_resolution_test_support import configure_computed_alignment
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
+    FakeVSNode,
     clip_state,
     create_video_files,
     execution_context,
+    install_fake_frame_render,
 )
 from .phase_task_helpers import _render_artifacts, _workspace
 from .preparation_test_support import create_config
@@ -66,9 +67,6 @@ config_dir = "config"
 
 [audio_alignment]
 enable = true
-
-[screenshots]
-use_ffmpeg = true
 
 [report]
 enable = false
@@ -122,8 +120,8 @@ enable = false
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    ffmpeg = FakeFFmpegRunner()
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg)
+    recorded = install_fake_frame_render(monkeypatch)
+    deps = RunDependencies(vs_loader=FakeVSLoader())
     request = make_run_request(
         root=tmp_path,
         skip_analysis=True,
@@ -136,8 +134,9 @@ enable = false
     assert result.frame_count == 3
 
     by_video: dict[str, list[int]] = {}
-    for video_name, frame_num, _ in ffmpeg.calls:
-        by_video.setdefault(video_name, []).append(frame_num)
+    for render_request in recorded:
+        source_name = cast(FakeVSNode, cast(Any, render_request.clip)).source_path.name
+        by_video.setdefault(source_name, []).append(render_request.frame_number)
 
     assert by_video["a_ref.mkv"] == [32, 66, 83]
     assert by_video["b_comp1.mkv"] == [31, 65, 82]
@@ -147,6 +146,7 @@ enable = false
 @pytest.fixture
 def real_cli_runner(monkeypatch: pytest.MonkeyPatch) -> list[RunResult]:
     results: list[RunResult] = []
+    install_fake_frame_render(monkeypatch)
 
     def _run(request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         result = real_run(
@@ -154,7 +154,6 @@ def real_cli_runner(monkeypatch: pytest.MonkeyPatch) -> list[RunResult]:
             replace(
                 dependencies or RunDependencies(),
                 vs_loader=FakeVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
             ),
         )
         results.append(result)
@@ -193,8 +192,6 @@ def test_cli_reports_alignment_diagnostics_from_the_actual_write(
 enable = true
 use_vsview = {str(forced).lower()}
 force_interactive = {str(forced).lower()}
-[screenshots]
-use_ffmpeg = true
 [report]
 enable = false
 [tmdb]
@@ -263,8 +260,6 @@ ignore_lead_seconds = 12.0
 ignore_trail_seconds = 0.03
 [audio_alignment]
 enable = false
-[screenshots]
-use_ffmpeg = true
 [report]
 enable = false
 [tmdb]
@@ -325,11 +320,7 @@ def test_render_failure_reports_written_alignment_diagnostics_once_in_human_outp
     root = tmp_path / "workspace"
     config_path = _write_minimal_config(root)
     with config_path.open("a", encoding="utf-8") as stream:
-        stream.write(
-            "\n[audio_alignment]\nenable = true\n"
-            "[screenshots]\nuse_ffmpeg = true\n"
-            "[report]\nenable = false\n"
-        )
+        stream.write("\n[audio_alignment]\nenable = true\n[report]\nenable = false\n")
     create_video_files(root / "comparison_videos", "reference.mkv", "encode.mkv")
     command = [
         "run",
@@ -378,9 +369,6 @@ enable = true
 use_vsview = true
 force_interactive = true
 
-[screenshots]
-use_ffmpeg = true
-
 [report]
 enable = false
 """
@@ -395,7 +383,7 @@ enable = false
         raise failure
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fail_alignment)
-    ffmpeg = FakeFFmpegRunner()
+    recorded = install_fake_frame_render(monkeypatch)
 
     with pytest.raises(AudioAlignmentError) as raised:
         asyncio.run(
@@ -406,12 +394,12 @@ enable = false
                     skip_metadata=True,
                     overrides=CLIConfigOverrides(random_frame_count=1, no_upload=True),
                 ),
-                deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg),
+                deps=RunDependencies(vs_loader=FakeVSLoader()),
             )
         )
 
     assert raised.value is failure
-    assert ffmpeg.calls == []
+    assert recorded == []
     run_dirs = [path for path in (tmp_path / "generated").iterdir() if path.is_dir()]
     assert len(run_dirs) == 1
     record = read_run_result(run_dirs[0] / "run_result.toml")
@@ -423,6 +411,7 @@ enable = false
 def test_execute_run_report_confirmed_decline_skips_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
@@ -435,9 +424,6 @@ confirm_upload_after_report = true
 
 [audio_alignment]
 enable = false
-
-[screenshots]
-use_ffmpeg = true
 
 [report]
 enable = true
@@ -469,7 +455,6 @@ enable = true
             ),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
                 confirm_slowpics_upload=_decline,
             ),
         )
@@ -651,7 +636,7 @@ def test_cli_dropped_frames_notice_uses_shared_run_spacing(
     with config_path.open("a", encoding="utf-8") as stream:
         stream.write(
             f"\n[audio_alignment]\nenable = {str(alignment_enabled).lower()}\n"
-            "[screenshots]\nuse_ffmpeg = true\n[report]\nenable = false\n"
+            "[report]\nenable = false\n"
         )
     create_video_files(root / "comparison_videos", "reference.mkv", "encode.mkv")
     monkeypatch.setattr("frame_compare.cli.entry._sys_stream_isatty", lambda *_: True)

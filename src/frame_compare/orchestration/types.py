@@ -12,7 +12,6 @@ from typing import Literal, Protocol
 import httpx
 
 from frame_compare.orchestration.run_inputs import AcquiredRunConfig
-from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.utils.post_upload_actions import PostUploadActionResults
 from frame_compare.utils.progress_protocol import AlignmentSummary, ProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
@@ -148,7 +147,6 @@ class RunDependencies:
     """Dependency injection container for run orchestration."""
 
     vs_loader: VSLoader | None = None
-    ffmpeg_runner: FFmpegRunner | None = None
     http_client: httpx.AsyncClient | None = None
     progress: ProgressReporter | None = None
     confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None

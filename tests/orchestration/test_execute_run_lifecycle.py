@@ -39,18 +39,16 @@ from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
-from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.loader import DefaultVSLoader
 from frame_compare.vs.types import SourceInfo
 from tests.render_test_support import prepared_jobs
 from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
-    FakeHDRVSLoader,
     FakeVSLoader,
     clip_state,
     create_video_files,
+    install_fake_frame_render,
 )
 from .phase_task_helpers import _render_artifacts, _workspace
 from .preparation_test_support import create_config
@@ -62,7 +60,9 @@ def _zero_monotonic_timer() -> float:
 
 def test_execute_run_returns_success_and_records_preflight_timing(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -73,7 +73,7 @@ def test_execute_run_returns_success_and_records_preflight_timing(
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     result = asyncio.run(execute_run(request, deps=deps))
 
@@ -166,6 +166,7 @@ def test_execute_run_propagates_collection_warning_once_through_result_summary_a
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     reference_path = tmp_path / "comparison_videos" / "Reference.mkv"
     reference_path.parent.mkdir(parents=True)
     reference_path.write_bytes(b"reference")
@@ -230,10 +231,8 @@ def test_execute_run_propagates_collection_warning_once_through_result_summary_a
         _ctx: RunContext,
         *,
         frames: list[int],
-        runner: object,
         vs_loader: object,
     ) -> RenderPhaseOutput:
-        del runner
         assert vs_loader is prepared_loader
         screenshot_dir = workspace.screenshots_dir
         assert screenshot_dir is not None
@@ -295,7 +294,6 @@ def test_execute_run_propagates_collection_warning_once_through_result_summary_a
                     root=tmp_path, config=config, skip_analysis=True, skip_metadata=True
                 ),
                 deps=RunDependencies(
-                    ffmpeg_runner=FakeFFmpegRunner(),
                     http_client=client,
                     monotonic_timer=_zero_monotonic_timer,
                     progress=NullProgressReporter(),
@@ -418,6 +416,7 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config = get_default_config()
     config.slowpics.auto_upload = True
     config.slowpics.confirm_upload_after_report = False
@@ -497,7 +496,6 @@ def test_execute_run_cleanup_delete_error_returns_warning_not_failure(
     )
     deps = RunDependencies(
         vs_loader=FakeVSLoader(),
-        ffmpeg_runner=FakeFFmpegRunner(),
         monotonic_timer=_zero_monotonic_timer,
     )
 
@@ -515,6 +513,7 @@ def test_execute_run_webhook_action_warning_is_warning_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config = get_default_config()
     config.slowpics.auto_upload = True
     config.slowpics.confirm_upload_after_report = False
@@ -579,7 +578,6 @@ def test_execute_run_webhook_action_warning_is_warning_only(
     )
     deps = RunDependencies(
         vs_loader=FakeVSLoader(),
-        ffmpeg_runner=FakeFFmpegRunner(),
         monotonic_timer=_zero_monotonic_timer,
     )
 
@@ -596,6 +594,7 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config = get_default_config()
     config.slowpics.auto_upload = True
     config.slowpics.confirm_upload_after_report = False
@@ -665,7 +664,6 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
     )
     deps = RunDependencies(
         vs_loader=FakeVSLoader(),
-        ffmpeg_runner=FakeFFmpegRunner(),
         monotonic_timer=_zero_monotonic_timer,
     )
 
@@ -675,25 +673,6 @@ def test_execute_run_report_warning_blocks_delete_after_upload_cleanup(
     assert result.slowpics_url == "https://slow.pics/c/example"
     assert any(warning.text.startswith("report:") for warning in result.warnings)
     assert uploaded.exists()
-
-
-def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
-    tmp_path: Path,
-) -> None:
-    create_config(tmp_path)
-    input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv")
-
-    request = make_run_request(
-        root=tmp_path,
-        skip_analysis=True,
-        skip_metadata=True,
-        overrides=CLIConfigOverrides(no_upload=True),
-    )
-    deps = RunDependencies(vs_loader=FakeHDRVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
-
-    with pytest.raises(TonemapRequiresVapourSynthError):
-        asyncio.run(execute_run(request, deps=deps))
 
 
 def test_run_acquisition_propagates_config_not_found_error(tmp_path: Path) -> None:
@@ -706,6 +685,7 @@ def test_run_acquisition_propagates_config_not_found_error(tmp_path: Path) -> No
 def test_execute_run_applies_cli_overrides_before_phase_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
@@ -737,7 +717,7 @@ enable = false
             force_interactive_alignment=True,
         ),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     captured: dict[str, object] = {}
 
@@ -765,6 +745,7 @@ def test_execute_run_publish_skip_follows_effective_slowpics_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
@@ -773,9 +754,6 @@ config_dir = "config"
 
 [audio_alignment]
 enable = false
-
-[screenshots]
-use_ffmpeg = true
 
 [slowpics]
 auto_upload = false
@@ -803,7 +781,7 @@ enable = false
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=False),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     result = asyncio.run(execute_run(request, deps=deps))
 
@@ -813,10 +791,15 @@ enable = false
     assert publish_attempts == []
 
 
-def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: Path) -> None:
+def test_execute_run_uses_and_populates_probe_cache_without_reprobing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path)
     input_dir = tmp_path / "comparison_videos"
-    create_video_files(input_dir, "source.mkv")
+    clips = ("source.mkv",)
+    create_video_files(input_dir, *clips)
+    clip_count = len(clips)
 
     request = make_run_request(
         root=tmp_path,
@@ -825,32 +808,38 @@ def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: 
         overrides=CLIConfigOverrides(no_upload=True),
     )
 
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    class CountingVSLoader(FakeVSLoader):
+        def __init__(self) -> None:
+            self.loads: list[Path] = []
+
+        def load(self, path: Path) -> SourceInfo:
+            self.loads.append(path)
+            return super().load(path)
+
+    loader = CountingVSLoader()
+    deps = RunDependencies(vs_loader=loader)
     result = asyncio.run(execute_run(request, deps=deps))
     assert result.success is True
+    cold_loads = len(loader.loads)
 
     cache_path = tmp_path / "generated" / "clip_probe.toml"
     assert cache_path.exists()
-    cache_before = cache_path.read_text(encoding="utf-8")
+    cache_before = cache_path.read_bytes()
 
-    class RaisingFakeVSLoader:
-        def load(self, path: Path) -> SourceInfo:
-            raise AssertionError(f"Fake VS loader should not be called: {path}")
-
-        def ensure_core(self) -> Never:
-            raise AssertionError("Fake VS core should not be requested when cache is warm")
-
-    reuse_deps = RunDependencies(vs_loader=RaisingFakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
-    reuse_result = asyncio.run(execute_run(request, deps=reuse_deps))
+    loader.loads.clear()
+    reuse_result = asyncio.run(execute_run(request, deps=deps))
     assert reuse_result.success is True
+    warm_loads = len(loader.loads)
+    assert warm_loads == cold_loads - clip_count
 
-    cache_after = cache_path.read_text(encoding="utf-8")
+    cache_after = cache_path.read_bytes()
     assert cache_after == cache_before
 
 
 def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "a_reference.mkv", "b_comparison.mkv")
@@ -877,7 +866,7 @@ def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=MixedFpsVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=MixedFpsVSLoader())
 
     with pytest.raises(MixedSourceFpsError, match="Mixed source FPS is not supported"):
         asyncio.run(execute_run(request, deps=deps))
@@ -1004,8 +993,8 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
         else:
             requests = [
                 RenderRequest(
-                    clip=root / "reference.mkv",
-                    diagnostic_source=root / "reference.mkv",
+                    clip=cast(Any, root / "reference.mkv"),
+                    diagnostic_source=cast(Any, root / "reference.mkv"),
                     frame_number=index,
                     output_path=workspace.screenshots_dir / f"{index}.png",
                     overlay=None,
@@ -1134,6 +1123,7 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
 async def test_first_cancellation_during_owned_client_close_records_only_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     records_at_close: list[list[Path]] = []
@@ -1156,7 +1146,7 @@ async def test_first_cancellation_during_owned_client_close_records_only_failure
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
     with pytest.raises(asyncio.CancelledError):
@@ -1171,6 +1161,7 @@ async def test_first_cancellation_during_owned_client_close_records_only_failure
 async def test_cancellation_at_completed_record_guard_records_only_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     client = httpx.AsyncClient()
@@ -1202,7 +1193,7 @@ async def test_cancellation_at_completed_record_guard_records_only_failure(
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
     with pytest.raises(asyncio.CancelledError):
@@ -1216,9 +1207,11 @@ async def test_cancellation_at_completed_record_guard_records_only_failure(
 
 def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failure(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from frame_compare.services.run_result_record import RUN_RESULT_FILENAME, read_run_result
 
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path)
     create_video_files(tmp_path / "comparison_videos", "source.mkv", "comparison.mkv")
     calls: list[Path] = []
@@ -1242,7 +1235,7 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
                     skip_metadata=True,
                     overrides=CLIConfigOverrides(no_upload=True),
                 ),
-                RunDependencies(vs_loader=InterruptedLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+                RunDependencies(vs_loader=InterruptedLoader()),
             )
         )
     assert len(calls) == 1
@@ -1291,6 +1284,7 @@ def test_reservation_is_captured_before_interrupted_run_info_writer(
     from frame_compare.services.run_result_record import RUN_RESULT_FILENAME, read_run_result
     from frame_compare.utils.cancellation import raise_if_cancelling
 
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
     write_info = preparation.write_run_info
@@ -1313,7 +1307,7 @@ def test_reservation_is_captured_before_interrupted_run_info_writer(
                     skip_metadata=True,
                     overrides=CLIConfigOverrides(no_upload=True),
                 ),
-                RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+                RunDependencies(vs_loader=FakeVSLoader()),
             )
         )
     records = list((tmp_path / "generated").rglob(RUN_RESULT_FILENAME))
@@ -1353,6 +1347,7 @@ async def test_confirmed_upload_facts_survive_cancellation(
     from frame_compare.services.slowpics_post_upload import SlowpicsPostUploadRequest
     from frame_compare.services.slowpics_webhook import SlowpicsWebhookResult
 
+    install_fake_frame_render(monkeypatch)
     workspace = _workspace(tmp_path, run_subdir="run", screenshots_subdir="run/screenshots")
     assert workspace.run_dir is not None
     workspace.run_dir.mkdir()
@@ -1439,11 +1434,9 @@ async def test_confirmed_upload_facts_survive_cancellation(
         )
         return prep
 
-    def fake_render(
-        _ctx: RunContext, *, frames: list[int], runner: object, vs_loader: object
-    ) -> RenderPhaseOutput:
+    def fake_render(_ctx: RunContext, *, frames: list[int], vs_loader: object) -> RenderPhaseOutput:
         nonlocal uploaded_paths
-        del runner, vs_loader
+        del vs_loader
         screenshots = workspace.screenshots_dir
         assert screenshots is not None
         screenshots.mkdir()
@@ -1572,7 +1565,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
                     root=tmp_path, config=config, skip_analysis=True, skip_metadata=True
                 ),
                 deps=RunDependencies(
-                    ffmpeg_runner=FakeFFmpegRunner(),
                     http_client=client,
                     monotonic_timer=_zero_monotonic_timer,
                     progress=(

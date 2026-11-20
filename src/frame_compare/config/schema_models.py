@@ -212,11 +212,9 @@ class ScreenshotsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    use_ffmpeg: bool = False
     overlay_mode: OverlayMode = OverlayMode.STANDARD
     include_frame_number: bool = True
     png_compression: int = Field(default=6, ge=0, le=9)
-    ffmpeg_timeout_seconds: float = Field(default=30.0, ge=5.0, allow_inf_nan=False)
     geometry_mode: ScreenshotGeometryMode = ScreenshotGeometryMode.NATIVE
     active_rect_detection: ScreenshotActiveRectDetection = ScreenshotActiveRectDetection.AUTO
     aligned_scale_policy: ScreenshotAlignedScalePolicy = ScreenshotAlignedScalePolicy.LARGEST_ACTIVE

@@ -48,7 +48,6 @@ def _prepared(width: int, height: int) -> PreparedRenderSource:
         prepared_clip=MagicMock(name="prepared"),
         source_dimensions=(width, height),
         source_total_frames=100,
-        source_is_hdr=False,
         presentation_state=PresentationState.SDR,
         tonemap=None,
     )
@@ -67,8 +66,6 @@ def test_geometry_facts_preserve_native_active_picture_without_transform(
             screenshots=ScreenshotsConfig(geometry_mode=ScreenshotGeometryMode.NATIVE)
         ),
         overlay_mode=OverlayMode.DIAGNOSTIC,
-        renderer="vapoursynth",
-        ffmpeg_runner=MagicMock(),
     )
     requests = [request for job in jobs for request in job.requests]
     clip_facts = {job.label: job.clip_facts for job in jobs}
@@ -94,8 +91,6 @@ def test_geometry_facts_capture_aligned_active_picture_and_canvas(mock_prepare: 
         output_dir=Path("out"),
         config=config,
         overlay_mode=OverlayMode.STANDARD,
-        renderer="vapoursynth",
-        ffmpeg_runner=MagicMock(),
     )
     requests = [request for job in jobs for request in job.requests]
     facts = {job.label: job.clip_facts for job in jobs}
@@ -126,8 +121,6 @@ def test_supplied_active_picture_wins_over_config_detection(mock_prepare: MagicM
         output_dir=Path("out"),
         config=config,
         overlay_mode=OverlayMode.STANDARD,
-        renderer="vapoursynth",
-        ffmpeg_runner=MagicMock(),
     )
     requests = [request for job in jobs for request in job.requests]
     facts = {job.label: job.clip_facts for job in jobs}
@@ -154,6 +147,4 @@ def test_prepared_dimensions_cannot_silently_replace_active_picture_bounds() -> 
             output_dir=Path("out"),
             config=get_default_config(),
             overlay_mode=OverlayMode.NONE,
-            renderer="vapoursynth",
-            ffmpeg_runner=MagicMock(),
         )

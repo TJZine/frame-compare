@@ -12,11 +12,10 @@ async function reviewControllerContracts() {
             checked: false,
             children: [],
             dataset: {},
-            hidden: false,
             textContent: '',
             value: '',
             addEventListener(type, handler) { handlers.set(type, handler); },
-            fire(type, target = this) { return handlers.get(type)?.({ target }); },
+            fire(type) { return handlers.get(type)?.({ target: this }); },
             click() { return this.fire('click'); },
             replaceChildren(...children) {
                 this.children = children;
@@ -51,15 +50,9 @@ async function reviewControllerContracts() {
             return link;
         },
     };
-    let lockGate = Promise.resolve();
-    let onLockRequest = null;
+    const confirmations = [];
+    let confirmed = false;
     const context = {
-        AbortController,
-        navigator: { locks: { request: async (_name, _options, operation) => {
-            onLockRequest?.();
-            await lockGate;
-            return operation();
-        } } },
         Blob: FakeBlob,
         Date,
         Map,
@@ -67,9 +60,6 @@ async function reviewControllerContracts() {
             constructor(text, value) { this.text = text; this.value = value; }
         },
         Set,
-        TextDecoder,
-        TextEncoder,
-        Uint8Array,
         URL: {
             createObjectURL(blob) {
                 const url = `blob:review-${++nextUrl}`;
@@ -79,7 +69,13 @@ async function reviewControllerContracts() {
             revokeObjectURL(url) { revoked.push(url); },
         },
         document: documentObject,
-        window: { setTimeout(callback) { timers.push(callback); } },
+        window: {
+            setTimeout(callback) { timers.push(callback); },
+            confirm(message) {
+                confirmations.push(message);
+                return confirmed;
+            },
+        },
     };
     context.globalThis = context;
 
@@ -89,7 +85,6 @@ async function reviewControllerContracts() {
     vm.runInNewContext(`${fs.readFileSync(formatAsset, 'utf8')}\n${fs.readFileSync(asset, 'utf8')}\nglobalThis.__ReviewState = ReviewState;`, context, { filename: asset });
     const ReviewState = context.__ReviewState;
     const reportId = `report_${'c'.repeat(32)}`;
-    const encoder = new TextEncoder();
 
     function clipDisplay(label) {
         return {
@@ -125,37 +120,8 @@ async function reviewControllerContracts() {
     }
 
     function file(name, text) {
-        const data = encoder.encode(text);
-        return {
-            name,
-            size: data.byteLength,
-            async arrayBuffer() { return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength); },
-        };
+        return { name, async text() { return text; } };
     }
-
-    function deferredFile(name, text) {
-        const data = encoder.encode(text);
-        let resolve;
-        const pending = new Promise((done) => { resolve = done; });
-        return {
-            file: {
-                name,
-                size: data.byteLength,
-                arrayBuffer() { return pending; },
-            },
-            resolve() { resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)); },
-        };
-    }
-
-    const modeMerge = { ...element(), name: 'review-import-mode', value: 'merge', checked: true };
-    const modeReplace = { ...element(), name: 'review-import-mode', value: 'replace' };
-    const conflictLocal = { ...element(), name: 'review-import-conflict', value: 'keep-local', checked: true };
-    const conflictImported = { ...element(), name: 'review-import-conflict', value: 'use-imported' };
-    const radios = [modeMerge, modeReplace, conflictLocal, conflictImported];
-    const preview = element();
-    preview.hidden = true;
-    preview.querySelectorAll = selector => radios.filter(input => selector.includes(input.name));
-    preview.querySelector = selector => radios.find(input => selector.includes(input.name) && input.checked) || null;
 
     const dom = {
         reviewFrame: element(),
@@ -168,14 +134,10 @@ async function reviewControllerContracts() {
         reviewExport: element(),
         reviewImportTrigger: element(),
         reviewImport: element(),
-        reviewPreview: preview,
-        reviewPreviewCounts: element(),
-        reviewImportApply: element(),
-        reviewImportCancel: element(),
     };
     dom.reviewImport.click = () => { dom.reviewImport.opened = true; };
 
-    const storage = new Storage();
+    let storage = new Storage();
     const announcements = [];
     const viewer = {
         dom,
@@ -184,7 +146,7 @@ async function reviewControllerContracts() {
             data: {
                 report_id: reportId,
                 version: '1.4',
-                frames: Array.from({ length: 1001 }, () => ({})),
+                frames: [{}, {}, {}],
                 clips: [clipDisplay('Reference'), clipDisplay('Encode')],
             },
         },
@@ -194,198 +156,215 @@ async function reviewControllerContracts() {
         setText(target, text) { target.textContent = String(text); },
     };
 
-    function warningViewer(storageApi) {
-        const warningAnnouncements = [];
-        const warningDom = {
-            reviewFrame: element(),
-            reviewBookmark: element(),
-            reviewTag: element(),
-            reviewNote: element(),
-            reviewNoteCount: element(),
-            reviewPreferred: element(),
-            reviewStatus: element(),
-        };
-        return {
-            announcements: warningAnnouncements,
-            viewer: {
-                dom: warningDom,
-                state: {
-                    currentFrameIdx: 0,
-                    data: {
-                        report_id: reportId,
-                        version: '1.4',
-                        frames: [{}],
-                        clips: [clipDisplay('Reference')],
-                    },
-                },
-                clipDisplay(clip) { return clip.display.control; },
-                localStorage: () => storageApi,
-                announce(message) { warningAnnouncements.push(message); },
-                setText(target, text) { target.textContent = String(text); },
-            },
-        };
+    const controller = ReviewState.createController(viewer);
+    controller.bind();
+    controller.render();
+
+    // The import button opens the input and an empty report needs no confirmation.
+    const { model } = controller;
+    const status = () => dom.reviewStatus.textContent;
+    function selectFile(selected) {
+        dom.reviewImport.value = selected.name;
+        dom.reviewImport.files = [selected];
+        return dom.reviewImport.fire('change');
     }
 
-    async function main() {
-        const controller = ReviewState.createController(viewer);
-        controller.bind();
-        controller.render();
-        assert.equal(dom.reviewPreferred.replaceCount, 1);
-        assert.equal(announcements.length, 0);
-        assert.equal(dom.reviewStatus.textContent, '0 review records saved in this browser.');
-
-        dom.reviewNote.value = 'working note';
-        await dom.reviewNote.fire('input');
-        assert.equal(dom.reviewStatus.textContent, '1 review record saved in this browser.');
-        const replacementCount = dom.reviewPreferred.replaceCount;
-        viewer.announce('Lens on.');
-        controller.render();
-        assert.equal(dom.reviewNote.value, 'working note');
-        assert.equal(dom.reviewPreferred.replaceCount, replacementCount);
-        assert.equal(announcements.at(-1), 'Lens on.');
-
-        await dom.reviewImport.fire('change', { files: [file('empty.json', exported([]))] });
-        modeMerge.checked = false;
-        modeReplace.checked = true;
-        dom.reviewPreview.fire('change');
-        dom.reviewBookmark.checked = true;
-        await dom.reviewBookmark.fire('change');
-        assert.match(dom.reviewPreviewCounts.textContent, /Remove 1/);
-        await dom.reviewImportApply.click();
-        assert.equal(controller.model.all().length, 0);
-
-        await dom.reviewImport.fire('change', { files: [file('a.json', exported([record(1, 'A')]))] });
-        const delayed = deferredFile('b.json', exported([record(2, 'B')]));
-        const pendingRead = dom.reviewImport.fire('change', { files: [delayed.file] });
-        assert.equal(dom.reviewPreview.hidden, true);
-        await dom.reviewImportApply.click();
-        assert.equal(controller.model.all().length, 0);
-        delayed.resolve();
-        await pendingRead;
-        assert.equal(dom.reviewPreview.hidden, false);
-        assert.equal(modeMerge.checked, true);
-        assert.equal(conflictLocal.checked, true);
-        await dom.reviewImportApply.click();
-        assert.equal(controller.model.all().map(item => item.frame_ordinal).join(','), '2');
-
-        // Production File API handlers must display the delta that their Apply handler commits.
-        for (const mode of ['merge', 'replace']) {
-            for (const conflict of ['keep-local', 'use-imported']) {
-                await controller.model.mutate(2, { note: 'controller local note' });
-                const before = JSON.stringify(controller.model.all());
-                await dom.reviewImport.fire('change', { files: [file('conflict.json', exported([record(2, 'incoming')]))] });
-                modeMerge.checked = mode === 'merge';
-                modeReplace.checked = mode === 'replace';
-                conflictLocal.checked = conflict === 'keep-local';
-                conflictImported.checked = conflict === 'use-imported';
-                dom.reviewPreview.fire('change');
-                const changed = mode === 'replace' || conflict === 'use-imported';
-                assert.equal(dom.reviewPreviewCounts.textContent, `Add 0 · Change ${changed ? 1 : 0} · Remove 0 · Unchanged ${changed ? 0 : 1}`);
-                assert.equal(announcements.at(-1), `Import preview: add 0, change ${changed ? 1 : 0}, remove 0, unchanged ${changed ? 0 : 1}.`);
-                await dom.reviewImportApply.click();
-                assert.equal(JSON.stringify(controller.model.all()) !== before, changed);
-                assert.equal(controller.model.get(2).note, changed ? 'incoming' : 'controller local note');
-            }
-        }
-
-        viewer.state.currentFrameIdx = 3;
-        await controller.model.mutate(3, { note: '<img src=x onerror=alert(1)>' });
-        controller.render();
-        assert.equal(dom.reviewNote.value, '<img src=x onerror=alert(1)>');
-
-        storage.failWrite = true;
-        dom.reviewBookmark.checked = true;
-        await dom.reviewBookmark.fire('change');
-        assert.equal(dom.reviewStatus.textContent, ReviewState.constants.PERSISTENCE_WARNING);
-        assert.equal(announcements.at(-1), ReviewState.constants.PERSISTENCE_WARNING);
-        storage.failWrite = false;
-
-        dom.reviewExport.click();
-        assert.equal(downloads.at(-1).download, `${reportId}-review.json`);
-        const downloadUrl = downloads.at(-1).href;
-        const downloadedBlob = objectUrls.get(downloadUrl);
-        assert.equal(downloadedBlob.type, 'application/json;charset=utf-8');
-        assert.equal(downloadedBlob.parts.length, 1);
-        assert.ok(downloadedBlob.parts[0].endsWith('\n'));
-        assert.equal(JSON.parse(downloadedBlob.parts[0]).report.id, reportId);
-        assert.equal(revoked.includes(downloadUrl), false);
-        timers.splice(0).forEach(callback => callback());
-        assert.equal(revoked.includes(downloadUrl), true);
-
-        // Cancel and new preview choices must cancel an Apply waiting on storage.
-        for (const action of ['cancel', 'choices']) {
-            await dom.reviewImport.fire('change', { files: [file('pending.json', exported([record(1, 'pending import')]))] });
-            assert.equal(dom.reviewPreview.hidden, false);
-            assert.match(dom.reviewPreviewCounts.textContent, /^Add 1 ·/);
-            let release;
-            lockGate = new Promise(resolve => { release = resolve; });
-            const lockRequested = new Promise(resolve => { onLockRequest = resolve; });
-            const before = JSON.stringify(controller.model.all());
-            const saved = storage.value;
-            const applying = dom.reviewImportApply.click();
-            await lockRequested;
-            onLockRequest = null;
-            if (action === 'cancel') dom.reviewImportCancel.click();
-            else dom.reviewPreview.fire('change');
-            release();
-            await applying;
-            assert.equal(JSON.stringify(controller.model.all()), before);
-            assert.equal(storage.value, saved);
-            dom.reviewImportCancel.click();
-        }
-
-        // A refused 1,001st record still cancels a Replace waiting for the lock.
-        const fullReview = Array.from({ length: 1000 }, (_, ordinal) => record(ordinal));
-        await dom.reviewImport.fire('change', { files: [file('full.json', exported(fullReview))] });
-        await dom.reviewImportApply.click();
-        assert.equal(controller.model.all().length, 1000);
-        const savedFullReview = storage.value;
-        assert.equal(JSON.parse(savedFullReview).reviews.length, 1000);
-        const fullRecords = JSON.stringify(controller.model.all());
-        await dom.reviewImport.fire('change', { files: [file('empty.json', exported([]))] });
-        modeMerge.checked = false;
-        modeReplace.checked = true;
-        dom.reviewPreview.fire('change');
-        assert.match(dom.reviewPreviewCounts.textContent, /Remove 1000/);
-        let release;
-        lockGate = new Promise(resolve => { release = resolve; });
-        const lockRequested = new Promise(resolve => { onLockRequest = resolve; });
-        const replacing = dom.reviewImportApply.click();
-        await lockRequested;
-        onLockRequest = null;
-        viewer.state.currentFrameIdx = 1000;
-        controller.render();
-        dom.reviewBookmark.checked = true;
-        await dom.reviewBookmark.fire('change');
-        assert.equal(dom.reviewBookmark.checked, false);
-        assert.match(announcements.at(-1), /record limit of 1,000 reached/);
-        release();
-        await replacing;
-        assert.equal(storage.value, savedFullReview);
-        assert.equal(JSON.stringify(controller.model.all()), fullRecords);
-
-        const unavailable = warningViewer(null);
-        const unavailableController = ReviewState.createController(unavailable.viewer);
-        unavailableController.render();
-        unavailableController.render({ force: true });
-        assert.deepEqual(unavailable.announcements, [ReviewState.constants.PERSISTENCE_WARNING]);
-
-        const corruptStorage = new Storage();
-        corruptStorage.value = '{bad';
-        const corrupt = warningViewer(corruptStorage);
-        const corruptController = ReviewState.createController(corrupt.viewer);
-        corruptController.render();
-        corruptController.render({ force: true });
-        assert.equal(corrupt.announcements.length, 1);
-        assert.match(corrupt.announcements[0], /corrupt or unsupported/);
-
-
+    async function chooseFile(selected) {
+        assert.equal(dom.reviewImport.value, '');
+        await selectFile(selected);
+        assert.equal(dom.reviewImport.value, '');
     }
 
+    function deferredFile(name) {
+        let resolve;
+        let reject;
+        const pending = new Promise((resolveRead, rejectRead) => {
+            resolve = resolveRead;
+            reject = rejectRead;
+        });
+        return { file: { name, text: () => pending }, resolve, reject };
+    }
 
+    assert.equal(dom.reviewPreferred.replaceCount, 1);
+    assert.equal(announcements.length, 0);
+    assert.equal(status(), '0 review records saved in this browser.');
+    dom.reviewImportTrigger.click();
+    assert.equal(dom.reviewImport.opened, true);
+    const initial = record(1, 'initial 😀');
+    await chooseFile(file('initial.json', exported([initial])));
+    assert.deepEqual(confirmations, []);
+    assert.equal(status(), 'Review import applied.');
+    assert.deepEqual(JSON.parse(storage.value).reviews, [initial]);
 
-    await main();
+    // The panel renders the selected frame and all four controls save immediately.
+    viewer.state.currentFrameIdx = 1;
+    controller.render();
+    assert.equal(dom.reviewFrame.textContent, 'Frame 2 of 3');
+    assert.equal(dom.reviewBookmark.checked, true);
+    assert.equal(dom.reviewTag.value, '');
+    assert.equal(dom.reviewNote.value, initial.note);
+    assert.equal(dom.reviewNoteCount.textContent, '9 / 1000');
+    assert.equal(dom.reviewPreferred.value, '');
+    assert.equal(status(), '1 review record saved in this browser.');
 
+    const savedRecord = () => JSON.parse(storage.value).reviews[0];
+    dom.reviewBookmark.checked = false;
+    dom.reviewBookmark.fire('change');
+    assert.equal(savedRecord().bookmark, false);
+    dom.reviewTag.value = 'detail';
+    dom.reviewTag.fire('change');
+    assert.equal(savedRecord().tag, 'detail');
+    dom.reviewPreferred.value = 'clip:1';
+    dom.reviewPreferred.fire('change');
+    assert.equal(savedRecord().preferred_clip_id, 'clip:1');
+    const note = '😀'.repeat(1000);
+    dom.reviewNote.value = note + 'x';
+    dom.reviewNote.fire('input');
+    assert.equal(dom.reviewNote.value, note);
+    assert.equal(savedRecord().note, note);
+    assert.equal(dom.reviewNoteCount.textContent, '1000 / 1000');
+
+    const literalNote = '<img src=x onerror=alert(1)>';
+    dom.reviewNote.value = literalNote;
+    dom.reviewNote.fire('input');
+    assert.equal(savedRecord().note, literalNote);
+    viewer.announce('Lens on.');
+    controller.render();
+    assert.equal(dom.reviewNote.value, literalNote);
+    assert.equal(dom.reviewPreferred.replaceCount, 1);
+    assert.equal(announcements.at(-1), 'Lens on.');
+
+    // Export keeps its file name, JSON contents, media type, and URL cleanup.
+    dom.reviewExport.click();
+    const download = downloads.at(-1);
+    assert.equal(download.download, `${reportId}-review.json`);
+    const downloadedBlob = objectUrls.get(download.href);
+    assert.equal(downloadedBlob.type, 'application/json;charset=utf-8');
+    assert.equal(downloadedBlob.parts.length, 1);
+    assert.equal(downloadedBlob.parts[0].endsWith('\n'), true);
+    const downloaded = JSON.parse(downloadedBlob.parts[0]);
+    assert.equal(downloaded.report.id, reportId);
+    assert.deepEqual(downloaded.reviews, [savedRecord()]);
+    assert.equal(revoked.includes(download.href), false);
+    timers.splice(0).forEach(callback => callback());
+    assert.equal(revoked.includes(download.href), true);
+    assert.equal(status(), 'Review JSON exported.');
+
+    // Cancel keeps memory and storage. Choosing the same file again and confirming replaces them.
+    const incoming = [record(0, 'first note'), record(2, 'second note')];
+    const replacement = file('replacement.json', exported(incoming));
+    const originalBytes = storage.value;
+    await chooseFile(replacement);
+    const question = 'Replace 1 saved review record with 2 imported records?';
+    assert.deepEqual(confirmations, [question]);
+    assert.equal(status(), 'Import cancelled. No changes were made.');
+    assert.equal(model.get(1).note, literalNote);
+    assert.equal(storage.value, originalBytes);
+
+    confirmed = true;
+    await chooseFile(replacement);
+    assert.deepEqual(confirmations, [question, question]);
+    assert.equal(status(), 'Review import applied.');
+    assert.equal(model.get(1).note, '');
+    assert.equal(dom.reviewNote.value, '');
+    assert.deepEqual(JSON.parse(storage.value).reviews, incoming);
+
+    // Invalid text, a wrong extension, and read failures keep the replacement untouched.
+    const replacedBytes = storage.value;
+    await chooseFile(file('invalid.json', '{bad'));
+    assert.equal(status(), 'Import is not valid JSON. No changes were made.');
+    await chooseFile({
+        name: 'review.txt',
+        async text() { assert.fail('a refused extension must not be read'); },
+    });
+    assert.equal(status(), 'Choose one .json review file. No changes were made.');
+    await chooseFile({
+        name: 'unreadable.json',
+        async text() { throw new Error('File could not be read.'); },
+    });
+    assert.equal(status(), 'File could not be read. No changes were made.');
+    assert.equal(confirmations.length, 2);
+    assert.equal(storage.value, replacedBytes);
+    assert.deepEqual(JSON.parse(JSON.stringify(model.all())), incoming);
+    assert.equal(dom.reviewStatus.dataset.tone, 'warning');
+
+    // Only the latest selection can finish, even if its extension is refused.
+    const refusedStatus = 'Choose one .json review file. No changes were made.';
+    const stale = deferredFile('slow.json');
+    const staleImport = selectFile(stale.file);
+    await selectFile(file('newer.txt', exported(incoming)));
+    assert.equal(dom.reviewImport.value, '');
+    assert.equal(status(), refusedStatus);
+    stale.resolve(exported([initial]));
+    await staleImport;
+    assert.equal(confirmations.length, 2);
+    assert.equal(storage.value, replacedBytes);
+    assert.deepEqual(JSON.parse(JSON.stringify(model.all())), incoming);
+    assert.equal(status(), refusedStatus);
+
+    const staleFailure = deferredFile('slow-error.json');
+    const staleFailedImport = selectFile(staleFailure.file);
+    const latest = deferredFile('latest.json');
+    const latestImport = selectFile(latest.file);
+    staleFailure.reject(new Error('Superseded read failed.'));
+    await staleFailedImport;
+    assert.equal(confirmations.length, 2);
+    assert.equal(status(), refusedStatus);
+    assert.equal(dom.reviewImport.value, latest.file.name);
+    latest.resolve(exported(incoming));
+    await latestImport;
+    assert.equal(confirmations.length, 3);
+    assert.equal(status(), 'Review import applied.');
+    assert.equal(dom.reviewImport.value, '');
+    assert.equal(storage.value, replacedBytes);
+
+    // A storage failure still applies the confirmed import, with the persistence warning.
+    const warning = ReviewState.constants.PERSISTENCE_WARNING;
+    storage.failWrite = true;
+    await chooseFile(file('memory.json', exported([initial])));
+    assert.equal(confirmations.at(-1), 'Replace 2 saved review records with 1 imported record?');
+    assert.equal(status(), `Review import applied. ${warning}`);
+    assert.equal(dom.reviewStatus.dataset.tone, 'warning');
+    assert.equal(model.get(1).note, initial.note);
+    assert.equal(dom.reviewNote.value, initial.note);
+    assert.equal(storage.value, replacedBytes);
+    dom.reviewBookmark.checked = false;
+    dom.reviewBookmark.fire('change');
+    assert.equal(model.get(1).bookmark, false);
+    assert.equal(status(), warning);
+    assert.equal(announcements.at(-1), warning);
+    dom.reviewExport.click();
+    assert.equal(status(), `Review JSON exported. ${warning}`);
+
+    // An unsuccessful import keeps the notes and the active persistence warning.
+    const memoryRecords = JSON.parse(JSON.stringify(model.all()));
+    confirmed = false;
+    await chooseFile(replacement);
+    assert.equal(status(), `Import cancelled. No changes were made. ${warning}`);
+    assert.equal(dom.reviewStatus.dataset.tone, 'warning');
+    assert.deepEqual(JSON.parse(JSON.stringify(model.all())), memoryRecords);
+    assert.equal(storage.value, replacedBytes);
+
+    await chooseFile(file('invalid.json', '{bad'));
+    assert.equal(status(), `Import is not valid JSON. No changes were made. ${warning}`);
+    assert.equal(dom.reviewStatus.dataset.tone, 'warning');
+    assert.deepEqual(JSON.parse(JSON.stringify(model.all())), memoryRecords);
+    assert.equal(storage.value, replacedBytes);
+
+    // Each startup warning is announced once, including on a forced render.
+    for (const [unavailableStorage, expected] of [
+        [null, warning],
+        [Object.assign(new Storage(), { value: '{bad' }),
+            'Stored review data is corrupt or unsupported; it was ignored and left untouched.'],
+    ]) {
+        storage = unavailableStorage;
+        const starting = ReviewState.createController(viewer);
+        const before = announcements.length;
+        starting.render();
+        starting.render({ force: true });
+        assert.deepEqual(announcements.slice(before), [expected]);
+        assert.equal(status(), expected);
+    }
 }
 
 module.exports = { reviewControllerContracts };

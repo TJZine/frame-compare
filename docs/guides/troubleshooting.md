@@ -172,8 +172,7 @@ frames. To confirm or enter an offset by eye, use
 ### Rendering and HDR
 
 Confirm source loading, range/transfer/primaries evidence, vs-placebo availability, and
-Vulkan initialization. Avoid enabling an FFmpeg-only path as a workaround when HDR
-frames still require VapourSynth tonemapping.
+Vulkan initialization.
 
 ### Report or browser behavior
 

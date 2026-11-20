@@ -311,8 +311,12 @@ def test_unavailable_alignment_warns_and_rendering_continues(
     from frame_compare.services import alignment_audio
     from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
     from frame_compare.utils.progress import NullProgressReporter
-    from tests.orchestration.execute_run_helpers import FakeFFmpegRunner
+    from tests.orchestration.execute_run_helpers import (
+        FakeVSLoader,
+        install_fake_frame_render,
+    )
 
+    install_fake_frame_render(monkeypatch)
     comparison_path = tmp_path / "comparison_videos" / "encode.mkv"
     comparison_path.parent.mkdir(parents=True)
     comparison_path.write_bytes(b"comparison")
@@ -388,7 +392,7 @@ def test_unavailable_alignment_warns_and_rendering_continues(
         request=request,
         config=ctx.config,
         monotonic_timer=monotonic,
-        ffmpeg_runner=FakeFFmpegRunner(),
+        vs_loader=FakeVSLoader(),
         http_client=None,
         state=state,
         metadata_prefetch=MetadataPrefetch(metadata=None, was_attempted=False),

@@ -187,10 +187,7 @@ def print_at_a_glance(
                 f"last {format_exclusion_duration(analysis.ignore_trail_seconds)}",
             ]
         )
-    if config.screenshots.use_ffmpeg:
-        renderer = _styled_value("FFmpeg")
-    else:
-        renderer = _dot_join(["automatic", "VapourSynth preferred"])
+    renderer = _styled_value("VapourSynth")
     geometry_text = _dot_join(
         [
             f"{config.screenshots.geometry_mode.value.lower()} geometry",

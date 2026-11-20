@@ -154,7 +154,6 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(
         return f"/usr/bin/{command}"
 
     config = _config()
-    config.screenshots.use_ffmpeg = True
     console = _console()
 
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _resolve)
@@ -192,7 +191,10 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(
     assert "do not reuse" in _rendered_row_value(output, "offsets")
     assert "HTML report" in output
     assert "BT.2390 reference" in _rendered_row_value(output, "tone map")
-    assert "FFmpeg" in output
+    assert any(
+        line.partition("│")[2].split() == ["Rendering", "VapourSynth"]
+        for line in output.splitlines()
+    )
     assert "disabled by --no-upload" in output
     for label in ("after upload", "webhook", "cleanup"):
         with pytest.raises(AssertionError, match=f"Missing row label: {label}"):
@@ -227,32 +229,6 @@ def test_run_plan_omits_details_for_features_disabled_in_config() -> None:
     for label in ("tools", "offsets", "after upload", "webhook", "cleanup"):
         with pytest.raises(AssertionError, match=f"Missing row label: {label}"):
             _rendered_row_value(output, label)
-
-
-def test_run_plan_reports_auto_renderer_when_ffmpeg_is_not_forced(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    console = _console()
-    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
-
-    print_at_a_glance(
-        console,
-        inputs=AcquiredRunConfig(
-            _workspace_path(),
-            _workspace_path("config", "config.toml"),
-            apply_cli_overrides(_config(), CLIConfigOverrides(no_upload=False)),
-        ),
-        no_cache=False,
-        from_cache_only=False,
-        skip_analysis=False,
-        skip_metadata=False,
-        no_upload_flag=False,
-    )
-
-    output = _render(console)
-    assert "Rendering" in output
-    assert "automatic" in output
-    assert "VapourSynth preferred" in output
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")

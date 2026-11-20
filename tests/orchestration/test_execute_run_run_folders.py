@@ -35,10 +35,10 @@ from frame_compare.vs.types import SourceInfo
 from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
     create_video_files,
+    install_fake_frame_render,
     metric_cache_fingerprint,
     write_metrics_cache,
     write_probe_cache_for_inputs,
@@ -94,6 +94,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -153,7 +154,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
         )
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
-    deps = RunDependencies(vs_loader=AnalysisCapableVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=AnalysisCapableVSLoader())
 
     asyncio.run(execute_run(request, deps=deps))
 
@@ -184,7 +185,9 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_probe_cach
 
 def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -201,7 +204,7 @@ def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     result = asyncio.run(execute_run(request, deps=deps))
 
@@ -235,7 +238,6 @@ def test_execute_prep_external_input_reserves_outputs_only_under_generated(
             ),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
             ),
         )
     )
@@ -413,6 +415,7 @@ def test_execute_run_custom_generated_dir_run_folders_saves_and_loads_shared_cac
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
@@ -427,7 +430,6 @@ dark_frame_count = 1
 enable = false
 
 [screenshots]
-use_ffmpeg = true
 active_rect_detection = "aspect_ratio"
 
 [report]
@@ -505,10 +507,7 @@ enable = false
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(
-                vs_loader=AnalysisCapableVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
-            ),
+            deps=RunDependencies(vs_loader=AnalysisCapableVSLoader()),
         )
     )
 
@@ -534,10 +533,7 @@ enable = false
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(
-                vs_loader=AnalysisCapableVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
-            ),
+            deps=RunDependencies(vs_loader=AnalysisCapableVSLoader()),
         )
     )
 
@@ -556,7 +552,9 @@ enable = false
 
 def test_execute_run_cache_only_run_folder_probe_snapshot_excludes_unrelated_shared_entries(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv", "unrelated.mkv")
@@ -584,10 +582,7 @@ def test_execute_run_cache_only_run_folder_probe_snapshot_excludes_unrelated_sha
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(
-                vs_loader=AnalysisCapableVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
-            ),
+            deps=RunDependencies(vs_loader=AnalysisCapableVSLoader()),
         )
     )
 
@@ -602,7 +597,9 @@ def test_execute_run_cache_only_run_folder_probe_snapshot_excludes_unrelated_sha
 
 def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -621,7 +618,7 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     first = asyncio.run(execute_run(request, deps=deps))
     assert first.screenshot_dir is not None
@@ -645,7 +642,9 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
 
 def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -663,7 +662,7 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
         skip_metadata=True,
         overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     with pytest.raises(MetricsCalculationError):
         asyncio.run(execute_run(request, deps=deps))

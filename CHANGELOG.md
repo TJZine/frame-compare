@@ -61,13 +61,19 @@ notes used by the guarded publication workflow.
   Use `reference` in place of `bt2390_spec` and `highlight_preserve`, and `spline`
   in place of `filmic`. Existing configuration using the removed names must be
   updated before running.
+- Remove the FFmpeg screenshot renderer. Screenshots always render through
+  VapourSynth, which every run already requires. Delete `screenshots.use_ffmpeg`
+  and `screenshots.ffmpeg_timeout_seconds` from existing configuration before
+  running.
+- Remove the review-import preview and its merge, replace and conflict choices.
+  Importing review JSON replaces the report's saved notes after a confirmation.
+  Report tabs editing the same notes no longer detect each other; the last save
+  wins.
 
 ### Fixed
 
 - Bound image allocations and external tool output, and limit the credentials
   passed to those tools.
-- Recheck source dimensions before FFmpeg writes screenshots, including when a
-  prepared render plan or cached frame count is available.
 - Refuse Windows batch-file FFmpeg and ffprobe wrappers so media filenames are
   never interpreted by a command shell.
 - Reject incomplete or inconsistent slow.pics responses before reporting a
@@ -105,8 +111,6 @@ notes used by the guarded publication workflow.
 
 - Recompute alignment when either source's picture region changes instead of
   reusing an offset confirmed against a different crop.
-- Prevent one report tab from silently overwriting another tab's saved notes;
-  retain conflicting local drafts for export and invalidate stale import previews.
 - Retain a confirmed slow.pics upload URL in failed-run history when cancellation
   interrupts optional post-upload work, while preserving interruption and cleanup.
 - Preserve explicitly authored tone-map settings through config save/reload and
@@ -119,7 +123,7 @@ notes used by the guarded publication workflow.
 - Fail cache-only runs before rendering when required analysis-cache acquisition
   becomes unavailable or invalid after prevalidation.
 - Let report notes use the full 1000-Unicode-scalar limit, including supplementary
-  characters, while preserving import/export bounds.
+  characters.
 - Describe `--no-cache` as refreshing the current scoped entry in CLI help.
 - Add a one-time approved migration for the existing repository signing key when
   its original private file is unavailable.
@@ -129,11 +133,7 @@ notes used by the guarded publication workflow.
 - Previous shared alignment entries lack crop identity. They remain on disk as
   historical information but require fresh computation or confirmation before reuse.
 - The report-notes correction applies to newly generated reports. Existing HTML
-  reports keep their embedded viewer; browsers without Web Locks keep new edits
-  in memory and require review JSON export to retain them.
-- Run-local `manual_overrides.toml` uses version "2" without a separate `confirmed`
-  field. Older versions are ignored as recoverable cache state and replaced on the
-  next manual save without migration. The native VSView result sidecar remains v1.
+  reports keep their embedded viewer.
 
 ## [0.6.1]
 

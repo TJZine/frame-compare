@@ -36,7 +36,6 @@ def test_overlay_config_contains_structured_facts_and_original_diagnostic_source
         prepared_clip=prepared_graph,
         source_dimensions=(3840, 2160),
         source_total_frames=143892,
-        source_is_hdr=False,
         presentation_state=PresentationState.SDR,
         tonemap=None,
     )
@@ -45,8 +44,6 @@ def test_overlay_config_contains_structured_facts_and_original_diagnostic_source
         output_dir=Path("out"),
         config=get_default_config(),
         overlay_mode=OverlayMode.DIAGNOSTIC,
-        renderer="vapoursynth",
-        ffmpeg_runner=MagicMock(),
     )
     requests = [request for job in jobs for request in job.requests]
     facts = {job.label: job.clip_facts for job in jobs}
@@ -70,7 +67,6 @@ def test_none_overlay_mode_does_not_create_overlay_config(mock_prepare: MagicMoc
         prepared_clip=source,
         source_dimensions=(3840, 2160),
         source_total_frames=143892,
-        source_is_hdr=False,
         presentation_state=PresentationState.SDR,
         tonemap=None,
     )
@@ -79,8 +75,6 @@ def test_none_overlay_mode_does_not_create_overlay_config(mock_prepare: MagicMoc
         output_dir=Path("out"),
         config=get_default_config(),
         overlay_mode=OverlayMode.NONE,
-        renderer="vapoursynth",
-        ffmpeg_runner=MagicMock(),
     )
     requests = [request for job in jobs for request in job.requests]
     assert requests[0].overlay is None
@@ -139,8 +133,6 @@ def test_actual_preparation_preserves_mixed_applied_facts_and_fallback_graph(
             output_dir=Path("out"),
             config=config,
             overlay_mode=OverlayMode.DIAGNOSTIC,
-            renderer="vapoursynth",
-            ffmpeg_runner=MagicMock(),
         )
         requests = [request for job in jobs for request in job.requests]
         facts = {job.label: job.clip_facts for job in jobs}

@@ -15,9 +15,7 @@ Install these host prerequisites first:
 - `uv` (recommended for the repository's locked environment) or pip;
 - optionally VSView 0.14.0 with the native Frame Compare panel for alignment review.
 
-The default renderer requires VapourSynth. Setting
-`screenshots.use_ffmpeg = true` selects the FFmpeg screenshot path, but HDR frames
-that require tonemapping still need VapourSynth.
+Screenshots render through VapourSynth.
 
 ## Install with uv
 

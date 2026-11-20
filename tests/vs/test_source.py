@@ -735,7 +735,6 @@ def test_load_source_real_video_stream_policy(
     import vapoursynth as vs
     from PIL import Image
 
-    from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
     from frame_compare.utils.subproc import run_subprocess
     from frame_compare.vs.hdr_probe import probe_hdr_metadata
 
@@ -883,16 +882,6 @@ def test_load_source_real_video_stream_policy(
     metadata = probe_hdr_metadata(video)
     assert metadata is not None
     assert (metadata.color_primaries, metadata.transfer, metadata.matrix) == (9, 16, 9)
-    runner = DefaultFFmpegRunner()
-    output = tmp_path / "single.png"
-    runner.extract_frame(video, 0, output)
-    runner.extract_frames(video, [0, 1], tmp_path / "batch")
-    for screenshot in [output, *sorted((tmp_path / "batch").glob("*.png"))]:
-        with Image.open(screenshot) as image:
-            assert image.size == (32, 24)
-            pixel = image.convert("RGB").getpixel((16, 12))
-            assert isinstance(pixel, tuple)
-            assert min(pixel) >= 250
 
 
 @pytest.fixture
