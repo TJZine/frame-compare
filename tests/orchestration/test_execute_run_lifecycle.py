@@ -1319,8 +1319,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
     confirm_after_report: bool,
     outcome: str,
 ) -> None:
-    from threading import Event
-
     from frame_compare.orchestration import execution, phase_post_render
     from frame_compare.orchestration.execution_types import (
         ExecutionState,
@@ -1365,9 +1363,8 @@ async def test_confirmed_upload_facts_survive_cancellation(
     )
     known_url = "https://slow.pics/c/confirmed-offline"
     uploaded_paths: tuple[Path, ...] = ()
-    connector_started = Event()
-    connector_finished = Event()
-    release_connector = Event()
+    connector_started = asyncio.Event()
+    connector_finished = asyncio.Event()
     applied_publish: list[bool] = []
     post_upload_started: list[bool] = []
     cleanup_started: list[bool] = []
@@ -1464,14 +1461,12 @@ async def test_confirmed_upload_facts_survive_cancellation(
             uploaded_file_paths=uploaded_paths,
         )
 
-    def connector(
-        _request: slowpics_webhook.WebhookDeliveryRequest,
-    ) -> slowpics_webhook.WebhookResponse:
+    async def webhook_handler(_request: httpx.Request) -> httpx.Response:
         connector_started.set()
         try:
             if outcome == "webhook_cancel":
-                assert release_connector.wait(5), "test did not release webhook worker"
-            return slowpics_webhook.WebhookResponse(status_code=204)
+                await asyncio.Event().wait()
+            return httpx.Response(204)
         finally:
             connector_finished.set()
 
@@ -1479,8 +1474,7 @@ async def test_confirmed_upload_facts_survive_cancellation(
         return await slowpics_webhook.deliver_slowpics_webhook(
             webhook_url=webhook_url,
             slowpics_url=slowpics_url,
-            resolver=lambda _host, _port: ("8.8.8.8",),
-            connector=connector,
+            transport=httpx.MockTransport(webhook_handler),
         )
 
     real_post_upload = phase_post_render.run_slowpics_post_upload_actions
@@ -1570,11 +1564,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
                             await worker
                         await asyncio.sleep(0.005)
                 worker.cancel()
-                await asyncio.sleep(0)
-                worker.cancel()
-                await asyncio.sleep(0)
-                assert not worker.done(), "cancellation abandoned the blocked webhook worker"
-                release_connector.set()
             if cancelled:
                 with pytest.raises(asyncio.CancelledError):
                     await asyncio.wait_for(worker, 3)
@@ -1583,7 +1572,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
                 assert result.success
                 assert result.slowpics_url == (None if outcome == "upload_failure" else known_url)
         finally:
-            release_connector.set()
             if not worker.done():
                 worker.cancel()
                 await asyncio.gather(worker, return_exceptions=True)
