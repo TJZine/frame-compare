@@ -60,7 +60,9 @@ def _validate_webhook_url(webhook_url: str) -> httpx.URL | None:
     except httpx.InvalidURL:
         return None
 
-    if url.scheme != "https" or not url.host.rstrip(".") or url.userinfo:
+    host = url.raw_host.decode("ascii")
+    normalized_host = host.rstrip(".")
+    if url.scheme != "https" or not normalized_host or url.userinfo:
         return None
     if url.port is not None and not 1 <= url.port <= 65535:
         return None
@@ -74,7 +76,7 @@ def _validate_webhook_url(webhook_url: str) -> httpx.URL | None:
     # HTTPX percent-encodes raw spaces in the request target during parsing.
     if " " in path or " " in query:
         return None
-    return url
+    return url.copy_with(host=normalized_host) if normalized_host != host else url
 
 
 async def _discard_redirect_location(response: httpx.Response) -> None:
@@ -120,13 +122,18 @@ async def deliver_slowpics_webhook(
     if url is None:
         return _failure_result(WebhookFailureKind.VALIDATION, warning=WEBHOOK_VALIDATION_WARNING)
 
+    try:
+        tls_context = ssl.create_default_context()
+    except OSError:
+        return _failure_result(WebhookFailureKind.TRANSPORT)
+
     body = json.dumps({"content": slowpics_url}, separators=(",", ":")).encode("utf-8")
     async with httpx.AsyncClient(
         transport=transport,
         timeout=httpx.Timeout(WEBHOOK_TIMEOUT_SECONDS),
         follow_redirects=False,
         trust_env=False,
-        verify=ssl.create_default_context(),
+        verify=tls_context,
         headers={"User-Agent": WEBHOOK_USER_AGENT, "Content-Type": "application/json"},
         event_hooks={"response": [_discard_redirect_location]},
     ) as client:

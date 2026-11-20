@@ -185,8 +185,10 @@ class RunSteps:
         else:
             elapsed = max(0.0, self._monotonic_timer() - start)
             self._state.phase_timings[name] = elapsed
-            if describe is not None:
-                completion = describe(output, elapsed)
+            success_completion = describe(output, elapsed) if describe is not None else completion
+            # The timer and description can run after the last await.
+            raise_if_cancelling()
+            completion = success_completion
             status = ProgressPhaseStatus.COMPLETED
             reporter.advance(1)
             return output

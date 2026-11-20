@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ssl
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 import httpx
@@ -132,6 +133,44 @@ async def test_lan_https_url_is_attempted() -> None:
     assert result == SlowpicsWebhookResult(success=True, detail="HTTP 204")
     (request,) = probe.requests
     assert str(request.url) == url
+    assert probe.sleeps == []
+
+
+async def test_dotted_hostname_is_normalized_in_request() -> None:
+    probe = WebhookProbe(httpx.Response(204))
+
+    result = await probe.deliver(
+        "https://hooks.example.test..:8443/notify%20me?mode=encoded%20space"
+    )
+
+    assert result == SlowpicsWebhookResult(success=True, detail="HTTP 204")
+    (request,) = probe.requests
+    assert request.url.host == "hooks.example.test"
+    assert request.headers["Host"] == "hooks.example.test:8443"
+    assert request.url.raw_path == b"/notify%20me?mode=encoded%20space"
+    assert probe.sleeps == []
+
+
+@pytest.mark.parametrize("error_type", [FileNotFoundError, ssl.SSLError])
+async def test_tls_context_setup_failure_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[OSError]
+) -> None:
+    def fail_tls_context() -> ssl.SSLContext:
+        raise error_type("private TLS configuration details")
+
+    monkeypatch.setattr(ssl, "create_default_context", fail_tls_context)
+    probe = WebhookProbe()
+
+    result = await probe.deliver()
+
+    assert result == SlowpicsWebhookResult(
+        success=False,
+        warning=WEBHOOK_FAILURE_WARNING,
+        failure_kind=WebhookFailureKind.TRANSPORT,
+    )
+    assert result.warning is not None
+    assert result.warning.text == "slow.pics webhook: delivery failed"
+    assert probe.requests == []
     assert probe.sleeps == []
 
 

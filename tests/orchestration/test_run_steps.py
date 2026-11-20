@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Never
-from unittest.mock import Mock
+from typing import Literal, Never
+from unittest.mock import Mock, call
 
 import httpx
 import pytest
@@ -21,6 +21,7 @@ from frame_compare.orchestration.execution_types import (
     MetadataPrefetch,
     PrepState,
     RenderPhaseOutput,
+    ReportPhaseOutput,
 )
 from frame_compare.orchestration.types import ReservedRunCapture, RunDependencies
 from frame_compare.services.run_result_record import read_run_result
@@ -131,9 +132,11 @@ def _reject_request(_request: httpx.Request) -> Never:
     raise AssertionError("unexpected network request")
 
 
-@pytest.mark.parametrize("cancel_at_start", [False, True], ids=["report-body", "report-start"])
+@pytest.mark.parametrize("cancel_at", ["report-body", "report-start", "report-end-timer"])
 async def test_interrupted_warn_only_report_stops_without_applying_output(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancel_at_start: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cancel_at: Literal["report-body", "report-start", "report-end-timer"],
 ) -> None:
     ctx = _context(tmp_path)
     ctx.config.audio_alignment.enable = False
@@ -146,14 +149,35 @@ async def test_interrupted_warn_only_report_stops_without_applying_output(
     run_dir.mkdir()
     reporter = Mock(spec=NullProgressReporter)
     cleanup = Mock(side_effect=AssertionError("cleanup started after interruption"))
+    report_timer_reads = 0
+    report_active = False
+
+    def request_cancellation() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
 
     def start_phase(name: str, total: int) -> None:
-        if cancel_at_start and name == "REPORT":
-            task = asyncio.current_task()
-            assert task is not None
-            task.cancel()
+        nonlocal report_active
+        if name == "REPORT":
+            report_active = True
+            if cancel_at == "report-start":
+                request_cancellation()
+
+    def complete_phase(_status: ProgressPhaseStatus, **_kwargs: object) -> None:
+        nonlocal report_active
+        report_active = False
+
+    def monotonic_timer() -> float:
+        nonlocal report_timer_reads
+        if report_active:
+            report_timer_reads += 1
+            if cancel_at == "report-end-timer" and report_timer_reads == 2:
+                request_cancellation()
+        return 100.0 + 5.0 * report_timer_reads
 
     reporter.start_phase.side_effect = start_phase
+    reporter.complete_phase.side_effect = complete_phase
 
     async def fake_prep(_request: object, deps: RunDependencies) -> PrepState:
         assert deps.capture_reserved_run is not None
@@ -168,12 +192,12 @@ async def test_interrupted_warn_only_report_stops_without_applying_output(
         )
         return prep
 
-    def interrupt_report(*_args: object, **_kwargs: object) -> Never:
-        task = asyncio.current_task()
-        assert task is not None
-        task.cancel()
-        raise_if_cancelling()
-        raise AssertionError("interrupted report returned")
+    def finish_report(*_args: object, **_kwargs: object) -> ReportPhaseOutput:
+        if cancel_at == "report-body":
+            request_cancellation()
+            raise_if_cancelling()
+            raise AssertionError("interrupted report returned")
+        return ReportPhaseOutput(report_path=run_dir / "report.html", report_succeeded=True)
 
     monkeypatch.setattr(coordinator, "execute_prep", fake_prep)
     monkeypatch.setattr(
@@ -188,7 +212,7 @@ async def test_interrupted_warn_only_report_stops_without_applying_output(
             )
         ),
     )
-    report = Mock(side_effect=interrupt_report)
+    report = Mock(side_effect=finish_report)
     monkeypatch.setattr(execution, "run_report_phase", report)
     monkeypatch.setattr(execution, "run_post_report_cleanup_phase", cleanup)
     async with httpx.AsyncClient(transport=httpx.MockTransport(_reject_request)) as client:
@@ -197,7 +221,9 @@ async def test_interrupted_warn_only_report_stops_without_applying_output(
                 make_run_request(
                     root=tmp_path, config=ctx.config, skip_analysis=True, skip_metadata=True
                 ),
-                RunDependencies(progress=reporter, http_client=client),
+                RunDependencies(
+                    progress=reporter, http_client=client, monotonic_timer=monotonic_timer
+                ),
             )
         )
         with pytest.raises(asyncio.CancelledError):
@@ -208,12 +234,20 @@ async def test_interrupted_warn_only_report_stops_without_applying_output(
     assert all(not warning.startswith("report:") for warning in record.warning_summaries)
     assert all(not warning.text.startswith("report:") for warning in state.warnings)
     assert state.artifacts.report_path is None
+    assert not state.artifacts.report_succeeded
+    assert record.report_path is None
     assert not (run_dir / "report.html").exists()
     reporter.complete_phase.assert_called_with(
         ProgressPhaseStatus.FAILED, summary=None, duration_text=None
     )
     reporter.start_phase.assert_any_call("REPORT", total=1)
-    if cancel_at_start:
+    report_calls = reporter.method_calls[
+        reporter.method_calls.index(call.start_phase("REPORT", total=1)) :
+    ]
+    assert call.advance(1) not in report_calls
+    assert report_timer_reads == 2
+    assert record.phase_timings["report"] == 5.0
+    if cancel_at == "report-start":
         report.assert_not_called()
     else:
         report.assert_called_once()
