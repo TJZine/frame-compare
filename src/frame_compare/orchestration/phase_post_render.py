@@ -24,7 +24,6 @@ from frame_compare.orchestration.execution_types import (
     RenderArtifacts,
     ReportPhaseOutput,
 )
-from frame_compare.orchestration.presentation import clip_role
 from frame_compare.orchestration.selection_rows import selection_rows
 from frame_compare.orchestration.slowpics_metadata import (
     resolve_slowpics_collection_metadata,
@@ -38,9 +37,11 @@ from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.metadata_parsing import parse_filename
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.release_identity import (
+    ShortNameSource,
+    clip_role,
     format_compact_identity,
-    format_micro_descriptor,
     format_release_descriptor,
+    short_source_names,
     unique_presentation_names,
 )
 from frame_compare.services.report.display import (
@@ -254,12 +255,21 @@ def run_confirm_slowpics_upload_phase(
 
 def _slowpics_upload_clips(ctx: RunContext) -> list[SlowpicsUploadClip]:
     clips = [ctx.reference, *ctx.comparisons]
+    short_names = short_source_names(
+        [
+            ShortNameSource(
+                clip.release_identity, clip.label, clip.label_is_explicit, clip.path.stem
+            )
+            for clip in clips
+        ]
+    )
     image_names = unique_presentation_names(
         [
             clip.label
             if clip.label_is_explicit or clip.release_identity is None
-            else format_release_descriptor(clip.release_identity) or clip.label
-            for clip in clips
+            else format_release_descriptor(clip.release_identity, short_name=short_names[index])
+            or clip.label
+            for index, clip in enumerate(clips)
         ],
         roles=[clip_role(index) for index in range(len(clips))],
         protected=[clip.label_is_explicit for clip in clips],
@@ -296,36 +306,38 @@ def run_report_phase(
             protected=protected,
         )
 
+    micros = short_source_names(
+        [
+            ShortNameSource(
+                identity=clip.release_identity,
+                label=clip.label,
+                label_is_explicit=clip.label_is_explicit,
+                stem=clip.path.stem,
+            )
+            for clip in clips
+        ],
+        show_bidi_controls=True,
+    )
     releases = [
-        format_release_descriptor(clip.release_identity, separator=" · ")
+        format_release_descriptor(clip.release_identity, separator=" · ", short_name=micros[index])
         if clip.release_identity
         else ""
-        for clip in clips
+        for index, clip in enumerate(clips)
     ]
     primaries = distinct_report_names(
         [
             clip.label
             if clip.label_is_explicit or clip.release_identity is None
-            else format_compact_identity(clip.release_identity, separator=" · ") or clip.label
-            for clip in clips
+            else format_compact_identity(
+                clip.release_identity, separator=" · ", short_name=micros[index]
+            )
+            or clip.label
+            for index, clip in enumerate(clips)
         ]
     )
     controls = distinct_report_names(
         [
             clip.label if clip.label_is_explicit else releases[index] or primaries[index]
-            for index, clip in enumerate(clips)
-        ]
-    )
-    micros = distinct_report_names(
-        [
-            clip.label
-            if clip.label_is_explicit
-            else (
-                format_micro_descriptor(clip.release_identity, separator=" · ")
-                if clip.release_identity
-                else ""
-            )
-            or controls[index]
             for index, clip in enumerate(clips)
         ]
     )
@@ -354,6 +366,7 @@ def run_report_phase(
                 active_picture=clip_facts.geometry.active_picture,
                 images=images,
                 label=clip.label,
+                release_identity=clip.release_identity,
                 source_identity=source_identity_from_fingerprint(
                     replace(clip.probe.fingerprint, path=clip.path)
                 ),

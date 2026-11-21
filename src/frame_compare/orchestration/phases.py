@@ -29,6 +29,7 @@ from frame_compare.utils.progress_protocol import (
     AlignmentSummary,
     ProgressPhaseStatus,
     ProgressReporter,
+    failure_progress_status,
 )
 
 log = structlog.get_logger()
@@ -43,11 +44,13 @@ class PhaseStatus(StrEnum):
     SKIPPED = "skipped"
     WARNED = "warned"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 PhaseExecute = Callable[[RunContext], Awaitable[None]]
 PhaseWarnOnly = bool | Callable[[RunContext], bool]
 PhaseSkipCondition = Callable[[ConfigSchema], bool]
+CONFIG_DISABLED = "Disabled"
 PhaseSkipDetail = str | Callable[[ConfigSchema], str | None]
 
 
@@ -102,6 +105,8 @@ async def execute_phases(
                 if callable(phase.skip_detail)
                 else phase.skip_detail
             )
+            if skip_detail == CONFIG_DISABLED and not isinstance(reporter, LogProgressReporter):
+                continue
             start_phase_progress(
                 reporter,
                 name=phase.name,
@@ -155,12 +160,9 @@ async def execute_phases(
                     error=str(exc),
                     exc_info=exc,
                 )
-        except BaseException:
-            # Cancellation and other control-flow exceptions do not inherit
-            # from Exception.  They still need a terminal lifecycle status so
-            # progress cannot report a cancelled phase as completed.
-            phase.status = PhaseStatus.FAILED
-            phase_progress_status = ProgressPhaseStatus.FAILED
+        except BaseException as error:
+            phase_progress_status = failure_progress_status(error)
+            phase.status = PhaseStatus(phase_progress_status.value)
             raise
         else:
             phase.status = PhaseStatus.COMPLETED

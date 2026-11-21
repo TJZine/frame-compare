@@ -21,7 +21,7 @@ from frame_compare.orchestration.execution_types import (
     AlignPhaseOutput,
     ExecutionState,
 )
-from frame_compare.orchestration.phases import Phase, execute_phases
+from frame_compare.orchestration.phases import Phase, PhaseStatus, execute_phases
 from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.utils.progress import (
     NullProgressReporter,
@@ -134,7 +134,7 @@ def test_execute_phases_fatal_exclusion_recovery_stops_warn_only_pipeline(
         asyncio.run(execute_phases(phases, context, NullProgressReporter()))
 
 
-def test_execute_phases_marks_cancellation_failed_before_propagating(
+def test_execute_phases_marks_cancellation_interrupted_before_propagating(
     tmp_path: Path,
 ) -> None:
     context = _make_context(tmp_path)
@@ -173,7 +173,8 @@ def test_execute_phases_marks_cancellation_failed_before_propagating(
     phase = Phase(name="cancel", execute=phase_cancel)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(execute_phases([phase], context, reporter))
-    assert reporter.complete_phase_calls == [ProgressPhaseStatus.FAILED]
+    assert reporter.complete_phase_calls == [ProgressPhaseStatus.INTERRUPTED]
+    assert phase.status == PhaseStatus.INTERRUPTED
 
 
 @pytest.mark.parametrize("explicit_skip", [True, False], ids=["false-predicate", "no-predicate"])
@@ -210,7 +211,7 @@ def test_execute_phases_fail_fast_failure_marks_failed_and_raises(
     assert executed == ["fail"]
 
 
-def test_warn_only_executor_interrupt_is_failed_and_never_applied(tmp_path: Path) -> None:
+def test_warn_only_executor_interrupt_is_interrupted_and_never_applied(tmp_path: Path) -> None:
     from frame_compare.orchestration.execution_types import FramePlanPhaseOutput
     from frame_compare.orchestration.phases import PhaseStatus
     from frame_compare.utils.cancellation import raise_if_cancelling
@@ -244,7 +245,7 @@ def test_warn_only_executor_interrupt_is_failed_and_never_applied(tmp_path: Path
         asyncio.run(
             execute_phases([phase, Phase("later", downstream)], context, NullProgressReporter())
         )
-    assert phase.status == PhaseStatus.FAILED
+    assert phase.status == PhaseStatus.INTERRUPTED
     assert list(context.selection.frames) == []
     assert state.warnings == []
     assert later == []

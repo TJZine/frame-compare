@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
@@ -28,13 +28,14 @@ from frame_compare.orchestration.full_window_retry import (
 )
 from frame_compare.orchestration.phase_selection import (
     build_initial_selection_details_by_source_frame,
-    generated_frame_count,
     selection_breakdown_with_source_offset,
     selection_details_with_source_offset,
     selection_timecode_for_frame,
+    shared_range_drop_warning,
+    shared_source_frame_range,
     source_frames_for_reference_base_domain,
 )
-from frame_compare.orchestration.presentation import clip_role
+from frame_compare.orchestration.presentation import join_source_names
 from frame_compare.render.prepare import resolve_tonemap_settings
 from frame_compare.services.alignment import (
     align_clips_from_request,
@@ -79,6 +80,7 @@ async def run_align_phase(
     verbose: bool = False,
     quiet: bool = False,
     json_output: bool = False,
+    on_diagnostics_written: Callable[[Path], None] | None = None,
 ) -> AlignPhaseOutput:
     if not ctx.comparisons:
         return AlignPhaseOutput(
@@ -117,6 +119,8 @@ async def run_align_phase(
         verbose=verbose,
         quiet=quiet,
         json_output=json_output,
+        on_reusable_cache_written=lambda: ctx.reusable_cache_writes.add("alignment"),
+        on_diagnostics_written=on_diagnostics_written,
     )
 
     results = outcome.results
@@ -124,7 +128,9 @@ async def run_align_phase(
 
     updated_comparisons: list[ClipState] = []
     warnings: list[RunWarning] = []
-    for comparison, result in zip(ctx.comparisons, results, strict=True):
+    for comparison, comparison_request, result in zip(
+        ctx.comparisons, alignment_request.comparisons, results, strict=True
+    ):
         alignment = None
         if result.applied:
             frame_offset = result.frame_offset
@@ -140,7 +146,8 @@ async def run_align_phase(
             warnings.append(
                 format_rejected_alignment_warning(
                     result,
-                    comparison_label=comparison.label,
+                    comparison_label=comparison_request.short_name or comparison_request.label,
+                    comparison_path=comparison.path,
                 )
             )
         updated_comparisons.append(
@@ -182,10 +189,10 @@ async def run_align_phase(
             reference=reference,
             comparisons=comparisons,
             selection_source_window=selection_source_window,
-            generated_requested_count=generated_frame_count(ctx.config.analysis),
+            generated_requested_count=ctx.config.analysis.generated_frame_count,
             seed=ctx.config.analysis.random_seed,
             allow_fallback=(
-                generated_frame_count(ctx.config.analysis) > 0
+                ctx.config.analysis.generated_frame_count > 0
                 and ctx.selection_domain.full_window_retry_override is None
             ),
             require_full_generated_selection=ctx.selection_domain.full_window_retry_override
@@ -200,14 +207,7 @@ async def run_align_phase(
     normalized_selected_frames = normalized_selection.selected_frames
     if normalized_selection.dropped_user_source_frames:
         warnings.append(
-            RunWarning(
-                "frame selection",
-                "warning",
-                "frame selection: dropped user frame(s) outside aligned renderable range: "
-                + ", ".join(
-                    str(frame) for frame in normalized_selection.dropped_user_source_frames
-                ),
-            )
+            shared_range_drop_warning(tuple(normalized_selection.dropped_user_source_frames))
         )
     selection_breakdown: SelectionBreakdown | None = None
     selection_details_by_source_frame: SelectionDetailsByFrame | None = None
@@ -294,7 +294,6 @@ async def run_align_phase(
                 aligned=[reference, *comparisons],
             ),
         ),
-        alignment_diagnostics_dir=outcome.diagnostics_dir,
         review_seconds=review_summary.review_seconds,
         review_unresolved=review_summary.review_unresolved,
         has_unapplied_offsets=any(not result.applied for result in results),
@@ -341,12 +340,7 @@ def _extra_footage_note(
 ) -> str | None:
     if len({clip.probe.num_frames for clip in originals}) <= 1:
         return None
-    parts: list[str] = []
-
-    def duration(frames: int, fps: Fraction) -> str:
-        seconds = frames / float(fps)
-        return f"{seconds:.1f} s" if seconds < 1 else format_duration(seconds)
-
+    sources_by_extent: dict[tuple[str | None, str | None], list[str]] = {}
     for source, original, final in zip(
         [request.reference, *request.comparisons], originals, aligned, strict=True
     ):
@@ -354,14 +348,24 @@ def _extra_footage_note(
         original_end = original.trim.trim_start_frames + original.effective_num_frames()
         final_end = final.trim.trim_start_frames + final.effective_num_frames()
         end = original_end - final_end
+        extent = (
+            format_duration(float(start / original.effective_fps)) if start > 0 else None,
+            format_duration(float(end / original.effective_fps)) if end > 0 else None,
+        )
+        sources_by_extent.setdefault(extent, []).append(_request_short_name(source))
+
+    shared_sources = sources_by_extent.pop((None, None), [])
+    comparator = f" than {shared_sources[0]}" if len(shared_sources) == 1 else ""
+    parts: list[str] = []
+    for (start, end), names in sources_by_extent.items():
         extents: list[str] = []
-        if start > 0:
-            extents.append(f"{duration(start, original.effective_fps)} more at the start")
-        if end > 0:
-            extents.append(f"{duration(end, original.effective_fps)} more at the end")
-        if extents:
-            parts.append(f"{_request_short_name(source)} has {' and '.join(extents)}")
-    return ", ".join(parts) + "; frames come from the range all sources share." if parts else None
+        if start is not None:
+            extents.append(f"{start} more at the start")
+        if end is not None:
+            extents.append(f"{end} more at the end")
+        verb = "has" if len(names) == 1 else "have"
+        parts.append(f"{join_source_names(names)} {verb} {' and '.join(extents)}{comparator}")
+    return "; ".join(parts) + "; frames come from the shared range." if parts else None
 
 
 def _request_short_name(comparison: AlignmentClipRequest) -> str:
@@ -381,26 +385,27 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
         if all(identity is not None for identity in identities)
         else None
     )
-    presentation_names = [
-        _alignment_presentation_name(clip, common_content is not None) for clip in clips
-    ]
-    counts = {name: presentation_names.count(name) for name in presentation_names}
-    presentation_names = [
-        clip.path.name if not name or counts[name] > 1 else name
-        for clip, name in zip(clips, presentation_names, strict=True)
-    ]
     short_names = short_source_names(
         [
             ShortNameSource(
                 identity=clip.release_identity,
                 label=clip.label,
                 label_is_explicit=clip.label_is_explicit,
+                stem=clip.path.stem,
             )
             for clip in clips
         ],
-        roles=[clip_role(index) for index in range(len(clips))],
     )
     short_names = [short or clip.path.name for short, clip in zip(short_names, clips, strict=True)]
+    presentation_names = [
+        _alignment_presentation_name(clip, common_content is not None, short_names[index])
+        for index, clip in enumerate(clips)
+    ]
+    counts = {name: presentation_names.count(name) for name in presentation_names}
+    presentation_names = [
+        clip.path.name if not name or counts[name] > 1 else name
+        for clip, name in zip(clips, presentation_names, strict=True)
+    ]
     return AlignmentRequest(
         reference=_alignment_clip_request(
             ctx.reference,
@@ -433,13 +438,15 @@ def _alignment_request_from_context(ctx: RunContext) -> AlignmentRequest:
     )
 
 
-def _alignment_presentation_name(clip: ClipState, has_common_content: bool) -> str:
+def _alignment_presentation_name(clip: ClipState, has_common_content: bool, short_name: str) -> str:
     if clip.label_is_explicit and clip.label.strip():
         return clip.label.strip()
     if clip.release_identity is None:
         return clip.path.name
     formatter = format_release_descriptor if has_common_content else format_compact_identity
-    return formatter(clip.release_identity, separator=" · ") or clip.path.name
+    return (
+        formatter(clip.release_identity, separator=" · ", short_name=short_name) or clip.path.name
+    )
 
 
 def _selected_reference_relationship(ctx: RunContext) -> AlignmentSelectedReferenceRelationship:
@@ -543,7 +550,7 @@ def _reselect_frames_for_trimmed_overlap(
         comparisons=comparisons,
         selection_source_window=selection_source_window,
     )
-    target_count = generated_frame_count(config)
+    target_count = config.generated_frame_count
     if selectable_length <= 0 or target_count <= 0:
         return None
     if target_count > selectable_length:
@@ -792,14 +799,8 @@ def _selectable_aligned_source_window(
     comparisons: list[ClipState],
     selection_source_window: tuple[int, int] | None,
 ) -> tuple[int, int]:
-    common_length = min(
-        [
-            reference.effective_num_frames(),
-            *[comparison.effective_num_frames() for comparison in comparisons],
-        ]
-    )
-    overlap_start = reference.trim.trim_start_frames
-    overlap_end = overlap_start + common_length
+    shared_range = shared_source_frame_range(reference, comparisons)
+    overlap_start, overlap_end = shared_range.start, shared_range.stop
     if selection_source_window is not None:
         selection_start, selection_end = selection_source_window
         overlap_start = max(overlap_start, selection_start)

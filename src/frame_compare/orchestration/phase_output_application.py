@@ -64,7 +64,6 @@ def apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: PhaseO
             )
             state.warnings.extend(phase_output.warnings)
             state.artifacts.alignment_summary = phase_output.alignment_summary
-            state.artifacts.alignment_diagnostics_dir = phase_output.alignment_diagnostics_dir
             state.vsview_review_seconds = max(0.0, phase_output.review_seconds)
         case RenderPhaseOutput() as phase_output:
             state.artifacts.render = phase_output.render

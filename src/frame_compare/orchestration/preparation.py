@@ -8,7 +8,7 @@ from pathlib import Path
 import structlog
 
 import frame_compare.analysis.cache_io as cache_io
-from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.errors import AnalysisCacheMissError, MetricsCalculationError
 from frame_compare.analysis.types import MetricCacheRequest
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.schema import ConfigSchema
@@ -75,7 +75,7 @@ from frame_compare.services.errors import (
     TmdbRateLimitedError,
 )
 from frame_compare.services.metadata_parsing import parse_filename_with_release_identity
-from frame_compare.services.release_identity import ReleaseIdentity
+from frame_compare.services.release_identity import ReleaseIdentity, ShortNameSource
 from frame_compare.services.run_folder import reserve_run_folder
 from frame_compare.services.run_info import (
     RunInfo,
@@ -92,7 +92,6 @@ from frame_compare.utils.paths import (
 )
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
-from frame_compare.vs.errors import SourceLoadError
 
 log = structlog.get_logger()
 
@@ -120,6 +119,7 @@ async def _resolve_run_directory(
     workspace: WorkspacePaths,
     config: ConfigSchema,
     input_videos: list[Path],
+    naming_sources: list[ShortNameSource],
     deps: RunDependencies,
     preflight_duration: float,
     preflight_warnings: list[RunWarning],
@@ -160,10 +160,12 @@ async def _resolve_run_directory(
 
     filenames = [video.name for video in input_videos]
     raise_if_cancelling()
+    created_at = deps.clock()
     run_dir = reserve_run_folder(
         generated_root=workspace.generated_root,
-        filenames=filenames,
+        sources=naming_sources,
         tmdb_metadata=metadata,
+        now=created_at,
     )
     try:
         resolved_run_dir = require_managed_immediate_child(
@@ -196,7 +198,7 @@ async def _resolve_run_directory(
         write_run_info(
             run_info_path,
             RunInfo(
-                created_at=deps.clock(),
+                created_at=created_at,
                 folder_name=run_dir.folder_name,
                 naming_source=run_dir.naming_source,
                 source_filenames=filenames,
@@ -310,20 +312,14 @@ def _cached_probe_snapshots_for_cache_only(
     snapshots: dict[Path, ClipProbeSnapshot] = {}
     for path in input_videos:
         raise_if_cancelling()
-        try:
-            fingerprint = live_probe_fingerprint(path).fingerprint
-        except SourceLoadError as error:
-            raise MetricsCalculationError(
-                "Cached clip probe data is required to validate --from-cache-only "
-                "analysis cache: current source authority could not be verified."
-            ) from error
+        fingerprint = live_probe_fingerprint(path).fingerprint
         snapshot = (
             entries_by_key.get(compute_probe_cache_key(fingerprint))
             if fingerprint.source_token is not None
             else None
         )
         if snapshot is None:
-            raise MetricsCalculationError(
+            raise AnalysisCacheMissError(
                 "Cached clip probe data is required to validate --from-cache-only "
                 "analysis cache for the configured selection domain."
             )
@@ -631,6 +627,15 @@ async def execute_prep(
         workspace=workspace,
         config=config,
         input_videos=input_videos,
+        naming_sources=[
+            ShortNameSource(
+                identity=release_identities_by_path[path],
+                label=labels_by_path[path],
+                label_is_explicit=explicit_labels_by_path[path],
+                stem=path.stem,
+            )
+            for path in input_videos
+        ],
         deps=deps,
         preflight_duration=preflight_duration,
         preflight_warnings=[],

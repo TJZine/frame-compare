@@ -111,6 +111,8 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
             success=True,
             screenshot_dir=Path("screenshots").resolve(),
             warnings=[RunWarning("sources", "skipped", "metadata skipped")],
+            frame_count=8,
+            clips_processed=3,
         )
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
@@ -122,14 +124,21 @@ def test_run_human_output_routes_summaries_and_runtime_diagnostics(
     stderr = _normalize_cli_output(result.stderr)
     assert "Run plan" in stdout
     assert "Comparison complete" in stdout
+    assert "8 of 10 frames · 3 sources" in stdout
     assert "Warnings" in stdout
     assert "metadata skipped" in stdout
-    assert "Sources · 1 loaded" not in stdout
+    assert "Sources · 1" not in stdout
     assert "Frame alignment" not in stdout
-    assert "Sources · 1 loaded" in stderr
+    assert any(line == "╭─ Sources · 1" for line in stderr.splitlines())
     assert "Frame alignment" in stderr
     assert "Run plan" not in stderr
     assert "Result" not in stderr
+    assert "240 frames (10.0 s)" in stderr
+    combined = _normalize_cli_output(result.output)
+    assert "╰─\n\n╭─ Sources · 1" in combined
+    assert "╰─\n\n╭─ Frame alignment" in combined
+    assert "╰─\n\n╭─ ! Comparison complete" in combined
+    assert "╰─\n\n╭─ ! Warnings" in combined
 
 
 def test_run_non_tty_routes_fps_diagnostics_through_logging(

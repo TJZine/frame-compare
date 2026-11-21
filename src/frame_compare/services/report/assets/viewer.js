@@ -479,7 +479,7 @@ const ReportViewer = {
         document.querySelectorAll(
             '.rv-controls button, .rv-controls select, .rv-controls input, .rv-viewport-palette button, .rv-viewport-palette select, .rv-viewport-palette input, .rv-bottom-panel button, .rv-bottom-panel select, .rv-bottom-panel input, .rv-inspector button, .rv-inspector select, .rv-inspector input'
         ).forEach(control => {
-            if (control === this.dom.btnHelp) return;
+            if (control.closest('.rv-bar-actions')) return;
             control.disabled = disabled;
         });
     },
@@ -487,7 +487,8 @@ const ReportViewer = {
     focusElement(element) {
         const outsideFullscreen = document.fullscreenElement
             && !document.fullscreenElement.contains(element);
-        const hidden = element?.getClientRects && element.getClientRects().length === 0;
+        const hidden = (element?.getClientRects && element.getClientRects().length === 0)
+            || element?.checkVisibility?.({ visibilityProperty: true }) === false;
         if (outsideFullscreen || hidden) element = this.dom.stage;
         if (element && typeof element.focus === 'function') {
             element.focus({ preventScroll: true });
@@ -712,7 +713,6 @@ const ReportViewer = {
 
     observeToolbar() {
         const toolbar = document.querySelector('.rv-controls');
-        const header = document.querySelector('.rv-header');
         const update = () => document.body.style.setProperty(
             '--rv-toolbar-bottom',
             `${toolbar.getBoundingClientRect().bottom}px`,
@@ -720,7 +720,6 @@ const ReportViewer = {
         update();
         const observer = new ResizeObserver(update);
         observer.observe(toolbar);
-        observer.observe(header);
         observer.observe(this.dom.status);
     },
 
@@ -1975,7 +1974,7 @@ const ReportViewer = {
         );
         this.dom.leftLayer.classList.toggle(
             'rv-layer--aligned-active',
-            isOverlay && this.state.activeClipIdx === this.state.rightClipIdx
+            this.singleShowsPairRight()
         );
         this.dom.rightLayer.classList.toggle(
             'active',
@@ -1984,6 +1983,10 @@ const ReportViewer = {
         this.refreshMainImageAvailability();
         this.viewport.applyFitMode();
         this.lens?.sync();
+    },
+
+    singleShowsPairRight() {
+        return this.state.mode === 'overlay' && this.state.activeClipIdx === this.state.rightClipIdx;
     },
 
     updateImages() {

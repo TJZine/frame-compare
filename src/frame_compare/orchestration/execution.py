@@ -46,7 +46,12 @@ from frame_compare.orchestration.phase_selection import (
     select_initial_frame_plan,
     selection_label_for_frame,
 )
-from frame_compare.orchestration.phases import Phase, PhaseSkipDetail, PhaseWarnOnly
+from frame_compare.orchestration.phases import (
+    CONFIG_DISABLED,
+    Phase,
+    PhaseSkipDetail,
+    PhaseWarnOnly,
+)
 from frame_compare.orchestration.types import (
     RunDependencies,
     RunRequest,
@@ -175,6 +180,9 @@ def build_phases_before_align(
     workspace: WorkspacePaths,
     vs_loader: VSLoader | None = None,
 ) -> list[Phase]:
+    def _record_alignment_diagnostics(path: Path) -> None:
+        state.artifacts.alignment_diagnostics_dir = path
+
     def _run_align_with_current_selection(ctx: RunContext):
         return run_align_phase(
             ctx,
@@ -183,6 +191,7 @@ def build_phases_before_align(
             verbose=request.verbose,
             quiet=request.quiet,
             json_output=request.json_output,
+            on_diagnostics_written=_record_alignment_diagnostics,
         )
 
     return [
@@ -215,7 +224,7 @@ def build_phases_before_align(
             warn_only=lambda ctx: not request.from_cache_only and bool(ctx.selection.frames),
             fatal_exceptions=(ExclusionRecoverySelectionError,),
             progress_total=ANALYZE_PROGRESS_TOTAL,
-            skip_detail="Disabled" if request.skip_analysis else "Not required",
+            skip_detail=CONFIG_DISABLED if request.skip_analysis else "Not required",
         ),
         _create_timed_phase(
             "align",
@@ -232,7 +241,7 @@ def build_phases_before_align(
                 AudioAlignmentCleanupError,
             ),
             progress_total=max(1, len(input_videos)),
-            skip_detail="Disabled",
+            skip_detail=CONFIG_DISABLED,
         ),
     ]
 
@@ -325,7 +334,7 @@ def build_phases_after_align(
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=True,
-            skip_detail="Disabled",
+            skip_detail=CONFIG_DISABLED,
         ),
     ]
     publish_phase = _create_timed_phase(
@@ -349,7 +358,7 @@ def build_phases_after_align(
             isinstance(output, PublishPhaseOutput) and output.slowpics_url is not None
         ),
         skip_detail=lambda effective_config: (
-            "Disabled"
+            CONFIG_DISABLED
             if not effective_config.slowpics.auto_upload
             else "Unavailable"
             if http_client is None
@@ -370,7 +379,7 @@ def build_phases_after_align(
         phase_timings=state.phase_timings,
         warnings=state.warnings,
         warn_only=True,
-        skip_detail="Disabled",
+        skip_detail=CONFIG_DISABLED,
     )
     confirm_slowpics_upload_phase = _create_timed_phase(
         "confirm_slowpics_upload",

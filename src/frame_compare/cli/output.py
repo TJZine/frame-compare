@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,10 +12,10 @@ from frame_compare.utils.artifact_paths import (
     artifact_link,
     format_display_path,
 )
-from frame_compare.utils.post_upload_actions import PostUploadActionResult, PostUploadActionResults
+from frame_compare.utils.post_upload_actions import PostUploadActionResults
 from frame_compare.utils.progress import AlignmentSummaryValue
-from frame_compare.utils.run_warnings import RunWarning, WarningSeverity, WarningSource
-from frame_compare.utils.terminal_sections import Section, section_title
+from frame_compare.utils.run_warnings import RunWarning, WarningSource
+from frame_compare.utils.terminal_sections import Section, section_title, take_run_block_separator
 from frame_compare.utils.terminal_theme import (
     ACCENT,
     BORDER_FAILED,
@@ -29,26 +28,20 @@ from frame_compare.utils.terminal_theme import (
     WARN,
     GlyphSet,
     format_duration,
+    format_exclusion_duration,
     glyphs_for_console,
+    print_with_paths,
 )
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunResult
     from frame_compare.orchestration.run_inputs import AcquiredRunConfig
+    from frame_compare.orchestration.types import InterruptedRun
 
 
 STYLE_UNIT = "dim"
 STYLE_PATH = "dim"
 STYLE_WARN = "yellow"
-
-
-@dataclass(frozen=True)
-class WarningPresentation:
-    source: WarningSource
-    severity: WarningSeverity
-    message: str
-    detail: str | None = None
-    action: str | None = None
 
 
 def _styled_value(value: str) -> str:
@@ -105,14 +98,11 @@ def _lower_first(text: str) -> str:
 def _format_tools_row(
     *,
     glyphs: GlyphSet,
-    alignment_enabled: bool,
     ffmpeg_available: bool,
     vsview_requested: bool,
     vsview_status: str | None,
 ) -> str:
-    if not alignment_enabled:
-        ffmpeg_entry = f"{glyphs.skipped} FFmpeg audio"
-    elif ffmpeg_available:
+    if ffmpeg_available:
         ffmpeg_entry = f"[{OK}]{glyphs.ok}[/] FFmpeg audio"
     else:
         ffmpeg_entry = f"[{WARN}]{glyphs.warning}[/] FFmpeg audio [dim](unavailable)[/]"
@@ -161,32 +151,6 @@ def print_at_a_glance(
     config = inputs.config
     root, config_path = inputs.root, inputs.config_path
     workspace = resolve_run_workspace(inputs)
-    vsview_status: str | None = None
-    use_vsview = config.audio_alignment.use_vsview
-    force_interactive = config.audio_alignment.force_interactive
-    if use_vsview or force_interactive:
-        from frame_compare.vsview.adapter import (
-            VSViewAvailabilityStatus,
-            check_vsview_availability,
-        )
-
-        availability = check_vsview_availability()
-        if availability.is_available:
-            vsview_status = "available (true)"
-        elif availability.status == VSViewAvailabilityStatus.PROBE_FAILED:
-            vsview_status = availability.public_probe_failure_status()
-        else:
-            vsview_status = "unavailable (false)"
-
-    from frame_compare.utils.subproc import resolve_executable
-
-    try:
-        resolve_executable("ffmpeg")
-        resolve_executable("ffprobe")
-    except FileNotFoundError:
-        ffmpeg_available = False
-    else:
-        ffmpeg_available = True
     workspace_root = root.resolve()
     input_path = workspace.input_dir
     analysis = config.analysis
@@ -196,16 +160,12 @@ def print_at_a_glance(
     bright_frame_count = analysis.bright_frame_count
     motion_frame_count = analysis.motion_frame_count
     random_seed = analysis.random_seed
-    requested_total = (
-        len(user_frames)
-        + random_frame_count
-        + dark_frame_count
-        + bright_frame_count
-        + motion_frame_count
-    )
+    requested_total = analysis.requested_frame_count
     overlay_mode = config.screenshots.overlay_mode
     tonemap_enabled = config.color.enable_tonemap
     alignment_enabled = config.audio_alignment.enable
+    use_vsview = config.audio_alignment.use_vsview
+    force_interactive = config.audio_alignment.force_interactive
     upload_enabled = config.slowpics.auto_upload
     report_confirmed_upload = upload_enabled and config.slowpics.confirm_upload_after_report
     glyphs = glyphs_for_console(console)
@@ -223,8 +183,8 @@ def print_at_a_glance(
     else:
         excluded_window = _dot_join(
             [
-                f"first {format_duration(analysis.ignore_lead_seconds)}",
-                f"last {format_duration(analysis.ignore_trail_seconds)}",
+                f"first {format_exclusion_duration(analysis.ignore_lead_seconds)}",
+                f"last {format_exclusion_duration(analysis.ignore_trail_seconds)}",
             ]
         )
     renderer = _styled_value("VapourSynth")
@@ -253,18 +213,6 @@ def print_at_a_glance(
         alignment_text = "audio, then VSView review"
     else:
         alignment_text = "audio"
-    reuse_policy_label = {
-        "disabled": "Do not reuse previous offsets",
-        "prompt": "Ask before reusing previous offsets",
-        "always": "Reuse previous offsets when valid",
-    }[config.audio_alignment.previous_offsets]
-    tools_text = _format_tools_row(
-        glyphs=glyphs,
-        alignment_enabled=alignment_enabled,
-        ffmpeg_available=ffmpeg_available,
-        vsview_requested=use_vsview or force_interactive,
-        vsview_status=vsview_status,
-    )
     if not config.report.enable:
         review_text = _styled_value("disabled")
     elif config.report.auto_open:
@@ -290,19 +238,6 @@ def print_at_a_glance(
                 "automatic upload",
             ]
         )
-    enabled_actions: list[str] = []
-    if config.slowpics.copy_url_to_clipboard:
-        enabled_actions.append("copy URL")
-    if config.slowpics.open_in_browser:
-        enabled_actions.append("open browser")
-    if config.slowpics.create_url_shortcut:
-        enabled_actions.append("create shortcut")
-    after_upload_text = _dot_join(enabled_actions) if enabled_actions else _styled_value("none")
-    cleanup_text = (
-        "Delete uploaded screenshots when report-safe"
-        if config.slowpics.delete_after_upload
-        else "Keep local artifacts"
-    )
 
     table = Section()
 
@@ -353,8 +288,44 @@ def print_at_a_glance(
 
     _add_separator(table)
     _add_section(table, "Alignment", _styled_value(alignment_text))
-    _add_plan_kv(table, "tools", tools_text)
-    _add_plan_kv(table, "offsets", _styled_value(_lower_first(reuse_policy_label)))
+    if alignment_enabled:
+        vsview_status: str | None = None
+        if use_vsview or force_interactive:
+            from frame_compare.vsview.adapter import (
+                VSViewAvailabilityStatus,
+                check_vsview_availability,
+            )
+
+            availability = check_vsview_availability()
+            if availability.is_available:
+                vsview_status = "available (true)"
+            elif availability.status == VSViewAvailabilityStatus.PROBE_FAILED:
+                vsview_status = availability.public_probe_failure_status()
+            else:
+                vsview_status = "unavailable (false)"
+
+        from frame_compare.utils.subproc import resolve_executable
+
+        try:
+            resolve_executable("ffmpeg")
+            resolve_executable("ffprobe")
+        except FileNotFoundError:
+            ffmpeg_available = False
+        else:
+            ffmpeg_available = True
+        reuse_policy_label = {
+            "disabled": "Do not reuse previous offsets",
+            "prompt": "Ask before reusing previous offsets",
+            "always": "Reuse previous offsets when valid",
+        }[config.audio_alignment.previous_offsets]
+        tools_text = _format_tools_row(
+            glyphs=glyphs,
+            ffmpeg_available=ffmpeg_available,
+            vsview_requested=use_vsview or force_interactive,
+            vsview_status=vsview_status,
+        )
+        _add_plan_kv(table, "tools", tools_text)
+        _add_plan_kv(table, "offsets", _styled_value(_lower_first(reuse_policy_label)))
 
     _add_separator(table)
     _add_section(table, "Review", review_text)
@@ -362,12 +333,26 @@ def print_at_a_glance(
 
     _add_separator(table)
     _add_section(table, "Publishing", publishing_text)
-    _add_plan_kv(table, "after upload", after_upload_text)
-    if config.slowpics.webhook_url:
-        _add_plan_kv(table, "webhook", _styled_value("configured"))
-    else:
-        _add_plan_kv(table, "webhook", "[dim]not configured[/]")
-    _add_plan_kv(table, "cleanup", _styled_value(_lower_first(cleanup_text)))
+    if upload_enabled:
+        enabled_actions: list[str] = []
+        if config.slowpics.copy_url_to_clipboard:
+            enabled_actions.append("copy URL")
+        if config.slowpics.open_in_browser:
+            enabled_actions.append("open browser")
+        if config.slowpics.create_url_shortcut:
+            enabled_actions.append("create shortcut")
+        after_upload_text = _dot_join(enabled_actions) if enabled_actions else _styled_value("none")
+        cleanup_text = (
+            "Delete uploaded screenshots when report-safe"
+            if config.slowpics.delete_after_upload
+            else "Keep local artifacts"
+        )
+        _add_plan_kv(table, "after upload", after_upload_text)
+        if config.slowpics.webhook_url:
+            _add_plan_kv(table, "webhook", _styled_value("configured"))
+        else:
+            _add_plan_kv(table, "webhook", "[dim]not configured[/]")
+        _add_plan_kv(table, "cleanup", _styled_value(_lower_first(cleanup_text)))
 
     table.title = section_title("Run plan")
     table.rail_style = BORDER_NEUTRAL
@@ -379,24 +364,24 @@ def _add_time_rows(table: Section, *, result: RunResult) -> None:
     review_seconds = max(0.0, result.vsview_review_seconds)
     _add_kv(table, "time", f"{format_duration(result.duration_seconds)} total")
 
-    machine_items: list[str] = []
+    phase_items: list[str] = []
     setup_seconds = timings.get("preflight", 0.0) + timings.get("load_sources", 0.0)
     if setup_seconds > 0.0:
-        machine_items.append(f"setup {format_duration(setup_seconds)}")
+        phase_items.append(f"setup {format_duration(setup_seconds)}")
     analyze_seconds = timings.get("analyze", 0.0)
     if analyze_seconds > 0.0:
-        machine_items.append(f"analyze {format_duration(analyze_seconds)}")
+        phase_items.append(f"analyze {format_duration(analyze_seconds)}")
     align_seconds = max(0.0, timings.get("align", 0.0) - review_seconds)
     if align_seconds > 0.0:
-        machine_items.append(f"align {format_duration(align_seconds)}")
+        phase_items.append(f"align {format_duration(align_seconds)}")
     render_seconds = timings.get("render", 0.0)
     if render_seconds > 0.0:
-        machine_items.append(f"render {format_duration(render_seconds)}")
+        phase_items.append(f"render {format_duration(render_seconds)}")
     upload_seconds = timings.get("publish", 0.0)
     if upload_seconds > 0.0:
-        machine_items.append(f"upload {format_duration(upload_seconds)}")
-    if machine_items:
-        table.add_row("  machine", _dot_join(machine_items))
+        phase_items.append(f"upload {format_duration(upload_seconds)}")
+    if phase_items:
+        table.add_row("  phases", _dot_join(phase_items))
 
     you_items: list[str] = []
     if review_seconds > 0.0:
@@ -413,6 +398,7 @@ def print_result_summary(
     *,
     result: RunResult,
     quiet: bool,
+    planned_frames: int | None = None,
     post_upload_actions: PostUploadActionResults = (),
     root: Path | None = None,
     verbose: bool = False,
@@ -428,18 +414,13 @@ def print_result_summary(
         *result.post_upload_actions,
         *post_upload_actions,
     )
-    row_warning_count = _row_warning_count(all_post_upload_actions)
-    warnings = [
-        presentation
-        for presentation in _warning_presentations(result.warnings, all_post_upload_actions)
-        if presentation.action not in _ROW_WARNING_ACTIONS
-    ]
+    warnings = _warning_presentations(result.warnings, all_post_upload_actions)
     glyphs = glyphs_for_console(console)
     if not result.success:
         title = f"[bold {FAIL}]{glyphs.failed} Comparison failed[/]"
         border_style = BORDER_FAILED
-    elif warnings or row_warning_count:
-        warning_count = row_warning_count + len(warnings)
+    elif warnings:
+        warning_count = len(warnings)
         noun = "warning" if warning_count == 1 else "warnings"
         title = (
             f"[bold {WARN}]{glyphs.warning} Comparison complete[/] [dim]· {warning_count} {noun}[/]"
@@ -468,7 +449,7 @@ def print_result_summary(
             )
             break
         if not action.success:
-            _add_kv(table, "  shortcut", _shortcut_failure_value(action, glyphs=glyphs))
+            _add_kv(table, "  shortcut", f"[{WARN}]{glyphs.warning}[/] not created")
             break
 
     for action in all_post_upload_actions:
@@ -503,7 +484,10 @@ def print_result_summary(
         _add_kv(table, "slow.pics", "upload skipped because the report could not be confirmed")
 
     run_segments: list[str] = []
-    if result.frame_count > 0:
+    if planned_frames is not None and result.frame_count != planned_frames:
+        unit = "frame" if planned_frames == 1 else "frames"
+        run_segments.append(f"{result.frame_count} of {planned_frames} {unit}")
+    elif result.frame_count > 0:
         unit = "frame" if result.frame_count == 1 else "frames"
         run_segments.append(f"{result.frame_count} {unit}")
     if result.clips_processed > 0:
@@ -525,12 +509,7 @@ def print_result_summary(
     table.print(console)
 
     if warnings:
-        max_lines = len(warnings) if verbose else 8
-        visible = warnings[:max_lines]
-        remaining = len(warnings) - len(visible)
-        warning_text = _format_warning_panel_text(visible, glyphs=glyphs)
-        if remaining > 0:
-            warning_text += _format_hidden_warning_counts(warnings[max_lines:], glyphs=glyphs)
+        warning_text = _format_warning_panel_text(warnings, glyphs=glyphs)
         section = Section(
             title=f"[{STYLE_WARN}]{glyphs.warning} Warnings[/]", rail_style=BORDER_PENDING
         )
@@ -539,9 +518,46 @@ def print_result_summary(
         section.print(console)
 
 
-def _count_screenshot_files(screenshot_dir: Path) -> int | None:
+def print_interruption(
+    console: Console, interruption: InterruptedRun | None, *, root: Path
+) -> None:
+    if take_run_block_separator():
+        console.print()
+    glyph = glyphs_for_console(console).warning
+    phase = None if interruption is None else interruption.phase
+    title = "Interrupted" if phase is None else f"Interrupted during {phase}"
+    console.print(f"[bold {WARN}]{glyph} {escape(title)}[/]")
+    if interruption is None:
+        return
+
+    workspace = interruption.workspace
+    if workspace is not None and workspace.run_dir is not None:
+        kept = _count_screenshot_files(workspace.screenshots_dir, missing_is_empty=True)
+        if kept is not None:
+            path = format_display_path(workspace.run_dir, root=root)
+            print_with_paths(
+                console,
+                f"  kept      {kept} of {interruption.planned_screenshots} screenshots · {escape(path)}",
+                (path,),
+            )
+
+    reusable = [
+        name
+        for name, written in (
+            ("analysis", interruption.analysis_cache_written),
+            ("alignment", interruption.alignment_cache_written),
+        )
+        if written
+    ]
+    if reusable:
+        console.print(f"  next run  reuses cached {' and '.join(reusable)}")
+
+
+def _count_screenshot_files(screenshot_dir: Path, *, missing_is_empty: bool = False) -> int | None:
     try:
         entries = list(screenshot_dir.iterdir())
+    except FileNotFoundError:
+        return 0 if missing_is_empty else None
     except OSError:
         return None
     return sum(1 for entry in entries if entry.is_file() and entry.suffix.lower() == ".png")
@@ -550,30 +566,6 @@ def _count_screenshot_files(screenshot_dir: Path) -> int | None:
 def _slowpics_link(url: str) -> str:
     target = url.replace("[", "%5B").replace("]", "%5D")
     return f"[link={target}][bold {ACCENT} underline]{escape(url)}[/][/link]"
-
-
-_ROW_WARNING_ACTIONS = ("clipboard", "browser", "shortcut", "webhook")
-
-
-def _row_warning_count(actions: PostUploadActionResults) -> int:
-    count = sum(
-        1 for action in actions if not action.success and action.kind in ("clipboard", "browser")
-    )
-    for kind in ("shortcut", "webhook"):
-        for action in actions:
-            if action.kind == kind:
-                if not action.success:
-                    count += 1
-                break
-    return count
-
-
-def _shortcut_failure_value(action: PostUploadActionResult, *, glyphs: GlyphSet) -> str:
-    item = f"[{WARN}]{glyphs.warning}[/] not created"
-    reason = None if action.warning is None else action.warning.detail
-    if reason:
-        item += f" [dim]({escape(reason)})[/]"
-    return item
 
 
 def _followup_action_items(actions: PostUploadActionResults, *, glyphs: GlyphSet) -> list[str]:
@@ -588,98 +580,36 @@ def _followup_action_items(actions: PostUploadActionResults, *, glyphs: GlyphSet
             if action.success:
                 items.append(f"[{OK}]{glyphs.ok}[/] opened in browser")
             else:
-                item = f"[{WARN}]{glyphs.warning}[/] browser didn't open"
-                reason = None if action.warning is None else action.warning.detail
-                if reason:
-                    item += f" [dim]({escape(reason)})[/]"
-                items.append(item)
+                items.append(f"[{WARN}]{glyphs.warning}[/] browser didn't open")
     return items
 
 
 def _warning_presentations(
     warnings: list[RunWarning],
     actions: PostUploadActionResults,
-) -> list[WarningPresentation]:
-    candidates: list[WarningPresentation] = []
-    seen: set[tuple[str, WarningSeverity, str, str | None]] = set()
-    action_warnings_by_record = {
-        action.warning: _post_upload_warning_presentation(action)
-        for action in actions
-        if action.warning is not None
-    }
-
-    for warning in warnings:
-        row = action_warnings_by_record.get(warning)
-        if row is None:
-            row = WarningPresentation(
-                warning.source, warning.severity, warning.message, warning.detail
-            )
-        key = (row.source, row.severity, row.message, row.detail)
-        if key in seen:
-            continue
-        seen.add(key)
-        candidates.append(row)
-
-    for row in action_warnings_by_record.values():
-        key = (row.source, row.severity, row.message, row.detail)
-        if key in seen:
-            continue
-        seen.add(key)
-        candidates.append(row)
-
-    return _group_warnings_by_source(candidates)
+) -> list[RunWarning]:
+    recorded = [*warnings, *(action.warning for action in actions if action.warning is not None)]
+    grouped: dict[WarningSource, dict[RunWarning, None]] = {}
+    for warning in recorded:
+        grouped.setdefault(warning.source, {})[warning] = None
+    return [warning for group in grouped.values() for warning in group]
 
 
-def _post_upload_warning_presentation(
-    action: PostUploadActionResult,
-) -> WarningPresentation:
-    warning = action.warning
-    if warning is None:
-        raise ValueError("post-upload warning presentation requires action.warning")
-    return WarningPresentation(
-        source=warning.source,
-        severity=warning.severity,
-        message=warning.message,
-        detail=warning.detail,
-        action=action.kind,
-    )
-
-
-def _group_warnings_by_source(warnings: list[WarningPresentation]) -> list[WarningPresentation]:
-    sources: list[str] = []
-    grouped: dict[str, list[WarningPresentation]] = {}
-    for warning in warnings:
-        if warning.source not in grouped:
-            sources.append(warning.source)
-            grouped[warning.source] = []
-        grouped[warning.source].append(warning)
-    return [warning for source in sources for warning in grouped[source]]
-
-
-def _format_warning_panel_text(warnings: list[WarningPresentation], *, glyphs: GlyphSet) -> str:
+def _format_warning_panel_text(warnings: list[RunWarning], *, glyphs: GlyphSet) -> str:
     lines: list[str] = []
+    group_by_source = len({warning.source for warning in warnings}) > 1
     current_source: str | None = None
     for warning in warnings:
-        if warning.source != current_source:
+        if group_by_source and warning.source != current_source:
             if lines:
                 lines.append("")
             lines.append(f"[bold {ACCENT}]{escape(warning.source)}[/]")
             current_source = warning.source
+        message = escape(warning.message)
         if warning.severity == "skipped":
-            lines.append(f"[dim]{glyphs.skipped} {escape(warning.message)}[/]")
+            lines.append(f"[dim]{glyphs.skipped} {message}[/]")
         else:
-            lines.append(f"[{WARN}]{glyphs.warning}[/] {escape(warning.message)}")
+            lines.append(f"[{WARN}]{glyphs.warning}[/] {message}")
         if warning.detail is not None:
             lines.append(f"  [dim]{escape(warning.detail)}[/]")
     return "\n".join(lines)
-
-
-def _format_hidden_warning_counts(hidden: list[WarningPresentation], *, glyphs: GlyphSet) -> str:
-    counts_by_source: dict[str, int] = {}
-    for warning in hidden:
-        counts_by_source[warning.source] = counts_by_source.get(warning.source, 0) + 1
-
-    count_text = ", ".join(
-        f"{escape(source)}={count}" for source, count in sorted(counts_by_source.items())
-    )
-    return f"\n[{WARN}]{glyphs.warning}[/] ... ({len(hidden)} more) hidden by source: {count_text}"

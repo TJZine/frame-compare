@@ -160,7 +160,6 @@ def _present(
         verbose=verbose,
         quiet=quiet,
         json_output=json_output,
-        diagnostics_written=False,
     )
 
 
@@ -448,6 +447,8 @@ def test_inconclusive_copy_does_not_report_boundary_hint_with_four_positions() -
         ("retime_rate_unsupported", "retimed audio rate unsupported"),
         ("analysis_budget_exceeded", "analysis budget exceeded"),
         ("timeout", "audio collection failed"),
+        ("video_check_inconclusive", "video check was inconclusive"),
+        ("unknown_future_reason", "no usable audio signal"),
     ],
 )
 def test_audio_unavailable_phrase(reason: str, phrase: str) -> None:
@@ -1402,7 +1403,6 @@ def test_normal_audio_evidence_reports_observation_and_stability(
         verbose=False,
         quiet=False,
         json_output=False,
-        diagnostics_written=False,
         review_pending=True,
     )
     rich_text = rendered.getvalue()
@@ -1419,8 +1419,9 @@ def test_normal_audio_evidence_reports_observation_and_stability(
 
 
 @pytest.mark.parametrize("verbose", [False, True])
-def test_audio_diagnostics_use_workspace_relative_link(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verbose: bool
+@pytest.mark.parametrize("review_count", [1, 2])
+def test_audio_review_heading_matches_comparison_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verbose: bool, review_count: int
 ) -> None:
     from io import StringIO
 
@@ -1431,8 +1432,13 @@ def test_audio_diagnostics_use_workspace_relative_link(
 
     config = AlignmentConfig(cache_results=False, no_color=True)
     reference, comparison, request = _request_for(tmp_path, config)
-    diagnostics = tmp_path / "generated" / "run" / "alignment_diagnostics"
-    request = replace(request, workspace_root=tmp_path, alignment_diagnostics_dir=diagnostics)
+    request = replace(
+        request,
+        comparisons=[
+            replace(request.comparisons[0], path=comparison.with_stem(f"comparison-{index}"))
+            for index in range(review_count)
+        ],
+    )
     output = StringIO()
     console = Console(file=output, width=120, record=True, no_color=True)
     monkeypatch.setattr(
@@ -1441,18 +1447,19 @@ def test_audio_diagnostics_use_workspace_relative_link(
     present_alignment_evidence(
         request=request,
         resolutions={
-            alignment_key(reference, comparison): ComparisonResolution(
-                _provisional_result(reference, comparison), "key", "computed_this_run"
+            alignment_key(reference, clip.path): ComparisonResolution(
+                _provisional_result(reference, clip.path), "key", "computed_this_run"
             )
+            for clip in request.comparisons
         },
         config=config,
         progress=RichProgressReporter(no_color=True),
         verbose=verbose,
         quiet=False,
         json_output=False,
-        diagnostics_written=True,
     )
     plain = Text.from_ansi(output.getvalue()).plain
-    assert f"diagnostics     {Path('generated') / 'run' / 'alignment_diagnostics'}" in plain
-    assert str(tmp_path) not in plain if not verbose else "(absolute:" in plain
-    assert f'href="{diagnostics.as_uri()}"' in console.export_html(clear=False)
+    assert (
+        f"Audio alignment · {review_count} {'needs' if review_count == 1 else 'need'} review"
+        in plain
+    )

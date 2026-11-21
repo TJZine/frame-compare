@@ -61,9 +61,11 @@ See [Output layout](../reference/output-layout.md) for ownership and portability
 frame-compare history list
 ```
 
-The list uses persisted lifecycle records and reports `completed`,
-`completed_with_warnings`, `failed`, or `unavailable` entries. It does not require the
-original media to remain at its old path.
+The table shows the run name, local date and time, source and frame counts when
+available, status, and whether a report is available. It can show `completed`,
+`completed with warnings`, `failed`, `interrupted`, or `unavailable`. Older
+interrupted runs may still show `failed`. You can list recorded runs after moving
+the original media.
 
 For structured automation:
 

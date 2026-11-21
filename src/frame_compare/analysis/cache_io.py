@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr
 
-from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.errors import AnalysisCacheMissError
 from frame_compare.analysis.metric_identity import stable_metric_algorithm_identity_json
 from frame_compare.analysis.types import (
     ActiveRectAlgorithmId,
@@ -163,7 +163,7 @@ def acquire_required_metrics(
     )
     if result.reason == "corrupted":
         raise CacheCorruptionError(error_path)
-    raise MetricsCalculationError(f"Cached metrics missing or mismatched ({result.reason}).")
+    raise AnalysisCacheMissError(f"Cached metrics missing or mismatched ({result.reason}).")
 
 
 def compute_cache_key(

@@ -400,8 +400,7 @@ def test_run_align_phase_composes_global_source_trims(
     assert output.selected_frames == expected_frames
     if warns:
         assert len(output.warnings) == 1
-        assert "align: Encode B alignment" in output.warnings[0].text
-        assert "encode_b" not in output.warnings[0].text
+        assert "encode_b: alignment not applied" in output.warnings[0].text
         assert output.reference.alignment is None
 
 
@@ -438,7 +437,7 @@ def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
     assert output.reference.trim.trim_start_frames == 2
     assert output.selected_frames == [48]
     assert [warning.text for warning in output.warnings] == [
-        "frame selection: dropped user frame(s) outside aligned renderable range: 0"
+        "1 requested frame falls outside the shared range and was skipped: 0"
     ]
 
 
@@ -943,7 +942,7 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
                     algorithm="cross_correlation",
                     source="computed",
                     applied=False,
-                    diagnostic="low_confidence",
+                    diagnostic="video_check_inconclusive",
                 ),
             )
         )
@@ -957,15 +956,12 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
     assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [0, 2]
     assert output.selected_frames == [0, 48, 97]
     assert len(output.warnings) == 1
-    warning = output.warnings[0].text
-    normalized_warning = warning.replace("_", " ").lower()
-    assert "align:" in warning.lower()
-    assert "align: Encode B alignment" in warning
-    assert "encode_b" not in warning
-    assert "low confidence" in normalized_warning
-    assert "unapplied" in normalized_warning
-    assert "best-effort reference-frame domain" in warning
-    assert "without accepted alignment" in warning
+    warning = output.warnings[0]
+    assert warning.comparison_path == comp_b.path
+    assert warning.text == (
+        "encode_b: alignment not applied (video check was inconclusive); "
+        "frames use the reference's frame numbers."
+    )
 
 
 @pytest.mark.parametrize(

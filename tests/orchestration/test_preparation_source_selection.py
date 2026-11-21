@@ -378,7 +378,7 @@ def test_execute_prep_rejects_duplicate_source_stems_before_probe(tmp_path: Path
     _create_video_files(input_dir, "source.mkv", "source.mp4")
     loader = FakeVSLoader()
 
-    with pytest.raises(DuplicateSourceStemError):
+    with pytest.raises(DuplicateSourceStemError, match="Two sources share the name 'source'"):
         asyncio.run(
             preparation.execute_prep(
                 make_run_request(root=tmp_path),

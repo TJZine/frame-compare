@@ -1,8 +1,10 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from frame_compare.config.schema import OverlayMode, ReportConfig
+from frame_compare.services.metadata_parsing import parse_filename_with_release_identity
 from frame_compare.services.report.payload import (
     REPORT_VERSION,
     ClipInfo,
@@ -12,6 +14,7 @@ from frame_compare.services.report.payload import (
     ReportRenderingInfo,
     build_report_payload,
 )
+from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     PresentationState,
@@ -97,6 +100,76 @@ def test_report_payload_v14_preserves_comparison_and_source_frame_domains(
     assert payload["rendering"]["overlay_mode"] == "diagnostic"
 
 
+_EBP = "Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv"
+_GNOME = "Black.Sails.S01E08.VIII.1080p.AMZN.WEB-DL.DDP.5.1.H.264-GNOME.mkv"
+_DUB = "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv"
+
+
+@pytest.mark.parametrize(
+    ("filenames", "tmdb_title", "expected"),
+    [
+        ([_EBP, _GNOME], "Les Voiles Noires", "Les Voiles Noires S01E08"),
+        ([_EBP, _GNOME], None, "Black Sails S01E08"),
+        ([_EBP, _DUB], None, "EbP vs english-dub-only"),
+        ([_EBP, _DUB, _GNOME], None, "EbP vs english-dub-only +1 more"),
+    ],
+    ids=["tmdb-with-episode", "common-content", "mixed-content", "mixed-content-with-more"],
+)
+def test_report_payload_title(
+    tmp_path: Path, filenames: list[str], tmdb_title: str | None, expected: str
+) -> None:
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"png")
+    base = _report_data(image)
+    clips = [
+        replace(
+            base.clips[0],
+            name=Path(filename).stem,
+            path=Path(filename),
+            label=filename,
+            release_identity=parse_filename_with_release_identity(filename)[1],
+            display=replace(
+                base.clips[0].display,
+                filename=filename,
+                micro=(
+                    "english-dub-only"
+                    if filename == _DUB
+                    else "GNOME"
+                    if filename == _GNOME
+                    else "EbP"
+                ),
+            ),
+        )
+        for filename in filenames
+    ]
+    data = replace(
+        base,
+        clips=clips,
+        rendering=replace(
+            base.rendering, geometry_by_label={filename: _geometry() for filename in filenames}
+        ),
+        metadata=(
+            TmdbMetadata(123, tmdb_title, "Black Sails", 2014, "tv")
+            if tmdb_title is not None
+            else None
+        ),
+    )
+
+    payload = build_report_payload(data, ReportConfig(), report_dir=tmp_path)
+
+    assert payload["title"] == expected
+    if tmdb_title is None and _DUB in filenames:
+        renamed = replace(
+            data.clips[0], display=replace(data.clips[0].display, micro="My reference")
+        )
+        updated = build_report_payload(
+            replace(data, clips=[renamed, *data.clips[1:]]), ReportConfig(), report_dir=tmp_path
+        )
+        assert updated["title"].startswith("My reference vs ")
+        assert updated["report_id"] != payload["report_id"]
+    assert [clip["display"]["filename"] for clip in payload["clips"]] == filenames
+
+
 def test_report_input_rejects_image_fact_frame_mismatch(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="does not match"):
         ReportImageInfo(
@@ -104,3 +177,29 @@ def test_report_input_rejects_image_fact_frame_mismatch(tmp_path: Path) -> None:
             source_frame=9,
             facts=RenderedFrameFacts(source_frame=8),
         )
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        None,
+        TmdbMetadata(1, "Inception", "Inception", 2010, "movie"),
+        TmdbMetadata(1, "Inception", "Inception", 0, "movie"),
+        TmdbMetadata(1, "", "Inception", 2010, "movie"),
+    ],
+)
+def test_movie_report_title_keeps_year_from_metadata_or_filename(
+    tmp_path: Path, metadata: TmdbMetadata | None
+) -> None:
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"png")
+    data = _report_data(image)
+    clip = replace(
+        data.clips[0],
+        release_identity=parse_filename_with_release_identity("Inception.2010.mkv")[1],
+    )
+    data = replace(data, clips=[clip], metadata=metadata)
+    assert (
+        build_report_payload(data, ReportConfig(), report_dir=tmp_path)["title"]
+        == "Inception (2010)"
+    )

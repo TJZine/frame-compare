@@ -1,6 +1,5 @@
 import math
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
 from frame_compare.services.alignment_evidence import (
@@ -147,7 +146,6 @@ class AlignmentOperationOutcome:
     results: tuple[AlignmentResult, ...]
     review: AlignmentReviewSummary = AlignmentReviewSummary()
     resolutions: tuple[ComparisonResolution, ...] = ()
-    diagnostics_dir: Path | None = None
 
 
 @dataclass(frozen=True)

@@ -21,6 +21,7 @@ from frame_compare.orchestration import preparation
 from frame_compare.orchestration.phase_render import _source_signal_facts
 from frame_compare.orchestration.types import RunDependencies
 from frame_compare.utils.media_facts import HDRStaticFacts, SourceSignalFacts
+from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 from tests.orchestration.execute_run_helpers import FakeHDRVSLoader, FakeVSLoader
 from tests.orchestration.preparation_test_support import (
@@ -126,13 +127,24 @@ def test_cache_only_refuses_invalid_probe_authority_before_metadata_and_reservat
     reserve = MagicMock(side_effect=AssertionError("must validate before run metadata/reservation"))
     monkeypatch.setattr(preparation, "_resolve_run_directory", reserve)
     loader = RecordingLoader()
-    with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
+    error_type = (
+        SourceLoadError if authority in {"no-probe", "refused"} else MetricsCalculationError
+    )
+    message = (
+        "Failed to load source"
+        if error_type is SourceLoadError
+        else "No cached analysis for this selection"
+    )
+    with pytest.raises(error_type, match=message) as caught:
         asyncio.run(
             preparation.execute_prep(
                 make_run_request(root=tmp_path, from_cache_only=True),
                 RunDependencies(vs_loader=loader),
             )
         )
+    if authority in {"no-probe", "refused"}:
+        assert caught.value.code == "FC-4015"
+        assert caught.value.hint == "Check file integrity or engine support"
     assert loader.calls == 0
     reserve.assert_not_called()
 
@@ -194,7 +206,7 @@ def test_untrusted_persisted_token_misses_at_both_preparation_entrypoints(
     cache_path.write_text(tomli_w.dumps(payload), encoding="utf-8")
     loader = RecordingLoader()
     if cache_only:
-        with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
+        with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
             asyncio.run(
                 preparation.execute_prep(
                     make_run_request(root=tmp_path, from_cache_only=True),

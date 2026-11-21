@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import tomllib
+from asyncio import CancelledError
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -12,7 +14,10 @@ from typer.testing import CliRunner
 from frame_compare.cli.entry import app
 from frame_compare.services.run_result_record import (
     CompletedRunFacts,
+    FailedRunFacts,
     completed_record,
+    failed_record,
+    read_run_result,
     write_run_result,
 )
 from frame_compare.utils.types import WorkspacePaths
@@ -205,14 +210,87 @@ def test_history_list_omits_recordless_folder(tmp_path: Path) -> None:
     assert "Recordless" not in result.stderr
 
 
-def test_history_list_human_exposes_concise_fields(tmp_path: Path) -> None:
-    _setup(tmp_path)
+def test_history_list_human_exposes_local_time_counts_and_status(tmp_path: Path) -> None:
+    report = _setup(tmp_path)
+    generated_root = report.parent.parent
+    completed = read_run_result(report.parent / "run_result.toml")
+    for name, record in [
+        (
+            "Warned",
+            replace(
+                completed,
+                status="completed_with_warnings",
+                warning_count=1,
+                warning_summaries=("A run warning was reported.",),
+                report_path=None,
+            ),
+        ),
+        (
+            "Interrupted",
+            failed_record(
+                error=CancelledError(),
+                started_at=completed.started_at,
+                completed_at=completed.completed_at,
+                facts=FailedRunFacts(clip_count=2),
+            ),
+        ),
+        (
+            "Failed",
+            failed_record(
+                error=RuntimeError(),
+                started_at=completed.started_at,
+                completed_at=completed.completed_at,
+            ),
+        ),
+    ]:
+        folder = generated_root / name
+        folder.mkdir()
+        write_run_result(folder, record)
+    broken = generated_root / "Broken"
+    broken.mkdir()
+    (broken / "run_result.toml").write_text("version = 99\n", encoding="utf-8")
+
+    human = _invoke(tmp_path, ["list"])
+    machine = _invoke(tmp_path, ["list", "--json"])
+
+    assert human.exit_code == machine.exit_code == 0
+    when = datetime(2026, 7, 14, 12, 0, 5, tzinfo=UTC).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    assert human.stdout.splitlines() == [
+        "Name         When                 Sources  Frames  Status                   Report",
+        f"Exact Run    {when}        2       4  completed                yes",
+        f"Failed       {when}        0       0  failed                   no",
+        f"Interrupted  {when}        2       0  interrupted              no",
+        f"Warned       {when}        2       4  completed with warnings  no",
+        "Broken       unknown                               unavailable              no",
+    ]
+    assert human.stderr == machine.stderr
+    assert "Broken: A run result record is unreadable or unsupported." in human.stderr
+    interrupted_json = next(
+        item for item in json.loads(machine.stdout)["runs"] if item["name"] == "Interrupted"
+    )
+    assert interrupted_json == {
+        "name": "Interrupted",
+        "status": "failed",
+        "started_at": "2026-07-14T12:00:00Z",
+        "completed_at": "2026-07-14T12:00:05Z",
+        "duration_seconds": 5.0,
+        "report_available": False,
+    }
+
+
+def test_history_list_human_omits_counts_when_all_records_are_unavailable(tmp_path: Path) -> None:
+    _setup_config(tmp_path)
+    broken = tmp_path / "generated" / "Broken"
+    broken.mkdir(parents=True)
+    (broken / "run_result.toml").write_text("version = 99\n", encoding="utf-8")
 
     result = _invoke(tmp_path, ["list"])
 
     assert result.exit_code == 0
-    assert result.stdout == "Exact Run\tcompleted\t2026-07-14T12:00:05Z\treport=yes\n"
-    assert result.stderr == ""
+    assert (
+        result.stdout == "Name    When     Status       Report\nBroken  unknown  unavailable  no\n"
+    )
+    assert "unreadable or unsupported" in result.stderr
 
 
 @pytest.mark.parametrize("external", [False, True], ids=["contained", "external"])

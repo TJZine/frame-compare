@@ -100,7 +100,22 @@ def test_build_html_report_information_content_counts_frames(
     assert parse_info_modal(html).general["Content"] == expected
 
 
-def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPayload) -> None:
+@pytest.mark.parametrize(
+    ("short", "detail", "expected"),
+    [
+        ("Reference micro", "Reference control", "Reference micro · Reference control"),
+        (
+            "AMZN WEB-DL · DV HDR · FLUX",
+            "2160p · AMZN WEB-DL · DV HDR · FLUX",
+            "AMZN WEB-DL · DV HDR · FLUX · 2160p",
+        ),
+        ("Custom · Cut", "custom · cut", "Custom · Cut"),
+    ],
+)
+def test_build_html_renders_frame_and_clip_selectors(
+    report_payload: ReportPayload, short: str, detail: str, expected: str
+) -> None:
+    report_payload["clips"][0]["display"].update(micro=short, control=detail)
     html = build_html(report_payload)
     parser = SelectParser()
     parser.feed(html)
@@ -112,25 +127,26 @@ def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPaylo
     ]
     assert parser.selects["left-select"].attrs["aria-label"] == "Left clip"
     reference = next(
-        option
-        for option in parser.selects["left-select"].options
-        if option.text == "Reference control"
+        option for option in parser.selects["left-select"].options if option.text == expected
     )
     assert "selected" in reference.attrs
     assert reference.attrs["title"] == "Reference primary <unsafe> — reference exact <unsafe>.mkv"
+    assert reference.attrs["aria-label"] == reference.attrs["title"]
+    assert reference.attrs["value"] == "0"
     assert parser.selects["right-select"].attrs["aria-label"] == "Right clip"
+    assert parser.selects["right-select"].options[0].text == expected
     candidate = next(
         option
         for option in parser.selects["right-select"].options
-        if option.text == "Encode control"
+        if option.text == "Encode micro · Encode control"
     )
     assert "selected" in candidate.attrs
     assert candidate.attrs["title"] == 'Encode primary "unsafe" — encode exact "unsafe".mkv'
+    assert candidate.attrs["aria-label"] == candidate.attrs["title"]
+    assert candidate.attrs["value"] == "1"
     assert parser.selects["active-select"].attrs["aria-label"] == "Single clip"
     active_reference = next(
-        option
-        for option in parser.selects["active-select"].options
-        if option.text == "Reference control"
+        option for option in parser.selects["active-select"].options if option.text == expected
     )
     assert "selected" in active_reference.attrs
 
@@ -169,6 +185,24 @@ def test_build_html_renders_mode_aware_clip_controls(report_payload: ReportPaylo
     assert "rv-context-controls" in active_controls.classes
     assert pair_controls in context_zone.children
     assert active_controls in context_zone.children
+    assert [child.attrs["id"] for child in pair_controls.children] == [
+        "left-select",
+        "btn-swap-clips",
+        "right-select",
+    ]
+    frame_controls = require_first(document, class_name="rv-frame-controls")
+    assert [child.attrs["id"] for child in frame_controls.children] == [
+        "btn-prev",
+        "frame-select",
+        "btn-next",
+        "active-filter-badge",
+    ]
+    actions = require_first(document, class_name="rv-bar-actions")
+    assert [child.attrs["id"] for child in find_children(actions, tag="button")] == [
+        "btn-inspector",
+        "btn-info",
+        "btn-help",
+    ]
     assert require_first(context_zone, element_id="alignment-status")
     assert "role" not in context_zone.attrs
     assert pair_controls.attrs["aria-label"] == "Comparison pair"
@@ -306,32 +340,28 @@ def test_build_html_keeps_shortcut_help_and_omits_redundant_footer(
 
 
 @pytest.mark.parametrize(
-    ("timestamp", "tag"),
+    "timestamp",
     [
-        ("2026-09-04T14:29:22.256990+00:00", "time"),
-        ("2026-09-04T23:59:59.123456-04:00", "time"),
-        ("2026-09-04T00:00:00Z", "time"),
-        ('unknown "<date>"', "span"),
+        "2026-09-04T14:29:22.256990+00:00",
+        "2026-09-04T23:59:59.123456-04:00",
+        "2026-09-04T00:00:00Z",
+        'unknown "<date>"',
     ],
 )
-def test_build_html_generated_timestamp(
-    report_payload: ReportPayload, timestamp: str, tag: str
-) -> None:
-    payload: ReportPayload = {**report_payload, "generated_at": timestamp}
-    html = build_html(payload)
-    metadata = require_first(parse_elements(html), class_name="rv-meta")
-    date = require_first(metadata, tag=tag)
-    assert date.attrs["title"] == timestamp
+def test_build_html_generated_timestamp(report_payload: ReportPayload, timestamp: str) -> None:
+    html = build_html({**report_payload, "generated_at": timestamp})
+    document = parse_elements(html)
+    info = require_first(document, element_id="info-modal")
+    date = require_first(info, tag="time")
+    assert find_all(document, tag="time") == [date]
+    assert date.attrs["title"] == date.attrs["datetime"] == date.text == timestamp
     assert script_payload(html)["generated_at"] == timestamp
-    if tag == "time":
-        assert date.attrs["datetime"] == timestamp
-        assert parse_info_modal(html).general["Generated"] == timestamp
-    else:
-        assert date.text == timestamp
+    assert parse_info_modal(html).general["Generated"] == timestamp
 
 
 def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
-    html = build_html(report_payload)
+    title = "EbP vs english-dub-only +1 more"
+    html = build_html({**report_payload, "title": title})
     tags = parse_start_tags(html)
     info_modal = parse_info_modal(html)
     elements = parse_elements(html)
@@ -342,11 +372,22 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     info_icon = require_first(info_button, tag="svg")
     inspector_icon = require_first(inspector_button, tag="svg")
 
-    metadata = require_first(elements, class_name="rv-meta")
-    assert "• 2 frames • 2 clips" in metadata.text
-    generated = require_first(metadata, tag="time")
-    assert generated.attrs["datetime"] == "2026-05-22T12:00:00+00:00"
-    assert generated.attrs["title"] == "2026-05-22T12:00:00+00:00"
+    controls = require_first(elements, class_name="rv-controls")
+    assert controls.children == [
+        require_first(controls, class_name=name)
+        for name in ("rv-title-stepper", "rv-mode-controls", "rv-context-zone", "rv-bar-actions")
+    ]
+    heading = require_first(controls, class_name="rv-title-stepper")
+    assert heading.children == [
+        require_first(heading, class_name=name) for name in ("rv-title", "rv-frame-controls")
+    ]
+    title_element = require_first(controls, class_name="rv-title")
+    assert title_element.text == title_element.attrs["title"] == title
+    assert require_first(elements, tag="title").text == f"{title} - Frame Compare Report"
+    assert not find_all(elements, class_name="rv-header")
+    assert not find_all(controls, class_name="rv-meta")
+    assert info_modal.general["Content"] == "2 frames · 2 sources"
+    assert info_modal.general["Generated"] == "2026-05-22T12:00:00+00:00"
     assert tags.by_id["btn-help"][1]["class"] == "rv-header-help-btn"
     assert tags.by_id["btn-info"][1]["class"] == "rv-header-info-btn"
     assert tags.by_id["btn-info"][1]["title"] == "Report information"
@@ -366,7 +407,7 @@ def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> No
     assert info_modal.attrs["role"] == "dialog"
     assert info_modal.section_headings == ["General", "Sources", "Rendering"]
     assert info_modal.general == {
-        "Title": "Renderer Contract",
+        "Title": title,
         "Report ID": "report_0123456789abcdef0123456789abcdef",
         "Generated": "2026-05-22T12:00:00+00:00",
         "Content": "2 frames · 2 sources",
@@ -676,9 +717,9 @@ def test_build_html_uses_payload_default_selection_for_clip_controls(
         if "selected" in option.attrs
     ]
 
-    assert left_selected == ["Encode control"]
-    assert right_selected == ["Reference control"]
-    assert active_selected == ["Encode control"]
+    assert left_selected == ["Encode micro · Encode control"]
+    assert right_selected == ["Reference micro · Reference control"]
+    assert active_selected == ["Encode micro · Encode control"]
 
 
 def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayload) -> None:
@@ -697,7 +738,10 @@ def test_build_html_renders_viewport_audit_controls(report_payload: ReportPayloa
 
     alignment_status = require_first(document, tag="div", element_id="alignment-status")
     assert "rv-alignment-status" in alignment_status.classes
-    assert alignment_status.text
+    assert "hidden" in alignment_status.attrs
+    assert not alignment_status.text
+    assert alignment_status.attrs["role"] == "status"
+    assert alignment_status.attrs["aria-live"] == "polite"
     fit_group = require_first(palette, tag="div", attr_name="role", attr_value="radiogroup")
     assert fit_group.attrs["aria-label"] == "Fit mode"
     fit_buttons = {

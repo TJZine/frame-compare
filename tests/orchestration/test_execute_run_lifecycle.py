@@ -79,7 +79,9 @@ def test_execute_run_returns_success_and_records_preflight_timing(
 
     assert result.success is True
     assert result.warnings == []
-    assert result.screenshot_dir == (tmp_path / "generated" / "source" / "screenshots").resolve()
+    assert result.screenshot_dir is not None
+    assert result.screenshot_dir.name == "screenshots"
+    assert result.screenshot_dir.parent.parent == (tmp_path / "generated").resolve()
     assert result.frame_count == 10
     assert result.clips_processed == 1
     assert result.duration_seconds >= 0.0
@@ -955,6 +957,9 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
             raise RenderError("render failed before interrupt")
         ready.set()
         assert release_render.wait(3)
+        if owner == "render":
+            request.output_path.parent.mkdir(parents=True, exist_ok=True)
+            request.output_path.write_bytes(b"retained screenshot fixture")
         return RenderedFrameResult(
             request.output_path,
             RenderedFrameFacts(
@@ -991,7 +996,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                     clip=cast(Any, root / "reference.mkv"),
                     diagnostic_source=cast(Any, root / "reference.mkv"),
                     frame_number=index,
-                    output_path=root / f"{index}.png",
+                    output_path=workspace.screenshots_dir / f"{index}.png",
                     overlay=None,
                     encoder_settings=EncoderSettings(),
                 )
@@ -1050,7 +1055,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                 "run",
                 "--root",
                 str(root),
-                "--quiet",
+                *([] if owner == "render" else ["--quiet"]),
                 "--skip-analysis",
                 "--skip-metadata",
                 "--no-upload",
@@ -1063,6 +1068,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
         json.dumps(
             {
                 "exit": result.exit_code,
+                "stderr": result.stderr,
                 "status": record.status,
                 "calls": sorted(calls),
                 "later": later,
@@ -1104,6 +1110,12 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
         assert observed["children"] == 1
     elif owner == "render":
         assert observed["calls"] in ([0], [0, 1])
+        stderr = observed["stderr"]
+        assert "[STOP] RENDER  Interrupted" in stderr
+        assert "! Interrupted during Render" in stderr
+        assert f"{len(observed['calls'])} of 10 screenshots" in stderr
+        assert "[FAIL] RENDER" not in stderr
+        assert "next run" not in stderr
     else:
         assert observed["close_completed"] == [True]
 
@@ -1230,7 +1242,9 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
     assert list((tmp_path / "generated").rglob("clip_probe.toml")) == []
     records = list((tmp_path / "generated").rglob(RUN_RESULT_FILENAME))
     assert len(records) == 1
-    assert read_run_result(records[0]).status == "failed"
+    record = read_run_result(records[0])
+    assert record.status == "failed"
+    assert record.was_interrupted
 
 
 def test_real_render_failure_wins_over_queued_sigint_and_client_close(tmp_path: Path) -> None:

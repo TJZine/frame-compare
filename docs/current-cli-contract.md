@@ -23,6 +23,8 @@ documents that promise elsewhere.
   renderer for Rich human sections. `src/frame_compare/utils/artifact_paths.py`
   owns human artifact-path formatting and terminal hyperlinks. `SessionConsole`
   mirrors the same section rules in the VSView process.
+- `src/frame_compare/utils/terminal_theme.py` owns the human console and path-safe
+  wrapping used by human dry-run and typed error output.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
 - `docs/ENGINEERING_RUNBOOK.md` owns workflow, verification, and public-surface policy.
 
@@ -73,8 +75,12 @@ and `cli_helpers.handle_error`):
 | `130` | A run or the wizard interrupted by Ctrl+C, or a wizard prompt aborted or reaching end of input |
 
 The first digit of an `FC-` code selects its family and exit code. Human output
-prints the code and message on stderr; `--json` prints the typed error document
-described under Output Modes. An unexpected error exits 1 and prints a fixed
+prints the code and message on stderr with a hint when available. The details
+block and its verbose prompt are omitted when the message already contains every
+detail value. Typed human errors wrap to the terminal width. Paths that do not fit
+at the end of a line move intact to the next line, including selectors displayed
+with quotes and escaped characters. `--json` prints the typed error
+document described under Output Modes. An unexpected error exits 1 and prints a fixed
 message to stderr. In `--json` mode it emits no stdout document.
 
 ## Shared Path Resolution Rules
@@ -222,10 +228,21 @@ before probing, metadata prefetch, run-folder reservation, rendering, or HTTP
 work. Derived collisions are qualified deterministically with source stems and
 then stable source order. Resolved labels drive overlays, reports, alignment display,
 and render artifact keys, but do not change source/cache/alignment identity or physical
-PNG filenames. Live render progress uses exact explicit labels or unique role-prefixed
-micro release descriptors. slow.pics columns use exact explicit labels or unique full
-release descriptors, with the canonical resolved label as the uninformative-parser
-fallback. Orchestrated rendering continues to use the source stem as `filename_label`. When the resulting
+PNG filenames. The Sources and alignment summaries use explicit short labels first.
+A parsed release group qualifies as a short label when it is unique among the sources,
+the filename ends with a hyphen followed by the complete group, and the filename
+also identifies a resolution, source, or codec. Hyphenated groups are supported. Otherwise the
+summary uses compact release details when available. If those details collide,
+unique differing filename text takes precedence over role prefixes. The filename
+fallback removes shared leading and trailing tokens. If the full stem remains, a matching parsed-title
+prefix can be removed. An empty remainder falls back to the resolved label.
+Live render progress uses exact explicit labels or unique role-prefixed micro release
+descriptors. slow.pics columns use exact explicit labels or unique full
+release descriptors. Descriptors show only usable groups. Without one, a descriptor
+appends differing filename text or a fallback label when it adds information.
+Release facts are listed once. Filename text used as the short label is appended
+as written. Role prefixes are omitted. Orchestrated rendering
+continues to use the source stem as `filename_label`. When the resulting
 absolute screenshot path would exceed the legacy Windows browser-safe boundary, the
 physical filename retains a readable source-stem prefix and adds a deterministic
 digest suffix so local `file://` reports remain loadable without identity collisions.
@@ -271,8 +288,12 @@ unchanged.
   search permission.
   History does not create the root, return a JSON success document, or fall back
   to the workspace or portable bundle.
-- Human `history list` output goes to stdout and exposes the exact run name,
-  status, persisted time, and report availability. Diagnostics and warnings use
+- Human `history list` writes a table to stdout with the exact run name, local date
+  and time, source and frame counts when recorded, status, and report availability
+  as `yes` or `no`. It uses completion time when known, then start time. Statuses include `completed`, `completed with warnings`, `failed`,
+  `interrupted`, and `unavailable`. Unreadable entries have empty count cells.
+  Count columns appear when at least one record supplies counts. An existing empty
+  root prints `No recorded runs in <generated dir>.` Diagnostics and warnings use
   stderr.
 - `history list --json` writes exactly one compact object to stdout with top-level
   key `runs`. Every entry has exactly `name`, `status`, `started_at`,
@@ -313,6 +334,8 @@ unchanged.
   `Will use`, `Would create in a real run`, `Publishing after success`, `Unknown
   until execution`, and `Not performed by dry-run`. Contained input paths are shown
   relative to the workspace root, while external input paths remain absolute.
+  Human output wraps to the terminal width and moves a path intact to the next
+  line when it does not fit.
   `--quiet` emits only a minimal source-count/no-side-effects summary.
   `--dry-run --json` writes exactly one JSON document to stdout, and typed errors
   retain the standard JSON error schema and stream placement.
@@ -364,12 +387,13 @@ unchanged.
   `+-`, `|`, `+-`, `*`, and `o` for the section and status glyphs, while the
   existing `·`, `›`, `…`, `×` mappings remain in force. Rich output uses this
   renderer for every in-scope section; the VSView process applies the same rules
-  in `SessionConsole`. There is one blank line before and after each section;
-  phase lines are grouped without blank lines between them and have one blank
-  line around the group.
+  in `SessionConsole`. One blank line separates `run` blocks, including the
+  completion and Warnings sections. Adjacent phase lines form one block.
+  Plain audio evidence forms a separate block. Errors and interruption summaries
+  are separated from the preceding section by one blank line.
 - Normal non-quiet runs begin with a dim-rail `Run plan` section containing
   `Workspace`, `Frames`, `Rendering`, `Alignment`, `Review`, and `Publishing`
-  groups. Rows and their order are unchanged. Group keys are accent bold; their
+  groups. Group keys are accent bold; their
   sub-rows are indented two spaces, and there is one blank body line between
   groups. `Workspace` is the root with `config`, `input`, and `output` sub-rows
   (`output` is the resolved generated-data root). `Frames` is `N total` with a
@@ -383,15 +407,16 @@ unchanged.
   VSView review` / `audio, VSView required` / `audio` / `disabled`, with a
   `tools` row of `{glyph} FFmpeg audio · {glyph} VSView`; unavailable tools are
   followed by muted `(unavailable)` or the existing probe-failure text, VSView
-  is omitted when not requested, and FFmpeg shows `–` when alignment is disabled.
-  Its `offsets` row uses the existing label with a lower-case first letter.
+  is omitted when not requested. Its `offsets` row uses the existing label
+  with a lower-case first letter. Disabled alignment omits both sub-rows.
   `Review` is `HTML report · opens when done` / `HTML report` / `disabled`, with
   `metadata` as `TMDB lookup` / `disabled`. `Publishing` is `slow.pics ·
   {visibility lower} · ask after the local report` / `automatic upload`, or
   `disabled` / `disabled by --no-upload`, with `after upload` as
   `copy URL · open browser · create shortcut` / `none`, `webhook` as
   `configured` / muted `not configured` (the URL is never displayed), and
-  `cleanup` with the existing text lower-cased first. The `tools` separators are
+  `cleanup` with the existing text lower-cased first. Disabled publishing omits
+  all three sub-rows. The `tools` separators are
   ` · `.
 - Human run-plan paths show the resolved workspace root once as an absolute anchor.
   Contained config, input, generated-data, and result paths are shown relative to
@@ -429,7 +454,7 @@ unchanged.
   prompt would be needed.
 #### Source, alignment, and completion summaries
 
-- After sources load, normal human output uses one `Sources · N loaded` section
+- After sources load, normal human output uses one `Sources · N` section
   when all sources do not share one content identity, or `{content identity} ·
   {N} sources` when they do. `1 source` is used for one source. The content
   identity appears only in the title. Each source entry has its bold name,
@@ -448,23 +473,31 @@ unchanged.
   to successful stdout.
 - Material alignment information is printed in a dim-rail `Frame alignment`
   section when accepted or rejected frame-alignment changes need explanation. Each
-  comparison has a bold short-name line, `trims`, `stability` when present, and
-  `frames` (`aligned …`).
+  comparison has a bold short-name line, `trims`, and `stability` when present.
+  The shared `frames` row follows the last comparison. With multiple comparisons,
+  a blank line separates it from the comparison rows and its label aligns with
+  the comparison names. With one comparison, it stays beneath that comparison.
+  The row uses `aligned …` or
+  `aligned frame 0 (1 total)` for one frame at index 0.
   The Align phase summary gives the final offsets and origins in place of
-  `offset` and `source` rows. Alignment warnings are `!` notes, and verbose output
-  includes `details` rows. The evidence reports normalized source-frame row 0,
-  final trim ranges, selected aligned frames, and alignment warning context. Stability is derived from credible chunk runs; unobserved
+  `offset` and `source` rows. A comparison with an alignment warning gets a
+  `! see warnings` note. The warning appears in the final Warnings section.
+  Verbose output includes `details` rows. The evidence reports normalized
+  source-frame row 0, final trim ranges, selected aligned frames, and alignment
+  warning context. Stability is derived from credible chunk runs; unobserved
   planned chunks remain unassessed. Individual diagnostic chunks are never printed.
   The section is suppressed by `--quiet` and never emitted to `run --json` stdout.
 - `--verbose` adds a dim-rail `Final selection` section after alignment. Its rows
   do not include an `After Alignment` stage label.
 - Audio alignment uses a dim rail, or a yellow rail when any comparison needs
-  review, with title `Audio alignment` and optional dim ` · {N} needs review`.
+  review, with title `Audio alignment` and optional dim ` · 1 needs review` or
+  ` · {N} need review`.
   Each entry starts with a bold short name and one of the exact states `{+Nf} ·
   applied`, `{+Nf} · confirm in VSView`, `{+Nf} · reused from last run`,
   `{+Nf} · previously confirmed`, `{+Nf} · manual offset`, `{+Nf} · not applied`,
-  or `no audio match ({reason phrase})`. A freshly computed, applied offset uses
-  `applied` when no review is pending. Fresh results include the dim evidence
+  or `no audio match ({reason phrase})`. The reason uses plain language. A freshly
+  computed, applied offset uses `applied` when no review is pending. Fresh
+  results include the dim evidence
   line `{agreeing} of {active} sections agree · video check {+Nf} · {stability}`.
   The agreeing count is `authority_recount.authority_agreeing_chunks` when an
   authority recount exists, otherwise `audio.agreeing_chunks`; both are counted
@@ -492,9 +525,8 @@ unchanged.
   Provisional evidence never authorizes trims, persistence, or computed-cache
   authority. Verbose evidence remains as dim key/value rows,
   including the original attempt and stream/chunk/video facts without fabricating
-  current details for reused results. A written diagnostics directory appears as
-  the `diagnostics` hyperlink row. Plain mode prints `{short}: {line 1 state}` and
-  indents following lines two spaces, then `Audio diagnostics: {path}`. No
+  current details for reused results. Plain mode prints `{short}: {line 1 state}`
+  and indents following lines two spaces. No
   `✓ Align … alignment applied` line appears before review. Quiet mode shows
   only actionable entries and the final screenshots line.
 - When previous offsets are reused interactively, the prompt section is
@@ -534,8 +566,11 @@ unchanged.
   form is `{accepted} of {N} comparisons aligned · {origin}` followed by one row per
   comparison at column 18; the wrapped `{origin}` appears only when every comparison
   has an applied offset and all those applied comparisons share that origin. Length
-  differences add the dim extra-footage line.
-  Review duration is `· {machine} + {review} review`. The Align phase is warned whenever any
+  differences add a dim note. Names with the same extra time at the start and
+  end share a clause. Distinct amounts use separate clauses joined by semicolons.
+  The note names the comparison source when exactly one source needed no trim
+  and ends with `frames come from the shared range.`
+  Review duration is `· {alignment time} + {review time} review`. The Align phase is warned whenever any
   comparison ends without an applied offset, whether or not review ran; this
   changes only the phase glyph and colour and does not change authority, trims,
   persistence, the warnings list, or the completion title.
@@ -544,22 +579,27 @@ unchanged.
   section title with a matching rail. Rows are `slow.pics` with the URL only when
   uploaded, followed by the existing copy/open result items and `  shortcut` and
   `  webhook` rows; `report`; `screenshots` with `  {N} files`; `alignment` when
-  alignment ran; `diagnostics` when written; and the `slow.pics` row `upload
+  alignment ran; the `diagnostics` hyperlink when written; and the `slow.pics` row `upload
   skipped because the report could not be confirmed` when that happened.
   The `alignment` row shows the same per-source offsets and origins for applied
   entries as the Align phase summary.
   Declined uploads get no row. After one blank body line, `run` is `{N} frames ·
   {N} sources · analysis cached` or `analysis computed`, with nothing for
-  `skipped`, followed by `time` as `{dur} total`, `  machine`, and `  you` with
-  their existing items. Artifact paths are Rich hyperlinks and use the shared
-  path formatter.
-- Final warnings are grouped by producer-selected source in a yellow-rail
-  `! Warnings` section. Each source has its accent bold name, `!` notes (or `–`
-  for skipped items), dim detail lines indented two spaces, and one blank body
-  line between sources. When warnings are hidden, a final line gives the total
-  number of hidden warnings and their counts by source. Records are
-  de-duplicated for display, and warning rows associated with post-upload action
-  rows remain on those rows.
+  `skipped`. If rendered and planned frame counts differ, the row shows
+  `{rendered} of {planned} frames`. The next rows are `time` as `{dur} total`,
+  `  phases`, and `  you` with their corresponding timings. Artifact paths are
+  Rich hyperlinks and use the shared path formatter. The diagnostics path is
+  available once a diagnostic is written, including when alignment later fails
+  or the run continues with its original selection. If an error prevents the
+  completion section, the error is followed by the written diagnostics path.
+  Quiet, JSON, and managed interruption output omit this path.
+- The yellow-rail `! Warnings` section lists every distinct warning once,
+  including post-upload action warnings. The completion title counts that same
+  list. Copy, browser, shortcut, and webhook rows retain concise outcomes. The
+  section groups by source only when several sources are represented, with `!`
+  for warnings, `–` for skipped items, and dim, indented details when present.
+  Rejected comparisons use the short label and a plain-language reason, followed
+  by a note that frames use the reference's frame numbers.
 - `run --json` does not emit the human warning panel, does not add warning
   fields, and keeps warning text off stdout for successful runs. Runtime logs,
   native VapourSynth diagnostics, and plugin stderr may still use stderr.
@@ -585,17 +625,24 @@ unchanged.
 - Rich phase lines use `{glyph} {Label:<16}{summary}`, so the summary begins at
   column 18. The duration is appended inline in dim as `{summary} · {dur}`; with
   no summary, the duration alone begins at column 18. Retained lines include
-  completed top-level phases of 10 seconds or more, skipped, warned, and failed
-  phases, and successful uploads. Plain mode keeps
-  `[OK] ALIGN  Completed in …` and related existing renderers.
+  completed top-level phases of 10 seconds or more, runtime skips, warned and
+  failed phases, and successful uploads. Plain mode keeps
+  `[OK] ALIGN  Completed in …`. Human durations use one decimal below a minute
+  (`0.3 s`, `12.9 s`), minutes and seconds from a minute (`1m 08s`), and hours
+  and minutes from an hour (`1h 02m`). The run plan, the full-window prompt,
+  and its warning show authored sub-minute exclusion values with their available
+  precision, such as `0.03 s`. Timecodes show positions within media.
 - Analyze uses `{N} frames
   selected`, Render uses `{N} screenshots ({F} frames × {S} sources)`, Publish
   uses `{N} screenshots uploaded · {visibility}`, and a skipped phase uses its
-  lower-cased detail, such as `– Publish          declined`.
+  lower-cased detail, such as `– Publish          declined`. Config- or
+  flag-disabled phases are omitted from both human progress reporters.
+  Runtime skips retain their detail, and structured logging records every skip.
 - Non-TTY human runs use those product phase labels in chronological ASCII
-  progress lines on stderr. Each top-level phase emits once when it completes;
+  progress lines on stderr. Each enabled top-level phase emits once when it completes;
   successful lines include elapsed time, skips preserve their detail, and failed
-  phases emit `[FAIL]` before the existing typed error presentation. Successful
+  phases emit `[FAIL]` before the existing typed error presentation. Interrupted
+  phases emit `[STOP] RENDER  Interrupted` (with the current phase name). Successful
   nested work and percentage milestones remain silent. Warned or failed nested
   work may emit one line when needed to preserve a material outcome. Expected
   warn-only phase failures do not add a console traceback or duplicate warning
@@ -748,7 +795,11 @@ uses knee 1.0. Existing explicit color overrides retain precedence.
   `--frames` disables `--random-frame-count` or the metric-count options.
 
 When a metric selector is pending, FramePlan can pass an empty provisional plan
-to Analyze. User frames outside the selection window still produce a drop warning.
+to Analyze. User frames outside the selection window produce a drop warning.
+When a requested frame falls outside the shared source range, the CLI prints a
+notice after Align, or immediately after the sources block when alignment is
+disabled. The same shared-range warning appears once in the final Warnings
+section.
 If Analyze fails, an ordinary run continues with a warning only when usable User
 or Random frames remain. Otherwise it exits with the typed analysis or selection
 error before rendering.
@@ -757,7 +808,14 @@ error before rendering.
 
 After the first Ctrl+C, Frame Compare starts no new phase or audio work, and stops starting new frames within a fraction of a second; frames already being rendered or analysed finish first. The render admission bound is 50 ms polling plus 100 ms scheduling slack after the main thread observes the interrupt. No new result, cache or diagnostic entry is published except the failure record. Native operations already in flight (a VapourSynth frame request, render or audio worker native call, and native index or cache files those calls write) run to completion. They have no guaranteed finite drain deadline. PNGs already written may remain. A second Ctrl+C keeps its existing behavior.
 
-The interrupted run follows the failure-record path and exits 130. On Windows,
+The interrupted run follows the failure-record path and exits 130. The active
+human progress line says `interrupted` and uses the skip glyph. After cleanup, the
+CLI prints `! Interrupted during {phase}` when a phase is known. A reserved run
+folder gets a `kept` row with its screenshot count, planned count, and path.
+A `next run` row names only reusable analysis or alignment caches written by
+this run. Quiet and JSON output omit this human summary.
+
+On Windows,
 once the standalone CLI has completed its Python cleanup and selected exit 130,
 it ignores further Ctrl+C during interpreter/native-module teardown to preserve
 that exit status. This does not change repeated-interrupt behavior while the run
@@ -936,9 +994,19 @@ recovery requirement.
   folders are not reused to satisfy analysis cache hits. Screenshots, run-local
   generated state, and the canonical report remain beneath that reserved folder
   even when media input is external.
-- Run-folder names are capped at 64 characters and do not include exact timestamps.
-  The first successful reservation uses the title-first base name, and collisions use
-  compact numeric suffixes such as `_2` and `_3`.
+- Run-folder names contain the TMDB title and reference episode when available, the
+  shared filename-derived content title, or up to two different parsed content titles.
+  Movie titles include the year from TMDB or the parsed reference when available.
+  The title is followed by ` - ` and the comma-separated short source labels. If no
+  title is available, the name uses the short labels alone. If a label becomes empty,
+  equals the content title, or clashes after filename sanitization, its source role
+  keeps it distinct. Names
+  are capped at 64 characters. If the name is too long, Frame Compare drops trailing labels, adds
+  ` +N` for the omitted labels, and shortens the title at a token boundary if needed.
+  A single overlong label is shortened at a token boundary.
+  A collision adds the local timestamp ` (YYYY-MM-DD HH.MM)`. A further collision
+  adds seconds, then a short UUID if that second is already taken. The suffix and
+  `run_info.toml` creation time use the same clock reading.
   Exact creation time and run identity are written to root-level
   `<run-folder>/run_info.toml` immediately after reservation and before probing
   or rendering. Version 2 stores `version`, UTC `created_at` with a `Z` suffix,
@@ -963,8 +1031,11 @@ recovery requirement.
   the final outcome without modifying `run_info.toml`. Successful records are
   written after all post-run phases settle and the coordinator's HTTP client
   closes. Their status is `completed` or `completed_with_warnings`. Failures
-  after reservation get one best-effort `failed` record. Failures before
-  reservation write no record. An ordinary
+  after reservation get one best-effort `failed` record. New records for
+  `asyncio.CancelledError` and `KeyboardInterrupt` use `RUN_INTERRUPTED` in
+  `failure.name`. Human history displays those records as `interrupted`.
+  History JSON and older undifferentiated failures continue to use `failed`.
+  Failures before reservation write no record. An ordinary
   completed-run result-write failure is warning-only and leaves the run successful;
   an ordinary failed-run result-write failure preserves the identical original
   exception and exit mapping. `KeyboardInterrupt` and `SystemExit` raised while
@@ -983,11 +1054,14 @@ recovery requirement.
   the matching shared analysis cache entry for the exact current performance mode
   and metric algorithm identity before metadata prefetch and before run-folder
   reservation, so a missing, wrong-mode, or invalid entry does not leave an empty
-  run folder.
+  run folder. A cache miss reports `No cached analysis for this selection.` and
+  tells the user to run once without `--from-cache-only`.
 - The matching cache must remain valid through the cache-only Analyze phase. If
   its later acquisition fails, the run exits with the typed cache/analysis error
   before rendering or publishing; it does not complete with only the initial
   user/random frame plan.
+- An unreadable source under `--from-cache-only` retains its source-load error
+  and hint. A missing compatible probe snapshot reports an analysis cache miss.
 - `--from-cache-only` does not require or prohibit TMDB network access after analysis
   cache prevalidation succeeds. `--skip-metadata`, disabled TMDB, and a missing API
   key perform no TMDB cache reads or writes.
@@ -1044,8 +1118,8 @@ without a separate `Visibility` row. The question inside the rail is
 
 - Newly generated standalone reports use payload version `1.4`. Each clip carries a
   presentation-only `display` object with full primary identity, release descriptor,
-  ordinary-control label, constrained micro label, and the exact basename. Display
-  names are assembled from prepared release identity and explicit-label state.
+  ordinary-control label, shared short source label for compact captions, and the
+  exact basename. Display names use prepared release identity and explicit-label state.
   Filename-derived bidirectional formatting controls appear as code points such as
   `[U+202E]` in the UI. Frame Compare qualifies collisions between the resulting
   display names while preserving explicit labels, canonical clip labels, report
@@ -1077,25 +1151,39 @@ without a separate `Visibility` row. The question inside the rail is
   measurement)`. The per-clip applied facts disclose the resolved source-peak origin.
   When fast mode uses the `default` origin, the report notes that no HDR peak metadata
   was found and the default 1000-nit peak was used.
-- The primary report toolbar keeps frame navigation, view modes, and mode-specific
-  context/alignment in three stable CSS-owned zones on wide screens. It becomes a
-  two-row layout at medium widths and a stacked layout at narrow widths without
-  changing DOM order, native controls, keyboard behavior, or ARIA semantics.
+- The report toolbar combines the comparison title, frame navigation, view modes,
+  mode-specific controls, and report actions. It uses one row on wide screens,
+  two rows at intermediate widths, and a stack on narrow screens. Native source
+  options show the short label first, then distinct control detail. Detail that
+  equals or ends with the complete short label after a separator is omitted or
+  shortened, including short labels with multiple segments. Long labels can
+  clip in the closed control. The full option title and accessible name remain available.
 - Viewer spatial translation is labeled `Offset`, distinct from temporal source-frame
-  alignment. Filmstrip captions show the comparison frame number and selection category
+  alignment. The toolbar shows it for the displayed pair when the offset is nonzero,
+  including Single when the active source is the selected right source.
+  The full offset value can wrap inside the status below 1280 px. Filmstrip captions show the comparison frame number and selection category
   at every thumbnail size, with the full original frame label available on hover and
-  in the frame selector. The viewport palette remains floating and adds no reserved row.
+  in the frame selector. In Grid, the palette sits below or beside the cells and
+  the frame selector identifies the current frame in the toolbar. Fullscreen Grid
+  shows the current frame chip below the cells. In Slider, Single, Diff, and Blink,
+  the palette floats over the image without reserving space.
 - Filmstrip captions center the frame-number/category group over a shallow bottom
   gradient without reducing thumbnail image space or increasing card height.
   Category identification uses text in captions and filters; filters keep their counts,
   and the selected thumbnail retains its brass border.
-- The header shows the generation date and time localized by the browser. The exact
-  ISO timestamp remains in the report payload and in the `<time>` element's `datetime`
-  and `title` attributes; hover over the header or Generated value to inspect it.
-  Unparseable date text is shown unchanged.
-- Report identity includes output-affecting overlay, geometry, tonemap, presentation,
-  signal, and per-image provenance facts. It excludes absolute paths, image bytes or
-  `src` values, timestamps, transient browser state, clip display strings, requested
+- The report title uses the TMDB title when available, with the reference filename's
+  season and episode for television. Movie titles include the year from TMDB or the
+  filename when available. Otherwise it uses the shared filename-derived
+  content title from the CLI Sources header, or the first two short labels joined by
+  ` vs ` with ` +N more` for additional sources. Filenames remain in Clips and Report
+  Information. Report Information shows the localized generation date and time, frame
+  count, and source count. The exact ISO timestamp remains in the report payload and
+  in the Generated value's `datetime` and `title` attributes. Unparseable date text is
+  shown unchanged.
+- Report identity includes the comparison title, including short labels used in its
+  fallback, and output-affecting overlay, geometry,
+  tonemap, presentation, signal, and per-image provenance facts. It excludes absolute paths, image bytes or
+  `src` values, timestamps, transient browser state, other clip display strings, requested
   tonemap settings, and fallback causes. Applied implementation, algorithm, effective
   controls and resolved per-clip peaks participate in identity. Identical output via
   different fallback causes shares identity. Payload 1.4 changes report IDs because
@@ -1724,7 +1812,11 @@ Unknown keys at the root of the config remain ignored so a config can carry
 top-level sections owned by other tools. Every Frame Compare-owned nested
 config table rejects unknown keys, including nested source override and active
 rectangle tables. A misspelled or stale key inside an owned table therefore
-fails config validation instead of silently using a default.
+fails config validation instead of silently using a default. Its error names the
+selected configuration file as context, gives the full dotted key and suggests up
+to three keys from that table. Invalid values show the expected value or constraint
+and the supplied value, subject to redaction. Validation after merging settings
+reports the effective configuration and lists the selected file as context.
 
 Validation details retain rejected non-secret inputs for diagnostics. Inputs at
 `slowpics.webhook_url` and `tmdb.api_key` are always replaced with `<redacted>`

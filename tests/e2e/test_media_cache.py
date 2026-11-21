@@ -39,7 +39,7 @@ def test_media_cache_lifecycle(
     base_arguments = ["run", "--json", "--skip-metadata", "--no-upload", "--root", str(root.root)]
     steps: list[ArtifactStep] = []
     # Cache Mode Semantics and History Command Contract.
-    base_run_name = "reference + comparison"
+    expected_history: list[list[str | bool]] = []
     expected = {
         "runs": [
             {"exit_code": 0, "metrics_cache_status": "miss", "frames": [0, 11]},
@@ -55,16 +55,15 @@ def test_media_cache_lifecycle(
             "error_name": "CACHE_CORRUPTION",
             "no_new_run_folder": True,
         },
-        "history": [
-            [base_run_name, "completed", True],
-            *[[f"{base_run_name}_{index}", "completed", True] for index in range(2, 7)],
-        ],
+        "history": expected_history,
     }
     runs = []
+    run_names: list[str] = []
     run_dir = None
 
     def record_render(result: CommandResult) -> Path:
         rendered, rendered_dir, report = render_summary(result)
+        run_names.append(rendered_dir.name)
         runs.append(
             {
                 "exit_code": result.exit_code,
@@ -129,6 +128,8 @@ def test_media_cache_lifecycle(
     warm = run_cli(root.root, base_arguments, timeout=60)
     steps.append((base_arguments, warm))
     run_dir = record_render(warm)
+    assert len(set(run_names)) == 6
+    expected_history.extend([name, "completed", True] for name in sorted(run_names))
 
     arguments = ["history", "list", "--json", "--root", str(root.root)]
     history = run_cli(root.root, arguments, timeout=30)

@@ -167,7 +167,7 @@ def test_rich_progress_reporter_indeterminate_phase_shows_elapsed(
     assert task.fields["presentation"] == "indeterminate"
     with reporter._progress.console.capture() as capture:
         reporter._progress.console.print(reporter._progress.get_renderable())
-    assert "0:42" in capture.get()
+    assert "42.0 s" in capture.get()
 
     reporter.complete_phase()
 
@@ -218,14 +218,14 @@ def test_rich_progress_reporter_serializes_concurrent_updates() -> None:
             ProgressPhaseStatus.COMPLETED,
             "50 frames selected",
             None,
-            "✓ Analyze         50 frames selected · 12s",
+            "✓ Analyze         50 frames selected · 12.0 s",
         ),
-        (ProgressPhaseStatus.COMPLETED, None, None, "✓ Analyze         12s"),
+        (ProgressPhaseStatus.COMPLETED, None, None, "✓ Analyze         12.0 s"),
         (
             ProgressPhaseStatus.COMPLETED,
             "offsets",
-            "2s + 42s review",
-            "✓ Analyze         offsets · 2s + 42s review",
+            "2.0 s + 42.0 s review",
+            "✓ Analyze         offsets · 2.0 s + 42.0 s review",
         ),
         (ProgressPhaseStatus.FAILED, None, None, "✗ Analyze"),
         (ProgressPhaseStatus.WARNED, None, None, "! Analyze"),
@@ -251,6 +251,47 @@ def test_durable_phase_duration_is_inline(
     rendered = Text.from_ansi(output.getvalue()).plain
     assert rendered == expected + "\n"
     assert all(line == line.rstrip() for line in rendered.splitlines())
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (0.3, "0.3 s"),
+        (0.99, "1.0 s"),
+        (1.0, "1.0 s"),
+        (12.9, "12.9 s"),
+        (59.9, "59.9 s"),
+        (59.95, "1m 00s"),
+        (60.0, "1m 00s"),
+        (68.0, "1m 08s"),
+        (3599.0, "59m 59s"),
+        (3600.0, "1h 00m"),
+        (3725.0, "1h 02m"),
+    ],
+)
+def test_human_phase_duration_boundaries(seconds: float, expected: str) -> None:
+    from frame_compare.utils.terminal_theme import format_duration
+
+    assert format_duration(seconds) == expected
+
+
+def test_reporters_use_shared_duration_format(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seconds, expected = 59.95, "1m 00s"
+    rich_reporter, rich_output = _captured_rich_reporter(monkeypatch)
+    elapsed = [0.0]
+    monkeypatch.setattr("frame_compare.utils.progress.monotonic", lambda: elapsed[0])
+    rich_reporter.start_phase("Render", 1)
+    elapsed[0] = seconds
+    rich_reporter.complete_phase()
+    elapsed[0] = 0.0
+    plain_reporter = PlainProgressReporter()
+    plain_reporter.start_phase("RENDER", 1)
+    elapsed[0] = seconds
+    plain_reporter.complete_phase()
+    assert Text.from_ansi(rich_output.getvalue()).plain.rstrip().endswith(f" {expected}")
+    assert capsys.readouterr().err == f"[OK] RENDER  Completed in {expected}\n"
 
 
 def test_step_map_tracks_run_phases_and_nested_work(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -367,7 +408,7 @@ def test_live_progress_caps_width_and_follows_resize(monkeypatch: pytest.MonkeyP
             lines = Text.from_ansi(capture.get()).plain.splitlines()
             assert all(len(line) <= min(width, 120) for line in lines)
             assert "reading audio" in lines[0]
-            assert "0:00" in lines[0]
+            assert "0.0 s" in lines[0]
             assert "Analyze" in lines[-1]
             assert reporter._progress.console.width == width
     finally:
@@ -462,3 +503,10 @@ def test_alignment_phase_and_completion_have_no_padding_or_overwide_lines(
     assert any("frames come" in line for line in lines)
     assert all(line == line.rstrip() for line in lines)
     assert all(Text(line).cell_len <= 120 for line in lines)
+
+
+def test_plain_interruption_uses_ascii_status_marker(capsys: pytest.CaptureFixture[str]) -> None:
+    reporter = PlainProgressReporter()
+    reporter.start_phase("RENDER", 3)
+    reporter.complete_phase(ProgressPhaseStatus.INTERRUPTED)
+    assert capsys.readouterr().err == "[STOP] RENDER  Interrupted\n"

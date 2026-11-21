@@ -695,13 +695,9 @@ const Viewport = {
         return labels[preset] || preset;
     },
 
-    alignmentStatusValue() {
-        const alignment = this.currentAlignment();
+    alignmentStatusValue(alignment) {
         const xText = this.formatSignedPixels(alignment.alignX, 'x');
         const yText = this.formatSignedPixels(alignment.alignY, 'y');
-        const hasOffset = alignment.alignX !== 0 || alignment.alignY !== 0;
-
-        if (!hasOffset && alignment.alignmentPreset === 'none') return 'none';
         if (alignment.alignmentPreset === 'custom') return `custom ${xText} ${yText}`;
         if (alignment.alignmentPreset !== 'none') {
             return `preset ${this.alignmentPresetLabel(alignment.alignmentPreset)}`;
@@ -709,19 +705,30 @@ const Viewport = {
         return `${xText} ${yText}`;
     },
 
-    alignmentStatusText() {
-        return `Offset: ${this.alignmentStatusValue()}`;
-    },
-
     updateAlignmentStatus() {
-        if (!this.viewer.dom.alignmentStatus) return;
+        const status = this.viewer.dom.alignmentStatus;
+        if (!status) return;
+        const alignment = this.currentAlignment();
+        const state = this.viewer.state;
+        const pairIsShown = ['slider', 'diff', 'blink'].includes(state.mode)
+            || this.viewer.singleShowsPairRight();
+        if (!pairIsShown || (alignment.alignX === 0 && alignment.alignY === 0)) {
+            status.hidden = true;
+            status.replaceChildren();
+            return;
+        }
+        const valueText = this.alignmentStatusValue(alignment);
+        const announcement = `Offset: ${valueText}`;
+        if (!status.hidden && status.textContent === announcement) return;
         const label = document.createElement('span');
         label.className = 'rv-offset-label';
         label.textContent = 'Offset:';
         const value = document.createElement('span');
         value.className = 'rv-offset-value';
-        value.textContent = ` ${this.alignmentStatusValue()}`;
-        this.viewer.dom.alignmentStatus.replaceChildren(label, value);
+        value.textContent = ` ${valueText}`;
+        if (status.hidden) this.viewer.announce(announcement);
+        status.hidden = false;
+        status.replaceChildren(label, value);
     },
 
     updateSlider() {

@@ -543,11 +543,17 @@ def test_forced_review_requires_complete_same_environment_runtime(
         lambda: VSViewAvailability(status=status, message="missing"),
     )
 
-    with pytest.raises(AudioAlignmentError, match="this Python environment"):
+    with pytest.raises(AudioAlignmentError, match="this Python environment") as caught:
         _call(
             tmp_path,
             config=AlignmentConfig(use_vsview=True, force_interactive=True),
         )
+
+    assert caught.value.code == "FC-4005"
+    assert (
+        caught.value.hint
+        == "Run 'frame-compare doctor' to check VSView, or drop --force-interactive-alignment."
+    )
 
 
 def test_optional_process_failure_retains_offsets(

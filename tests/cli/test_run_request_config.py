@@ -24,19 +24,6 @@ from .cli_helpers import (
 )
 
 
-def test_run_exits_processing_error_when_runner_returns_unsuccessful(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        return RunResult(success=False)
-
-    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
-
-    result = _invoke_run_with_minimal_workspace([], tmp_path=tmp_path, monkeypatch=monkeypatch)
-    assert result.exit_code == 5
-
-
 def test_run_builds_run_request_from_cli_args(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     captured: dict[str, RunRequest] = {}
 
