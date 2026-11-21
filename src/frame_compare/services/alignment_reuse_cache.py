@@ -457,7 +457,7 @@ def save_reusable_offsets(
     candidate: ReusableSourceSetCandidate,
     *,
     accepted_at: str | None = None,
-) -> None:
+) -> bool:
     """Persist reusable offsets for the prepared source set."""
     if candidate.source_set_key != source_set_cache_key(request):
         raise ValueError("alignment candidate belongs to a different source set")
@@ -490,7 +490,7 @@ def save_reusable_offsets(
                     action="shared_alignment_offsets_not_cached",
                     error=str(exc),
                 )
-                return
+                return False
             write_bytes_atomic(cache_path, content, publish_guard=guard_publication)
     except OSError as exc:
         log.warning(
@@ -500,3 +500,5 @@ def save_reusable_offsets(
             error=str(exc),
             exc_info=exc,
         )
+        return False
+    return True

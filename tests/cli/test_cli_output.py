@@ -10,6 +10,7 @@ from typing import Literal
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from rich.console import Console
+from rich.text import Text
 
 from frame_compare.cli.output import print_at_a_glance, print_result_summary
 from frame_compare.config.loader import get_default_config
@@ -46,13 +47,18 @@ def test_unapplied_alignment_warning_preserves_adversarial_label_and_semantics()
         None,
         "computed",
         applied=False,
-        diagnostic="low_confidence",
+        diagnostic="video_check_inconclusive",
     )
     neutral_label = "Encode B"
     adversarial_label = "Encode skipped frames: because ordinary label"
     rows = [
         _warning_presentations(
-            [format_rejected_alignment_warning(result, comparison_label=label)], ()
+            [
+                format_rejected_alignment_warning(
+                    result, comparison_label=label, comparison_path=Path("cmp.mkv")
+                )
+            ],
+            (),
         )[0]
         for label in (neutral_label, adversarial_label)
     ]
@@ -64,18 +70,18 @@ def test_unapplied_alignment_warning_preserves_adversarial_label_and_semantics()
     )
     assert neutral.source == "alignment"
     assert neutral.severity == "warning"
-    assert neutral.message == "align: Encode B alignment left unapplied"
-    assert neutral.detail == (
-        "because low_confidence; rendering in best-effort reference-frame domain "
-        "without accepted alignment."
+    assert neutral.message == (
+        "Encode B: alignment not applied (video check was inconclusive); "
+        "frames use the reference's frame numbers."
     )
+    assert neutral.detail is None
     assert adversarial.message == neutral.message.replace(neutral_label, adversarial_label)
     assert adversarial_label in adversarial.message
     assert adversarial_label not in adversarial.source
-    assert adversarial.detail is not None and adversarial_label not in adversarial.detail
+    assert adversarial.detail is None
     rendered = []
     for row in rows:
-        console = Console(record=True, force_terminal=True, width=240)
+        console = Console(record=True, force_terminal=True, width=240, height=25)
         console.print(_format_warning_panel_text([row], glyphs=GLYPHS_UNICODE))
         rendered.append(console.export_text(styles=True))
     assert rendered[1] == rendered[0].replace(neutral_label, adversarial_label)
@@ -190,8 +196,39 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(
         for line in output.splitlines()
     )
     assert "disabled by --no-upload" in output
+    for label in ("after upload", "webhook", "cleanup"):
+        with pytest.raises(AssertionError, match=f"Missing row label: {label}"):
+            _rendered_row_value(output, label)
     assert "opens when done" in output
     assert "VSView" not in output
+
+
+def test_run_plan_omits_details_for_features_disabled_in_config() -> None:
+    config = _config()
+    config.audio_alignment.enable = False
+    config.slowpics.auto_upload = False
+    config.slowpics.open_in_browser = True
+    config.slowpics.webhook_url = "https://example.test/unused"
+    config.slowpics.delete_after_upload = True
+    console = _console()
+
+    print_at_a_glance(
+        console,
+        inputs=AcquiredRunConfig(_workspace_path(), _workspace_path("config.toml"), config),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
+    )
+
+    output = _render(console)
+    for heading in ("Alignment", "Publishing"):
+        row = next(line for line in output.splitlines() if line.startswith(f"│ {heading} "))
+        assert row.split() == ["│", heading, "disabled"]
+    for label in ("tools", "offsets", "after upload", "webhook", "cleanup"):
+        with pytest.raises(AssertionError, match=f"Missing row label: {label}"):
+            _rendered_row_value(output, label)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")
@@ -223,38 +260,6 @@ def test_at_a_glance_reports_non_executable_ffmpeg_override_as_unavailable(
     )
 
     assert "(unavailable)" in _rendered_row_value(_render(console), "tools")
-
-
-def test_at_a_glance_marks_ffmpeg_audio_disabled_in_tools_row(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    config = _config()
-    config.audio_alignment.enable = False
-    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
-    console = _console()
-
-    print_at_a_glance(
-        console,
-        inputs=AcquiredRunConfig(
-            _workspace_path(),
-            _workspace_path("config", "config.toml"),
-            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
-        ),
-        no_cache=False,
-        from_cache_only=False,
-        skip_analysis=False,
-        skip_metadata=False,
-        no_upload_flag=False,
-    )
-
-    output = _render(console)
-    assert "Alignment" in output
-    assert "disabled" in output
-    tools_row = _rendered_row_value(output, "tools")
-    assert "FFmpeg audio" in tools_row
-    assert "(unavailable)" not in tools_row
-    assert "not required" not in tools_row
-    assert "VSView" not in tools_row
 
 
 def test_at_a_glance_prints_previous_offsets_effective_mode(
@@ -452,7 +457,7 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
     config.analysis.motion_frame_count = 4
     config.analysis.random_seed = 99
     config.analysis.performance_mode = AnalysisPerformanceMode.PERFORMANCE
-    config.analysis.ignore_lead_seconds = 2.5
+    config.analysis.ignore_lead_seconds = 0.3
     config.analysis.ignore_trail_seconds = 4.0
     config.sources.analysis_source = "fastest"
     config.screenshots.overlay_mode = OverlayMode.DIAGNOSTIC
@@ -502,7 +507,7 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
     assert "active area automatic" in _rendered_row_value(output, "geometry")
     assert "2 user · 3 random · 2 dark · 1 bright · 4 motion" in _rendered_row_value(output, "mix")
     assert "fastest source" in _rendered_row_value(output, "analysis")
-    assert "first 2.5 s · last 4.0 s" in _rendered_row_value(output, "skip")
+    assert "first 0.3 s · last 4.0 s" in _rendered_row_value(output, "skip")
     assert "ask before reusing previous offsets" in _rendered_row_value(output, "offsets")
     assert "HTML report" in output
     assert "opens when done" not in output
@@ -590,6 +595,8 @@ def test_run_plan_no_color_uses_native_wrapping_without_truncation(
 def test_run_plan_wraps_complete_key_labels_at_very_narrow_width(
     monkeypatch: MonkeyPatch,
 ) -> None:
+    config = _config()
+    config.slowpics.auto_upload = True
     console = _console_at_width(24)
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
 
@@ -598,7 +605,7 @@ def test_run_plan_wraps_complete_key_labels_at_very_narrow_width(
         inputs=AcquiredRunConfig(
             _workspace_path(),
             _workspace_path("config", "config.toml"),
-            apply_cli_overrides(_config(), CLIConfigOverrides(no_upload=False)),
+            config,
         ),
         no_cache=False,
         from_cache_only=False,
@@ -670,9 +677,10 @@ def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
             clips_processed=2,
         ),
         quiet=False,
+        root=tmp_path,
     )
 
-    assert "3 files" in _render(console)
+    assert "screenshots  3 files" in _render(console)
 
     missing_console = _console()
     print_result_summary(
@@ -684,9 +692,14 @@ def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
             clips_processed=2,
         ),
         quiet=False,
+        root=tmp_path,
     )
 
-    assert "files" not in _render(missing_console)
+    missing_path = str(Path("screenshots") / "absent")
+    assert any(
+        line.split() == ["│", "screenshots", missing_path]
+        for line in _render(missing_console).splitlines()
+    )
 
 
 def test_result_summary_resolves_relative_artifact_link_against_root(
@@ -776,31 +789,26 @@ def test_result_summary_report_path_presentation(external: bool) -> None:
         assert f"(absolute: {report})" in output
 
 
-def test_result_summary_warning_headline_cap_and_verbose_expansion() -> None:
-    warnings = [RunWarning("sources", "warning", f"warning {index}") for index in range(1, 11)]
-    normal_console = _console()
+@pytest.mark.parametrize("verbose", [False, True])
+def test_result_summary_lists_all_distinct_warnings_without_a_category_for_one_source(
+    verbose: bool,
+) -> None:
+    console = _console()
+    warnings = [RunWarning("sources", "warning", f"warning item {index}") for index in range(10)]
     print_result_summary(
-        normal_console,
-        result=RunResult(success=True, warnings=warnings),
+        console,
+        result=RunResult(success=True, warnings=[*warnings, warnings[0]]),
         quiet=False,
+        verbose=verbose,
     )
-    normal_output = _render(normal_console)
-    assert "Comparison complete · 10 warnings" in normal_output
-    assert "warning 8" in normal_output
-    assert "warning 9" not in normal_output
-    assert "(2 more)" in normal_output
 
-    verbose_console = _console()
-    print_result_summary(
-        verbose_console,
-        result=RunResult(success=True, warnings=warnings),
-        quiet=False,
-        verbose=True,
-    )
-    verbose_output = _render(verbose_console)
-    assert "Comparison complete · 10 warnings" in verbose_output
-    assert "warning 10" in verbose_output
-    assert "(2 more)" not in verbose_output
+    output = _render(console)
+    assert "Comparison complete · 10 warnings" in output
+    _, section = output.split("Warnings", 1)
+    assert "│ sources" not in section
+    assert "hidden by source" not in section
+    for index in range(10):
+        assert section.count(f"warning item {index}") == 1
 
 
 def test_result_summary_quiet_mode_prints_only_screenshot_path_when_available() -> None:
@@ -922,7 +930,7 @@ def test_result_summary_shows_followup_failure_on_row_not_in_panel() -> None:
     assert "Comparison complete · 4 warnings" in output
     assert "URL not copied" in output
     assert "action: clipboard" not in output
-    assert "failed to copy URL" not in output
+    assert output.count("failed to copy URL") == 1
     assert "alignment" in output
     assert "slow.pics" in output
     assert output.count("alignment") == 1
@@ -1021,12 +1029,16 @@ def test_result_summary_uploaded_with_each_followup_failing() -> None:
     assert "no browser accepted the request" in output
     assert "not created" in output
     assert "failed to write URL shortcut Example.url: boom" in output
-    assert "delivery failed" in output
-    assert "Warnings" not in output
-    assert "failed to copy URL" not in output
+    completion, warnings = output.split("Warnings", 1)
+    assert "delivery failed" in completion
+    assert "no browser accepted the request" not in completion
+    assert "failed to write URL shortcut Example.url: boom" not in completion
+    assert "slow.pics browser:" in warnings
+    assert "slow.pics webhook: delivery failed" in warnings
+    assert output.count("failed to copy URL") == 1
 
 
-def test_result_summary_shortcut_and_webhook_warnings_are_deduplicated_on_rows() -> None:
+def test_result_summary_shortcut_and_webhook_warnings_are_deduplicated_in_warning_section() -> None:
     console = _console()
     shortcut_warning = RunWarning(
         "slow.pics",
@@ -1066,11 +1078,11 @@ def test_result_summary_shortcut_and_webhook_warnings_are_deduplicated_on_rows()
     assert "Comparison complete · 2 warnings" in output
     assert "not created" in output
     assert "delivery failed" in output
-    assert "Warnings" not in output
+    _, warnings = output.split("Warnings", 1)
     assert output.count("failed to write URL shortcut Example.url: boom") == 1
-    assert output.count("delivery failed") == 1
-    assert "slow.pics shortcut:" not in output
-    assert "slow.pics webhook:" not in output
+    assert warnings.count("slow.pics webhook: delivery failed") == 1
+    assert warnings.count("slow.pics shortcut:") == 1
+    assert "│ slow.pics\n" not in warnings
 
 
 def test_result_summary_ascii_fallback_uses_ascii_glyphs() -> None:
@@ -1080,7 +1092,7 @@ def test_result_summary_ascii_fallback_uses_ascii_glyphs() -> None:
     print_result_summary(console, result=RunResult(success=True), quiet=False)
 
     stream.seek(0)
-    output = stream.read()
+    output = Text.from_ansi(stream.read()).plain
     stream.close()
     assert "+ Comparison complete" in output
     assert "✓" not in output
@@ -1257,18 +1269,18 @@ def _timed_result() -> RunResult:
                 "prompts 3.0 s",
             ),
             (),
-            id="machine-user",
+            id="phases-user",
         ),
         pytest.param(
             RunResult(success=True, duration_seconds=5.0, phase_timings={"render": 5.0}),
-            ("5.0 s total", "render 5.0 s", "machine"),
+            ("5.0 s total", "render 5.0 s", "phases"),
             ("setup", "analyze", "align", "upload", "VSView review", "prompts", "you"),
             id="partial-zero",
         ),
         pytest.param(
             RunResult(success=True, duration_seconds=2.0),
             ("2.0 s total",),
-            ("machine", "you"),
+            ("phases", "you"),
             id="all-zero",
         ),
         pytest.param(
@@ -1296,18 +1308,31 @@ def test_result_summary_time_rows(
         assert fragment not in output
 
 
-def test_post_upload_association_requires_record_equality() -> None:
-    from frame_compare.cli.output import _warning_presentations
-
+def test_warning_deduplication_includes_source() -> None:
     action_warning = RunWarning("slow.pics", "warning", "same emitted text")
     other_warning = RunWarning("history", "warning", "same emitted text")
-    assert action_warning.text == other_warning.text
-    assert action_warning != other_warning
-    rows = _warning_presentations(
-        [other_warning, replace(action_warning)],
-        (PostUploadActionResult(kind="webhook", success=False, warning=action_warning),),
+    console = _console_at_width(240)
+    print_result_summary(
+        console,
+        result=RunResult(success=True, warnings=[other_warning, replace(action_warning)]),
+        post_upload_actions=(
+            PostUploadActionResult(kind="webhook", success=False, warning=action_warning),
+        ),
+        quiet=False,
     )
-    assert [(row.source, row.action) for row in rows] == [
-        ("history", None),
-        ("slow.pics", "webhook"),
-    ]
+    output = _render(console)
+    assert output.count("same emitted text") == 2
+    assert "history" in output and "slow.pics" in output
+
+
+def test_interruption_receipt_names_both_written_caches() -> None:
+    from frame_compare.cli.output import print_interruption
+    from frame_compare.orchestration.types import InterruptedRun
+
+    console = _console_at_width(240)
+    print_interruption(
+        console,
+        InterruptedRun(phase="Render", analysis_cache_written=True, alignment_cache_written=True),
+        root=Path.cwd(),
+    )
+    assert "next run  reuses cached analysis and alignment" in _render(console)

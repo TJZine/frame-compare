@@ -41,6 +41,7 @@ from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.cancellation import (
     cancellation_checkpoint,
     is_cancelling,
+    is_run_interruption,
     raise_if_cancelling,
 )
 from frame_compare.utils.progress import LogProgressReporter, align_phase_duration_text
@@ -52,6 +53,7 @@ from frame_compare.utils.progress_protocol import (
 from frame_compare.utils.run_warnings import RunWarning, WarningSource
 
 __all__ = [
+    "CONFIG_DISABLED",
     "RunSteps",
     "StepCompletion",
     "progress_step_names",
@@ -62,6 +64,10 @@ __all__ = [
 ]
 
 log = structlog.get_logger()
+
+# Skip detail for a step the configuration turns off. Human progress leaves these
+# steps out; log progress still records them.
+CONFIG_DISABLED = "Disabled"
 
 
 @dataclass
@@ -88,9 +94,28 @@ class RunSteps:
         self._reporter = reporter
         self._state = state
         self._monotonic_timer = monotonic_timer
+        # The step that ended interrupted, for the run's interruption notice.
+        self.interrupted_step: str | None = None
+
+    def _interrupted(self, name: str) -> ProgressPhaseStatus:
+        self.interrupted_step = name
+        return ProgressPhaseStatus.INTERRUPTED
+
+    def _raised_status(self, name: str, error: BaseException) -> ProgressPhaseStatus:
+        # An error that coincides with Ctrl+C ends the run as an interruption
+        # (exit 130), except an alignment cleanup failure, so the step reads the same.
+        if is_run_interruption(error) or (
+            isinstance(error, Exception)
+            and is_cancelling()
+            and not isinstance(error, AudioAlignmentCleanupError)
+        ):
+            return self._interrupted(name)
+        return ProgressPhaseStatus.FAILED
 
     async def skip(self, name: str, *, detail: str | None, total: int = 1) -> None:
         await cancellation_checkpoint()
+        if detail == CONFIG_DISABLED and not isinstance(self._reporter, LogProgressReporter):
+            return
         label = phase_display_label(name)
         start_phase_progress(
             self._reporter,
@@ -171,6 +196,7 @@ class RunSteps:
                 or cancelling
                 or not isinstance(exc, Exception)
             ):
+                status = self._raised_status(name, exc)
                 raise
             status = ProgressPhaseStatus.WARNED
             if isinstance(reporter, LogProgressReporter):
@@ -187,7 +213,9 @@ class RunSteps:
             self._state.phase_timings[name] = elapsed
             success_completion = describe(output, elapsed) if describe is not None else completion
             # The timer and description can run after the last await.
-            raise_if_cancelling()
+            if is_cancelling():
+                status = self._interrupted(name)
+                raise_if_cancelling()
             completion = success_completion
             status = ProgressPhaseStatus.COMPLETED
             reporter.advance(1)
@@ -272,7 +300,7 @@ async def run_selection_steps(
     if _skip_analysis(request, ctx.config):
         await steps.skip(
             "analyze",
-            detail="Disabled" if request.skip_analysis else "Not required",
+            detail=CONFIG_DISABLED if request.skip_analysis else "Not required",
             total=ANALYZE_PROGRESS_TOTAL,
         )
     else:
@@ -310,8 +338,12 @@ async def run_selection_steps(
 
     align_total = max(1, len(prep.input_videos))
     if not ctx.config.audio_alignment.enable:
-        await steps.skip("align", detail="Disabled", total=align_total)
+        await steps.skip("align", detail=CONFIG_DISABLED, total=align_total)
         return
+
+    def record_alignment_diagnostics(path: Path) -> None:
+        # Recorded on write, so a later Align failure can still point at them.
+        state.artifacts.alignment_diagnostics_dir = path
 
     alignment = await steps.run(
         "align",
@@ -322,6 +354,7 @@ async def run_selection_steps(
             verbose=request.verbose,
             quiet=request.quiet,
             json_output=request.json_output,
+            on_diagnostics_written=record_alignment_diagnostics,
         ),
         warning_source="alignment",
         warn_only=not prep.config.audio_alignment.force_interactive,
@@ -344,13 +377,12 @@ async def run_selection_steps(
         )
         state.warnings.extend(alignment.warnings)
         state.artifacts.alignment_summary = alignment.alignment_summary
-        state.artifacts.alignment_diagnostics_dir = alignment.alignment_diagnostics_dir
         state.vsview_review_seconds = max(0.0, alignment.review_seconds)
 
 
 async def _report(ctx: RunContext, steps: RunSteps, state: ExecutionState) -> None:
     if not ctx.config.report.enable:
-        await steps.skip("report", detail="Disabled")
+        await steps.skip("report", detail=CONFIG_DISABLED)
         return
     artifacts = state.artifacts
     report = await steps.run(
@@ -379,7 +411,7 @@ async def _publish(
     client = deps.http_client
     confirmation = artifacts.slowpics_upload_confirmation_status
     if not ctx.config.slowpics.auto_upload:
-        await steps.skip("publish", detail="Disabled")
+        await steps.skip("publish", detail=CONFIG_DISABLED)
         return
     if client is None:
         await steps.skip("publish", detail="Unavailable")
@@ -442,7 +474,7 @@ async def run_output_steps(
     state.warnings.extend(render.render.warnings)
 
     if request.skip_metadata:
-        await steps.skip("metadata", detail="Disabled")
+        await steps.skip("metadata", detail=CONFIG_DISABLED)
     else:
         metadata = await steps.run(
             "metadata",

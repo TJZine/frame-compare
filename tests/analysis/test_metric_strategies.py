@@ -508,4 +508,4 @@ def test_metric_loop_stops_before_next_frame_after_task_cancel(
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(analyze())
-    reporter.complete_phase.assert_called_with(ProgressPhaseStatus.FAILED)
+    reporter.complete_phase.assert_called_with(ProgressPhaseStatus.INTERRUPTED)

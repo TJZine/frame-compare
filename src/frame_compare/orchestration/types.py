@@ -131,6 +131,17 @@ class RunResult:
     vsview_review_seconds: float = 0.0
 
 
+@dataclass(frozen=True)
+class InterruptedRun:
+    """Facts available to a human caller after run cleanup."""
+
+    phase: str | None = None
+    workspace: WorkspacePaths | None = None
+    planned_screenshots: int = 0
+    analysis_cache_written: bool = False
+    alignment_cache_written: bool = False
+
+
 @dataclass
 class RunDependencies:
     """Dependency injection container for run orchestration."""
@@ -142,6 +153,8 @@ class RunDependencies:
     confirm_full_window_retry: FullWindowRetryConfirmationFn | None = None
     clock: Callable[[], datetime] = field(default=_utc_now)
     monotonic_timer: Callable[[], float] = field(default=monotonic)
+    on_interrupted: Callable[[InterruptedRun], None] | None = None
+    on_failed_alignment_diagnostics: Callable[[Path], None] | None = None
     capture_reserved_run: Callable[[ReservedRunCapture], None] | None = field(
         default=None,
         init=False,

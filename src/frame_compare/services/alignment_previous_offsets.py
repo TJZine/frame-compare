@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_resolution import resolution_from_reuse
 from frame_compare.services.alignment_reuse_cache import (
@@ -27,6 +29,7 @@ from frame_compare.utils.types import AlignmentClipRequest, AlignmentRequest
 
 __all__ = [
     "apply_shared_reuse",
+    "can_reuse_written_offsets_without_confirmation",
     "prompt_for_previous_alignment_offset_reuse",
     "validate_previous_offsets_policy",
 ]
@@ -96,6 +99,17 @@ def _apply_cached_alignment_result(
     comparison_key = comparison_cache_key(comparison)
     resolutions[key] = resolution_from_reuse(
         result, comparison_cache_key=comparison_key, computed=computed_cache_hit
+    )
+
+
+def can_reuse_written_offsets_without_confirmation(
+    request: AlignmentRequest, resolutions: Sequence[ComparisonResolution]
+) -> bool:
+    """Whether a written source set can supply the next run without confirming offsets."""
+    return request.previous_offsets == "always" or all(
+        resolution.origin != "interactive_confirmed_this_run"
+        or (resolution.computed_fallback is not None and resolution.computed_fallback.applied)
+        for resolution in resolutions
     )
 
 

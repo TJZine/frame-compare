@@ -24,6 +24,7 @@ from frame_compare.orchestration.execution_types import (
     ReportPhaseOutput,
 )
 from frame_compare.orchestration.types import ReservedRunCapture, RunDependencies
+from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.services.run_result_record import read_run_result
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.progress import NullProgressReporter, RichProgressReporter
@@ -231,6 +232,7 @@ async def test_interrupted_warn_only_report_stops_without_applying_output(
 
     record = read_run_result(run_dir / "run_result.toml")
     assert record.status == "failed"
+    assert record.was_interrupted
     assert all(not warning.startswith("report:") for warning in record.warning_summaries)
     assert all(not warning.text.startswith("report:") for warning in state.warnings)
     assert state.artifacts.report_path is None
@@ -238,7 +240,7 @@ async def test_interrupted_warn_only_report_stops_without_applying_output(
     assert record.report_path is None
     assert not (run_dir / "report.html").exists()
     reporter.complete_phase.assert_called_with(
-        ProgressPhaseStatus.FAILED, summary=None, duration_text=None
+        ProgressPhaseStatus.INTERRUPTED, summary=None, duration_text=None
     )
     reporter.start_phase.assert_any_call("REPORT", total=1)
     report_calls = reporter.method_calls[
@@ -254,8 +256,17 @@ async def test_interrupted_warn_only_report_stops_without_applying_output(
     cleanup.assert_not_called()
 
 
-@pytest.mark.parametrize("error", [RuntimeError("boom"), asyncio.CancelledError()])
-async def test_required_step_marks_failure_and_propagates(error: BaseException) -> None:
+@pytest.mark.parametrize(
+    ("error", "status", "interrupted_step"),
+    [
+        (RuntimeError("boom"), ProgressPhaseStatus.FAILED, None),
+        (asyncio.CancelledError(), ProgressPhaseStatus.INTERRUPTED, "render"),
+    ],
+    ids=["error", "cancelled"],
+)
+async def test_required_step_marks_failure_and_propagates(
+    error: BaseException, status: ProgressPhaseStatus, interrupted_step: str | None
+) -> None:
     reporter = Mock(spec=NullProgressReporter)
     state = ExecutionState()
     clock = iter([100.0, 105.0])
@@ -267,19 +278,37 @@ async def test_required_step_marks_failure_and_propagates(error: BaseException) 
     with pytest.raises(type(error)) as caught:
         await steps.run("render", fail, warning_source="render")
     assert caught.value is error
-    reporter.complete_phase.assert_called_once_with(
-        ProgressPhaseStatus.FAILED, summary=None, duration_text=None
-    )
+    reporter.complete_phase.assert_called_once_with(status, summary=None, duration_text=None)
+    assert steps.interrupted_step == interrupted_step
     reporter.advance.assert_not_called()
     assert state.phase_timings == {"render": 5.0}
     assert state.warnings == []
 
 
-async def test_cancelling_warn_only_step_keeps_its_original_error() -> None:
+@pytest.mark.parametrize(
+    ("error", "status", "interrupted_step"),
+    [
+        # An error that coincides with Ctrl+C ends the run as an interruption.
+        (
+            RuntimeError("report failed while cancelling"),
+            ProgressPhaseStatus.INTERRUPTED,
+            "report",
+        ),
+        # An alignment cleanup failure keeps its own outcome.
+        (
+            AudioAlignmentCleanupError("resource not released"),
+            ProgressPhaseStatus.FAILED,
+            None,
+        ),
+    ],
+    ids=["error", "cleanup-error"],
+)
+async def test_cancelling_warn_only_step_keeps_its_original_error(
+    error: Exception, status: ProgressPhaseStatus, interrupted_step: str | None
+) -> None:
     reporter = Mock(spec=NullProgressReporter)
     state = ExecutionState()
     steps = RunSteps(reporter=reporter, state=state, monotonic_timer=lambda: 0.0)
-    error = RuntimeError("report failed while cancelling")
 
     def fail() -> Never:
         task = asyncio.current_task()
@@ -288,7 +317,7 @@ async def test_cancelling_warn_only_step_keeps_its_original_error() -> None:
         raise error
 
     async def run() -> None:
-        with pytest.raises(RuntimeError) as caught:
+        with pytest.raises(type(error)) as caught:
             await steps.run("report", fail, warning_source="render", warn_only=True)
         assert caught.value is error
         # Consume the task's queued cancellation after observing the step's own error.
@@ -296,8 +325,7 @@ async def test_cancelling_warn_only_step_keeps_its_original_error() -> None:
             await asyncio.sleep(0)
 
     await asyncio.create_task(run())
-    reporter.complete_phase.assert_called_once_with(
-        ProgressPhaseStatus.FAILED, summary=None, duration_text=None
-    )
+    reporter.complete_phase.assert_called_once_with(status, summary=None, duration_text=None)
+    assert steps.interrupted_step == interrupted_step
     reporter.advance.assert_not_called()
     assert state.warnings == []

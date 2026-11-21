@@ -76,5 +76,5 @@ def test_fast_successful_align_keeps_its_phase_line(monkeypatch: pytest.MonkeyPa
         )
     )
     assert Text.from_ansi(output.getvalue()).plain.strip() == (
-        "✓ Align           source +0f · reused from last run · 0s"
+        "✓ Align           source +0f · reused from last run · 0.0 s"
     )

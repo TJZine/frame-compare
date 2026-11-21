@@ -61,6 +61,12 @@ AUDIO_UNAVAILABLE_REASON_PHRASES: dict[str, str] = {
     "selected_audio_timeline_unavailable": "selected audio timeline unavailable",
     "retime_rate_unsupported": "retimed audio rate unsupported",
     "analysis_budget_exceeded": "analysis budget exceeded",
+    "competing_offset_confirmed_by_video": "video confirmed a different offset",
+    "competing_offset": "audio suggests more than one offset",
+    "unresolved_audio_disagreement": "audio offsets disagree",
+    "video_check_inconclusive": "video check was inconclusive",
+    "video_check_unavailable": "video check was unavailable",
+    "audio_only": "audio match has no video confirmation",
 }
 AUDIO_COLLECTION_FAILURE_PHRASE = "audio collection failed"
 
@@ -71,7 +77,7 @@ def audio_unavailable_phrase(reason: str) -> str:
         return phrase
     if reason in get_args(CollectionFailureCategory.__value__):
         return AUDIO_COLLECTION_FAILURE_PHRASE
-    return reason
+    return "no usable audio signal"
 
 
 def analysis_stream_start(start: Fraction, timeline_scale: Fraction) -> Fraction:

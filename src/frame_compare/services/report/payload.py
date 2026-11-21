@@ -16,6 +16,10 @@ from frame_compare.config.schema import OverlayMode, ReportConfig
 from frame_compare.config.text_validation import show_bidi_formatting_controls
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.services.errors import ReportError
+from frame_compare.services.release_identity import (
+    ReleaseIdentity,
+    comparison_title,
+)
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
@@ -258,6 +262,7 @@ class ClipInfo:
     display: ReportClipDisplayInfo
     label: str | None = None
     source_identity: str | None = None
+    release_identity: ReleaseIdentity | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,7 +318,7 @@ def build_report_payload(
 ) -> ReportPayload:
     """Shape validated report data into the embedded v1.4 JSON payload."""
     _validate_report_cardinality(data)
-    title = data.metadata.title if data.metadata else data.clips[0].name
+    title = _comparison_title(data)
     clips = build_clip_payloads(data.clips)
     frames = build_frame_payloads(data, config, report_dir=report_dir)
     rendering = build_rendering_payload(data.rendering, [clip.tonemap for clip in data.clips])
@@ -344,6 +349,19 @@ def build_report_payload(
         "frames": frames,
         "rendering": rendering,
     }
+
+
+def _comparison_title(data: ReportData) -> str:
+    identities = [clip.release_identity for clip in data.clips]
+    shared = comparison_title(identities, data.metadata)
+    if shared is not None:
+        title, _source = shared
+        return title
+    names = [clip.display.micro for clip in data.clips]
+    title = " vs ".join(names[:2])
+    if len(names) > 2:
+        title += f" +{len(names) - 2} more"
+    return title
 
 
 def _validate_report_cardinality(data: ReportData) -> None:

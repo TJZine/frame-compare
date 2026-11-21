@@ -30,7 +30,7 @@ from frame_compare.orchestration.execution_types import (
     RunArtifacts,
 )
 from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
-from frame_compare.orchestration.types import ReservedRunCapture, RunResult
+from frame_compare.orchestration.types import InterruptedRun, ReservedRunCapture, RunResult
 from frame_compare.render.errors import RenderError
 from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.services.publishers import PublishResult
@@ -81,7 +81,9 @@ def test_execute_run_returns_success_and_records_preflight_timing(
 
     assert result.success is True
     assert result.warnings == []
-    assert result.screenshot_dir == (tmp_path / "generated" / "source" / "screenshots").resolve()
+    assert result.screenshot_dir is not None
+    assert result.screenshot_dir.name == "screenshots"
+    assert result.screenshot_dir.parent.parent == (tmp_path / "generated").resolve()
     assert result.frame_count == 10
     assert result.clips_processed == 1
     assert result.duration_seconds >= 0.0
@@ -950,6 +952,9 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
         calls.append(request.frame_number)
         ready.set()
         assert release_render.wait(3)
+        if owner == "render":
+            request.output_path.parent.mkdir(parents=True, exist_ok=True)
+            request.output_path.write_bytes(b"retained screenshot fixture")
         return RenderedFrameResult(
             request.output_path,
             RenderedFrameFacts(
@@ -986,7 +991,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                     clip=cast(Any, root / "reference.mkv"),
                     diagnostic_source=cast(Any, root / "reference.mkv"),
                     frame_number=index,
-                    output_path=root / f"{index}.png",
+                    output_path=workspace.screenshots_dir / f"{index}.png",
                     overlay=None,
                     encoder_settings=EncoderSettings(),
                 )
@@ -1023,7 +1028,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                 "run",
                 "--root",
                 str(root),
-                "--quiet",
+                *([] if owner == "render" else ["--quiet"]),
                 "--skip-analysis",
                 "--skip-metadata",
                 "--no-upload",
@@ -1035,6 +1040,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
         json.dumps(
             {
                 "exit": result.exit_code,
+                "stderr": result.stderr,
                 "status": record.status,
                 "calls": sorted(calls),
                 "later": later,
@@ -1075,6 +1081,12 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
         assert observed["children"] == 1
     elif owner == "render":
         assert observed["calls"] in ([0], [0, 1])
+        stderr = observed["stderr"]
+        assert "[STOP] RENDER  Interrupted" in stderr
+        assert "! Interrupted during Render" in stderr
+        assert f"{len(observed['calls'])} of 10 screenshots" in stderr
+        assert "[FAIL] RENDER" not in stderr
+        assert "next run" not in stderr
 
 
 async def test_first_cancellation_during_owned_client_close_records_only_failure(
@@ -1095,6 +1107,7 @@ async def test_first_cancellation_during_owned_client_close_records_only_failure
 
     client = httpx.AsyncClient(transport=InterruptingCloseTransport())
     monkeypatch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
+    interrupted: list[InterruptedRun] = []
     worker = asyncio.create_task(
         execute_run(
             make_run_request(
@@ -1103,7 +1116,7 @@ async def test_first_cancellation_during_owned_client_close_records_only_failure
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader()),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), on_interrupted=interrupted.append),
         )
     )
     with pytest.raises(asyncio.CancelledError):
@@ -1112,7 +1125,9 @@ async def test_first_cancellation_during_owned_client_close_records_only_failure
     assert records_at_close == [[]]
     records = list(tmp_path.glob("generated/*/run_result.toml"))
     assert len(records) == 1
-    assert read_run_result(records[0]).status == "failed"
+    assert read_run_result(records[0]).was_interrupted
+    # Every step had finished, so the notice names no step.
+    assert [run.phase for run in interrupted] == [None]
 
 
 async def test_cancellation_at_completed_record_guard_records_only_failure(
@@ -1142,6 +1157,7 @@ async def test_cancellation_at_completed_record_guard_records_only_failure(
         )
 
     monkeypatch.setattr(coordinator, "record_completed_run_result", cancel_before_publication)
+    interrupted: list[InterruptedRun] = []
     worker = asyncio.create_task(
         execute_run(
             make_run_request(
@@ -1150,7 +1166,7 @@ async def test_cancellation_at_completed_record_guard_records_only_failure(
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader()),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), on_interrupted=interrupted.append),
         )
     )
     with pytest.raises(asyncio.CancelledError):
@@ -1159,7 +1175,8 @@ async def test_cancellation_at_completed_record_guard_records_only_failure(
     assert client_closed_at_publication == [True]
     records = list(tmp_path.glob("generated/*/run_result.toml"))
     assert len(records) == 1
-    assert read_run_result(records[0]).status == "failed"
+    assert read_run_result(records[0]).was_interrupted
+    assert [run.phase for run in interrupted] == [None]
 
 
 def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failure(
@@ -1182,6 +1199,7 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
             task.cancel()
             return source
 
+    interrupted: list[InterruptedRun] = []
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             execute_run(
@@ -1192,14 +1210,17 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
                     skip_metadata=True,
                     overrides=CLIConfigOverrides(no_upload=True),
                 ),
-                RunDependencies(vs_loader=InterruptedLoader()),
+                RunDependencies(vs_loader=InterruptedLoader(), on_interrupted=interrupted.append),
             )
         )
+    assert [run.phase for run in interrupted] == ["Setup"]
     assert len(calls) == 1
     assert list((tmp_path / "generated").rglob("clip_probe.toml")) == []
     records = list((tmp_path / "generated").rglob(RUN_RESULT_FILENAME))
     assert len(records) == 1
-    assert read_run_result(records[0]).status == "failed"
+    record = read_run_result(records[0])
+    assert record.status == "failed"
+    assert record.was_interrupted
 
 
 async def test_interrupt_takes_precedence_over_render_error(
@@ -1208,13 +1229,17 @@ async def test_interrupt_takes_precedence_over_render_error(
     create_config(tmp_path)
     create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
-    def interrupt_render(*_args: object, **_kwargs: object) -> Never:
+    def interrupt_render(ctx: RunContext, *_args: object, **_kwargs: object) -> Never:
+        # The notice reports the caches this run actually wrote.
+        ctx.reusable_cache_writes.add("analysis")
         task = asyncio.current_task()
         assert task is not None
         task.cancel()
         raise RenderError("render failed during interrupt")
 
     monkeypatch.setattr(execution, "run_render_phase", interrupt_render)
+    interrupted: list[InterruptedRun] = []
+    diagnostics: list[Path] = []
     worker = asyncio.create_task(
         execute_run(
             make_run_request(
@@ -1223,7 +1248,11 @@ async def test_interrupt_takes_precedence_over_render_error(
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader()),
+            deps=RunDependencies(
+                vs_loader=FakeVSLoader(),
+                on_interrupted=interrupted.append,
+                on_failed_alignment_diagnostics=diagnostics.append,
+            ),
         )
     )
     with pytest.raises(asyncio.CancelledError):
@@ -1233,12 +1262,19 @@ async def test_interrupt_takes_precedence_over_render_error(
     assert len(records) == 1
     record = read_run_result(records[0])
     assert record.status == "failed"
+    assert record.was_interrupted
     assert record.failure is not None
     assert record.failure.category == "internal"
+    [run] = interrupted
+    assert run.phase == "Render"
+    assert (run.analysis_cache_written, run.alignment_cache_written) == (True, False)
+    assert run.workspace is not None and run.workspace.run_dir == records[0].parent
+    assert diagnostics == []
 
 
+@pytest.mark.parametrize("cleanup_error", [True, False], ids=["cleanup-error", "other-error"])
 async def test_alignment_cleanup_error_survives_interrupt_during_client_close(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cleanup_error: bool
 ) -> None:
     create_config(tmp_path, ALIGNMENT_CONFIG)
     create_video_files(tmp_path / "comparison_videos", "a_reference.mkv", "b_comparison.mkv")
@@ -1250,15 +1286,24 @@ async def test_alignment_cleanup_error_survives_interrupt_during_client_close(
             await asyncio.sleep(0)
             close_events.append("completed")
 
-    async def interrupt_align(*_args: object, **_kwargs: object) -> Never:
+    diagnostics_dir = tmp_path / "alignment diagnostics"
+
+    async def interrupt_align(
+        *_args: object, on_diagnostics_written: Callable[[Path], None], **_kwargs: object
+    ) -> Never:
+        on_diagnostics_written(diagnostics_dir)
         task = asyncio.current_task()
         assert task is not None
         task.cancel()
-        raise AudioAlignmentCleanupError("alignment resource could not be released")
+        if cleanup_error:
+            raise AudioAlignmentCleanupError("alignment resource could not be released")
+        raise RuntimeError("alignment failed during interrupt")
 
     client = httpx.AsyncClient(transport=YieldingCloseTransport())
     monkeypatch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
     monkeypatch.setattr(execution, "run_align_phase", interrupt_align)
+    interrupted: list[InterruptedRun] = []
+    diagnostics: list[Path] = []
     worker = asyncio.create_task(
         execute_run(
             make_run_request(
@@ -1267,10 +1312,14 @@ async def test_alignment_cleanup_error_survives_interrupt_during_client_close(
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader()),
+            deps=RunDependencies(
+                vs_loader=FakeVSLoader(),
+                on_interrupted=interrupted.append,
+                on_failed_alignment_diagnostics=diagnostics.append,
+            ),
         )
     )
-    with pytest.raises(AudioAlignmentCleanupError):
+    with pytest.raises(AudioAlignmentCleanupError if cleanup_error else asyncio.CancelledError):
         await asyncio.wait_for(worker, 3)
 
     assert close_events == ["started"]
@@ -1279,7 +1328,15 @@ async def test_alignment_cleanup_error_survives_interrupt_during_client_close(
     record = read_run_result(records[0])
     assert record.status == "failed"
     assert record.failure is not None
-    assert record.failure.code == "FC-4005"
+    if cleanup_error:
+        assert record.failure.code == "FC-4005"
+        assert not record.was_interrupted
+        assert interrupted == []
+        assert diagnostics == [diagnostics_dir]
+    else:
+        assert record.was_interrupted
+        assert [run.phase for run in interrupted] == ["Align"]
+        assert diagnostics == []
 
 
 def test_reservation_is_captured_before_interrupted_run_info_writer(

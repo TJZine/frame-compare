@@ -147,3 +147,6 @@ class RunContext:
     run_warnings: list[RunWarning] | None = None
     preflight_warnings: list[RunWarning] | None = None
     no_color: bool = False
+    reusable_cache_writes: set[Literal["analysis", "alignment"]] = field(
+        default_factory=set[Literal["analysis", "alignment"]]
+    )

@@ -37,14 +37,17 @@ from frame_compare.vsview.alignment_review_contract import (
     KeepCurrentAlignmentReviewDecision,
     write_alignment_review_result,
 )
-from tests.alignment_review_test_support import trusted_audio_attempt
 from tests.services.alignment_request_test_support import (
     alignment_request,
 )
 from tests.services.alignment_request_test_support import (
     vsview_session as _session,
 )
-from tests.services.alignment_resolution_test_support import save_resolutions
+from tests.services.alignment_resolution_test_support import (
+    configure_computed_alignment,
+    save_resolutions,
+    trusted_computed_result,
+)
 from tests.services.test_alignment_diagnostics import audio_attempt
 
 
@@ -56,44 +59,6 @@ def align_clips_from_request(
     return list(asyncio.run(_align_clips_from_request(request, config, **kwargs)).results)
 
 
-def _trusted_computed_result(
-    reference: Path, comparison: Path, frame_offset: int
-) -> AlignmentResult:
-    return AlignmentResult(
-        reference_clip=reference.name,
-        comparison_clip=comparison.name,
-        frame_offset=frame_offset,
-        time_offset_seconds=frame_offset / 24,
-        correlation_score=0.99,
-        algorithm="cross_correlation",
-        source="computed",
-        stability=audio_attempt().stability,
-        audio_attempt=trusted_audio_attempt(frame_offset=frame_offset),
-    )
-
-
-def _configure_computed_alignment(monkeypatch: pytest.MonkeyPatch, frame_offset: int = 3) -> None:
-    monkeypatch.setattr(
-        "frame_compare.services.alignment._estimate_audio_pair",
-        lambda reference, comparison, **_kwargs: _trusted_computed_result(
-            reference, comparison, frame_offset
-        ),
-    )
-    monkeypatch.setattr(
-        alignment_vsview,
-        "check_vsview_availability",
-        lambda: VSViewAvailability(
-            status=VSViewAvailabilityStatus.AVAILABLE,
-            message="available",
-        ),
-    )
-    monkeypatch.setattr(
-        alignment_vsview,
-        "_current_tty_status",
-        lambda: SimpleNamespace(stdin=True, stdout=True, stderr=True),
-    )
-
-
 def _run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, config: AlignmentConfig
 ) -> AlignmentOperationOutcome:
@@ -101,7 +66,7 @@ def _run(
     comparison = tmp_path / "comparison.mkv"
     reference.touch()
     comparison.touch()
-    _configure_computed_alignment(monkeypatch)
+    configure_computed_alignment(monkeypatch)
     request = alignment_request(
         reference=reference,
         comparisons=[comparison],
@@ -111,9 +76,12 @@ def _run(
 
 
 def test_confirmed_native_pair_replaces_computed_offset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def launch(*_args: object, **_kwargs: object):
+        import sys
+
+        print("\n╭─ VSView is open\n╰─\n", file=sys.stderr)
         session = _session(tmp_path)
         write_alignment_review_result(
             session,
@@ -132,11 +100,21 @@ def test_confirmed_native_pair_replaces_computed_offset(
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    outcome = _run(
-        tmp_path,
-        monkeypatch,
-        config=AlignmentConfig(use_vsview=True, cache_results=False),
-    )
+    from frame_compare.utils.progress import PlainProgressReporter
+    from frame_compare.utils.terminal_sections import run_output_spacing
+
+    with run_output_spacing():
+        outcome = _run(
+            tmp_path,
+            monkeypatch,
+            config=AlignmentConfig(use_vsview=True, cache_results=False),
+        )
+        reporter = PlainProgressReporter()
+        reporter.start_phase("ALIGN", 1)
+        reporter.complete_phase()
+    output = capsys.readouterr().err
+    assert "╰─\n\n[OK] ALIGN" in output
+    assert "╰─\n\n\n[OK] ALIGN" not in output
 
     assert outcome.results[0].frame_offset == 12
     (resolution,) = outcome.resolutions
@@ -144,10 +122,12 @@ def test_confirmed_native_pair_replaces_computed_offset(
     assert resolution.accepted_offset == 12
 
 
+@pytest.mark.parametrize("previous_offsets", ["disabled", "always"])
 def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    previous_offsets: str,
 ) -> None:
     attempt = audio_attempt()
     unapplied = AlignmentResult(
@@ -220,11 +200,16 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
     )
     request = replace(
         request,
+        previous_offsets=previous_offsets,
         alignment_diagnostics_dir=tmp_path / "alignment_diagnostics",
         alignment_diagnostics_root=tmp_path.parent,
     )
 
-    result = align_clips_from_request(request, config)[0]
+    receipts: list[bool] = []
+    result = align_clips_from_request(
+        request, config, on_reusable_cache_written=lambda: receipts.append(True)
+    )[0]
+    assert receipts == ([True] if previous_offsets == "always" else [])
 
     assert result.audio_attempt is attempt
     assert result.source == "manual"
@@ -359,8 +344,8 @@ def test_trusted_manual_confirmation_keeps_original_computed_fallback_on_disk(
     comparison = tmp_path / "comparison.mkv"
     reference.touch()
     comparison.touch()
-    _configure_computed_alignment(monkeypatch)
-    original = _trusted_computed_result(reference, comparison, 42)
+    configure_computed_alignment(monkeypatch)
+    original = trusted_computed_result(reference, comparison, 42)
     monkeypatch.setattr(
         "frame_compare.services.alignment._estimate_audio_pair", lambda *_args, **_kwargs: original
     )
@@ -410,7 +395,7 @@ def test_aliased_comparisons_keep_distinct_run_local_confirmations(
     target.touch()
     first.symlink_to(target)
     second.symlink_to(target)
-    _configure_computed_alignment(monkeypatch)
+    configure_computed_alignment(monkeypatch)
     request = alignment_request(
         reference=reference,
         comparisons=[first, second],

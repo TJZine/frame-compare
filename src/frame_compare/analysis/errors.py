@@ -66,13 +66,30 @@ class AnalysisError(ProcessingError):
 class MetricsCalculationError(AnalysisError):
     """Failed to calculate metrics (FC-4002)."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        message: str | None = None,
+        hint: str = "Check input format compatibility",
+    ) -> None:
         super().__init__(
             ErrorContext(
                 code="FC-4002",
                 name="METRICS_CALCULATION_ERROR",
-                message=f"Metrics calculation failed: {reason}",
-                hint="Check input format compatibility",
+                message=message or f"Metrics calculation failed: {reason}",
+                hint=hint,
                 details={"reason": reason},
             )
+        )
+
+
+class AnalysisCacheMissError(MetricsCalculationError):
+    """Required analysis was unavailable in cache-only mode."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            reason,
+            message="No cached analysis for this selection.",
+            hint="Run once without --from-cache-only to build the cache.",
         )

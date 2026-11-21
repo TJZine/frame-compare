@@ -35,6 +35,16 @@ that Frame Compare can reuse.
 The intermediate files in a run folder vary with the enabled features. Write scripts
 that rely only on documented artifacts.
 
+Run folders combine the comparison title and short source labels, for example
+`Black Sails S01E08 - EbP, GNOME`. If the same name is already present,
+Frame Compare appends the local date and time, such as ` (2026-11-16 13.25)`.
+Source roles keep labels distinct when characters are removed or replaced to make
+a valid folder name. Long names can omit trailing source labels and show their
+count as `+N`. A single long label is shortened between words. Movie titles include
+the year when available. A derived source label that repeats the title becomes its role,
+for example `Inception (2010) - Reference`. The collision timestamp and
+`run_info.toml` creation time come from the same clock reading.
+
 ## Ownership
 
 | Path | Owner and purpose |

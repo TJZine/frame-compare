@@ -30,7 +30,7 @@ from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration import phase_selection, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
-from frame_compare.services.run_folder import RunFolderReservation, reserve_run_folder
+from frame_compare.services.run_folder import RunFolderReservation
 from frame_compare.vs.types import SourceInfo
 from tests.run_request_support import make_run_request
 
@@ -60,11 +60,7 @@ dark_frame_count = 1
 )
 
 
-def _reserve_expected_source_run_name(tmp_path: Path) -> str:
-    return reserve_run_folder(
-        tmp_path / "expected_run_names",
-        filenames=["source.mkv"],
-    ).folder_name
+_OLD_RUN_NAME = "historical run"
 
 
 class ClipStub:
@@ -171,8 +167,6 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_probe_cach
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
-    run_name = _reserve_expected_source_run_name(tmp_path)
-    run_dir = tmp_path / "generated" / run_name
 
     request = make_run_request(
         root=tmp_path,
@@ -186,7 +180,7 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_probe_cach
     with pytest.raises(MetricsCalculationError):
         asyncio.run(execute_run(request, deps=deps))
 
-    assert not run_dir.exists()
+    assert not list((tmp_path / "generated").glob("*/run_info.toml"))
 
 
 def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
@@ -214,7 +208,8 @@ def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
 
     result = asyncio.run(execute_run(request, deps=deps))
 
-    run_name = _reserve_expected_source_run_name(tmp_path)
+    assert result.screenshot_dir is not None
+    run_name = result.screenshot_dir.parent.name
     assert result.success is True
     assert result.cache_hit is True
     assert result.warnings == []
@@ -413,6 +408,7 @@ def test_execute_prep_rejects_junctioned_reserved_run_directory(
         )
 
     assert not run_dir.exists()
+    assert not list((tmp_path / "generated").glob("*/run_info.toml"))
 
 
 def test_execute_run_custom_generated_dir_run_folders_saves_and_loads_shared_cache(
@@ -608,9 +604,6 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    run_name = _reserve_expected_source_run_name(tmp_path)
-    existing_run_dir = tmp_path / "generated" / run_name
-    existing_run_dir.mkdir(parents=True)
     config = load_config(tmp_path / "config" / "config.toml")
     source_path = input_dir / "source.mkv"
     write_metrics_cache(
@@ -627,6 +620,10 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
+    first = asyncio.run(execute_run(request, deps=deps))
+    assert first.screenshot_dir is not None
+    existing_run_dir = first.screenshot_dir.parent
+    run_name = existing_run_dir.name
     result = asyncio.run(execute_run(request, deps=deps))
 
     assert result.success is True
@@ -637,7 +634,7 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
     run_dirs = [
         path
         for path in (tmp_path / "generated").iterdir()
-        if path.is_dir() and (path.name == run_name or path.name.startswith(f"{run_name}_"))
+        if path.is_dir() and (path.name == run_name or path.name.startswith(f"{run_name} ("))
     ]
     assert len(run_dirs) == 2
     assert [path for path in input_dir.iterdir() if path.is_dir()] == []
@@ -652,7 +649,7 @@ def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    run_name = _reserve_expected_source_run_name(tmp_path)
+    run_name = _OLD_RUN_NAME
     run_generated_dir = tmp_path / "generated" / run_name / "generated"
     source_path = input_dir / "source.mkv"
     config = load_config(tmp_path / "config" / "config.toml")

@@ -21,7 +21,11 @@ from frame_compare.render.types import (
     ScreenshotBatchRequest,
 )
 from frame_compare.utils.cancellation import is_cancelling, raise_if_cancelling
-from frame_compare.utils.progress_protocol import ProgressPhaseStatus, ProgressReporter
+from frame_compare.utils.progress_protocol import (
+    ProgressPhaseStatus,
+    ProgressReporter,
+    failure_progress_status,
+)
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
@@ -168,8 +172,8 @@ def render_clip_jobs(
                 raise RuntimeError("render jobs completed without a rendered clip")
             completed.append(result)
         return tuple(completed)
-    except BaseException:
-        status = ProgressPhaseStatus.FAILED
+    except BaseException as error:
+        status = failure_progress_status(error)
         raise
     finally:
         if reporter is not None:

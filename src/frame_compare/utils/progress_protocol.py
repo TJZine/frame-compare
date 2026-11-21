@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
+from frame_compare.utils.cancellation import is_run_interruption
+
 
 class ProgressPhaseStatus(StrEnum):
     """Terminal status for a reported phase."""
@@ -18,6 +20,16 @@ class ProgressPhaseStatus(StrEnum):
     SKIPPED = "skipped"
     WARNED = "warned"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
+
+
+def failure_progress_status(error: BaseException) -> ProgressPhaseStatus:
+    """Distinguish interruption from failure without changing the original exception."""
+    return (
+        ProgressPhaseStatus.INTERRUPTED
+        if is_run_interruption(error)
+        else ProgressPhaseStatus.FAILED
+    )
 
 
 @dataclass(frozen=True)

@@ -73,10 +73,6 @@ const GridView = (() => {
             return visibleIndexes(state.start, clipCount(), state.mobile);
         }
 
-        function announce(message) {
-            viewer.announce?.(message);
-        }
-
         function updateControls(options = {}) {
             if (!dom.controls) return;
             const count = clipCount();
@@ -89,7 +85,7 @@ const GridView = (() => {
             const text = positionText(state.start, count, state.mobile);
             dom.position.textContent = text;
             dom.position.setAttribute('aria-label', text);
-            if (options.announce && text) announce(`${text} visible.`);
+            if (options.announce && text) viewer.announce(`${text} visible.`);
         }
 
         function updateLayout() {
@@ -241,7 +237,7 @@ const GridView = (() => {
             if (error) error.hidden = false;
             updateFrameError();
             const label = unavailableLabel(index);
-            announce(`${label} image unavailable.`);
+            viewer.announce(`${label} image unavailable.`);
             if (!src.startsWith('data:')) return;
             cell.querySelector('[data-grid-retry]')?.remove();
         }

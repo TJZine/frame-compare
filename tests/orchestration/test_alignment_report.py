@@ -1,6 +1,7 @@
 """Unit tests for frame alignment diagnostics reporting helpers."""
 
 import os
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -97,14 +98,18 @@ def test_build_frame_alignment_report_uses_final_normalized_trim_domain() -> Non
             reference_path=Path("ref.mkv"),
             comparison_path=Path("encode.mkv"),
             presentation_name="Encode",
-            short_name="Encode",
-            reference_short_name="Reference",
+            short_name="encode",
+            reference_short_name="ref",
         ),
     )
 
 
+@pytest.mark.parametrize(
+    ("frames", "frame_text"),
+    [([0, 28, 83], "aligned 0, 28, 83"), ([0], "aligned frame 0 (1 total)")],
+)
 def test_emit_frame_alignment_report_renders_human_panel_to_stderr(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], frames: list[int], frame_text: str
 ) -> None:
     comparison = AlignmentReportComparison(
         label="Encode [candidate]",
@@ -119,7 +124,7 @@ def test_emit_frame_alignment_report_renders_human_panel_to_stderr(
     emit_frame_alignment_report(
         stage="after_align",
         comparisons=[comparison],
-        selected_frames=[0, 28, 83],
+        selected_frames=frames,
         alignment_warnings=[],
         json_output=False,
         quiet=False,
@@ -137,7 +142,7 @@ def test_emit_frame_alignment_report_renders_human_panel_to_stderr(
     assert "offset" not in captured.err
     assert "Reference source 155 <-> Encode [candidate] source 0" in captured.err
     assert "Reference 155..999 · Encode [candidate] 0..844" in captured.err
-    assert "aligned 0, 28, 83" in captured.err
+    assert frame_text in captured.err
     assert "\x1b[" not in captured.err
     assert "[bold cyan]" not in captured.err
 
@@ -306,7 +311,40 @@ def test_emit_frame_alignment_report_caps_selected_frame_list(
     )
 
     captured = capsys.readouterr()
-    assert "aligned 0, 1, 2, 3, 4, 5, 6, 7, ... (12 total)" in captured.err
+    assert "aligned 0, 1, 2, 3, 4, 5, 6, 7, … (12 total)" in captured.err
+
+
+def test_aligned_frames_belong_to_the_whole_block(capsys: pytest.CaptureFixture[str]) -> None:
+    first = AlignmentReportComparison(
+        label="First",
+        alignment_source="manual",
+        relative_offset_frames=1,
+        reference_row_zero_source_frame=1,
+        comparison_row_zero_source_frame=0,
+        reference_trim_range=(1, 99),
+        comparison_trim_range=(0, 98),
+    )
+    second = replace(
+        first,
+        label="Second",
+    )
+    emit_frame_alignment_report(
+        stage="after_align",
+        comparisons=[first, second],
+        selected_frames=[4, 8],
+        alignment_warnings=[],
+        json_output=False,
+        quiet=False,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert output.count("trims") == 2
+    second_heading = output.index("Second")
+    first_frames = output.index("aligned 4, 8")
+    assert second_heading < output.rindex("trims") < first_frames
+    assert output.count("frames ") == 1
+    assert "\n│\n│ frames" in output
 
 
 def test_emit_frame_alignment_report_shows_material_stability_concisely(
@@ -349,75 +387,26 @@ def test_emit_frame_alignment_report_shows_material_stability_concisely(
     assert "valid windows" not in output
 
 
-def test_emit_frame_alignment_report_renders_alignment_warning_context(
+def test_emit_frame_alignment_report_points_only_warned_comparisons_to_warnings(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    comparison = AlignmentReportComparison(
-        label="Encode",
-        alignment_source=None,
-        relative_offset_frames=None,
-        reference_row_zero_source_frame=0,
-        comparison_row_zero_source_frame=0,
-        reference_trim_range=(0, 99),
-        comparison_trim_range=(0, 99),
+    warned = _make_clip_state("warned.mkv", "Warned")
+    unflagged = _make_clip_state("other.mkv", "Other")
+    comparisons = build_frame_alignment_report(
+        reference=_make_clip_state("ref.mkv", "Reference"),
+        comparisons=[warned, unflagged],
     )
 
     emit_frame_alignment_report(
         stage="after_align",
-        comparisons=[comparison],
-        selected_frames=[],
-        alignment_warnings=[
-            RunWarning(
-                "alignment", "warning", "align: encode low confidence; left unapplied and untrimmed"
-            )
-        ],
-        json_output=False,
-        quiet=False,
-        no_color=True,
-    )
-
-    captured = capsys.readouterr()
-    assert "Frame alignment" in captured.err
-    assert "Encode" in captured.err
-    assert "warnings" not in captured.err
-    assert "! align: encode low confidence" in captured.err
-    assert "rejected" not in captured.err
-    assert "align: encode low confidence; left unapplied and untrimmed" in captured.err
-
-
-def test_emit_frame_alignment_report_does_not_label_applied_stability_warning_rejected(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    summary = AlignmentStabilitySummary(
-        classification="possible_drift",
-        valid_windows=4,
-        offset_min_frames=178,
-        offset_max_frames=182,
-        first_offset_frames=178,
-        last_offset_frames=182,
-        largest_adjacent_jump_frames=2,
-        change_position_seconds=None,
-    )
-    comparison = AlignmentReportComparison(
-        label="Encode",
-        alignment_source="computed",
-        relative_offset_frames=180,
-        reference_row_zero_source_frame=180,
-        comparison_row_zero_source_frame=0,
-        reference_trim_range=(180, 999),
-        comparison_trim_range=(0, 819),
-        stability=summary,
-    )
-
-    emit_frame_alignment_report(
-        stage="after_align",
-        comparisons=[comparison],
-        selected_frames=[],
+        comparisons=comparisons,
+        selected_frames=[0, 50],
         alignment_warnings=[
             RunWarning(
                 "alignment",
                 "warning",
-                "align: Comparison 1 alignment may drift across the source. The applied constant offset was retained and should be verified.",
+                "alignment not applied [video check]",
+                comparison_path=warned.path,
             )
         ],
         json_output=False,
@@ -426,68 +415,11 @@ def test_emit_frame_alignment_report_does_not_label_applied_stability_warning_re
     )
 
     output = capsys.readouterr().err
-    assert "!" in output
-    assert "applied constant offset was retained" in output
-    assert "rejected" not in output
-
-
-def test_emit_frame_alignment_report_preserves_literal_brackets_in_warnings(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    comparison = AlignmentReportComparison(
-        label="Encode",
-        alignment_source=None,
-        relative_offset_frames=None,
-        reference_row_zero_source_frame=0,
-        comparison_row_zero_source_frame=0,
-        reference_trim_range=(0, 99),
-        comparison_trim_range=(0, 99),
-    )
-
-    emit_frame_alignment_report(
-        stage="after_align",
-        comparisons=[comparison],
-        selected_frames=[],
-        alignment_warnings=[RunWarning("alignment", "warning", "align: encode [low] confidence")],
-        json_output=False,
-        quiet=False,
-        no_color=True,
-    )
-
-    captured = capsys.readouterr()
-    assert "align: encode [low] confidence" in captured.err
-    assert "\x1b[" not in captured.err
-
-
-def test_emit_frame_alignment_report_prioritizes_normal_alignment_evidence(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    comparison = AlignmentReportComparison(
-        label="Encode",
-        alignment_source="computed",
-        relative_offset_frames=-4,
-        reference_row_zero_source_frame=0,
-        comparison_row_zero_source_frame=4,
-        reference_trim_range=(0, 95),
-        comparison_trim_range=(4, 99),
-    )
-
-    emit_frame_alignment_report(
-        stage="after_align",
-        comparisons=[comparison],
-        selected_frames=[0, 50],
-        alignment_warnings=[RunWarning("alignment", "warning", "align: confidence warning")],
-        json_output=False,
-        quiet=False,
-        no_color=True,
-    )
-
-    captured = capsys.readouterr()
-    output = captured.err
-    assert output.index("trims") < output.index("confidence warning")
-    assert "  offset" not in output
-    assert "  source" not in output
-    assert "align: confidence warning" in output
+    assert "Frame alignment" in output
+    assert output.count("! see warnings") == 1
+    assert output.index("warned") < output.index("! see warnings") < output.index("aligned 0, 50")
+    assert output.index("! see warnings") < output.index("other")
+    assert "alignment not applied [video check]" not in output
     assert "row 0" not in output
 
 
@@ -598,9 +530,7 @@ def test_emit_frame_alignment_report_wraps_at_narrow_terminal_widths(
             )
         ],
         selected_frames=list(range(12)),
-        alignment_warnings=[
-            RunWarning("alignment", "warning", "align: a long warning that must remain readable")
-        ],
+        alignment_warnings=[],
         json_output=False,
         quiet=False,
         no_color=True,
@@ -608,6 +538,6 @@ def test_emit_frame_alignment_report_wraps_at_narrow_terminal_widths(
 
     captured = capsys.readouterr()
     assert "Frame alignment" in captured.err
-    assert "align: a long warning" in captured.err
+    assert "A comparison with a long label" in captured.err
     assert "\x1b[" not in captured.err
     assert all(len(line) <= columns for line in captured.err.splitlines())

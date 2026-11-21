@@ -10,13 +10,14 @@ from pytest import MonkeyPatch
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
-from frame_compare.config.errors import ConfigNotFoundError
+from frame_compare.config.errors import ConfigNotFoundError, ConfigParseError
 from frame_compare.errors import ErrorContext, FrameCompareError
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 
 from .cli_helpers import (
     MINIMAL_CONFIG,
     _invoke_run_with_minimal_workspace,
+    _normalize_cli_output,
     _write_minimal_config,
     isolated_cli_filesystem,
     runner,
@@ -380,7 +381,6 @@ def test_run_json_exclusion_recovery_fails_closed_without_confirmation_dependenc
     )
 
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        assert dependencies is None
         raise error
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
@@ -421,7 +421,6 @@ def test_run_quiet_exclusion_recovery_fails_closed_on_stderr_without_prompt(
     )
 
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        assert dependencies is None
         raise error
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
@@ -610,16 +609,54 @@ def test_run_json_stale_analysis_config_keys_fail_before_runner(
     }
 
 
+@pytest.mark.parametrize(
+    ("options", "second_interrupt"),
+    [([], False), ([], True), (["--quiet"], False), (["--json"], False)],
+)
 def test_run_exit_code_is_130_on_keyboard_interrupt(
-    monkeypatch: MonkeyPatch, tmp_path: Path
+    second_interrupt: bool, options: list[str], monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise KeyboardInterrupt()
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    if second_interrupt:
 
-    result = _invoke_run_with_minimal_workspace([], tmp_path=tmp_path, monkeypatch=monkeypatch)
+        def interrupt_summary(*_args: object, **_kwargs: object) -> None:
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr("frame_compare.cli.run_command.print_interruption", interrupt_summary)
+
+    result = _invoke_run_with_minimal_workspace(options, tmp_path=tmp_path, monkeypatch=monkeypatch)
     assert result.exit_code == int(ExitCode.INTERRUPTED)
+    if options:
+        assert result.stderr == ""
+        assert result.stdout == ""
+    elif not second_interrupt:
+        assert result.stderr.strip() == "! Interrupted"
+        assert "╰─\n\n! Interrupted" in _normalize_cli_output(result.output)
+
+
+def test_run_error_wraps_colon_after_a_full_width_config_path(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    path = Path("a" * 75 + ".toml")
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise ConfigParseError(path, "invalid TOML syntax")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    result = _invoke_run_with_minimal_workspace(
+        ["--no-color"],
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        env={"COLUMNS": "80", "TERM": "xterm-256color"},
+    )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert any(str(path) in line for line in result.stderr.splitlines())
+    assert "invalid TOML syntax" in result.stderr
+    assert all(len(line) <= 80 for line in result.stderr.splitlines())
 
 
 def test_run_no_color_error_output_has_no_rich_markup(

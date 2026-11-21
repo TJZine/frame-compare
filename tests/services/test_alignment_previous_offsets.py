@@ -713,17 +713,19 @@ def test_align_clips_from_request_disabled_writes_shared_reuse_without_legacy_ca
         shared_cache_dir=shared_cache_dir,
     )
 
+    notify = Mock()
     with (
         patch(
             "frame_compare.services.alignment_previous_offsets.load_reusable_offset_entries",
             return_value=None,
         ),
     ):
-        results = align_clips_from_request(request, config)
+        results = align_clips_from_request(request, config, on_reusable_cache_written=notify)
 
     assert results[0].source == "computed"
     cache_file = shared_cache_dir / REUSE_CACHE_FILE_NAME
     assert cache_file.exists()
+    notify.assert_called_once_with()
     assert not (generated_dir / "audio_offsets.toml").exists()
     with cache_file.open("rb") as handle:
         cache_data = tomllib.load(handle)

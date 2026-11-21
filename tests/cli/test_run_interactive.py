@@ -189,7 +189,9 @@ def test_handle_run_injects_confirmation_dependency_only_for_prompt_required_pat
 
     assert prompt_runner.dependencies[0] is not None
     assert prompt_runner.dependencies[0].confirm_slowpics_upload is not None
-    assert normal_runner.dependencies == [None]
+    normal_deps = normal_runner.dependencies[0]
+    assert normal_deps is not None
+    assert normal_deps.confirm_slowpics_upload is None
 
 
 @pytest.mark.parametrize(
@@ -316,6 +318,8 @@ def test_full_window_retry_confirmation_is_not_injected_for_unattended_modes(
     config = get_default_config()
     config.analysis.ignore_lead_seconds = 240.0
     dependencies = build_runner_dependencies(
+        on_interrupted=lambda _: None,
+        on_failed_alignment_diagnostics=lambda _: None,
         args=replace(_base_args(), **args_update),
         deps=replace(
             _deps(
@@ -330,7 +334,7 @@ def test_full_window_retry_confirmation_is_not_injected_for_unattended_modes(
         inputs=AcquiredRunConfig(Path("/workspace"), Path("/workspace/config/config.toml"), config),
     )
 
-    assert dependencies is None
+    assert dependencies.confirm_full_window_retry is None
 
 
 def test_full_window_retry_confirmation_is_injected_only_for_nonzero_interactive_config() -> None:
@@ -339,12 +343,16 @@ def test_full_window_retry_confirmation_is_injected_only_for_nonzero_interactive
     config.analysis.ignore_trail_seconds = 240.0
 
     dependencies = build_runner_dependencies(
+        on_interrupted=lambda _: None,
+        on_failed_alignment_diagnostics=lambda _: None,
         args=replace(_base_args(), quiet=False),
         deps=replace(interactive_deps, load_config=lambda config_path=None, overrides=None: config),
         console=Console(file=StringIO(), no_color=True),
         inputs=AcquiredRunConfig(Path("/workspace"), Path("/workspace/config/config.toml"), config),
     )
     zero_margin_dependencies = build_runner_dependencies(
+        on_interrupted=lambda _: None,
+        on_failed_alignment_diagnostics=lambda _: None,
         args=replace(_base_args(), quiet=False),
         deps=replace(
             interactive_deps,
@@ -356,9 +364,8 @@ def test_full_window_retry_confirmation_is_injected_only_for_nonzero_interactive
         ),
     )
 
-    assert dependencies is not None
     assert dependencies.confirm_full_window_retry is not None
-    assert zero_margin_dependencies is None
+    assert zero_margin_dependencies.confirm_full_window_retry is None
 
 
 @pytest.mark.parametrize("auto_open", [False, True], ids=["disabled", "browser-refused"])

@@ -9,7 +9,7 @@ from rich.markup import escape
 from rich.text import Text
 
 from frame_compare.utils.terminal import no_color_requested
-from frame_compare.utils.terminal_sections import Section, section_title
+from frame_compare.utils.terminal_sections import Section, section_title, take_run_block_separator
 from frame_compare.utils.terminal_theme import (
     WARN,
     glyphs_for_console,
@@ -87,6 +87,8 @@ def print_vsview_review_result(
         return
     console = _console(no_color=no_color)
     glyphs = glyphs_for_console(console)
+    if take_run_block_separator():
+        console.print()
     console.print(
         Text.assemble(
             (glyphs.warning, WARN),

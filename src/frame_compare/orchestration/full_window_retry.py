@@ -27,6 +27,7 @@ from frame_compare.orchestration.selection_domain import (
 )
 from frame_compare.orchestration.types import FullWindowRetryConfirmationRequest
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.terminal_theme import format_exclusion_duration
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.context import ClipState, RunContext
@@ -98,7 +99,7 @@ def compute_selection_window_with_recovery(
             raise error from None
         _require_confirmation(
             error=error,
-            requested_frame_count=_requested_frame_count(config),
+            requested_frame_count=config.analysis.requested_frame_count,
             config=config,
             confirm=confirm,
         )
@@ -256,20 +257,9 @@ def raise_if_full_window_retry_runtime_failed(
     if ctx.selection_domain.full_window_retry_override is None:
         return
     selection_error = SelectionError(
-        type(error).__name__, requested=_requested_frame_count(ctx.config), found=0
+        type(error).__name__, requested=ctx.config.analysis.requested_frame_count, found=0
     )
     raise _fatal_selection_error(selection_error, retry_failed=True) from error
-
-
-def _requested_frame_count(config: ConfigSchema) -> int:
-    analysis = config.analysis
-    return (
-        len(analysis.user_frames)
-        + analysis.random_frame_count
-        + analysis.dark_frame_count
-        + analysis.bright_frame_count
-        + analysis.motion_frame_count
-    )
 
 
 def _full_window_config(config: ConfigSchema) -> ConfigSchema:
@@ -286,13 +276,19 @@ def _full_window_config(config: ConfigSchema) -> ConfigSchema:
 
 
 def _override_warning(ignore_lead_seconds: float, ignore_trail_seconds: float) -> RunWarning:
+    def message(lead: str, trail: str, effective: str) -> str:
+        return (
+            f"{_FULL_WINDOW_RETRY_WARNING} "
+            f"(configured lead={lead}, trail={trail}; effective lead={effective}, trail={effective})"
+        )
+
     return RunWarning(
         "analysis",
         "warning",
-        (
-            f"{_FULL_WINDOW_RETRY_WARNING} "
-            f"(configured lead={ignore_lead_seconds:g}s, trail={ignore_trail_seconds:g}s; "
-            "effective lead=0s, trail=0s)"
+        message(
+            format_exclusion_duration(ignore_lead_seconds),
+            format_exclusion_duration(ignore_trail_seconds),
+            format_exclusion_duration(0.0),
         ),
     )
 

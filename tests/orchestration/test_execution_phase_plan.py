@@ -8,6 +8,9 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+from rich.console import Console
+from rich.text import Text
+from structlog.testing import capture_logs
 
 from frame_compare.analysis.types import (
     SelectionBreakdown,
@@ -21,6 +24,7 @@ from frame_compare.orchestration.execution import RunSteps
 from frame_compare.orchestration.execution_types import (
     AlignPhaseOutput,
     AnalyzePhaseOutput,
+    ConfirmSlowpicsUploadPhaseOutput,
     ExecutionState,
     FramePlanPhaseOutput,
     MetadataPhaseOutput,
@@ -32,7 +36,12 @@ from frame_compare.orchestration.execution_types import (
 )
 from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
-from frame_compare.utils.progress import NullProgressReporter
+from frame_compare.utils.progress import (
+    LogProgressReporter,
+    NullProgressReporter,
+    PlainProgressReporter,
+    RichProgressReporter,
+)
 from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.run_warnings import RunWarning
 from tests.run_request_support import make_run_request
@@ -425,6 +434,102 @@ async def test_steps_preserve_align_boundary_and_progress_total(
     ]
 
 
+@pytest.mark.parametrize("transport", ["tty", "pipe", "json"])
+@pytest.mark.parametrize("configured", [True, False])
+async def test_steps_distinguish_disabled_from_runtime_skips(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    transport: str,
+    configured: bool,
+) -> None:
+    ctx = _context(tmp_path)
+    config = ctx.config
+    config.audio_alignment.enable = not configured
+    config.report.enable = not configured
+    config.slowpics.auto_upload = not configured
+    config.slowpics.confirm_upload_after_report = not configured
+    config.analysis.dark_frame_count = 0
+    config.analysis.bright_frame_count = 0
+    config.analysis.motion_frame_count = 0
+    state = ExecutionState()
+    request = make_run_request(
+        config=config, root=tmp_path, skip_analysis=configured, skip_metadata=configured
+    )
+    reporter: RichProgressReporter | PlainProgressReporter | LogProgressReporter
+    if transport == "tty":
+        console = Console(stderr=True, force_terminal=True, no_color=True, width=120)
+        monkeypatch.setattr("frame_compare.utils.progress.human_console", lambda **_: console)
+        reporter = RichProgressReporter()
+    elif transport == "pipe":
+        reporter = PlainProgressReporter()
+    else:
+        reporter = LogProgressReporter()
+    monkeypatch.setattr(
+        execution, "select_initial_frame_plan", lambda *a, **kw: FramePlanPhaseOutput([0])
+    )
+    monkeypatch.setattr(
+        execution,
+        "run_align_phase",
+        lambda *a, **kw: AlignPhaseOutput(ctx.reference, ctx.comparisons, [0]),
+    )
+    monkeypatch.setattr(
+        execution,
+        "run_render_phase",
+        lambda *a, **kw: RenderPhaseOutput(
+            _render_artifacts(screenshots_by_label={}, screenshot_dir=None)
+        ),
+    )
+    monkeypatch.setattr(execution, "run_metadata_phase", lambda *a, **kw: MetadataPhaseOutput(None))
+    monkeypatch.setattr(execution, "run_report_phase", lambda *a, **kw: ReportPhaseOutput(None))
+    monkeypatch.setattr(
+        execution,
+        "run_confirm_slowpics_upload_phase",
+        lambda *a, **kw: ConfirmSlowpicsUploadPhaseOutput("declined"),
+    )
+    monkeypatch.setattr(
+        execution, "run_post_report_cleanup_phase", lambda *a, **kw: PostReportCleanupPhaseOutput()
+    )
+    steps = RunSteps(reporter=reporter, state=state, monotonic_timer=lambda: 0.0)
+    prep = prep_for_context(ctx, state)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_reject_request)) as client:
+        deps = RunDependencies(http_client=client)
+        with capture_logs() as logs:
+            await execution.run_selection_steps(
+                ctx, steps, request=request, prep=prep, state=state, deps=deps
+            )
+            await execution.run_output_steps(
+                ctx, steps, request=request, prep=prep, state=state, deps=deps
+            )
+
+    expected = (
+        {"analyze", "align", "metadata", "publish", "report"}
+        if configured
+        else {"analyze", "publish"}
+    )
+    output = capsys.readouterr().err
+    if transport == "json":
+        assert output == ""
+        assert {
+            event["phase"]
+            for event in logs
+            if event.get("event") == "phase_completed" and event.get("status") == "skipped"
+        } == expected
+    elif transport == "tty":
+        plain = Text.from_ansi(output).plain
+        if configured:
+            assert "disabled" not in plain.lower()
+        else:
+            assert "– Analyze         not required" in plain
+            assert "– Publish         declined" in plain
+    else:
+        skip_lines = [line for line in output.splitlines() if line.startswith("[SKIP]")]
+        assert skip_lines == (
+            [] if configured else ["[SKIP] ANALYZE  Not required", "[SKIP] PUBLISH  Declined"]
+        )
+
+
 async def test_analyze_step_skips_when_request_disables_analysis(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -443,10 +548,11 @@ async def test_analyze_step_skips_when_request_disables_analysis(
     await _run_selection(ctx, state, skip_analysis=True)
 
     analyze.assert_not_called()
-    reporter.start_phase.assert_any_call(
-        "ANALYZE  Disabled", total=execution.ANALYZE_PROGRESS_TOTAL
-    )
-    reporter.complete_phase.assert_any_call(ProgressPhaseStatus.SKIPPED, summary="disabled")
+    # Human progress leaves a configuration-disabled step out entirely.
+    assert all("ANALYZE" not in call.args[0] for call in reporter.start_phase.call_args_list)
+    assert ProgressPhaseStatus.SKIPPED not in {
+        call.args[0] for call in reporter.complete_phase.call_args_list
+    }
     assert "analyze" not in state.phase_timings
     request = make_run_request(root=tmp_path, config=ctx.config, skip_analysis=True)
     assert "Analyze" not in execution.progress_step_names(request, ctx.config)
@@ -552,6 +658,6 @@ async def test_align_step_records_review_split_duration_text(
     reporter.complete_phase.assert_called_with(
         ProgressPhaseStatus.COMPLETED,
         summary="1 pair confirmed in VSView",
-        duration_text="17s + 42s review",
+        duration_text="17.5 s + 42.5 s review",
     )
     assert state.vsview_review_seconds == pytest.approx(42.5)

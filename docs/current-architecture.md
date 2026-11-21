@@ -98,7 +98,12 @@ Analyze validation timing for ordinary runs.
 `RunDependencies` supplies aware UTC wall time for persisted start/completion
 timestamps and a separate monotonic timer for preflight, source loading, phases,
 and total success/failure durations. Persisted `duration_seconds` comes from that
-monotonic total rather than wall-clock subtraction.
+monotonic total rather than wall-clock subtraction. The alignment service
+reports the diagnostics directory after a successful per-run write. Execution
+records that path in run artifacts independently of alignment or selection
+application. After failure cleanup and run-record handling, the coordinator can
+pass the path to the caller. The run CLI renders it with the error using its
+human output path formatter.
 Current phase-family owners are intentionally explicit:
 
 - `frame_compare.orchestration.phase_selection`: frame-plan and analyze phase bodies plus shared selection/frame-translation helpers
@@ -226,13 +231,20 @@ coordinates during this allocation.
 
 `frame_compare.orchestration.source_labels` resolves presentation labels after
 selector/override resolution and before probing or run-folder reservation.
-`frame_compare.orchestration.presentation` owns the stable reference/comparison
-role labels and bounded console-width policy shared by orchestration reports.
+`frame_compare.orchestration.presentation` owns the bounded console-width policy
+shared by orchestration reports.
 `frame_compare.services.release_identity` owns dependency-light, non-persisted
-content/release identity types and plain formatters. Preparation invokes the existing
+content/release identity types, reference/comparison role names, shared comparison
+titles, and plain formatters. Preparation invokes the existing
 GuessIt/Anitopy parser seam once per source and attaches the resulting presentation
 metadata and explicit-label provenance to `ClipState`; these fields are excluded from
-source, cache, selection, and report identity.
+source, cache, and selection identity. Report titles can use the derived content
+identity or short labels and participate in report identity. Release identity records
+whether a parsed group qualifies for display. Every release formatter applies that
+policy. Without a usable group, a long descriptor can append the filename difference
+or fallback label when it adds information. It lists release facts once, appends
+filename text used as the short label as written, and omits role prefixes. When compact descriptors collide, the short-name formatter uses
+unique differing filename text before resolving remaining collisions with roles.
 `selection_domain` receives the resolved per-path map when constructing
 `ClipState`; it does not own parsing or collision policy. Labels propagate
 through presentation surfaces while source paths, fingerprints,
@@ -325,6 +337,12 @@ Frame Compare-owned indexes before reuse. See
 [Supported Media Runtime](supported-media-runtime.md) for the profile boundary and
 recovery requirement.
 
+An interrupted run sends its phase and reserved workspace to the human CLI
+through the runner's interruption callback. Analysis and alignment report
+successful reusable cache writes from their persistence owners. The CLI counts
+retained screenshots after the runner returns control, while the existing
+failure-record path remains responsible for persisted run status.
+
 ### Configuration persistence
 
 `orchestration.run_inputs` owns the selected run configuration. The only intentional
@@ -335,6 +353,10 @@ do not replace admitted run settings. Doctor shares `select_run_config_path` and
 never searches parent directories.
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
+- `frame_compare.config.loader` supplies the selected file and validation schema to
+  the config error formatter. `frame_compare.config.errors` redacts diagnostic
+  values before formatting invalid settings and uses the affected table's schema
+  for unknown-key suggestions.
 - `frame_compare.config.persistence`: secret-safe serialization shared by generated
   config and preset writes; runtime `slowpics.webhook_url` and `tmdb.api_key` values
   are excluded from every generated TOML payload. The config-owned representation
@@ -511,7 +533,10 @@ Selected-video identity is not persisted.
   `frame_compare.services.run_result_record` and written atomically only after a
   reserved run completes or fails. It stores sanitized run-folder-relative output
   facts, UTC lifecycle timing, bounded warning summaries, cache/phase facts,
-  slow.pics outcome, and a sanitized typed failure when applicable. A failed run
+  slow.pics outcome, and a sanitized typed failure when applicable. Cancellation
+  records use `RUN_INTERRUPTED` in the existing `failure.name` field and retain the
+  stored status `failed`. The CLI uses this marker to show `interrupted` in the
+  human table. The JSON projector exposes the stored status. A failed run
   can still record an uploaded slow.pics outcome and URL when the publisher
   confirmed remote success before cancellation. Orchestration captures that fact
   synchronously before optional post-upload work or another cancellation
@@ -621,13 +646,16 @@ selection domain before metadata prefetch or run-folder reservation. Report gene
 receives the explicit canonical `<run-folder>/report.html` path from post-render
 orchestration; no report-specific output directory or fallback placement exists.
 
-Run-folder names are title-first and capped at 64 characters for Windows path
-headroom. The base name comes from resolved TMDB title/year, common parsed
-metadata, combined filename stems, or `unnamed_run`. Windows reserved basenames
-are rewritten before reservation. Exact timestamps are not
-part of folder names; collisions use compact numeric suffixes such as `_2` and
-`_3`, then a short random suffix if bounded numeric claiming cannot reserve a
-directory. Preparation validates the reserved immediate-child path and completes
+Run-folder naming consumes the prepared release identities and explicit-label provenance.
+It shares the report's TMDB and shared content title formatting and uses short labels
+to distinguish sources. It reserves the unsuffixed name first, then the local minute,
+local second, and a UUID for a same-second collision. The 64-character budget includes
+the suffix. Reservation and `run_info.toml` share one reading of the injected run clock.
+Movie titles include the TMDB year or parsed reference year when available. Source
+roles distinguish labels that are empty or collide after filename
+sanitization. A derived label that repeats the title also becomes its role. A single long label is shortened at a token
+boundary. Other trailing labels are omitted before title truncation at a token boundary.
+Windows reserved basenames are rewritten before reservation. Preparation validates the reserved immediate-child path and completes
 the `WorkspacePaths` transition before writing metadata. The exact creation time
 then lives in `<run-folder>/run_info.toml`, which is written before probing,
 rendering, or other runtime-heavy work. If reservation validation, the workspace
@@ -1134,19 +1162,29 @@ replacement remains owned by `frame_compare.utils.atomic_write`.
 
 `frame_compare.services.report` owns the static offline report payload and viewer
 assets. The generated viewer exposes slider, internal overlay mode presented to
-users as Single where appropriate, diff, and pair-based blink modes; frame/category
+users as Single where appropriate, diff, pair-based blink, and grid modes; frame/category
 navigation; a source-labels toggle for stage labels and current-frame metadata; a
-primary toolbar plus floating viewport palette; a collapsible, compact/normal/large
+primary toolbar plus viewport palette; a collapsible, compact/normal/large
 filmstrip bottom panel; a responsive inspector drawer with Frame, Clips, Image offset,
 and Review tabs; fullscreen support; viewport pan, zoom, actual size and fit height
 controls (plus continued support for a restored width-fit preference without a visible
-control), reveal, and adjacent-frame preloading. The toolbar owner uses
-CSS Grid to keep frame, mode, and context/offset zones stable at wide widths, then
-reflows them to two rows and a narrow stack without JavaScript measurement or DOM
-reordering. Frame arrow shortcuts select the adjacent visible frame while suppressing
+control), reveal, and adjacent-frame preloading. The toolbar combines the title,
+frame stepper and filter badge, mode switch, context controls, offset status, and
+report actions. At 1280 px and wider it stays on one row while the controls fit,
+with a stable mode-switch position and bar height across modes at zero offset,
+including coarse-pointer Grid paging. The title shrinks first; when the row still
+does not fit, the report actions wrap onto a second row. From 769 to 1599 px it uses smaller text and padding. Intermediate widths put the title and stepper above the other
+controls, which wrap onto another row when they do not fit; the source selects keep
+their width. Through 768 px the stacked controls follow DOM and keyboard order,
+with report actions last. The offset status appears for a visible pair with a
+nonzero offset, including Single when it shows the selected right source. It is
+hidden for Single sources other than the selected right source. Offset appearance can shift
+the mode switch; the toolbar reserves no inactive status space. Below 1280 px
+the full value can wrap inside the status without covering adjacent controls.
+Frame arrow shortcuts select the adjacent visible frame while suppressing
 native document and filmstrip scrolling; the selected filmstrip item owns its roving
 tab stop. Custom view-mode, fit, filmstrip-size, and lens-option radio groups use
-standard arrow and Home/End selection. The header Help dialog is the single persistent
+standard arrow and Home/End selection. The toolbar Help dialog is the single persistent
 shortcut reference, and the filmstrip is the final visible report region. The
 desktop Inspector starts at the measured toolbar bottom, including shifts caused
 by the viewer status banner. One responsive Inspector width token controls both
@@ -1157,8 +1195,8 @@ The drawer also starts at the top in fullscreen.
 Help and Report Information share the local `HelpInfoDialog` owner in
 `assets/viewer.js` for visibility, focus restoration, Tab trapping, and Escape
 handling. The Inspector retains its separate drawer lifecycle and focus policy.
-Fullscreen includes the stage, Inspector, and dialogs while hiding the header,
-toolbar, and filmstrip. Closing a dialog whose trigger is hidden returns focus to
+Fullscreen includes the stage, Inspector, and dialogs while hiding the merged
+toolbar and filmstrip. Closing a dialog whose trigger is hidden returns focus to
 the stage.
 
 Viewer appearance remains owned by `assets/viewer.css`: neutral charcoal surfaces,
@@ -1170,10 +1208,18 @@ retain text and counts without colored dots or thumbnail stripes. Palette orient
 rotates its existing icon through CSS, while the viewer updates the accessible action label. The floating
 palette omits a fit-width control; actual size and fit height remain, and a restored
 width-fit preference still computes zoom and keeps the fit radio group keyboard
-reachable when neither visible radio matches. The floating palette does not reserve
-stage height. On fine pointers the palette carries a `data-proximity` state driven
-by a throttled stage pointermove listener: near at or within 96 px of the palette
-rectangle, far at or beyond 160 px with hysteresis between, far on stage pointer
+reachable when neither visible radio matches. In Slider, Single, Diff, and Blink,
+the palette floats over the stage without reserving image space. With a horizontal
+palette, source chips sit above the bottom controls. A vertical palette sits to
+the right of the chips, which stay near the bottom above the frame chip. This
+leaves the top-left corner clear for burned-in text. On mobile, chip metadata
+ends with an ellipsis when it exceeds the available width. In Grid, the palette has a
+row below the cells or a column beside them when vertical. The frame selector in
+the toolbar identifies the current frame in windowed Grid. Fullscreen hides the
+toolbar and shows the current frame chip below the cells. On fine pointers a throttled stage pointermove
+listener updates the palette's `data-proximity` state. It sets near at or within
+96 px of the palette rectangle and far at or beyond 160 px with hysteresis between.
+The state is also far on stage pointer
 leave, forced far during viewport or slider drags, forced near for 3000 ms after
 load and while either the image-offset or lens-settings popover is open, and always
 near on coarse pointers or when the fine-pointer media query stops matching.
@@ -1185,13 +1231,15 @@ source-frame alignment. View-mode controls and the Help dialog state each mode's
 (reveal spatial differences, inspect one source, locate changed pixels, alternate the
 selected pair, scan sources together).
 Keyboard focus uses a neutral light outline, and the image canvas has no decorative
-shadow. The renderer emits the header generation timestamp as a `<time>` element
-carrying the exact ISO timestamp in `datetime` and `title`; the viewer localizes its
-text to medium date plus short time. The exact timestamp remains available in the
-tooltip, Report Information, and payload.
-Report Information is the single place for report metadata: title, report ID, generated
-timestamp, frame/clip counts, and the slow.pics link. The renderer alone builds that
-link's safe http(s) href; no viewer script re-derives it. The viewer's Inspector builds
+shadow. Report payload generation derives the comparison title from resolved TMDB
+metadata and reference episode numbers, shared content identity, or source short
+labels, in that order. The toolbar title uses a single line with the full title in
+its tooltip. Report Information shows the report ID and is the single place for
+Generated and Content (frame and source counts), including when the report has
+no frames. The Generated `<time>` contains the exact ISO timestamp in `datetime` and
+`title`. The viewer localizes its visible date and time. The toolbar and Report
+Information include the slow.pics link when available. The renderer alone builds
+its safe http(s) href; no viewer script re-derives it. The viewer's Inspector builds
 the Report Information source cards, Opens in, and Default pair at startup; renderer.py
 emits only their containers.
 
@@ -1260,8 +1308,14 @@ per clip. `phase_post_render` reuses prepared release identities, explicit-label
 provenance, shared formatters, stable roles, and set-level collision handling once per
 report, joining profile segments with `·` (slow.pics image names keep the `|`
 separator; burned-in screenshot text is the clip label and does not use release
-descriptors). Report controls consume control or micro names,
-while Inspector/info and ARIA surfaces use the primary identity and the displayed basename.
+descriptors). The micro profile uses the same short source names as terminal
+summaries, with bidi controls made visible before collision handling. Grid, the lens,
+and compact inspector rows consume this profile. Native source options start with
+the short name and append distinct control detail. A descriptor equal to the short
+name, or ending with that complete short name after a separator, is omitted or
+shortened. The closed select caps its width and can clip long names. The option title and accessible name retain the
+primary identity and displayed basename. Stage chips and source details continue
+to use their existing profiles.
 Per-clip presentation contains applied tonemap facts; the rendering summary derives a
 shared implementation/algorithm/control projection, excluding clip-specific peaks and
 causes. Identity includes applied output facts and excludes requested settings and
