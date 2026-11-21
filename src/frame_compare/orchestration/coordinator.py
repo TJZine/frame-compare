@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import nullcontext, suppress
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import datetime
 
@@ -15,7 +16,10 @@ from frame_compare.orchestration.alignment_report import (
 )
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.execution import (
-    build_execution_phase_plan,
+    RunSteps,
+    progress_step_names,
+    run_output_steps,
+    run_selection_steps,
 )
 from frame_compare.orchestration.execution_types import (
     ExecutionState,
@@ -25,10 +29,8 @@ from frame_compare.orchestration.fps_report import (
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
 )
-from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import (
-    rich_phase_label,
     select_reporter,
     uses_rich_progress,
 )
@@ -43,6 +45,7 @@ from frame_compare.orchestration.types import (
     RunRequest,
     RunResult,
 )
+from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
@@ -52,6 +55,38 @@ from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = ["RunDependencies", "RunRequest", "RunResult", "execute_run"]
+
+
+@asynccontextmanager
+async def _run_http_client(deps: RunDependencies) -> AsyncGenerator[httpx.AsyncClient]:
+    if deps.http_client is not None:
+        yield deps.http_client
+        return
+
+    client = httpx.AsyncClient()
+    deps.http_client = client
+    try:
+        yield client
+    except BaseException:
+        deps.http_client = None
+        # Preserve the run error. A cancel delivered during close still leaves
+        # the task cancelling for _interrupt_outcome.
+        with suppress(Exception, asyncio.CancelledError):
+            await client.aclose()
+        raise
+    deps.http_client = None
+    with suppress(Exception):
+        await client.aclose()
+
+
+def _interrupt_outcome(error: BaseException) -> BaseException:
+    if isinstance(error, _RunInterrupt) or (
+        isinstance(error, Exception)
+        and is_cancelling()
+        and not isinstance(error, AudioAlignmentCleanupError)
+    ):
+        return asyncio.CancelledError()
+    return error
 
 
 def _assemble_run_result(
@@ -198,28 +233,11 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         if prep.config.slowpics.auto_upload and prep.config.slowpics.confirm_upload_after_report:
             state.phase_timings["confirm_slowpics_upload"] = 0.0
 
-        phase_plan = build_execution_phase_plan(
-            request=request,
-            deps=local_deps,
-            prep=prep,
-            state=state,
+        steps = RunSteps(reporter=reporter, state=state, monotonic_timer=local_deps.monotonic_timer)
+        reporter.set_phase_steps(progress_step_names(request, prep.config))
+        await run_selection_steps(
+            context, steps, request=request, prep=prep, state=state, deps=local_deps
         )
-
-        # Publish can be skipped later by confirmation or availability; only its
-        # config switch excludes it from the initial run map.
-        reporter.set_phase_steps(
-            [
-                rich_phase_label(phase.name)
-                for phase in [*phase_plan.before_align, *phase_plan.after_align]
-                if phase.name in {"analyze", "align", "render", "report", "publish"}
-                and (
-                    prep.config.slowpics.auto_upload
-                    if phase.name == "publish"
-                    else phase.skip_condition is None or not phase.skip_condition(prep.config)
-                )
-            ]
-        )
-        await execute_phases(phase_plan.before_align, context, reporter)
         selected_frame_count = len(list(context.selection.frames))
         emit_final_selection_report(
             selected_frames=list(context.selection.frames),
@@ -253,7 +271,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             no_color=request.no_color,
             verbose=request.verbose,
         )
-        await execute_phases(phase_plan.after_align, context, reporter)
+        await run_output_steps(
+            context, steps, request=request, prep=prep, state=state, deps=local_deps
+        )
         duration_seconds = max(0.0, local_deps.monotonic_timer() - run_timer_start)
         run_end = local_deps.clock()
         result = _assemble_run_result(
@@ -268,51 +288,19 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         return result, run_start, run_end
 
     try:
-        execution_error: Exception | asyncio.CancelledError | None = None
-        owns_client = local_deps.http_client is None
-        client_context = httpx.AsyncClient() if owns_client else nullcontext()
-        try:
-            async with client_context as owned_client:
-                if owned_client is not None:
-                    local_deps.http_client = owned_client
-                try:
-                    result, started_at, completed_at = await _execute_with_deps()
-                    await cancellation_checkpoint()
-                except (_RunInterrupt, asyncio.CancelledError):
-                    # Deliver the queued interrupt before awaited client cleanup.
-                    with suppress(asyncio.CancelledError):
-                        await cancellation_checkpoint()
-                    execution_error = asyncio.CancelledError()
-                    raise execution_error from None
-                except Exception as exc:
-                    execution_error = exc
-                    if is_cancelling():
-                        with suppress(asyncio.CancelledError):
-                            await cancellation_checkpoint()
-                    raise
-        except (Exception, asyncio.CancelledError) as cleanup_error:
-            # Client close can fail while a run failure is already unwinding.
-            if execution_error is not None and cleanup_error is not execution_error:
-                raise execution_error from None
-            raise
-        finally:
-            if owns_client:
-                local_deps.http_client = None
-
-        try:
-            await cancellation_checkpoint()
-            recorded_result = record_completed_run_result(
-                workspace=reserved_workspace,
-                result=result,
-                started_at=started_at,
-                completed_at=completed_at,
-            )
-            await cancellation_checkpoint()
-        except _RunInterrupt:
-            await cancellation_checkpoint()
-            raise asyncio.CancelledError() from None
-        return recorded_result
-    except BaseException as original_error:
+        async with _run_http_client(local_deps):
+            result, started_at, completed_at = await _execute_with_deps()
+        recorded = record_completed_run_result(
+            workspace=reserved_workspace,
+            result=result,
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+        # An interrupt after the completed record is written still fails the run.
+        await cancellation_checkpoint()
+        return recorded
+    except BaseException as error:
+        outcome = _interrupt_outcome(error)
         duration_seconds = (
             0.0
             if run_timer_start is None
@@ -320,7 +308,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         )
         record_failed_run_best_effort(
             workspace=reserved_workspace,
-            error=original_error,
+            error=outcome,
             started_at=run_start,
             completed_at=local_deps.clock,
             duration_seconds=duration_seconds,
@@ -334,4 +322,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 else list(current_preflight_warnings)
             ),
         )
-        raise
+        if outcome is error:
+            raise
+        raise outcome from None

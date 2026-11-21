@@ -26,7 +26,6 @@ from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 
 if TYPE_CHECKING:
-    from frame_compare.orchestration.phases import Phase
     from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 
 
@@ -118,19 +117,6 @@ class PostReportCleanupPhaseOutput:
     warnings: list[RunWarning] = field(default_factory=list[RunWarning])
 
 
-type PhaseOutput = (
-    FramePlanPhaseOutput
-    | AnalyzePhaseOutput
-    | AlignPhaseOutput
-    | RenderPhaseOutput
-    | MetadataPhaseOutput
-    | PublishPhaseOutput
-    | ReportPhaseOutput
-    | ConfirmSlowpicsUploadPhaseOutput
-    | PostReportCleanupPhaseOutput
-)
-
-
 @dataclass(kw_only=True)
 class RunArtifacts:
     """Internal carrier for artifacts accumulated during the run."""
@@ -152,7 +138,7 @@ class RunArtifacts:
 
 @dataclass
 class ExecutionState:
-    """Mutable execution state shared explicitly by phase construction."""
+    """Mutable state accumulated by the run steps."""
 
     artifacts: RunArtifacts = field(default_factory=RunArtifacts)
     frame_plan_warnings: list[RunWarning] = field(default_factory=list[RunWarning])
@@ -187,24 +173,14 @@ class PrepState:
     load_source_diagnostics: list[str] = field(default_factory=list[str])
 
 
-@dataclass(frozen=True)
-class ExecutionPhasePlan:
-    """Execution phases split around the post-align reporting boundary."""
-
-    before_align: list[Phase]
-    after_align: list[Phase]
-
-
 __all__ = [
     "AlignPhaseOutput",
     "AnalyzePhaseOutput",
     "ConfirmSlowpicsUploadPhaseOutput",
-    "ExecutionPhasePlan",
     "ExecutionState",
     "FramePlanPhaseOutput",
     "MetadataPhaseOutput",
     "MetadataPrefetch",
-    "PhaseOutput",
     "PostReportCleanupPhaseOutput",
     "PrepState",
     "PublishPhaseOutput",

@@ -25,6 +25,10 @@ notes used by the guarded publication workflow.
   vulnerabilities before signing.
 - Provision the required Python 3.13 build interpreter directly for Windows
   source installs without first installing the project's development dependencies.
+- Accept valid HTTPS webhook URLs, including local-network addresses, and use a
+  10-second timeout per network operation.
+- Exit 130 after the first Ctrl+C even when a step fails at the same moment.
+  Alignment resource cleanup failures keep their own error.
 
 ### Removed
 

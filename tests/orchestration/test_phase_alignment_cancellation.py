@@ -7,12 +7,11 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
-from frame_compare.orchestration import execution
 from frame_compare.orchestration.context import RunContext
+from frame_compare.orchestration.execution import RunSteps
 from frame_compare.orchestration.execution_types import (
     AlignPhaseOutput,
     ExecutionState,
@@ -21,6 +20,7 @@ from frame_compare.orchestration.execution_types import (
 from frame_compare.services import alignment
 from frame_compare.services.errors import raise_if_alignment_cancelled
 from frame_compare.services.types import AlignmentConfig
+from frame_compare.utils.progress import NullProgressReporter
 from tests.orchestration.phase_task_helpers import _context
 from tests.services.alignment_request_test_support import alignment_request
 
@@ -49,10 +49,14 @@ async def test_cancelled_alignment_never_applies_phase_output(
         raise_if_alignment_cancelled(cancellation)
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", block)
-    apply_output = MagicMock()
-    monkeypatch.setattr(execution, "apply_phase_output", apply_output)
-    state = ExecutionState(artifacts=RunArtifacts())
-    timings: dict[str, float] = {}
+    ctx = _context(tmp_path)
+    reference_before, comparisons_before, selection_before = (
+        ctx.reference,
+        ctx.comparisons,
+        ctx.selection,
+    )
+    state = ExecutionState()
+    steps = RunSteps(reporter=NullProgressReporter(), state=state, monotonic_timer=time.monotonic)
 
     async def executor(ctx: RunContext) -> AlignPhaseOutput:
         await alignment.align_clips_from_request(
@@ -63,19 +67,8 @@ async def test_cancelled_alignment_never_applies_phase_output(
             reference=ctx.reference, comparisons=ctx.comparisons, selected_frames=[]
         )
 
-    phase = execution._create_timed_phase(
-        "align",
-        "align",
-        None,
-        executor,
-        state,
-        time.monotonic,
-        timings,
-        [],
-    )
-
     async def run_phase() -> None:
-        await phase.execute(_context(tmp_path))
+        await steps.run("align", lambda: executor(ctx), warning_source="alignment")
 
     task = asyncio.create_task(run_phase())
     for _ in range(200):
@@ -89,4 +82,8 @@ async def test_cancelled_alignment_never_applies_phase_output(
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    apply_output.assert_not_called()
+    assert ctx.reference is reference_before
+    assert ctx.comparisons is comparisons_before
+    assert ctx.selection is selection_before
+    assert state.artifacts == RunArtifacts()
+    assert state.vsview_review_seconds == 0.0
