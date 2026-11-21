@@ -18,7 +18,7 @@ def test_normalize_picture_type(value: object, expected: str | None) -> None:
 
 
 def test_geometry_contains_active_picture_and_is_immutable() -> None:
-    active = ActivePictureFacts(0, 140, 1920, 800, "dolby_vision_l5", False)
+    active = ActivePictureFacts(0, 140, 1920, 800, "explicit", False)
     facts = RenderedGeometryFacts(
         source_size=(1920, 1080),
         active_picture=active,
@@ -27,7 +27,7 @@ def test_geometry_contains_active_picture_and_is_immutable() -> None:
         final_canvas_size=(1920, 800),
         is_noop=False,
     )
-    assert facts.active_picture.provenance == "dolby_vision_l5"
+    assert facts.active_picture.provenance == "explicit"
     with pytest.raises(FrozenInstanceError):
         facts.is_noop = True  # type: ignore[misc]  # Exercise the frozen assignment guard.
 

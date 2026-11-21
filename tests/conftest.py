@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -72,6 +73,19 @@ if _vs_needs_mock():
 
 
 # ─── Fixtures ──────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def isolate_config_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove inherited application settings while allowing explicit test setup."""
+    from frame_compare.config.schema import ConfigSchema
+
+    sections = {f"FRAME_COMPARE_{name.upper()}" for name in ConfigSchema.model_fields}
+    for name in tuple(os.environ):
+        # Settings accept section JSON and case-insensitive nested overrides.
+        # Runtime/test selectors (for example RUNTIME_KIND) are separate controls.
+        if name.upper().split("__", 1)[0] in sections:
+            monkeypatch.delenv(name)
 
 
 @pytest.fixture(autouse=True)

@@ -1,0 +1,91 @@
+name: Reusable unsigned Windows portable verification
+
+on:
+  workflow_call:
+    inputs:
+      expected_sha:
+        description: Exact commit to build and verify
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  build_test:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    outputs:
+      bundle_id: ${{ steps.build.outputs.bundle_id }}
+      bundle_digest: ${{ steps.build.outputs.bundle_digest }}
+      update_id: ${{ steps.build.outputs.update_id }}
+      update_digest: ${{ steps.build.outputs.update_digest }}
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:EXPECTED_SHA -cnotmatch '\A[0-9a-f]{40}\z' -or (git rev-parse HEAD).Trim() -cne $env:EXPECTED_SHA) {
+            throw "Checkout did not resolve to the exact expected commit."
+          }
+
+      - name: Build and exercise Windows portable inputs
+        id: build
+        uses: ./.github/actions/windows-portable-build
+        with:
+          expected_sha: ${{ inputs.expected_sha }}
+          require_signing: "false"
+
+  # Keep the existing reusable job check name as the final unsigned gate.
+  build:
+    needs: build_test
+    if: always()
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Require a successful upstream build
+        shell: pwsh
+        env:
+          BUILD_RESULT: ${{ needs.build_test.result }}
+        run: |
+          if ($env:BUILD_RESULT -cne "success") {
+            throw "The required unsigned Windows check needs a successful build and test job."
+          }
+
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:EXPECTED_SHA -cnotmatch '\A[0-9a-f]{40}\z' -or (git rev-parse HEAD).Trim() -cne $env:EXPECTED_SHA) {
+            throw "Checkout did not resolve to the exact expected commit."
+          }
+
+      - name: Verify unsigned inputs on a fresh runner
+        uses: ./.github/actions/windows-portable-verify
+        with:
+          expected_sha: ${{ inputs.expected_sha }}
+          bundle_id: ${{ needs.build_test.outputs.bundle_id }}
+          bundle_digest: ${{ needs.build_test.outputs.bundle_digest }}
+          update_id: ${{ needs.build_test.outputs.update_id }}
+          update_digest: ${{ needs.build_test.outputs.update_digest }}

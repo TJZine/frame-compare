@@ -10,3 +10,8 @@ tools/windows_portable/shim/*.ps1 text eol=crlf
 tools/windows_portable/licenses/**/*.txt text eol=lf
 tools/windows_portable/licenses/**/*.txt whitespace=-blank-at-eof
 src/frame_compare/assets/fonts/Inter-OFL.txt text eol=lf
+
+uv.lock text eol=lf
+tools/windows_portable/portable_archive.py text eol=lf
+tools/windows_portable/portable_runtime.py text eol=lf
+tools/windows_portable/manifest.windows-x64.json text eol=lf

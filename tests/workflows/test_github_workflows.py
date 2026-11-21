@@ -51,12 +51,19 @@ def test_release_workflows_preserve_triggers_permissions_and_windows_owner(
         "id-token": "write",
     }
     assert release["jobs"]["preflight"]["permissions"] == {"contents": "read"}
+    assert release["jobs"]["source_security"]["permissions"] == {"contents": "read"}
+    assert release["jobs"]["source_security"]["needs"] == "preflight"
+    assert release["jobs"]["source_security"]["uses"].endswith("source-security.yml")
+    assert release["jobs"]["source_security"]["with"] == {
+        "expected_sha": "${{ inputs.expected_sha }}"
+    }
     assert release["jobs"]["windows"]["permissions"] == attestation_permissions
+    assert release["jobs"]["windows"]["needs"] == ["preflight", "source_security"]
     assert release["jobs"]["publish"]["permissions"] == {"contents": "write"}
     assert release["jobs"]["windows"]["uses"].endswith("windows-portable-build.yml")
     assert portable["on"]["workflow_call"] is not None
-    assert "permissions" not in portable
-    assert "permissions" not in portable["jobs"]["build"]
+    assert portable["permissions"] == {}
+    assert portable["jobs"]["package_attest"]["permissions"] == attestation_permissions
 
 
 def test_release_workflow_keeps_fail_closed_asset_contract(repo_root: Path) -> None:
@@ -155,7 +162,7 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     docker = _load_workflow(repo_root / ".github" / "workflows" / "docker-integration.yml")
 
     assert set(ci["on"]) == {"push", "pull_request", "workflow_dispatch"}
-    assert set(ci["on"]["push"]["branches"]) == {"main", "staging"}
+    assert set(ci["on"]["push"]["branches"]) == {"main", "pre-release", "staging"}
     assert ci["permissions"] == {"contents": "read"}
     assert set(docker["on"]) == {"pull_request", "workflow_dispatch"}
     assert docker["permissions"] == {"contents": "read"}
@@ -176,6 +183,8 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
         "pyproject.toml",
         "uv.lock",
         "Dockerfile",
+        "README.md",
+        "LICENSE",
         "docker-compose*.yml",
         "tools/verify_docker_*.sh",
         "tools/docker_runtime_smoke.py",
@@ -184,6 +193,32 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
         ".github/workflows/docker-integration.yml",
     } == set(workflow_paths)
     assert "paths-ignore" not in docker["on"]["pull_request"]
+
+
+def test_docker_verifies_both_native_architectures(repo_root: Path) -> None:
+    workflow = _load_workflow(repo_root / ".github/workflows/docker-integration.yml")
+    job = workflow["jobs"]["docker-integration"]
+    assert job["name"] == "${{ matrix.name }}"
+    assert job["runs-on"] == "${{ matrix.runner }}"
+    assert job["strategy"]["fail-fast"] == "false"
+    variants = {variant["arch"]: variant for variant in job["strategy"]["matrix"]["include"]}
+    assert set(variants) == {"amd64", "arm64"}
+    assert variants["amd64"]["runner"] == "ubuntu-latest"
+    assert variants["amd64"]["name"] == "Docker Integration Tests"
+    assert variants["arm64"]["runner"] == "ubuntu-24.04-arm"
+    assert variants["arm64"]["name"] == "Docker Integration Tests (ARM64)"
+    assert {variant["artifact"] for variant in variants.values()} == {
+        "docker-e2e-artifacts",
+        "docker-e2e-artifacts-arm64",
+    }
+
+    steps = {step.get("name"): step for step in job["steps"]}
+    assert steps["Run opt-in alignment resource proof"]["if"] == "matrix.arch == 'amd64'"
+    offscreen = steps["Verify the Docker GUI runtime offscreen"]
+    assert "if" not in offscreen
+    assert "docker build --target gui-linux" in offscreen["run"]
+    assert "QT_QPA_PLATFORM=offscreen" in offscreen["run"]
+    assert "/tmp/verify_docker_gui.sh --inside-container" in offscreen["run"]
 
 
 def test_pr_title_workflow_can_publish_its_configured_status(repo_root: Path) -> None:
@@ -216,6 +251,8 @@ def test_release_please_remains_guarded_and_non_merging(repo_root: Path) -> None
     assert release["if"] == "needs.initial_release_guard.outputs.enabled == 'true'"
     assert release["permissions"] == {"contents": "write", "pull-requests": "write"}
     assert action["with"]["skip-github-release"] == "true"
+    assert action["with"]["target-branch"] == "pre-release"
+    assert workflow["on"]["push"]["branches"] == ["pre-release"]
     assert checkout["with"]["fetch-depth"] == "1"
     assert checkout["with"]["persist-credentials"] == "false"
     assert ".release-please-manifest.json" in guard_run
@@ -244,18 +281,39 @@ def test_windows_portable_dispatch_owns_immutable_inputs_and_environment_gates(
     }
     assert jobs["release"]["secrets"] == signing_secret
     assert jobs["verify_pull_request"]["permissions"] == {"contents": "read"}
-    assert jobs["verify_pull_request"]["with"]["require_signing"] == "false"
-    assert jobs["verify_pull_request"]["with"]["environment_name"] == "windows-ci"
+    assert jobs["verify_pull_request"]["with"] == {"expected_sha": "${{ github.sha }}"}
+    assert (
+        jobs["verify_pull_request"]["uses"] == "./.github/workflows/windows-portable-unsigned.yml"
+    )
     assert "secrets" not in jobs["verify_pull_request"]
+    unsigned = _load_workflow(repo_root / ".github/workflows/windows-portable-unsigned.yml")
+    assert set(unsigned["jobs"]) == {"build_test", "build"}
+    assert unsigned["jobs"]["build"]["needs"] == "build_test"
+    assert unsigned["jobs"]["build"]["if"] == "always()"
+    guard = unsigned["jobs"]["build"]["steps"][0]
+    assert guard["name"] == "Require a successful upstream build"
+    assert guard["env"] == {"BUILD_RESULT": "${{ needs.build_test.result }}"}
+    assert '$env:BUILD_RESULT -cne "success"' in guard["run"]
+    assert "throw " in guard["run"]
+    assert unsigned["jobs"]["build_test"]["steps"][-1]["with"]["require_signing"] == "false"
+    for job in unsigned["jobs"].values():
+        assert job["permissions"] == {"contents": "read"}
+        assert "environment" not in job
+    assert "secrets" not in unsigned["on"]["workflow_call"]
     assert jobs["validate_manual"]["permissions"] == {}
     assert "secrets" not in jobs["validate_manual"]
-    assert jobs["verify_manual"]["permissions"] == {"contents": "read"}
+    assert jobs["verify_manual"]["permissions"] == {
+        "contents": "read",
+        "id-token": "write",
+        "attestations": "write",
+    }
     assert jobs["verify_manual"]["with"]["require_signing"] == "true"
     assert jobs["verify_manual"]["secrets"] == signing_secret
     assert jobs["release"]["permissions"] == {
         "attestations": "write",
         "contents": "write",
         "id-token": "write",
+        "pull-requests": "read",
     }
 
     release = _load_workflow(repo_root / ".github" / "workflows" / "release.yml")
@@ -270,9 +328,10 @@ def test_windows_portable_dispatch_owns_immutable_inputs_and_environment_gates(
     }
     assert windows["secrets"] == signing_secret
     build = _load_workflow(repo_root / ".github" / "workflows" / "windows-portable-build.yml")
-    assert build["on"]["workflow_call"]["secrets"] == {
-        "WINDOWS_UPDATE_SIGNING_KEY_XML": {"required": "false"}
-    }
+    assert (
+        build["on"]["workflow_call"]["secrets"]["WINDOWS_UPDATE_SIGNING_KEY_XML"]["required"]
+        == "true"
+    )
     assert validate_release["env"]["DISPATCH_REF_PROTECTED"] == ("${{ github.ref_protected }}")
     assert validate_release["env"]["DISPATCH_REF_TYPE"] == "${{ github.ref_type }}"
     assert '"$DISPATCH_REF_TYPE" != "branch"' in validate_release["run"]
@@ -332,6 +391,55 @@ def test_release_preflight_ref_validation_fails_closed(
     assert message in completed.stderr
 
 
+@pytest.mark.parametrize(
+    ("listing", "message"),
+    [("pending-draft", "A release or draft already claims tag"), ("unavailable", "HTTP 403")],
+)
+def test_release_publish_checks_drafts_even_without_a_tag_ref(
+    repo_root: Path, listing: str, message: str
+) -> None:
+    workflow = _load_workflow(repo_root / ".github/workflows/release.yml")
+    step = next(
+        step
+        for step in workflow["jobs"]["publish"]["steps"]
+        if step["name"] == "Recheck main, collisions, and create exact tag"
+    )
+    stub = r"""
+gh() {
+  if [[ "$*" == *"--method POST"* ]]; then
+    echo "unexpected mutation" >&2
+    return 90
+  fi
+  case "$2" in
+    repos/fixture/repo/git/ref/tags/*|repos/fixture/repo/releases/tags/*)
+      echo "HTTP 404" >&2; return 1 ;;
+    --paginate)
+      [[ "$3" == "repos/fixture/repo/releases?per_page=100" ]] || return 91
+      if [[ "$FIXTURE_LISTING" == "unavailable" ]]; then echo "HTTP 403" >&2; return 1; fi
+      printf '%s\n' v1.0.0 "$RELEASE_TAG" ;;
+    *) return 92 ;;
+  esac
+}
+"""
+    completed = subprocess.run(
+        [_bash_executable_or_skip(), "-c", stub + step["run"]],
+        env=os.environ
+        | {
+            "FIXTURE_LISTING": listing,
+            "GITHUB_REPOSITORY": "fixture/repo",
+            "RELEASE_CHANNEL": "rc",
+            "RELEASE_TAG": "v1.0.1-rc.1",
+        },
+        timeout=_SCRIPT_TIMEOUT_SECONDS,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode != 0
+    assert message in completed.stderr
+    assert "unexpected mutation" not in completed.stderr
+
+
 def test_ci_keeps_test_audit_browser_and_distribution_gates(
     repo_root: Path,
 ) -> None:
@@ -346,7 +454,25 @@ def test_ci_keeps_test_audit_browser_and_distribution_gates(
     browser_runs = [str(step.get("run", "")) for step in jobs["report-browser"]["steps"]]
     assert any("command -v google-chrome" in run for run in browser_runs)
     assert any("tests/browser/test_report_browser_smoke.py" in run for run in browser_runs)
-    audit_run = "\n".join(str(step.get("run", "")) for step in jobs["dependency-audit"]["steps"])
+    security_caller = jobs["source-security"]
+    assert security_caller["uses"] == "./.github/workflows/source-security.yml"
+    assert security_caller["with"]["expected_sha"] == (
+        "${{ github.event.pull_request.head.sha || github.sha }}"
+    )
+    security = _load_workflow(repo_root / ".github/workflows/source-security.yml")
+    security_jobs = security["jobs"]
+    assert set(security_jobs) == {"security", "dependency-audit"}
+    for job in security_jobs.values():
+        assert job["steps"][0]["with"] == {
+            "ref": "${{ inputs.expected_sha }}",
+            "persist-credentials": "false",
+        }
+        assert "git rev-parse HEAD" in job["steps"][1]["run"]
+        assert job["steps"][1]["env"]["EXPECTED_SHA"] == "${{ inputs.expected_sha }}"
+    assert security_jobs["security"]["steps"][-1]["run"] == "bash tools/check_python_security.sh"
+    audit_run = "\n".join(
+        str(step.get("run", "")) for step in security_jobs["dependency-audit"]["steps"]
+    )
     assert all(flag in audit_run for flag in ("--strict", "--require-hashes", "--disable-pip"))
     assert "--ignore-vuln" not in audit_run
     package_run = "\n".join(str(step.get("run", "")) for step in jobs["package"]["steps"])
@@ -355,8 +481,7 @@ def test_ci_keeps_test_audit_browser_and_distribution_gates(
     assert "uv pip install" in package_run
     required_jobs = {
         "lint",
-        "security",
-        "dependency-audit",
+        "source-security",
         "typecheck",
         "test",
         "import-lints",
@@ -364,7 +489,7 @@ def test_ci_keeps_test_audit_browser_and_distribution_gates(
         "report-browser",
     }
     assert set(jobs["ci-pass"]["needs"]) == required_jobs
-    audit_runners = set(jobs["dependency-audit"]["strategy"]["matrix"]["os"])
+    audit_runners = set(security_jobs["dependency-audit"]["strategy"]["matrix"]["os"])
     assert any("ubuntu" in runner for runner in audit_runners)
     assert any("windows" in runner for runner in audit_runners)
 
@@ -373,7 +498,7 @@ def test_docker_build_inputs_are_immutable(repo_root: Path) -> None:
     dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
 
     for image in re.findall(r"^FROM\s+(\S+)", dockerfile, re.MULTILINE):
-        if image in {"runtime"}:
+        if image in {"runtime", "scratch"}:
             continue
         assert re.search(r"@sha256:[0-9a-f]{64}$", image), image
     commits = re.findall(r"^ARG\s+\w+COMMIT=([^\s]+)", dockerfile, re.MULTILINE)
@@ -385,6 +510,8 @@ def test_docker_build_inputs_are_immutable(repo_root: Path) -> None:
     assert "uv export --frozen" in dockerfile
     assert "--require-hashes" in dockerfile
     assert "python -m pip install --no-cache-dir --user --no-deps -e ." in dockerfile
+    assert "COPY --from=application-inputs" in dockerfile
+    assert not re.search(r"^COPY\s+(?:--\S+\s+)*\.\s+", dockerfile, re.MULTILINE)
 
 
 def test_setup_uv_uses_one_concrete_version(repo_root: Path) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from frame_compare.errors import JSONValue
 
@@ -34,8 +35,14 @@ class DoctorReport:
     """Complete diagnostic report."""
 
     checks: list[tuple[DoctorCheck, CheckResult]]
-    all_passed: bool
     critical_failures: list[str]
 
 
-__all__ = ["CheckResult", "DoctorCheck", "DoctorReport"]
+__all__ = ["CheckResult", "DoctorCheck", "DoctorConfigSelection", "DoctorReport"]
+
+
+@dataclass(frozen=True, slots=True)
+class DoctorConfigSelection:
+    root: Path
+    config_path: Path
+    explicit: bool

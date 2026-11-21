@@ -1,4 +1,4 @@
-"""M3: cache reuse, explicit bypass, corruption refusal and persisted history."""
+"""M3: cache reuse, bypass, corruption refusal and repair, and persisted history."""
 
 from __future__ import annotations
 
@@ -39,12 +39,15 @@ def test_media_cache_lifecycle(
     base_arguments = ["run", "--json", "--skip-metadata", "--no-upload", "--root", str(root.root)]
     steps: list[ArtifactStep] = []
     # Cache Mode Semantics and History Command Contract.
+    expected_history: list[list[str | bool]] = []
     expected = {
         "runs": [
             {"exit_code": 0, "metrics_cache_status": "miss", "frames": [0, 11]},
             {"exit_code": 0, "metrics_cache_status": "hit", "frames": [0, 11]},
             {"exit_code": 0, "metrics_cache_status": "hit", "frames": [0, 11]},
             {"exit_code": 0, "metrics_cache_status": "miss", "frames": [0, 11]},
+            {"exit_code": 0, "metrics_cache_status": "miss", "frames": [0, 11]},
+            {"exit_code": 0, "metrics_cache_status": "hit", "frames": [0, 11]},
         ],
         "corrupted": {
             "exit_code": 5,
@@ -52,15 +55,24 @@ def test_media_cache_lifecycle(
             "error_name": "CACHE_CORRUPTION",
             "no_new_run_folder": True,
         },
-        "history": [
-            ["reference + comparison", "completed", True],
-            ["reference + comparison_2", "completed", True],
-            ["reference + comparison_3", "completed", True],
-            ["reference + comparison_4", "completed", True],
-        ],
+        "history": expected_history,
     }
     runs = []
+    run_names: list[str] = []
     run_dir = None
+
+    def record_render(result: CommandResult) -> Path:
+        rendered, rendered_dir, report = render_summary(result)
+        run_names.append(rendered_dir.name)
+        runs.append(
+            {
+                "exit_code": result.exit_code,
+                "metrics_cache_status": rendered["metrics_cache_status"],
+                "frames": [frame["number"] for frame in report["frames"]],
+            }
+        )
+        return rendered_dir
+
     for flags in ([], [], ["--from-cache-only"], ["--no-cache"]):
         arguments = [*base_arguments, *flags]
         result = run_cli(root.root, arguments, timeout=60)
@@ -91,17 +103,10 @@ def test_media_cache_lifecycle(
                 run_dir,
             )
             return
-        rendered, run_dir, report = render_summary(result)
-        runs.append(
-            {
-                "exit_code": result.exit_code,
-                "metrics_cache_status": rendered["metrics_cache_status"],
-                "frames": [frame["number"] for frame in report["frames"]],
-            }
-        )
+        run_dir = record_render(result)
     cache_files = list((root.generated_dir / "cache" / "analysis").glob("*.compframes"))
     assert len(cache_files) == 1
-    # Preserve the header/version and truncate the compressed metrics payload.
+    # Preserve the version while truncating the JSON payload.
     cache_file = cache_files[0]
     content = cache_file.read_bytes()
     cache_file.write_bytes(content[: len(content) // 2])
@@ -115,6 +120,17 @@ def test_media_cache_lifecycle(
     after = sorted(
         path.name for path in root.generated_dir.iterdir() if path.is_dir() and path.name != "cache"
     )
+    repaired = run_cli(root.root, base_arguments, timeout=60)
+    steps.append((base_arguments, repaired))
+    record_render(repaired)
+    assert cache_file.read_bytes() == content
+
+    warm = run_cli(root.root, base_arguments, timeout=60)
+    steps.append((base_arguments, warm))
+    run_dir = record_render(warm)
+    assert len(set(run_names)) == 6
+    expected_history.extend([name, "completed", True] for name in sorted(run_names))
+
     arguments = ["history", "list", "--json", "--root", str(root.root)]
     history = run_cli(root.root, arguments, timeout=30)
     steps.append((arguments, history))

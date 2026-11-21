@@ -29,18 +29,18 @@ The expected candidate profile is:
 
 | Component | Expected Windows identity |
 | --- | --- |
-| Python | 3.13.16 |
-| VapourSynth | R81, API R4.3 |
+| Python | 3.14.10 |
+| VapourSynth | R82, API R4.3 |
 | L-SMASH-Works | `vapoursynth-lsmas` 1310.0.0.0 / native lineage 1310.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
-| vs-placebo | 2.0.4 |
-| BestSource (VSView/UI only) | 22 |
-| VSView / CLI parser | 0.12.0 / Cyclopts 5.2.0 |
+| vs-placebo | 2.0.5 |
+| BestSource (VSView/UI only) | 23 |
+| VSView / CLI parser | 0.14.0 / Cyclopts 5.4.2 |
 | vspackrgb | 2.0.0 (Rust extension) |
-| PySide6 family | 6.11.2 |
-| FFmpeg | `n8.1.3-9-g29e619e767`, BtbN win64 LGPL 8.1 build `autobuild-2026-09-30-13-08` |
-| Full runtime fingerprint | `b47d64de188aab069cf3c3b9d51add6d0b3416c5ee175b4c0646b72436219320` |
-| L-SMASH index token | `lsw1310-f125953022b6` |
+| PySide6 family | 6.12.0; WebEngine/PDF distribution metadata 6.12.0.140 |
+| FFmpeg | `n8.1.3-27-g8dca1586f4`, BtbN win64 LGPL 8.1 build `autobuild-2026-10-31-12-59` |
+| Full runtime fingerprint | `50c72cd2078e6909b28b0ea9bcf576c4c06899f186a78d62435dda7f2a199db4` |
+| L-SMASH index token | `lsw1310-47d07506e489` |
 
 ## 1. Exact source and repository gates
 
@@ -93,7 +93,7 @@ uv sync --all-groups --extra vsview --frozen
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
 uv run --no-sync pyright --warnings
-uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+bash tools/check_python_security.sh
 uv run --no-sync lint-imports
 uv run --no-sync pytest
 uv run --no-sync zensical build --clean --strict
@@ -123,24 +123,34 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File `
   tools\windows_portable\build_portable.ps1 `
   -ManifestPath $Manifest `
   -RepoRoot $Repo `
+  -ExpectedCommitSha $ExpectedPrHeadSha `
   -OutDir $Candidate `
   -CacheDir $Cache
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ```
 
-This is the canonical manifest-based build command. For a release run, add
+This is the canonical manifest-based build command. The builder uses the supplied
+commit for the projected application source, dependency lock and source inventory.
+A local invocation without `-ExpectedCommitSha` resolves `HEAD` once at the start. For a release run, add
 `-RequireReleasePublicKey` to this same invocation; do not rebuild a second candidate.
 All evidence, packaging, and digest verification must use this exact `$Candidate`.
 
 Required evidence:
 
 - Every download passes exact byte-size and SHA-256 verification.
+- Every destination declared through `license.files` has the manifest-pinned
+  SHA-256 in the bundle inventory.
 - No artifact is accepted from a mutable fallback URL.
 - The bundle contains `bundle_info.json`, `bundle_inventory.json`,
   `licenses/SOURCE_URLS.txt`, and `licenses/THIRD_PARTY_NOTICES.txt`.
 - `bundle_info.schema_version` is 3, identifying a native-panel-capable full bundle;
   schema-2 pre-native-panel bundles are not eligible for code-only updates.
 - The recorded source SHA equals the tested pull-request SHA.
+- The direct libplacebo frame proof reports a separate result before and after
+  Qt initialization. The hosted skip is reserved for Windows exit code
+  `3221225477` with `VK_ERROR_INCOMPATIBLE_DRIVER` or `Failed creating instance`
+  in stderr. Other probe failures fail the build. Record a successful direct
+  frame on the physical Windows GPU.
 - The bundle runtime fingerprint equals the expected value above.
 - FFmpeg is the LGPL-only artifact; no GPL or nonfree build is present.
 - FFMS2 is not present in the Windows bundle or plugin manifests.
@@ -165,7 +175,9 @@ not a globally installed Frame Compare environment.
 The focused verifier below is also invoked by the hosted workflow's
 `Verify extracted portable bundle` step. It owns ZIP containment/layout, extraction,
 default workspace directories, candidate launcher and doctor checks, installation,
-and installed-shim parity. Every command it reports must exit `0`; a thrown assertion
+and installed-shim parity. It verifies the extracted manifest-pinned notices against
+the inventory and extracted files. Before installation, the extracted Python must
+import VSView and load the registered Frame Compare alignment panel. Every command it reports must exit `0`; a thrown assertion
 is a failed check. The verifier atomically reserves the fresh extraction root, writes
 without overwrite, and retains extracted evidence after any later failure. Its
 expected commit argument must be the recorded detached pull-request head used to build
@@ -202,7 +214,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Inspect `doctor-candidate.json`. Required results:
 
 - The observed and expected media-runtime fingerprints match.
-- VapourSynth reports R81 independently from API R4.3.
+- VapourSynth reports R82 independently from API R4.3.
 - `lsmas` registers both `LibavSMASHSource` and `LWLibavSource`.
 - `placebo` registers `Tonemap`.
 - FFMS2 is reported as intentionally absent on Windows, not as a missing requirement.
@@ -293,7 +305,7 @@ retain:
 
 Metric equality alone is not sufficient evidence of perceptual equivalence.
 
-## 7. Cache and index migration
+## 7. Cache and index isolation
 
 Use copies of media so test cleanup cannot damage a production library.
 
@@ -301,14 +313,49 @@ Use copies of media so test cleanup cannot damage a production library.
 
 Verify all of the following:
 
-- A legacy adjacent `<media>.lwi` is ignored and not deleted.
-- The candidate creates
-  `<media>.frame-compare-lsw1310-f125953022b6.lwi`.
-- A second run reuses the candidate-owned index.
-- A corrupt candidate-owned index is removed and regenerated once.
-- A missing index is created normally.
-- An unwritable index location falls back to the documented cache-free open.
-- Indexes from another runtime profile are not silently reused.
+- Use a read-only media directory containing both a legacy `<media>.lwi` and an
+  old runtime-token-named sidecar. Retain their original byte hashes and directory
+  listing. Run the installed CLI and a generated VSView session. Both legacy
+  files and the directory listing must remain unchanged. Deliberately invalid
+  sidecar bytes must have no effect on the decoded result.
+- A first run creates an index and commit metadata under
+  `<resolved paths.generated_dir>/cache/source-indexes/`. A second run opens it
+  with `cache=0` and leaves the committed bytes and modification times unchanged.
+  Confirm the warm open still probes headers and reuses the committed geometry
+  proof. Cold opens and the private fallback, including in VSView, scan complete
+  coded and visible frame geometry before the native open.
+- On NTFS, replace source bytes in place with the same byte length and restore the
+  original modification time. The next run must reject the old index because the
+  handle-reported ChangeTime changed. Repeat a normal cold write and warm hit to
+  prove the staged index flush succeeds with the Windows write-capable handle.
+- A missing or corrupt managed entry rebuilds in a private staging directory.
+  Invalid metadata, geometry policy or probe mismatches, runtime-token or digest
+  mismatches, and redirected entries cannot authorize stable reuse. An unwritable
+  cache falls back to a cache-free open.
+- Confirm cancellation and failures do not commit incomplete index metadata, and
+  the native plugin never creates or changes an index in the media directory.
+
+Run the focused process and cache cases from the exact candidate checkout on Windows:
+
+```powershell
+uv run --no-sync pytest -o addopts="" -q -ra `
+  tests/utils/test_subproc.py::test_windows_child_uses_kill_on_close_job `
+  tests/utils/test_subproc.py::test_windows_failed_assignment_stops_and_reaps_child `
+  tests/utils/test_subproc.py::test_windows_reports_job_close_failure_after_reaping_leader `
+  tests/utils/test_subproc.py::test_successful_leader_cannot_leave_a_capture_pipe_open `
+  tests/services/test_alignment_paired_streaming.py::test_paired_collection_finishes_when_descendant_inherits_pipe `
+  tests/vs/test_source_index_cache.py::test_cold_write_warm_hit_and_same_length_source_overwrite `
+  tests/vs/test_source_index_cache.py::test_source_overwrite_after_index_replace_prevents_metadata_commit
+```
+
+The application starts its children with normal `Popen` and immediately assigns
+them to a preconfigured kill-on-close Job Object. The focused assignment tests
+use a simulated Win32 API. On Windows, verify bounded cleanup and that a job-owned
+descendant retaining an inherited capture pipe stops after its leader exits. Also
+close or cancel an installed VSView review and a paired FFmpeg alignment run and
+check for leftover descendants. A descendant can escape if it starts in the small
+interval before assignment. An interrupt inside `Popen` can also prevent the
+application from receiving the handle needed for cleanup.
 
 ### Application caches
 
@@ -319,16 +366,18 @@ Verify with old and newly generated data:
 - Alignment reuse misses when the standalone FFmpeg lineage differs.
 - Render/run metadata records the complete candidate runtime contract.
 - `--from-cache-only` fails closed when only stale cache data exists.
-- `--no-cache` does not read or persist reusable cache data.
+- `--no-cache` removes the matching analysis entry, recomputes, and persists a fresh
+  entry; repeated runs without it then hit. See the
+  [run command contract](current-cli-contract.md#run-command-contract).
 - Repeated candidate runs produce valid cache hits without changing selected frames.
 - Unrelated cache scopes are not invalidated without a documented reason.
 
 ## 8. Portable update boundary
 
-Keep one untouched installation of the immediate predecessor to this R81 candidate:
-the R80 / VSView 0.11.0 / vspackrgb 1.4.0 / August 2026 FFmpeg bundle with
+Keep one untouched installation of the immediate predecessor to this R82 candidate.
+Use the R81 / VSView 0.13.0 / CPython 3.13.17 / September 2026 FFmpeg bundle with
 full runtime fingerprint
-`a17abda6b032c5568e557f881c018d2220230c832c612b75c7461e03d0eb4ba8`.
+`3ba680493a218e486baabbff812ad5047c50b471be742d420e721579fc8eaad0`.
 Retain an older schema-2 installation separately when available for the
 pre-native-panel refusal case.
 

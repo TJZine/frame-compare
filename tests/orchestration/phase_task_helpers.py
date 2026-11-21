@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from PIL import Image
-
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.config.loader import load_config
@@ -23,6 +21,7 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution_types import AlignPhaseOutput, RenderArtifacts
+from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.render.types import RenderedClipFacts
 from frame_compare.services.release_identity import ReleaseIdentity
 from frame_compare.utils.media_facts import (
@@ -33,10 +32,10 @@ from frame_compare.utils.media_facts import (
     SourceSignalFacts,
 )
 from frame_compare.utils.types import WorkspacePaths
+from tests.render_test_support import rendered_clips
 
 __all__ = [
     "_run_align_phase",
-    "_RenderRunner",
     "_render_artifacts",
     "_workspace",
     "_create_config",
@@ -65,9 +64,6 @@ channel_strategy = "best_channel"
 reference_stream = 1
 comparison_streams = { encode = 2 }
 
-[screenshots]
-use_ffmpeg = true
-
 [report]
 enable = false
 """
@@ -92,15 +88,6 @@ def _run_align_phase(*args: Any, **kwargs: Any) -> AlignPhaseOutput:
     return asyncio.run(invoke())
 
 
-class _RenderRunner:
-    def extract_frame(
-        self, _video: Path, frame_num: int, output: Path, **_kwargs: object
-    ) -> RenderedFrameFacts:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
-        return RenderedFrameFacts(source_frame=frame_num, picture_type="I")
-
-
 def _render_artifacts(
     *,
     screenshots_by_label: dict[str, list[Path]],
@@ -123,23 +110,27 @@ def _render_artifacts(
         else source_frames_by_label
     )
     return RenderArtifacts(
-        screenshots_by_label=screenshots_by_label,
-        frame_facts_by_label={
-            label: [RenderedFrameFacts(source_frame=frame, picture_type="I") for frame in values]
-            for label, values in frames.items()
-        },
-        clip_facts_by_label={
-            label: RenderedClipFacts(
-                size_bytes=0,
-                source_resolution=(1920, 1080),
-                source_total_frames=100,
-                signal=SourceSignalFacts(is_hdr=False),
-                presentation_state=PresentationState.SDR,
-                tonemap_settings=None,
-                geometry=geometry,
-            )
-            for label in screenshots_by_label
-        },
+        clips=rendered_clips(
+            screenshots_by_label,
+            {
+                label: [
+                    RenderedFrameFacts(source_frame=frame, picture_type="I") for frame in values
+                ]
+                for label, values in frames.items()
+            },
+            {
+                label: RenderedClipFacts(
+                    size_bytes=0,
+                    source_resolution=(1920, 1080),
+                    source_total_frames=100,
+                    signal=SourceSignalFacts(is_hdr=False),
+                    presentation_state=PresentationState.SDR,
+                    tonemap=None,
+                    geometry=geometry,
+                )
+                for label in screenshots_by_label
+            },
+        ),
         screenshot_dir=screenshot_dir,
     )
 
@@ -210,9 +201,11 @@ def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> R
         workspace=_workspace(tmp_path),
         reference=reference,
         comparisons=[] if comparisons is None else comparisons,
-        analysis_selection_domain="test-selection-domain",
-        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
-        analysis_clip=reference,
+        selection_domain=PreparedSelectionDomain(
+            token="test-selection-domain",
+            selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
+            analysis_clip=reference,
+        ),
     )
 
 

@@ -5,21 +5,6 @@ from pathlib import Path
 from frame_compare.errors import ErrorContext, ErrorDetails, ProcessingError
 
 
-class FrameExtractionError(ProcessingError):
-    """Failed to extract specific frame (FC-4001)."""
-
-    def __init__(self, frame_number: int, clip_name: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4001",
-                name="FRAME_EXTRACTION_ERROR",
-                message=f"Failed to extract frame {frame_number} from {clip_name}",
-                hint="Check source reliability/seekability",
-                details={"frame": frame_number, "clip": clip_name},
-            )
-        )
-
-
 class RenderError(ProcessingError):
     """Composition/image encoding failure (FC-4004)."""
 

@@ -12,6 +12,7 @@ import threading
 import time
 from fractions import Fraction
 from pathlib import Path
+from traceback import extract_tb
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -26,6 +27,7 @@ from frame_compare.services.alignment_audio import (
     ProbedStreams,
     VideoStreamStart,
 )
+from frame_compare.services.alignment_evidence import CollectionFailureCategory
 from frame_compare.services.alignment_streaming import (
     CollectionCleanup,
     CollectionFacts,
@@ -33,12 +35,11 @@ from frame_compare.services.alignment_streaming import (
     collect_paired_audio_chunks,
 )
 from frame_compare.services.errors import (
-    AudioAlignmentCancellationError,
     AudioAlignmentCleanupError,
     raise_if_alignment_cancelled,
 )
 from frame_compare.services.types import AlignmentConfig
-from frame_compare.utils.alignment_evidence import CollectionFailureCategory
+from frame_compare.utils.subproc import SubprocessCleanupError
 from tests.services.alignment_request_test_support import alignment_request
 
 
@@ -108,7 +109,7 @@ def _paired_kwargs(
     return {
         "chunks": chunks,
         "lag_samples": 100,
-        "consumer": consumer,
+        "consume_borrowed_chunk": consumer,
         "reference_limit_samples": 8_000_000,
         "comparison_limit_samples": 8_000_000,
         "total_timeout_seconds": 30.0,
@@ -158,9 +159,7 @@ def test_outer_cancellation_reaches_collection_and_blocks_post_work(
     monkeypatch.setattr(alignment, "save_reusable_offsets", cache_write)
 
     async def run() -> None:
-        task = asyncio.create_task(
-            alignment.align_clips_from_request(request, config, reference_fps=Fraction(24))
-        )
+        task = asyncio.create_task(alignment.align_clips_from_request(request, config))
         await _wait_until(pair_reached)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -200,9 +199,7 @@ async def test_repeated_cancellation_waits_for_worker_cleanup_and_preserves_canc
         raise_if_alignment_cancelled(cancellation)
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", delayed_cleanup)
-    task = asyncio.create_task(
-        alignment.align_clips_from_request(request, config, reference_fps=Fraction(24))
-    )
+    task = asyncio.create_task(alignment.align_clips_from_request(request, config))
     await _wait_until(started)
     task.cancel()
     await asyncio.sleep(0.01)
@@ -238,9 +235,7 @@ async def test_worker_error_racing_outer_cancellation_does_not_replace_cancellat
         raise RuntimeError("worker failed during cancellation")
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", fail_after_cancel)
-    task = asyncio.create_task(
-        alignment.align_clips_from_request(request, config, reference_fps=Fraction(24))
-    )
+    task = asyncio.create_task(alignment.align_clips_from_request(request, config))
     await _wait_until(started)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -264,6 +259,7 @@ async def test_cleanup_failure_after_cancellation_replaces_cancellation(
     )
     started = threading.Event()
     cleanup_release = threading.Event()
+    subprocess_error = SubprocessCleanupError("child wait failed")
 
     def fail_cleanup_after_cancel(
         *_args: Any, cancellation: threading.Event, **_kwargs: Any
@@ -272,11 +268,14 @@ async def test_cleanup_failure_after_cancellation_replaces_cancellation(
         while not cancellation.is_set():
             time.sleep(0.001)
         cleanup_release.wait(timeout=2)
-        raise AudioAlignmentCleanupError(
-            "collector child was not reaped",
-            category="cancelled",
-            stage="collection",
-        )
+        try:
+            raise subprocess_error
+        except SubprocessCleanupError as cause:
+            raise AudioAlignmentCleanupError(
+                "packet probe child was not reaped",
+                category="cleanup_failed",
+                stage="audio_probe",
+            ) from cause
 
     monkeypatch.setattr(alignment, "_estimate_audio_pair", fail_cleanup_after_cancel)
     diagnostics = MagicMock()
@@ -285,9 +284,7 @@ async def test_cleanup_failure_after_cancellation_replaces_cancellation(
     monkeypatch.setattr(alignment, "_write_run_diagnostics", diagnostics)
     monkeypatch.setattr(alignment, "maybe_launch_alignment_vsview", review)
     monkeypatch.setattr(alignment, "save_reusable_offsets", cache_write)
-    task = asyncio.create_task(
-        alignment.align_clips_from_request(request, config, reference_fps=Fraction(24))
-    )
+    task = asyncio.create_task(alignment.align_clips_from_request(request, config))
     await _wait_until(started)
     task.cancel()
     await asyncio.sleep(0.01)
@@ -299,8 +296,13 @@ async def test_cleanup_failure_after_cancellation_replaces_cancellation(
     with pytest.raises(AudioAlignmentCleanupError) as caught:
         await task
 
-    assert caught.value.category == "cancelled"
-    assert isinstance(caught.value.__cause__, asyncio.CancelledError)
+    assert caught.value.category == "cleanup_failed"
+    assert caught.value.__cause__ is subprocess_error
+    assert any(
+        frame.name == "fail_cleanup_after_cancel"
+        for frame in extract_tb(caught.value.__traceback__)
+    )
+    assert extract_tb(subprocess_error.__traceback__)[-1].name == "fail_cleanup_after_cancel"
     diagnostics.assert_not_called()
     review.assert_not_called()
     cache_write.assert_not_called()
@@ -367,7 +369,6 @@ def _paired_failure(
 ) -> PairedAudioCollectionFailure:
     def facts() -> CollectionFacts:
         return CollectionFacts(
-            planned_end_sample=4800000,
             emitted_sample_count=8000,
             emitted_byte_count=32000,
             retained_sample_count=8000,
@@ -402,42 +403,20 @@ def _paired_failure(
 
 
 @pytest.mark.parametrize(
-    "category, reference_exited, comparison_exited, change_identity, expected_error, expected_category, detail",
+    "category, reference_exited, comparison_exited, expected_error, expected_category, detail",
     [
         pytest.param(
             "cancelled",
             False,
             True,
-            False,
             AudioAlignmentCleanupError,
             "cancelled",
             None,
             id="cancelled_pair_with_incomplete_cleanup_raises_cleanup_error",
         ),
         pytest.param(
-            "timeout",
-            False,
-            True,
-            True,
-            AudioAlignmentCleanupError,
-            "timeout",
-            None,
-            id="identity_change_with_incomplete_cleanup_raises_cleanup_error",
-        ),
-        pytest.param(
-            "cancelled",
-            True,
-            True,
-            True,
-            AudioAlignmentCancellationError,
-            None,
-            None,
-            id="cancelled_pair_with_identity_change_still_cancels",
-        ),
-        pytest.param(
             "nonzero_exit",
             True,
-            False,
             False,
             AudioAlignmentCleanupError,
             "nonzero_exit",
@@ -452,7 +431,6 @@ def test_pair_failure_precedence(
     category: CollectionFailureCategory,
     reference_exited: bool,
     comparison_exited: bool,
-    change_identity: bool,
     expected_error: type[Exception],
     expected_category: str | None,
     detail: str | None,
@@ -467,9 +445,6 @@ def test_pair_failure_precedence(
     monkeypatch.setattr(alignment_audio, "probe_streams", lambda _path, **_kwargs: _probe())
 
     def collect(*_args: Any, **_kwargs: Any) -> Any:
-        if change_identity:
-            with open(comparison, "ab") as handle:
-                handle.write(b"mutated")
         return _paired_failure(
             category=category,
             reference_exited=reference_exited,

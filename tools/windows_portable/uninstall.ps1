@@ -36,7 +36,7 @@ foreach ($entry in $entries) {
 }
 [Environment]::SetEnvironmentVariable("Path", ($filtered -join ";"), "User")
 
-foreach ($file in @("frame-compare.ps1", "frame-compare.cmd", "frame-compare-update.ps1", "frame-compare-update.cmd", "update_public_key.xml")) {
+foreach ($file in @("frame-compare.ps1", "frame-compare.cmd", "frame-compare-update.ps1", "frame-compare-update.cmd", "frame-compare-version.ps1", "update_public_key.xml")) {
   $path = Join-Path $binDir $file
   if (Test-Path -LiteralPath $path) {
     Remove-Item -LiteralPath $path -Force

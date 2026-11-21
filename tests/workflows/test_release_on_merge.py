@@ -38,6 +38,7 @@ def test_merged_release_delegates_to_guarded_publication(repo_root: Path) -> Non
         "attestations": "write",
         "contents": "write",
         "id-token": "write",
+        "pull-requests": "read",
     }
     assert release["secrets"] == {
         "WINDOWS_UPDATE_SIGNING_KEY_XML": "${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}"
@@ -48,9 +49,12 @@ def test_merged_release_delegates_to_guarded_publication(repo_root: Path) -> Non
     assert manual["jobs"]["release"]["concurrency"]["group"].startswith("frame-compare-release-")
     guarded = load_workflow(repo_root / ".github/workflows/release.yml")
     assert guarded["jobs"]["windows"]["with"]["require_signing"] == "true"
-    for job in (guarded["jobs"]["windows"], guarded["jobs"]["publish"]):
-        environment = job.get("environment", job.get("with", {}))
-        assert "production" in str(environment)
+    assert guarded["jobs"]["windows"]["with"]["environment_name"] == (
+        "${{ inputs.channel == 'stable' && 'production' || 'release-candidate' }}"
+    )
+    publish = guarded["jobs"]["publish"]
+    assert publish["needs"] == ["preflight", "windows"]
+    assert "environment" not in publish
 
 
 @pytest.mark.parametrize(
@@ -66,6 +70,8 @@ def test_merged_release_delegates_to_guarded_publication(repo_root: Path) -> Non
         ("unmerged", False, True),
         ("wrong_base", False, True),
         ("wrong_repo", False, True),
+        ("wrong_head", False, True),
+        ("fork_head", False, True),
         ("unchanged_version", False, True),
         ("rc", False, True),
         ("no_pr", False, True),
@@ -121,6 +127,10 @@ def test_release_identification_at_pushed_commit(
         "base": {
             "ref": "staging" if case == "wrong_base" else "main",
             "repo": {"full_name": "other/repo" if case == "wrong_repo" else "TJZine/frame-compare"},
+        },
+        "head": {
+            "ref": "topic" if case == "wrong_head" else "pre-release",
+            "repo": {"full_name": "other/repo" if case == "fork_head" else "TJZine/frame-compare"},
         },
     }
     response = tmp_path / "pulls.json"

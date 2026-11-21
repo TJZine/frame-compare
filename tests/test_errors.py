@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,6 @@ from frame_compare.orchestration.errors import (
 )
 from frame_compare.render.errors import (
     EncodingError,
-    FrameExtractionError,
     OverlayError,
     RenderError,
 )
@@ -39,13 +39,12 @@ from frame_compare.services.errors import (
     TmdbError,
     TmdbRateLimitedError,
 )
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.cache_errors import CacheCorruptionError
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.vs.errors import (
     PluginNotFoundError,
     SourceLoadError,
     TonemapError,
-    TonemapRequiresVapourSynthError,
     VapourSynthError,
     VapourSynthNotFoundError,
 )
@@ -71,19 +70,16 @@ def _render_rich_markup(markup: str) -> str:
         (FFmpegNotFoundError, (), "FC-2005"),
         (FFmpegError, ("test", 1), "FC-2006"),
         (VSViewNotFoundError, (), "FC-2008"),
-        (TonemapRequiresVapourSynthError, (), "FC-2009"),
         # InputError (FC-3xxx)
         (NoVideosFoundError, (Path("/test"),), "FC-3001"),
         (DirectoryNotFoundError, (Path("/test"),), "FC-3006"),
         (PathEscapesRootError, (Path("/root"), Path("/other")), "FC-3009"),
         # ProcessingError (FC-4xxx)
-        (FrameExtractionError, (42, "clip.mkv"), "FC-4001"),
         (MetricsCalculationError, ("test",), "FC-4002"),
         (TonemapError, ("test",), "FC-4003"),
         (RenderError, (), "FC-4004"),
         (AudioAlignmentError, ("test",), "FC-4005"),
         (CacheCorruptionError, (Path("/cache"),), "FC-4006"),
-        (CacheVersionMismatchError, ("1.0", "2.0"), "FC-4007"),
         (SelectionError, ("reason", 10, 5), "FC-4012"),
         (EncodingError, (Path("/out.png"), "test"), "FC-4013"),
         (OverlayError, ("test",), "FC-4014"),
@@ -147,6 +143,17 @@ def test_get_exit_code_maps_by_error_code_prefix_for_generic_error(code, expecte
     assert get_exit_code(error) == expected
 
 
+_ERROR_WITH_EXTRA_DETAILS = FrameCompareError(
+    ErrorContext(
+        code="FC-4006",
+        name="CACHE_CORRUPTION",
+        message="Cache file corrupted",
+        hint="Clear cache directory",
+        details={"path": str(Path("/cache"))},
+    )
+)
+
+
 @pytest.mark.parametrize(
     ("error", "verbose", "hint", "present", "absent"),
     [
@@ -158,25 +165,32 @@ def test_get_exit_code_maps_by_error_code_prefix_for_generic_error(code, expecte
             ["Details:", "For more details, run with --verbose"],
         ),
         (
-            CacheCorruptionError(Path("/cache")),
+            _ERROR_WITH_EXTRA_DETAILS,
             True,
             "--verbose",
             ["Details:", "path:", str(Path("/cache"))],
             [],
         ),
         (
-            CacheCorruptionError(Path("/cache")),
+            _ERROR_WITH_EXTRA_DETAILS,
             False,
             "--verbose",
             ["For more details, run with --verbose"],
             ["Details:"],
         ),
         (
-            CacheCorruptionError(Path("/cache")),
+            _ERROR_WITH_EXTRA_DETAILS,
             False,
             None,
             ["Details:", "path:"],
             ["For more details, run with --verbose"],
+        ),
+        (
+            CacheCorruptionError(Path("/cache")),
+            True,
+            "--verbose",
+            [],
+            ["Details:", "For more details, run with --verbose"],
         ),
         (RenderError(), True, "--verbose", [], ["Details:"]),
         (
@@ -204,6 +218,7 @@ def test_get_exit_code_maps_by_error_code_prefix_for_generic_error(code, expecte
         "verbose-details",
         "hidden-details",
         "no-hint",
+        "redundant-details",
         "verbose-empty",
         "literal-brackets",
     ],
@@ -258,3 +273,42 @@ def test_error_formatting_helpers_are_json_safe() -> None:
             "ctx": {"limit": 100, "path": str(Path("/config.toml"))},
         }
     ]
+
+
+@pytest.mark.parametrize("container", ["list", "dict", "tuple"])
+def test_error_normalization_bounds_nested_values_before_serializing(container: str) -> None:
+    value: object = "sentinel-deep-secret"
+    for _ in range(2000):
+        if container == "dict":
+            value = {"nested": value}
+        elif container == "tuple":
+            value = (value,)
+        else:
+            value = [value]
+    normalized = normalize_pydantic_errors(
+        [
+            {
+                "loc": ("tmdb",),
+                "type": "model_type",
+                "msg": "Invalid section",
+                "ctx": {"expected": "dictionary"},
+                "input": value,
+            }
+        ]
+    )
+    assert normalized[0]["loc"] == ["tmdb"]
+    assert normalized[0]["type"] == "model_type"
+    assert normalized[0]["msg"] == "Invalid section"
+    assert normalized[0]["ctx"] == {"expected": "dictionary"}
+    encoded = json.dumps(normalized)
+    assert "sentinel-deep-secret" not in encoded
+    assert "<nested value omitted>" in encoded
+    # Inspect the public output without depending on the internal cutoff value.
+    pending: list[tuple[object, int]] = [(normalized, 0)]
+    while pending:
+        item, depth = pending.pop()
+        assert depth <= 20
+        if isinstance(item, dict):
+            pending.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, list):
+            pending.extend((child, depth + 1) for child in item)

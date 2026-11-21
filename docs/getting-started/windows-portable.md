@@ -254,18 +254,68 @@ From the repository root:
 ```
 
 The root command delegates to the source installer, builds
-`dist\frame-compare-portable-win-x64`, and installs the same user-level shim as a
-published bundle. The source route refuses before bootstrap, dependency sync, or output
+`dist\frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z` (UTC), and installs the same user-level shim as a
+published bundle. The source route refuses before bootstrap, Python provisioning, or output
 changes when PowerShell 7 is unavailable.
+
+The source installer ensures `uv` is on `PATH`, then runs `uv python install 3.13`
+before building. It provisions the build interpreter without creating a project
+environment or installing development dependencies. The builder requires a discoverable
+Python 3.13 and assembles the pinned portable runtime separately.
+
+Use `.\install.cmd -SkipPythonInstall` only when Python 3.13 is already discoverable.
+This skips interpreter provisioning; the builder still checks for Python 3.13 without
+downloading it. The legacy `-SkipSync` switch remains an alias with the same meaning.
 
 Run a direct source `.ps1` installer with
 `pwsh`; Windows PowerShell 5.1 remains supported for published-bundle installation,
 launch, and updates.
 
+Each rerun builds and verifies a fresh folder before switching the active-bundle
+pointer. The installed shim always selects that active bundle. By default,
+non-empty `config/`, `comparison_videos/`, and `generated/` folders move from the
+previous active bundle with same-volume renames. Use `.\install.cmd -UserData Leave`
+to activate without moving them. Leave keeps data in the previous bundle and may
+select an older AppData fallback config if the new bundle has no `config/config.toml`.
+
+Before Python provisioning and building, the source installer acquires an exclusive
+activation lock and refuses a pending source-migration marker. It re-reads the active
+pointer as one byte snapshot after the build. A source install or current bundle
+installer already activating causes a refusal with the lock path and retry guidance.
+The lock file may remain after success or a crash; only its open process handle
+prevents another activation.
+
+Junctions, symlinks, and mount points in build or previous-bundle ancestry are refused;
+choose physical paths so containment can be checked. Stored active pointers must use
+fully qualified absolute paths. Drive-relative and root-relative values are malformed.
+
+Move is all-or-nothing for failures and Ctrl+C: a move or activation failure restores
+completed moves, empty placeholders, the previous pointer, and its shims. If recovery
+fails, the installer stops and reports the pointer and every folder location for manual
+repair. After an interrupted migration, the next run refuses installation and reports
+the pointer and folder locations; empty candidate placeholders count as unmoved.
+A candidate pointer and moved folders do not prove activation finished: configuration
+and PATH setup follow pointer publication. Leave that data in the candidate bundle
+and retain the marker while checking the candidate's configuration, installed shim,
+and user PATH. In a new terminal, confirm `frame-compare` launches the candidate;
+only after those checks succeed may you remove the marker before retrying.
+When the pointer still names the previous bundle, follow the listed folder-restoration
+steps. Conflicting or unreadable pointer state requires a manual check before moving
+anything or deleting the marker. If activation succeeds but marker cleanup fails,
+the installer reports a cleanup error without reversing data or the pointer.
+Cross-volume moves refuse activation; use Leave and relocate data manually.
+Moving media makes path-keyed caches recompute once. Absolute paths in config are
+not rewritten. Previous bundles are never deleted; remove them manually only once
+you have accepted the new installation. A missing or stale active pointer is treated
+as a first install.
+
+The direct `build_portable.ps1` command refuses occupied and unsafe output paths.
+Remove only disposable build output explicitly before reusing a build path.
+
 Use the source-built bundle as the application workspace:
 
 ```text
-dist/frame-compare-portable-win-x64/
+dist/frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z/
 ├── config/
 ├── comparison_videos/
 ├── generated/

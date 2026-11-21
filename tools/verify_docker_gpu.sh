@@ -3,12 +3,11 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: bash tools/verify_docker_gpu.sh [--service NAME] [--no-build] [--no-cache]
+Usage: bash tools/verify_docker_gpu.sh [--no-build] [--no-cache]
 
 Runs the optional NVIDIA Docker GPU proof inside the Docker image.
 
-Defaults:
-  --service frame-compare-test
+Uses the frame-compare-test Compose service.
 
 Notes:
   - Requires a Linux host with a working NVIDIA driver and NVIDIA Container Toolkit.
@@ -18,7 +17,7 @@ EOF
 }
 
 readonly MIN_COMPOSE_GPUS_VERSION="2.30.0"
-readonly DEFAULT_SERVICE="frame-compare-test"
+readonly TEST_SERVICE="frame-compare-test"
 if ! REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; then
   echo "ERROR: unable to determine repository root" >&2
   exit 2
@@ -28,22 +27,12 @@ readonly DEFAULT_IMAGE="frame-compare:test"
 readonly CONTAINER_WORKDIR="/home/framecompare/frame-compare"
 readonly DEFAULT_DRIVER_CAPABILITIES="compute,utility,graphics"
 
-service="$DEFAULT_SERVICE"
 run_build="1"
 no_cache="0"
 inside_container="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --service)
-      if [[ $# -lt 2 || -z "${2:-}" ]]; then
-        echo "ERROR: --service requires a value" >&2
-        usage >&2
-        exit 2
-      fi
-      service="${2:-}"
-      shift 2
-      ;;
     --no-build)
       run_build="0"
       shift
@@ -157,11 +146,6 @@ find_nvidia_icd() {
 }
 
 run_placebo_proof() {
-  if [[ -n "${FRAME_COMPARE_GPU_PLACEBO_PROOF_CMD:-}" ]]; then
-    bash -lc "${FRAME_COMPARE_GPU_PLACEBO_PROOF_CMD}"
-    return
-  fi
-
   python - <<'PY'
 from __future__ import annotations
 
@@ -214,9 +198,7 @@ run_container_proof() {
     exit 20
   fi
 
-  if [[ -n "${FRAME_COMPARE_GPU_FORCE_NO_NVIDIA_ICD:-}" ]]; then
-    nvidia_icd=""
-  elif nvidia_icd="$(find_nvidia_icd 2>/dev/null)"; then
+  if nvidia_icd="$(find_nvidia_icd 2>/dev/null)"; then
     export VK_ICD_FILENAMES="$nvidia_icd"
   fi
 
@@ -339,9 +321,9 @@ run_host_proof() {
 
   if [[ "$run_build" == "1" ]]; then
     if [[ "${#build_args[@]}" -gt 0 ]]; then
-      docker compose build "${build_args[@]}" "$service"
+      docker compose build "${build_args[@]}" "$TEST_SERVICE"
     else
-      docker compose build "$service"
+      docker compose build "$TEST_SERVICE"
     fi
   fi
 
@@ -364,7 +346,7 @@ run_host_proof() {
     -f docker-compose.yml \
     -f docker-compose.gpu-nvidia.yml \
     --profile gpu-nvidia \
-    run --rm "$service" \
+    run --rm "$TEST_SERVICE" \
     -lc 'bash tools/verify_docker_gpu.sh --inside-container'
 }
 

@@ -3,34 +3,16 @@ const ReviewState = (() => {
 
     const FORMAT = 'frame-compare-review';
     const SCHEMA_VERSION = 1;
-    const MAX_BYTES = 8388608;
-    const MAX_RECORDS = 1000;
     const MAX_NOTE_SCALARS = 1000;
-    const MAX_BYTES_LABEL = MAX_BYTES.toLocaleString('en-US');
-    const MAX_RECORDS_LABEL = MAX_RECORDS.toLocaleString('en-US');
     const TAGS = new Set([null, 'artifact', 'detail', 'motion', 'color', 'other']);
-    const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
     const PERSISTENCE_WARNING = 'Changes are kept only for this session. Export review JSON to keep them.';
     const REPORT_MISMATCH = 'This review belongs to a different report. No changes were made.';
-    const encoder = new TextEncoder();
 
     class ReviewStateError extends Error {}
 
-    function ownKeys(value, expected, label) {
+    function requireObject(value, label) {
         if (!value || typeof value !== 'object' || Array.isArray(value)) {
             throw new ReviewStateError(`${label} must be an object.`);
-        }
-        const keys = Object.keys(value);
-        if (keys.length !== expected.length || keys.some((key) => !expected.includes(key))) {
-            throw new ReviewStateError(`${label} has unknown or missing keys.`);
-        }
-    }
-
-    function rejectDangerousKeys(value) {
-        if (!value || typeof value !== 'object') return;
-        for (const key of Object.keys(value)) {
-            if (DANGEROUS_KEYS.has(key)) throw new ReviewStateError('Import contains a dangerous key.');
-            rejectDangerousKeys(value[key]);
         }
     }
 
@@ -39,15 +21,7 @@ const ReviewState = (() => {
     }
 
     function scalarLength(value) {
-        let length = 0;
-        for (const character of value) {
-            const codePoint = character.codePointAt(0);
-            if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
-                throw new ReviewStateError('Review note contains an invalid Unicode surrogate.');
-            }
-            length += 1;
-        }
-        return length;
+        return [...value].length;
     }
 
     function defaultRecord(frameOrdinal) {
@@ -68,12 +42,8 @@ const ReviewState = (() => {
         };
     }
 
-    function sameRecord(left, right) {
-        return JSON.stringify(left) === JSON.stringify(right);
-    }
-
     function validateRecord(record, context, allowDefault = false) {
-        ownKeys(record, ['frame_ordinal', 'bookmark', 'tag', 'note', 'preferred_clip_id'], 'Review record');
+        requireObject(record, 'Review record');
         if (!Number.isInteger(record.frame_ordinal) || record.frame_ordinal < 0 || record.frame_ordinal >= context.frameCount) {
             throw new ReviewStateError('Review frame ordinal is out of range.');
         }
@@ -100,7 +70,13 @@ const ReviewState = (() => {
                 throw new ReviewStateError('Preferred clip is out of range.');
             }
         }
-        const normalized = canonicalRecord({ ...record, note });
+        const normalized = {
+            frame_ordinal: record.frame_ordinal,
+            bookmark: record.bookmark,
+            tag: record.tag,
+            note,
+            preferred_clip_id: record.preferred_clip_id,
+        };
         if (!allowDefault && isDefault(normalized)) {
             throw new ReviewStateError('All-default review records are not stored.');
         }
@@ -108,49 +84,29 @@ const ReviewState = (() => {
     }
 
     function validateRecords(records, context) {
-        if (!Array.isArray(records) || records.length > MAX_RECORDS) {
-            throw new ReviewStateError('Review record count is invalid.');
-        }
-        let previous = -1;
-        return records.map((record) => {
+        if (!Array.isArray(records)) throw new ReviewStateError('Reviews must be an array.');
+        const ordinals = new Set();
+        return Array.from(records, record => {
             const validated = validateRecord(record, context);
-            if (validated.frame_ordinal <= previous) {
-                throw new ReviewStateError('Review frame ordinals must be unique and sorted.');
+            if (ordinals.has(validated.frame_ordinal)) {
+                throw new ReviewStateError('Review frame ordinals must be unique.');
             }
-            previous = validated.frame_ordinal;
+            ordinals.add(validated.frame_ordinal);
             return validated;
-        });
+        }).sort((left, right) => left.frame_ordinal - right.frame_ordinal);
     }
 
-    function validateDocument(document, context, exported) {
-        rejectDangerousKeys(document);
-        ownKeys(
-            document,
-            exported ? ['format', 'schema_version', 'report', 'reviews', 'exported_at'] : ['format', 'schema_version', 'report', 'reviews'],
-            'Review document',
-        );
+    function validateDocument(document, context) {
+        requireObject(document, 'Review document');
         if (document.format !== FORMAT || document.schema_version !== SCHEMA_VERSION) {
             throw new ReviewStateError('Unsupported review format or schema version.');
         }
-        ownKeys(document.report, ['id', 'payload_version'], 'Review report identity');
-        if (typeof document.report.id !== 'string' || !/^report_[0-9a-f]{32}$/.test(document.report.id)) {
-            throw new ReviewStateError('Review report ID is invalid.');
-        }
+        requireObject(document.report, 'Review report identity');
         if (document.report.id !== context.reportId) throw new ReviewStateError(REPORT_MISMATCH);
         if (document.report.payload_version !== context.payloadVersion) {
             throw new ReviewStateError('Review payload version does not match this report.');
         }
-        const reviews = validateRecords(document.reviews, context);
-        if (exported) {
-            if (typeof document.exported_at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(document.exported_at)) {
-                throw new ReviewStateError('Export timestamp is invalid.');
-            }
-            const timestamp = new Date(document.exported_at);
-            if (!Number.isFinite(timestamp.getTime()) || timestamp.toISOString() !== document.exported_at) {
-                throw new ReviewStateError('Export timestamp is invalid.');
-            }
-        }
-        return reviews;
+        return validateRecords(document.reviews, context);
     }
 
     function storedDocument(context, records) {
@@ -158,18 +114,16 @@ const ReviewState = (() => {
             format: FORMAT,
             schema_version: SCHEMA_VERSION,
             report: { id: context.reportId, payload_version: context.payloadVersion },
-            reviews: records.map(canonicalRecord),
+            reviews: records,
         };
     }
 
     function serialize(document) {
-        const text = `${JSON.stringify(document, null, 2)}\n`;
-        if (encoder.encode(text).byteLength > MAX_BYTES) throw new ReviewStateError(`Review JSON exceeds ${MAX_BYTES_LABEL} bytes.`);
-        return text;
+        return `${JSON.stringify(document, null, 2)}\n`;
     }
 
     function mapFrom(records) {
-        return new Map(records.map((record) => [record.frame_ordinal, canonicalRecord(record)]));
+        return new Map(records.map(record => [record.frame_ordinal, record]));
     }
 
     function create(options) {
@@ -179,53 +133,44 @@ const ReviewState = (() => {
             frameCount: options.frameCount,
             clipCount: options.clipCount,
         };
-        if (!/^report_[0-9a-f]{32}$/.test(context.reportId) || context.payloadVersion !== '1.2') {
+        if (!/^report_[0-9a-f]{32}$/.test(context.reportId) || context.payloadVersion !== '1.4') {
             throw new ReviewStateError('Current report identity is invalid.');
         }
         const storageKey = `frame-compare:report-review:v1:${context.reportId}`;
-        let storage = options.storage ?? null;
+        const storage = options.storage;
         let records = new Map();
-        let revision = 0;
-        const candidates = new WeakMap();
         let memoryOnly = !storage;
-        let unsaved = false;
         let warning = memoryOnly ? PERSISTENCE_WARNING : '';
 
-        function sortedRecords(source = records) {
-            return [...source.values()].sort((left, right) => left.frame_ordinal - right.frame_ordinal);
+        function sortedRecords() {
+            return [...records.values()].sort((left, right) => left.frame_ordinal - right.frame_ordinal);
         }
 
+        let stored = null;
         if (storage) {
             try {
-                const bytes = storage.getItem(storageKey);
-                if (bytes !== null) {
-                    if (encoder.encode(bytes).byteLength > MAX_BYTES) throw new ReviewStateError(`Stored review JSON exceeds ${MAX_BYTES_LABEL} bytes.`);
-                    const parsed = JSON.parse(bytes);
-                    records = mapFrom(validateDocument(parsed, context, false));
-                }
-            } catch (error) {
+                stored = storage.getItem(storageKey);
+            } catch {
+                memoryOnly = true;
+                warning = PERSISTENCE_WARNING;
+            }
+        }
+        if (stored !== null) {
+            try {
+                records = mapFrom(validateDocument(JSON.parse(stored), context));
+            } catch {
                 warning = 'Stored review data is corrupt or unsupported; it was ignored and left untouched.';
-                if (!(error instanceof ReviewStateError || error instanceof SyntaxError)) {
-                    memoryOnly = true;
-                    storage = null;
-                    warning = PERSISTENCE_WARNING;
-                }
             }
         }
 
-        function persistMutation() {
-            if (!storage) {
-                unsaved = true;
-                warning = PERSISTENCE_WARNING;
-                return false;
-            }
+        function save() {
+            if (memoryOnly) return false;
             try {
                 storage.setItem(storageKey, serialize(storedDocument(context, sortedRecords())));
-                unsaved = false;
                 warning = '';
                 return true;
             } catch {
-                unsaved = true;
+                memoryOnly = true;
                 warning = PERSISTENCE_WARNING;
                 return false;
             }
@@ -239,109 +184,44 @@ const ReviewState = (() => {
                 throw new ReviewStateError('Review mutation must be an object.');
             }
             const next = { ...(records.get(frameOrdinal) || defaultRecord(frameOrdinal)), ...patch, frame_ordinal: frameOrdinal };
-            if (typeof next.note === 'string') next.note = normalizedNote(next.note);
             const validated = validateRecord(next, context, true);
             if (isDefault(validated)) records.delete(frameOrdinal);
-            else {
-                if (!records.has(frameOrdinal) && records.size >= MAX_RECORDS) throw new ReviewStateError(`Review record limit of ${MAX_RECORDS_LABEL} reached.`);
-                records.set(frameOrdinal, validated);
-            }
-            revision += 1;
-            persistMutation();
-            return records.get(frameOrdinal) || defaultRecord(frameOrdinal);
+            else records.set(frameOrdinal, validated);
+            return save();
         }
 
         function exportText(now = new Date()) {
-            const timestamp = now.toISOString();
-            const document = { ...storedDocument(context, sortedRecords()), exported_at: timestamp };
-            const text = serialize(document);
-            validateDocument(JSON.parse(text), context, true);
-            return text;
-        }
-
-        function parseImport(bytes) {
-            const byteArray = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-            if (byteArray.byteLength > MAX_BYTES) throw new ReviewStateError(`Import exceeds ${MAX_BYTES_LABEL} bytes.`);
-            if (byteArray.length >= 3 && byteArray[0] === 0xef && byteArray[1] === 0xbb && byteArray[2] === 0xbf) {
-                throw new ReviewStateError('Import must not contain a UTF-8 BOM.');
-            }
-            let text;
-            try { text = new TextDecoder('utf-8', { fatal: true }).decode(byteArray); }
-            catch { throw new ReviewStateError('Import must be strict UTF-8.'); }
-            let parsed;
-            try { parsed = JSON.parse(text); }
-            catch { throw new ReviewStateError('Import is not valid JSON.'); }
-            return validateDocument(parsed, context, true);
-        }
-
-        function preview(importedRecords, mode = 'merge', conflict = 'keep-local') {
-            if (!['merge', 'replace'].includes(mode) || !['keep-local', 'use-imported'].includes(conflict)) {
-                throw new ReviewStateError('Import preview options are invalid.');
-            }
-            const imported = mapFrom(validateRecords(importedRecords, context));
-            const candidate = mode === 'replace' ? imported : new Map(records);
-            if (mode === 'merge') {
-                for (const [ordinal, incoming] of imported) {
-                    if (!candidate.has(ordinal) || conflict === 'use-imported') candidate.set(ordinal, incoming);
-                }
-            }
-            const ordinals = new Set([...records.keys(), ...candidate.keys()]);
-            const counts = { add: 0, change: 0, remove: 0, unchanged: 0 };
-            for (const ordinal of ordinals) {
-                const local = records.get(ordinal);
-                const selected = candidate.get(ordinal);
-                if (!local) counts.add += 1;
-                else if (!selected) counts.remove += 1;
-                else if (sameRecord(local, selected)) counts.unchanged += 1;
-                else counts.change += 1;
-            }
-            const previewValue = Object.freeze({
-                mode, conflict, counts: Object.freeze(counts),
-                importedRecords: Object.freeze(sortedRecords(imported).map(record => Object.freeze(record))),
+            return serialize({
+                ...storedDocument(context, sortedRecords()),
+                exported_at: now.toISOString(),
             });
-            candidates.set(previewValue, { candidate, revision });
-            return previewValue;
         }
 
-        function apply(previewValue) {
-            // Validate supplied input even when it did not originate at this model.
-            validateRecords(previewValue?.importedRecords, context);
-            const selected = candidates.get(previewValue);
-            if (!selected || selected.revision !== revision) {
-                throw new ReviewStateError('Import preview is stale or invalid. Review choices again.');
+        function parseImport(text) {
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            } catch (error) {
+                if (!(error instanceof SyntaxError)) throw error;
+                throw new ReviewStateError('Import is not valid JSON.');
             }
-            const candidateRecords = validateRecords(sortedRecords(selected.candidate), context);
-            const candidate = mapFrom(candidateRecords);
-            const serialized = serialize(storedDocument(context, candidateRecords));
-            if (memoryOnly) {
-                records = candidate;
-                revision += 1;
-                unsaved = true;
-                warning = PERSISTENCE_WARNING;
-                return true;
-            }
-            try { storage.setItem(storageKey, serialized); }
-            catch {
-                warning = 'Import could not be saved; no changes were made.';
-                return false;
-            }
-            records = candidate;
-            revision += 1;
-            unsaved = false;
-            warning = '';
-            return true;
+            return validateDocument(parsed, context);
+        }
+
+        function replaceAll(importedRecords) {
+            records = mapFrom(validateRecords(importedRecords, context));
+            return save();
         }
 
         return {
             storageKey,
-            get: (ordinal) => canonicalRecord(records.get(ordinal) || defaultRecord(ordinal)),
+            get: ordinal => canonicalRecord(records.get(ordinal) || defaultRecord(ordinal)),
             all: () => sortedRecords().map(canonicalRecord),
             mutate,
             exportText,
             parseImport,
-            preview,
-            apply,
-            status: () => ({ memoryOnly, unsaved, warning, count: records.size }),
+            replaceAll,
+            status: () => ({ memoryOnly, warning, count: records.size }),
         };
     }
 
@@ -353,28 +233,24 @@ const ReviewState = (() => {
             clipCount: viewer.state.data.clips.length,
             storage: viewer.localStorage(),
         });
-        let importRecords = null;
-        let importPreview = null;
-        let importToken = 0;
+        let importGeneration = 0;
         let renderedFrameOrdinal = null;
         let initialWarningPending = Boolean(model.status().warning);
 
         function showMessage(message, warning = false, announce = true) {
             viewer.setText(viewer.dom.reviewStatus, message);
             viewer.dom.reviewStatus.dataset.tone = warning ? 'warning' : 'saved';
-            if (announce) viewer.announce?.(message);
+            if (announce) viewer.announce(message);
         }
 
-        function messageWithPersistence(message) {
-            const status = model.status();
-            return status.warning ? `${message} ${status.warning}` : message;
+        function showActionMessage(message, isError = false) {
+            const { warning } = model.status();
+            showMessage(warning ? `${message} ${warning}` : message, isError || Boolean(warning));
         }
 
         function updateStatus(announce = false) {
             const status = model.status();
-            const saved = status.unsaved
-                ? 'Unsaved changes.'
-                : `${status.count} review record${status.count === 1 ? '' : 's'} saved in this browser.`;
+            const saved = `${status.count} review record${status.count === 1 ? '' : 's'} saved in this browser.`;
             showMessage(status.warning || saved, Boolean(status.warning), announce);
         }
 
@@ -405,12 +281,10 @@ const ReviewState = (() => {
 
         function mutate(patch) {
             try {
-                model.mutate(viewer.state.currentFrameIdx, patch);
-                updateImportPreview();
-                updateStatus(Boolean(model.status().warning));
+                updateStatus(!model.mutate(viewer.state.currentFrameIdx, patch));
             } catch (error) {
                 render({ force: true });
-                showMessage(error.message, true);
+                showActionMessage(error.message, true);
             }
         }
 
@@ -423,103 +297,45 @@ const ReviewState = (() => {
                 link.download = `${viewer.state.data.report_id}-review.json`;
                 link.click();
                 window.setTimeout(() => URL.revokeObjectURL(url), 0);
-                const message = messageWithPersistence('Review JSON exported.');
-                showMessage(message, Boolean(model.status().warning));
+                showActionMessage('Review JSON exported.');
             } catch (error) {
-                showMessage(error.message, true);
+                showActionMessage(error.message, true);
             }
         }
 
-        function importChoice(name, fallback) {
-            return viewer.dom.reviewPreview
-                .querySelector(`input[name="${name}"]:checked`)
-                ?.value || fallback;
-        }
-
-        function resetImportChoices() {
-            viewer.dom.reviewPreview
-                .querySelectorAll('input[name="review-import-mode"]')
-                .forEach(input => { input.checked = input.value === 'merge'; });
-            viewer.dom.reviewPreview
-                .querySelectorAll('input[name="review-import-conflict"]')
-                .forEach(input => { input.checked = input.value === 'keep-local'; });
-        }
-
-        function updateImportPreview(announce = false) {
-            if (!importRecords) return;
-            importPreview = model.preview(
-                importRecords,
-                importChoice('review-import-mode', 'merge'),
-                importChoice('review-import-conflict', 'keep-local'),
-            );
-            const { add, change, remove, unchanged } = importPreview.counts;
-            viewer.setText(
-                viewer.dom.reviewPreviewCounts,
-                `Add ${add} · Change ${change} · Remove ${remove} · Unchanged ${unchanged}`,
-            );
-            if (announce) {
-                showMessage(
-                    `Import preview: add ${add}, change ${change}, remove ${remove}, unchanged ${unchanged}.`,
-                );
-            }
-        }
-
-        function cancelImport() {
-            importToken += 1;
-            importRecords = null;
-            importPreview = null;
-            viewer.dom.reviewPreview.hidden = true;
-            viewer.dom.reviewImport.value = '';
-            resetImportChoices();
-        }
-
-        async function readImport(file) {
-            if (!file) return;
-            cancelImport();
-            const token = ++importToken;
-            if (!file.name.toLowerCase().endsWith('.json')) {
-                cancelImport();
-                showMessage('Choose one .json review file. No changes were made.', true);
-                return;
-            }
-            if (file.size > MAX_BYTES) {
-                cancelImport();
-                showMessage(`Import exceeds ${MAX_BYTES_LABEL} bytes. No changes were made.`, true);
-                return;
-            }
+        async function readImport(input) {
+            const generation = ++importGeneration;
             try {
-                const bytes = await file.arrayBuffer();
-                if (token !== importToken) return;
-                importRecords = model.parseImport(bytes);
-                resetImportChoices();
-                viewer.dom.reviewPreview.hidden = false;
-                updateImportPreview();
-                const { add, change, remove, unchanged } = importPreview.counts;
-                showMessage(
-                    `Import ready: add ${add}, change ${change}, remove ${remove}, unchanged ${unchanged}. Review choices before applying.`,
-                );
-            } catch (error) {
-                if (token !== importToken) return;
-                cancelImport();
-                showMessage(error.message, true);
-            }
-        }
-
-        function applyImport() {
-            if (!importPreview) return;
-            try {
-                if (!model.apply(importPreview)) {
-                    showMessage('Import could not be saved; no changes were made.', true);
-                    return;
+                const file = input.files?.[0];
+                if (!file) return;
+                if (!file.name.toLowerCase().endsWith('.json')) {
+                    throw new ReviewStateError('Choose one .json review file.');
                 }
+                const text = await file.text();
+                if (generation !== importGeneration) return;
+                const imported = model.parseImport(text);
+                const { count } = model.status();
+                if (count > 0) {
+                    const savedLabel = count === 1 ? 'record' : 'records';
+                    const importedLabel = imported.length === 1 ? 'record' : 'records';
+                    if (!window.confirm(
+                        `Replace ${count} saved review ${savedLabel} with ${imported.length} imported ${importedLabel}?`,
+                    )) {
+                        showActionMessage('Import cancelled. No changes were made.');
+                        return;
+                    }
+                }
+                model.replaceAll(imported);
+                render({ force: true });
+                showActionMessage('Review import applied.');
             } catch (error) {
-                showMessage(`${error.message} No changes were made.`, true);
-                return;
+                if (generation !== importGeneration) return;
+                const message = error.message || String(error);
+                const suffix = message.includes('No changes were made.') ? '' : ' No changes were made.';
+                showActionMessage(message + suffix, true);
+            } finally {
+                if (generation === importGeneration) input.value = '';
             }
-            cancelImport();
-            render({ force: true });
-            const message = messageWithPersistence('Review import applied.');
-            showMessage(message, Boolean(model.status().warning));
         }
 
         function bind() {
@@ -532,7 +348,7 @@ const ReviewState = (() => {
                 event => mutate({ tag: event.target.value || null }),
             );
             viewer.dom.reviewNote.addEventListener('input', event => {
-                const normalized = event.target.value.replace(/\r\n?/g, '\n');
+                const normalized = normalizedNote(event.target.value);
                 const scalars = [...normalized];
                 if (scalars.length > MAX_NOTE_SCALARS) {
                     event.target.value = scalars.slice(0, MAX_NOTE_SCALARS).join('');
@@ -554,11 +370,8 @@ const ReviewState = (() => {
             );
             viewer.dom.reviewImport.addEventListener(
                 'change',
-                event => readImport(event.target.files?.[0]),
+                event => readImport(event.target),
             );
-            viewer.dom.reviewPreview.addEventListener('change', () => updateImportPreview(true));
-            viewer.dom.reviewImportApply.addEventListener('click', applyImport);
-            viewer.dom.reviewImportCancel.addEventListener('click', cancelImport);
         }
 
         populatePreferredOptions();
@@ -572,8 +385,6 @@ const ReviewState = (() => {
         constants: {
             FORMAT,
             SCHEMA_VERSION,
-            MAX_BYTES,
-            MAX_RECORDS,
             MAX_NOTE_SCALARS,
             PERSISTENCE_WARNING,
             REPORT_MISMATCH,

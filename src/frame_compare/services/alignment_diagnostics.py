@@ -8,17 +8,17 @@ from pathlib import Path
 from typing import Literal
 
 from frame_compare.errors import PathEscapesRootError
-from frame_compare.services.types import AlignmentResult
-from frame_compare.utils.alignment_evidence import (
-    MAX_ALIGNMENT_EVIDENCE_BYTES,
+from frame_compare.services.alignment_evidence import (
     AudioAlignmentAttempt,
     audio_attempt_payload,
 )
+from frame_compare.services.types import ComparisonResolution
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.paths import require_managed_immediate_child
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
+_MAX_DIAGNOSTIC_BYTES = 2 * 1024 * 1024
 
 type AlignmentReviewOutcome = Literal[
     "pending",
@@ -85,14 +85,13 @@ def write_alignment_diagnostic(
     comparison_ordinal: int,
     reference_label: str,
     comparison_label: str,
-    attempt: AudioAlignmentAttempt | None,
-    evidence_availability: str,
+    resolution: ComparisonResolution,
     review_outcome: AlignmentReviewOutcome,
-    final_result: AlignmentResult,
-    final_origin: str,
     confirmed_frame_pair: tuple[int, int] | None = None,
 ) -> tuple[Path, str | None, int]:
     """Atomically write one bounded pathless diagnostic envelope."""
+    final_result = resolution.result
+    attempt = final_result.audio_attempt
     path = diagnostic_path(generated_root, diagnostics_dir, comparison_ordinal)
     digest = original_attempt_digest(attempt)
     payload = {
@@ -109,12 +108,12 @@ def write_alignment_diagnostic(
             "reference_label": _bounded_label(reference_label),
             "comparison_label": _bounded_label(comparison_label),
         },
-        "evidence_availability": evidence_availability,
+        "evidence_availability": resolution.evidence_availability,
         "original_audio_attempt": _attempt_payload(attempt),
         "original_attempt_digest": digest,
         "review_outcome": review_outcome,
         "final_resolution": {
-            "origin": final_origin if final_result.applied else "none",
+            "origin": resolution.origin if final_result.applied else "none",
             "applied": final_result.applied,
             "frame_offset": final_result.frame_offset if final_result.applied else None,
             "reference_source_frame": (
@@ -133,7 +132,7 @@ def write_alignment_diagnostic(
         allow_nan=False,
     )
     size = len(content.encode("utf-8"))
-    if size > MAX_ALIGNMENT_EVIDENCE_BYTES:
+    if size > _MAX_DIAGNOSTIC_BYTES:
         raise ValueError(f"audio alignment diagnostic exceeds the 2 MiB limit: {size} bytes")
     write_text_atomic(path, content, encoding="utf-8", publish_guard=raise_if_cancelling)
     return path, digest, size

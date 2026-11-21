@@ -11,10 +11,9 @@ from typing import Literal, Protocol
 
 import httpx
 
-from frame_compare.config.overrides import CLIConfigOverrides
-from frame_compare.render.backend.ffmpeg import FFmpegRunner
+from frame_compare.orchestration.run_inputs import AcquiredRunConfig
 from frame_compare.utils.post_upload_actions import PostUploadActionResults
-from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.utils.progress_protocol import AlignmentSummary, ProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import VSLoader
@@ -28,10 +27,7 @@ class RunRequest:
     See docs/current-cli-contract.md for CLI flag → config mappings and persistence rules.
     """
 
-    # Paths and persistent CLI overrides
-    root: Path
-    config_path: Path | None = None
-    config_overrides: CLIConfigOverrides = field(default_factory=CLIConfigOverrides)
+    inputs: AcquiredRunConfig
 
     # Run-mode controls
     no_cache: bool = False
@@ -96,7 +92,7 @@ class FullWindowRetryConfirmationFn(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ReservedRunCapture:
-    """Facts known immediately after a run folder's identity is durable."""
+    """Facts captured after reserving the workspace and before writing run_info.toml."""
 
     workspace: WorkspacePaths
     clip_count: int
@@ -114,6 +110,8 @@ class RunResult:
     screenshot_dir: Path | None = None
     slowpics_url: str | None = None
     report_path: Path | None = None
+    alignment_summary: AlignmentSummary | None = None
+    alignment_diagnostics_dir: Path | None = None
     post_upload_actions: PostUploadActionResults = ()
     slowpics_upload_confirmation_status: SlowpicsUploadConfirmationStatus = "not_applicable"
 
@@ -133,18 +131,30 @@ class RunResult:
     vsview_review_seconds: float = 0.0
 
 
+@dataclass(frozen=True)
+class InterruptedRun:
+    """Facts available to a human caller after run cleanup."""
+
+    phase: str | None = None
+    workspace: WorkspacePaths | None = None
+    planned_screenshots: int = 0
+    analysis_cache_written: bool = False
+    alignment_cache_written: bool = False
+
+
 @dataclass
 class RunDependencies:
     """Dependency injection container for run orchestration."""
 
     vs_loader: VSLoader | None = None
-    ffmpeg_runner: FFmpegRunner | None = None
     http_client: httpx.AsyncClient | None = None
     progress: ProgressReporter | None = None
     confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None
     confirm_full_window_retry: FullWindowRetryConfirmationFn | None = None
     clock: Callable[[], datetime] = field(default=_utc_now)
     monotonic_timer: Callable[[], float] = field(default=monotonic)
+    on_interrupted: Callable[[InterruptedRun], None] | None = None
+    on_failed_alignment_diagnostics: Callable[[Path], None] | None = None
     capture_reserved_run: Callable[[ReservedRunCapture], None] | None = field(
         default=None,
         init=False,

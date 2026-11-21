@@ -46,14 +46,18 @@ from frame_compare.orchestration.phase_selection import (
     select_initial_frame_plan,
     selection_label_for_frame,
 )
-from frame_compare.orchestration.phases import Phase, PhaseSkipDetail
+from frame_compare.orchestration.phases import (
+    CONFIG_DISABLED,
+    Phase,
+    PhaseSkipDetail,
+    PhaseWarnOnly,
+)
 from frame_compare.orchestration.types import (
     RunDependencies,
     RunRequest,
     SlowpicsUploadConfirmationFn,
 )
-from frame_compare.render.backend.ffmpeg import FFmpegRunner
-from frame_compare.services.errors import AlignmentSourceIdentityError, AudioAlignmentCleanupError
+from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
@@ -95,7 +99,7 @@ def _create_timed_phase(
     phase_timings: dict[str, float],
     warnings: list[RunWarning],
     *,
-    warn_only: bool = False,
+    warn_only: PhaseWarnOnly = False,
     fatal_exceptions: tuple[type[BaseException], ...] = (),
     progress_total: int = 1,
     retain_on_success: bool | None = None,
@@ -123,9 +127,10 @@ def _create_timed_phase(
                 phase.success_summary = summary
             if timing_key == "align" and isinstance(output, AlignPhaseOutput):
                 align_output = output
-                if output.review_unresolved:
-                    if phase is None:
-                        raise RuntimeError("timed phase was not initialized")
+                if phase is None:
+                    raise RuntimeError("timed phase was not initialized")
+                phase.alignment_summary = output.alignment_summary
+                if output.review_unresolved or output.has_unapplied_offsets:
                     phase.success_status = ProgressPhaseStatus.WARNED
             if retain_if is not None:
                 if phase is None:
@@ -135,11 +140,10 @@ def _create_timed_phase(
             await cancellation_checkpoint()
             raise asyncio.CancelledError() from None
         except Exception as exc:
-            if warn_only:
+            if phase is not None and phase.warns_on_error(ctx):
                 warnings.append(
                     RunWarning(_PHASE_WARNING_SOURCES[name], "warning", f"{name}: {exc}")
                 )
-                raise
             raise
         finally:
             phase_timings[timing_key] = max(0.0, monotonic_timer() - start)
@@ -176,6 +180,20 @@ def build_phases_before_align(
     workspace: WorkspacePaths,
     vs_loader: VSLoader | None = None,
 ) -> list[Phase]:
+    def _record_alignment_diagnostics(path: Path) -> None:
+        state.artifacts.alignment_diagnostics_dir = path
+
+    def _run_align_with_current_selection(ctx: RunContext):
+        return run_align_phase(
+            ctx,
+            selected_frames=list(ctx.selection.frames),
+            vs_loader=vs_loader,
+            verbose=request.verbose,
+            quiet=request.quiet,
+            json_output=request.json_output,
+            on_diagnostics_written=_record_alignment_diagnostics,
+        )
+
     return [
         _create_timed_phase(
             "frame_plan",
@@ -196,29 +214,23 @@ def build_phases_before_align(
                 input_videos=input_videos,
                 workspace=workspace,
                 require_cache_only=request.from_cache_only,
+                force_recompute=request.no_cache,
                 vs_loader=vs_loader,
             ),
             state=state,
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
             warnings=state.warnings,
-            warn_only=not request.from_cache_only,
+            warn_only=lambda ctx: not request.from_cache_only and bool(ctx.selection.frames),
             fatal_exceptions=(ExclusionRecoverySelectionError,),
             progress_total=ANALYZE_PROGRESS_TOTAL,
-            skip_detail="Disabled" if request.skip_analysis else "Not required",
+            skip_detail=CONFIG_DISABLED if request.skip_analysis else "Not required",
         ),
         _create_timed_phase(
             "align",
             "align",
             lambda config: not config.audio_alignment.enable,
-            partial(
-                run_align_phase,
-                selected_frames=state.selected_frames,
-                vs_loader=vs_loader,
-                verbose=request.verbose,
-                quiet=request.quiet,
-                json_output=request.json_output,
-            ),
+            _run_align_with_current_selection,
             state=state,
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
@@ -227,10 +239,9 @@ def build_phases_before_align(
             fatal_exceptions=(
                 ExclusionRecoverySelectionError,
                 AudioAlignmentCleanupError,
-                AlignmentSourceIdentityError,
             ),
             progress_total=max(1, len(input_videos)),
-            skip_detail="Disabled",
+            skip_detail=CONFIG_DISABLED,
         ),
     ]
 
@@ -239,13 +250,17 @@ def build_phases_after_align(
     *,
     request: RunRequest,
     monotonic_timer: Callable[[], float],
-    ffmpeg_runner: FFmpegRunner,
     http_client: httpx.AsyncClient | None,
     state: ExecutionState,
     metadata_prefetch: MetadataPrefetch,
     config: ConfigSchema,
     confirm_slowpics_upload: SlowpicsUploadConfirmationFn | None = None,
+    vs_loader: VSLoader | None = None,
 ) -> list[Phase]:
+    def _retain_confirmed_upload(url: str, uploaded_file_paths: tuple[Path, ...]) -> None:
+        state.artifacts.slowpics_url = url
+        state.artifacts.uploaded_slowpics_file_paths = uploaded_file_paths
+
     async def _run_publish_with_current_artifacts(ctx: RunContext) -> PublishPhaseOutput:
         if (
             _requires_report_confirmed_slowpics(ctx.config)
@@ -257,13 +272,14 @@ def build_phases_after_align(
             client=http_client,
             metadata=state.artifacts.resolved_metadata,
             render=state.artifacts.render,
-            selected_frames=state.selected_frames,
+            selected_frames=list(ctx.selection.frames),
+            on_upload_confirmed=_retain_confirmed_upload,
         )
 
     def _run_report_with_current_artifacts(ctx: RunContext) -> ReportPhaseOutput:
         return run_report_phase(
             ctx,
-            frames=state.selected_frames,
+            frames=list(ctx.selection.frames),
             render=state.artifacts.render,
             metadata=state.artifacts.resolved_metadata,
             slowpics_url=None
@@ -290,16 +306,15 @@ def build_phases_after_align(
             report_succeeded=state.artifacts.report_succeeded,
         )
 
+    def _run_render_with_current_selection(ctx: RunContext):
+        return run_render_phase(ctx, frames=list(ctx.selection.frames), vs_loader=vs_loader)
+
     render_metadata_phases = [
         _create_timed_phase(
             "render",
             "render",
             None,
-            partial(
-                run_render_phase,
-                frames=state.selected_frames,
-                runner=ffmpeg_runner,
-            ),
+            _run_render_with_current_selection,
             state=state,
             monotonic_timer=monotonic_timer,
             phase_timings=state.phase_timings,
@@ -319,7 +334,7 @@ def build_phases_after_align(
             phase_timings=state.phase_timings,
             warnings=state.warnings,
             warn_only=True,
-            skip_detail="Disabled",
+            skip_detail=CONFIG_DISABLED,
         ),
     ]
     publish_phase = _create_timed_phase(
@@ -343,7 +358,7 @@ def build_phases_after_align(
             isinstance(output, PublishPhaseOutput) and output.slowpics_url is not None
         ),
         skip_detail=lambda effective_config: (
-            "Disabled"
+            CONFIG_DISABLED
             if not effective_config.slowpics.auto_upload
             else "Unavailable"
             if http_client is None
@@ -364,7 +379,7 @@ def build_phases_after_align(
         phase_timings=state.phase_timings,
         warnings=state.warnings,
         warn_only=True,
-        skip_detail="Disabled",
+        skip_detail=CONFIG_DISABLED,
     )
     confirm_slowpics_upload_phase = _create_timed_phase(
         "confirm_slowpics_upload",
@@ -430,19 +445,15 @@ def build_execution_phase_plan(
         vs_loader=deps.vs_loader,
     )
 
-    ffmpeg_runner = deps.ffmpeg_runner
-    if ffmpeg_runner is None:
-        raise RuntimeError("FFmpeg runner must be initialized before execution.")
-
     after_align = build_phases_after_align(
         request=request,
         monotonic_timer=deps.monotonic_timer,
-        ffmpeg_runner=ffmpeg_runner,
         http_client=deps.http_client,
         state=state,
         metadata_prefetch=prep.metadata_prefetch,
         config=prep.config,
         confirm_slowpics_upload=deps.confirm_slowpics_upload,
+        vs_loader=deps.vs_loader,
     )
     return ExecutionPhasePlan(
         before_align=before_align,

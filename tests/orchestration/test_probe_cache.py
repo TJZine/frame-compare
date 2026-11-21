@@ -28,27 +28,20 @@ def test_probe_cache_invalidates_on_fingerprint_change():
     assert compute_probe_cache_key(fp_mtime) != base_key
 
 
-def test_probe_cache_key_intentionally_reuses_same_stat_identity(tmp_path: Path) -> None:
-    """Content hashing is deliberately excluded from the performance-first key."""
+def test_live_probe_key_invalidates_same_size_and_mtime_replacement(tmp_path: Path) -> None:
     video = tmp_path / "video.mkv"
     fixed_mtime_ns = 1_704_067_200_000_000_000
     video.write_bytes(b"original")
     os.utime(video, ns=(fixed_mtime_ns, fixed_mtime_ns))
-    original_stat = video.stat()
-    original = compute_probe_cache_key(
-        ClipFingerprint(video, original_stat.st_size, original_stat.st_mtime_ns)
-    )
-
+    original = probe_cache.live_probe_fingerprint(video).fingerprint
     video.write_bytes(b"replaced")
     os.utime(video, ns=(fixed_mtime_ns, fixed_mtime_ns))
-    replaced_stat = video.stat()
+    replaced = probe_cache.live_probe_fingerprint(video).fingerprint
 
-    assert (
-        compute_probe_cache_key(
-            ClipFingerprint(video, replaced_stat.st_size, replaced_stat.st_mtime_ns)
-        )
-        == original
-    )
+    assert original.source_token is not None
+    assert original.size_bytes == replaced.size_bytes
+    assert original.mtime_ns == replaced.mtime_ns
+    assert compute_probe_cache_key(original) != compute_probe_cache_key(replaced)
 
 
 def test_probe_cache_key_changes_with_scoped_runtime_fingerprint(monkeypatch) -> None:

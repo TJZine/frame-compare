@@ -2,13 +2,13 @@ name: Release Please
 
 on:
   push:
-    branches: [main]
+    branches: [pre-release]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-please-main
+  group: release-please-pre-release
   cancel-in-progress: false
 
 jobs:
@@ -86,4 +86,5 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          target-branch: pre-release
           skip-github-release: true

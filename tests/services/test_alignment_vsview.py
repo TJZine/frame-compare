@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import asdict
-from fractions import Fraction
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -13,19 +12,14 @@ from unittest.mock import MagicMock
 import pytest
 
 import frame_compare.services.alignment_vsview as alignment_vsview
-from frame_compare.services.alignment import align_clips_from_request
-from frame_compare.services.alignment_manual_overrides import load_manual_overrides
+from frame_compare.services.alignment import _build_audio_review_map, align_clips_from_request
+from frame_compare.services.alignment_keys import alignment_key
 from frame_compare.services.alignment_vsview import (
     AlignmentVSViewOutcome,
     maybe_launch_alignment_vsview,
 )
 from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
-from frame_compare.utils.alignment_evidence import (
-    MAX_ALIGNMENT_EVIDENCE_BYTES,
-    AudioAlignmentAttempt,
-    evidence_from_payload,
-)
+from frame_compare.services.types import AlignmentConfig, AlignmentResult, ComparisonResolution
 from frame_compare.utils.types import AlignmentClipIdentity, AlignmentClipRequest
 from frame_compare.vsview.adapter import VSViewAvailability, VSViewAvailabilityStatus
 from frame_compare.vsview.alignment_review_contract import (
@@ -35,6 +29,7 @@ from frame_compare.vsview.alignment_review_contract import (
     write_alignment_review_result,
 )
 from frame_compare.vsview.errors import VSViewError
+from tests.alignment_review_test_support import trusted_audio_attempt
 from tests.services.alignment_request_test_support import (
     VSVIEW_SESSION_ID as _SESSION_ID,
 )
@@ -82,6 +77,16 @@ def _set_interactive(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(alignment_vsview, "check_vsview_availability", _available)
 
 
+def _cached_resolution(reference: Path, comparison: Path) -> ComparisonResolution:
+    return ComparisonResolution(
+        AlignmentResult(
+            reference.name, comparison.name, 3, 3 / 24, 1.0, "cross_correlation", "cached"
+        ),
+        "fixture",
+        "shared_computed_offsets",
+    )
+
+
 def _call(
     tmp_path: Path,
     *,
@@ -90,68 +95,75 @@ def _call(
 ) -> AlignmentVSViewOutcome:
     reference = _clip(tmp_path / "ref.mkv")
     resolved_comparisons = comparisons or [_clip(tmp_path / "comparison.mkv", frame_count=150)]
-    offsets: dict[str, int | None] = {
-        f"ref:{comparison.path.stem}": 3 for comparison in resolved_comparisons
-    }
+    paths = [comparison.path for comparison in resolved_comparisons]
     return maybe_launch_alignment_vsview(
         reference=reference,
         comparisons=resolved_comparisons,
-        offsets_by_key=offsets,
-        audio_review_by_key={
-            key: json.dumps(
-                {
-                    "current_authority": {
-                        "origin": "shared_computed_offsets",
-                        "frame_offset": offset,
-                    },
-                    "evidence_availability": "historical_details_unavailable",
-                    "audio_attempt": None,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            for key, offset in offsets.items()
-        },
+        audio_review_by_key=_build_audio_review_map(
+            reference=reference.path,
+            comparisons=paths,
+            resolutions={
+                alignment_key(reference.path, path): _cached_resolution(reference.path, path)
+                for path in paths
+            },
+        ),
         cache_dir=tmp_path,
         config=config,
         progress=None,
     )
 
 
-def test_constructed_audio_review_envelope_round_trips_attempt_parser() -> None:
-    """The VSView audio-review envelope embeds the v4 attempt validated by one parser."""
+def test_audio_review_envelopes_distinguish_current_attempt_and_reused_offset() -> None:
+    reference = Path("ref")
+    fresh = Path("fresh")
+    reused = Path("reused")
     attempt = audio_attempt()
-    envelope = {
-        "current_authority": {"origin": "computed_this_run", "frame_offset": 0},
-        "evidence_availability": "current_attempt",
-        "audio_attempt": asdict(attempt),
-    }
-    encoded = json.dumps(envelope, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    assert len(encoded.encode("utf-8")) <= MAX_ALIGNMENT_EVIDENCE_BYTES
-
-    decoded = json.loads(encoded)
-    assert set(decoded) == {"current_authority", "evidence_availability", "audio_attempt"}
-    parsed = evidence_from_payload(AudioAlignmentAttempt, decoded["audio_attempt"])
-    assert parsed == attempt
-    assert parsed.comparison_ordinal == 1
-    assert parsed.decision.state == "provisional"
-    assert parsed.decision.candidate is not None
-    assert parsed.decision.candidate.frame_offset == 0
-
-    historical = json.loads(
-        json.dumps(
-            {
-                "current_authority": {
-                    "origin": "shared_computed_offsets",
-                    "frame_offset": 3,
-                },
-                "evidence_availability": "historical_details_unavailable",
-                "audio_attempt": None,
-            }
-        )
+    fresh_result = AlignmentResult(
+        reference.name,
+        fresh.name,
+        None,
+        None,
+        0.0,
+        "cross_correlation",
+        "computed",
+        applied=False,
+        audio_attempt=attempt,
     )
-    assert set(historical) == {"current_authority", "evidence_availability", "audio_attempt"}
-    assert historical["audio_attempt"] is None
+    fresh_key = alignment_key(reference, fresh)
+    reused_key = alignment_key(reference, reused)
+    reviews = _build_audio_review_map(
+        reference=reference,
+        comparisons=[fresh, reused],
+        resolutions={
+            fresh_key: ComparisonResolution(fresh_result, "fixture", "computed_this_run"),
+            reused_key: _cached_resolution(reference, reused),
+        },
+    )
+
+    assert set(reviews) == {fresh_key, reused_key}
+    current = json.loads(reviews[fresh_key])
+    historical = json.loads(reviews[reused_key])
+    assert (
+        set(current)
+        == set(historical)
+        == {
+            "current_authority",
+            "decision_state",
+            "candidate_offset",
+            "summary_lines",
+            "detail_lines",
+        }
+    )
+    assert current["current_authority"] == {"origin": "none", "frame_offset": None}
+    assert current["decision_state"] == "provisional"
+    assert current["candidate_offset"] == 0
+    assert historical["current_authority"] == {
+        "origin": "shared_computed_offsets",
+        "frame_offset": 3,
+    }
+    assert historical["decision_state"] is None
+    assert historical["candidate_offset"] is None
+    assert historical["detail_lines"] == ["Historical audio details unavailable."]
 
 
 def test_disabled_review_has_no_runtime_side_effects(
@@ -190,20 +202,46 @@ def test_native_result_applies_confirmed_pair_and_keeps_other_pair(
 
     monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
 
-    outcome = _call(
-        tmp_path,
-        config=AlignmentConfig(use_vsview=True),
+    reference = _clip(tmp_path / "ref.mkv")
+    request = replace(
+        alignment_request(
+            reference=reference.path,
+            comparisons=[comparison.path for comparison in comparisons],
+            generated_dir=tmp_path,
+        ),
+        reference=reference,
         comparisons=comparisons,
     )
+    attempt = trusted_audio_attempt(frame_offset=3)
 
-    assert outcome.summary.review_ran is True
-    assert outcome.summary.pairs_confirmed == 1
-    assert outcome.summary.comparisons_kept == 1
-    assert outcome.summary.review_unresolved is False
+    def compute(reference: Path, comparison: Path, **_kwargs: object) -> AlignmentResult:
+        return AlignmentResult(
+            reference.name,
+            comparison.name,
+            3,
+            3 / 24,
+            1.0,
+            "cross_correlation",
+            "computed",
+            stability=attempt.stability,
+            audio_attempt=attempt,
+        )
 
-    overrides = load_manual_overrides(tmp_path)
-    assert set(overrides) == {"ref:first"}
-    assert overrides["ref:first"].frame_offset == 12
+    monkeypatch.setattr("frame_compare.services.alignment._estimate_audio_pair", compute)
+    outcome = asyncio.run(
+        align_clips_from_request(request, AlignmentConfig(use_vsview=True, cache_results=False))
+    )
+
+    assert outcome.review.review_ran is True
+    assert outcome.review.pairs_confirmed == 1
+    assert outcome.review.comparisons_kept == 1
+    assert outcome.review.review_unresolved is False
+
+    confirmed, kept = outcome.resolutions
+    assert confirmed.origin == "interactive_confirmed_this_run"
+    assert confirmed.accepted_offset == 12
+    assert kept.origin == "computed_this_run"
+    assert kept.accepted_offset == 3
 
 
 @pytest.mark.parametrize("wait_seconds", [42.5, 0.0])
@@ -335,7 +373,6 @@ def test_pending_review_without_launch_marks_review_unresolved(
         align_clips_from_request(
             request,
             config,
-            reference_fps=Fraction(24),
         )
     )
 
@@ -347,6 +384,8 @@ def test_pending_review_without_launch_marks_review_unresolved(
     "payload",
     [
         "{not json",
+        "[" * 10000,
+        "1" * 5000,
         json.dumps(
             {
                 "schema_version": 1,
@@ -376,9 +415,9 @@ def test_pending_review_without_launch_marks_review_unresolved(
             }
         ),
     ],
-    ids=("malformed", "stale-session", "partial", "out-of-bounds"),
+    ids=("malformed", "deep", "integer-limit", "stale-session", "partial", "out-of-bounds"),
 )
-def test_optional_invalid_result_is_rejected_without_persisting_override(
+def test_optional_invalid_result_is_rejected(
     payload: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -395,7 +434,6 @@ def test_optional_invalid_result_is_rejected_without_persisting_override(
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
         None, "rejected_result"
     )
-    assert load_manual_overrides(tmp_path) == {}
 
 
 def test_close_without_finish_is_optional_cancellation(
@@ -505,11 +543,17 @@ def test_forced_review_requires_complete_same_environment_runtime(
         lambda: VSViewAvailability(status=status, message="missing"),
     )
 
-    with pytest.raises(AudioAlignmentError, match="this Python environment"):
+    with pytest.raises(AudioAlignmentError, match="this Python environment") as caught:
         _call(
             tmp_path,
             config=AlignmentConfig(use_vsview=True, force_interactive=True),
         )
+
+    assert caught.value.code == "FC-4005"
+    assert (
+        caught.value.hint
+        == "Run 'frame-compare doctor' to check VSView, or drop --force-interactive-alignment."
+    )
 
 
 def test_optional_process_failure_retains_offsets(
@@ -542,7 +586,6 @@ def test_optional_session_setup_failure_retains_offsets(
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
         None, "no_result"
     )
-    assert load_manual_overrides(tmp_path) == {}
 
 
 def test_forced_process_failure_propagates_typed_vsview_error(
@@ -589,30 +632,3 @@ def test_native_review_never_reads_terminal_input(
     assert _call(tmp_path, config=AlignmentConfig(use_vsview=True)) == AlignmentVSViewOutcome(
         {}, "keep_current", comparisons_kept=1
     )
-
-
-@pytest.mark.parametrize("changed_role", ["reference", "comparison"])
-def test_source_changed_during_review_cannot_save_new_manual_authority(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    changed_role: str,
-) -> None:
-    _set_interactive(monkeypatch)
-
-    def launch(*_args: object, **_kwargs: object):
-        session = _session(tmp_path)
-        write_alignment_review_result(
-            session,
-            AlignmentReviewResult(
-                session_id=session.session_id,
-                decisions=(ConfirmedAlignmentReviewDecision("ref:comparison", 120, 108),),
-            ),
-        )
-        changed = tmp_path / ("ref.mkv" if changed_role == "reference" else "comparison.mkv")
-        changed.write_bytes(b"changed after frozen request")
-        return session, 0.0
-
-    monkeypatch.setattr(alignment_vsview, "launch_alignment_verification_session", launch)
-    with pytest.raises(AudioAlignmentError, match="changed since preparation"):
-        _call(tmp_path, config=AlignmentConfig(use_vsview=True))
-    assert load_manual_overrides(tmp_path) == {}

@@ -18,28 +18,35 @@ def _resolve_existing_target_mode(path: Path) -> int | None:
 
 
 def _open_temp_for_atomic_write(path: Path) -> tuple[int, str]:
-    """Create a sibling temp file using normal file-creation permissions."""
+    """Create a sibling temp file with the target's mode before writing."""
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_BINARY"):
         flags |= os.O_BINARY
 
+    target_mode = _resolve_existing_target_mode(path)
+    create_mode = 0o666 if target_mode is None else target_mode
     collisions = 0
     for _ in range(_TEMP_NAME_ATTEMPTS):
         tmp_path = path.parent / f".{path.name}.{secrets.token_hex(8)}"
         try:
-            return os.open(tmp_path, flags, 0o666), str(tmp_path)
+            fd = os.open(tmp_path, flags, create_mode)
         except FileExistsError:
             collisions += 1
+            continue
+
+        if target_mode is None:
+            return fd, str(tmp_path)
+        try:
+            os.fchmod(fd, target_mode)
+        except BaseException as original_error:
+            os.close(fd)
+            _cleanup_temp_after_failure(str(tmp_path), original_error)
+            raise
+        return fd, str(tmp_path)
 
     raise FileExistsError(
         f"could not create a unique temporary file for {path} after {collisions} collisions"
     )
-
-
-def _preserve_existing_target_mode(path: Path, tmp_name: str) -> None:
-    target_mode = _resolve_existing_target_mode(path)
-    if target_mode is not None:
-        os.chmod(tmp_name, target_mode)
 
 
 def _cleanup_temp_after_failure(tmp_name: str, original_error: BaseException) -> None:
@@ -68,7 +75,6 @@ def write_text_atomic(
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        _preserve_existing_target_mode(path, tmp_name)
         if publish_guard is not None:
             publish_guard()
         os.replace(tmp_name, path)
@@ -91,7 +97,6 @@ def write_bytes_atomic(
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
-        _preserve_existing_target_mode(path, tmp_name)
         if publish_guard is not None:
             publish_guard()
         os.replace(tmp_name, path)

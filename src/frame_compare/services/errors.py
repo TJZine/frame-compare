@@ -95,6 +95,7 @@ class AudioAlignmentError(ProcessingError):
         role: str | None = None,
         reference_sample_count: int | None = None,
         comparison_sample_count: int | None = None,
+        hint: str = "Ensure audio tracks exist and are similar",
     ) -> None:
         self.category = category
         self.stage = stage
@@ -106,20 +107,9 @@ class AudioAlignmentError(ProcessingError):
                 code="FC-4005",
                 name="AUDIO_ALIGNMENT_ERROR",
                 message=f"Audio alignment failed: {reason}",
-                hint="Ensure audio tracks exist and are similar",
+                hint=hint,
                 details={"reason": reason},
             )
-        )
-
-
-class AlignmentSourceIdentityError(AudioAlignmentError):
-    """Fatal invalidation of the prepared source set; a fresh run is required."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            "Alignment sources changed since preparation. Start a fresh run.",
-            category="source_identity_changed",
-            stage="acceptance",
         )
 
 

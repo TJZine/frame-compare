@@ -1,9 +1,22 @@
 """Typed, presentation-only identities derived from release filenames."""
 
+from __future__ import annotations
+
+import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+from frame_compare.config.text_validation import (
+    is_control_character,
+    show_bidi_formatting_controls,
+)
+
+if TYPE_CHECKING:
+    from frame_compare.services.types import TmdbMetadata
+
+_STEM_TOKEN = re.compile(r"[^.\-_ ]+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +43,7 @@ class ReleaseIdentity:
     release_group: str | None = None
     revision_tags: tuple[str, ...] = ()
     variant_tags: tuple[str, ...] = ()
+    has_terminal_release_group: bool = False
 
 
 def format_content_identity(content: ContentIdentity) -> str:
@@ -46,30 +60,78 @@ def format_content_identity(content: ContentIdentity) -> str:
     return label
 
 
-def format_release_descriptor(identity: ReleaseIdentity, separator: str = " | ") -> str:
+def clip_role(index: int) -> str:
+    """Return the stable presentation role for an ordered clip."""
+    return "Reference" if index == 0 else f"Comparison {index}"
+
+
+def comparison_title(
+    identities: Sequence[ReleaseIdentity | None], metadata: TmdbMetadata | None
+) -> tuple[str, Literal["tmdb", "parsed_metadata"]] | None:
+    """Return the comparison title and its source before surface-specific fallbacks."""
+    if metadata is not None and metadata.title.strip():
+        reference = identities[0] if identities else None
+        content = reference.content if reference is not None else None
+        title = format_content_identity(
+            ContentIdentity(
+                metadata.title,
+                year=(metadata.year or (content.year if content is not None else None))
+                if metadata.media_type == "movie"
+                else None,
+                season=content.season
+                if content is not None and metadata.media_type == "tv"
+                else None,
+                episode=content.episode
+                if content is not None and metadata.media_type == "tv"
+                else None,
+            )
+        )
+        return title, "tmdb"
+    common = common_content_identity(identities)
+    return (format_content_identity(common), "parsed_metadata") if common is not None else None
+
+
+def _usable_release_group(identity: ReleaseIdentity) -> str | None:
+    return identity.release_group if identity.has_terminal_release_group else None
+
+
+def format_release_descriptor(
+    identity: ReleaseIdentity, separator: str = " | ", *, short_name: str
+) -> str:
     """Format release facts without repeating content identity."""
     source = " ".join(part for part in (identity.service, identity.source_type) if part)
     parts = [identity.resolution, source or None]
     parts.extend((" ".join(identity.dynamic_range_claims) or None,))
     parts.extend(identity.revision_tags)
     parts.extend(identity.variant_tags)
-    parts.append(identity.release_group)
-    return separator.join(part for part in parts if part)
+    descriptor = separator.join(part for part in parts if part)
+    ending = _usable_release_group(identity)
+    if ending is None:
+        role_prefixed = re.match(r"^(Reference|Comparison \d+) \| ", short_name) is not None
+        from_facts = all(part in parts for part in short_name.split(" · "))
+        ending = "" if role_prefixed or from_facts else short_name.replace(" · ", separator)
+    if ending and not (descriptor == ending or descriptor.endswith(separator + ending)):
+        return separator.join(part for part in (descriptor, ending) if part)
+    return descriptor
 
 
-def format_compact_identity(identity: ReleaseIdentity, separator: str = " | ") -> str:
+def format_compact_identity(
+    identity: ReleaseIdentity, separator: str = " | ", *, short_name: str
+) -> str:
     """Format content and release facts in one compact line."""
     return separator.join(
         part
         for part in (
             format_content_identity(identity.content),
-            format_release_descriptor(identity, separator),
+            format_release_descriptor(identity, separator, short_name=short_name),
         )
         if part
     )
 
 
-def format_micro_descriptor(identity: ReleaseIdentity, separator: str = " | ") -> str:
+def format_micro_descriptor(
+    identity: ReleaseIdentity, separator: str = " | ", *, include_group: bool = True
+) -> str:
     """Format the smallest useful release descriptor for constrained surfaces."""
     source = " ".join(part for part in (identity.service, identity.source_type) if part)
     return separator.join(
@@ -78,35 +140,68 @@ def format_micro_descriptor(identity: ReleaseIdentity, separator: str = " | ") -
             source or None,
             " ".join(identity.dynamic_range_claims) or None,
             *identity.revision_tags,
-            identity.release_group,
+            _usable_release_group(identity) if include_group else None,
         )
         if part
     )
 
 
+def normalize_release_text(value: str) -> str:
+    """Normalize filename-derived presentation text."""
+    without_controls = "".join(
+        " " if is_control_character(character) else character for character in value
+    )
+    return " ".join(without_controls.split())
+
+
 @dataclass(frozen=True, slots=True)
 class ShortNameSource:
-    """Per-source facts needed for the terminal short name (S1)."""
+    """Per-source facts needed for a short presentation name."""
 
     identity: ReleaseIdentity | None
     label: str
     label_is_explicit: bool
+    stem: str
 
 
-def short_source_names(sources: Sequence[ShortNameSource], *, roles: Sequence[str]) -> list[str]:
-    """Return one short name per source in clip order for terminal output.
-
-    A source uses its release group when it has one and no other source has
-    the same group (case-insensitive); otherwise it uses its compact
-    (``micro``) name. Explicit labels are used as given. Any remaining
-    collision is resolved with :func:`unique_presentation_names`.
-    """
+def short_source_names(
+    sources: Sequence[ShortNameSource],
+    *,
+    show_bidi_controls: bool = False,
+) -> list[str]:
+    """Prefer explicit labels, unique usable groups, micro descriptors, then filename text."""
     groups = [
-        source.identity.release_group if source.identity is not None else None for source in sources
+        _usable_release_group(source.identity) if source.identity is not None else None
+        for source in sources
     ]
+    stems = [normalize_release_text(source.stem) for source in sources]
+    tokens = [tuple(_STEM_TOKEN.finditer(stem)) for stem in stems]
+    token_values = [tuple(token[0].casefold() for token in matches) for matches in tokens]
+    prefix, suffix = _shared_stem_edges(token_values)
+    micros = [
+        format_micro_descriptor(source.identity, separator=" · ", include_group=group is not None)
+        if source.identity is not None
+        else ""
+        for source, group in zip(sources, groups, strict=True)
+    ]
+    differing_names: list[str] = []
+    for index, source in enumerate(sources):
+        start = prefix
+        end = len(tokens[index]) - suffix
+        if prefix == suffix == 0 and source.identity is not None:
+            start = _verified_title_prefix(source.identity.content, token_values[index])
+        differing_names.append(
+            stems[index][tokens[index][start].start() : tokens[index][end - 1].end()]
+            if start < end
+            else ""
+        )
+    micro_counts = Counter(name.casefold() for name in micros)
+    differing_counts = Counter(name.casefold() for name in differing_names)
     names: list[str] = []
     protected: list[bool] = []
-    for source, group in zip(sources, groups, strict=True):
+    for source, group, micro, differing in zip(
+        sources, groups, micros, differing_names, strict=True
+    ):
         label = source.label.strip()
         if source.label_is_explicit and label:
             names.append(source.label)
@@ -114,16 +209,42 @@ def short_source_names(sources: Sequence[ShortNameSource], *, roles: Sequence[st
             continue
         if group and _release_group_is_unique(group, groups):
             names.append(group)
-            protected.append(False)
-            continue
-        micro = (
-            format_micro_descriptor(source.identity, separator=" · ")
-            if source.identity is not None
-            else ""
-        )
-        names.append(micro or label)
+        elif (
+            micro_counts[micro.casefold()] > 1
+            and differing
+            and differing_counts[differing.casefold()] == 1
+        ):
+            names.append(differing)
+        else:
+            names.append(micro or differing or label)
         protected.append(False)
+    roles = [clip_role(index) for index in range(len(sources))]
+    if show_bidi_controls:
+        names = [show_bidi_formatting_controls(name) for name in names]
     return unique_presentation_names(names, roles=list(roles), protected=protected)
+
+
+def _shared_stem_edges(token_values: Sequence[tuple[str, ...]]) -> tuple[int, int]:
+    if len(token_values) < 2:
+        return 0, 0
+    prefix = _matching_token_count(token_values)
+    suffix = _matching_token_count([tokens[prefix:][::-1] for tokens in token_values])
+    return prefix, suffix
+
+
+def _matching_token_count(token_values: Sequence[tuple[str, ...]]) -> int:
+    for index, aligned in enumerate(zip(*token_values, strict=False)):
+        if len(set(aligned)) > 1:
+            return index
+    return min(map(len, token_values))
+
+
+def _verified_title_prefix(content: ContentIdentity, tokens: tuple[str, ...]) -> int:
+    if content.title_origin == "parsed":
+        title = tuple(token.casefold() for token in _STEM_TOKEN.findall(content.title))
+        if len(title) < len(tokens) and tokens[: len(title)] == title:
+            return len(title)
+    return 0
 
 
 def _release_group_is_unique(group: str, groups: Sequence[str | None]) -> bool:
@@ -133,7 +254,10 @@ def _release_group_is_unique(group: str, groups: Sequence[str | None]) -> bool:
 
 
 def unique_presentation_names(
-    names: list[str], *, roles: list[str], protected: list[bool] | None = None
+    names: list[str],
+    *,
+    roles: list[str],
+    protected: list[bool] | None = None,
 ) -> list[str]:
     """Resolve display-only collisions deterministically without changing identities."""
     if len(names) != len(roles):
@@ -158,11 +282,13 @@ def unique_presentation_names(
     return resolved
 
 
-def common_content_identity(identities: list[ReleaseIdentity]) -> ContentIdentity | None:
+def common_content_identity(identities: Sequence[ReleaseIdentity | None]) -> ContentIdentity | None:
     """Return safely shared content identity, or None when content conflicts."""
-    if not identities or not any(item.content.title_origin == "parsed" for item in identities):
+    contents = [item.content for item in identities if item is not None]
+    if len(contents) != len(identities) or not any(
+        content.title_origin == "parsed" for content in contents
+    ):
         return None
-    contents = [item.content for item in identities]
     if len({" ".join(item.title.casefold().split()) for item in contents}) != 1:
         return None
     for field in ("year", "season", "episode"):
@@ -193,6 +319,8 @@ __all__ = [
     "format_content_identity",
     "format_micro_descriptor",
     "format_release_descriptor",
+    "clip_role",
+    "comparison_title",
     "short_source_names",
     "unique_presentation_names",
 ]

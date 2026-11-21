@@ -1,0 +1,212 @@
+{
+  "validity": [
+    {
+      "value": "0.0.0",
+      "valid": true
+    },
+    {
+      "value": "0.8.0",
+      "valid": true
+    },
+    {
+      "value": "0.8.0rc1",
+      "valid": true
+    },
+    {
+      "value": "0.8.0rc999999999",
+      "valid": true
+    },
+    {
+      "value": "999999999.999999999.999999999",
+      "valid": true
+    },
+    {
+      "value": "1.2.3rc2",
+      "valid": true
+    },
+    {
+      "value": "",
+      "valid": false
+    },
+    {
+      "value": "1",
+      "valid": false
+    },
+    {
+      "value": "1.2",
+      "valid": false
+    },
+    {
+      "value": "01.2.3",
+      "valid": false
+    },
+    {
+      "value": "1.02.3",
+      "valid": false
+    },
+    {
+      "value": "1.2.03",
+      "valid": false
+    },
+    {
+      "value": "1.2.3rc0",
+      "valid": false
+    },
+    {
+      "value": "1.2.3rc01",
+      "valid": false
+    },
+    {
+      "value": "1.2.3RC1",
+      "valid": false
+    },
+    {
+      "value": "v1.2.3",
+      "valid": false
+    },
+    {
+      "value": "1.2.3+local",
+      "valid": false
+    },
+    {
+      "value": "1.2.3\n",
+      "valid": false
+    },
+    {
+      "value": " 1.2.3",
+      "valid": false
+    },
+    {
+      "value": "1.2.3 ",
+      "valid": false
+    },
+    {
+      "value": "1.2.٣",
+      "valid": false
+    },
+    {
+      "value": "1.2.3rc٢",
+      "valid": false
+    },
+    {
+      "value": "1.2.3rc-1",
+      "valid": false
+    },
+    {
+      "value": "1000000000.0.0",
+      "valid": true,
+      "powershell_valid": false
+    },
+    {
+      "value": "1.2.3٣",
+      "valid": false
+    },
+    {
+      "value": "1.2٢.3",
+      "valid": false
+    },
+    {
+      "value": "1.2.3rc2٢",
+      "valid": false
+    }
+  ],
+  "ordering": [
+    {
+      "left": "0.8.0rc1",
+      "right": "0.8.0rc2",
+      "order": -1
+    },
+    {
+      "left": "0.8.0rc10",
+      "right": "0.8.0rc2",
+      "order": 1
+    },
+    {
+      "left": "0.8.0rc999999999",
+      "right": "0.8.0",
+      "order": -1
+    },
+    {
+      "left": "0.8.0",
+      "right": "0.8.0rc1",
+      "order": 1
+    },
+    {
+      "left": "0.8.0",
+      "right": "0.8.0",
+      "order": 0
+    },
+    {
+      "left": "0.8.1rc1",
+      "right": "0.8.0",
+      "order": 1
+    },
+    {
+      "left": "1.0.0",
+      "right": "0.999999999.999999999",
+      "order": 1
+    }
+  ],
+  "ranges": [
+    {
+      "value": "0.8.0rc1",
+      "min": "0.8.0",
+      "max": null,
+      "allowed": true
+    },
+    {
+      "value": "0.8.0rc1",
+      "min": "0.8.0rc2",
+      "max": null,
+      "allowed": false
+    },
+    {
+      "value": "0.8.0rc2",
+      "min": "0.8.0rc2",
+      "max": "0.8.0rc2",
+      "allowed": true
+    },
+    {
+      "value": "0.8.0",
+      "min": "0.8.0",
+      "max": "0.8.0",
+      "allowed": true
+    },
+    {
+      "value": "0.8.1rc1",
+      "min": "0.8.0",
+      "max": "0.8.1rc1",
+      "allowed": true
+    },
+    {
+      "value": "0.8.1",
+      "min": "0.8.0",
+      "max": "0.8.1rc1",
+      "allowed": false
+    },
+    {
+      "value": "0.9.0rc1",
+      "min": "0.8.0",
+      "max": null,
+      "allowed": false
+    },
+    {
+      "value": "1.0.0",
+      "min": "0.8.0",
+      "max": null,
+      "allowed": false
+    },
+    {
+      "value": "0.8.0",
+      "min": "invalid",
+      "max": null,
+      "allowed": false
+    },
+    {
+      "value": "0.8.0",
+      "min": "0.8.0",
+      "max": "invalid",
+      "allowed": false
+    }
+  ]
+}

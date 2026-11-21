@@ -3,24 +3,18 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypeGuard, cast, get_args
 
-from frame_compare.utils.alignment_evidence import (
-    MAX_ALIGNMENT_EVIDENCE_BYTES,
-    AudioAlignmentAttempt,
-    evidence_from_payload,
-)
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
-ALIGNMENT_REVIEW_METADATA_VERSION = 5
+ALIGNMENT_REVIEW_METADATA_VERSION = 6
 ALIGNMENT_REVIEW_RESULT_VERSION = 1
 ALIGNMENT_REVIEW_RESULT_SUFFIX = ".alignment-result.json"
-VSVIEW_SESSIONS_DIR_NAME = "vsview_sessions"
 
 ALIGNMENT_REVIEW_METADATA_VERSION_KEY = "frame_compare_contract_version"
 ALIGNMENT_REVIEW_METADATA_SESSION_ID_KEY = "frame_compare_session_id"
@@ -28,7 +22,6 @@ ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY = "frame_compare_alignment_key"
 ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY = "frame_compare_comparison_ordinal"
 ALIGNMENT_REVIEW_METADATA_ROLE_KEY = "frame_compare_output_role"
 ALIGNMENT_REVIEW_METADATA_NAME_KEY = "frame_compare_presentation_name"
-ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY = "frame_compare_suggested_offset"
 ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY = "frame_compare_audio_review"
 ALIGNMENT_REVIEW_REFERENCE_METADATA_KEYS = frozenset(
     {
@@ -46,7 +39,6 @@ ALIGNMENT_REVIEW_COMPARISON_METADATA_KEYS = frozenset(
         ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY,
         ALIGNMENT_REVIEW_METADATA_ROLE_KEY,
         ALIGNMENT_REVIEW_METADATA_NAME_KEY,
-        ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY,
         ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY,
     }
 )
@@ -61,18 +53,21 @@ type _AuthorityOrigin = Literal[
     "shared_computed_offsets",
     "interactive_confirmed_this_run",
     "shared_previous_offsets",
-    "preexisting_manual_override",
     "none",
 ]
-type _EvidenceAvailabilityLiteral = Literal[
-    "current_attempt", "historical_details_unavailable", "not_computed"
-]
+type AlignmentReviewDecisionState = Literal["trusted_automatic", "provisional", "unavailable"]
+
+MANUAL_AUTHORITY_ORIGINS: frozenset[_AuthorityOrigin] = frozenset(
+    {
+        "interactive_confirmed_this_run",
+        "shared_previous_offsets",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
 class AlignmentReviewSession:
     script_path: Path
-    sessions_dir: Path
     session_id: str
     result_path: Path
 
@@ -120,8 +115,10 @@ class AlignmentReviewCurrentAuthority:
 @dataclass(frozen=True, slots=True)
 class AlignmentReviewAudioReview:
     current_authority: AlignmentReviewCurrentAuthority
-    evidence_availability: _EvidenceAvailabilityLiteral
-    audio_attempt: AudioAlignmentAttempt | None
+    decision_state: AlignmentReviewDecisionState | None
+    candidate_offset: int | None
+    summary_lines: tuple[str, ...]
+    detail_lines: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +129,6 @@ class AlignmentReviewComparisonMetadata:
     comparison_key: str
     comparison_ordinal: int
     presentation_name: str
-    suggested_offset: int | None
     audio_review: AlignmentReviewAudioReview
 
 
@@ -227,36 +223,12 @@ class AlignmentReviewResult:
         _validated_session_id(self.session_id)
 
 
-def alignment_review_session_from_script(
-    script_path: Path,
-    *,
-    sessions_dir: Path | None = None,
-    require_result_absent: bool = False,
-) -> AlignmentReviewSession:
-    """Derive trusted session identity and result path from a generated script."""
-    owner = script_path.parent if sessions_dir is None else sessions_dir
-    if owner.name != VSVIEW_SESSIONS_DIR_NAME or owner.is_symlink() or not owner.is_dir():
-        raise AlignmentReviewContractError("invalid VSView sessions directory")
-    if script_path.parent.resolve() != owner.resolve():
-        raise AlignmentReviewContractError(
-            "VSView session script is outside its sessions directory"
-        )
-    if script_path.is_symlink() or not script_path.is_file():
-        raise AlignmentReviewContractError("VSView session script is not a regular file")
-
-    session_id = _session_id_from_filename(script_path.name)
-    result_path = script_path.with_name(f"{script_path.stem}{ALIGNMENT_REVIEW_RESULT_SUFFIX}")
-    if result_path.parent.resolve() != owner.resolve():
-        raise AlignmentReviewContractError(
-            "alignment review result path escaped its sessions directory"
-        )
-    if require_result_absent and os.path.lexists(result_path):
-        raise AlignmentReviewContractError("alignment review result already exists")
+def alignment_review_session_from_script(script_path: Path) -> AlignmentReviewSession:
+    """Derive session identity and result path from a generated script name."""
     return AlignmentReviewSession(
         script_path=script_path,
-        sessions_dir=owner,
-        session_id=session_id,
-        result_path=result_path,
+        session_id=_session_id_from_filename(script_path.name),
+        result_path=script_path.with_name(f"{script_path.stem}{ALIGNMENT_REVIEW_RESULT_SUFFIX}"),
     )
 
 
@@ -265,7 +237,6 @@ def write_alignment_review_result(
     result: AlignmentReviewResult,
 ) -> None:
     """Atomically write one complete alignment review result."""
-    _validate_session_paths(session, result_file_must_exist=False)
     if result.session_id != session.session_id:
         raise AlignmentReviewContractError("alignment review result session mismatch")
     payload = {
@@ -285,18 +256,11 @@ def read_alignment_review_result(
     expected_comparisons: tuple[AlignmentReviewExpectedComparison, ...],
 ) -> AlignmentReviewResult:
     """Read and strictly validate the exact trusted result sidecar."""
-    _validate_session_paths(session, result_file_must_exist=True)
     try:
-        raw = cast(
-            object,
-            json.loads(
-                session.result_path.read_text(encoding="utf-8"),
-                object_pairs_hook=_json_object_without_duplicates,
-            ),
-        )
+        raw = cast(object, json.loads(session.result_path.read_text(encoding="utf-8")))
     except FileNotFoundError as exc:
         raise AlignmentReviewContractError("alignment review result is missing") from exc
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+    except (OSError, *SERIALIZED_DECODE_FAILURES) as exc:
         raise AlignmentReviewContractError("alignment review result is unreadable") from exc
     result = _parse_result(raw)
     validate_alignment_review_result(result, session, expected_comparisons)
@@ -326,31 +290,20 @@ def validate_alignment_review_result(
                 raise AlignmentReviewContractError("comparison source frame is out of bounds")
 
 
-def _validate_session_paths(
-    session: AlignmentReviewSession, *, result_file_must_exist: bool
-) -> None:
-    trusted = alignment_review_session_from_script(
-        session.script_path,
-        sessions_dir=session.sessions_dir,
-    )
-    if trusted != session:
-        raise AlignmentReviewContractError("alignment review session paths are inconsistent")
-    if os.path.lexists(session.result_path):
-        if session.result_path.is_symlink() or not session.result_path.is_file():
-            raise AlignmentReviewContractError("alignment review result is not a regular file")
-        if session.result_path.resolve().parent != session.sessions_dir.resolve():
-            raise AlignmentReviewContractError(
-                "alignment review result escaped its sessions directory"
-            )
-    elif result_file_must_exist:
-        raise AlignmentReviewContractError("alignment review result is missing")
-
-
 def _session_id_from_filename(filename: str) -> str:
     if not filename.endswith(".py"):
         raise AlignmentReviewContractError("invalid VSView session script filename")
     token = Path(filename).stem.rpartition("_")[2]
     return _validated_session_id(token)
+
+
+def alignment_review_metadata_version_message(version: object) -> str:
+    rendered = str(version) if _is_int(version) else "unknown"
+    return (
+        "Alignment review requires a newly generated session. "
+        f"This session uses metadata v{rendered}; "
+        f"this version requires v{ALIGNMENT_REVIEW_METADATA_VERSION}."
+    )
 
 
 def _parse_output_metadata(
@@ -363,11 +316,7 @@ def _parse_output_metadata(
     metadata = candidate.metadata
     version = metadata.get(ALIGNMENT_REVIEW_METADATA_VERSION_KEY)
     if not _is_int(version) or version != ALIGNMENT_REVIEW_METADATA_VERSION:
-        rendered = str(version) if _is_int(version) else "unknown"
-        raise AlignmentReviewContractError(
-            "Alignment review requires a newly generated session. "
-            f"This session uses metadata v{rendered}; this version requires v5."
-        )
+        raise AlignmentReviewContractError(alignment_review_metadata_version_message(version))
     role = metadata.get(ALIGNMENT_REVIEW_METADATA_ROLE_KEY)
     if role == "reference":
         expected_keys = ALIGNMENT_REVIEW_REFERENCE_METADATA_KEYS
@@ -393,19 +342,12 @@ def _parse_output_metadata(
         )
     comparison_key = metadata[ALIGNMENT_REVIEW_METADATA_ALIGNMENT_KEY]
     ordinal = metadata[ALIGNMENT_REVIEW_METADATA_ORDINAL_KEY]
-    suggested_offset = metadata[ALIGNMENT_REVIEW_METADATA_SUGGESTED_OFFSET_KEY]
     audio_review_raw = metadata[ALIGNMENT_REVIEW_METADATA_AUDIO_REVIEW_KEY]
     if not isinstance(comparison_key, str) or not comparison_key:
         raise AlignmentReviewContractError("alignment review output comparison key is invalid")
     if not _is_int(ordinal) or ordinal <= 0:
         raise AlignmentReviewContractError("alignment review output ordinal is invalid")
-    if suggested_offset is not None and not _is_int(suggested_offset):
-        raise AlignmentReviewContractError("alignment review suggested offset is invalid")
-    audio_review = _parse_audio_review(
-        audio_review_raw,
-        suggested_offset=suggested_offset,
-        comparison_ordinal=ordinal,
-    )
+    audio_review = _parse_audio_review(audio_review_raw)
     return AlignmentReviewComparisonMetadata(
         output_id=candidate.output_id,
         source_frame_count=candidate.source_frame_count,
@@ -413,7 +355,6 @@ def _parse_output_metadata(
         comparison_key=comparison_key,
         comparison_ordinal=ordinal,
         presentation_name=name,
-        suggested_offset=suggested_offset,
         audio_review=audio_review,
     )
 
@@ -421,8 +362,8 @@ def _parse_output_metadata(
 _CURRENT_AUTHORITY_ORIGINS: frozenset[_AuthorityOrigin] = frozenset(
     get_args(_AuthorityOrigin.__value__)
 )
-_EVIDENCE_AVAILABILITY: frozenset[_EvidenceAvailabilityLiteral] = frozenset(
-    get_args(_EvidenceAvailabilityLiteral.__value__)
+_DECISION_STATES: frozenset[AlignmentReviewDecisionState] = frozenset(
+    get_args(AlignmentReviewDecisionState.__value__)
 )
 
 
@@ -430,26 +371,34 @@ def _is_authority_origin(value: object) -> TypeGuard[_AuthorityOrigin]:
     return isinstance(value, str) and value in _CURRENT_AUTHORITY_ORIGINS
 
 
-def _is_evidence_availability(value: object) -> TypeGuard[_EvidenceAvailabilityLiteral]:
-    return isinstance(value, str) and value in _EVIDENCE_AVAILABILITY
+def _is_decision_state(value: object) -> TypeGuard[AlignmentReviewDecisionState]:
+    return isinstance(value, str) and value in _DECISION_STATES
 
 
-def _parse_audio_review(
-    raw: object, *, suggested_offset: int | None, comparison_ordinal: int
-) -> AlignmentReviewAudioReview:
+def _parse_review_lines(raw: object, field: str) -> tuple[str, ...]:
+    if not isinstance(raw, list) or not all(
+        isinstance(line, str) for line in cast(list[object], raw)
+    ):
+        raise AlignmentReviewContractError(f"alignment review {field} must be a list of strings")
+    return tuple(cast(list[str], raw))
+
+
+def _parse_audio_review(raw: object) -> AlignmentReviewAudioReview:
     if not isinstance(raw, str):
         raise AlignmentReviewContractError("alignment review audio evidence is invalid")
     try:
-        if len(raw.encode("utf-8")) > MAX_ALIGNMENT_EVIDENCE_BYTES:
-            raise AlignmentReviewContractError("alignment review audio evidence is invalid")
-        decoded = json.loads(raw, object_pairs_hook=_json_object_without_duplicates)
-    except AlignmentReviewContractError:
-        raise
-    except (RecursionError, ValueError) as exc:
+        decoded = json.loads(raw)
+    except SERIALIZED_DECODE_FAILURES as exc:
         raise AlignmentReviewContractError("alignment review audio evidence is invalid") from exc
     root = _strict_dict(
         decoded,
-        {"current_authority", "evidence_availability", "audio_attempt"},
+        {
+            "current_authority",
+            "decision_state",
+            "candidate_offset",
+            "summary_lines",
+            "detail_lines",
+        },
         "audio evidence",
     )
     authority_raw = _strict_dict(
@@ -461,69 +410,19 @@ def _parse_audio_review(
         raise AlignmentReviewContractError("alignment review current authority origin is invalid")
     if frame_offset is not None and not _is_int(frame_offset):
         raise AlignmentReviewContractError("alignment review current authority offset is invalid")
-    if (origin == "none") != (frame_offset is None):
-        raise AlignmentReviewContractError("alignment review current authority is inconsistent")
-    if suggested_offset != frame_offset:
-        raise AlignmentReviewContractError("alignment review trusted offset is inconsistent")
-    availability = root["evidence_availability"]
-    if not _is_evidence_availability(availability):
-        raise AlignmentReviewContractError("alignment review evidence availability is invalid")
-    attempt_raw = root["audio_attempt"]
-    if availability == "current_attempt":
-        attempt = _parse_audio_attempt(
-            attempt_raw,
-            suggested_offset=suggested_offset,
-            authority_origin=origin,
-            comparison_ordinal=comparison_ordinal,
-        )
-    else:
-        if attempt_raw is not None:
-            raise AlignmentReviewContractError(
-                "historical alignment evidence must not invent an attempt"
-            )
-        if origin == "computed_this_run":
-            raise AlignmentReviewContractError(
-                "current computed authority requires its trusted attempt"
-            )
-        attempt = None
+    decision_state = root["decision_state"]
+    if decision_state is not None and not _is_decision_state(decision_state):
+        raise AlignmentReviewContractError("alignment review decision state is invalid")
+    candidate_offset = root["candidate_offset"]
+    if candidate_offset is not None and not _is_int(candidate_offset):
+        raise AlignmentReviewContractError("alignment review candidate offset is invalid")
     return AlignmentReviewAudioReview(
         current_authority=AlignmentReviewCurrentAuthority(origin=origin, frame_offset=frame_offset),
-        evidence_availability=availability,
-        audio_attempt=attempt,
+        decision_state=decision_state,
+        candidate_offset=candidate_offset,
+        summary_lines=_parse_review_lines(root["summary_lines"], "summary lines"),
+        detail_lines=_parse_review_lines(root["detail_lines"], "detail lines"),
     )
-
-
-def _parse_audio_attempt(
-    raw: object,
-    *,
-    suggested_offset: int | None,
-    authority_origin: _AuthorityOrigin,
-    comparison_ordinal: int,
-) -> AudioAlignmentAttempt:
-    """Parse the embedded v4 attempt through the shared evidence parser."""
-    try:
-        attempt = evidence_from_payload(AudioAlignmentAttempt, raw)
-    except ValueError as exc:
-        raise AlignmentReviewContractError(
-            f"alignment review audio attempt is invalid: {exc}"
-        ) from exc
-    if attempt.comparison_ordinal != comparison_ordinal:
-        raise AlignmentReviewContractError("alignment review attempt ordinal is inconsistent")
-    state = attempt.decision.state
-    if state != "trusted_automatic" and authority_origin in {
-        "computed_this_run",
-        "shared_computed_offsets",
-    }:
-        raise AlignmentReviewContractError("untrusted audio evidence became authoritative")
-    if state == "trusted_automatic":
-        candidate = attempt.decision.candidate
-        if (
-            authority_origin != "computed_this_run"
-            or candidate is None
-            or suggested_offset != candidate.frame_offset
-        ):
-            raise AlignmentReviewContractError("accepted audio evidence is inconsistent")
-    return attempt
 
 
 def _validated_session_id(value: str) -> str:
@@ -538,15 +437,6 @@ def _validated_session_id(value: str) -> str:
 
 def _is_int(value: object) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _json_object_without_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise AlignmentReviewContractError("alignment review JSON contains duplicate fields")
-        result[key] = value
-    return result
 
 
 def _parse_result(raw: object) -> AlignmentReviewResult:

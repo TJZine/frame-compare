@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import replace
 from datetime import datetime
 
@@ -18,6 +18,7 @@ from frame_compare.orchestration.execution import (
     build_execution_phase_plan,
 )
 from frame_compare.orchestration.execution_types import (
+    ExecutionPhasePlan,
     ExecutionState,
     RunArtifacts,
 )
@@ -25,11 +26,14 @@ from frame_compare.orchestration.fps_report import (
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
 )
-from frame_compare.orchestration.phases import execute_phases
+from frame_compare.orchestration.phase_selection import (
+    shared_range_drop_warning,
+    user_frames_outside_shared_range,
+)
+from frame_compare.orchestration.phases import PhaseStatus, execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import (
-    emit_execution_section_end,
-    emit_execution_section_start,
+    rich_phase_label,
     select_reporter,
     uses_rich_progress,
 )
@@ -39,21 +43,44 @@ from frame_compare.orchestration.run_result_lifecycle import (
 )
 from frame_compare.orchestration.selection_report import emit_final_selection_report
 from frame_compare.orchestration.types import (
+    InterruptedRun,
     ReservedRunCapture,
     RunDependencies,
     RunRequest,
     RunResult,
 )
-from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
     is_cancelling,
+    is_run_interruption,
 )
 from frame_compare.utils.run_warnings import RunWarning
+from frame_compare.utils.terminal_sections import take_run_block_separator
+from frame_compare.utils.terminal_theme import WARN, glyphs_for_console, human_console
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = ["RunDependencies", "RunRequest", "RunResult", "execute_run"]
+
+
+def _emit_dropped_frames_notice(request: RunRequest, frames: tuple[int, ...]) -> None:
+    if frames and not (request.json_output or request.quiet):
+        console = human_console(stderr=True, no_color=request.no_color)
+        glyph = glyphs_for_console(console).warning
+        if take_run_block_separator():
+            console.print()
+        console.print(f"[{WARN}]{glyph}[/] {shared_range_drop_warning(frames).message}")
+
+
+def _combine_shared_range_warnings(warnings: list[RunWarning]) -> tuple[int, ...]:
+    relevant = [warning for warning in warnings if warning.dropped_user_frames]
+    frames = tuple(sorted({frame for warning in relevant for frame in warning.dropped_user_frames}))
+    if len(relevant) > 1:
+        warnings[:] = [
+            *(warning for warning in warnings if not warning.dropped_user_frames),
+            shared_range_drop_warning(frames),
+        ]
+    return frames
 
 
 def _assemble_run_result(
@@ -72,6 +99,8 @@ def _assemble_run_result(
         screenshot_dir=None if artifacts.render is None else artifacts.render.screenshot_dir,
         slowpics_url=artifacts.slowpics_url,
         report_path=artifacts.report_path,
+        alignment_summary=artifacts.alignment_summary,
+        alignment_diagnostics_dir=artifacts.alignment_diagnostics_dir,
         post_upload_actions=artifacts.post_upload_actions,
         slowpics_upload_confirmation_status=artifacts.slowpics_upload_confirmation_status,
         frame_count=len(selected_frames),
@@ -104,7 +133,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     run_timer_start: float | None = None
     phase_timings: dict[str, float] = {}
     clip_count = 0
-    selected_frame_count = 0
+    selected_frame_count: int | None = None
+    phase_plan: ExecutionPhasePlan | None = None
+    context: RunContext | None = None
     artifacts: RunArtifacts | None = None
     preflight_warnings: list[RunWarning] = []
     current_preflight_warnings: list[RunWarning] | None = None
@@ -131,11 +162,11 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             no_color=request.no_color,
         )
 
-    async def _execute_with_deps() -> RunResult:
+    async def _execute_with_deps() -> tuple[RunResult, datetime, datetime]:
         nonlocal artifacts, clip_count, phase_timings, preflight_warnings, run_start
         nonlocal current_preflight_warnings
         nonlocal run_timer_start
-        nonlocal selected_frame_count
+        nonlocal context, phase_plan, selected_frame_count
         run_start = local_deps.clock()
         run_timer_start = local_deps.monotonic_timer()
         reporter = local_deps.progress
@@ -145,10 +176,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         await cancellation_checkpoint()
         prep = await execute_prep(request, local_deps)
         await cancellation_checkpoint()
-        if local_deps.ffmpeg_runner is None:
-            local_deps.ffmpeg_runner = DefaultFFmpegRunner(
-                extraction_timeout_seconds=prep.config.screenshots.ffmpeg_timeout_seconds
-            )
         state = ExecutionState(artifacts=prep.artifacts)
         artifacts = prep.artifacts
         phase_timings = state.phase_timings
@@ -166,12 +193,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             workspace=prep.workspace,
             reference=reference,
             comparisons=comparisons,
-            analysis_selection_domain=prep.analysis_selection_domain,
-            analysis_clip=prep.analysis_clip,
-            selection_window=prep.selection_window,
+            selection_domain=prep.selection_domain,
             reporter=reporter,
             confirm_full_window_retry=local_deps.confirm_full_window_retry,
-            full_window_retry_override=prep.full_window_retry_override,
             run_warnings=state.warnings,
             preflight_warnings=prep.preflight_warnings,
             no_color=request.no_color,
@@ -186,6 +210,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             no_color=request.no_color,
             verbose=request.verbose,
         )
+        if not prep.config.audio_alignment.enable:
+            _emit_dropped_frames_notice(request, user_frames_outside_shared_range(context))
         state.phase_timings["load_sources"] = max(
             0.0, local_deps.monotonic_timer() - prep.load_sources_start
         )
@@ -212,112 +238,173 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             state=state,
         )
 
-        emit_execution_section_start(reporter, no_color=request.no_color)
-        try:
-            await execute_phases(phase_plan.before_align, context, reporter)
-            selected_frame_count = len(state.selected_frames)
-            emit_final_selection_report(
-                selected_frames=state.selected_frames,
-                breakdown=context.selection_breakdown,
-                verbose=request.verbose,
-                json_output=request.json_output,
-                quiet=request.quiet,
-                no_color=request.no_color,
-            )
-            emit_consolidated_fps_report(
-                stage="after_align",
-                clips=build_consolidated_fps_report(context.reference, context.comparisons),
-                json_output=request.json_output,
-                quiet=request.quiet,
-                rich_output=uses_rich_progress(reporter),
-                no_color=request.no_color,
-                verbose=request.verbose,
-            )
-            emit_frame_alignment_report(
-                stage="after_align",
-                comparisons=build_frame_alignment_report(
-                    reference=context.reference,
-                    comparisons=context.comparisons,
-                ),
-                selected_frames=state.selected_frames,
-                alignment_warnings=[
-                    warning for warning in state.warnings if warning.source == "alignment"
-                ],
-                json_output=request.json_output,
-                quiet=request.quiet,
-                no_color=request.no_color,
-                verbose=request.verbose,
-            )
-            await execute_phases(phase_plan.after_align, context, reporter)
-        except BaseException:
-            with suppress(BaseException):
-                emit_execution_section_end(reporter, no_color=request.no_color)
-            raise
-        else:
-            emit_execution_section_end(reporter, no_color=request.no_color)
+        # Publish can be skipped later by confirmation or availability; only its
+        # config switch excludes it from the initial run map.
+        reporter.set_phase_steps(
+            [
+                rich_phase_label(phase.name)
+                for phase in [*phase_plan.before_align, *phase_plan.after_align]
+                if phase.name in {"analyze", "align", "render", "report", "publish"}
+                and (
+                    prep.config.slowpics.auto_upload
+                    if phase.name == "publish"
+                    else phase.skip_condition is None or not phase.skip_condition(prep.config)
+                )
+            ]
+        )
+        await execute_phases(phase_plan.before_align, context, reporter)
+        dropped_frames = _combine_shared_range_warnings(state.warnings)
+        if prep.config.audio_alignment.enable:
+            _emit_dropped_frames_notice(request, dropped_frames)
+        selected_frame_count = len(list(context.selection.frames))
+        emit_final_selection_report(
+            selected_frames=list(context.selection.frames),
+            breakdown=context.selection.breakdown,
+            verbose=request.verbose,
+            json_output=request.json_output,
+            quiet=request.quiet,
+            no_color=request.no_color,
+        )
+        emit_consolidated_fps_report(
+            stage="after_align",
+            clips=build_consolidated_fps_report(context.reference, context.comparisons),
+            json_output=request.json_output,
+            quiet=request.quiet,
+            rich_output=uses_rich_progress(reporter),
+            no_color=request.no_color,
+            verbose=request.verbose,
+        )
+        emit_frame_alignment_report(
+            stage="after_align",
+            comparisons=build_frame_alignment_report(
+                reference=context.reference,
+                comparisons=context.comparisons,
+            ),
+            selected_frames=list(context.selection.frames),
+            alignment_warnings=[
+                warning for warning in state.warnings if warning.source == "alignment"
+            ],
+            json_output=request.json_output,
+            quiet=request.quiet,
+            no_color=request.no_color,
+            verbose=request.verbose,
+        )
+        await execute_phases(phase_plan.after_align, context, reporter)
         duration_seconds = max(0.0, local_deps.monotonic_timer() - run_timer_start)
         run_end = local_deps.clock()
         result = _assemble_run_result(
             artifacts=prep.artifacts,
-            selected_frames=state.selected_frames,
+            selected_frames=list(context.selection.frames),
             context=context,
             preflight_warnings=prep.preflight_warnings,
             phase_timings=state.phase_timings,
             duration_seconds=duration_seconds,
             vsview_review_seconds=state.vsview_review_seconds,
         )
-        await cancellation_checkpoint()
-        recorded_result = record_completed_run_result(
-            workspace=reserved_workspace,
-            result=result,
-            started_at=run_start,
-            completed_at=run_end,
-        )
-        await cancellation_checkpoint()
-        return recorded_result
+        return result, run_start, run_end
 
-    async def _execute_and_record_failure() -> RunResult:
+    try:
+        execution_error: Exception | asyncio.CancelledError | None = None
+        owns_client = local_deps.http_client is None
+        client_context = httpx.AsyncClient() if owns_client else nullcontext()
         try:
-            try:
-                return await _execute_with_deps()
-            except (_RunInterrupt, asyncio.CancelledError):
-                await cancellation_checkpoint()
-                raise asyncio.CancelledError() from None
-        except BaseException as original_error:
-            if isinstance(original_error, Exception) and is_cancelling():
-                # Deliver the queued interrupt before awaited client cleanup,
-                # without replacing a real failure already observed by its owner.
-                with suppress(asyncio.CancelledError):
+            async with client_context as owned_client:
+                if owned_client is not None:
+                    local_deps.http_client = owned_client
+                try:
+                    result, started_at, completed_at = await _execute_with_deps()
                     await cancellation_checkpoint()
-            duration_seconds = (
-                0.0
-                if run_timer_start is None
-                else max(0.0, local_deps.monotonic_timer() - run_timer_start)
-            )
-            record_failed_run_best_effort(
-                workspace=reserved_workspace,
-                error=original_error,
-                started_at=run_start,
-                completed_at=local_deps.clock,
-                duration_seconds=duration_seconds,
-                artifacts=artifacts,
-                clip_count=clip_count,
-                selected_frame_count=selected_frame_count,
-                phase_timings=phase_timings,
-                warnings=(
-                    preflight_warnings
-                    if current_preflight_warnings is None
-                    else list(current_preflight_warnings)
-                ),
-            )
+                except (_RunInterrupt, asyncio.CancelledError):
+                    # Deliver the queued interrupt before awaited client cleanup.
+                    with suppress(asyncio.CancelledError):
+                        await cancellation_checkpoint()
+                    execution_error = asyncio.CancelledError()
+                    raise execution_error from None
+                except Exception as exc:
+                    execution_error = exc
+                    if is_cancelling():
+                        with suppress(asyncio.CancelledError):
+                            await cancellation_checkpoint()
+                    raise
+        except (Exception, asyncio.CancelledError) as cleanup_error:
+            # Client close can fail while a run failure is already unwinding.
+            if execution_error is not None and cleanup_error is not execution_error:
+                raise execution_error from None
             raise
-
-    if local_deps.http_client is not None:
-        return await _execute_and_record_failure()
-
-    async with httpx.AsyncClient() as http_client:
-        local_deps.http_client = http_client
-        try:
-            return await _execute_and_record_failure()
         finally:
-            local_deps.http_client = None
+            if owns_client:
+                local_deps.http_client = None
+
+        try:
+            await cancellation_checkpoint()
+            recorded_result = record_completed_run_result(
+                workspace=reserved_workspace,
+                result=result,
+                started_at=started_at,
+                completed_at=completed_at,
+            )
+            await cancellation_checkpoint()
+        except _RunInterrupt:
+            await cancellation_checkpoint()
+            raise asyncio.CancelledError() from None
+        return recorded_result
+    except BaseException as original_error:
+        duration_seconds = (
+            0.0
+            if run_timer_start is None
+            else max(0.0, local_deps.monotonic_timer() - run_timer_start)
+        )
+        record_failed_run_best_effort(
+            workspace=reserved_workspace,
+            error=original_error,
+            started_at=run_start,
+            completed_at=local_deps.clock,
+            duration_seconds=duration_seconds,
+            artifacts=artifacts,
+            clip_count=clip_count,
+            selected_frame_count=selected_frame_count or 0,
+            phase_timings=phase_timings,
+            warnings=(
+                preflight_warnings
+                if current_preflight_warnings is None
+                else list(current_preflight_warnings)
+            ),
+        )
+        if (
+            local_deps.on_failed_alignment_diagnostics is not None
+            and artifacts is not None
+            and artifacts.alignment_diagnostics_dir is not None
+            and isinstance(original_error, Exception)
+        ):
+            with suppress(Exception):
+                local_deps.on_failed_alignment_diagnostics(artifacts.alignment_diagnostics_dir)
+        if local_deps.on_interrupted is not None and is_run_interruption(original_error):
+            phase_label = _interrupted_phase_label(phase_plan)
+            planned_frames = selected_frame_count
+            if planned_frames is None:
+                analysis = request.inputs.config.analysis
+                planned_frames = analysis.requested_frame_count
+            with suppress(Exception):
+                local_deps.on_interrupted(
+                    InterruptedRun(
+                        phase=phase_label,
+                        workspace=reserved_workspace,
+                        planned_screenshots=planned_frames * clip_count,
+                        analysis_cache_written=(
+                            context is not None and "analysis" in context.reusable_cache_writes
+                        ),
+                        alignment_cache_written=(
+                            context is not None and "alignment" in context.reusable_cache_writes
+                        ),
+                    )
+                )
+        raise
+
+
+def _interrupted_phase_label(plan: ExecutionPhasePlan | None) -> str | None:
+    if plan is None:
+        return "Setup"
+    for phase in (*plan.before_align, *plan.after_align):
+        if phase.status == PhaseStatus.INTERRUPTED:
+            return rich_phase_label(phase.name)
+    return None

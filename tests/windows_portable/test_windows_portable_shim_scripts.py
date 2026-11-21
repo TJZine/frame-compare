@@ -14,7 +14,6 @@ def test_windows_portable_shim_source_recognizes_equals_config_flag(
     )
 
     assert re.search(r"\$arg\.StartsWith\(\"--config=\"\)", shim)
-    assert "Push-Location $bundlePath" in shim
     assert "Pop-Location" in shim
     assert re.search(r"&\s*\$bundleLauncher\s+@forwardArgs", shim)
     assert re.search(r'\$MyInvocation\.InvocationName\s*-ne\s*["\']\.[\'"]', shim)
@@ -59,6 +58,9 @@ def test_windows_51_shims_read_bomless_nonascii_bundle_state(
     )
     (bundle_dir / "frame-compare.ps1").write_text(
         'Write-Output "frame-compare 1.0.0"; exit 0', encoding="utf-8"
+    )
+    (shim_dir / "frame-compare-version.ps1").write_bytes(
+        (repo_root / "tools/windows_portable/shim/frame-compare-version.ps1").read_bytes()
     )
     for name, args, expected in (
         ("frame-compare.ps1", ["version"], "frame-compare 1.0.0"),

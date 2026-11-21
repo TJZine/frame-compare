@@ -231,6 +231,42 @@ results = ["not metadata"]
     assert TmdbCache(cache_path).get_search(endpoint, params) is None
 
 
+@pytest.mark.parametrize(
+    "stored_at",
+    [
+        "0001-01-01T00:00:00+01:00",
+        "9999-12-31T23:59:59-01:00",
+    ],
+)
+def test_cache_ignores_datetime_overflow_entry_and_keeps_neighbor(
+    tmp_path: Path, stored_at: str
+) -> None:
+    cache_path = tmp_path / "tmdb.toml"
+    endpoint = "https://api.example.test/search/movie"
+    params = _search_params("Neighbor")
+    neighbor = _movie(1, "Neighbor")
+    neighbor_key = cache_key_for_request("search", endpoint, params)
+    bad_key = "b" * 64
+    current_time = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    cache_path.write_text(
+        f'''version = "{tmdb_cache.TMDB_CACHE_VERSION}"
+
+[entries."{bad_key}"]
+kind = "search"
+stored_at = "{stored_at}"
+results = []
+
+[entries."{neighbor_key}"]
+kind = "search"
+stored_at = "{current_time}"
+results = [{{ tmdb_id = {neighbor.tmdb_id}, title = "{neighbor.title}", original_title = "{neighbor.original_title}", year = {neighbor.year}, media_type = "{neighbor.media_type}" }}]
+''',
+        encoding="utf-8",
+    )
+
+    assert TmdbCache(cache_path).get_search(endpoint, params) == [neighbor]
+
+
 @pytest.mark.anyio
 async def test_locked_atomic_write_failure_is_warning_only(
     tmp_path: Path,
@@ -267,3 +303,22 @@ async def test_locked_atomic_write_failure_is_warning_only(
     assert "Private title" not in repr(warning)
     assert "a" * 32 not in repr(warning)
     assert not cache_path.exists()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+    ],
+)
+async def test_parser_limits_miss_and_store_repairs(tmp_path: Path, content: str) -> None:
+    path = tmp_path / "tmdb.toml"
+    path.write_text(content, encoding="utf-8")
+    endpoint = "https://api.example.test/search/movie"
+    params = _search_params("Known")
+    cache = TmdbCache(path)
+    assert cache.get_search(endpoint, params) is None
+    await cache.store_search(endpoint, params, [_movie(1, "Known")])
+    assert TmdbCache(path).get_search(endpoint, params) == [_movie(1, "Known")]

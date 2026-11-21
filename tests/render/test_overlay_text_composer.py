@@ -14,14 +14,15 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
     SourceSignalFacts,
 )
-from frame_compare.vs.types import TonemapSettings
+from frame_compare.vs.types import AppliedTonemap, TonemapSettings
+from tests.tonemap_test_support import libplacebo_tonemap
 
 
 def _geometry(*, transformed: bool = False) -> RenderedGeometryFacts:
     return RenderedGeometryFacts(
         source_size=(3840, 2160),
         active_picture=(
-            ActivePictureFacts(0, 276, 3840, 1608, "dolby_vision_l5", False)
+            ActivePictureFacts(0, 276, 3840, 1608, "explicit", False)
             if transformed
             else ActivePictureFacts(0, 0, 3840, 2160, "full_frame", True)
         ),
@@ -45,7 +46,7 @@ def _config(
     source_resolution: tuple[int, int] = (3840, 2160),
     signal: SourceSignalFacts | None = None,
     presentation_state: PresentationState = PresentationState.SDR,
-    tonemap_settings: TonemapSettings | None = None,
+    tonemap: AppliedTonemap | None = None,
     geometry: RenderedGeometryFacts | None = None,
 ) -> OverlayConfig:
     return OverlayConfig(
@@ -60,7 +61,7 @@ def _config(
         source_resolution=source_resolution,
         signal=signal or SourceSignalFacts(is_hdr=False),
         presentation_state=presentation_state,
-        tonemap_settings=tonemap_settings,
+        tonemap=tonemap,
         geometry=geometry or _geometry(),
         font_path=None,
     )
@@ -70,10 +71,12 @@ def _lines(
     config: OverlayConfig,
     *,
     picture_type: PictureType | None = "B",
+    frame_rpu: bool | None = None,
 ) -> list[str]:
     facts = RenderedFrameFacts(
         source_frame=config.source_frame,
         picture_type=picture_type,
+        dolby_vision_rpu=frame_rpu,
     )
     return compose_overlay_text_lines(config, facts)
 
@@ -95,7 +98,7 @@ def _hdr_config(*, dovi: bool = False) -> OverlayConfig:
         file_size_bytes=int((54.72 if dovi else 17.42) * 1024**3),
         signal=signal,
         presentation_state=PresentationState.HDR_TONEMAPPED,
-        tonemap_settings=TonemapSettings(),
+        tonemap=libplacebo_tonemap(TonemapSettings()),
         geometry=_geometry(transformed=dovi),
     )
 
@@ -198,8 +201,8 @@ def test_file_size_uses_iec_boundaries(size: int, expected: str) -> None:
                 "Comparison 1842 → source 1855/143892 • B-frame",
                 "Selection: Bright",
                 "Source: 3840×2160 • 54.72 GiB",
-                "Geometry: active 3840×1608 @ (0,276) • DV L5 → 3840×2160 canvas",
-                "Signal: HDR • BT.2020 / PQ / BT.2020nc • Limited • DV RPU",
+                "Geometry: active 3840×1608 @ (0,276) • explicit → 3840×2160 canvas",
+                "Signal: HDR • BT.2020 / PQ / BT.2020nc • Limited • DV RPU (clip)",
                 "Tonemap: BT.2390 → 100 nits",
                 "HDR static: MDL 0.005–1000 nits • MaxCLL/FALL 982/244",
             ],
@@ -247,3 +250,20 @@ def test_overlay_text_examples(
     expected: list[str],
 ) -> None:
     assert _lines(config, picture_type=picture_type)[start:stop] == expected
+
+
+@pytest.mark.parametrize(
+    ("clip_rpu", "frame_rpu", "labels"),
+    [
+        pytest.param(True, False, ["DV RPU (clip)"], id="absent_on_frame"),
+        pytest.param(True, None, ["DV RPU (clip)"], id="unknown_on_frame"),
+        pytest.param(True, True, ["DV RPU (clip)", "DV RPU (frame)"], id="both"),
+        pytest.param(False, True, ["DV RPU (frame)"], id="frame_only"),
+    ],
+)
+def test_diagnostic_overlay_distinguishes_clip_and_frame_rpu(
+    clip_rpu: bool, frame_rpu: bool | None, labels: list[str]
+) -> None:
+    lines = _lines(_hdr_config(dovi=clip_rpu), frame_rpu=frame_rpu)
+    signal = next(line for line in lines if line.startswith("Signal:"))
+    assert signal == " • ".join(["Signal: HDR", "BT.2020 / PQ / BT.2020nc", "Limited", *labels])

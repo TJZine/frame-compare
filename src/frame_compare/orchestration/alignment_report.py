@@ -7,16 +7,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from rich.markup import escape
-from rich.panel import Panel
-from rich.table import Table
+from rich.text import Text
 
 from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.presentation import report_console_width
-from frame_compare.services.release_identity import format_release_descriptor
+from frame_compare.services.alignment_evidence import AlignmentStabilitySummary
+from frame_compare.services.release_identity import (
+    ShortNameSource,
+    format_release_descriptor,
+    short_source_names,
+)
 from frame_compare.services.types import AlignmentSource
-from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
 from frame_compare.utils.run_warnings import RunWarning
-from frame_compare.utils.terminal_theme import ACCENT, BORDER_NEUTRAL, human_console
+from frame_compare.utils.terminal_sections import Section, section_title
+from frame_compare.utils.terminal_theme import human_console
 
 _MAX_SELECTED_FRAMES = 8
 
@@ -36,6 +40,8 @@ class AlignmentReportComparison:
     comparison_path: Path | None = None
     presentation_name: str | None = None
     stability: AlignmentStabilitySummary | None = None
+    short_name: str | None = None
+    reference_short_name: str | None = None
 
 
 def build_frame_alignment_report(
@@ -49,6 +55,19 @@ def build_frame_alignment_report(
     comparison clip. The values are already normalized into the aligned frame
     domain used by rendering.
     """
+    clips = [reference, *comparisons]
+    short_names = short_source_names(
+        [
+            ShortNameSource(
+                identity=clip.release_identity,
+                label=clip.label,
+                label_is_explicit=clip.label_is_explicit,
+                stem=clip.path.stem,
+            )
+            for clip in clips
+        ],
+    )
+    reference_short_name = short_names[0] if short_names else reference.label
     return tuple(
         AlignmentReportComparison(
             label=comparison.label,
@@ -66,14 +85,20 @@ def build_frame_alignment_report(
                 comparison.label
                 if comparison.label_is_explicit
                 else (
-                    format_release_descriptor(comparison.release_identity, separator=" · ")
+                    format_release_descriptor(
+                        comparison.release_identity,
+                        separator=" · ",
+                        short_name=short_names[index + 1],
+                    )
                     if comparison.release_identity is not None
                     else comparison.label
                 )
             ),
             stability=None if comparison.alignment is None else comparison.alignment.stability,
+            short_name=short_names[index + 1],
+            reference_short_name=reference_short_name,
         )
-        for comparison in comparisons
+        for index, comparison in enumerate(comparisons)
     )
 
 
@@ -87,18 +112,6 @@ def _trim_range(clip: ClipState) -> tuple[int, int]:
     return start, min(end, clip.probe.num_frames - 1)
 
 
-def _stage_label(stage: str) -> str:
-    if stage == "after_align":
-        return "After Alignment"
-    return stage.replace("_", " ").title()
-
-
-def _format_offset(offset: int | None) -> str:
-    if offset is None:
-        return "none"
-    return f"{offset:+d}f"
-
-
 def _format_range(trim_range: tuple[int, int]) -> str:
     start, end = trim_range
     if end < start:
@@ -107,9 +120,11 @@ def _format_range(trim_range: tuple[int, int]) -> str:
 
 
 def _format_selected_frames(selected_frames: Sequence[int]) -> str:
+    if len(selected_frames) == 1:
+        return f"frame {selected_frames[0]} (1 total)"
     shown = [str(frame) for frame in selected_frames[:_MAX_SELECTED_FRAMES]]
     if len(selected_frames) > _MAX_SELECTED_FRAMES:
-        shown.append(f"... ({len(selected_frames)} total)")
+        shown.append(f"… ({len(selected_frames)} total)")
     return ", ".join(shown)
 
 
@@ -130,10 +145,11 @@ def _format_stability(summary: AlignmentStabilitySummary) -> str:
 def _has_material_alignment_info(
     *,
     comparisons: Sequence[AlignmentReportComparison],
-    alignment_warnings: list[RunWarning],
+    warned_comparison_paths: set[Path],
 ) -> bool:
     return any(
-        comparison.relative_offset_frames not in (None, 0)
+        comparison.comparison_path in warned_comparison_paths
+        or comparison.relative_offset_frames not in (None, 0)
         or (
             comparison.alignment_source is not None
             and (
@@ -145,38 +161,39 @@ def _has_material_alignment_info(
             )
         )
         for comparison in comparisons
-    ) or bool(alignment_warnings)
+    )
 
 
 def _render_alignment_table(
     *,
     comparisons: Sequence[AlignmentReportComparison],
     selected_frames: Sequence[int],
-    alignment_warnings: list[RunWarning],
+    warned_comparison_paths: set[Path],
     verbose: bool,
-) -> Table:
-    table = Table(
-        show_header=False,
-        box=None,
-        pad_edge=False,
-        padding=(0, 2, 0, 0),
-        expand=False,
+) -> Section:
+    section = Section(section_title("Frame alignment"))
+    reference_name = (
+        comparisons[0].reference_short_name
+        if comparisons and comparisons[0].reference_short_name
+        else "Reference"
     )
-    table.add_column("key", style="dim", no_wrap=True, min_width=12, overflow="fold")
-    table.add_column("value", overflow="fold")
-
     for index, comparison in enumerate(comparisons):
         if index > 0:
-            table.add_row("", "")
+            section.add_line()
 
-        source = comparison.alignment_source if comparison.alignment_source is not None else "none"
         display_name = (
-            comparison.label if verbose else (comparison.presentation_name or comparison.label)
+            comparison.label
+            if verbose
+            else (comparison.short_name or comparison.presentation_name or comparison.label)
         )
-        table.add_row("comparison", f"{escape(display_name)}")
-        table.add_row(
-            "  offset",
-            f"{escape(_format_offset(comparison.relative_offset_frames))}",
+        trim_name = comparison.short_name or comparison.presentation_name or comparison.label
+        section.add_line(f"[bold]{escape(display_name)}[/]")
+        section.add_row(
+            "  trims",
+            Text(
+                f"{reference_name} {_format_range(comparison.reference_trim_range)} · "
+                f"{trim_name} {_format_range(comparison.comparison_trim_range)}"
+            ),
         )
         stability = comparison.stability
         if stability is not None and (
@@ -186,49 +203,42 @@ def _render_alignment_table(
             value = _format_stability(stability)
             if verbose:
                 value += f"; {stability.valid_windows} credible chunks"
-            table.add_row("  stability", f"{escape(value)}")
-        table.add_row("  source", f"{escape(source)}")
-        table.add_row(
-            "  trims",
-            f"Reference {escape(_format_range(comparison.reference_trim_range))}, "
-            f"{escape(display_name)} "
-            f"{escape(_format_range(comparison.comparison_trim_range))}",
-        )
-        if selected_frames:
-            table.add_row(
-                "  frames",
-                f"aligned {escape(_format_selected_frames(selected_frames))}",
-            )
+            section.add_row("  stability", Text(value))
 
-    if alignment_warnings:
-        if comparisons:
-            table.add_row("", "")
-        table.add_row("warnings", "")
-        for warning in alignment_warnings:
-            table.add_row("  warning", f"[yellow]{escape(warning.text)}[/]")
+        if comparison.comparison_path in warned_comparison_paths:
+            section.add_note("see warnings")
+
+    if selected_frames:
+        if len(comparisons) > 1:
+            section.add_line()
+        section.add_row(
+            "frames" if len(comparisons) > 1 else "  frames",
+            Text(f"aligned {_format_selected_frames(selected_frames)}"),
+        )
 
     if verbose:
         for comparison in comparisons:
-            table.add_row("", "")
-            table.add_row("details", f"{escape(comparison.label)}")
-            table.add_row(
+            section.add_line()
+            section.add_row("details", Text(comparison.label))
+            section.add_row(
                 "  row 0",
-                f"Reference source {comparison.reference_row_zero_source_frame}"
-                f" <-> {escape(comparison.label)} source "
-                f"{comparison.comparison_row_zero_source_frame}",
+                Text(
+                    f"Reference source {comparison.reference_row_zero_source_frame}"
+                    f" <-> {comparison.label} source {comparison.comparison_row_zero_source_frame}"
+                ),
             )
             if comparison.reference_path is not None:
-                table.add_row(
+                section.add_row(
                     "  reference path",
                     f"[dim]{escape(str(comparison.reference_path.resolve()))}[/]",
                 )
             if comparison.comparison_path is not None:
-                table.add_row(
+                section.add_row(
                     "  comparison path",
                     f"[dim]{escape(str(comparison.comparison_path.resolve()))}[/]",
                 )
 
-    return table
+    return section
 
 
 def _render_human_alignment_report(
@@ -236,7 +246,7 @@ def _render_human_alignment_report(
     stage: str,
     comparisons: Sequence[AlignmentReportComparison],
     selected_frames: Sequence[int],
-    alignment_warnings: list[RunWarning],
+    warned_comparison_paths: set[Path],
     no_color: bool,
     verbose: bool,
 ) -> None:
@@ -246,18 +256,13 @@ def _render_human_alignment_report(
         width=report_console_width(),
         height=1000,
     )
-    console.print(
-        Panel(
-            _render_alignment_table(
-                comparisons=comparisons,
-                selected_frames=selected_frames,
-                alignment_warnings=alignment_warnings,
-                verbose=verbose,
-            ),
-            title=f"[bold {ACCENT} not dim]Frame Alignment[/] [dim]{escape(_stage_label(stage))}[/]",
-            border_style=BORDER_NEUTRAL,
-        )
-    )
+    _ = stage
+    _render_alignment_table(
+        comparisons=comparisons,
+        selected_frames=selected_frames,
+        warned_comparison_paths=warned_comparison_paths,
+        verbose=verbose,
+    ).print(console)
 
 
 def emit_frame_alignment_report(
@@ -274,9 +279,14 @@ def emit_frame_alignment_report(
     """Emit the frame alignment report for human-readable runs."""
     if quiet or json_output:
         return
+    warned_comparison_paths = {
+        warning.comparison_path
+        for warning in alignment_warnings
+        if warning.comparison_path is not None
+    }
     if not _has_material_alignment_info(
         comparisons=comparisons,
-        alignment_warnings=alignment_warnings,
+        warned_comparison_paths=warned_comparison_paths,
     ):
         return
 
@@ -284,7 +294,7 @@ def emit_frame_alignment_report(
         stage=stage,
         comparisons=comparisons,
         selected_frames=selected_frames,
-        alignment_warnings=alignment_warnings,
+        warned_comparison_paths=warned_comparison_paths,
         no_color=no_color,
         verbose=verbose,
     )

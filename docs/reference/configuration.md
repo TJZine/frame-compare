@@ -17,7 +17,10 @@ Settings take precedence in this order, highest first:
 4. Built-in defaults
 
 The default file is `config/config.toml` under the workspace root. Unknown top-level
-tables are ignored; an unknown key inside a Frame Compare table fails validation.
+tables are ignored. For an unknown key inside a Frame Compare table, the error
+shows the dotted key and suggests up to three valid keys in that table. Errors
+in the effective configuration name the selected file for context.
+For an invalid value, the error shows what the setting accepts and what you supplied.
 
 Use the wizard for common settings and edit TOML for the rest. See [config validation](../current-cli-contract.md#config-validation-logging-and-migration).
 
@@ -143,6 +146,20 @@ Default
 :   `"auto"`
 
 Release-name parser for `parsed` labels.
+
+#### `sources.scan_frame_geometry` { #sources.scan_frame_geometry .fc-key }
+
+Values
+:   `true` or `false`
+
+Default
+:   `false`
+
+Require a full ffprobe scan for changing or out-of-bounds frame dimensions before
+opening a video with L-SMASH-Works, including in VSView. A managed index that
+records a valid completed scan can be reused. The scan decodes the entire video
+and can add substantial time on the first open. Header checks and decoder pixel
+limits apply in either mode.
 
 #### `sources.overrides` { #sources.overrides .fc-key }
 
@@ -431,16 +448,6 @@ Comparison audio stream numbers by filename stem.
 `[screenshots]` is explained in [Reports and overlays](../guides/reports-and-overlays.md)
 and the contract's [screenshot surface](../current-cli-contract.md#config-only-screenshot-surface).
 
-#### `screenshots.use_ffmpeg` { #screenshots.use_ffmpeg .fc-key }
-
-Values
-:   `true`, `false`
-
-Default
-:   `false`
-
-Render with FFmpeg instead of VapourSynth; HDR sources then need `color.enable_tonemap = false`.
-
 #### `screenshots.overlay_mode` { #screenshots.overlay_mode .fc-key }
 
 Values
@@ -470,16 +477,6 @@ Default
 :   `6`
 
 PNG compression level.
-
-#### `screenshots.ffmpeg_timeout_seconds` { #screenshots.ffmpeg_timeout_seconds .fc-key }
-
-Values
-:   number, at least `5`
-
-Default
-:   `30.0`
-
-Timeout for FFmpeg frame extraction.
 
 #### `screenshots.geometry_mode` { #screenshots.geometry_mode .fc-key }
 
@@ -558,12 +555,28 @@ Tonemap HDR sources to SDR.
 #### `color.preset` { #color.preset .fc-key }
 
 Values
-:   `"reference"`, `"filmic"`, `"contrast"`, `"bt2390_spec"`, `"spline"`, `"bright_lift"`, `"highlight_guard"`
+:   `"reference"`, `"contrast"`, `"spline"`, `"bright_lift"`, `"highlight_guard"`
 
 Default
 :   `"reference"`
 
-Baseline tonemap settings.
+Baseline tonemap settings. `reference` uses BT.2390 at 100 nits with knee 1.0.
+See the [preset table](../guides/hdr-tonemapping.md#configure-the-result) for each
+preset's curve, target, gamma lift, and parameter.
+
+#### `color.tonemap_speed` { #color.tonemap_speed .fc-key }
+
+Values
+:   `"quality"`, `"fast"`
+
+Default
+:   `"quality"`
+
+Choose the source-peak policy for HDR tonemapping. `"quality"` measures the peak
+for each screenshot. `"fast"` disables dynamic peak detection and uses available
+stream or static metadata, falling back to the configured or default source peak.
+Fast mode is reproducible and shares native state across screenshots, but it can
+look different from quality mode and depends on HDR metadata.
 
 #### `color.target_nits` { #color.target_nits .fc-key }
 
@@ -583,7 +596,9 @@ Values
 Default
 :   from the preset
 
-Tone curve.
+Tone curve. An explicit override that changes the preset curve uses that curve's
+default parameter: BT.2390 1.0, spline 0.5, or Reinhard 0.5. An explicit curve equal
+to the preset curve keeps the preset's parameter.
 
 #### `color.gamma_lift` { #color.gamma_lift .fc-key }
 
@@ -609,6 +624,10 @@ Explicit configuration or environment values for `target_nits`, `tone_curve`,
 `gamma_lift`, and `contrast_recovery` override the preset baseline. `--tm-target`
 and `--tm-curve` override `target_nits` and `tone_curve` for one run and take
 precedence over configuration and environment values.
+
+`tonemap_speed` is independent of the preset and persists as an ordinary color
+field. Configuration and environment values set its baseline; `--tm-speed` takes
+precedence for one run.
 
 `gamma_lift` and `contrast_recovery` can be set only through configuration or
 environment variables;
@@ -717,7 +736,7 @@ Delete the uploaded local screenshots after the report is done.
 #### `slowpics.timeout_seconds` { #slowpics.timeout_seconds .fc-key }
 
 Values
-:   number, at least `10`
+:   finite number, at least `10`
 
 Default
 :   `60.0`
@@ -807,7 +826,7 @@ Days until slow.pics removes the collection; `0` keeps it.
 #### `slowpics.image_upload_timeout_seconds` { #slowpics.image_upload_timeout_seconds .fc-key }
 
 Values
-:   number, at least `10`
+:   finite number, at least `10`
 
 Default
 :   `180.0`
@@ -893,7 +912,7 @@ no metadata. This setting does not enable a chooser.
 #### `tmdb.timeout_seconds` { #tmdb.timeout_seconds .fc-key }
 
 Values
-:   number, at least `1`
+:   finite number, at least `1`
 
 Default
 :   `10.0`

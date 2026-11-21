@@ -14,6 +14,7 @@ from frame_compare.orchestration.fps_report import (
     build_consolidated_fps_report,
     emit_consolidated_fps_report,
 )
+from frame_compare.services.metadata_parsing import parse_filename_with_release_identity
 from frame_compare.services.release_identity import ContentIdentity, ReleaseIdentity
 
 
@@ -38,6 +39,7 @@ def _make_clip_state(
     size_bytes: int = 123,
     release_identity: ReleaseIdentity | None = None,
     label_is_explicit: bool = False,
+    source_fps: Fraction | None = None,
 ) -> ClipState:
     fingerprint = ClipFingerprint(Path(path), size_bytes, 456)
     probe = ClipProbeSnapshot(
@@ -52,7 +54,7 @@ def _make_clip_state(
         path=Path(path),
         label=label,
         probe=probe,
-        source_fps=fps,
+        source_fps=fps if source_fps is None else source_fps,
         effective_fps=effective_fps,
         release_identity=release_identity,
         label_is_explicit=label_is_explicit,
@@ -71,7 +73,10 @@ def _fps_report_clip(
     num_frames: int = 100,
     is_hdr: bool = False,
     note: str | None = None,
+    raw_fps: Fraction | None = None,
+    fps_reason: str | None = None,
     size_bytes: int = 0,
+    release_identity: ReleaseIdentity | None = None,
 ) -> FpsReportClip:
     return FpsReportClip(
         path=path,
@@ -84,7 +89,10 @@ def _fps_report_clip(
         effective_fps=effective_fps,
         fps_divergent=fps_divergent,
         note=note,
+        raw_fps=source_fps if raw_fps is None else raw_fps,
+        fps_reason=fps_reason,
         size_bytes=size_bytes,
+        release_identity=release_identity,
     )
 
 
@@ -104,6 +112,7 @@ def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts
             source_type="WEB-DL",
             dynamic_range_claims=("DV", "HDR10+"),
             release_group="Kitsune",
+            has_terminal_release_group=True,
         ),
         label_is_explicit=True,
     )
@@ -120,6 +129,7 @@ def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts
             dynamic_range_claims=("DV", "HDR10+"),
             revision_tags=("REPACK",),
             release_group="Kitsune",
+            has_terminal_release_group=True,
         ),
     )
 
@@ -156,6 +166,7 @@ def test_sources_standard_name_uses_dot_separator_without_common_content(
             service="AMZN",
             source_type="WEB-DL",
             release_group="SCOPE",
+            has_terminal_release_group=True,
         ),
     )
     comparison = _make_clip_state(
@@ -169,6 +180,7 @@ def test_sources_standard_name_uses_dot_separator_without_common_content(
             service="AMZN",
             source_type="WEB-DL",
             release_group="SIGMA",
+            has_terminal_release_group=True,
         ),
     )
 
@@ -228,6 +240,28 @@ def test_build_consolidated_fps_report_includes_probe_metadata_and_fps_order() -
     assert report[1].source_fps == Fraction(30000, 1001)
     assert report[1].effective_fps == Fraction(24000, 1001)
     assert report[1].fps_divergent is True
+    assert report[1].raw_fps == Fraction(30000, 1001)
+    assert report[1].fps_reason is None
+
+
+def test_build_consolidated_fps_report_retains_raw_rate_for_canonical_snap() -> None:
+    raw_fps = Fraction(27021, 1127)
+    canonical_fps = Fraction(24000, 1001)
+    reference = _make_clip_state(
+        "ref.mkv",
+        "Reference",
+        raw_fps,
+        canonical_fps,
+        source_fps=canonical_fps,
+    )
+
+    (report_clip,) = build_consolidated_fps_report(reference, [])
+
+    assert report_clip.raw_fps == raw_fps
+    assert report_clip.source_fps == canonical_fps
+    assert report_clip.effective_fps == canonical_fps
+    assert report_clip.fps_divergent is False
+    assert report_clip.fps_reason == "within 10 ppm of standard"
 
 
 def test_build_consolidated_fps_report_with_empty_comparisons_returns_reference_only() -> None:
@@ -337,15 +371,77 @@ def test_emit_consolidated_fps_report_json_mode_logs_without_human_output(
     assert clips[0]["label"] == "Reference"
     assert clips[0]["source_fps_num"] == 24
     assert clips[0]["source_fps_den"] == 1
+    assert clips[0]["raw_fps_num"] == 24
+    assert clips[0]["raw_fps_den"] == 1
     assert clips[0]["effective_fps_num"] == 24
     assert clips[0]["fps_divergent"] is False
     assert "size_bytes" not in clips[0]
+
+
+def test_emit_consolidated_fps_report_shows_canonical_snap_reason(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw_fps = Fraction(27021, 1127)
+    canonical_fps = Fraction(24000, 1001)
+    clip = _fps_report_clip(
+        path=Path("imprecise.mkv"),
+        label="Imprecise",
+        source_fps=canonical_fps,
+        effective_fps=canonical_fps,
+        fps_divergent=False,
+        raw_fps=raw_fps,
+        fps_reason="within 10 ppm of standard",
+    )
+
+    emit_consolidated_fps_report(
+        stage="after_load_sources",
+        clips=[clip],
+        json_output=False,
+        quiet=False,
+        rich_output=True,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert "23.976 fps (27021/1127) -> 23.976 fps (24000/1001)" in output
+    assert "within 10 ppm of standard" in output
+
+
+def test_emit_consolidated_fps_report_does_not_hide_canonical_snap_after_align(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    clip = _fps_report_clip(
+        path=Path("imprecise.mkv"),
+        label="Imprecise",
+        source_fps=Fraction(24000, 1001),
+        effective_fps=Fraction(24000, 1001),
+        fps_divergent=False,
+        raw_fps=Fraction(27021, 1127),
+        fps_reason="within 10 ppm of standard",
+    )
+
+    emit_consolidated_fps_report(
+        stage="after_align",
+        clips=[clip],
+        json_output=False,
+        quiet=False,
+        rich_output=True,
+        no_color=True,
+    )
+
+    output = capsys.readouterr().err
+    assert "Frame rates" in output
+    assert "27021/1127" in output
+    assert "24000/1001" in output
+    assert "within 10 ppm of standard" in output
+    assert "frame rates match" not in output
 
 
 def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    dub = "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv"
     clips = [
         _fps_report_clip(
             path=Path("ref.mkv"),
@@ -361,7 +457,8 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
             size_bytes=17 * 1024**3,
         ),
         _fps_report_clip(
-            path=Path("encode.mkv"),
+            path=Path(dub),
+            release_identity=parse_filename_with_release_identity(dub)[1],
             label="Encode [candidate]",
             width=1920,
             height=1080,
@@ -390,7 +487,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Sources · 2 loaded" in captured.err
+    assert "Sources · 2" in captured.err
     assert "Sources" in captured.err
     assert "After Load Sources" not in captured.err
     assert "3840×2160" in captured.err
@@ -401,11 +498,12 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert "17.00 GiB" in captured.err
     assert "0.00 B" not in captured.err
     assert "ref.mkv" in captured.err
-    assert "encode.mkv" in captured.err
-    assert "Lengths differ" in captured.err
-    assert "1200 frames" in captured.err
+    assert dub in captured.err
+    assert "Lengths differ: english-dub-only is 1200 frames" in captured.err
     assert "FPS target: 24000/1001 (majority)" in captured.err
-    assert "analysis source" in captured.err
+    assert "analysis" in captured.err
+    assert "\n│\n│ analysis        " in captured.err
+    assert "analysis source" not in captured.err
     assert "(configured)" in captured.err
     assert "selected by configured policy" not in captured.err
     assert "\x1b[" not in captured.err
@@ -428,7 +526,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     assert colored.out == ""
     assert "\x1b[" in colored.err
     assert "ref.mkv" in colored.err
-    assert "encode.mkv" in colored.err
+    assert dub in colored.err
 
 
 def test_emit_consolidated_fps_report_uses_relative_input_and_external_paths(
@@ -501,6 +599,7 @@ def _length_clip(name: str, num_frames: int, fps: Fraction = Fraction(24, 1)) ->
         effective_fps=fps,
         fps_divergent=False,
         note=None,
+        raw_fps=fps,
     )
 
 
@@ -569,7 +668,7 @@ def test_emit_consolidated_fps_report_keeps_after_align_fps_panel(
 
     captured = capsys.readouterr()
     assert "Frame rates" in captured.err
-    assert "After Alignment" in captured.err
+    assert "After Alignment" not in captured.err
     assert "29.97 fps (30000/1001) -> 23.976 fps (24000/1001)" in captured.err
     assert "adjusted" in captured.err
     assert "assumed" in captured.err
@@ -612,7 +711,7 @@ def test_emit_consolidated_fps_report_collapses_matching_after_align_state(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "frame rates match · 24 fps (24/1)" in captured.err
+    assert captured.err == ""
     assert str(reference_path) not in captured.err
 
 
@@ -745,7 +844,7 @@ def test_emit_consolidated_fps_report_wraps_at_narrow_terminal_widths(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "Sources · 1 loaded" in captured.err
+    assert "Sources · 1" in captured.err
     assert "a-very-long-source-name.mkv" in captured.err
     assert "3840×2160" in captured.err
     assert "\x1b[" not in captured.err

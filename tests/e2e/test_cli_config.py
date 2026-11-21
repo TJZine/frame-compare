@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from collections.abc import Callable
 
 import pytest
@@ -162,3 +163,61 @@ def test_cli_preset_apply_rejects_invalid_utf8_without_writing_config(
     assert "[FC-1005]" in result.stderr
     assert "Traceback" not in result.stderr
     assert root.config_path.read_bytes() == before
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("command", ["apply", "save"])
+@pytest.mark.parametrize("absolute", [False, True], ids=["relative", "absolute"])
+def test_cli_preset_uses_environment_selected_config(
+    command: str,
+    absolute: bool,
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = workspace({"analysis": {"random_frame_count": 7}})
+    literal = root.root / "$FC_TEST_CONFIG"
+    literal.write_text("[analysis]\nrandom_frame_count = 2\n", encoding="utf-8")
+    literal_before = literal.read_bytes()
+    selected_before = root.config_path.read_bytes()
+    config_value = root.config_path if absolute else root.config_path.relative_to(root.root)
+    monkeypatch.setenv("FC_TEST_CONFIG", str(config_value))
+    preset_dir = root.config_path.parent / "presets"
+    preset_dir.mkdir()
+    preset = preset_dir / "picked.toml"
+    if command == "apply":
+        preset.write_text("[analysis]\nrandom_frame_count = 13\n", encoding="utf-8")
+
+    _, result = _run(run_cli, root, ["preset", command, "picked", "--config", literal.name])
+
+    assert result.exit_code == 0, result.stderr
+    assert literal.read_bytes() == literal_before
+    if command == "apply":
+        assert str(root.config_path.resolve()) in result.stderr
+        assert tomllib.loads(root.config_path.read_text())["analysis"]["random_frame_count"] == 13
+    else:
+        assert root.config_path.read_bytes() == selected_before
+        assert tomllib.loads(preset.read_text())["analysis"]["random_frame_count"] == 7
+
+
+@pytest.mark.e2e
+def test_cli_preset_list_validates_config_path_without_reading_config(
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = workspace()
+    preset_dir = root.config_path.parent / "presets"
+    preset_dir.mkdir()
+    (preset_dir / "picked.toml").touch()
+    arguments = ["preset", "list", "--config", "$FC_TEST_CONFIG"]
+    monkeypatch.setenv("FC_TEST_CONFIG", "missing.toml")
+    _, accepted = _run(run_cli, root, arguments)
+    assert accepted.exit_code == 0, accepted.stderr
+    assert accepted.stdout == "picked\n"
+
+    monkeypatch.setenv("FC_TEST_CONFIG", "../outside.toml")
+    _, rejected = _run(run_cli, root, arguments)
+    assert rejected.exit_code == 4
+    assert rejected.stdout == ""
+    assert "FC-3009" in rejected.stderr

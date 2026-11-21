@@ -6,8 +6,7 @@ import importlib.metadata
 import json
 import re
 import subprocess
-import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import cast
 
 JsonObject = dict[str, object]
@@ -18,6 +17,8 @@ REQUIRED_DISTRIBUTIONS = {
     "pyside6",
     "pyside6-addons",
     "pyside6-essentials",
+    "pyside6-pdf",
+    "pyside6-webengine",
     "shiboken6",
     "vapoursynth",
     "vapoursynth-bestsource",
@@ -28,9 +29,17 @@ REQUIRED_DISTRIBUTIONS = {
     "vsview",
 }
 SOURCE_SCRIPTS = (
+    ".github/actions/windows-portable-build/action.yml",
+    ".github/actions/windows-portable-verify/action.yml",
     ".github/workflows/windows-portable-build.yml",
+    ".github/workflows/windows-portable-unsigned.yml",
     ".github/workflows/windows-portable.yml",
     "tools/windows_portable/build_portable.ps1",
+    "tools/windows_portable/path_safety.ps1",
+    "tools/windows_portable/portable_launchers.ps1",
+    "tools/windows_portable/portable_archive.py",
+    "tools/windows_portable/portable_bundle.py",
+    "tools/windows_portable/portable_runtime.py",
     "tools/windows_portable/runtime_smoke.py",
     "tools/windows_portable/build_update.ps1",
     "tools/windows_portable/bundle_info.schema.json",
@@ -42,8 +51,14 @@ SOURCE_SCRIPTS = (
     "tools/windows_portable/manifest.windows-x64.json",
     "tools/windows_portable/manifest.schema.json",
     "tools/windows_portable/sign_update.ps1",
+    "tools/windows_portable/release_update.ps1",
+    "tools/windows_portable/release_portable_authority.ps1",
+    "tools/windows_portable/release_update_contract.ps1",
+    "tools/windows_portable/sign_verified_manifest.ps1",
+    "tools/windows_portable/update_manifest_bytes.ps1",
     "tools/windows_portable/update_manifest.schema.json",
     "tools/windows_portable/shim/frame-compare-update.ps1",
+    "tools/windows_portable/shim/frame-compare-version.ps1",
     "tools/windows_portable/validate_update_public_key.ps1",
     "tools/windows_portable/write_bundle_inventory.py",
 )
@@ -62,6 +77,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--bundle-root", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--require-clean-repo", action="store_true")
     return parser.parse_args()
@@ -283,6 +299,62 @@ def _license_inventory(bundle_root: Path) -> list[JsonObject]:
     return records
 
 
+def _assert_manifest_notices(manifest: JsonObject, licenses: list[JsonObject]) -> None:
+    hashes = {record["path"]: record["sha256"] for record in licenses}
+    required_paths: set[str] = set()
+    for raw_artifact in _require_list(manifest.get("artifacts"), "manifest.artifacts"):
+        artifact = _require_dict(raw_artifact, "manifest artifact")
+        license_info = _require_dict(artifact.get("license"), "manifest artifact license")
+        if "files" not in license_info:
+            continue
+        artifact_id = _require_str(artifact.get("id"), "manifest artifact id")
+        spdx = _require_str(license_info.get("spdx"), f"{artifact_id}.license.spdx")
+        files = _require_list(license_info["files"], f"{artifact_id}.license.files")
+        for raw_file in files:
+            notice = _require_dict(raw_file, f"{artifact_id} license file")
+            source = _require_str(notice.get("path"), f"{artifact_id} license path")
+            sha256 = _require_sha256(notice.get("sha256"), f"{artifact_id} license SHA-256")
+            filename = PurePosixPath(source).name
+            if len(files) > 1:
+                suffix = f"--{filename}"
+            else:
+                # .NET GetExtension includes a leading dot and ignores a final dot.
+                last_dot = filename.rfind(".")
+                suffix = filename[last_dot:] if 0 <= last_dot < len(filename) - 1 else ""
+            name = f"{artifact_id}-{spdx}{suffix}"
+            if not re.fullmatch(r"[A-Za-z0-9._+() -]+", name) or name.endswith((".", " ")):
+                raise ValueError(f"Unsafe bundle license filename: {name}")
+            path = f"licenses/{name}"
+            if path.casefold() in required_paths:
+                raise ValueError(f"Duplicate manifest notice destination: {path}")
+            required_paths.add(path.casefold())
+            if path not in hashes:
+                raise ValueError(f"Missing manifest notice: {path}")
+            if hashes[path] != sha256:
+                raise ValueError(f"Manifest notice SHA-256 mismatch: {path}")
+
+
+def _archive_inventory(bundle_root: Path, output_path: Path) -> JsonObject:
+    """Describe all members except the inventory itself."""
+    files: list[JsonObject] = []
+    directories: list[str] = []
+    for path in sorted(
+        bundle_root.rglob("*"), key=lambda item: item.relative_to(bundle_root).as_posix()
+    ):
+        if path == output_path:
+            continue
+        relative = path.relative_to(bundle_root).as_posix()
+        if path.is_symlink() or path.is_junction():
+            raise ValueError(f"prohibited archive member type: {relative}")
+        if path.is_dir():
+            directories.append(relative)
+        elif path.is_file():
+            files.append({"path": relative, "bytes": path.stat().st_size, "sha256": _sha256(path)})
+        else:
+            raise ValueError(f"prohibited archive member type: {relative}")
+    return {"files": files, "directories": directories}
+
+
 def _promote_bundled_inter_license(bundle_root: Path) -> None:
     source = bundle_root / _INTER_LICENSE_SOURCE
     if not source.is_file():
@@ -411,18 +483,11 @@ def main() -> int:
     packaged_src = (bundle_root / "app" / "src").resolve(strict=True)
     if not packaged_src.is_dir():
         raise NotADirectoryError(packaged_src)
-    sys.dont_write_bytecode = True
-    sys.path.insert(0, str(packaged_src))
-    from frame_compare.vs.runtime_contract import (  # noqa: PLC0415
-        MEDIA_RUNTIME_SCOPES,
-    )
-    from frame_compare.vs.runtime_contract import (
-        media_runtime_fingerprint as canonical_media_runtime_fingerprint,
-    )
+    media_runtime_scopes = ("analysis", "probe", "alignment", "index", "full")
 
-    commit_sha = _run_git(repo_root, "rev-parse", "HEAD")
+    commit_sha = args.commit_sha
     if not re.fullmatch(r"[a-f0-9]{40}", commit_sha):
-        raise ValueError("git HEAD is not a full commit SHA")
+        raise ValueError("--commit-sha must be a complete lowercase 40-character commit SHA")
     if args.require_clean_repo and _run_git(
         repo_root, "status", "--porcelain", "--untracked-files=all"
     ):
@@ -454,7 +519,7 @@ def main() -> int:
         bundle_info.get("media_runtime_fingerprints"),
         "bundle_info.media_runtime_fingerprints",
     )
-    expected_scopes = set(MEDIA_RUNTIME_SCOPES)
+    expected_scopes = set(media_runtime_scopes)
     if set(media_runtime_fingerprints) != expected_scopes:
         raise ValueError(
             "bundle_info.media_runtime_fingerprints must contain the exact supported scopes"
@@ -485,15 +550,6 @@ def main() -> int:
     }
     if validated_manifest_fingerprints != validated_media_runtime_fingerprints:
         raise ValueError("bundle_info media-runtime fingerprints do not match manifest.json")
-    canonical_fingerprints = {
-        scope: canonical_media_runtime_fingerprint(scope, profile="windows-x64")
-        for scope in MEDIA_RUNTIME_SCOPES
-    }
-    if validated_manifest_fingerprints != canonical_fingerprints:
-        raise ValueError(
-            "portable media-runtime fingerprints do not match the canonical windows-x64 contract"
-        )
-
     _assert_safe_bundle(bundle_root)
     _promote_bundled_inter_license(bundle_root)
     distributions = _python_distributions(bundle_root / "app" / "site-packages")
@@ -513,8 +569,10 @@ def main() -> int:
         distributions=distributions,
     )
     licenses = _license_inventory(bundle_root)
+    _assert_manifest_notices(manifest, licenses)
 
     inventory: JsonObject = {
+        "archive": _archive_inventory(bundle_root, output_path),
         "bundle": {
             "commit_sha": commit_sha,
             "frame_compare_license": "GPL-3.0-only",

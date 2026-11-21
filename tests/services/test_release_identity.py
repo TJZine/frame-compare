@@ -1,9 +1,10 @@
 """Structured release identity corpus and formatter tests."""
 
+from pathlib import Path
+
 import pytest
 
 from frame_compare.services.metadata_parsing import (
-    parse_filename,
     parse_filename_with_release_identity,
 )
 from frame_compare.services.release_identity import (
@@ -16,6 +17,7 @@ from frame_compare.services.release_identity import (
     short_source_names,
     unique_presentation_names,
 )
+from frame_compare.services.types import ParsedMetadata
 
 
 @pytest.mark.parametrize(
@@ -60,6 +62,16 @@ from frame_compare.services.release_identity import (
         ("Film.2020.1080p.PCOK.WEB-DL-GROUP.mkv", ("PCOK", "WEB-DL", (), (), "GROUP")),
         ("Film.2020.1080p.HMAX.WEB-DL-GROUP.mkv", ("HMAX", "WEB-DL", (), (), "GROUP")),
         ("Film.2020.1080p.MA.BluRay-GROUP.mkv", ("MA", "BluRay", (), (), "GROUP")),
+        (
+            "The.Odyssey.2026.2160p.UHD.BluRay.DTS-HD.MA.5.1.HDR.x265-RandomBytes.mkv",
+            (None, "UHD BluRay", ("HDR",), (), "RandomBytes"),
+        ),
+        ("Film.2020.1080p.WEB-DL.DTS.HD.MA.5.1-GROUP.mkv", (None, "WEB-DL", (), (), "GROUP")),
+        ("Film.2020.1080p.WEB-DL.DTSHD.MA.5.1-GROUP.mkv", (None, "WEB-DL", (), (), "GROUP")),
+        (
+            "Film.2020.1080p.MA.WEB-DL.DTS-HD.MA.5.1-GROUP.mkv",
+            ("MA", "WEB-DL", (), (), "GROUP"),
+        ),
         ("Film.2020.1080p.AppleTV.WEB-DL-GROUP.mkv", ("ATV", "WEB-DL", (), (), "GROUP")),
     ],
 )
@@ -102,9 +114,11 @@ def test_screenshots_it_file_descriptor() -> None:
         "WEB-DL",
         ("DV", "HDR"),
         "ThisBlockHasProblems",
+        has_terminal_release_group=True,
     )
     assert (
-        format_release_descriptor(identity) == "2160p | iT WEB-DL | DV HDR | ThisBlockHasProblems"
+        format_release_descriptor(identity, short_name="")
+        == "2160p | iT WEB-DL | DV HDR | ThisBlockHasProblems"
     )
 
 
@@ -143,10 +157,16 @@ def test_guessit_streaming_service_names_map_to_display_codes(
 
 def test_hlg_claim_is_not_duplicated_in_release_descriptor() -> None:
     identity = ReleaseIdentity(
-        ContentIdentity("Show", season=1, episode=5), "1080p", "AMZN", "WEBRip", ("HLG",), "GROUP"
+        ContentIdentity("Show", season=1, episode=5),
+        "1080p",
+        "AMZN",
+        "WEBRip",
+        ("HLG",),
+        "GROUP",
+        has_terminal_release_group=True,
     )
 
-    assert format_release_descriptor(identity) == "1080p | AMZN WEBRip | HLG | GROUP"
+    assert format_release_descriptor(identity, short_name="") == "1080p | AMZN WEBRip | HLG | GROUP"
 
 
 @pytest.mark.parametrize(
@@ -183,41 +203,71 @@ def test_parser_derived_controls_are_normalized(monkeypatch: pytest.MonkeyPatch)
 
     assert identity.content.title == "Movie Title"
     assert identity.release_group == "GROUP EVIL"
-    assert "\n" not in format_compact_identity(identity)
-    assert "\x1b" not in format_compact_identity(identity)
+    assert "\n" not in format_compact_identity(identity, short_name="")
+    assert "\x1b" not in format_compact_identity(identity, short_name="")
 
 
 @pytest.mark.parametrize(
-    ("filename", "expected_year", "expected_episode"),
+    ("filename", "expected_canonical", "expected_year", "expected_episode"),
     [
-        ("[Group] Movie.2024.1080p.NF.WEB-DL.HDR10.mkv", 2024, None),
-        ("[SubsPlease] Show - 03 (1080p) [ABC].mkv", None, 3),
+        (
+            "[Group] Movie.2024.1080p.NF.WEB-DL.HDR10.mkv",
+            ParsedMetadata(title="Movie 2024", release_group="Group", resolution="1080p"),
+            2024,
+            None,
+        ),
+        (
+            "[SubsPlease] Show - 03 (1080p) [ABC].mkv",
+            ParsedMetadata(
+                title="Show",
+                episode=3,
+                release_group="SubsPlease",
+                resolution="1080p",
+            ),
+            None,
+            3,
+        ),
     ],
 )
 def test_combined_parse_preserves_canonical_fallback_and_merged_release_facts(
     filename: str,
+    expected_canonical: ParsedMetadata,
     expected_year: int | None,
     expected_episode: int | None,
 ) -> None:
     canonical, release = parse_filename_with_release_identity(filename, parser_priority="auto")
 
-    assert canonical == parse_filename(
-        filename,
-        parser_priority="auto",
-        alternate_policy="fallback",
-    )
+    assert canonical == expected_canonical
     assert release.content.year == expected_year
     assert release.content.episode == expected_episode
 
 
 def test_formatters_and_common_content() -> None:
     content = ContentIdentity("Avatar Aang The Last Airbender", 2026)
-    first = ReleaseIdentity(content, "2160p", "PMTP", "WEB-DL", ("DV", "HDR10+"), "Kitsune")
-    second = ReleaseIdentity(
-        content, "2160p", "ATV", "WEB-DL", ("DV", "HDR10+"), "Kitsune", ("REPACK",)
+    first = ReleaseIdentity(
+        content,
+        "2160p",
+        "PMTP",
+        "WEB-DL",
+        ("DV", "HDR10+"),
+        "Kitsune",
+        has_terminal_release_group=True,
     )
-    assert format_release_descriptor(first) == "2160p | PMTP WEB-DL | DV HDR10+ | Kitsune"
-    assert format_compact_identity(second).startswith(
+    second = ReleaseIdentity(
+        content,
+        "2160p",
+        "ATV",
+        "WEB-DL",
+        ("DV", "HDR10+"),
+        "Kitsune",
+        ("REPACK",),
+        has_terminal_release_group=True,
+    )
+    assert (
+        format_release_descriptor(first, short_name="")
+        == "2160p | PMTP WEB-DL | DV HDR10+ | Kitsune"
+    )
+    assert format_compact_identity(second, short_name="").startswith(
         "Avatar Aang The Last Airbender (2026) | 2160p"
     )
     assert format_micro_descriptor(second) == "ATV WEB-DL | DV HDR10+ | REPACK | Kitsune"
@@ -241,14 +291,15 @@ def test_separator_keyword_applies_to_inner_and_outer_joins() -> None:
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
         release_group="Kitsune",
+        has_terminal_release_group=True,
     )
-    assert format_release_descriptor(identity, separator=" · ") == (
+    assert format_release_descriptor(identity, separator=" · ", short_name="") == (
         "2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
     )
     assert format_micro_descriptor(identity, separator=" · ") == (
         "ATV WEB-DL · DV HDR10+ · Kitsune"
     )
-    compact = format_compact_identity(identity, separator=" · ")
+    compact = format_compact_identity(identity, separator=" · ", short_name="")
     assert compact == "Example (2026) · 2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
     assert "|" not in compact
 
@@ -267,6 +318,7 @@ def _short_name_identity(
         dynamic_range_claims=dynamic_range,
         release_group=group,
         revision_tags=revision,
+        has_terminal_release_group=group is not None,
     )
 
 
@@ -276,11 +328,11 @@ def _short_name_source(
     *,
     explicit: bool = False,
 ) -> ShortNameSource:
-    return ShortNameSource(identity=identity, label=label, label_is_explicit=explicit)
+    return ShortNameSource(identity=identity, label=label, label_is_explicit=explicit, stem="")
 
 
 @pytest.mark.parametrize(
-    ("sources", "roles", "expected"),
+    ("sources", "expected"),
     [
         pytest.param(
             [
@@ -294,7 +346,6 @@ def _short_name_source(
                     "c.mkv",
                 ),
             ],
-            ["Reference", "Comparison 1", "Comparison 2"],
             [
                 "SCOPE",
                 "ThisBlockHasProblems",
@@ -307,7 +358,6 @@ def _short_name_source(
                 _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "a.mkv"),
                 _short_name_source(_short_name_identity("iT", "scope", ("DV", "HDR")), "b.mkv"),
             ],
-            ["Reference", "Comparison 1"],
             [
                 "AMZN WEB-DL · HDR · SCOPE",
                 "iT WEB-DL · DV HDR · scope",
@@ -321,7 +371,6 @@ def _short_name_source(
                 ),
                 _short_name_source(_short_name_identity("iT", "OTHER", ("DV", "HDR")), "b.mkv"),
             ],
-            ["Reference", "Comparison 1"],
             [
                 "My Cut",
                 "OTHER",
@@ -333,7 +382,6 @@ def _short_name_source(
                 _short_name_source(None, "reference.mkv"),
                 _short_name_source(_short_name_identity("iT", "OTHER", ("DV", "HDR")), "b.mkv"),
             ],
-            ["Reference", "Comparison 1"],
             [
                 "reference.mkv",
                 "OTHER",
@@ -345,7 +393,6 @@ def _short_name_source(
                 _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "a.mkv"),
                 _short_name_source(_short_name_identity("AMZN", "SCOPE", ("HDR",)), "b.mkv"),
             ],
-            ["Reference", "Comparison 1"],
             [
                 "Reference | AMZN WEB-DL · HDR · SCOPE",
                 "Comparison 1 | AMZN WEB-DL · HDR · SCOPE",
@@ -354,8 +401,123 @@ def _short_name_source(
         ),
     ],
 )
-def test_short_names(sources: list[ShortNameSource], roles: list[str], expected: list[str]) -> None:
-    assert short_source_names(sources, roles=roles) == expected
+def test_short_names(sources: list[ShortNameSource], expected: list[str]) -> None:
+    assert short_source_names(sources) == expected
+
+
+_EBP = "Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv"
+_GNOME = "Black.Sails.S01E08.VIII.1080p.AMZN.WEB-DL.DDP.5.1.H.264-GNOME.mkv"
+_NOGRP = "Black.Sails.S01E08.VIII.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-NOGRP.mkv"
+_DEMON_SLAYER = "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv"
+_DEMON_SLAYER_COPY = "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv"
+
+
+@pytest.mark.parametrize(
+    ("filenames", "expected", "long_labels"),
+    [
+        (
+            [_EBP, _GNOME, _NOGRP],
+            ["EbP", "GNOME", "NOGRP"],
+            [
+                "Black Sails S01E08 · 1080p · BluRay · EbP",
+                "Black Sails S01E08 · 1080p · AMZN WEB-DL · GNOME",
+                "Black Sails S01E08 · 1080p · BluRay REMUX · NOGRP",
+            ],
+        ),
+        (
+            [_EBP, _DEMON_SLAYER],
+            ["EbP", "english-dub-only"],
+            [
+                "Black Sails S01E08 · 1080p · BluRay · EbP",
+                "Constructed DemonSlayer Kitsune · english-dub-only",
+            ],
+        ),
+        (
+            [_EBP, _DEMON_SLAYER_COPY, _DEMON_SLAYER],
+            ["EbP", "english-dub-only-copy", "english-dub-only"],
+            [
+                "Black Sails S01E08 · 1080p · BluRay · EbP",
+                "Constructed DemonSlayer Kitsune · english-dub-only-copy",
+                "Constructed DemonSlayer Kitsune · english-dub-only",
+            ],
+        ),
+        (
+            [
+                "Constructed.Witch-Kira.audio-delay-500ms.mkv",
+                "Constructed.Witch-Kira.audio-starts-500ms-in-sync.mkv",
+            ],
+            ["delay-500ms", "starts-500ms-in-sync"],
+            [
+                "Constructed Witch Kira · delay-500ms",
+                "Constructed Witch Kira · starts-500ms-in-sync",
+            ],
+        ),
+        (
+            ["Movie.x264-Group.mkv", "Movie.1080p.BluRay-Group-copy.mkv"],
+            ["Group", "Group-copy"],
+            ["Movie · Group", "Movie · 1080p · BluRay · Group-copy"],
+        ),
+        (
+            ["Movie.1080p.BluRay.x264-D-Z0N3.mkv", "Movie.1080p.x264-EbP.mkv"],
+            ["D-Z0N3", "EbP"],
+            ["Movie · 1080p · BluRay · D-Z0N3", "Movie · 1080p · EbP"],
+        ),
+        (
+            ["Movie.cutA.final.mkv", "Movie.cutB.final.mkv"],
+            ["cutA", "cutB"],
+            ["Movie cutA final · cutA", "Movie cutB final · cutB"],
+        ),
+        (
+            ["Movie.mkv", "Movie.alternate.mkv"],
+            ["Canonical 1", "alternate"],
+            ["Movie · Canonical 1", "Movie · alternate"],
+        ),
+        (
+            ["Movie.2010.1080p.BluRay.x264.crf18.mkv", "Movie.2010.1080p.BluRay.x264.crf20.mkv"],
+            ["crf18", "crf20"],
+            ["Movie (2010) · 1080p · BluRay · crf18", "Movie (2010) · 1080p · BluRay · crf20"],
+        ),
+        (
+            ["Movie.2010.1080p.BluRay.HYBRID.x264.mkv", "Movie.2010.1080p.WEB-DL.x264.mkv"],
+            ["BluRay", "WEB-DL"],
+            ["Movie (2010) · 1080p · BluRay · HYBRID", "Movie (2010) · 1080p · WEB-DL"],
+        ),
+        (
+            [
+                "Movie.2010.crf18.2160p.AMZN.WEB-DL.H.265-FLUX.mkv",
+                "Movie.2010.crf20.2160p.AMZN.WEB-DL.H.265-FLUX.mkv",
+            ],
+            ["crf18", "crf20"],
+            [
+                "Movie (2010) · 2160p · AMZN WEB-DL · FLUX",
+                "Movie (2010) · 2160p · AMZN WEB-DL · FLUX",
+            ],
+        ),
+    ],
+)
+def test_short_names_for_real_filenames(
+    filenames: list[str], expected: list[str], long_labels: list[str]
+) -> None:
+    sources = [
+        ShortNameSource(
+            identity=parse_filename_with_release_identity(filename)[1],
+            label=f"Canonical {index}",
+            label_is_explicit=False,
+            stem=Path(filename).stem,
+        )
+        for index, filename in enumerate(filenames, start=1)
+    ]
+    assert short_source_names(sources) == expected
+    for source, short, long_label in zip(sources, expected, long_labels, strict=True):
+        assert source.identity is not None
+        assert (
+            format_compact_identity(source.identity, separator=" · ", short_name=short)
+            == long_label
+        )
+        if not source.identity.has_terminal_release_group:
+            assert format_micro_descriptor(
+                source.identity, include_group=True
+            ) == format_micro_descriptor(source.identity, include_group=False)
 
 
 def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -363,3 +525,11 @@ def test_malformed_name_fails_open_to_stem(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr("frame_compare.services.metadata_parsing.anitopy.parse", lambda _name: None)
     _, identity = parse_filename_with_release_identity("odd_name.mkv")
     assert identity.content == ContentIdentity("odd name", title_origin="fallback")
+
+
+@pytest.mark.parametrize("short", ["Reference | BluRay", "Comparison 1 | BluRay"])
+def test_release_descriptor_omits_role_prefixed_short_name(short: str) -> None:
+    _, identity = parse_filename_with_release_identity("Movie.2010.1080p.BluRay.x264.mkv")
+    assert (
+        format_release_descriptor(identity, separator=" · ", short_name=short) == "1080p · BluRay"
+    )

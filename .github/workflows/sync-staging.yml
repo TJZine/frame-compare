@@ -66,6 +66,6 @@ jobs:
             exit 1
           fi
 
-          # A normal push is intentionally used: concurrent staging changes make
-          # this fail rather than silently overwriting them.
+          # Main was rechecked above. A normal push refuses a non-fast-forward
+          # update to staging.
           git push origin "HEAD:refs/heads/staging"

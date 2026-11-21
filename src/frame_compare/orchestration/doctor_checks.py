@@ -7,12 +7,13 @@ import subprocess
 from collections.abc import Callable, Iterable, Mapping
 from typing import cast
 
-from frame_compare.config.errors import ConfigParseError, ConfigValidationError
-from frame_compare.config.loader import load_config
+from frame_compare.config.errors import ConfigNotFoundError, ConfigParseError, ConfigValidationError
+from frame_compare.config.loader import load_config, load_environment_config
 from frame_compare.errors import JSONValue
-from frame_compare.orchestration.doctor_types import CheckResult, DoctorCheck
-from frame_compare.orchestration.preflight import resolve_workspace
+from frame_compare.orchestration.doctor_types import CheckResult, DoctorCheck, DoctorConfigSelection
+from frame_compare.orchestration.run_inputs import select_run_config_path
 from frame_compare.services.metadata import is_valid_tmdb_api_key
+from frame_compare.utils.child_environment import diagnostic_secrets, sanitize_diagnostic
 from frame_compare.utils.subproc import resolve_executable, run_subprocess
 from frame_compare.vs.env import (
     candidate_lsmas_plugin_path_details,
@@ -489,6 +490,8 @@ def _check_ffmpeg() -> CheckResult:
             completed = run_subprocess(
                 [executable_path, "-version"],
                 timeout_seconds=5.0,
+                max_stdout_bytes=16 * 1024,
+                max_stderr_bytes=8 * 1024,
             )
         except (OSError, subprocess.SubprocessError) as error:
             details["exception_type"] = type(error).__name__
@@ -498,7 +501,7 @@ def _check_ffmpeg() -> CheckResult:
                 hint="Repair or replace the FFmpeg runtime, then rerun doctor",
                 details=details,
             )
-        lines = completed.stdout.decode("utf-8", errors="replace").splitlines()
+        lines = sanitize_diagnostic(completed.stdout, diagnostic_secrets()).decode().splitlines()
         details[f"{executable}_version_line"] = lines[0] if lines else ""
 
     ffmpeg_version_line = str(details["ffmpeg_version_line"])
@@ -573,9 +576,9 @@ def _check_vsview() -> CheckResult:
     )
 
 
-def _check_tmdb_api_key() -> CheckResult:
+def _check_tmdb_api_key(selection: DoctorConfigSelection | None = None) -> CheckResult:
     """Check TMDB API key is configured through the normal runtime config chain."""
-    tmdb_enabled, resolved_api_key, config_error = _resolve_tmdb_config()
+    tmdb_enabled, resolved_api_key, config_error = _resolve_tmdb_config(selection)
 
     if config_error is not None:
         return CheckResult(
@@ -612,20 +615,28 @@ def _check_tmdb_api_key() -> CheckResult:
 
 
 def _tmdb_config_error_hint(config_error: dict[str, JSONValue]) -> str:
-    if config_error.get("exception_type") == "ConfigParseError":
-        return "Fix config/config.toml syntax, then rerun doctor"
+    if config_error.get("exception_type") in {"ConfigNotFoundError", "ConfigParseError"}:
+        return f"Make {config_error['config_file']} readable and valid TOML, then rerun doctor"
     return "Fix the reported config/environment validation errors, then rerun doctor"
 
 
-def _resolve_tmdb_config() -> tuple[bool | None, str | None, dict[str, JSONValue] | None]:
+def _resolve_tmdb_config(
+    selection: DoctorConfigSelection | None = None,
+) -> tuple[bool | None, str | None, dict[str, JSONValue] | None]:
     """Resolve TMDB enablement and credentials through the runtime config path."""
-    root = resolve_workspace(None)
-    config_path = root / "config" / "config.toml"
-    effective_config_path = config_path if config_path.exists() else None
+    if selection is None:
+        root, config_path = select_run_config_path(None, None)
+        selection = DoctorConfigSelection(root, config_path, False)
+    config_path = selection.config_path
+    effective_config_path = config_path if selection.explicit or config_path.exists() else None
 
     try:
-        config = load_config(effective_config_path)
-    except ConfigParseError as exc:
+        config = (
+            load_config(effective_config_path)
+            if effective_config_path is not None
+            else load_environment_config()
+        )
+    except (ConfigNotFoundError, ConfigParseError) as exc:
         details: dict[str, JSONValue] = {
             "config_file": str(config_path),
             "exception_type": type(exc).__name__,
@@ -643,7 +654,7 @@ def _resolve_tmdb_config() -> tuple[bool | None, str | None, dict[str, JSONValue
     return config.tmdb.enabled, config.tmdb.api_key, None
 
 
-def collect_checks() -> list[DoctorCheck]:
+def collect_checks(selection: DoctorConfigSelection | None = None) -> list[DoctorCheck]:
     """Collect all diagnostic checks in deterministic order.
 
     Returns:
@@ -663,7 +674,7 @@ def collect_checks() -> list[DoctorCheck]:
         "ffms2": _check_ffms2,
         "ffmpeg": _check_ffmpeg,
         "vsview": _check_vsview,
-        "tmdb_api_key": _check_tmdb_api_key,
+        "tmdb_api_key": lambda: _check_tmdb_api_key(selection),
     }
     managed_runtime = runtime_kind().casefold() in {"docker", "windows-portable"}
 

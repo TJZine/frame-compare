@@ -9,7 +9,6 @@ from typing import Literal
 from rich.console import Console
 from rich.markup import escape
 
-from frame_compare.cli.output import format_display_path
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.analysis_policy import needs_analysis
 from frame_compare.orchestration.errors import (
@@ -21,6 +20,8 @@ from frame_compare.orchestration.source_selection import (
     resolve_source_selection,
     resolve_source_selector,
 )
+from frame_compare.utils.artifact_paths import format_display_path
+from frame_compare.utils.terminal_theme import print_with_paths
 
 type RuntimeFactStatus = Literal["known", "unknown"]
 
@@ -303,6 +304,7 @@ def print_dry_run_plan(
         "[bold]No side effects:[/] this dry run validates configuration and input "
         "filenames only; it does not write, render, upload, or open anything."
     )
+    input_directory = format_display_path(plan.input.resolved_directory, root=plan.workspace_root)
     _print_section(
         console,
         "Will use",
@@ -311,13 +313,7 @@ def print_dry_run_plan(
                 "Workspace",
                 str(plan.workspace_root),
             ),
-            (
-                "Input directory",
-                format_display_path(
-                    plan.input.resolved_directory,
-                    root=plan.workspace_root,
-                ),
-            ),
+            ("Input directory", input_directory),
             (
                 f"Sources ({len(plan.input.source_filenames)})",
                 ", ".join(plan.input.source_filenames),
@@ -351,6 +347,12 @@ def print_dry_run_plan(
                 f"metrics {'required' if plan.selection.analysis_metrics_required else 'not required'}; "
                 f"random seed {plan.selection.random_seed}",
             ),
+        ),
+        paths=(
+            str(plan.workspace_root),
+            input_directory,
+            *plan.input.source_filenames,
+            plan.reference.configured_selector,
         ),
     )
     _print_section(
@@ -434,11 +436,13 @@ def _print_section(
     console: Console,
     title: str,
     rows: tuple[tuple[str, str], ...],
+    *,
+    paths: tuple[str, ...] = (),
 ) -> None:
     console.print()
     console.print(f"[bold]{title}[/]")
     for label, value in rows:
-        console.print(f"  {label}: {escape(value)}")
+        print_with_paths(console, f"  {label}: {escape(value)}", paths)
 
 
 def _selection_label(name: str) -> str:

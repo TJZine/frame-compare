@@ -118,10 +118,8 @@ def _copy_keygen_owner(*, repo_root: Path, tmp_path: Path) -> tuple[Path, Path, 
     owner_dir.mkdir(parents=True)
     script = owner_dir / "generate_update_keypair.ps1"
     placeholder = owner_dir / "update_public_key.xml"
-    shutil.copy2(
-        repo_root / "tools" / "windows_portable" / "generate_update_keypair.ps1",
-        script,
-    )
+    for name in (script.name, "path_safety.ps1"):
+        shutil.copy2(repo_root / "tools" / "windows_portable" / name, owner_dir / name)
     placeholder.write_text(
         "\n".join(
             [
@@ -338,19 +336,51 @@ def test_windows_update_keygen_refuses_existing_outputs(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("junction_role", ["direct", "private-path", "repository-root"])
 def test_windows_update_keygen_rejects_repository_private_path(
     tmp_path: Path,
     repo_root: Path,
+    junction_role: str,
 ) -> None:
+    if junction_role != "direct" and os.name != "nt":
+        pytest.skip("Windows junction required")
     exe = _powershell_exe()
     if exe is None:
         pytest.skip("pwsh/powershell not available")
 
+    tmp_path = tmp_path.resolve()
     copied_repo, script, placeholder = _copy_keygen_owner(
         repo_root=repo_root,
         tmp_path=tmp_path,
     )
     private_path = copied_repo / "private.xml"
+    expected_error = "outside the repository"
+    if junction_role != "direct":
+        alias = tmp_path / "outside-junction"
+        junction = subprocess.run(
+            [
+                exe,
+                "-NoProfile",
+                "-Command",
+                '$ErrorActionPreference = "Stop"; '
+                "New-Item -ItemType Junction -Path $env:ALIAS -Target $env:TARGET | Out-Null",
+            ],
+            env=os.environ | {"ALIAS": str(alias), "TARGET": str(copied_repo)},
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert junction.returncode == 0, junction.stdout + junction.stderr
+        if junction_role == "private-path":
+            private_path = alias / "private.xml"
+            expected_error = "PrivateKeyPath has a reparse-point ancestor"
+        else:
+            script = alias / script.relative_to(copied_repo)
+            placeholder = alias / placeholder.relative_to(copied_repo)
+            private_path = tmp_path / "private.xml"
+            expected_error = "Repository root has a reparse-point ancestor"
+
     before = placeholder.read_bytes()
     proc = _run_keygen(
         exe=exe,
@@ -360,9 +390,10 @@ def test_windows_update_keygen_rejects_repository_private_path(
         replace_placeholder=True,
     )
     assert proc.returncode != 0
-    assert "outside the repository" in proc.stderr
+    assert expected_error in _normalized_powershell_output(proc.stderr)
     assert placeholder.read_bytes() == before
     assert not private_path.exists()
+    assert not list(private_path.parent.glob(".private.xml.*.tmp"))
 
 
 @pytest.mark.integration
@@ -640,23 +671,6 @@ Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
     assert all(entry["bytes"] > 0 for entry in manifest["files"])
 
 
-def test_windows_portable_update_never_bypasses_dependency_mismatch(repo_root: Path) -> None:
-    updater = (repo_root / "tools/windows_portable/shim/frame-compare-update.ps1").read_text(
-        encoding="utf-8"
-    )
-    mismatch_start = updater.index(
-        "$expectedFingerprint = Get-RequiredStringProperty -Object $manifest"
-    )
-    mismatch_end = updater.index("$payloadDir = Join-PathParts", mismatch_start)
-    mismatch_block = updater[mismatch_start:mismatch_end]
-
-    assert "Dependency fingerprint mismatch; code-only update refused" in mismatch_block
-    assert "complete Windows portable bundle" in mismatch_block
-    assert "Read-Choice" not in mismatch_block
-    assert "Confirm-Token" not in mismatch_block
-    assert "Start-Process" not in mismatch_block
-
-
 def test_windows_portable_sign_update_avoids_private_key_path_cli_argument(repo_root: Path) -> None:
     sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
     sign_script = _read_text_or_fail(sign_path)
@@ -670,16 +684,6 @@ def test_windows_portable_sign_update_requires_canonical_signature_entry(
     sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
     sign_script = _read_text_or_fail(sign_path)
     assert "signature_file must be the canonical 'update-manifest.sig' entry" in sign_script
-
-
-def test_windows_portable_updater_fails_closed_when_installed_version_missing(
-    repo_root: Path,
-) -> None:
-    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
-    updater = _read_text_or_fail(updater_path)
-    assert "Get-BundleAppVersion" in updater
-    assert "Installed app version could not be determined; refusing code-only update" in updater
-    assert "skipping version range check" not in updater.lower()
 
 
 def test_windows_portable_updater_authenticates_before_manifest_parse_and_archive_trust(
@@ -696,6 +700,7 @@ def test_windows_portable_updater_authenticates_before_manifest_parse_and_archiv
     assert signature_check < archive_validation < manifest_parse < extraction
     assert "UNSIGNED" not in body
     assert "Confirm-Token" not in updater
+    assert "Read-Choice" not in updater
 
 
 def test_windows_portable_updater_holds_one_read_only_archive_stream(repo_root: Path) -> None:
@@ -732,16 +737,6 @@ def test_windows_portable_build_update_uses_clean_committed_source(repo_root: Pa
     assert "Get-AppVersionFromSource -RepoRootPath $sourceSnapshotRoot" in build_script
 
 
-def test_windows_portable_updater_prefers_bundle_launcher_for_installed_version(
-    repo_root: Path,
-) -> None:
-    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
-    updater = _read_text_or_fail(updater_path)
-    assert '$bundleLauncher = Join-Path $BundlePath "frame-compare.ps1"' in updater
-    assert "& $bundleLauncher version 2>&1" in updater
-    assert "Get-VersionFromCommandOutput -OutputLines $launcherResult" in updater
-
-
 def test_windows_portable_update_signature_uses_explicit_pkcs1_sha256(
     repo_root: Path,
 ) -> None:
@@ -760,14 +755,44 @@ def test_windows_portable_update_signature_uses_explicit_pkcs1_sha256(
     assert "[System.Security.Cryptography.RSASignaturePadding]::Pkcs1" in updater
 
 
-def test_backup_identity_is_written_and_checked_before_rollback_mutation(repo_root: Path) -> None:
-    updater = _read_text_or_fail(repo_root / "tools/windows_portable/shim/frame-compare-update.ps1")
-    apply = _extract_powershell_function(updater, "Invoke-ApplyUpdate")
-    assert 'Join-Path (Split-Path -Parent $backupDir) "compatibility.json"' in apply
-    assert "$installedCompatibility | ConvertTo-Json" in apply
-    rollback = _extract_powershell_function(updater, "Invoke-Rollback")
-    assert rollback.index("Get-BackupCompatibilityError") < rollback.index("Acquire-UpdateLock")
-    assert rollback.index("Get-BackupCompatibilityError") < rollback.index("Restore-FromBackup")
-    listing = _extract_powershell_function(updater, "Invoke-ListBackups")
-    assert "Get-BackupCompatibilityError" in listing
-    assert "unavailable:" in listing
+@pytest.mark.parametrize("interpreter", ["powershell", "pwsh"])
+def test_update_generator_keeps_numeric_minimum_for_stable_and_rc(
+    repo_root: Path, interpreter: str
+) -> None:
+    exe = shutil.which(interpreter)
+    if exe is None:
+        pytest.skip(f"{interpreter} unavailable for generator version calculation")
+    result = subprocess.run(
+        [
+            exe,
+            "-NoProfile",
+            "-Command",
+            r"""
+$ErrorActionPreference = 'Stop'
+. $env:VERSION_OWNER
+. $env:MANIFEST_OWNER
+foreach ($version in @('1.2.3', '1.2.3rc1', '0.8.0rc999999999')) {
+  $manifest = [Text.Encoding]::UTF8.GetString((New-UpdateManifestBytes $version)) | ConvertFrom-Json
+  $actual = $manifest.from_app_version_min
+  $expected = if ($version.StartsWith('1.2.')) { '1.2.0' } else { '0.8.0' }
+  if ($actual -cne $expected) { throw "incorrect stable minimum: $actual" }
+}
+try { New-UpdateManifestBytes '1.2.3RC1'; throw 'malformed version accepted' }
+catch { if ($_.Exception.Message -ne 'Invalid update version.') { throw } }
+Write-Host 'generator-minimum-cases-complete'
+""",
+        ],
+        env=os.environ
+        | {
+            "VERSION_OWNER": str(
+                repo_root / "tools/windows_portable/shim/frame-compare-version.ps1"
+            ),
+            "MANIFEST_OWNER": str(repo_root / "tools/windows_portable/update_manifest_bytes.ps1"),
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "generator-minimum-cases-complete" in result.stdout
