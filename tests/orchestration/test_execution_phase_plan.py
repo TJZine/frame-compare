@@ -516,18 +516,17 @@ async def test_steps_distinguish_disabled_from_runtime_skips(
             for event in logs
             if event.get("event") == "phase_completed" and event.get("status") == "skipped"
         } == expected
+        return
+    plain = Text.from_ansi(output).plain.lower()
+    if configured:
+        # Configuration-disabled steps never start on a human reporter.
+        assert [name for name in sorted(expected) if name in plain] == []
     elif transport == "tty":
-        plain = Text.from_ansi(output).plain
-        if configured:
-            assert "disabled" not in plain.lower()
-        else:
-            assert "– Analyze         not required" in plain
-            assert "– Publish         declined" in plain
+        assert "– analyze         not required" in plain
+        assert "– publish         declined" in plain
     else:
         skip_lines = [line for line in output.splitlines() if line.startswith("[SKIP]")]
-        assert skip_lines == (
-            [] if configured else ["[SKIP] ANALYZE  Not required", "[SKIP] PUBLISH  Declined"]
-        )
+        assert skip_lines == ["[SKIP] ANALYZE  Not required", "[SKIP] PUBLISH  Declined"]
 
 
 async def test_analyze_step_skips_when_request_disables_analysis(

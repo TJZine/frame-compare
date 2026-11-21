@@ -233,7 +233,7 @@ async def test_interrupted_warn_only_report_stops_without_applying_output(
     record = read_run_result(run_dir / "run_result.toml")
     assert record.status == "failed"
     assert record.was_interrupted
-    assert all(not warning.startswith("report:") for warning in record.warning_summaries)
+    assert record.warning_count == 0
     assert all(not warning.text.startswith("report:") for warning in state.warnings)
     assert state.artifacts.report_path is None
     assert not state.artifacts.report_succeeded

@@ -818,9 +818,11 @@ keeps its existing behavior.
 The interrupted run exits 130 even if a step fails at the same moment. If an
 alignment child, reader, pipe or handle cannot be released, the alignment cleanup
 error keeps its own exit code. Once a run folder has been reserved, Frame Compare
-attempts to write a failed record. The active human progress line says
-`interrupted` and uses the skip glyph. After cleanup, the CLI prints
-`! Interrupted during {phase}` when a phase is known. A reserved run folder gets a
+attempts to write a failed record. The step that was running ends as
+interrupted: the Rich line uses the skip glyph and says `interrupted`, and piped
+output prints a line such as `[STOP] RENDER  Interrupted`. After cleanup, the CLI
+prints `! Interrupted during {phase}`, or `! Interrupted` when the stop came
+between steps or during cleanup. A reserved run folder gets a
 `kept` row with its screenshot count, planned count, and path. A `next run` row
 names only reusable analysis or alignment caches written by this run. Quiet and
 JSON output omit this human summary.

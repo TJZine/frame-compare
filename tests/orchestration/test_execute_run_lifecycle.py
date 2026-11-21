@@ -1042,6 +1042,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                 "exit": result.exit_code,
                 "stderr": result.stderr,
                 "status": record.status,
+                "was_interrupted": record.was_interrupted,
                 "calls": sorted(calls),
                 "later": later,
                 "render_applied": artifacts.render is not None,
@@ -1074,6 +1075,7 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
     assert result.returncode == 130, result.stderr
     observed = json.loads(result.stdout)
     assert observed["status"] == "failed"
+    assert observed["was_interrupted"] is True
     assert observed["later"] == []
     assert observed["render_applied"] is False
     assert observed["reaped"] is True
