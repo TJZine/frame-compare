@@ -32,10 +32,9 @@ from tests.orchestration.phase_task_helpers import (
     _context,
     _frame_metrics,
     _render_artifacts,
+    prep_for_context,
 )
 from tests.run_request_support import make_run_request
-
-from .test_run_steps import prep_for_context
 
 
 async def _run_selection_and_output(ctx: RunContext, *, skip_analysis: bool) -> ExecutionState:

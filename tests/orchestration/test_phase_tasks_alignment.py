@@ -40,10 +40,9 @@ from tests.orchestration.phase_task_helpers import (
     _context,
     _frame_metrics,
     _run_align_phase,
+    prep_for_context,
 )
 from tests.run_request_support import make_run_request
-
-from .test_run_steps import prep_for_context
 
 
 def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(

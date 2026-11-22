@@ -152,8 +152,9 @@ per-frame mapper state, and fast mode never routes through the experimental
 `independent=1` path. The speed setting is an ordinary persisted color field, but it
 does not change preset values or output encoding. Each parallel render batch owns one
 `threading.Event`. The main thread sets it on cancellation or a real failure, and
-workers check it before each render frame. Stopped units retain completed frame
-results as cleanup outcomes. Real-failure ordering remains authoritative.
+workers check it before each render frame. PNGs already written by a stopped
+unit stay on disk. The scheduler discards the unit's partial results, so a
+partial clip is never published. Real-failure ordering remains authoritative.
 Sequential render frames also check admission. VSView polls its blocking waits
 and reaps owned work.
 A native frame request already in flight has no guaranteed finite drain deadline;
@@ -1632,6 +1633,8 @@ reconstructing or validating parallel path/fact maps.
 - The orchestration coordinator creates and closes the default shared HTTP client
   when no client is injected through `RunDependencies`. Injected clients remain
   caller-owned. An ordinary error closing the owned client leaves the run outcome intact.
+  An interrupt can cut the close short, and the run ends as interrupted or with
+  the alignment cleanup error.
   `runner` bridges sync callers to async orchestration. Doctor checks
   runtime availability and local TMDB configuration without HTTP requests;
   slow.pics connectivity belongs to the browser-compatible publishing flow.

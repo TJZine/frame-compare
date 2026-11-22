@@ -52,13 +52,12 @@ from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
     _render_artifacts,
+    prep_for_context,
 )
 from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
 from tests.services.report_viewer_contracts import SelectParser, script_payload
 from tests.tonemap_test_support import libplacebo_tonemap
-
-from .test_run_steps import prep_for_context
 
 
 class _RecordingProgressReporter(NullProgressReporter):

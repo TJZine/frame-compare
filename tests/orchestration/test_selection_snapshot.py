@@ -32,10 +32,8 @@ from tests.orchestration.execute_run_helpers import (
     FakeVSLoader,
     install_fake_frame_render,
 )
-from tests.orchestration.phase_task_helpers import _context, _frame_metrics
+from tests.orchestration.phase_task_helpers import _context, _frame_metrics, prep_for_context
 from tests.run_request_support import make_run_request
-
-from .test_run_steps import prep_for_context
 
 
 async def test_late_snapshot_replacements_reach_align_render_publish_and_report(

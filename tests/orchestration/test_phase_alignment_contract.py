@@ -31,11 +31,14 @@ from tests.alignment_review_test_support import (
     provisional_audio_attempt,
     unavailable_audio_attempt,
 )
-from tests.orchestration.phase_task_helpers import _clip, _context, _run_align_phase
+from tests.orchestration.phase_task_helpers import (
+    _clip,
+    _context,
+    _run_align_phase,
+    prep_for_context,
+)
 from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
-
-from .test_run_steps import prep_for_context
 
 
 @pytest.mark.parametrize("speed, enabled", [("quality", True), ("fast", True), ("fast", False)])

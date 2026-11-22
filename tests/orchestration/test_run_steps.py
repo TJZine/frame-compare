@@ -12,13 +12,11 @@ import pytest
 
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError
 from frame_compare.orchestration import coordinator, execution
-from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.execution import RunSteps
 from frame_compare.orchestration.execution_types import (
     AlignPhaseOutput,
     ExecutionState,
     FramePlanPhaseOutput,
-    MetadataPrefetch,
     PrepState,
     RenderPhaseOutput,
     ReportPhaseOutput,
@@ -32,23 +30,7 @@ from frame_compare.utils.progress_protocol import ProgressPhaseStatus
 from frame_compare.utils.run_warnings import RunWarning
 from tests.run_request_support import make_run_request
 
-from .phase_task_helpers import _context, _render_artifacts
-
-
-def prep_for_context(ctx: RunContext, state: ExecutionState) -> PrepState:
-    clips = [ctx.reference, *ctx.comparisons]
-    return PrepState(
-        workspace=ctx.workspace,
-        config=ctx.config,
-        input_videos=[clip.path for clip in clips],
-        clips=clips,
-        artifacts=state.artifacts,
-        metadata_prefetch=MetadataPrefetch(None, False),
-        preflight_warnings=[],
-        preflight_duration=0.0,
-        load_sources_start=0.0,
-        selection_domain=ctx.selection_domain,
-    )
+from .phase_task_helpers import _context, _render_artifacts, prep_for_context
 
 
 async def test_unresolved_align_review_renders_warning_line(
@@ -283,6 +265,57 @@ async def test_required_step_marks_failure_and_propagates(
     reporter.advance.assert_not_called()
     assert state.phase_timings == {"render": 5.0}
     assert state.warnings == []
+
+
+async def test_step_keeps_cleanup_error_when_progress_completion_fails() -> None:
+    reporter = Mock(spec=NullProgressReporter)
+    reporter.complete_phase.side_effect = OSError("stderr closed")
+    steps = RunSteps(reporter=reporter, state=ExecutionState(), monotonic_timer=lambda: 0.0)
+    error = AudioAlignmentCleanupError("resource not released")
+
+    def fail() -> Never:
+        raise error
+
+    with pytest.raises(AudioAlignmentCleanupError) as caught:
+        await steps.run(
+            "align",
+            fail,
+            warning_source="alignment",
+            warn_only=True,
+            fatal=(AudioAlignmentCleanupError,),
+        )
+
+    assert caught.value is error
+    reporter.complete_phase.assert_called_once_with(
+        ProgressPhaseStatus.FAILED, summary=None, duration_text=None
+    )
+
+
+async def test_successful_step_propagates_progress_completion_error() -> None:
+    reporter = Mock(spec=NullProgressReporter)
+    error = OSError("stderr closed")
+    reporter.complete_phase.side_effect = error
+    steps = RunSteps(reporter=reporter, state=ExecutionState(), monotonic_timer=lambda: 0.0)
+
+    with pytest.raises(OSError) as caught:
+        await steps.run("render", lambda: None, warning_source="render")
+
+    assert caught.value is error
+
+
+async def test_successful_step_propagates_progress_completion_error_in_caller_except() -> None:
+    reporter = Mock(spec=NullProgressReporter)
+    error = OSError("stderr closed")
+    reporter.complete_phase.side_effect = error
+    steps = RunSteps(reporter=reporter, state=ExecutionState(), monotonic_timer=lambda: 0.0)
+
+    try:
+        raise RuntimeError("caller handling")
+    except RuntimeError:
+        with pytest.raises(OSError) as caught:
+            await steps.run("render", lambda: None, warning_source="render")
+
+    assert caught.value is error
 
 
 @pytest.mark.parametrize(

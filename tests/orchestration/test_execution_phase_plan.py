@@ -50,8 +50,13 @@ from .execute_run_helpers import (
     clip_state,
     execution_context,
 )
-from .phase_task_helpers import _context, _frame_metrics, _render_artifacts, _workspace
-from .test_run_steps import prep_for_context
+from .phase_task_helpers import (
+    _context,
+    _frame_metrics,
+    _render_artifacts,
+    _workspace,
+    prep_for_context,
+)
 
 
 async def test_frame_plan_step_applies_selection_labels(
@@ -522,8 +527,9 @@ async def test_steps_distinguish_disabled_from_runtime_skips(
         # Configuration-disabled steps never start on a human reporter.
         assert [name for name in sorted(expected) if name in plain] == []
     elif transport == "tty":
-        assert "– analyze         not required" in plain
-        assert "– publish         declined" in plain
+        lines = [" ".join(line.split()) for line in plain.splitlines()]
+        assert any(line.endswith("– analyze not required") for line in lines)
+        assert any(line.endswith("– publish declined") for line in lines)
     else:
         skip_lines = [line for line in output.splitlines() if line.startswith("[SKIP]")]
         assert skip_lines == ["[SKIP] ANALYZE  Not required", "[SKIP] PUBLISH  Declined"]

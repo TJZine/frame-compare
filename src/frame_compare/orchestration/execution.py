@@ -175,6 +175,7 @@ class RunSteps:
         start = self._monotonic_timer()
         completion = StepCompletion()
         status = ProgressPhaseStatus.FAILED
+        raising = False
         try:
             # Starting progress can request cancellation before the body runs.
             raise_if_cancelling()
@@ -197,6 +198,7 @@ class RunSteps:
                 or not isinstance(exc, Exception)
             ):
                 status = self._raised_status(name, exc)
+                raising = True
                 raise
             status = ProgressPhaseStatus.WARNED
             if isinstance(reporter, LogProgressReporter):
@@ -215,41 +217,49 @@ class RunSteps:
             # The timer and description can run after the last await.
             if is_cancelling():
                 status = self._interrupted(name)
+                raising = True
                 raise_if_cancelling()
             completion = success_completion
             status = ProgressPhaseStatus.COMPLETED
             reporter.advance(1)
             return output
         finally:
-            if completion.retain is not None:
-                retain = completion.retain
-            if uses_rich_progress(reporter):
-                if (
-                    status == ProgressPhaseStatus.COMPLETED
-                    and completion.success_status is not None
-                ):
-                    status = completion.success_status
-                if name == "align":
-                    retain = True
-            if completion.alignment_summary is not None:
-                reporter.complete_phase(
-                    status,
-                    retain=retain,
-                    summary=completion.summary,
-                    duration_text=completion.duration_text,
-                    alignment_summary=completion.alignment_summary,
-                )
-            elif retain is None:
-                reporter.complete_phase(
-                    status, summary=completion.summary, duration_text=completion.duration_text
-                )
-            else:
-                reporter.complete_phase(
-                    status,
-                    retain=retain,
-                    summary=completion.summary,
-                    duration_text=completion.duration_text,
-                )
+            try:
+                if completion.retain is not None:
+                    retain = completion.retain
+                if uses_rich_progress(reporter):
+                    if (
+                        status == ProgressPhaseStatus.COMPLETED
+                        and completion.success_status is not None
+                    ):
+                        status = completion.success_status
+                    if name == "align":
+                        retain = True
+                if completion.alignment_summary is not None:
+                    reporter.complete_phase(
+                        status,
+                        retain=retain,
+                        summary=completion.summary,
+                        duration_text=completion.duration_text,
+                        alignment_summary=completion.alignment_summary,
+                    )
+                elif retain is None:
+                    reporter.complete_phase(
+                        status, summary=completion.summary, duration_text=completion.duration_text
+                    )
+                else:
+                    reporter.complete_phase(
+                        status,
+                        retain=retain,
+                        summary=completion.summary,
+                        duration_text=completion.duration_text,
+                    )
+            except Exception:
+                # The coordinator classifies the run from the step's own error.
+                # A failed progress write must preserve it, including the exit
+                # code for an AudioAlignmentCleanupError.
+                if not raising:
+                    raise
 
 
 def _skip_analysis(request: RunRequest, config: ConfigSchema) -> bool:

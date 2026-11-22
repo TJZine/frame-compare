@@ -83,6 +83,8 @@ not combined.
 
 ## Decision ledger
 
+Report file names in this ledger use the case names “4K HDR film” and “1080p animation”, and the evidence commits stored those reports under the source titles.
+
 | Evidence commit | Evidence | Material result | Decision |
 | --- | --- | --- | --- |
 | Historical June record | `analysis-tier-benchmark-warm-index.json` (raw report removed) | Old NumPy quality was 430.34s; dense 320px performance was 130.27s, or 3.30x faster. Bright/motion exact overlap was 10/10; dark was 7/10. | Established the first practical performance direction; superseded by PlaneStats quality and temporal sampling. |

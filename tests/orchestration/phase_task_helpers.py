@@ -20,7 +20,13 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.execution_types import AlignPhaseOutput, RenderArtifacts
+from frame_compare.orchestration.execution_types import (
+    AlignPhaseOutput,
+    ExecutionState,
+    MetadataPrefetch,
+    PrepState,
+    RenderArtifacts,
+)
 from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
 from frame_compare.render.types import RenderedClipFacts
 from frame_compare.services.release_identity import ReleaseIdentity
@@ -42,6 +48,7 @@ __all__ = [
     "_clip",
     "_context",
     "_frame_metrics",
+    "prep_for_context",
 ]
 
 MINIMAL_CONFIG = """\
@@ -206,6 +213,22 @@ def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> R
             selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=100),
             analysis_clip=reference,
         ),
+    )
+
+
+def prep_for_context(ctx: RunContext, state: ExecutionState) -> PrepState:
+    clips = [ctx.reference, *ctx.comparisons]
+    return PrepState(
+        workspace=ctx.workspace,
+        config=ctx.config,
+        input_videos=[clip.path for clip in clips],
+        clips=clips,
+        artifacts=state.artifacts,
+        metadata_prefetch=MetadataPrefetch(None, False),
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=0.0,
+        selection_domain=ctx.selection_domain,
     )
 
 

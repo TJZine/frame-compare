@@ -24,8 +24,7 @@ from frame_compare.services import alignment
 from frame_compare.services.errors import raise_if_alignment_cancelled
 from frame_compare.services.types import AlignmentConfig
 from frame_compare.utils.progress import NullProgressReporter
-from tests.orchestration.phase_task_helpers import _context
-from tests.orchestration.test_run_steps import prep_for_context
+from tests.orchestration.phase_task_helpers import _context, prep_for_context
 from tests.run_request_support import make_run_request
 from tests.services.alignment_request_test_support import alignment_request
 
