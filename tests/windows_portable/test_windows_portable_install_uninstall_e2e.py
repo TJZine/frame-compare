@@ -221,22 +221,22 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
         activation.write_text(
             source.replace(
                 after_path,
-                """      $written = Get-PortableUserPath
-      [IO.File]::WriteAllText($env:FC_TEST_PATH_WRITTEN, ($written | ConvertTo-Json -Compress))
+                """      $observedPath = Get-PortableUserPath
+      [IO.File]::WriteAllText($env:FC_TEST_PATH_WRITTEN, ($observedPath | ConvertTo-Json -Compress))
       if ($env:FC_TEST_PATH_DRIFT) {
-        $drift = $env:FC_TEST_PATH_DRIFT | ConvertFrom-Json
-        $kind = [Microsoft.Win32.RegistryValueKind]$drift.Kind
-        $value = $drift.Value
-        if ($kind -eq [Microsoft.Win32.RegistryValueKind]::MultiString) {
-          $value = [string[]]$value
-          $moved = Join-Path $BundleRoot 'generated/rollback-sentinel.bin'
-          if (!(Test-Path -LiteralPath $moved -PathType Leaf) -or
+        $externalPath = $env:FC_TEST_PATH_DRIFT | ConvertFrom-Json
+        $externalPathKind = [Microsoft.Win32.RegistryValueKind]$externalPath.Kind
+        $externalPathValue = $externalPath.Value
+        if ($externalPathKind -eq [Microsoft.Win32.RegistryValueKind]::MultiString) {
+          $externalPathValue = [string[]]$externalPathValue
+          $candidateDataProbe = Join-Path $BundleRoot 'generated/rollback-sentinel.bin'
+          if (!(Test-Path -LiteralPath $candidateDataProbe -PathType Leaf) -or
               (Test-Path -LiteralPath $env:FC_TEST_PREVIOUS_DATA) -or
               !(Test-Path -LiteralPath $pendingMigrationPath -PathType Leaf)) {
             throw "User data did not move before the injected failure"
           }
         }
-        Set-PortableUserPath ([pscustomobject]@{ Value = $value; Kind = $kind })
+        Set-PortableUserPath ([pscustomobject]@{ Value = $externalPathValue; Kind = $externalPathKind })
       }
       throw "Injected failure after user Path registration"
 """,

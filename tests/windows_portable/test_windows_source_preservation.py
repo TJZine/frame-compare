@@ -1634,7 +1634,11 @@ def test_source_install_retains_marker_and_folders_when_third_pointer_supersedes
     )
     result = _run(
         pwsh,
-        "function uv {}; & $env:INSTALL -SkipSync",
+        """
+function uv {}
+try { & $env:INSTALL -SkipSync }
+catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
+""",
         tmp_path,
         INSTALL=str(script),
         FAILURE="third-pointer",
@@ -1645,7 +1649,9 @@ def test_source_install_retains_marker_and_folders_when_third_pointer_supersedes
     marker = pointer.parent / "source-migration.pending.json"
     candidate = Path(json.loads(marker.read_text())["candidate_bundle"])
     output = result.stdout + result.stderr
-    assert "Pointer changed unexpectedly during activation" in output
+    assert (
+        "Pointer changed unexpectedly during activation; refusing data reversal." in result.stderr
+    )
     assert base64.b64encode(third.read_bytes()).decode() in output
     for relative, contents in initial.items():
         name = relative.partition("/")[0]
