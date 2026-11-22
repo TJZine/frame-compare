@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from tests.workflow_helpers import load_workflow as _load_workflow
+from tests.workflow_helpers import read_text_or_fail
 from tests.workflows._helpers import bash_executable_or_skip as _bash_executable_or_skip
 
 _SCRIPT_TIMEOUT_SECONDS = 10.0
@@ -195,6 +197,23 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     assert "paths-ignore" not in docker["on"]["pull_request"]
 
 
+def test_default_compose_services_run_headless(repo_root: Path) -> None:
+    compose = yaml.safe_load(read_text_or_fail(repo_root / "docker-compose.yml"))
+    services = compose["services"]
+
+    for name in ("frame-compare", "frame-compare-test", "frame-compare-run"):
+        service = services[name]
+        assert "profiles" not in service, name
+        assert "gpus" not in service, name
+
+        environment = service.get("environment", {})
+        if isinstance(environment, list):
+            entries = (entry.partition("=") for entry in environment)
+            environment = {key: value for key, _, value in entries}
+        assert str(environment.get("LIBGL_ALWAYS_SOFTWARE", "1")) == "1", name
+        assert not any(key.startswith("NVIDIA_") for key in environment), name
+
+
 def test_docker_verifies_both_native_architectures(repo_root: Path) -> None:
     workflow = _load_workflow(repo_root / ".github/workflows/docker-integration.yml")
     job = workflow["jobs"]["docker-integration"]
@@ -214,11 +233,6 @@ def test_docker_verifies_both_native_architectures(repo_root: Path) -> None:
 
     steps = {step.get("name"): step for step in job["steps"]}
     assert steps["Run opt-in alignment resource proof"]["if"] == "matrix.arch == 'amd64'"
-    offscreen = steps["Verify the Docker GUI runtime offscreen"]
-    assert "if" not in offscreen
-    assert "docker build --target gui-linux" in offscreen["run"]
-    assert "QT_QPA_PLATFORM=offscreen" in offscreen["run"]
-    assert "/tmp/verify_docker_gui.sh --inside-container" in offscreen["run"]
 
 
 def test_pr_title_workflow_can_publish_its_configured_status(repo_root: Path) -> None:

@@ -446,9 +446,7 @@ system:
 
 Record exact bundle SHA, OS/GPU/driver/runtime facts, commands, logs, sidecar fixtures,
 screenshots, and pass/fail results. Hosted or macOS offscreen proof must not be reported
-as physical Windows desktop acceptance. Linux X11 visible-launch proof is also
-unavailable until `bash tools/verify_docker_gui.sh` runs on a compatible Linux desktop;
-its offscreen contract does not establish visible ergonomics.
+as physical Windows desktop acceptance.
 
 ## 11. Completion record
 

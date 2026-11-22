@@ -222,7 +222,6 @@ Platform-specific help:
 
 - [Windows portable](../getting-started/windows-portable.md)
 - [Docker](../getting-started/docker.md)
-- [Docker profiles](../getting-started/docker-profiles.md)
 - [Native source](../getting-started/native.md)
 
 For exact error streams, JSON shape, and exit codes, see the

@@ -90,9 +90,6 @@ Default Docker posture:
   open a generated fixture through both source loaders; invoke `placebo.Tonemap`
   without reducing the result to 8-bit; run `doctor --json`; inspect native
   linkage for missing shared libraries; and execute as a non-root user.
-- Optional Docker GPU or GUI profiles require compatible host setup and separate
-  verification; do not treat them as covered by the default gate unless the task
-  explicitly adds and proves them.
 
 Windows portable local packaging path:
 
@@ -309,9 +306,7 @@ list. The production image copies that stage and the explicit locked package
 metadata. The test service mounts the checkout for tests and verification tools.
 
 CI runs this gate on native AMD64 and ARM64 Linux runners and uploads a separate
-artifact for each architecture. The hosted workflow also builds the `gui-linux`
-target and runs its inside-container offscreen proof on both architectures.
-The separate alignment resource benchmark runs on AMD64.
+artifact for each architecture. The separate alignment resource benchmark runs on AMD64.
 
 The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` with
 10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
@@ -388,9 +383,12 @@ successful proof.
 `src/frame_compare/vsview/**` also owns an external plugin/process/UI boundary.
 Pure metadata/result validation uses focused Python proof and the applicable full
 gate. Changes to plugin discovery, launch/lifetime, Qt callbacks, or generated native
-sessions require compatible-host integration proof: use the Linux GUI verifier or
-Windows portable route for the platform changed. The default Docker gate does not
-cover VSView. Retain the offscreen/visible/physical-host distinctions below.
+sessions require integration proof on the affected platform. Follow the
+[native Linux installation](getting-started/native.md#install-with-uv) with
+`--extra vsview` or the [Windows portable procedure](#windows-portable-release-path-verification).
+Use the [alignment review guide](guides/vsview-review.md) for the visible desktop
+journey. Offscreen checks establish the Python, Qt, and plugin behavior they
+exercise. Native media proof requires the L-SMASH-Works decoder (`core.lsmas`).
 
 For a coordinated media-runtime change, the gate additionally owns immutable
 source/wheel hashes and byte sizes, native SONAME/symlink preservation,
@@ -402,68 +400,11 @@ explicit security, ABI, licensing, image-size, and multiarchitecture decision.
 
 Current capability contract:
 
-| Environment | Default posture |
+| Environment | Supported runtime |
 | --- | --- |
-| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap only; Docker-based VSView GUI launch is unsupported beyond those backend features, and native GPU acceleration/native Qt desktop forwarding are not supported |
-| Linux Docker, CPU/software Vulkan | Canonical default Docker path; headless, deterministic, and CI-safe |
-| Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile plus dedicated GPU proof path; documented-only/unverified unless separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` override/profile; the verifier contract covers offscreen VSView/plugin/session/metadata/result proof. The R81 dependency refresh has Linux-container offscreen proof on macOS Docker Desktop; the Linux X11 host wrapper and visible launch remain unverified |
-| Native Windows portable | Separate first-class native runtime/release surface, not a Docker profile |
-
-When documenting or reviewing optional Docker GPU/profile work, cite the official
-Docker references in prose so the host/runtime assumptions stay explicit:
-[Docker Engine GPU access](https://docs.docker.com/engine/containers/gpu/),
-[Docker Desktop GPU support notes](https://docs.docker.com/desktop/features/gpu/),
-[Compose profiles](https://docs.docker.com/compose/how-tos/profiles/), and the
-[Compose `gpus` service attribute](https://docs.docker.com/reference/compose-file/services/#gpus).
-
-Optional NVIDIA GPU proof command:
-
-```bash
-bash tools/verify_docker_gpu.sh
-```
-
-That command is not part of the default Docker gate. It is a separate, fail-closed
-host-dependent proof for Linux NVIDIA systems only. If the local machine cannot run
-it, record GPU support as documented-only/unverified rather than supported.
-
-Optional Linux X11 GUI proof command:
-
-```bash
-bash tools/verify_docker_gui.sh
-```
-
-That command is not part of the default Docker gate. It is a separate,
-host-dependent proof for Linux X11 desktop systems only. The minimal X11 contract
-is explicit:
-
-- host `DISPLAY`
-- host `/tmp/.X11-unix` socket mount into the container
-- optional host `XAUTHORITY` cookie file mount when the X server requires it
-- container user/UID aligned to the host UID/GID for local-user X11 permissions
-
-Docs and scripts must not use `xhost +`. If temporary X11 permission widening is
-needed, use the narrower host-local form `xhost +si:localuser:<user>` and record
-the cleanup command `xhost -si:localuser:<user>`. Real UI launch remains manual
-only; the proof command should verify dependency availability and session-script
-generation without requiring a visible desktop launch.
-
-The verifier contract covers this offscreen path: the `gui-linux` image must discover
-and load the exact Frame Compare VSView panel entry point, construct the panel in its
-inert ordinary-session state, load a production-generated L-SMASH session with VSView
-0.14.0, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
-all three outputs, and round-trip/validate the sibling result sidecar. The R81
-dependency refresh ran the inside-container offscreen proof on macOS Docker Desktop;
-see the [Windows 10 handoff](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-07-dependency-refresh-windows10-handoff.md)
-for its evidence and limits. The Linux X11 host wrapper remains unverified.
-The contract does not prove a visible X11 desktop
-launch, Qt ergonomics, native Windows behavior, or physical-Windows acceptance.
-
-If the local machine cannot run the GUI proof command, record GUI support as
-documented-only/unverified rather than supported.
-On macOS, an offscreen or synthetic-panel check proves only the Python/Qt/plugin
-contract; if `core.lsmas` is absent, it is not native L-SMASH media proof. Linux X11
-visible-GUI behavior remains unavailable/unverified until a compatible host runs it.
+| macOS Docker Desktop and Linux Docker | Headless rendering, reports, and software-Vulkan tonemapping |
+| Native Linux with `--extra vsview` | Desktop alignment review |
+| Native Windows portable | Native rendering, desktop alignment review, and the Windows release path |
 
 ### Alignment Accuracy Benchmark
 
@@ -817,8 +758,7 @@ archive safety policy for extraction into an empty isolated directory and
 inventory that tree with Syft's directory source. Never execute files from the
 bundle. For Docker, consume each distributable platform image by its immutable
 OCI digest. If only a local image exists, export it and bind both its exact image
-ID and the export SHA-256 to the evidence. Scan the runtime profile's installed
-contents, including optional GUI or GPU profiles when those are distributed.
+ID and the export SHA-256 to the evidence. Scan the runtime image's installed contents.
 
 Retain CycloneDX JSON and the native Syft JSON from a single inventory. Require
 nonempty inventories and check the scanner name and version in the Syft and

@@ -91,7 +91,6 @@ def test_devcontainer_docker_stage_only_owns_the_venv_mount_target(repo_root: Pa
 
     assert stage_names[-1] == "default-runtime"
     assert stage_by_name["devcontainer"][0] == "runtime"
-    assert stage_by_name["gui-linux"][0] == "runtime"
     assert stage_by_name["default-runtime"][0] == "runtime"
 
     instructions = [

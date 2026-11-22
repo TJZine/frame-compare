@@ -17,7 +17,6 @@ nav = [
     { "Choose an installation" = "getting-started/index.md" },
     { "Windows portable" = "getting-started/windows-portable.md" },
     { "Docker" = "getting-started/docker.md" },
-    { "Docker profiles" = "getting-started/docker-profiles.md" },
     { "Native source" = "getting-started/native.md" },
     { "Your first comparison" = "getting-started/first-comparison.md" },
   ] },

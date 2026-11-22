@@ -969,15 +969,13 @@ External runtime boundaries:
 - Windows PowerShell installer and updater scripts
 - VSView public plugin API and event-loop/threading contract
 
-Current Docker capability contract:
+Current runtime capability contract:
 
 | Environment | Current posture |
 | --- | --- |
-| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path only; Docker-based VSView GUI launch is unsupported beyond those backend features, and macOS Docker is not a native GPU or native Qt desktop surface |
-| Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
-| Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` compose override/profile plus `tools/verify_docker_gpu.sh`; documented-only/unverified until separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; the 2026-10-07 dependency-refresh handoff records reported Linux-container offscreen proof on macOS Docker Desktop for a production-generated three-source session, panel, frame-0 outputs, sidecar, and cleanup. The current Linux X11 host wrapper, visible launch, and physical native acceptance remain unverified |
-| Native Windows portable | First-class native runtime with backend rendering, reports, and VSView GUI support outside Docker |
+| macOS Docker Desktop and Linux Docker | Headless backend rendering, reports, and software-Vulkan tonemapping |
+| Native Linux with `--extra vsview` | Desktop alignment review through the [native installation](getting-started/native.md#install-with-uv) |
+| Native Windows portable | Backend rendering, reports, and VSView desktop alignment review |
 
 Keep these integrations at their current owners:
 
@@ -1010,56 +1008,12 @@ streams directed to the null device. The CLI waits up to 10 seconds for the brok
 and kills and reaps it on timeout. Desktop handlers and clipboard selection owners
 can outlive the broker, including after a broker failure or timeout.
 
-The default Docker behavior is intentionally narrower than the native Windows
-portable runtime: it preserves deterministic headless software Vulkan for backend
-rendering and report generation. Optional Docker GPU or GUI profiles are
-host-dependent runtime variants and must be documented and verified separately from
-the default Docker gate. When those variants are discussed, use the official Docker
-GPU/container, Docker Desktop GPU support, Compose profiles, and Compose `gpus`
-documentation as the external contract reference.
-
-Current Docker owner seams for optional profiles remain explicit:
-
-- `docker-compose.yml`: default headless software-Vulkan services, including a
-  configuration-writable `frame-compare-wizard` setup service and a
-  configuration-read-only `frame-compare-run` service with the single persistent
-  generated-data mount
-- `docker-compose.gpu-nvidia.yml`: opt-in NVIDIA GPU override/profile only
-- `docker-compose.gui-linux.yml`: opt-in Linux X11/VSView override/profile only
-- `tools/verify_docker_integration.sh`: canonical default Docker gate
-- `tools/verify_docker_gpu.sh`: optional NVIDIA visibility/Vulkan/placebo proof
-- `tools/verify_docker_gui.sh`: optional Linux X11/VSView dependency and session-script proof
-- `tools/open_docker_host_target.py`: host-side helper for default compose output mounts and explicit `https://slow.pics/...` URLs only
-
-The GUI profile stays container-boundary aware rather than changing CLI/runtime
-owners. Its explicit X11 contract is:
-
-- host `DISPLAY`
-- host `/tmp/.X11-unix` mounted into the container
-- optional host `XAUTHORITY` cookie file mount when required by the desktop
-- container process UID/GID aligned to the host user for narrow local-user X11 permission flows
-
-CI runs the optional GUI image's offscreen proof on native AMD64 and ARM64.
-The visible X11 launch remains a separate host check. The verifier requires the
-`gui-linux` image to discover and load the exact Frame Compare VSView entry point,
-construct the panel in its inert ordinary-session state, load a production-generated
-L-SMASH session with VSView 0.14.0, register one `Reference` and ordered comparison
-outputs, render frame 0 for each output, exercise complete source readiness plus the
-whole-set positions and keep-current actions, and round-trip/validate the sibling
-result sidecar. The 2026-10-07 dependency-refresh handoff records a reported
-inside-container offscreen pass on macOS Docker Desktop for this contract, including
-a production-generated three-source L-SMASH session, frame-0 rendering, sidecar
-round-trip, and cleanup. This is historical reported evidence for that refresh,
-not a current GUI run; raw historical logs were not independently authenticated
-in this checkout. Execution through the current Linux/X11 host wrapper remains
-unavailable/unverified until a compatible Linux/X11 host runs it. The contract covers dependency
-availability, plugin discovery, panel construction, generated metadata/result
-integration, named-output registration, and offscreen rendering without requiring a
-real desktop launch. It does not prove visible X11 launch, Qt ergonomics, native
-Windows behavior, or physical-Windows acceptance. Any real UI launch remains a manual
-Linux desktop action outside the default Docker verification gate.
-macOS offscreen or synthetic-panel checks are UI/plugin proof only; if the host lacks
-`core.lsmas`, they do not prove native L-SMASH media loading.
+Docker uses headless software Vulkan for backend rendering and report generation.
+The [Compose services](getting-started/docker.md#compose-services) include the
+configuration-writable setup wizard, the read-only-configuration run service, the
+development shell, and the real-dependency test service. They share the persistent
+generated-data mount. `tools/verify_docker_integration.sh` owns the Docker runtime gate,
+which runs on hosted AMD64 and ARM64.
 
 The host open helper is also container-boundary aware rather than a CLI contract
 change. It does not alter in-container report auto-open or slow.pics browser

@@ -27,11 +27,9 @@ install uses the host's Vulkan driver.
 
 ## Alignment review
 
-The VSView alignment panel ships with the Windows bundle. A native install adds it with
-the `vsview` extra. The default Docker services do not include it, and Docker on macOS
-does not run VSView. [Docker profiles](../getting-started/docker-profiles.md) describes
-an optional Linux X11 profile for the panel; that profile is not yet verified on a
-visible desktop.
+The VSView alignment panel ships with the Windows bundle. For visual review on Linux,
+follow the [native installation instructions](../getting-started/native.md#install-with-uv)
+with `--extra vsview`. Docker runs headless.
 
 ## Exact versions
 

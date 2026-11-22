@@ -33,7 +33,7 @@ by operating system and by how much of the media runtime you want to manage.
 | Windows user who wants the broadest supported feature set | Windows portable |
 | macOS user who wants a reproducible backend | Docker |
 | Linux user who wants the canonical headless route | Docker |
-| Linux user who needs NVIDIA acceleration or an X11 desktop | Docker, then the matching [Docker profile](docker-profiles.md) |
+| Linux user who needs hardware Vulkan or visual alignment review | [Native source](native.md#install-with-uv), with `--extra vsview` for visual review |
 | Existing native VapourSynth environment | Native source with `uv` |
 | Embedding Frame Compare in an existing Python environment | Native source with pip, with host runtime validation |
 | Contributor changing application code | [Contributor environment](https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md) |

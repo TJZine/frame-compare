@@ -9,9 +9,10 @@ runs inside VSView and saves one decision for the whole set of sources.
 
 ## Before you start
 
-The Windows portable bundle includes the panel. Native installs need the `vsview`
-extra in the same Python environment that runs Frame Compare. The default Docker route
-has no desktop. A PATH-only VSView executable is not supported.
+The Windows portable bundle includes the panel. On Linux, follow the
+[native installation instructions](../getting-started/native.md#install-with-uv)
+with `--extra vsview`. Install VSView in the same Python environment as Frame Compare
+so it can discover the panel. Docker runs headless.
 
 Turn review on with `audio_alignment.use_vsview = true`, or require it with
 `--force-interactive-alignment`:

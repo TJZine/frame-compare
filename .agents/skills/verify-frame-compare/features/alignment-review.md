@@ -97,20 +97,15 @@ For the real journey, first restore the normal Qt platform and inspect
 `frame-compare doctor --json` in the intended native environment. Establish the
 actual desktop/session and decoder, including `core.lsmas` for the generated
 L-SMASH session, rather than assuming VSView or BestSource availability supplies
-it. Use the complete
-[Docker/runtime procedure](../../../../docs/ENGINEERING_RUNBOOK.md#docker-runtime-verification)
-for its supported host, or the separate
-[Windows portable/release-path procedure](../../../../docs/ENGINEERING_RUNBOOK.md#windows-portable-release-path-verification).
-Those procedures own runtime setup and specialized proof; do not copy abbreviated
-build commands here.
+it. Use the [native installation instructions](../../../../docs/getting-started/native.md#install-with-uv)
+with `--extra vsview` on Linux, or the
+[Windows portable/release-path procedure](../../../../docs/ENGINEERING_RUNBOOK.md#windows-portable-release-path-verification)
+on Windows.
 
-`tools/verify_docker_gui.sh` has an offscreen generated three-source/session/sidecar
-contract under its Linux X11 host wrapper prerequisites. That is different from
-the visible user interaction above. Native manual proof must additionally observe
-the actual panel actions, saved session-bound sidecar, close/resume and resulting
-alignment. Capture command/doctor, relevant UI states and bounded sanitized
-run/result artifacts; preserve the original attempt provenance alongside confirmed
-zero/nonzero offsets. Do not infer confirmation from an existing cache entry.
+Observe the actual panel actions, saved session-bound sidecar, close/resume and
+resulting alignment. Capture command/doctor, relevant UI states and bounded sanitized
+run/result artifacts. Preserve the original attempt provenance alongside confirmed
+zero/nonzero offsets. Use the saved sidecar and resumed run to verify confirmation.
 
 `tests/vsview/test_native_workspace_positions.py` drives the installed VSView workspace
 with generated SDR media in an isolated offscreen child. It covers never-opened,
@@ -124,9 +119,8 @@ offscreen proof, distinct from visible desktop and packaged acceptance.
 - The current Mac pilot exposed `core.bs`, but no `core.lsmas`. This is an explicit
   native-media prerequisite gap. Offscreen Qt success cannot close it. Recheck on
   the actual host; a historical absence is not a permanent capability verdict.
-- Full visible-native review, Linux X11 visible launch and physical Windows
-  acceptance are unverified by this skill's seed evidence. A Linux-container
-  offscreen result or hosted Windows packaging pass proves a narrower claim.
+- Visible native review and physical Windows acceptance need dedicated desktop
+  runs. Record offscreen results and hosted packaging results separately.
 - The panel is inactive in ordinary or hand-written VSView sessions. Use the
   production-generated session; session identity and complete source-set validation
   matter. Missing/stale/mixed/incomplete results fail closed.

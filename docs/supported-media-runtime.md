@@ -99,7 +99,7 @@ and Frame Compare-owned indexes before reuse.
 - Debian Trixie FFmpeg runtime package `7:7.1.5-0+deb13u1`.
 - Software Vulkan through Mesa is the canonical headless validation path.
 
-VSView and the native Frame Compare alignment panel are optional for native and Docker
+VSView and the native Frame Compare alignment panel are optional for native
 workflows. Its base package is the supported choice; the upstream `recommended` and
 `full` extras add unrelated graph features and are intentionally excluded. Install
 `frame-compare[vsview]` in the same environment as Frame Compare so the exact
@@ -295,15 +295,9 @@ deterministic layout. For generated HDR fixtures, `ffprobe` is the encoded
 stream-signal authority;
 the Docker gate separately proves that both source plugins retain at least 10-bit
 decoded precision because L-SMASH-Works does not expose every stream color tag as a
-frame property. The Linux GUI verifier contract requires the VSView 0.14.0 image to
-discover and load the exact native panel entry point, construct its inactive panel
-offscreen, load a production-generated L-SMASH session, register named
-`Reference`/`Comparison 1` outputs, render frame 0 for both outputs, and round-trip a
-typed sibling result while rejecting malformed data. The R81 dependency refresh
-passed the inside-container offscreen proof with real L-SMASH media on macOS
-Docker Desktop; its evidence is recorded in the
-[Windows 10 handoff](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-07-dependency-refresh-windows10-handoff.md).
-The Linux X11 host wrapper and visible desktop launch remain unverified.
+frame property. Visual alignment review on Linux uses the
+[native installation](getting-started/native.md#install-with-uv) with `--extra vsview`.
+
 Offscreen proof does not replace final validation on the supported physical Windows system.
 macOS offscreen or synthetic-panel proof exercises the Python/Qt/plugin contract only;
 when the host does not provide `core.lsmas`, it is not native L-SMASH media proof and
