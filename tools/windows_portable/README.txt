@@ -119,7 +119,7 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
       tools\windows_portable\licenses\
     The build SHA256-verifies those vendored license texts before copying them
     into the bundle.
-  - PySide6/Qt LGPL-3.0 and Qt-bundled FFmpeg LGPL notices are copied from
+  - PySide6/Qt LGPL-3.0 and the separate Qt Multimedia FFmpeg LGPL notices are copied from
     manifest-declared, SHA256-verified repository files. Wheel-specific notices
     under *.dist-info\licenses are copied as well.
   - VSView requires Qt Multimedia from PySide6 Addons. The portable deployment

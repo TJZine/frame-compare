@@ -67,8 +67,11 @@ function Assert-BuildOutputPath() {
 
 function Assert-BuildManifest([object]$Manifest) {
   $manifestVersion = Get-RequiredProperty $Manifest "manifest_version" "manifest"
-  if (($manifestVersion -isnot [int] -and $manifestVersion -isnot [long]) -or $manifestVersion -ne 2) {
-    throw "Unsupported portable manifest version (expected 2)."
+  if (($manifestVersion -isnot [int] -and $manifestVersion -isnot [long]) -or $manifestVersion -notin @(2, 3)) {
+    throw "Unsupported portable manifest version (expected 2 or 3)."
+  }
+  if ($ReleaseBuild -and $manifestVersion -ne 3) {
+    throw "Portable release builds require manifest version 3."
   }
   $bundle = Get-RequiredProperty $Manifest "bundle" "manifest"
   $fingerprints = Get-RequiredProperty $bundle "runtime_fingerprints" "manifest.bundle"
@@ -79,6 +82,7 @@ function Assert-BuildManifest([object]$Manifest) {
   $artifacts = @(Get-RequiredProperty $Manifest "artifacts" "manifest")
   if ($artifacts.Count -eq 0) { throw "Manifest artifacts must not be empty." }
   $ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  $qtOverlays = 0
   foreach ($artifact in $artifacts) {
     foreach ($field in @("id", "url", "sha256")) {
       $null = Get-RequiredStringProperty $artifact $field "artifact"
@@ -101,7 +105,13 @@ function Assert-BuildManifest([object]$Manifest) {
     $null = Get-RequiredStringProperty $license "url" "artifact.license"
     $install = Get-RequiredProperty $artifact "install" "artifact"
     $type = Get-RequiredStringProperty $install "type" "artifact.install"
-    if ($type -notin @("extract", "python_wheel")) { throw "Unknown install.type: $type" }
+    if ($type -cnotin @("extract", "python_wheel", "qt_multimedia_ffmpeg")) { throw "Unknown install.type: $type" }
+    if ($type -ceq "qt_multimedia_ffmpeg") {
+      $qtOverlays++
+      if (@($install.PSObject.Properties).Count -ne 1 -or !$uri.AbsolutePath.EndsWith(".zip")) {
+        throw "Qt Multimedia FFmpeg installation requires a ZIP and no additional install fields."
+      }
+    }
     $destination = Get-OptionalStringProperty $install "destination"
     if ($type -eq "extract" -or $destination -ne "") {
       if ([string]::IsNullOrWhiteSpace($destination) -or
@@ -118,6 +128,12 @@ function Assert-BuildManifest([object]$Manifest) {
         }
       }
     }
+  }
+  if ($manifestVersion -eq 2 -and $qtOverlays -ne 0) {
+    throw "Portable manifest v2 forbids a Qt Multimedia FFmpeg overlay."
+  }
+  if ($manifestVersion -eq 3 -and $qtOverlays -ne 1) {
+    throw "Portable manifest v3 requires exactly one Qt Multimedia FFmpeg ZIP overlay."
   }
 }
 
@@ -326,9 +342,6 @@ function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion, [object]$Man
   }
 
   $manifestVersion = [int](Get-RequiredProperty -Object $manifest -Name "manifest_version" -Context "manifest")
-  if ($manifestVersion -ne 2) {
-    throw "Unsupported portable manifest version '$manifestVersion' (expected 2)."
-  }
   $bundleContract = Get-RequiredProperty -Object $manifest -Name "bundle" -Context "manifest"
   $manifestFingerprints = Get-RequiredProperty -Object $bundleContract -Name "runtime_fingerprints" -Context "manifest.bundle"
   $runtimeFingerprints = [ordered]@{}

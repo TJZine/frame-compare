@@ -105,8 +105,11 @@ notices, and source inventory. Use `-ExpectedCommitSha` to select it, or let
 the builder capture `HEAD` once. A custom `-ManifestPath` supplies its own
 manifest and adjacent notices. The installer and shims come from the live
 worktree. Record the selected SHA and worktree differences for a local build
-of an older commit. `-ReleaseBuild` requires a clean worktree at the selected
-commit before reserving output.
+of an older commit. Version 2 manifests remain available for local builds with
+matching application source, the original embedded Python files and wheel-provided
+Qt FFmpeg. Version 3 omits the optional Python SQLite binaries and requires one
+Qt FFmpeg overlay. Hosted builds require version 3. `-ReleaseBuild` also requires
+a clean worktree at the selected commit before reserving output.
 
 Locked dependency audit (PowerShell):
 

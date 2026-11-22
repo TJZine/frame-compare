@@ -195,9 +195,27 @@ def test_packed_zip_succession(tmp_path: Path, interpreter: str, case: str) -> N
         first = root / "first bundle"
         second = root / "second bundle"
         with zipfile.ZipFile(archive_path) as archive:
+            manifest = json.loads(archive.read(f"{_BUNDLE_ROOT}/manifest.json"))
+            bundle_info = json.loads(archive.read(f"{_BUNDLE_ROOT}/bundle_info.json"))
+            assert manifest["manifest_version"] == bundle_info["manifest_version"] == 3
+            assert manifest["bundle"]["python_version"] == "3.15.2"
+            sqlite_binaries = {"_sqlite3.pyd", "sqlite3.dll"}
+            assert sqlite_binaries.isdisjoint(
+                name.rsplit("/", 1)[-1].casefold() for name in archive.namelist()
+            )
             for bundle in (first, second):
                 archive.extractall(root)
                 (root / _BUNDLE_ROOT).rename(bundle)
+        python_version = subprocess.run(
+            [str(first / "python" / "python.exe"), "--version"],
+            cwd=first,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        assert python_version.stdout.strip() == "Python 3.15.2"
         first_app = _application_tree(first)
         for bundle in (first, second):
             for name in _LEGACY_LEAVES:

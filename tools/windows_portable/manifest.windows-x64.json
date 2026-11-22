@@ -1,10 +1,10 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "bundle": {
     "platform": "windows",
     "arch": "x64",
     "vs_ref": "R82",
-    "python_version": "3.14.10",
+    "python_version": "3.15.2",
     "ffmpeg_policy": "lgpl-only",
     "plugin_layout": "R74+ site-packages/vapoursynth/plugins only",
     "notes": "Deterministic Windows media runtime contract. VapourSynth plugins are installed only in the canonical site-packages/vapoursynth/plugins directory. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
@@ -13,7 +13,7 @@
       "probe": "b411643a70b6777974e141274614df896cf742d932fe02038e26e247dc846982",
       "alignment": "1da95673a8315f0be8d14ded7b889b0c6ec3ae55618e4c1bc75b96315da4b324",
       "index": "47d07506e489fb708e6a6baf07eed55d50f241e91c7a011b6dbd5074aae024c3",
-      "full": "50c72cd2078e6909b28b0ea9bcf576c4c06899f186a78d62435dda7f2a199db4"
+      "full": "21c1821c05cc947e4af19807826e5ff1aaeb4187f5c0cf43640f306b4d2a3f51"
     }
   },
   "artifacts": [
@@ -50,11 +50,11 @@
     {
       "id": "python-embed-amd64",
       "name": "Python embeddable package (amd64)",
-      "version": "3.14.10",
-      "url": "https://www.python.org/ftp/python/3.14.10/python-3.14.10-embed-amd64.zip",
-      "source_url": "https://www.python.org/ftp/python/3.14.10/Python-3.14.10.tgz",
-      "sha256": "90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159",
-      "bytes": 12619664,
+      "version": "3.15.2",
+      "url": "https://www.python.org/ftp/python/3.15.2/python-3.15.2-embed-amd64.zip",
+      "source_url": "https://www.python.org/ftp/python/3.15.2/Python-3.15.2.tgz",
+      "sha256": "d012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62",
+      "bytes": 13740486,
       "license": {
         "spdx": "Python-2.0",
         "url": "https://docs.python.org/3/license.html"
@@ -65,9 +65,10 @@
       },
       "release_date": "2026-10-25",
       "source_kind": "release",
-      "source_ref": "3.14.10",
-      "source_sha256": "9e4996c19ae5a3df31f10c37723661f71d3455d73bd005f79df7098e5cc13192",
-      "source_bytes": 31671453
+      "source_ref": "3.15.2",
+      "source_sha256": "f74e1db0eabd651cd01e4e2a00201bd41866abe74869ab716f9bf33cbbaa0943",
+      "source_bytes": 35882840,
+      "notes": "The Windows application runtime omits the optional _sqlite3 extension and its SQLite DLL. The CPython license is retained."
     },
     {
       "id": "vapoursynth-portable-r82",
@@ -92,7 +93,7 @@
         "type": "extract",
         "destination": "vs/core"
       },
-      "notes": "R82 stable portable runtime with core API R4.3. The archive contains the same CPython 3.12 ABI3 wheel as the frozen lock and supports the selected CPython 3.14 runtime.",
+      "notes": "R82 stable portable runtime with core API R4.3. The archive contains the same CPython 3.12 ABI3 wheel as the frozen lock and supports the selected CPython 3.15 runtime.",
       "release_date": "2026-11-01",
       "source_kind": "release",
       "source_ref": "R82",
@@ -315,13 +316,43 @@
           "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
           "source_url": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz"
         }],
-        "notes": "The Windows wheel bundles Qt 6.12.0 multimedia and FFmpeg 9.0.1 DLLs; both corresponding sources and license texts are inventoried."
+        "notes": "The wheel supplies Qt Multimedia 6.12.0. Its five FFmpeg DLLs are replaced by the separately inventoried FFmpeg 9.1 build. The original wheel license texts are retained."
       },
       "install": { "type": "python_wheel" },
       "source_kind": "release",
       "source_ref": "6.12.0",
       "source_sha256": "099c1a597cf33c1b000e11cf68a0b82d216fb802bf81726efc720394f10c7751",
       "source_bytes": 18211772
+    },
+    {
+      "id": "qt-multimedia-ffmpeg-9.1-win-x64",
+      "name": "FFmpeg for Qt Multimedia (System233, Windows x64 LGPL shared build)",
+      "version": "9.1",
+      "url": "https://github.com/System233/ffmpeg-msvc-prebuilt/releases/download/ffmpeg-9.1/ffmpeg-9.1_x64-windows-shared-lgpl.zip",
+      "bytes": 45526634,
+      "sha256": "af02e8cc60d57fa3f668c579e65edf6586eb16c0f6c687532f9324cfd07f07d2",
+      "release_date": "2026-11-20",
+      "source_kind": "release",
+      "source_ref": "n9.1",
+      "source_commit": "74e4393595cf2b5857f0da925c4e0dd74ea306e5",
+      "source_url": "https://ffmpeg.org/releases/ffmpeg-9.1.tar.xz",
+      "source_bytes": 12557532,
+      "source_sha256": "1a4d394ae63d190a526cd052eb4415c156b5c5e2df37efab41a7de0b8fde2433",
+      "build_source_commit": "7bd67a2dfc716f34e53849434e46a8c57c71884b",
+      "build_source_url": "https://codeload.github.com/System233/ffmpeg-msvc-prebuilt/tar.gz/7bd67a2dfc716f34e53849434e46a8c57c71884b",
+      "build_source_bytes": 230937,
+      "build_source_sha256": "816571843f901030625d30d1d52e1cffe374d2e76ade4bd8791e9cfa91265fe9",
+      "license": {
+        "spdx": "LGPL-3.0-or-later",
+        "url": "https://www.gnu.org/licenses/lgpl-3.0.html",
+        "files": [{
+          "path": "licenses/common/LGPL-3.0.txt",
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+          "source_url": "https://ffmpeg.org/releases/ffmpeg-9.1.tar.xz"
+        }]
+      },
+      "install": { "type": "qt_multimedia_ffmpeg" },
+      "notes": "Only bin/avcodec-63.dll, bin/avformat-63.dll, bin/avutil-61.dll, bin/swresample-7.dll and bin/swscale-10.dll enter the bundle under PySide6. Provider run 44761609597, job 136377375799, built the x64-windows-shared-lgpl variant with the pinned recipe and the vcpkg 2026.06.01 classic-mode ports. Published variant metadata: https://raw.githubusercontent.com/System233/ffmpeg-msvc-prebuilt/e98cec94f9400f0015e3a066ed5099d5762c96aa/9.x/9.1/variants/x64-windows-shared-lgpl.yaml (1589 bytes, SHA-256 54b1767f103068290054ad6bd171675197d93fd76fc2cb51a386a311bd67f235). Retain the distributor-controlled corresponding-source offer and independently account for linked dependencies and notices before public distribution."
     },
     {
       "id": "pyside6-essentials-6.12.0-win-amd64-wheel",
@@ -613,15 +644,16 @@
       "bytes": 18211772
     },
     {
-      "name": "FFmpeg (Qt Multimedia 6.12.0 build)",
-      "version": "9.0.1",
-      "selection_kind": "release",
-      "source_ref": "n9.0.1",
-      "license": "LGPL-2.1-or-later",
-      "source_url": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz",
-      "sha256": "cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635",
-      "bytes": 12036420,
-      "notes": "The PySide6 Addons Windows wheel contains avcodec-63.dll, avformat-63.dll, avutil-61.dll, and Qt's FFmpeg multimedia plugin; embedded build paths identify FFmpeg n9.0.1."
+      "name": "vcpkg ports for the Qt Multimedia FFmpeg build",
+      "version": "2026.06.01",
+      "selection_kind": "tag",
+      "source_ref": "2026.06.01",
+      "source_commit": "f3e10653cc27d62a37a3763cd84b38bca07c6075",
+      "license": "MIT",
+      "source_url": "https://codeload.github.com/microsoft/vcpkg/tar.gz/f3e10653cc27d62a37a3763cd84b38bca07c6075",
+      "sha256": "86f72c4ff5c853eb7f749e26bc7b8edf2bffaa5b959753d2685e96f9653b0fd5",
+      "bytes": 5263899,
+      "notes": "The provider installed dependencies from these default ports in classic mode. The separately pinned provider build source contains its overlay ports and FFmpeg patches."
     },
     {
       "name": "xxHash",

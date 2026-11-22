@@ -29,7 +29,7 @@ The expected candidate profile is:
 
 | Component | Expected Windows identity |
 | --- | --- |
-| Python | 3.14.10 |
+| Python | 3.15.2 embeddable CPython, with the optional SQLite extension and DLL omitted |
 | VapourSynth | R82, API R4.3 |
 | L-SMASH-Works | `vapoursynth-lsmas` 1310.0.0.0 / native lineage 1310.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
@@ -38,8 +38,9 @@ The expected candidate profile is:
 | VSView / CLI parser | 0.14.0 / Cyclopts 5.4.2 |
 | vspackrgb | 2.0.0 (Rust extension) |
 | PySide6 family | 6.12.0; WebEngine/PDF distribution metadata 6.12.0.140 |
+| Qt Multimedia FFmpeg | System233 9.1 LGPL-3.0-or-later shared build, five DLLs loaded from the bundled PySide6 directory |
 | FFmpeg | `n8.1.3-27-g8dca1586f4`, BtbN win64 LGPL 8.1 build `autobuild-2026-10-31-12-59` |
-| Full runtime fingerprint | `50c72cd2078e6909b28b0ea9bcf576c4c06899f186a78d62435dda7f2a199db4` |
+| Full runtime fingerprint | `21c1821c05cc947e4af19807826e5ff1aaeb4187f5c0cf43640f306b4d2a3f51` |
 | L-SMASH index token | `lsw1310-47d07506e489` |
 
 ## 1. Exact source and repository gates
@@ -156,6 +157,9 @@ Required evidence:
 - FFMS2 is not present in the Windows bundle or plugin manifests.
 - PySide6 Addons and Qt Multimedia remain present, while Qt WebEngine/Chromium runtime
   files are absent. Record the build runtime proof and verify the absence in the ZIP.
+- The Qt Multimedia runtime proof decodes the generated 64×64 frame with the
+  FFmpeg backend. Record the proof that all five loaded FFmpeg DLLs came from
+  the bundled PySide6 directory.
 - L-SMASH-Works and vs-placebo license/source records include their statically bundled
   dependency notices.
 - Native plugins do not depend on unbundled DLLs outside the documented Windows/UCRT
@@ -179,12 +183,14 @@ manifest-pinned notices in the extracted bundle against the inventory. From
 the extracted root, run:
 
 ```powershell
+.\python\python.exe -c "import importlib.util, sys; assert sys.version_info[:3] == (3, 15, 2) and sys.version_info.releaselevel == 'final'; assert importlib.util.find_spec('_sqlite3') is None; print(sys.version)"
 .\frame-compare.ps1 --help
 .\frame-compare.ps1 version
 .\frame-compare.ps1 doctor --json 1> doctor-candidate.json 2> doctor-candidate.stderr.log
 ```
 
-Require exit 0 from each command and the exact `frame-compare X.Y.Z` version from
+Confirm that the extracted `python/` directory contains neither `_sqlite3.pyd` nor
+`sqlite3.dll`. Require exit 0 from each command and the exact `frame-compare X.Y.Z` version from
 the candidate. After installing the extracted bundle, open a new terminal and
 check the installed `frame-compare --help` and `frame-compare version`. Use the
 bundled Python and VSView for the native-panel check in section 10.

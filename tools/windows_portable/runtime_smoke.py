@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import importlib.util
 import io
 import json
 import os
@@ -9,6 +10,14 @@ import sys
 import types
 from contextlib import redirect_stderr
 from pathlib import Path
+
+QT_FFMPEG_DLLS = (
+    "avcodec-63.dll",
+    "avformat-63.dll",
+    "avutil-61.dll",
+    "swresample-7.dll",
+    "swscale-10.dll",
+)
 
 
 def assert_true(condition: object, message: str) -> None:
@@ -122,6 +131,31 @@ def prove_qt_webengine_excluded() -> None:
     proof("qt_webengine_runtime=absent deployment=excluded")
 
 
+def read_bundle_manifest(bundle_root: Path) -> dict:
+    manifest = json.loads((bundle_root / "manifest.json").read_bytes())
+    version = manifest.get("manifest_version")
+    assert_true(type(version) is int and version in (2, 3), "unsupported portable manifest version")
+    return manifest
+
+
+def prove_embedded_python(bundle_root: Path, expected: str) -> None:
+    observed = ".".join(map(str, sys.version_info[:3]))
+    assert_true(
+        sys.implementation.name == "cpython"
+        and sys.version_info.releaselevel == "final"
+        and observed == expected,
+        f"expected embedded CPython {expected}, observed {sys.version}",
+    )
+    python_root = bundle_root / "python"
+    for name in ("_sqlite3.pyd", "sqlite3.dll"):
+        assert_true(not (python_root / name).exists(), f"unexpected embedded Python file: {name}")
+    assert_true(
+        importlib.util.find_spec("_sqlite3") is None,
+        "the SQLite extension resolved in the embedded Python environment",
+    )
+    proof(f"embedded_python={observed} sqlite=absent")
+
+
 def prove_runtime_contract() -> None:
     from frame_compare.utils.subproc import resolve_executable
     from frame_compare.vs.runtime_contract import (
@@ -150,6 +184,9 @@ def prove_runtime_contract() -> None:
     )
 
     bundle_root = Path(sys.executable).resolve().parent.parent
+    manifest = read_bundle_manifest(bundle_root)
+    if manifest["manifest_version"] == 3:
+        prove_embedded_python(bundle_root, manifest["bundle"]["python_version"])
     bundled_ffmpeg_bin = os.path.normcase(os.path.normpath(str(bundle_root / "ffmpeg" / "bin")))
     path_entries = {
         os.path.normcase(os.path.normpath(entry))
@@ -698,13 +735,108 @@ def prove_generated_vsview_session(media_path: Path) -> None:
     )
 
 
+def prove_qt_ffmpeg_loaded_from(pyside_root: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    current_process = kernel32.GetCurrentProcess
+    current_process.argtypes = []
+    current_process.restype = wintypes.HANDLE
+    list_modules = kernel32.K32EnumProcessModules
+    list_modules.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.HMODULE),
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    list_modules.restype = wintypes.BOOL
+    module_path = kernel32.GetModuleFileNameW
+    module_path.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+    module_path.restype = wintypes.DWORD
+
+    modules = (wintypes.HMODULE * 2048)()
+    needed = wintypes.DWORD()
+    if not list_modules(current_process(), modules, ctypes.sizeof(modules), ctypes.byref(needed)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    assert_true(needed.value <= ctypes.sizeof(modules), "module inventory exceeded its bound")
+
+    observed: dict[str, set[Path]] = {name: set() for name in QT_FFMPEG_DLLS}
+    buffer = ctypes.create_unicode_buffer(32768)
+    for handle in modules[: needed.value // ctypes.sizeof(wintypes.HMODULE)]:
+        length = module_path(handle, buffer, len(buffer))
+        assert_true(0 < length < len(buffer), "could not resolve a loaded Windows module path")
+        path = Path(buffer.value)
+        if path.name.casefold() in observed:
+            observed[path.name.casefold()].add(path.resolve())
+    for name, paths in observed.items():
+        expected = (pyside_root / name).resolve()
+        assert_true(
+            paths == {expected}, f"Qt FFmpeg DLL {name}: expected {expected}, loaded {paths}"
+        )
+
+
+def prove_qt_ffmpeg_runtime(media_path: Path) -> None:
+    from PySide6.QtCore import QEventLoop, QTimer, QUrl
+    from PySide6.QtMultimedia import QMediaPlayer, QVideoFrame, QVideoSink
+
+    from frame_compare.vs.runtime_contract import WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE
+
+    player = QMediaPlayer()
+    sink = QVideoSink()
+    loop = QEventLoop()
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(loop.quit)
+    dimensions: tuple[int, int] | None = None
+    failure: str | None = None
+
+    def receive_frame(frame: QVideoFrame) -> None:
+        nonlocal dimensions
+        if frame.isValid():
+            dimensions = (frame.width(), frame.height())
+            loop.quit()
+
+    def receive_error(error: QMediaPlayer.Error, message: str) -> None:
+        nonlocal failure
+        failure = f"{error}: {message}"
+        loop.quit()
+
+    sink.videoFrameChanged.connect(receive_frame)
+    player.errorOccurred.connect(receive_error)
+    player.setVideoSink(sink)
+    try:
+        player.setSource(QUrl.fromLocalFile(str(media_path.resolve(strict=True))))
+        player.play()
+        if dimensions is None and failure is None:
+            timer.start(15000)
+            loop.exec()
+        assert_true(failure is None, f"Qt Multimedia FFmpeg failed: {failure}")
+        assert_true(
+            dimensions == (64, 64), f"Qt Multimedia did not decode the 64x64 frame: {dimensions}"
+        )
+        bundle_root = Path(sys.executable).resolve().parent.parent
+        prove_qt_ffmpeg_loaded_from(bundle_root / "app" / "site-packages" / "PySide6")
+    finally:
+        timer.stop()
+        player.stop()
+    proof(
+        "qt_ffmpeg_runtime=ok backend=ffmpeg decoded_frame=64x64 dlls=5 "
+        f"lineage={WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE}"
+    )
+
+
 def prove_vsview_runtime(media_path: Path) -> None:
     from frame_compare.vsview.launcher import preload_vapoursynth_runtime
 
     preload_vapoursynth_runtime()
     proof("vsview_runtime_preload=ok")
 
+    bundle_root = Path(sys.executable).resolve().parent.parent
+    manifest_version = read_bundle_manifest(bundle_root)["manifest_version"]
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    if manifest_version == 3:
+        os.environ["QT_MEDIA_BACKEND"] = "ffmpeg"
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
@@ -722,25 +854,16 @@ def prove_vsview_runtime(media_path: Path) -> None:
     proof("vsview_deep_imports=ok modules=vsview.app.main,vsview.cli,vspackrgb.rust")
     importlib.import_module("PySide6.QtPdf")
     proof("qt_pdf_runtime=ok deployment=retained")
-    site_packages = Path(sys.executable).resolve().parent.parent / "app" / "site-packages"
-    qt_ffmpeg_dlls = [
-        site_packages / "PySide6" / name
-        for name in (
-            "avcodec-63.dll",
-            "avformat-63.dll",
-            "avutil-61.dll",
-            "swresample-7.dll",
-            "swscale-10.dll",
+    if manifest_version == 3:
+        prove_qt_ffmpeg_runtime(media_path)
+    else:
+        pyside_root = bundle_root / "app" / "site-packages" / "PySide6"
+        dlls = [pyside_root / name for name in QT_FFMPEG_DLLS]
+        assert_true(all(path.is_file() for path in dlls), f"Qt FFmpeg DLL set incomplete: {dlls}")
+        proof(
+            "qt_ffmpeg_runtime=ok lineage=9.0.1 "
+            "dlls=avcodec-63,avformat-63,avutil-61,swresample-7,swscale-10"
         )
-    ]
-    assert_true(
-        all(path.is_file() for path in qt_ffmpeg_dlls),
-        f"Qt FFmpeg DLL set incomplete: {qt_ffmpeg_dlls}",
-    )
-    proof(
-        "qt_ffmpeg_runtime=ok lineage=9.0.1 "
-        "dlls=avcodec-63,avformat-63,avutil-61,swresample-7,swscale-10"
-    )
     prove_qt_webengine_excluded()
     prove_vsview_distribution_contract()
     prove_project_entrypoint_and_panel()

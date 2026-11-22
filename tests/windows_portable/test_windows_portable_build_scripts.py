@@ -234,7 +234,7 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
     manifest = json.loads(_read_text_or_fail(manifest_path))
     artifacts = {artifact["id"]: artifact for artifact in manifest["artifacts"]}
 
-    assert manifest["manifest_version"] == 2
+    assert manifest["manifest_version"] == 3
     assert manifest["bundle"]["vs_ref"] == "R82"
     assert manifest["bundle"]["ffmpeg_policy"] == "lgpl-only"
     assert set(manifest["bundle"]["runtime_fingerprints"]) == {
@@ -249,12 +249,22 @@ def test_windows_portable_manifest_tracks_coordinated_media_runtime_artifacts(
         for fingerprint in manifest["bundle"]["runtime_fingerprints"].values()
     )
 
-    expected_python_version = "3.14.10"
+    expected_python_version = "3.15.2"
     assert manifest["bundle"]["python_version"] == expected_python_version
     python = artifacts["python-embed-amd64"]
     assert python["version"] == expected_python_version
     assert python["source_ref"] == expected_python_version
     assert python["release_date"] == "2026-10-25"
+    assert python["url"] == (
+        "https://www.python.org/ftp/python/3.15.2/python-3.15.2-embed-amd64.zip"
+    )
+    assert python["bytes"] == 13740486
+    assert python["sha256"] == ("d012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62")
+    assert python["source_url"] == "https://www.python.org/ftp/python/3.15.2/Python-3.15.2.tgz"
+    assert python["source_bytes"] == 35882840
+    assert python["source_sha256"] == (
+        "f74e1db0eabd651cd01e4e2a00201bd41866abe74869ab716f9bf33cbbaa0943"
+    )
 
     vapoursynth = artifacts["vapoursynth-portable-r82"]
     assert vapoursynth["version"] == "R82"
@@ -366,7 +376,6 @@ def test_windows_portable_manifest_pins_exact_vsview_windows_graph(repo_root: Pa
     assert sources["Qt for Python"]["sha256"] == (
         "099c1a597cf33c1b000e11cf68a0b82d216fb802bf81726efc720394f10c7751"
     )
-    assert sources["FFmpeg (Qt Multimedia 6.12.0 build)"]["version"] == "9.0.1"
     pdf_source = sources["Qt PDF (Qt WebEngine source tree)"]
     assert pdf_source["version"] == "6.140.0"
     assert pdf_source["selection_kind"] == "commit"
@@ -375,6 +384,59 @@ def test_windows_portable_manifest_pins_exact_vsview_windows_graph(repo_root: Pa
         "141e9b230e5ec9ee65a7357ca4b87d702e4badc515289eeade1047a788bb96e7"
     )
     assert pdf_source["bytes"] == 584649116
+
+
+def test_windows_qt_ffmpeg_pins_binary_source_recipe_and_build_registry(repo_root: Path) -> None:
+    manifest = json.loads(
+        _read_text_or_fail(repo_root / "tools/windows_portable/manifest.windows-x64.json")
+    )
+    (qt_ffmpeg,) = (
+        artifact
+        for artifact in manifest["artifacts"]
+        if artifact["install"]["type"] == "qt_multimedia_ffmpeg"
+    )
+    assert qt_ffmpeg["id"] == "qt-multimedia-ffmpeg-9.1-win-x64"
+    assert qt_ffmpeg["install"] == {"type": "qt_multimedia_ffmpeg"}
+    assert qt_ffmpeg["version"] == "9.1"
+    assert qt_ffmpeg["url"] == (
+        "https://github.com/System233/ffmpeg-msvc-prebuilt/releases/download/"
+        "ffmpeg-9.1/ffmpeg-9.1_x64-windows-shared-lgpl.zip"
+    )
+    assert qt_ffmpeg["bytes"] == 45526634
+    assert qt_ffmpeg["sha256"] == "af02e8cc60d57fa3f668c579e65edf6586eb16c0f6c687532f9324cfd07f07d2"
+    assert qt_ffmpeg["source_ref"] == "n9.1"
+    assert qt_ffmpeg["source_commit"] == "74e4393595cf2b5857f0da925c4e0dd74ea306e5"
+    assert qt_ffmpeg["source_url"] == "https://ffmpeg.org/releases/ffmpeg-9.1.tar.xz"
+    assert qt_ffmpeg["source_bytes"] == 12557532
+    assert qt_ffmpeg["source_sha256"] == (
+        "1a4d394ae63d190a526cd052eb4415c156b5c5e2df37efab41a7de0b8fde2433"
+    )
+    assert qt_ffmpeg["build_source_commit"] == "7bd67a2dfc716f34e53849434e46a8c57c71884b"
+    assert qt_ffmpeg["build_source_url"] == (
+        "https://codeload.github.com/System233/ffmpeg-msvc-prebuilt/tar.gz/"
+        "7bd67a2dfc716f34e53849434e46a8c57c71884b"
+    )
+    assert qt_ffmpeg["build_source_bytes"] == 230937
+    assert qt_ffmpeg["build_source_sha256"] == (
+        "816571843f901030625d30d1d52e1cffe374d2e76ade4bd8791e9cfa91265fe9"
+    )
+    assert qt_ffmpeg["license"]["spdx"] == "LGPL-3.0-or-later"
+    (notice,) = qt_ffmpeg["license"]["files"]
+    assert notice["path"] == "licenses/common/LGPL-3.0.txt"
+    assert notice["sha256"] == "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+
+    registry = next(
+        source
+        for source in manifest["corresponding_sources"]
+        if source["name"] == "vcpkg ports for the Qt Multimedia FFmpeg build"
+    )
+    assert registry["source_ref"] == "2026.06.01"
+    assert registry["source_commit"] == "f3e10653cc27d62a37a3763cd84b38bca07c6075"
+    assert registry["source_url"] == (
+        "https://codeload.github.com/microsoft/vcpkg/tar.gz/f3e10653cc27d62a37a3763cd84b38bca07c6075"
+    )
+    assert registry["bytes"] == 5263899
+    assert registry["sha256"] == "86f72c4ff5c853eb7f749e26bc7b8edf2bffaa5b959753d2685e96f9653b0fd5"
 
 
 def test_windows_portable_vsview_artifacts_match_uv_lock(repo_root: Path) -> None:
@@ -644,6 +706,7 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
         "from PySide6.QtWidgets import QApplication",
         "WINDOWS_BUNDLE_PROOF",
         "runtime_contract=ok",
+        'prove_embedded_python(bundle_root, manifest["bundle"]["python_version"])',
         "FFMS2 must remain excluded",
         "standalone FFmpeg directory leaked onto PATH",
     ):
@@ -827,6 +890,9 @@ def test_windows_portable_release_build_requires_clean_exact_source(repo_root: P
     )
     assert "git -C $RepoRoot status --porcelain=v1 --untracked-files=all" in build
     assert "Portable release builds require a clean, exact source checkout." in build
+    assert "if ($ReleaseBuild -and $manifestVersion -ne 3)" in build
+    assert "Portable release builds require manifest version 3." in build
+    assert build.count("Assert-BuildManifest -Manifest $manifest") == 2
     assert 'if ($ReleaseBuild) {\n    $arguments += "--require-clean-repo"' in build
 
 
@@ -883,6 +949,7 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
     for required_proof in (
         "preload_vapoursynth_runtime()",
         "app.exec()",
+        "prove_qt_ffmpeg_runtime(media_path)",
         "prove_qt_webengine_excluded()",
         "prove_vsview_distribution_contract()",
         "prove_runtime_contract()",
@@ -897,7 +964,18 @@ def test_windows_portable_build_runtime_validation_checks_vsview_stack(repo_root
         assert required_proof in combined_proof
     assert "vsview_runtime_preload=ok" in combined_proof
     assert "pyside6_event_loop=ok" in combined_proof
+    assert combined_proof.index('os.environ["QT_MEDIA_BACKEND"] = "ffmpeg"') < combined_proof.index(
+        "import vsview.app.main"
+    )
+    assert "qt_ffmpeg_runtime=ok backend=ffmpeg decoded_frame=64x64 dlls=5" in proof_source
+    assert (
+        "if manifest_version == 3:\n        prove_qt_ffmpeg_runtime(media_path)" in combined_proof
+    )
     assert "qt_ffmpeg_runtime=ok lineage=9.0.1" in combined_proof
+    assert "sink.videoFrameChanged.connect(receive_frame)" in proof_source
+    assert "player.errorOccurred.connect(receive_error)" in proof_source
+    assert "kernel32.K32EnumProcessModules" in proof_source
+    assert "prove_qt_ffmpeg_loaded_from(bundle_root" in proof_source
     assert "qt_pdf_runtime=ok deployment=retained" in combined_proof
     assert "qt_webengine_runtime=absent deployment=excluded" in proof_source
     assert "vsview_runtime=ok" in combined_proof
@@ -1138,10 +1216,26 @@ def test_windows_portable_manifest_schema_models_current_install_shapes(repo_roo
     assert "oneOf" in install_def
 
     variants = {variant["properties"]["type"]["const"]: variant for variant in install_def["oneOf"]}
-    assert set(variants) == {"extract", "python_wheel"}
+    assert schema["properties"]["manifest_version"] == {"type": "integer", "enum": [2, 3]}
+    assert schema["if"]["properties"]["manifest_version"] == {"const": 3}
+    assert schema["then"]["properties"]["artifacts"] == {
+        "contains": {"$ref": "#/$defs/qt_ffmpeg_overlay"},
+        "minContains": 1,
+        "maxContains": 1,
+    }
+    assert schema["else"]["properties"]["artifacts"] == {
+        "contains": {"$ref": "#/$defs/qt_ffmpeg_overlay"},
+        "minContains": 0,
+        "maxContains": 0,
+    }
+    info_schema = json.loads(_read_text_or_fail(schema_path.with_name("bundle_info.schema.json")))
+    assert info_schema["properties"]["manifest_version"] == {"type": "integer", "enum": [2, 3]}
+    assert set(variants) == {"extract", "python_wheel", "qt_multimedia_ffmpeg"}
     assert variants["extract"]["required"] == ["type", "destination"]
     assert variants["python_wheel"]["required"] == ["type"]
     assert "destination" not in variants["python_wheel"]["properties"]
+    assert set(variants["qt_multimedia_ffmpeg"]["properties"]) == {"type"}
+    assert variants["qt_multimedia_ffmpeg"]["additionalProperties"] is False
 
 
 def test_windows_portable_manifest_vendored_license_files_exist_and_match_hashes(
@@ -1265,7 +1359,7 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
                 "bundle_kind": "full",
                 "app_version": "0.1.0",
                 "requirements_lock_sha256": "a" * 64,
-                "manifest_version": 2,
+                "manifest_version": manifest["manifest_version"],
                 "platform": "windows-x64",
                 "media_runtime_fingerprint": runtime_fingerprints["full"],
                 "media_runtime_fingerprints": runtime_fingerprints,
@@ -1426,12 +1520,31 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     assert license_paths == sorted(license_paths)
     assert "licenses/frame-compare-LICENSE.txt" in license_paths
     assert "licenses/Inter-OFL.txt" in license_paths
+    assert "licenses/qt-multimedia-ffmpeg-9.1-win-x64-LGPL-3.0-or-later.txt" in license_paths
+    qt_ffmpeg = next(
+        artifact
+        for artifact in inventory["manifest_artifacts"]
+        if artifact["id"] == "qt-multimedia-ffmpeg-9.1-win-x64"
+    )
+    assert qt_ffmpeg["source_commit"] == "74e4393595cf2b5857f0da925c4e0dd74ea306e5"
+    assert qt_ffmpeg["build_source_commit"] == "7bd67a2dfc716f34e53849434e46a8c57c71884b"
+    assert any(
+        source["name"] == "vcpkg ports for the Qt Multimedia FFmpeg build"
+        and source["source_commit"] == "f3e10653cc27d62a37a3763cd84b38bca07c6075"
+        for source in inventory["corresponding_sources"]
+    )
     source_urls = (bundle / "licenses" / "SOURCE_URLS.txt").read_text(encoding="utf-8")
     assert inventory["bundle"]["commit_sha"] in source_urls
     assert "qt-everywhere-src-6.12.0.tar.xz" in source_urls
     assert "Inter 4.1: https://github.com/rsms/inter/releases/tag/v4.1" in source_urls
+    assert qt_ffmpeg["source_url"] in source_urls and qt_ffmpeg["build_source_url"] in source_urls
+    assert (
+        "codeload.github.com/microsoft/vcpkg/tar.gz/f3e10653cc27d62a37a3763cd84b38bca07c6075"
+        in source_urls
+    )
     notices = (bundle / "licenses" / "THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8")
     assert "Inter 4.1 (OFL-1.1)" in notices
+    assert f"{qt_ffmpeg['name']} 9.1 (LGPL-3.0-or-later)" in notices
 
 
 @pytest.mark.parametrize(
@@ -1568,7 +1681,14 @@ Main
     ]
     expected_manifest = committed_manifest
     expected_notice = committed_notice
+    env = os.environ | {"FIXTURE_PYTHON": sys.executable, "FIXTURE_LAYOUT": str(seed)}
     if custom:
+        manifest["manifest_version"] = 2
+        manifest["artifacts"] = [
+            item
+            for item in manifest["artifacts"]
+            if item["install"]["type"] != "qt_multimedia_ffmpeg"
+        ]
         custom_dir = tmp_path / "custom-manifest"
         shutil.copytree(owner / "licenses", custom_dir / "licenses")
         expected_notice = b"custom manifest notice\n"
@@ -1579,9 +1699,23 @@ Main
         custom_path = custom_dir / "custom.json"
         custom_path.write_bytes(expected_manifest)
         command.extend(("-ManifestPath", str(custom_path)))
+        release = subprocess.run(
+            [*command, "-ReleaseBuild"],
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert release.returncode != 0
+        assert "Portable release builds require manifest version 3." in _normalized_process_output(
+            release
+        )
+        assert not (tmp_path / "out").exists()
+        assert not (tmp_path / "cache").exists()
     result = subprocess.run(
         command,
-        env=os.environ | {"FIXTURE_PYTHON": sys.executable, "FIXTURE_LAYOUT": str(seed)},
+        env=env,
         check=False,
         capture_output=True,
         text=True,
@@ -1591,6 +1725,8 @@ Main
     assert result.returncode == 0, _normalized_process_output(result)
     out = tmp_path / "out"
     assert (out / "manifest.json").read_bytes() == expected_manifest
+    bundle_info = json.loads((out / "bundle_info.json").read_bytes())
+    assert bundle_info["manifest_version"] == (2 if custom else 3)
     assert (out / "licenses" / destination).read_bytes() == expected_notice
     inventory = json.loads((out / "bundle_inventory.json").read_text(encoding="utf-8"))
     assert inventory["bundle"]["commit_sha"] == selected

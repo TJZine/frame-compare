@@ -11,7 +11,7 @@
   "properties": {
     "manifest_version": {
       "type": "integer",
-      "const": 2
+      "enum": [2, 3]
     },
     "bundle": {
       "type": "object",
@@ -108,7 +108,39 @@
       "type": "string"
     }
   },
+  "if": {
+    "properties": {
+      "manifest_version": {"const": 3}
+    }
+  },
+  "then": {
+    "properties": {
+      "artifacts": {
+        "contains": {"$ref": "#/$defs/qt_ffmpeg_overlay"},
+        "minContains": 1,
+        "maxContains": 1
+      }
+    }
+  },
+  "else": {
+    "properties": {
+      "artifacts": {
+        "contains": {"$ref": "#/$defs/qt_ffmpeg_overlay"},
+        "minContains": 0,
+        "maxContains": 0
+      }
+    }
+  },
   "$defs": {
+    "qt_ffmpeg_overlay": {
+      "properties": {
+        "install": {
+          "properties": {
+            "type": {"const": "qt_multimedia_ffmpeg"}
+          }
+        }
+      }
+    },
     "artifact": {
       "type": "object",
       "required": [
@@ -421,6 +453,18 @@
           "properties": {
             "type": {
               "const": "python_wheel"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "qt_multimedia_ffmpeg"
             }
           },
           "additionalProperties": false

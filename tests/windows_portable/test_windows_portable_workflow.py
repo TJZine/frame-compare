@@ -130,3 +130,19 @@ def test_windows_workflow_runs_lifecycle_after_packing_and_before_upload(repo_ro
     assert '$versionOutput[0] -cne "frame-compare $expectedVersion"' in smoke
     assert "& $launcher doctor --json" in smoke
     assert "-ReleaseBuild" in _step_by_name(action, "Build portable bundle")["run"]
+
+
+def test_windows_build_requires_current_manifest_from_exact_checkout_before_setup(
+    repo_root: Path,
+) -> None:
+    action = _build_action(repo_root)
+    gate = _step_by_name(action, "Require current portable manifest")
+    assert action["steps"][0] == gate
+    assert "if" not in gate
+    assert gate["env"] == {"EXPECTED_SHA": "${{ inputs.expected_sha }}"}
+    assert (
+        'git show "${env:EXPECTED_SHA}:tools/windows_portable/manifest.windows-x64.json"'
+        in gate["run"]
+    )
+    assert "$version -ne 3" in gate["run"]
+    assert "Hosted Windows portable builds require manifest version 3." in gate["run"]

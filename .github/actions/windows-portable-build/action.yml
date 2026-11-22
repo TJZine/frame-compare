@@ -17,6 +17,20 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Require current portable manifest
+      shell: pwsh
+      env:
+        EXPECTED_SHA: ${{ inputs.expected_sha }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        $PSNativeCommandUseErrorActionPreference = $true
+        $json = (git show "${env:EXPECTED_SHA}:tools/windows_portable/manifest.windows-x64.json") -join "`n"
+        $manifest = $json | ConvertFrom-Json
+        $version = $manifest.manifest_version
+        if (($version -isnot [int] -and $version -isnot [long]) -or $version -ne 3) {
+          throw "Hosted Windows portable builds require manifest version 3."
+        }
+
     - name: Setup Python 3.13.17
       uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
@@ -100,7 +114,7 @@ runs:
         foreach ($marker in @(
           "pyside6_event_loop=ok",
           "vsview_deep_imports=ok",
-          "qt_ffmpeg_runtime=ok",
+          "qt_ffmpeg_runtime=ok backend=ffmpeg decoded_frame=64x64 dlls=5",
           "qt_webengine_runtime=absent deployment=excluded",
           "project_entrypoint=ok source=app/src",
           "alignment_panel=ok state=inactive platform=offscreen",
