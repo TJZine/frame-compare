@@ -49,7 +49,7 @@ runs:
 
     - name: Full test suite (includes portable updater proof)
       shell: pwsh
-      run: uv run --no-sync pytest -q
+      run: uv run --no-sync pytest -q --ignore=tests/windows_portable/test_windows_portable_zip_succession.py
 
     - name: Validate update public key
       if: inputs.require_signing == 'true'
@@ -182,8 +182,14 @@ runs:
         Get-Command -CommandType ExternalScript $launcher | Format-List Source,Path
         & $launcher --help | Out-Host
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        & $launcher version | Out-Host
+        $expectedVersion = python -B -I -S -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $versionOutput = @(& $launcher version)
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $versionOutput | Out-Host
+        if ($versionOutput.Count -ne 1 -or $versionOutput[0] -cne "frame-compare $expectedVersion") {
+          throw "Candidate version output must be exactly frame-compare $expectedVersion"
+        }
         $doctorStdout = Join-Path $env:RUNNER_TEMP "bundle-doctor.json"
         $doctorStderr = Join-Path $env:RUNNER_TEMP "bundle-doctor.stderr.txt"
         & $launcher doctor --json 1> $doctorStdout 2> $doctorStderr
@@ -224,6 +230,19 @@ runs:
         if (Test-Path $zip) { Remove-Item -Force $zip }
         python -B -I -S tools/windows_portable/portable_bundle.py pack --root $bundle --output $zip
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Test packed ZIP succession
+      shell: pwsh
+      run: |
+        $env:FRAME_COMPARE_TEST_PORTABLE_ZIP = (Resolve-Path -LiteralPath "dist/frame-compare-portable-win-x64.zip" -ErrorAction Stop).Path
+        $results = Join-Path $env:RUNNER_TEMP "windows-zip-succession.xml"
+        uv run --no-sync pytest -q -rs -s tests/windows_portable/test_windows_portable_zip_succession.py --junitxml $results
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $report = [xml](Get-Content -LiteralPath $results -Raw)
+        $suite = $report.testsuites.testsuite
+        if ([int]$suite.tests -ne 8 -or [int]$suite.skipped -ne 0) {
+          throw "Packed ZIP succession requires all eight cases with no skips."
+        }
 
     - name: Verify extracted portable bundle
       shell: pwsh

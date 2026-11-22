@@ -338,6 +338,8 @@ try {
   $requiredEntries = @(
     "frame-compare-portable-win-x64/install.cmd",
     "frame-compare-portable-win-x64/install.ps1",
+    "frame-compare-portable-win-x64/portable_activation.ps1",
+    "frame-compare-portable-win-x64/path_safety.ps1",
     "frame-compare-portable-win-x64/frame-compare.ps1",
     "frame-compare-portable-win-x64/frame-compare-update.cmd",
     "frame-compare-portable-win-x64/frame-compare-update.ps1",
@@ -827,6 +829,7 @@ $requiredSourceScripts = @(
   ".github/workflows/windows-portable-build.yml",
   "tools/windows_portable/build_portable.ps1",
   "tools/windows_portable/path_safety.ps1",
+  "tools/windows_portable/portable_activation.ps1",
   "tools/windows_portable/portable_launchers.ps1",
   "tools/windows_portable/shim/frame-compare-version.ps1",
   "tools/windows_portable/runtime_smoke.py",
@@ -1322,7 +1325,7 @@ $null = Invoke-BoundedCommand `
 Write-Host "WINDOWS_EXTRACTED_PROOF vsview_entrypoint=ok"
 
 $installer = Join-Path $bundle "install.cmd"
-$null = Invoke-BoundedCommand -Label "candidate_install" -FilePath $installer
+$null = Invoke-BoundedCommand -Label "candidate_install" -FilePath $installer -ArgumentList @("-UserData", "Leave")
 
 $installedShim = Join-Path $env:LOCALAPPDATA "Programs/FrameCompare/bin/frame-compare.cmd"
 if (!(Test-Path -LiteralPath $installedShim -PathType Leaf)) {
@@ -1330,7 +1333,7 @@ if (!(Test-Path -LiteralPath $installedShim -PathType Leaf)) {
 }
 $installStatePath = Join-Path $env:LOCALAPPDATA "Programs/FrameCompare/state/config.json"
 try {
-  $installState = Get-Content -LiteralPath $installStatePath -Raw |
+  $installState = Get-Content -LiteralPath $installStatePath -Raw -Encoding UTF8 |
     ConvertFrom-Json -ErrorAction Stop
 } catch {
   throw "Installed state is missing or invalid: $installStatePath"

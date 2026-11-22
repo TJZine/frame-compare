@@ -111,6 +111,8 @@ def release_chain(repo_root: Path, tmp_path: Path) -> _Release:
         "build_update.ps1",
         "install.cmd",
         "install.ps1",
+        "portable_activation.ps1",
+        "path_safety.ps1",
         "portable_launchers.ps1",
         "portable_archive.py",
         "portable_bundle.py",
@@ -172,7 +174,15 @@ def release_chain(repo_root: Path, tmp_path: Path) -> _Release:
     shutil.copytree(source, bundle / "app/src/frame_compare")
     shutil.copytree(owner / "shim", bundle / "shim")
     shutil.copyfile(owner / "update_public_key.xml", bundle / "shim/update_public_key.xml")
-    for filename in ("README.txt", "install.cmd", "install.ps1", "uninstall.cmd", "uninstall.ps1"):
+    for filename in (
+        "README.txt",
+        "install.cmd",
+        "install.ps1",
+        "uninstall.cmd",
+        "uninstall.ps1",
+        "portable_activation.ps1",
+        "path_safety.ps1",
+    ):
         shutil.copyfile(owner / filename, bundle / filename)
     launch = subprocess.run(
         [

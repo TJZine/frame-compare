@@ -213,7 +213,7 @@ function Copy-InstallerFiles([string]$BundleRoot) {
   $shimDest = Join-Path $BundleRoot "shim"
   $publicKeySource = Join-Path $sourceDir "update_public_key.xml"
 
-  foreach ($file in @("install.ps1", "uninstall.ps1", "install.cmd", "uninstall.cmd", "README.txt")) {
+  foreach ($file in @("install.ps1", "uninstall.ps1", "install.cmd", "uninstall.cmd", "README.txt", "portable_activation.ps1", "path_safety.ps1")) {
     $src = Join-Path $sourceDir $file
     if (!(Test-Path -LiteralPath $src)) {
       throw "Installer file not found: $src"

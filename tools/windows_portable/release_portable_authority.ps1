@@ -26,7 +26,7 @@ function Get-ArchiveEntryRecord([IO.Compression.ZipArchiveEntry]$Entry) {
 function Get-PortableAuthority([string]$ExpectedSha, [hashtable]$Source) {
   $owner = "tools/windows_portable"
   $paths = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
-  foreach ($file in @("README.txt", "install.cmd", "install.ps1", "uninstall.cmd", "uninstall.ps1")) {
+  foreach ($file in @("README.txt", "install.cmd", "install.ps1", "uninstall.cmd", "uninstall.ps1", "portable_activation.ps1", "path_safety.ps1")) {
     $paths.Add("$owner/$file", $file)
   }
   $paths.Add("$owner/update_public_key.xml", "shim/update_public_key.xml")

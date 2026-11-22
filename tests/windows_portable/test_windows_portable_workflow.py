@@ -372,12 +372,27 @@ def test_windows_portable_attests_and_uploads_exact_release_assets(repo_root: Pa
     assert download["with"]["digest-mismatch"] == "error"
 
 
-def test_windows_portable_workflow_runs_full_suite_once_including_updater_proof(
+def test_windows_portable_workflow_separates_full_suite_from_post_pack_proof(
     repo_root: Path,
 ) -> None:
     steps = _build_action(repo_root)["steps"]
-    pytest_runs = [step["run"] for step in steps if "pytest" in step.get("run", "")]
-    assert pytest_runs == ["uv run --no-sync pytest -q"]
+    module = "tests/windows_portable/test_windows_portable_zip_succession.py"
+    assert (repo_root / module).is_file()
+    pytest_steps = [step for step in steps if "pytest" in step.get("run", "")]
+    full, succession = pytest_steps
+    pack = next(step for step in steps if step["name"] == "Package zip")
+    assert steps.index(full) < steps.index(pack) < steps.index(succession)
+    assert full["run"] == f"uv run --no-sync pytest -q --ignore={module}"
+    assert f"pytest -q -rs -s {module} --junitxml" in succession["run"]
+    assert (
+        'Resolve-Path -LiteralPath "dist/frame-compare-portable-win-x64.zip"' in succession["run"]
+    )
+    assert "[int]$suite.skipped -ne 0" in succession["run"]
+    assert "[int]$suite.tests -ne 8" in succession["run"]
+
+    smoke = next(step for step in steps if step["name"] == "Smoke: absolute candidate launcher")
+    assert "$versionOutput.Count -ne 1" in smoke["run"]
+    assert '$versionOutput[0] -cne "frame-compare $expectedVersion"' in smoke["run"]
 
 
 def test_windows_portable_composite_actions_pin_and_bind_unsigned_artifacts(

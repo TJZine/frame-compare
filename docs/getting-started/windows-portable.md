@@ -193,17 +193,14 @@ frame-compare-update apply .\frame-compare-update-win-x64-<tag>.zip
 When the fingerprint differs, install the complete portable ZIP for that release into a
 fresh, empty folder. Overlaying a full ZIP onto an existing bundle root is unsupported.
 
-Before a full reinstall:
+Run `install.cmd` from the fresh extraction. It moves the previous active bundle's
+non-empty `config/`, `comparison_videos/`, and `generated/` folders into the new
+bundle. Application code, runtime files, and update backups stay in the old bundle.
 
-1. Preserve the old bundle and its user configuration, source videos, and generated data.
-2. Copy your `config/config.toml` and any bundle-local inputs or `generated/` data into
-   the new bundle as needed, or retain their external locations.
-3. Leave application code, runtime files, and update backups in the old bundle.
-4. Run the new bundle's `install.cmd` to point the installed shim at it.
+Run `install.cmd -UserData Leave` to keep the data in the old bundle or to copy
+selected user files to the new bundle yourself.
 
 The installed AppData fallback configuration and external user data are preserved.
-Keep **Generated data location** external when reports and reusable state must survive
-replacement.
 
 ## Backup and rollback
 

@@ -194,7 +194,9 @@ Set-Location -LiteralPath $env:FRAME_COMPARE_TEST_PROVIDER_ROOT
 def test_windows_portable_installed_default_config_uses_generated_root_only(
     repo_root: Path,
 ) -> None:
-    install_script = _read_text_or_fail(repo_root / "tools" / "windows_portable" / "install.ps1")
+    install_script = _read_text_or_fail(
+        repo_root / "tools/windows_portable/portable_activation.ps1"
+    )
     default_block_start = install_script.index('$defaultPortableConfigToml = @"')
     default_block_end = install_script.index('"@', default_block_start)
     default_config = install_script[default_block_start:default_block_end]
@@ -1233,12 +1235,14 @@ def _write_extracted_verifier_fixture(
     (bundle / "frame-compare.ps1").write_text(candidate_launcher, encoding="utf-8")
     (bundle / "install.ps1").write_text(installer, encoding="utf-8")
     (bundle / "install.cmd").write_text(
-        '@pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"\n@exit /b %ERRORLEVEL%\n',
+        '@pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*\n@exit /b %ERRORLEVEL%\n',
         encoding="ascii",
     )
     for relative_path in (
         "frame-compare-update.cmd",
         "frame-compare-update.ps1",
+        "portable_activation.ps1",
+        "path_safety.ps1",
         "shim/frame-compare.cmd",
         "shim/frame-compare-update.cmd",
         "shim/frame-compare-update.ps1",
@@ -1379,6 +1383,7 @@ def _write_extracted_verifier_fixture(
             ".github/workflows/windows-portable.yml",
             "tools/windows_portable/build_portable.ps1",
             "tools/windows_portable/path_safety.ps1",
+            "tools/windows_portable/portable_activation.ps1",
             "tools/windows_portable/portable_launchers.ps1",
             "tools/windows_portable/runtime_smoke.py",
             "tools/windows_portable/build_update.ps1",
@@ -2063,6 +2068,8 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     for required_entry in (
         "frame-compare-portable-win-x64/install.cmd",
         "frame-compare-portable-win-x64/install.ps1",
+        "frame-compare-portable-win-x64/portable_activation.ps1",
+        "frame-compare-portable-win-x64/path_safety.ps1",
         "frame-compare-portable-win-x64/frame-compare.ps1",
         "frame-compare-portable-win-x64/frame-compare-update.cmd",
         "frame-compare-portable-win-x64/frame-compare-update.ps1",
@@ -2085,6 +2092,10 @@ def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parit
     assert 'Join-Path $PSScriptRoot "path_safety.ps1"' in verifier
     assert "[System.IO.FileMode]::CreateNew" in verifier
     assert "Expand-Archive" not in verifier
+    assert (
+        '-Label "candidate_install" -FilePath $installer -ArgumentList @("-UserData", "Leave")'
+        in verifier
+    )
     assert "WINDOWS_EXTRACTED_PROOF license_inventory=ok" in verifier
     assert "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded" in verifier
     assert "Extracted bundle unexpectedly contains Qt WebEngine/Chromium runtime files" in verifier

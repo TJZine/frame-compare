@@ -58,11 +58,14 @@ NOTES:
     after accepting the new installation.
     The direct builder refuses occupied or unsafe output folders. Maintainers
     must explicitly remove disposable build output before reusing its path.
-  - A complete runtime reinstall requires a fresh, empty folder. Overlaying a full
-    ZIP onto an existing bundle root is unsupported. Preserve user configuration,
-    input clips, and generated data; copy only those user files to the new bundle
-    if they were bundle-local. AppData fallback configuration and external data
-    remain preserved. Do not copy application/runtime files or old update backups.
+  - Extract the complete portable ZIP into a fresh, empty folder and run
+    install.cmd. Overlaying a full ZIP onto an existing bundle root is
+    unsupported. The installer moves non-empty config\, comparison_videos\,
+    and generated\ folders from the previous active bundle. Run
+    install.cmd -UserData Leave to keep the folders in the old bundle or to copy
+    selected user files yourself. AppData fallback configuration and external
+    data stay in place. Leave application files, runtime files, and update
+    backups in the old bundle.
   - If the bundle is moved, run `install.cmd` again from the new location.
 
 QUICK START:

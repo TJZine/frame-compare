@@ -52,13 +52,14 @@ def test_root_install_delegates_to_fail_closed_source_install(repo_root: Path) -
     ("wrapper", "script"),
     (
         ("install.cmd", "install.ps1"),
+        ("tools/windows_portable/install.cmd", "install.ps1"),
         (
             "tools/windows_portable/install-from-source.cmd",
             "install-from-source.ps1",
         ),
     ),
 )
-def test_windows_source_install_cmd_wrappers_forward_args_and_exit_code(
+def test_windows_install_cmd_wrappers_forward_args_and_exit_code(
     repo_root: Path, wrapper: str, script: str
 ) -> None:
     source = _read_text_or_fail(repo_root / wrapper).lower()
@@ -186,6 +187,7 @@ def test_root_source_installer_prerequisite_at_process_boundary(
         "install.ps1",
         "tools/windows_portable/install-from-source.ps1",
         "tools/windows_portable/path_safety.ps1",
+        "tools/windows_portable/portable_activation.ps1",
     ):
         (copied_repo / relative).write_bytes((repo_root / relative).read_bytes())
     (owner / "manifest.windows-x64.json").write_text("{}", encoding="utf-8")
@@ -194,7 +196,12 @@ def test_root_source_installer_prerequisite_at_process_boundary(
         """
 param($ManifestPath, $OutDir, $CacheDir, $RepoRoot)
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
-Set-Content -LiteralPath (Join-Path $OutDir "install.ps1") -Value '$global:LASTEXITCODE = 0'
+Set-Content -LiteralPath (Join-Path $OutDir "portable_activation.ps1") -Value @'
+function Invoke-PortableActivation($BundleRoot, $StateDirectory, $UserData, $ActivationLock) {
+  if (!$ActivationLock.CanWrite) { throw 'activation lock not supplied' }
+  Set-Content -LiteralPath (Join-Path $BundleRoot 'activation-invoked') -Value $UserData
+}
+'@
 $global:LASTEXITCODE = 0
 """,
         encoding="utf-8",
@@ -223,6 +230,12 @@ $global:LASTEXITCODE = 0
         assert proc.returncode == 0, proc.stderr
         assert "Source install complete." in proc.stdout
         assert (
-            len(list((copied_repo / "dist").glob("frame-compare-portable-win-x64-*Z/install.ps1")))
+            len(
+                list(
+                    (copied_repo / "dist").glob(
+                        "frame-compare-portable-win-x64-*Z/activation-invoked"
+                    )
+                )
+            )
             == 1
         )
