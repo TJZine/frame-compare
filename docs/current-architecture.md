@@ -586,25 +586,36 @@ Selected-video identity is not persisted.
   path is reported as unreadable.
 - screenshot output directories and generated HTML reports
 - Windows source installs build verified bundles under
-  `dist/frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z` (UTC); the AppData
-  active-bundle pointer selects the workspace. The builder validates inputs before
-  atomically reserving the final output path, refuses occupied/unsafe paths, and
-  cleans up only its own reservation on failure. Building at the final path keeps
-  the requirements-lock fingerprint unchanged for CI's fixed build location.
-  Source reinstalls move non-empty `config/`, `comparison_videos/`, and `generated/`
-  folders by default (`-UserData Leave` opts out), reverse moves on activation
-  failure even after pointer replacement, and restore previous shims. A fresh
-  pointer byte snapshot after building owns migration and rollback under an
-  exclusive activation lock shared with current bundle installation. Reparse-point
-  ancestry is refused where physical containment is unproven; stored pointers must
-  be fully qualified. They never delete previous bundles. Recovery diagnostics
-  preserve and report all known paths even when the pointer cannot be read.
-  A pending migration blocks another source install. Candidate-pointer and folder
-  state establish data locations, not completed activation: configuration and PATH
-  setup follow pointer publication. Candidate data stays in place while activation,
-  configuration, installed shims, and PATH are verified before marker removal.
-  Marker-cleanup failure after successful activation reports a nonzero cleanup
-  error without reversing the candidate pointer or data.
+  `dist/frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z` (UTC). The builder validates
+  inputs before atomically reserving the final output path, refuses occupied or
+  unsafe paths, and cleans up only its own reservation on failure. Building at the
+  final path keeps the requirements-lock fingerprint stable for CI's fixed location.
+- The bundle's `portable_activation.ps1` owns activation for both ZIP and source
+  installs. Source installation holds the exclusive `state/source-install.lock`
+  handle across provisioning and building, then passes it to the built bundle's
+  helper. ZIP installation acquires the same lock directly. Uninstallation takes
+  the lock before removing the managed shims, pointer, and PATH entry. All three
+  refuse to proceed while a pending migration marker exists.
+- Activation reads the previous pointer as exact bytes, with explicit UTF-8
+  decoding for pointer and marker interpretation. A fully qualified existing
+  bundle other than the candidate can supply user data. The helper checks
+  reparse-point ancestry and moves non-empty `config/`, `comparison_videos/`, and
+  `generated/` by same-volume rename after recording the planned moves.
+  `-UserData Leave` skips the moves. The helper retains both bundle directories
+  and leaves external generated-data roots in place.
+- Activation commits after the helper writes the shims and pointer, initializes
+  any missing fallback config, and completes user PATH registration. The installed
+  shim selects the workspace using the AppData pointer and prefers the bundle's
+  `config/config.toml` to the AppData fallback. Activation preserves any existing
+  fallback config.
+- Before commit, recovery restores the exact original pointer bytes or its
+  absence, restores the installer's registration changes, and reverses completed
+  moves. If the pointer changes unexpectedly or recovery cannot proceed safely,
+  the helper stops and reports the pointer state and folder locations. A
+  candidate pointer may appear before registration completes. After commit,
+  failure to remove a legacy updater file yields a warning. Failure to remove
+  the pending migration marker returns a nonzero exit and leaves the new
+  installation active.
 
 `frame_compare.vs.runtime_contract` is the sole component-identity owner for the
 coordinated media stack. It emits narrow analysis, probe, alignment, and index

@@ -81,7 +81,8 @@ and Frame Compare-owned indexes before reuse.
   from the same environment; a PATH-only VSView executable is unsupported. BestSource
   remains UI-only; generated Frame Compare sessions continue to load media through
   L-SMASH-Works.
-- Retained BtbN FFmpeg 8.1-branch Windows x64 LGPL-only artifact.
+- Standalone BtbN FFmpeg 8.1-branch Windows x64 LGPL-only artifact.
+- Five pinned LGPL FFmpeg 9.1 DLLs for the Qt Multimedia backend.
 - FFMS2 intentionally excluded.
 - Plugins load from the deterministic canonical VapourSynth package path; the
   standalone FFmpeg directory is not used for recursive DLL discovery.
@@ -235,9 +236,10 @@ the installed decoder ABI. Legacy media-adjacent indexes remain inert. See
 
 ## Portable update boundary
 
-Install the complete Windows portable ZIP when the native runtime changes.
-The manifest and bundle inventory identify the runtime pins and fingerprints
-for the resulting installation.
+Install a fresh extraction of the complete Windows portable ZIP when the native
+runtime changes. Follow the [Windows reinstall steps](getting-started/windows-portable.md#update-behavior)
+to carry bundle-local data forward or leave it in the active bundle. The manifest
+and bundle inventory identify the runtime pins and fingerprints for each bundle.
 
 ## Licensing and corresponding source
 

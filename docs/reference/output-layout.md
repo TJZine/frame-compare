@@ -90,8 +90,10 @@ fresh metadata requests; Frame Compare recreates it as successful lookups occur.
 
 ## Windows portable persistence
 
-The default generated-data root can be inside the bundle. Choose an external normal
-user directory when results must survive bundle replacement. Installation and uninstallation preserve that external root.
+The Windows portable installer moves a non-empty bundle-local `generated/` folder
+when you install a fresh ZIP over an active bundle. Use `install.cmd -UserData Leave`
+to keep that folder in the previous bundle. Installation and uninstallation leave
+external generated-data roots in place.
 
 Moving source media or the bundle can change path-based cache identity. Existing reports
 remain viewable as long as their run folder is intact.

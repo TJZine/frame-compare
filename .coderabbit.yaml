@@ -117,10 +117,10 @@ reviews:
         Review integration tests for honest runtime requirements, markers, skips, fixture isolation, and real FFmpeg/VapourSynth behavior where the changed surface requires it.
     - path: "tools/windows_portable/**"
       instructions: |
-        Review Windows portable changes for path quoting, partial activation failures, required PowerShell verification, and docs/CI drift.
+        Check CMD argument forwarding, PowerShell path quoting, and UTF-8 state reads under both Windows PowerShell 5.1 and PowerShell 7. Check same-volume user-data carry-over, the Leave option, external-root preservation, and registration recovery under the shared lock. Require packed ZIP lifecycle evidence on both interpreters and separate physical evidence for GPU/HDR and interactive VSView claims.
     - path: ".github/workflows/**"
       instructions: |
-        Review CI changes for parity with documented local verification, Python/uv cache safety, Docker/runtime gates, Windows portable paths, and release artifact integrity.
+        Check parity with local verification, Python/uv cache safety, and headless Docker coverage on AMD64 and ARM64. Check that the Windows scan and publisher fetch the same producer ZIP by artifact ID and verify its SHA-256 independently. Check that each release has the scanned ZIP and a matching filename-bound SHA-256 sidecar, and that PRs have read-only Windows build and scan permissions.
     - path: "Dockerfile"
       instructions: |
         Review Docker changes for reproducibility, runtime dependency correctness, FFmpeg/VapourSynth availability, cache behavior, and parity with tools/verify_docker_integration.sh.

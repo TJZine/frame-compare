@@ -1,14 +1,17 @@
 # Physical Windows Media Runtime Validation
 
-This checklist is the final pre-merge acceptance pass for a coordinated media-runtime
-refresh. It supplements GitHub-hosted Linux, Docker, and Windows packaging checks; it
-does not duplicate them. Run it on the supported physical Windows 10/11 x64 system
-with the intended production GPU and private real-media corpus.
+Run this checklist on a supported physical Windows 10/11 x64 system with the
+intended production GPU and private real-media corpus. Keep the results with the
+hosted Linux, Docker, and Windows packaging evidence.
 
-Do not merge the media-runtime pull request until every required item is recorded as
-passed, failed with an accepted explanation, or explicitly deferred by the maintainer.
-Keep raw command output, JSON diagnostics, hashes, screenshots, and comparison notes
-with the pull-request evidence.
+- Before merging a coordinated media-runtime change, start at
+  [section 1](#1-exact-source-and-repository-gates) and build from the exact pull request head.
+  Record the result or maintainer disposition for every required item before merging.
+- Before promoting a release candidate, start at
+  [Published RC acceptance](#published-rc-acceptance) and use the issued ZIP.
+
+Keep command output, JSON diagnostics, hashes, screenshots, and comparison notes
+with the evidence for the route you ran.
 
 ## Test-system record
 
@@ -19,8 +22,9 @@ Record these facts before changing the machine or installing the candidate bundl
 - GPU model, driver package/version/date, and Vulkan runtime/loader version.
 - PowerShell version and execution policy.
 - Git version.
-- Pull-request number, fetched pull-request head ref, and detached exact
+- For a local build, the pull-request number, fetched head ref, and detached exact
   40-character commit SHA.
+- For a published RC, the release URL, tag, and hosted release and Windows job logs.
 - Python and `uv` versions used for repository validation.
 - Previous portable bundle version/runtime fingerprint used for migration testing.
 - Real-media case identifiers without publishing private filenames when inappropriate.
@@ -42,6 +46,52 @@ The expected candidate profile is:
 | FFmpeg | `n8.1.3-27-g8dca1586f4`, BtbN win64 LGPL 8.1 build `autobuild-2026-10-31-12-59` |
 | Full runtime fingerprint | `21c1821c05cc947e4af19807826e5ff1aaeb4187f5c0cf43640f306b4d2a3f51` |
 | L-SMASH index token | `lsw1310-47d07506e489` |
+
+## Published RC acceptance
+
+1. Open the published RC on [GitHub Releases](https://github.com/TJZine/frame-compare/releases).
+   Confirm it is a pre-release with the tag `vX.Y.Z-rc.N`. Download both assets
+   from that release into the same directory. Expect exactly
+   `frame-compare-portable-win-x64-<tag>.zip` and the corresponding `.zip.sha256`.
+2. Verify the sidecar and ZIP before extraction. From the download directory,
+   substitute the actual RC tag in the following commands.
+
+   ```powershell
+   $Tag = '<published RC tag>'
+   $ZipName = "frame-compare-portable-win-x64-$Tag.zip"
+   $Zip = (Resolve-Path -LiteralPath $ZipName -ErrorAction Stop).Path
+   $ZipDigest = (Get-FileHash -LiteralPath $Zip -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+   $Sidecar = (Get-Content -LiteralPath "$Zip.sha256" -Raw -Encoding ASCII -ErrorAction Stop).TrimEnd([char[]]"`r`n")
+   if ($Sidecar -cne "$ZipDigest  $ZipName") {
+     throw 'The published ZIP does not match its SHA-256 sidecar.'
+   }
+   $ZipDigest
+   ```
+
+   Record the full ZIP SHA-256. In the Windows scan evidence for this RC, check that
+   `portable_sha256` matches it and record the producer artifact ID.
+3. Use a clean repository checkout. Fetch the fully qualified RC tag from the
+   release repository and peel it to its commit. Check that the commit matches
+   the exact Windows build checkout SHA and the scan evidence's `commit` field.
+
+   ```powershell
+   $TagRef = "refs/tags/$Tag"
+   git fetch --no-tags origin $TagRef
+   if ($LASTEXITCODE -ne 0) { throw "Failed to fetch $TagRef." }
+   $ExpectedBundleCommit = git rev-parse --verify 'FETCH_HEAD^{commit}'
+   if ($LASTEXITCODE -ne 0) { throw "Failed to resolve $TagRef to a commit." }
+   $ExpectedBundleCommit
+   ```
+
+   Record the tag and commit with the hosted build, smoke, packed installer, and
+   scan results. Use this exact commit for the focused repository tests in
+   [section 7](#7-cache-and-index-isolation). Detach at `$ExpectedBundleCommit`
+   and sync the frozen contributor environment before running those tests.
+4. Start at [section 3](#3-extracted-bundle-smoke-tests) with the downloaded `$Zip`.
+   Check `bundle_inventory.json` against `$ExpectedBundleCommit` before running any
+   bundle code. Use the verified ZIP throughout sections 3–11, including the
+   previous-release installation, production GPU and HDR tests, and native VSView
+   panel checks.
 
 ## 1. Exact source and repository gates
 
@@ -132,9 +182,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 This is the canonical manifest-based build command. The builder uses the supplied
 commit for the projected application source, dependency lock and source inventory.
-A local invocation without `-ExpectedCommitSha` resolves `HEAD` once at the start. For a release run, add
-`-ReleaseBuild` to this invocation and use the resulting bundle for all checks.
-All evidence, packaging, and digest verification must use this exact `$Candidate`.
+A local invocation without `-ExpectedCommitSha` resolves `HEAD` once at the start.
+To exercise the release build rules locally, add `-ReleaseBuild` to this invocation.
+Tie local evidence, packaging, and digest verification to this exact `$Candidate`.
 
 Required evidence:
 
@@ -168,6 +218,7 @@ Required evidence:
 Pack the tested build and record its SHA-256 before extraction:
 
 ```powershell
+$ExpectedBundleCommit = $ExpectedPrHeadSha
 $Zip = "$Candidate.zip"
 python -B -I -S tools/windows_portable/portable_bundle.py pack --root $Candidate --output $Zip
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -177,10 +228,18 @@ Get-FileHash -LiteralPath $Zip -Algorithm SHA256
 ## 3. Extracted-bundle smoke tests
 
 Extract the checked ZIP into a fresh directory outside the repository and the
-previous installation. Check that it contains one portable root and that
-its `bundle_inventory.json` records the expected source commit. Verify the
-manifest-pinned notices in the extracted bundle against the inventory. From
-the extracted root, run:
+previous installation. Check that it contains one portable root. From that root,
+verify that the inventory records the source commit for this route.
+
+```powershell
+$Inventory = Get-Content -LiteralPath '.\bundle_inventory.json' -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+if ($Inventory.bundle.commit_sha -cne $ExpectedBundleCommit) {
+  throw 'The bundle source commit does not match the expected commit.'
+}
+```
+
+Verify the manifest-pinned notices in the extracted bundle against the inventory.
+From the extracted root, run:
 
 ```powershell
 .\python\python.exe -c "import importlib.util, sys; assert sys.version_info[:3] == (3, 15, 2) and sys.version_info.releaselevel == 'final'; assert importlib.util.find_spec('_sqlite3') is None; print(sys.version)"
@@ -191,9 +250,9 @@ the extracted root, run:
 
 Confirm that the extracted `python/` directory contains neither `_sqlite3.pyd` nor
 `sqlite3.dll`. Require exit 0 from each command and the exact `frame-compare X.Y.Z` version from
-the candidate. After installing the extracted bundle, open a new terminal and
-check the installed `frame-compare --help` and `frame-compare version`. Use the
-bundled Python and VSView for the native-panel check in section 10.
+the candidate. Complete the [ZIP installation check](#8-zip-installation-over-the-previous-release)
+before running checks that use the installed shim. Use the bundled Python and
+VSView for the native-panel check in section 10.
 
 Inspect `doctor-candidate.json`. Required results:
 
@@ -357,13 +416,18 @@ Verify with old and newly generated data:
 
 ## 8. ZIP installation over the previous release
 
-Keep a separate installation of v0.6.1 with test data in the bundle's config,
-input, and generated folders. Verify the candidate ZIP's checksum. Extract it
-into a fresh directory and run `install.cmd` before uninstalling anything. Use
-the installed shim to confirm the candidate version, existing config and run
-history. Verify that the previous bundle's application, fallback configuration
-and external generated-data roots are preserved. Check the opt-out with
-`install.cmd -UserData Leave` using a separate test installation.
+Keep a separate active installation of v0.6.1 with test data in the bundle's
+config, input, and generated folders. Check the candidate ZIP against the digest
+recorded for your route. Extract it into a fresh directory on the same volume
+as v0.6.1 and run `install.cmd` before uninstalling anything. Open a new terminal
+and use the installed shim to check `frame-compare --help`, the candidate version,
+existing config, and run history. Check the moved configuration, sources, run folder, and report assets
+in the candidate. Check that the previous bundle's application remains usable
+and that the installed AppData fallback and any configured external generated-data
+root retain their contents. Check `install.cmd -UserData Leave` with a separate test
+installation. If you run the v0.6.1 installer again, it reactivates v0.6.1 and
+restores its updater. The moved folders stay in the candidate. To test moving
+data back with `install.cmd`, use two bundles that support carry-over.
 
 ## 9. End-to-end comparisons
 
@@ -417,9 +481,11 @@ as physical Windows desktop acceptance.
 
 ## 11. Completion record
 
-Summarize the physical pass in the pull request with:
+Record the physical results in the media-runtime pull request for a local build
+or in the promotion pull request for a published RC. Include the following.
 
 - Tested commit SHA and bundle ZIP SHA-256.
+- For a published RC, the release URL, tag, hosted run URL, and producer artifact ID.
 - Test-system and GPU/driver identity.
 - Passed, failed, skipped, and unavailable cases.
 - Exact real-media categories exercised.
@@ -429,8 +495,7 @@ Summarize the physical pass in the pull request with:
 - Residual risks or platform-specific limitations.
 - Independent final reviewer identity/session, reviewed commit SHA, verdict, and any
   findings or accepted counter-evidence.
-- A clear merge recommendation.
+- A clear recommendation on whether to merge or promote.
 
-Do not mark the pull request ready or merge it while a production-significant failure
-is unresolved. Preserve this checklist as the authoritative handoff rather than
-reconstructing requirements from chat history.
+Resolve production-significant failures before marking the media-runtime pull
+request ready or promoting the RC.

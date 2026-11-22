@@ -144,16 +144,22 @@ Run `install.cmd` from the fresh extraction. It moves the previous active bundle
 non-empty `config/`, `comparison_videos/`, and `generated/` folders into the new
 bundle. Application code and runtime files stay in the old bundle.
 
-Run `install.cmd -UserData Leave` to keep the data in the old bundle or to copy
-selected user files to the new bundle yourself.
+Keep both bundles on the same volume. For each non-empty folder the installer
+moves, the matching folder in the new bundle must be empty or absent. If either
+condition fails, run `install.cmd -UserData Leave` and copy the files you need
+by hand.
 
 The installed AppData fallback configuration and external user data are preserved.
 
 ### Reactivate a previous bundle
 
 Run `install.cmd` from the bundle you want to reactivate. Installers from
-v0.7.0 onward move the same user folders back by default. If you reactivate
-a bundle from before v0.7.0, its installer restores that version and its legacy
+v0.7.0 onward move the same user folders back by default, subject to the same
+volume and empty-folder requirements. If both bundles have data in a folder
+after using Leave, reactivate with `install.cmd -UserData Leave` and copy the
+files you need by hand.
+
+If you reactivate a bundle from before v0.7.0, its installer restores that version and its legacy
 update command. Data you moved stays in the newer bundle. Copy the folders
 you need back to the older bundle yourself.
 

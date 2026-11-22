@@ -511,8 +511,10 @@ Canonical verification path:
    and uninstall evidence. Upload the original raw ZIP after the post-pack proof.
 6. Run the downstream [final-artifact scan](#final-artifact-security-evidence).
    Confirm the immutable producer artifact ID, source commit and SHA-256.
-7. Complete the [physical Windows validation](media-runtime-windows-validation.md)
-   for the candidate, including real runtime, HDR and native-panel proof.
+7. Complete [pre-merge physical Windows validation](media-runtime-windows-validation.md#1-exact-source-and-repository-gates)
+   for a coordinated runtime change. For promotion, use the
+   [published RC acceptance procedure](media-runtime-windows-validation.md#published-rc-acceptance).
+   Both routes require real runtime, HDR, and native-panel proof.
 
 The [Windows portable workflow](../.github/workflows/windows-portable.yml) runs
 the Windows build and Linux scan on all pull requests. Release workflows call
@@ -533,8 +535,7 @@ retains the approved Qt/PySide6 subset, native components, licenses and committe
 project metadata and entry points.
 
 Use GitHub-hosted Windows to verify packaging and generated-fixture behavior. Complete
-the separate [physical Windows handoff](media-runtime-windows-validation.md) for
-the release candidate. Record real GPU Vulkan initialization, HDR10/Dolby Vision
+[physical Windows acceptance on the published RC](media-runtime-windows-validation.md#published-rc-acceptance). Record real GPU Vulkan initialization, HDR10/Dolby Vision
 output, range and bit-depth preservation, real-media timing and frame properties,
 managed-index isolation and reuse, ZIP installation, and objective and perceptual
 comparison evidence.
@@ -625,19 +626,124 @@ artifact from changes in the advisory feed.
 
 ### Pre-release and stable publication
 
-Merge the integration branch into `pre-release` with a merge commit to
-trigger the RC workflow. Verify the candidate ZIP and its checksum, review the
-run evidence, and test the candidate on Windows. Promote `pre-release` to
-`main` with a merge commit. The stable workflow requires the same source tree as a
-complete published RC. Dependabot targets `pre-release` once the default branch
-contains that configuration. Release Please prepares the version and changelog
-on `pre-release`.
+#### Release candidate
 
-Each push workflow plans against its live branch head. If publication fails,
-use **Re-run all jobs** on the applicable push run to plan again. A published
-release with missing or mismatched assets requires manual repair. Release notes
-come from the matching `CHANGELOG.md` section, and the release version must match
-the manifest, project metadata, package version, and editable lock entry.
+1. Merge the active version branch (`vX.Y.Z`) into `pre-release` with a merge commit.
+   The maintainer performs the merge using an identity that triggers push workflows.
+   Merges made with `GITHUB_TOKEN` do not trigger the RC workflow.
+2. On the push, the RC workflow reads the live `pre-release` head. If its stable
+   version is already published, the run waits for the next version. Otherwise the
+   head must include `main` in its ancestry. Merge `main` through the integration
+   branch if that check fails. A complete RC for this commit already satisfies
+   publication. A published but incomplete RC requires manual repair.
+3. For a new candidate, the workflow chooses the next numeric `vX.Y.Z-rc.N` tag.
+   The source audit and Windows workflow use the planned commit SHA. The publisher
+   verifies the scanned ZIP by artifact ID and digest, creates a draft at that SHA,
+   and verifies the uploaded files before publishing it as a GitHub pre-release.
+4. Download `frame-compare-portable-win-x64-vX.Y.Z-rc.N.zip` and its matching
+   `.zip.sha256` file. Run `sha256sum --check <zip-name>.sha256` beside the ZIP.
+   The tag, ZIP name, and `bundle_inventory.json` field `bundle.commit_sha`
+   identify the candidate. Inside the ZIP, `frame-compare version` prints
+   `frame-compare X.Y.Z`.
+5. Review the [acceptance records](#release-acceptance-records) and test the
+   issued ZIP using [Published RC acceptance](media-runtime-windows-validation.md#published-rc-acceptance).
+   Pause merges into `pre-release` during acceptance. If its head advances,
+   accept the new candidate before promotion. If `main` advances, merge it
+   through the integration branch and test the resulting candidate.
+
+#### Stable promotion
+
+1. After accepting the RC, open a PR from `pre-release` to `main` and merge it
+   with a merge commit. Keep the accepted source tree intact.
+2. On the push, the stable workflow reads the live `main` head. Before a new
+   publication, it requires a complete published RC of the same version with
+   a tree identical to that head. If the tree differs, return to RC acceptance.
+3. The workflow audits the planned `main` commit, builds and scans its stable
+   ZIP, and publishes `vX.Y.Z` as a full release. Verify the two assets
+   (`frame-compare-portable-win-x64-vX.Y.Z.zip` and its `.zip.sha256`) and the
+   release notes. Both channels extract the matching `CHANGELOG.md` section.
+   The version must agree across the Release Please manifest, `pyproject.toml`,
+   package `__version__`, and editable entry in `uv.lock`.
+4. Check that the stable workflow moves the merged Release Please PR from
+   `autorelease: pending` to `autorelease: tagged`. An already tagged PR
+   satisfies this check.
+
+Use **Re-run all jobs** on the applicable push run after a failure. This reruns the
+plan against the live head. Rerunning only failed jobs can reuse an earlier
+planned SHA. Each publication path clears its stale drafts before trying again
+and verifies its new draft before publishing. A published release with missing
+or mismatched assets requires manual repair. A stable rerun that finds a
+complete release can still repair the Release Please label.
+
+#### Start the next release cycle
+
+1. Resolve the published stable tag via `refs/tags/vX.Y.Z` and start the next
+   version branch at its exact commit. Merge that branch into `pre-release`
+   with a merge commit before the next preparation cycle. This brings the
+   stable commit into `pre-release` history while preserving the promotion's
+   ancestry.
+2. Release Please observes pushes to `pre-release` and prepares version and
+   changelog PRs there. Its guard waits for a published stable release of the
+   manifest version and for the stable tag's commit to be in the branch history.
+   A missing release is treated as absent on HTTP 404. Other lookup errors fail
+   the run. The Release Please action leaves publication to the release workflows.
+3. Review the preparation PR for agreement across the manifest, `pyproject.toml`,
+   package `__version__`, and editable lock entry. Check for one matching
+   `## [X.Y.Z]` changelog section. Merge using an identity that triggers push
+   workflows so the new version can produce an RC. Verify the stable label after
+   promotion.
+
+#### First 0.7.0 cutover checklist
+
+1. Squash the G5 PR into `v0.7.0` using `--match-head-commit` with the reviewed
+   PR head SHA. The integration branch has no required checks.
+2. Fetch `main` and confirm that `refs/remotes/origin/main` still points to
+   the reviewed `ba2d6c45` (`chore(release): 0.6.1`). If it has moved, review
+   the intervening changes before proceeding. With maintainer approval, merge
+   the reviewed SHA into `v0.7.0` using `git merge -s ours ba2d6c45`. Before
+   pushing, verify the old integration head and the reviewed `main` commit
+   are the first and second parents. Check that `HEAD^{tree}` equals
+   `HEAD^1^{tree}` and that `origin/main` is an ancestor. The integration tree
+   includes the prepared 0.6.1 changelog organization. Use qualified refs for
+   lookups and exact SHAs for checkouts and tag targets since `v0.7.0` names both
+   the integration branch and the planned stable tag.
+3. After the G5 PR reports the new checks, configure the repository before the
+   first integration merge.
+
+   - Enable merge commits and keep squash merges available for feature PRs.
+   - Remove linear-history requirements on `main` and `pre-release` so both
+     can accept merge commits. Keep both branches protected against direct
+     unauthorized writes, force pushes, and deletion. Keep `pre-release`
+     protected from automatic deletion after promotion.
+   - Replace required checks for the old unsigned verifier, signer, and
+     wrappers with `CI Pass` and the Windows portable jobs `build_test` and
+     `artifact_security` (displayed as **Inventory and scan portable ZIP**).
+     Use the contexts reported by the G5 PR. Leave path-filtered Docker and
+     docs jobs outside the universal required checks.
+   - Confirm the release workflows can create `v*` tags and that
+     `RELEASE_PLEASE_TOKEN` is configured.
+4. Check for existing `v0.7.0-rc.*` tags. Merge `v0.7.0` into `pre-release`
+   with a maintainer-created merge commit and expect `v0.7.0-rc.1` when there are
+   no prior tags. Check the two assets and verify the downloaded ZIP with
+   `sha256sum --check`. Follow [Published RC acceptance](media-runtime-windows-validation.md#published-rc-acceptance).
+   Run the issued ZIP's `install.cmd` over an active v0.6.1 test installation
+   and check comparisons, run history, and config after carry-over. Follow the RC acceptance freeze and repeat testing
+   if the accepted candidate changes.
+5. Promote `pre-release` into `main` with a merge commit. Check that `v0.7.0`
+   is published with two assets and the 0.7.0 notes. The label job accepts
+   the absence of a Release Please PR for this manually prepared version.
+6. After promotion, Dependabot reads the default branch configuration that
+   targets `pre-release`. Retarget or close open PRs against `staging` and review
+   any staging-only commits before deleting that branch and its rules. Check
+   for other consumers before removing the old environment rules for
+   `release-candidate`, `production`, and `branch-maintenance`, the
+   `WINDOWS_UPDATE_SIGNING_KEY_XML` and `SIGNING_KEY_MIGRATION_TOKEN` secrets,
+   the `BRANCH_MAINTENANCE_CLIENT_ID` variable, the
+   `BRANCH_MAINTENANCE_PRIVATE_KEY` secret, and the branch-maintenance App
+   bypass. Keep historical release and archive tags.
+7. Start the next cycle at the commit of `refs/tags/v0.7.0` and merge the new
+   integration branch into `pre-release`. Check the first Release Please PR
+   and its eventual stable label as described above.
 
 Local workflow checks:
 

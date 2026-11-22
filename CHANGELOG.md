@@ -3,12 +3,33 @@
 All notable user-facing changes to Frame Compare are documented in this file.
 
 Frame Compare follows Conventional Commits. Versioned sections supply the release
-notes used by the guarded publication workflow.
+notes used by the release workflows.
 
 ## Unreleased
 
+## [0.7.0]
+
 ### Changed
 
+- Install a fresh Windows portable ZIP with `install.cmd` to update. It moves
+  non-empty bundle-local configuration, sources, and generated data, including
+  reports and history, from the active bundle. `-UserData Leave` keeps those
+  folders in place. The installer preserves the previous bundle, AppData fallback
+  config, and external generated-data roots. Successful activation retires
+  the old updater files from the installed shim directory.
+- Publish two Windows release assets, the portable ZIP and its `.zip.sha256`
+  checksum. Windows CI exercises the packed installer on PowerShell 5.1 and 7.
+  Syft and Grype scan the exact producer ZIP that the release workflow publishes.
+- Publish release candidates automatically from `pre-release` and stable
+  releases from `main` after promotion of an accepted RC tree. Both packages
+  report the base version. The RC tag, ZIP name, and recorded source commit
+  identify the candidate. Release Please prepares version and changelog changes.
+  Version integration and stable promotion use merge commits.
+- Use manifest v3 for the shipped Windows runtime. Bundle official CPython 3.15.2
+  with the unused SQLite extension and DLL omitted, plus five pinned LGPL FFmpeg
+  9.1 DLLs for Qt Multimedia. Standalone BtbN FFmpeg, PySide6 6.12.0, and VSView
+  remain included. Local builds with version 2 manifests retain their original
+  runtime layout.
 - Default the BT.2390 knee to 1.0, so HDR screenshots keep more separation in
   bright areas and look slightly different from earlier versions.
 - Reject unsupported or changing video dimensions before native indexing. The
@@ -21,19 +42,13 @@ notes used by the guarded publication workflow.
   or color information.
 - Store generated decoder indexes in Frame Compare's data directory and leave
   old indexes beside media untouched.
-- Rebuild Windows portable releases independently and check them for known
-  vulnerabilities before signing.
 - Provision the required Python 3.13 build interpreter directly for Windows
   source installs without first installing the project's development dependencies.
-- Name each run folder after what is compared and the sources' short names, for
-  example `Amber Reach S02E05 - OwL, HERON, EGRET`. When that name already exists,
-  the date and time are added. Existing run folders keep their names.
-- Title the HTML report by what is compared, for example `Amber Reach S02E05`,
-  instead of the reference filename. Movie titles from TMDB include the year.
-- Take a source's short name from the part of its filename that differs from the
-  other sources when it has no usable release group, for example
-  `english-dub-only`, or `crf18` and `crf20` for two of your own encodes. Release
-  groups that contain a hyphen, such as `S-W1FT`, are recognized.
+- Name each run folder after what is compared and the sources' short names. Add
+  the date and time when that name already exists. Existing folders keep their names.
+- Title the HTML report by what is compared. Movie titles from TMDB include the year.
+- Use the part of a source filename that differs from the other sources when it
+  has no usable release group. Recognize release group names that contain a hyphen.
 - Show `history list` as a table with the run name, time, sources, frames, status,
   and whether a report exists. Interrupted runs show `interrupted`. JSON output is
   unchanged.
@@ -58,9 +73,20 @@ notes used by the guarded publication workflow.
   10-second timeout per network operation.
 - Exit 130 after the first Ctrl+C even when a step fails at the same moment.
   Alignment resource cleanup failures keep their own error.
+- Reuse prepared audio-evidence summaries in the native alignment panel during
+  preview updates while keeping live frame drafts and markers current.
+- Run the Windows native runtime and VSView smoke checks with the bundled Python
+  interpreter.
 
 ### Removed
 
+- Remove the signed in-place Windows updater and its backup and rollback
+  commands. Remove the separate update assets, manifest signing, and release
+  attestations. Scan the producer ZIP directly without rebuilding it for
+  comparison.
+- Remove the Docker X11 GUI and NVIDIA GPU profiles. The default headless
+  Compose services and software Vulkan remain available. Use a native Linux
+  install with `--extra vsview` for visual alignment review.
 - Remove the `bt2390_spec`, `filmic`, and `highlight_preserve` tonemap presets.
   Use `reference` in place of `bt2390_spec` and `highlight_preserve`, and `spline`
   in place of `filmic`. Existing configuration using the removed names must be
@@ -87,29 +113,13 @@ notes used by the guarded publication workflow.
 - Align audio in older Matroska files that lack per-stream duration metadata.
 - Recognize near-standard frame rates so those sources no longer require
   `sources.match_fps` to compare with their standard-rate counterparts.
-- Support stable and release-candidate versions in Windows code updates, with exact
-  target verification and journaled source replacement for both apply and rollback.
-  Complete backup inventories prevent restoring truncated backups.
-  Same-line stable/RC transitions and signed-range downgrades remain supported.
 - Keep release labels, slow.pics image names, and report source selectors from
-  ending in a stray word taken from the filename, such as `only`.
+  ending in a stray word taken from the filename.
 - Report an unreadable source as a source error under `--from-cache-only` instead
   of as a missing cache.
 - Exit with code 130 when Ctrl+C is pressed again while the interruption summary
   prints.
 - Show a duration just under a minute as `1m 00s` instead of `60.0 s`.
-
-## [0.7.0]
-
-### Changed
-
-- Reuse prepared audio-evidence summaries in the native alignment panel during
-  preview updates while keeping live frame drafts and markers current.
-- Maintain Windows bundled-runtime verification in a dedicated Python source file
-  while preserving the packaged native, VSView, provenance and cleanup checks.
-
-### Fixed
-
 - Recompute alignment when either source's picture region changes instead of
   reusing an offset confirmed against a different crop.
 - Retain a confirmed slow.pics upload URL in failed-run history when cancellation
@@ -126,11 +136,14 @@ notes used by the guarded publication workflow.
 - Let report notes use the full 1000-Unicode-scalar limit, including supplementary
   characters.
 - Describe `--no-cache` as refreshing the current scoped entry in CLI help.
-- Add a one-time approved migration for the existing repository signing key when
-  its original private file is unavailable.
 
 ### Upgrade notes
 
+- Close running comparisons before reinstalling on Windows. Extract the complete
+  ZIP into a fresh folder, then run its `install.cmd` while the previous bundle
+  is still active. Installers with carry-over support can move data back when
+  reactivating a bundle. Reactivating an older bundle without carry-over also
+  restores its updater, and moved data stays in the newer bundle.
 - Previous shared alignment entries lack crop identity. They remain on disk as
   historical information but require fresh computation or confirmation before reuse.
 - The report-notes correction applies to newly generated reports. Existing HTML
