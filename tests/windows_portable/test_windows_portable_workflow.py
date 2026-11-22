@@ -132,6 +132,18 @@ def test_windows_workflow_runs_lifecycle_after_packing_and_before_upload(repo_ro
     assert "-ReleaseBuild" in _step_by_name(action, "Build portable bundle")["run"]
 
 
+def test_windows_workflow_packs_after_launcher_smoke_without_regenerating_inventory(
+    repo_root: Path,
+) -> None:
+    action = _build_action(repo_root)
+    steps = action["steps"]
+    smoke = _step_by_name(action, "Smoke: absolute candidate launcher")
+    package = _step_by_name(action, "Package zip")
+    assert steps.index(package) == steps.index(smoke) + 1
+    assert "portable_bundle.py pack" in package["run"]
+    assert all("write_bundle_inventory.py" not in step.get("run", "") for step in steps)
+
+
 def test_windows_build_requires_current_manifest_from_exact_checkout_before_setup(
     repo_root: Path,
 ) -> None:

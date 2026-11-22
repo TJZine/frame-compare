@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 
 import pytest
 
@@ -14,3 +15,13 @@ def native_powershell_module_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         # Each child interpreter initializes its own defaults; restore the parent
         # environment after the test instead of changing machine/user settings.
         monkeypatch.delenv("PSModulePath", raising=False)
+
+
+@pytest.fixture
+def pwsh() -> str:
+    if os.name != "nt":
+        pytest.skip("Windows filesystem semantics and PowerShell 7 required")
+    executable = shutil.which("pwsh")
+    if executable is None:
+        pytest.skip("PowerShell 7 not available")
+    return executable

@@ -734,6 +734,68 @@ def test_windows_portable_build_runtime_validation_proves_vs_plugins(repo_root: 
     assert "libplacebo_runtime_usable=" in proof_source
 
 
+def test_windows_portable_build_fails_when_runtime_smoke_leaves_a_file(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is required for the runtime smoke cleanup regression")
+
+    build_script = _read_text_or_fail(repo_root / "tools/windows_portable/build_portable.ps1")
+    runtime_check = _bundle_runtime_function_block(build_script)
+    runtime_check, replaced = re.subn(
+        r"(?m)^    & \$ffmpeg .*",
+        "    Set-Content -LiteralPath $mediaPath -Value 'fixture media'",
+        runtime_check,
+    )
+    assert replaced == 1
+    cleanup = "Remove-Item -Force -LiteralPath $smokePath -ErrorAction SilentlyContinue"
+    assert runtime_check.count(cleanup) == 1
+    runtime_check = runtime_check.replace(cleanup, "# Simulate failed smoke script removal.")
+
+    bundle = tmp_path / "bundle"
+    for relative_path in (
+        "python/python.exe",
+        "ffmpeg/bin/ffmpeg.exe",
+        "runtime-smoke-cache/vsview_sessions/vsview_fixture.py",
+    ):
+        path = bundle / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    (tmp_path / "runtime_smoke.py").touch()
+
+    proof_script = tmp_path / "runtime-cleanup.ps1"
+    proof_script.write_text(
+        """param([string]$BundleRoot)
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+function Get-ProcessEnvironmentValue {}
+function Restore-ProcessEnvironmentValue {}
+function Set-BundleRuntimeEnvironment {}
+function Assert-LastExitCode {}
+function Invoke-BundleRuntimeProof {}
+function Invoke-VSViewOffscreenLaunchProof {}
+"""
+        + runtime_check
+        + "\nAssert-BundleRuntime -BundleRoot $BundleRoot\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(proof_script), str(bundle)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=os.environ | {"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    smoke_path = bundle / "runtime-smoke.py"
+    output = _normalized_process_output(result)
+    assert result.returncode != 0, output
+    assert f"Runtime smoke left files in the bundle: {smoke_path}" in output
+    assert smoke_path.is_file()
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("owner", ["launcher", "runtime-validation"])
 @pytest.mark.parametrize("initial_value", [None, "", "outer-value"], ids=["absent", "empty", "set"])
@@ -1435,6 +1497,64 @@ def _source_commit(repo: Path) -> str:
     return subprocess.check_output(
         ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True, timeout=10
     ).strip()
+
+
+@pytest.mark.parametrize("override", ["script-root", "manifest"])
+def test_windows_portable_release_build_refuses_external_tooling(
+    pwsh: str, tmp_path: Path, inventory_source_repo: Path, override: str
+) -> None:
+    source = inventory_source_repo
+    owner = source / "tools/windows_portable"
+    manifest = owner / "manifest.windows-x64.json"
+    script = owner / "build_portable.ps1"
+    if override == "script-root":
+        external_owner = tmp_path / "external-tooling"
+        external_owner.mkdir()
+        for name in (
+            "build_portable.ps1",
+            "version_utils.ps1",
+            "path_safety.ps1",
+            "portable_launchers.ps1",
+        ):
+            shutil.copyfile(owner / name, external_owner / name)
+        script = external_owner / script.name
+        message = r"Portable release builder must run from tools\windows_portable"
+    else:
+        custom_manifest = tmp_path / manifest.name
+        shutil.copyfile(manifest, custom_manifest)
+        manifest = custom_manifest
+        message = "Portable release builds require the selected checkout's committed manifest"
+
+    out = tmp_path / "out"
+    cache = tmp_path / "cache"
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-Command",
+            """
+function uv { throw 'Release build reached host Python lookup' }
+& $env:BUILDER -ReleaseBuild -RepoRoot $env:SOURCE_REPO -ManifestPath $env:BUILD_MANIFEST `
+  -OutDir $env:BUILD_OUT -CacheDir $env:BUILD_CACHE
+""",
+        ],
+        env=os.environ
+        | {
+            "BUILDER": str(script),
+            "SOURCE_REPO": str(source),
+            "BUILD_MANIFEST": str(manifest),
+            "BUILD_OUT": str(out),
+            "BUILD_CACHE": str(cache),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != 0
+    assert message in _normalized_process_output(result)
+    assert not out.exists()
+    assert not cache.exists()
 
 
 def _run_bundle_inventory(

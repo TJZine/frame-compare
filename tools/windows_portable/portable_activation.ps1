@@ -348,14 +348,20 @@ function Set-PortableRegistration(
     if (!(Test-Path -LiteralPath $source -PathType Leaf)) {
       throw "Shim file is missing: $source"
     }
-    [pscustomobject]@{ Source = $source; Path = $target; Bytes = (Read-OptionalPortableFile $target) }
+    [pscustomobject]@{
+      Path = $target
+      OriginalBytes = (Read-OptionalPortableFile $target)
+      WrittenBytes = [IO.File]::ReadAllBytes($source)
+    }
   })
 
   [IO.Directory]::CreateDirectory($binDir) | Out-Null
   foreach ($shim in $shims) {
-    Write-PortableFile -Path $shim.Path -Bytes ([IO.File]::ReadAllBytes($shim.Source))
     $Changes.Files.Add($shim)
+    if (Test-PortableBytesEqual $shim.OriginalBytes $shim.WrittenBytes) { continue }
+    Write-PortableFile -Path $shim.Path -Bytes $shim.WrittenBytes
   }
+  $Changes.PointerWriteStarted = $true
   Write-PortableFile -Path $PointerPath -Bytes $CandidatePointer
 
   $portableConfigToml = Join-Path $StateDirectory "config.toml"
@@ -372,8 +378,12 @@ config_dir = "config"
 "@
       $fallback = [Text.Encoding]::UTF8.GetBytes($defaultPortableConfigToml)
     }
-    Write-PortableFile -Path $portableConfigToml -Bytes $fallback -NewOnly
-    $Changes.Files.Add([pscustomobject]@{ Path = $portableConfigToml; Bytes = $null })
+    Assert-NoReparsePointAncestor -Path $portableConfigToml -Label "Fallback config"
+    $originalFallback = Read-OptionalPortableFile $portableConfigToml
+    $Changes.Files.Add([pscustomobject]@{ Path = $portableConfigToml; OriginalBytes = $originalFallback; WrittenBytes = $fallback })
+    if (!(Test-PortableBytesEqual $originalFallback $fallback)) {
+      Write-PortableFile -Path $portableConfigToml -Bytes $fallback -NewOnly
+    }
   }
 
   Update-PortableUserPath -BinDir $binDir -Changes $Changes
@@ -398,7 +408,7 @@ function Restore-PortableRegistration(
   Assert-NoReparsePointAncestor -Path $PointerPath -Label "Install state"
   $active = Read-OptionalPortableFile $PointerPath
   if (!(Test-PortableBytesEqual $active $OriginalPointer)) {
-    if (!(Test-PortableBytesEqual $active $CandidatePointer)) {
+    if (!$Changes.PointerWriteStarted -or !(Test-PortableBytesEqual $active $CandidatePointer)) {
       throw "Pointer changed unexpectedly during activation; refusing data reversal."
     }
     Restore-PortableFile -Path $PointerPath -Bytes $OriginalPointer
@@ -406,10 +416,57 @@ function Restore-PortableRegistration(
 
   for ($index = $Changes.Files.Count - 1; $index -ge 0; $index--) {
     $file = $Changes.Files[$index]
-    Restore-PortableFile -Path $file.Path -Bytes $file.Bytes
+    try {
+      Assert-NoReparsePointAncestor -Path $file.Path -Label "Registration recovery"
+      $currentBytes = Read-OptionalPortableFile $file.Path
+    } catch {
+      Write-Warning "Registration rollback conflict: could not verify $($file.Path): $($_.Exception.Message)"
+      continue
+    }
+    if (Test-PortableBytesEqual $currentBytes $file.OriginalBytes) { continue }
+    if (Test-PortableBytesEqual $currentBytes $file.WrittenBytes) {
+      Restore-PortableFile -Path $file.Path -Bytes $file.OriginalBytes
+    } else {
+      Write-Warning "Registration rollback conflict: preserving changed file $($file.Path)"
+    }
   }
   if ($null -ne $Changes.CandidatePath -and (Test-PortableUserPathEqual (Get-PortableUserPath) $Changes.CandidatePath)) {
     Set-PortableUserPath $Changes.OriginalPath
+  }
+}
+
+function Assert-PortableLauncherVersion([string]$Launcher) {
+  $versionTimeoutMs = 120000
+  $stdout = $null
+  $stderr = $null
+  $probe = $null
+  try {
+    $stdout = [IO.Path]::GetTempFileName()
+    $stderr = [IO.Path]::GetTempFileName()
+    # Use the same interpreter edition as the installer and the entrypoint used by the shim.
+    $shell = if ($PSVersionTable.PSEdition -eq "Desktop") { "powershell.exe" } else { "pwsh.exe" }
+    $arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" version' -f $Launcher
+    $probe = Start-Process -FilePath (Join-Path $PSHOME $shell) -ArgumentList $arguments `
+      -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $null = $probe.Handle
+    if (!$probe.WaitForExit($versionTimeoutMs)) {
+      throw "Version probe timed out after $versionTimeoutMs ms."
+    }
+    if ($probe.ExitCode -ne 0 -or !([IO.File]::ReadAllLines($stdout) -cmatch '^frame-compare ')) {
+      throw "Expected exit code 0 and a line starting with 'frame-compare ' (exit code: $($probe.ExitCode))."
+    }
+  } finally {
+    try {
+      if ($null -ne $probe -and !$probe.HasExited) {
+        $taskkill = Join-Path ([Environment]::SystemDirectory) "taskkill.exe"
+        & $taskkill /T /F /PID $probe.Id | Out-Null
+        if (!$probe.WaitForExit(5000)) { throw "Could not terminate version probe process $($probe.Id)." }
+      }
+    } finally {
+      if ($null -ne $probe) { $probe.Dispose() }
+      if ($null -ne $stdout) { [IO.File]::Delete($stdout) }
+      if ($null -ne $stderr) { [IO.File]::Delete($stderr) }
+    }
   }
 }
 
@@ -420,7 +477,17 @@ function Invoke-PortableActivation(
 ) {
   $BundleRoot = ConvertTo-PortableBundlePath $BundleRoot
   Assert-NoReparsePointAncestor -Path $BundleRoot -Label "New bundle"
+  $installRoot = ConvertTo-PortableBundlePath (Split-Path -Parent $StateDirectory)
+  $managedPaths = @((Join-Path $installRoot "bin"), (ConvertTo-PortableBundlePath $StateDirectory))
+  foreach ($managedPath in $managedPaths) {
+    if ($BundleRoot -eq $installRoot -or $BundleRoot -eq $managedPath -or
+        (Test-PathWithin $BundleRoot $managedPath) -or (Test-PathWithin $managedPath $BundleRoot)) {
+      throw "Bundle must not overlap the Frame Compare install root: $BundleRoot (install root: $installRoot)"
+    }
+  }
+
   $launcher = Join-Path $BundleRoot "frame-compare.ps1"
+  Assert-NoReparsePointAncestor -Path $launcher -Label "Bundle launcher"
   if (!(Test-Path -LiteralPath $launcher -PathType Leaf)) {
     throw "Bundle launcher not found: $launcher"
   }
@@ -435,6 +502,17 @@ function Invoke-PortableActivation(
 
   try {
     Assert-NoPendingPortableMigration $StateDirectory
+    $bundleInfo = Join-Path $BundleRoot "bundle_info.json"
+    Assert-NoReparsePointAncestor -Path $bundleInfo -Label "Bundle runtime identity"
+    if (!(Test-Path -LiteralPath $bundleInfo -PathType Leaf)) {
+      throw "Bundle runtime identity not found: $bundleInfo"
+    }
+    try {
+      Assert-PortableLauncherVersion $launcher
+    } catch {
+      throw "Bundle launcher version check failed for ${launcher}: $($_.Exception.Message)"
+    }
+
     $pointerPath = Join-Path $StateDirectory "config.json"
     $pendingMigrationPath = Join-Path $StateDirectory "source-migration.pending.json"
     Assert-NoReparsePointAncestor -Path $pointerPath -Label "Install state"
@@ -458,10 +536,10 @@ function Invoke-PortableActivation(
 
     $changes = @{
       Files = [Collections.Generic.List[object]]::new()
+      PointerWriteStarted = $false
       CandidatePath = $null
       OriginalPath = $null
     }
-    $moved = [Collections.Generic.List[object]]::new()
     $placeholders = [Collections.Generic.List[string]]::new()
     $markerWritten = $false
     $registrationStarted = $false
@@ -478,12 +556,12 @@ function Invoke-PortableActivation(
           if (!(Test-NonEmptyDirectory $folder.Source)) { throw "User folder changed: $($folder.Source)" }
           if (Test-NonEmptyDirectory $folder.Target) { throw "New user folder is occupied: $($folder.Target)" }
           if ([IO.Directory]::Exists($folder.Target)) {
-            [IO.Directory]::Delete($folder.Target)
             $placeholders.Add($folder.Target)
+            [IO.Directory]::Delete($folder.Target)
           }
           try { [IO.Directory]::Move($folder.Source, $folder.Target) }
+          catch [System.Management.Automation.PipelineStoppedException] { throw }
           catch { throw "Cannot move $($folder.Source) to $($folder.Target). Move requires same-volume renames; use -UserData Leave and relocate data manually. $($_.Exception.Message)" }
-          $moved.Add($folder)
         }
       } elseif ($UserData -eq "Leave" -and $null -ne $previousBundle) {
         Write-Warning "User data left in previous bundle $previousBundle. The shim may select an older AppData state config if the new bundle has no config\config.toml."
@@ -501,17 +579,30 @@ function Invoke-PortableActivation(
       if (!$committed -and ($markerWritten -or $registrationStarted)) {
         try {
           Restore-PortableRegistration -PointerPath $pointerPath -OriginalPointer $originalPointer -CandidatePointer $candidatePointer -Changes $changes
-          for ($index = $moved.Count - 1; $index -ge 0; $index--) {
-            $folder = $moved[$index]
-            Assert-NoReparsePointAncestor -Path $folder.Source -Label "Previous user folder"
-            Assert-NoReparsePointAncestor -Path $folder.Target -Label "Moved user folder"
-            [IO.Directory]::Move($folder.Target, $folder.Source)
+          if ($markerWritten) {
+            $unreconciled = @()
+            for ($index = $folders.Count - 1; $index -ge 0; $index--) {
+              $folder = $folders[$index]
+              Assert-NoReparsePointAncestor -Path $folder.Source -Label "Previous user folder"
+              Assert-NoReparsePointAncestor -Path $folder.Target -Label "Moved user folder"
+              $sourceHasData = Test-NonEmptyDirectory $folder.Source
+              $targetHasData = Test-NonEmptyDirectory $folder.Target
+              if ($sourceHasData -and !$targetHasData) { continue }
+              if ($targetHasData -and !(Test-Path -LiteralPath $folder.Source)) {
+                [IO.Directory]::Move($folder.Target, $folder.Source)
+                continue
+              }
+              $unreconciled += $folder.Name
+            }
+            foreach ($placeholder in $placeholders) {
+              Assert-NoReparsePointAncestor -Path $placeholder -Label "User data placeholder"
+              [IO.Directory]::CreateDirectory($placeholder) | Out-Null
+            }
+            if ($unreconciled.Count -gt 0) {
+              throw "Could not reconcile user folders: $($unreconciled -join ', ')"
+            }
+            Remove-Item -LiteralPath $pendingMigrationPath -Force
           }
-          foreach ($placeholder in $placeholders) {
-            Assert-NoReparsePointAncestor -Path $placeholder -Label "User data placeholder"
-            [IO.Directory]::CreateDirectory($placeholder) | Out-Null
-          }
-          if ($markerWritten) { Remove-Item -LiteralPath $pendingMigrationPath -Force }
         } catch {
           Write-RecoveryLocations -PointerPath $pointerPath -Folders $folders
           $reason = if ($null -ne $failure) { $failure.Exception.Message } else { "Activation interrupted" }
@@ -530,7 +621,7 @@ function Invoke-PortableActivation(
     if ($null -ne $previousBundle) {
       Write-Host "Previous bundle retained: $previousBundle"
     }
-    if ($moved.Count -gt 0) {
+    if ($folders.Count -gt 0) {
       Write-Host "Moved user data to $BundleRoot. Path-keyed caches recompute once; absolute paths in your config were not rewritten."
     }
     Write-Host "Installed Frame Compare shim."

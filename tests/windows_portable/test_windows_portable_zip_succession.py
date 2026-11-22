@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import zipfile
 from contextlib import nullcontext
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 
 import pytest
@@ -203,6 +203,23 @@ def test_packed_zip_succession(tmp_path: Path, interpreter: str, case: str) -> N
             assert sqlite_binaries.isdisjoint(
                 name.rsplit("/", 1)[-1].casefold() for name in archive.namelist()
             )
+            pyside_prefix = f"{_BUNDLE_ROOT}/app/site-packages/PySide6/".casefold()
+            chromium_runtime_names = {
+                "icudtl.dat",
+                "v8_context_snapshot.bin",
+                "v8_context_snapshot.debug.bin",
+            }
+            webengine_files = []
+            for member in archive.infolist():
+                name = member.filename.casefold()
+                if member.is_dir() or not name.startswith(pyside_prefix):
+                    continue
+                relative = PurePosixPath(name.removeprefix(pyside_prefix))
+                if "webengine" in relative.as_posix() or (
+                    relative.parent.name == "resources" and relative.name in chromium_runtime_names
+                ):
+                    webengine_files.append(member.filename)
+            assert not webengine_files, f"Qt WebEngine deployment files in ZIP: {webengine_files}"
             for bundle in (first, second):
                 archive.extractall(root)
                 (root / _BUNDLE_ROOT).rename(bundle)

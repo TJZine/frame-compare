@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import stat
 import subprocess
@@ -98,22 +99,61 @@ def bundle_tree(root: Path) -> PathIndex:
 
 def write_bundle(root: Path, destination: Path) -> None:
     index = bundle_tree(root)
-    with zipfile.ZipFile(
-        destination, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=False
-    ) as archive:
-        for name in ["", *sorted(index.directories)]:
-            info = zipfile.ZipInfo(PREFIX + (name + "/" if name else ""))
-            info.create_system = 3
-            info.external_attr = stat.S_IFDIR << 16 | 0x10
-            archive.writestr(info, b"")
-        for name in sorted(index.files):
-            info = zipfile.ZipInfo(PREFIX + name)
-            info.create_system = 3
-            info.external_attr = (stat.S_IFREG | 0o644) << 16
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.compress_level = 6
-            with (root / name).open("rb") as source, archive.open(info, "w") as target:
-                copy_exact(source, (root / name).stat().st_size, target)
+    inventory_name = "bundle_inventory.json"
+    inventory_bytes = (root / inventory_name).read_bytes()
+    inventory = json.loads(inventory_bytes.decode("utf-8"))["archive"]
+    records = {entry["path"]: entry for entry in inventory["files"]}
+    listed = set(records)
+    actual = set(index.files) - {inventory_name}
+    if listed != actual:
+        raise ValueError(
+            f"Bundle files differ from inventory: unlisted={sorted(actual - listed)}, "
+            f"missing={sorted(listed - actual)}"
+        )
+    if "directories" in inventory:
+        directories = set(inventory["directories"])
+        if directories != index.directories:
+            raise ValueError(
+                "Bundle directories differ from inventory: "
+                f"unlisted={sorted(index.directories - directories)}, "
+                f"missing={sorted(directories - index.directories)}"
+            )
+
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent, suffix=".tmp", delete=False
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            with zipfile.ZipFile(
+                temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=False
+            ) as archive:
+                for name in ["", *sorted(index.directories)]:
+                    info = zipfile.ZipInfo(PREFIX + (name + "/" if name else ""))
+                    info.create_system = 3
+                    info.external_attr = stat.S_IFDIR << 16 | 0x10
+                    archive.writestr(info, b"")
+                for name in sorted(index.files):
+                    info = zipfile.ZipInfo(PREFIX + name)
+                    info.create_system = 3
+                    info.external_attr = (stat.S_IFREG | 0o644) << 16
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    info.compress_level = 6
+                    if name == inventory_name:
+                        archive.writestr(info, inventory_bytes)
+                        continue
+                    member = root / name
+                    with member.open("rb") as source, archive.open(info, "w") as target:
+                        digest = copy_exact(source, member.stat().st_size, target)
+                    record = records[name]
+                    if info.file_size != record["bytes"] or digest != record["sha256"]:
+                        raise ValueError(f"Bundle file contents differ from inventory: {name}")
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError(destination)
+        temporary_path.replace(destination)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def main() -> None:

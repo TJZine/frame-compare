@@ -22,10 +22,6 @@ Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $true
 $hasExpectedCommitSha = $PSBoundParameters.ContainsKey("ExpectedCommitSha")
 
-. (Join-Path $PSScriptRoot "version_utils.ps1")
-. (Join-Path $PSScriptRoot "path_safety.ps1")
-. (Join-Path $PSScriptRoot "portable_launchers.ps1")
-
 # Convert caller-supplied relative paths once, before they are embedded in
 # runtime environment variables or passed across process working directories.
 $currentLocation = $PWD.ProviderPath
@@ -38,6 +34,14 @@ $OutDir = [System.IO.Path]::TrimEndingDirectorySeparator($OutDir)
 $CacheDir = [System.IO.Path]::TrimEndingDirectorySeparator($CacheDir)
 $RepoRoot = [System.IO.Path]::TrimEndingDirectorySeparator($RepoRoot)
 $currentLocation = [System.IO.Path]::TrimEndingDirectorySeparator($currentLocation)
+
+if ($ReleaseBuild -and $PSScriptRoot -ne (Join-Path $RepoRoot "tools\windows_portable")) {
+  throw "Portable release builder must run from tools\windows_portable in the selected checkout."
+}
+
+. (Join-Path $PSScriptRoot "version_utils.ps1")
+. (Join-Path $PSScriptRoot "path_safety.ps1")
+. (Join-Path $PSScriptRoot "portable_launchers.ps1")
 
 function Assert-BuildPathAncestry() {
   foreach ($path in @($OutDir, $CacheDir, $RepoRoot, $currentLocation, $PSScriptRoot, (Split-Path -Parent $ManifestPath))) {
@@ -537,6 +541,19 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE" -Value $originalFfmpegExecutable
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE" -Value $originalFfprobeExecutable
   }
+
+  $leftoverSmokePaths = @(
+    $smokePath
+    $mediaPath
+    $comparisonOneMediaPath
+    $comparisonTwoMediaPath
+    (Join-Path $BundleRoot "runtime-smoke-vsview.stdout.log")
+    (Join-Path $BundleRoot "runtime-smoke-vsview.stderr.log")
+    (Join-Path $BundleRoot "runtime-smoke-cache")
+  ) | Where-Object { Test-Path -LiteralPath $_ -ErrorAction Stop }
+  if ($leftoverSmokePaths) {
+    throw "Runtime smoke left files in the bundle: $($leftoverSmokePaths -join ', ')"
+  }
 }
 
 function Remove-PythonBytecodeCaches([string]$BundleRoot) {
@@ -660,6 +677,9 @@ function Main() {
   if (!$useCommittedManifest) {
     $manifest = Get-Manifest -Path $selectedManifestPath
     Assert-BuildManifest -Manifest $manifest
+    if ($ReleaseBuild) {
+      throw "Portable release builds require the selected checkout's committed manifest.windows-x64.json."
+    }
   }
   Assert-BuildOutputPath
   $commitSha = $ExpectedCommitSha
@@ -718,10 +738,9 @@ function Main() {
     $artifacts = @(Get-RequiredProperty -Object $manifest -Name "artifacts" -Context "manifest")
     Copy-Licenses -BundleRoot $OutDir -ManifestDir (Split-Path -Parent $selectedManifestPath) -Artifacts $artifacts
     Assert-RequiredPySideLicenseMetadata -BundleRoot $OutDir
-    Write-BundleInventory -BundleRoot $OutDir -CommitSha $commitSha
-
     Assert-BundleRuntime -BundleRoot $OutDir
     Remove-PythonBytecodeCaches -BundleRoot $OutDir
+    Write-BundleInventory -BundleRoot $OutDir -CommitSha $commitSha
 
     Write-Host "OK: portable bundle assembled at $OutDir"
   } catch {

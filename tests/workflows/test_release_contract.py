@@ -64,6 +64,9 @@ class History(release.GitHistory):
     def is_ancestor(self, ancestor: str, commit: str) -> bool:
         return (ancestor, commit) in self.ancestry
 
+    def require_matching_definitions(self, event_sha: str, planned_sha: str) -> None:
+        assert event_sha == planned_sha
+
     def prepared_version(self, commit: str) -> str:
         return self.versions[commit]
 
@@ -251,7 +254,7 @@ def test_rc_published_stable_skips_before_ancestry_or_draft_cleanup() -> None:
     github.add_release(STABLE)
     github.add_release(f"{STABLE}-rc.1", draft=True)
     history.ancestry.clear()
-    plan = release.plan_rc(github, history)
+    plan = release.plan_rc(github, history, PRE_RELEASE)
     assert plan.status == "skip" and "waiting for the next version" in plan.message
     assert history.heads == [release.PRE_RELEASE]
     assert not github.mutations
@@ -261,7 +264,7 @@ def test_rc_rejects_pre_release_without_main_ancestry() -> None:
     github, history = GitHub(), History()
     history.ancestry.clear()
     with pytest.raises(ReleaseContractError, match="merge main into the integration branch first"):
-        release.plan_rc(github, history)
+        release.plan_rc(github, history, PRE_RELEASE)
     assert not github.mutations
 
 
@@ -271,11 +274,11 @@ def test_rc_uses_existing_published_release_for_exact_head(complete: bool) -> No
     candidate = github.add_release(RC)
     github.add_release(f"{STABLE}-rc.1", draft=True)
     if complete:
-        assert release.plan_rc(github, History()).status == "skip"
+        assert release.plan_rc(github, History(), PRE_RELEASE).status == "skip"
     else:
         candidate["assets"].clear()
         with pytest.raises(ReleaseContractError, match="published but incomplete"):
-            release.plan_rc(github, History())
+            release.plan_rc(github, History(), PRE_RELEASE)
     assert not github.mutations
 
 
@@ -290,7 +293,7 @@ def test_rc_missing_published_tag_blocks_before_draft_cleanup_or_serial_choice(
     monkeypatch.setattr(history, "tags", lambda: pytest.fail("RC serial allocation started"))
 
     with pytest.raises(ReleaseContractError, match=f"Published RC {missing} is missing"):
-        release.plan_rc(github, history)
+        release.plan_rc(github, history, PRE_RELEASE)
     assert not github.mutations
     assert not github.downloads
 
@@ -301,12 +304,14 @@ def test_rc_discards_only_own_stale_drafts_then_allocates_next_existing_tag_seri
     history.tag_commits[RC] = OTHER_COMMIT
     stale = github.add_release(f"{STABLE}-rc.11", draft=True)
     earlier = github.add_release("v0.7.0-rc.9", draft=True)
+    preview = github.add_release(f"{STABLE}-rc.preview", draft=True)
     github.add_release(STABLE, draft=True)
-    assert release.plan_rc(github, history) == release.Plan(
+    assert release.plan_rc(github, history, PRE_RELEASE) == release.Plan(
         "rc", PRE_RELEASE, VERSION, f"{STABLE}-rc.11"
     )
     assert github.mutations == [("DELETE", f"releases/{stale['id']}")]
     assert earlier in github.releases
+    assert preview in github.releases
     assert history.heads == [release.PRE_RELEASE, release.MAIN]
 
 
@@ -326,7 +331,7 @@ def test_stable_refuses_rc_without_complete_equal_tree(defect: str) -> None:
 
     stale = github.add_release(STABLE, draft=True)
     with pytest.raises(ReleaseContractError, match="no complete RC of .* matches main's tree"):
-        release.plan_stable(github, history)
+        release.plan_stable(github, history, MAIN)
     assert github.mutations == [("DELETE", f"releases/{stale['id']}")]
 
 
@@ -336,7 +341,9 @@ def test_stable_plans_publication_from_equal_tree_at_different_commit() -> None:
     legacy["assets"].clear()
     stale = github.add_release(STABLE, draft=True)
     github.add_release(RC)
-    assert release.plan_stable(github, history) == release.Plan("stable", MAIN, VERSION, STABLE)
+    assert release.plan_stable(github, history, MAIN) == release.Plan(
+        "stable", MAIN, VERSION, STABLE
+    )
     assert history.heads == [release.MAIN]
     assert github.mutations == [("DELETE", f"releases/{stale['id']}")]
 
@@ -346,7 +353,9 @@ def test_stable_skips_rc_missing_from_snapshot_and_uses_complete_equal_tree_rc()
     github.add_release(f"{STABLE}-rc.11")
     candidate = github.add_release(RC)
 
-    assert release.plan_stable(github, history) == release.Plan("stable", MAIN, VERSION, STABLE)
+    assert release.plan_stable(github, history, MAIN) == release.Plan(
+        "stable", MAIN, VERSION, STABLE
+    )
     assert github.downloads == [candidate["assets"][1]["id"]]
     assert not github.mutations
 
@@ -356,7 +365,7 @@ def test_stable_never_replaces_published_release(complete: bool) -> None:
     github = GitHub()
     existing = github.add_release(STABLE)
     if complete:
-        plan = release.plan_stable(github, History())
+        plan = release.plan_stable(github, History(), MAIN)
         assert plan.status == "complete"
         assert plan.tag == STABLE and plan.version == VERSION
     else:
@@ -364,24 +373,24 @@ def test_stable_never_replaces_published_release(complete: bool) -> None:
         with pytest.raises(
             ReleaseContractError, match="published but incomplete; repair it by hand"
         ):
-            release.plan_stable(github, History())
+            release.plan_stable(github, History(), MAIN)
     assert not github.mutations
 
 
 @pytest.mark.parametrize(
-    "operation",
+    ("operation", "args"),
     [
-        release.plan_stable,
-        release.plan_rc,
-        release.release_please_enabled,
+        (release.plan_stable, (MAIN,)),
+        (release.plan_rc, (PRE_RELEASE,)),
+        (release.release_please_enabled, ()),
     ],
 )
 @pytest.mark.parametrize("status", [403, 500])
-def test_non_404_release_lookup_is_fatal(operation, status: int) -> None:
+def test_non_404_release_lookup_is_fatal(operation, args: tuple[str, ...], status: int) -> None:
     github = GitHub()
     github.missing_status = status
     with pytest.raises(HTTPError) as error:
-        operation(github, History())
+        operation(github, History(), *args)
     assert error.value.code == status
     assert not github.mutations
 
@@ -419,6 +428,79 @@ def test_git_history_uses_remote_heads(monkeypatch: pytest.MonkeyPatch) -> None:
     history = release.GitHistory()
     monkeypatch.setattr(history, "_git", git)
     assert history.head(release.PRE_RELEASE) == PRE_RELEASE
+
+
+@pytest.mark.parametrize("channel", ["rc", "stable"])
+@pytest.mark.parametrize(
+    "changed_path",
+    [
+        "src/frame_compare/feature.py",
+        ".github/workflows/windows-portable.yml",
+        ".github/actions/windows-portable-build/action.yml",
+        "scripts/release_plan.py",
+        "scripts/validate_release_contract.py",
+        "tools/windows_portable/artifact_security.py",
+    ],
+)
+def test_release_plan_checks_event_definitions_against_live_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, channel: str, changed_path: str
+) -> None:
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            [
+                "git",
+                "-c",
+                "user.name=Release test",
+                "-c",
+                "user.email=release@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            cwd=tmp_path,
+            text=True,
+            timeout=30,
+        ).strip()
+
+    git("init", "--quiet")
+    for name, data in _files().items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(data, encoding="utf-8")
+    git("add", ".")
+    git("commit", "--quiet", "-m", "Event commit")
+    event = git("rev-parse", "HEAD")
+    path = tmp_path / changed_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("updated", encoding="utf-8")
+    git("add", changed_path)
+    git("commit", "--quiet", "-m", "Live commit")
+    planned = git("rev-parse", "HEAD")
+    git("update-ref", "refs/remotes/origin/main", planned)
+    git("update-ref", "refs/remotes/origin/pre-release", planned)
+    github = GitHub()
+    if channel == "stable":
+        git("tag", RC, planned)
+        github.add_release(RC)
+    source_only = changed_path.startswith("src/")
+    if not source_only:
+        github.add_release(STABLE if channel == "stable" else f"{STABLE}-rc.9", draft=True)
+    plan = release.plan_rc if channel == "rc" else release.plan_stable
+    monkeypatch.chdir(tmp_path)
+    if source_only:
+        result = plan(github, release.GitHistory(), event)
+        assert result.status == "publish"
+        assert result.sha == planned
+    else:
+        with pytest.raises(
+            ReleaseContractError,
+            match=(
+                "Release definitions changed since this run's commit; "
+                "re-run the push run for the current head instead."
+            ),
+        ):
+            plan(github, release.GitHistory(), event)
+    assert not github.mutations
 
 
 def test_git_history_looks_up_exact_tags_and_peels_only_to_commits(

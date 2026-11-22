@@ -18,6 +18,7 @@ import pytest
 from tools.windows_portable import portable_bundle as bundle
 from tools.windows_portable import portable_runtime as runtime
 from tools.windows_portable.portable_archive import checked_zip
+from tools.windows_portable.write_bundle_inventory import _archive_inventory
 
 _QT_FFMPEG_DLLS = (
     "avcodec-63.dll",
@@ -490,6 +491,8 @@ def test_portable_assembly_is_inert_and_safely_packaged(
         output / "licenses/python/pyside6_webengine-1.dist-info__licenses/LICENSE"
     ).read_bytes() == b"notice"
 
+    inventory = output / "bundle_inventory.json"
+    inventory.write_text(json.dumps({"archive": _archive_inventory(output, inventory)}))
     archive_path = tmp_path / "portable.zip"
     bundle.write_bundle(output, archive_path)
     with checked_zip(archive_path) as archive:
@@ -600,3 +603,39 @@ def test_invalid_manifest_version_and_overlay_fail_before_runtime_inputs(
     with pytest.raises(ValueError, match=error):
         runtime.assemble(tmp_path / "out", manifest, b"", b"", tmp_path / "cache")
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("drift", "expected"),
+    [
+        ("unlisted", r"unlisted=\['smoke-output\.txt'\]"),
+        ("missing", r"missing=\['launcher\.ps1'\]"),
+        ("changed-contents", r"Bundle file contents differ from inventory: launcher\.ps1"),
+        ("wrong-byte-count", r"Bundle file contents differ from inventory: launcher\.ps1"),
+        ("extra-directory", r"Bundle directories differ from inventory: unlisted=\['empty'\]"),
+    ],
+)
+def test_portable_pack_rejects_inventory_drift(tmp_path: Path, drift: str, expected: str) -> None:
+    root = tmp_path / "bundle"
+    root.mkdir()
+    listed_file = root / "launcher.ps1"
+    listed_file.write_bytes(b"launcher")
+    inventory = root / "bundle_inventory.json"
+    inventory.write_text(json.dumps({"archive": _archive_inventory(root, inventory)}))
+    if drift == "unlisted":
+        (root / "smoke-output.txt").write_text("unexpected")
+    elif drift == "missing":
+        listed_file.unlink()
+    elif drift == "changed-contents":
+        listed_file.write_bytes(b"LAUNCHER")
+    elif drift == "wrong-byte-count":
+        recorded = json.loads(inventory.read_text())
+        recorded["archive"]["files"][0]["bytes"] += 1
+        inventory.write_text(json.dumps(recorded))
+    else:
+        (root / "empty").mkdir()
+    destination = tmp_path / "output.zip"
+    with pytest.raises(ValueError, match=expected):
+        bundle.write_bundle(root, destination)
+    assert not destination.exists()
+    assert list(tmp_path.iterdir()) == [root]

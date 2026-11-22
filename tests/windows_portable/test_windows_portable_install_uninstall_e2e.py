@@ -94,7 +94,10 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
     uninstall_script = bundle_dir / "uninstall.ps1"
     for name in ("install.ps1", "uninstall.ps1", "portable_activation.ps1", "path_safety.ps1"):
         shutil.copy2(source_dir / name, bundle_dir / name)
-    (bundle_dir / "frame-compare.ps1").write_text("exit 0\n", encoding="utf-8")
+    (bundle_dir / "frame-compare.ps1").write_text(
+        "Write-Output 'frame-compare 0.1.0'; exit 0\n", encoding="utf-8"
+    )
+    (bundle_dir / "bundle_info.json").write_text("{}", encoding="utf-8")
 
     managed_bin_files = ("frame-compare.ps1", "frame-compare.cmd")
     for index, filename in enumerate(managed_bin_files):
@@ -244,7 +247,6 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
             if drift is not None and drift[1] == winreg.REG_MULTI_SZ:
                 active = _run_script(exe=exe, script=install_script, env=env)
                 assert active.returncode == 0, (active.stdout, active.stderr)
-                (bundle_dir / "bundle_info.json").write_text("{}", encoding="utf-8")
                 original_pointer = b"  " + pointer.read_bytes() + b"\r\n"
                 pointer.write_bytes(original_pointer)
                 replacement_config_bytes = replacement_config.read_bytes()

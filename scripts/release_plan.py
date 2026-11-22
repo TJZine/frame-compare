@@ -68,6 +68,33 @@ class GitHistory:
             result.check_returncode()
         return result.returncode == 0
 
+    def require_matching_definitions(self, event_sha: str, planned_sha: str) -> None:
+        if not SHA_RE.fullmatch(event_sha):
+            raise ReleaseContractError("Release planning requires the exact event commit SHA.")
+        result = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--quiet",
+                event_sha,
+                planned_sha,
+                "--",
+                ".github/workflows/",
+                ".github/actions/",
+                "scripts/release_plan.py",
+                "scripts/validate_release_contract.py",
+                "tools/windows_portable/artifact_security.py",
+            ],
+            timeout=30,
+            check=False,
+        )
+        if result.returncode == 1:
+            raise ReleaseContractError(
+                "Release definitions changed since this run's commit; "
+                "re-run the push run for the current head instead."
+            )
+        result.check_returncode()
+
     def prepared_version(self, commit: str) -> str:
         return manifest_version(self._git("show", f"{commit}:.release-please-manifest.json"))
 
@@ -275,8 +302,9 @@ class Plan:
     message: str = ""
 
 
-def plan_rc(github: GitHub, history: GitHistory) -> Plan:
+def plan_rc(github: GitHub, history: GitHistory, event_sha: str) -> Plan:
     sha = history.head(PRE_RELEASE)
+    history.require_matching_definitions(event_sha, sha)
     version, _ = history.version_and_notes(sha)
     stable_tag = f"v{version}"
     stable = github.release(stable_tag)
@@ -297,12 +325,12 @@ def plan_rc(github: GitHub, history: GitHistory) -> Plan:
     releases = [
         release
         for release in github.pages("releases")
-        if release["tag_name"].startswith(f"{stable_tag}-rc.")
+        if _rc_serial(version, release["tag_name"]) is not None
     ]
     matching_rcs = []
     for release in releases:
         tag = release["tag_name"]
-        if release["draft"] is not False or _rc_serial(version, tag) is None:
+        if release["draft"] is not False:
             continue
         commit = history.tag_commit(tag)
         if commit is None:
@@ -332,8 +360,9 @@ def plan_rc(github: GitHub, history: GitHistory) -> Plan:
     return Plan("rc", sha, version, f"{stable_tag}-rc.{next_rc(version, history.tags())}")
 
 
-def plan_stable(github: GitHub, history: GitHistory) -> Plan:
+def plan_stable(github: GitHub, history: GitHistory, event_sha: str) -> Plan:
     sha = history.head(MAIN)
+    history.require_matching_definitions(event_sha, sha)
     version, _ = history.version_and_notes(sha)
     tag = f"v{version}"
     stable = github.release(tag)
@@ -496,10 +525,11 @@ def main() -> None:
                 print("Release Please waits for the stable release and its commit on pre-release.")
             _outputs(enabled=str(enabled).lower())
         else:
+            event_sha = os.environ["GITHUB_SHA"]
             plan = (
-                plan_rc(github, history)
+                plan_rc(github, history, event_sha)
                 if args.command == "plan-rc"
-                else plan_stable(github, history)
+                else plan_stable(github, history, event_sha)
             )
             print(plan.message or f"Build {plan.tag} from {plan.sha}")
             _outputs(

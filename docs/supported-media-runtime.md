@@ -271,12 +271,11 @@ inventory records installed distributions, native artifacts, source URLs, licens
 paths, and hashes. The Docker image also retains Debian FFmpeg's package copyright
 file and records its GPL-2.0-or-later profile in runtime provenance.
 
-The VSView Windows candidate is not release-ready solely because these top-level
-expressions and source URLs are recorded. VSView requires Qt Multimedia from the
-PySide6 Addons distribution, but does not use Qt WebEngine; the portable deployment
-therefore excludes the pinned wheel's WebEngine/Chromium files and verifies their
-absence from both the built and extracted bundle. Release remains blocked until that
-absence is proved in the canonical ZIP and the deployed Qt subset has matching
+VSView requires Qt Multimedia from the PySide6 Addons distribution.
+The Windows portable bundle excludes the pinned wheel's Qt WebEngine and Chromium
+runtime files. The build checks the assembled tree, and the
+[post-pack ZIP succession test](https://github.com/TJZine/frame-compare/blob/main/tests/windows_portable/test_windows_portable_zip_succession.py)
+checks the exact ZIP before upload. The deployed Qt subset also requires matching
 third-party notices and SBOM/provenance, complete Qt Multimedia FFmpeg lineage, a
 distributor-controlled corresponding-source offer, and legal adjudication. See the
 [final-artifact security evidence](ENGINEERING_RUNBOOK.md#final-artifact-security-evidence)

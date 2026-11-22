@@ -6,21 +6,12 @@ import base64
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-
-
-@pytest.fixture
-def pwsh() -> str:
-    if os.name != "nt":
-        pytest.skip("Windows filesystem semantics and PowerShell 7 required")
-    executable = shutil.which("pwsh")
-    if executable is None:
-        pytest.skip("PowerShell 7 not available")
-    return executable
 
 
 def _run(
@@ -198,6 +189,7 @@ def _inject(path: Path, anchor: str, replacement: str) -> None:
 _REGISTRATION = "      $registrationStarted = $true"
 _POINTER_WRITE = "  Write-PortableFile -Path $PointerPath -Bytes $CandidatePointer"
 _COMMIT = "      $committed = $true"
+_VERSION_LAUNCHER = "Write-Output 'frame-compare 0.1.0'; exit 0"
 _RENAME = "          try { [IO.Directory]::Move($folder.Source, $folder.Target) }"
 
 
@@ -301,7 +293,7 @@ New-Item -ItemType Directory -Path $OutDir | Out-Null
 foreach ($name in @('config', 'comparison_videos', 'shim')) { New-Item -ItemType Directory -Path (Join-Path $OutDir $name) | Out-Null }
 if ($env:FAILURE -eq 'occupied-target') { Set-Content -LiteralPath (Join-Path $OutDir 'config/unexpected') -Value 'preserve new data' }
 Set-Content -LiteralPath (Join-Path $OutDir 'bundle_info.json') -Value '{}'
-Set-Content -LiteralPath (Join-Path $OutDir 'frame-compare.ps1') -Value '# launcher'
+Set-Content -LiteralPath (Join-Path $OutDir 'frame-compare.ps1') -Value "Write-Output 'frame-compare 0.1.0'; exit 0"
 foreach ($name in @('portable_activation.ps1', 'path_safety.ps1')) {
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $OutDir
 }
@@ -1271,6 +1263,299 @@ def test_source_install_pipeline_stop_reverses_data_and_removes_marker(
     assert not (candidate / "generated").exists()
 
 
+def test_source_install_pipeline_stop_after_first_rename_restores_planned_folders(
+    pwsh: str, tmp_path: Path, source_fixture: tuple[Path, Path, Path]
+) -> None:
+    script, previous, pointer = source_fixture
+    before = _snapshot(previous)
+    pointer_before = pointer.read_bytes()
+    _inject(
+        _activation_helper(script),
+        _RENAME,
+        _RENAME.removesuffix(" }")
+        + "; throw [System.Management.Automation.PipelineStoppedException]::new() }",
+    )
+    result = _run(pwsh, "function uv {}; & $env:INSTALL -SkipSync", tmp_path, INSTALL=str(script))
+    assert result.returncode != 0
+    assert _snapshot(previous) == before
+    assert pointer.read_bytes() == pointer_before
+    assert not (pointer.parent / "source-migration.pending.json").exists()
+    candidate = next((script.parents[2] / "dist").iterdir())
+    for name in ("config", "comparison_videos"):
+        assert (candidate / name).is_dir()
+        assert not list((candidate / name).iterdir())
+    assert not (candidate / "generated").exists()
+
+
+@pytest.mark.parametrize("state", ["both-populated", "absent-source-empty-target", "empty-source"])
+def test_source_install_rollback_retains_marker_for_unreconciled_folders(
+    pwsh: str, tmp_path: Path, source_fixture: tuple[Path, Path, Path], state: str
+) -> None:
+    script, previous, pointer = source_fixture
+    pointer_before = pointer.read_bytes()
+    original_config = (previous / "config/config.toml").read_bytes()
+    clips = _snapshot(previous / "comparison_videos")
+    generated = _snapshot(previous / "generated")
+    clear_target = "      [IO.File]::Delete((Join-Path $BundleRoot 'config/config.toml'))"
+    change = {
+        "both-populated": """      $newSource = Join-Path $previousBundle 'config'
+      [IO.Directory]::CreateDirectory($newSource) | Out-Null
+      [IO.File]::WriteAllText((Join-Path $newSource 'config.toml'), 'concurrent edit')""",
+        "absent-source-empty-target": clear_target,
+        "empty-source": clear_target
+        + "\n      [IO.Directory]::CreateDirectory((Join-Path $previousBundle 'config')) | Out-Null",
+    }[state]
+    _inject(
+        _activation_helper(script),
+        _COMMIT,
+        change + "\n      throw 'injected conflict during rollback'",
+    )
+    result = _run(pwsh, "function uv {}; & $env:INSTALL -SkipSync", tmp_path, INSTALL=str(script))
+    assert result.returncode != 0
+    assert pointer.read_bytes() == pointer_before
+    marker = pointer.parent / "source-migration.pending.json"
+    assert marker.is_file()
+    candidate = Path(json.loads(marker.read_text())["candidate_bundle"])
+    if state == "both-populated":
+        assert (previous / "config/config.toml").read_text() == "concurrent edit"
+        assert (candidate / "config/config.toml").read_bytes() == original_config
+    else:
+        assert (candidate / "config").is_dir()
+        assert not list((candidate / "config").iterdir())
+        if state == "empty-source":
+            assert (previous / "config").is_dir()
+            assert not list((previous / "config").iterdir())
+        else:
+            assert not (previous / "config").exists()
+    assert _snapshot(previous / "comparison_videos") == clips
+    assert _snapshot(previous / "generated") == generated
+    assert not list((candidate / "comparison_videos").iterdir())
+    assert not (candidate / "generated").exists()
+    output = result.stdout + result.stderr
+    assert "Could not reconcile user folders: config" in output
+    assert str(previous / "config") in output and str(candidate / "config") in output
+
+
+@pytest.mark.parametrize("stop_at", ["before-write", "after-write"])
+def test_source_install_pipeline_stop_during_shim_registration(
+    pwsh: str, tmp_path: Path, source_fixture: tuple[Path, Path, Path], stop_at: str
+) -> None:
+    script, previous, pointer = source_fixture
+    bin_dir = pointer.parent.parent / "bin"
+    if stop_at == "after-write":
+        (bin_dir / "frame-compare.ps1").unlink()
+    bin_before = _snapshot(bin_dir)
+    pointer_before = pointer.read_bytes()
+    before = _snapshot(previous)
+    write = "    Write-PortableFile -Path $shim.Path -Bytes $shim.WrittenBytes"
+    stop = "    throw [System.Management.Automation.PipelineStoppedException]::new()"
+    lines = (write, stop) if stop_at == "after-write" else (stop, write)
+    _inject(_activation_helper(script), write, "\n".join(lines))
+
+    result = _run(pwsh, "function uv {}; & $env:INSTALL -SkipSync", tmp_path, INSTALL=str(script))
+
+    assert result.returncode != 0
+    assert "Registration rollback conflict" not in result.stdout + result.stderr
+    assert _snapshot(bin_dir) == bin_before
+    assert pointer.read_bytes() == pointer_before
+    assert not pointer.with_name("config.toml").exists()
+    assert not pointer.with_name("source-migration.pending.json").exists()
+    assert not (tmp_path / "appdata/activation-events").exists()
+    assert _snapshot(previous) == before
+
+
+@pytest.mark.parametrize("failure", ["", "after-pointer"], ids=["success", "rollback"])
+def test_source_install_preserves_identical_read_only_shim(
+    pwsh: str, tmp_path: Path, source_fixture: tuple[Path, Path, Path], failure: str
+) -> None:
+    script, previous, pointer = source_fixture
+    candidate = script.parents[2] / "dist/candidate"
+    bin_dir = pointer.parent.parent / "bin"
+    shim = bin_dir / "frame-compare.ps1"
+    shim_before = shim.read_bytes()
+    pointer_before = pointer.read_bytes()
+    previous_before = _snapshot(previous)
+    bin_before = _snapshot(bin_dir)
+    _inject(
+        script.with_name("build_portable.ps1"),
+        "$global:LASTEXITCODE = 0",
+        "[IO.File]::WriteAllBytes((Join-Path $OutDir 'shim/frame-compare.ps1'), "
+        "[IO.File]::ReadAllBytes($env:INSTALLED_SHIM))\n"
+        "$global:LASTEXITCODE = 0",
+    )
+
+    shim.chmod(stat.S_IREAD)
+    try:
+        result = _run(
+            pwsh,
+            "function uv {}; & $env:INSTALL -SkipSync -OutDir $env:OUT",
+            tmp_path,
+            INSTALL=str(script),
+            OUT=str(candidate),
+            INSTALLED_SHIM=str(shim),
+            FAILURE=failure,
+        )
+        output = result.stdout + result.stderr
+        assert (candidate / "shim" / shim.name).read_bytes() == shim_before
+        assert shim.read_bytes() == shim_before
+        assert not shim.stat().st_mode & stat.S_IWRITE
+        assert not pointer.with_name("source-migration.pending.json").exists(), output
+
+        if failure:
+            assert result.returncode != 0
+            assert "activation after pointer" in output
+            assert _snapshot(previous) == previous_before
+            assert pointer.read_bytes() == pointer_before
+            assert _snapshot(bin_dir) == bin_before
+            for name in ("config", "comparison_videos"):
+                assert (candidate / name).is_dir()
+                assert not list((candidate / name).iterdir())
+            assert not (candidate / "generated").exists()
+        else:
+            assert result.returncode == 0, output
+            assert Path(json.loads(pointer.read_text(encoding="utf-8"))["bundle_path"]) == candidate
+            for name in ("config", "comparison_videos", "generated"):
+                assert not (previous / name).exists()
+            assert _snapshot(candidate / "shim") == _snapshot(bin_dir)
+            for relative, payload in previous_before.items():
+                if relative.split("/", 1)[0] in {"config", "comparison_videos", "generated"}:
+                    assert (candidate / relative).read_bytes() == payload
+    finally:
+        if shim.exists():
+            shim.chmod(stat.S_IWRITE)
+
+
+@pytest.mark.parametrize(
+    ("defect", "message"),
+    [
+        ("missing-info", "Bundle runtime identity not found"),
+        ("nonzero-version", "Bundle launcher version check failed"),
+        ("invalid-version-output", "Bundle launcher version check failed"),
+        ("slow-version", "Version probe timed out after 2000 ms"),
+    ],
+)
+def test_source_install_rejects_invalid_candidate_before_moving_data(
+    pwsh: str,
+    tmp_path: Path,
+    source_fixture: tuple[Path, Path, Path],
+    defect: str,
+    message: str,
+) -> None:
+    script, previous, pointer = source_fixture
+    before = _snapshot(previous)
+    registration = _snapshot(pointer.parent.parent)
+    builder = script.with_name("build_portable.ps1")
+    change = {
+        "missing-info": "Remove-Item -LiteralPath (Join-Path $OutDir 'bundle_info.json')",
+        "nonzero-version": "Set-Content -LiteralPath (Join-Path $OutDir 'frame-compare.ps1') "
+        "-Value \"Write-Output 'frame-compare 0.1.0'; exit 1\"",
+        "invalid-version-output": "Set-Content -LiteralPath (Join-Path $OutDir 'frame-compare.ps1') "
+        "-Value \"Write-Output 'unrecognised'; exit 0\"",
+        "slow-version": "Set-Content -LiteralPath (Join-Path $OutDir 'frame-compare.ps1') "
+        "-Value \"Start-Sleep -Seconds 10; Write-Output 'frame-compare 0.1.0'; exit 0\"",
+    }[defect]
+    if defect == "slow-version":
+        _inject(
+            _activation_helper(script), "$versionTimeoutMs = 120000", "$versionTimeoutMs = 2000"
+        )
+        _inject(_activation_helper(script), _RENAME, "          throw 'Unexpected user data move'")
+    _inject(builder, "$global:LASTEXITCODE = 0", f"{change}\n$global:LASTEXITCODE = 0")
+    result = _run(pwsh, "function uv {}; & $env:INSTALL -SkipSync", tmp_path, INSTALL=str(script))
+    assert result.returncode != 0
+    assert message in result.stdout + result.stderr
+    assert _snapshot(previous) == before
+    assert {
+        path: data
+        for path, data in _snapshot(pointer.parent.parent).items()
+        if path != "state/source-install.lock"
+    } == registration
+    assert not (pointer.parent / "source-migration.pending.json").exists()
+    assert not (tmp_path / "appdata/activation-events").exists()
+    assert not (tmp_path / "appdata/test-user-path").exists()
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "allowed"),
+    [(".", False), ("bin", False), ("state", False), ("v0.7.0", True)],
+)
+def test_bundle_activation_respects_managed_install_paths(
+    pwsh: str,
+    tmp_path: Path,
+    source_fixture: tuple[Path, Path, Path],
+    relative_path: str,
+    allowed: bool,
+) -> None:
+    script, previous, pointer = source_fixture
+    install_root = pointer.parent.parent
+    candidate = install_root / relative_path
+    candidate.mkdir(exist_ok=True)
+    (candidate / "frame-compare.ps1").write_text(_VERSION_LAUNCHER, encoding="ascii")
+    (candidate / "bundle_info.json").write_text("{}", encoding="ascii")
+    shutil.copytree(previous / "shim", candidate / "shim")
+    before = _snapshot(previous)
+    registration = _snapshot(install_root)
+    result = _run(
+        pwsh,
+        ". $env:ACTIVATION; Invoke-PortableActivation -BundleRoot $env:CANDIDATE "
+        "-StateDirectory (Get-PortableStateDirectory)",
+        tmp_path,
+        ACTIVATION=str(_activation_helper(script)),
+        CANDIDATE=str(candidate),
+    )
+    if allowed:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert Path(json.loads(pointer.read_text(encoding="utf-8"))["bundle_path"]) == candidate
+        assert _snapshot(install_root / "bin") == _snapshot(candidate / "shim")
+        assert (candidate / "config/config.toml").read_bytes() == before["config/config.toml"]
+        assert not (previous / "config").exists()
+        assert not pointer.with_name("source-migration.pending.json").exists()
+        return
+    assert result.returncode != 0
+    assert "Bundle must not overlap the Frame Compare install root" in result.stdout + result.stderr
+    assert _snapshot(previous) == before
+    assert _snapshot(install_root) == registration
+    assert not (tmp_path / "appdata/test-user-path").exists()
+
+
+def test_source_install_rollback_preserves_edited_fallback_config(
+    pwsh: str, tmp_path: Path, source_fixture: tuple[Path, Path, Path]
+) -> None:
+    script, previous, pointer = source_fixture
+    fallback = pointer.with_name("config.toml")
+    assert not fallback.exists()
+    before = _snapshot(previous)
+    pointer_before = pointer.read_bytes()
+    bin_before = _snapshot(pointer.parent.parent / "bin")
+    edited = tmp_path / "updated-config.toml"
+    edited.write_bytes(b'[paths]\r\ngenerated_dir = "updated"\r\n')
+    _inject(
+        _activation_helper(script),
+        _COMMIT,
+        """      $fallback = Join-Path $StateDirectory 'config.toml'
+      if (!(Test-Path -LiteralPath $fallback -PathType Leaf)) { throw 'fallback was not initialised' }
+      [IO.File]::WriteAllBytes($fallback, [IO.File]::ReadAllBytes($env:EDITED_CONFIG))
+      throw 'injected failure after fallback edit'
+""",
+    )
+    result = _run(
+        pwsh,
+        "function uv {}; & $env:INSTALL -SkipSync",
+        tmp_path,
+        INSTALL=str(script),
+        EDITED_CONFIG=str(edited),
+    )
+    assert result.returncode != 0
+    output = result.stdout + result.stderr
+    assert "injected failure after fallback edit" in output
+    assert f"Registration rollback conflict: preserving changed file {fallback}" in output
+    assert fallback.read_bytes() == edited.read_bytes()
+    assert _snapshot(previous) == before
+    assert pointer.read_bytes() == pointer_before
+    assert _snapshot(pointer.parent.parent / "bin") == bin_before
+    assert not (pointer.parent / "source-migration.pending.json").exists()
+    assert (tmp_path / "appdata/test-user-path").read_text() == r"C:\fixture-path"
+
+
 def _junction(pwsh: str, root: Path, alias: Path, target: Path) -> None:
     alias.parent.mkdir(parents=True, exist_ok=True)
     result = _run(
@@ -1384,7 +1669,8 @@ def test_bundle_activation_coordinates_with_source_install_lock(
         pytest.skip(f"{interpreter} not available")
     bundle = tmp_path / "bundlé"
     (bundle / "shim").mkdir(parents=True)
-    (bundle / "frame-compare.ps1").write_text("# launcher")
+    (bundle / "frame-compare.ps1").write_text(_VERSION_LAUNCHER, encoding="ascii")
+    (bundle / "bundle_info.json").write_text("{}")
     names = (
         "frame-compare.ps1",
         "frame-compare.cmd",
@@ -1491,7 +1777,7 @@ def test_zip_activation_restores_original_pointer_state_under_windows_powershell
     candidate.mkdir()
     for name in ("portable_activation.ps1", "path_safety.ps1"):
         shutil.copyfile(script.with_name(name), candidate / name)
-    (candidate / "frame-compare.ps1").write_text("# launcher")
+    (candidate / "frame-compare.ps1").write_text(_VERSION_LAUNCHER, encoding="ascii")
     (candidate / "bundle_info.json").write_text("{}")
     shutil.copytree(previous / "shim", candidate / "shim")
     stop = "  if ($env:FAILURE -eq 'after-pointer') { throw 'activation after pointer' }"
@@ -1681,3 +1967,73 @@ def test_uninstall_refuses_before_any_registration_mutation_with_pending_marker(
         } == before
     finally:
         _set_user_path(original_path)
+
+
+@pytest.mark.xdist_group("windows-install-lifecycle")
+def test_uninstall_refuses_managed_file_path_that_is_a_directory(
+    pwsh: str, tmp_path: Path, repo_root: Path, source_fixture: tuple[Path, Path, Path]
+) -> None:
+    import winreg
+
+    from .test_windows_portable_install_uninstall_e2e import _get_user_path, _set_user_path
+
+    _, _, pointer = source_fixture
+    install_root = pointer.parent.parent
+    bin_dir = install_root / "bin"
+    managed_directory = pointer.with_name("config.json.tmp")
+    managed_directory.mkdir()
+    (managed_directory / "child").write_bytes(b"preserve me")
+    before = _snapshot(install_root)
+    configured_path = (rf"C:\FrameCompare-E2E\preserve-me;{bin_dir}", winreg.REG_EXPAND_SZ)
+    original_path = _get_user_path()
+    try:
+        _set_user_path(configured_path)
+        result = _run(
+            pwsh,
+            "& $env:UNINSTALL",
+            tmp_path,
+            UNINSTALL=str(repo_root / "tools/windows_portable/uninstall.ps1"),
+        )
+        assert result.returncode != 0
+        output = result.stdout + result.stderr
+        assert "Expected a regular installed file" in output and str(managed_directory) in output
+        assert _get_user_path() == configured_path
+        assert managed_directory.is_dir()
+        assert {
+            name: content
+            for name, content in _snapshot(install_root).items()
+            if name != "state/source-install.lock"
+        } == before
+    finally:
+        _set_user_path(original_path)
+
+
+@pytest.mark.xdist_group("windows-install-lifecycle")
+def test_uninstall_removes_read_only_managed_config(
+    pwsh: str, tmp_path: Path, repo_root: Path, source_fixture: tuple[Path, Path, Path]
+) -> None:
+    import winreg
+
+    from .test_windows_portable_install_uninstall_e2e import _get_user_path, _set_user_path
+
+    _, _, pointer = source_fixture
+    bin_dir = pointer.parent.parent / "bin"
+    retained_path = r"C:\FrameCompare-E2E\preserve-me"
+    original_path = _get_user_path()
+    try:
+        pointer.chmod(stat.S_IREAD)
+        _set_user_path((f"{retained_path};{bin_dir}", winreg.REG_EXPAND_SZ))
+        result = _run(
+            pwsh,
+            "& $env:UNINSTALL",
+            tmp_path,
+            UNINSTALL=str(repo_root / "tools/windows_portable/uninstall.ps1"),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not pointer.exists()
+        assert not bin_dir.exists()
+        assert _get_user_path() == (retained_path, winreg.REG_EXPAND_SZ)
+    finally:
+        _set_user_path(original_path)
+        if pointer.exists():
+            pointer.chmod(stat.S_IWRITE)
