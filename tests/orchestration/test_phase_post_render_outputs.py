@@ -106,7 +106,7 @@ async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit
         service="ATV",
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
-        release_group="Kitsune",
+        release_group="Bittern",
         has_terminal_release_group=True,
     )
     comparison = _clip(
@@ -177,8 +177,8 @@ async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit
         for row in cast(SlowpicsUploadPlan, captured_upload_plan).rows
     ] == [
         [
-            "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
-            "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+            "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Bittern",
+            "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Bittern",
             "My Encode",
         ]
     ]
@@ -193,7 +193,7 @@ def test_run_report_phase_builds_report_data_and_records_path(
         service="ATV",
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
-        release_group="Kitsune",
+        release_group="Bittern",
         has_terminal_release_group=True,
     )
     comparison = _clip(
@@ -259,8 +259,8 @@ def test_run_report_phase_builds_report_data_and_records_path(
         "Encode 1"
     ]
     assert [clip.display.control for clip in report_data.clips] == [
-        "Reference | 2160p · ATV WEB-DL · DV HDR10+ · Kitsune",
-        "Comparison 1 | 2160p · ATV WEB-DL · DV HDR10+ · Kitsune",
+        "Reference | 2160p · ATV WEB-DL · DV HDR10+ · Bittern",
+        "Comparison 1 | 2160p · ATV WEB-DL · DV HDR10+ · Bittern",
         "My Explicit",
     ]
     assert [clip.display.micro for clip in report_data.clips] == [
@@ -268,7 +268,7 @@ def test_run_report_phase_builds_report_data_and_records_path(
         "encode",
         "My Explicit",
     ]
-    assert report_data.clips[2].display.release == "2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
+    assert report_data.clips[2].display.release == "2160p · ATV WEB-DL · DV HDR10+ · Bittern"
     assert report_data.clips[2].display.filename == "explicit.mkv"
     assert report_data.slowpics_url == "https://slow.pics/c/example"
     assert report_data.rendering.overlay_mode == ctx.config.screenshots.overlay_mode
@@ -297,7 +297,7 @@ def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
         service="ATV",
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
-        release_group="Kitsune",
+        release_group="Bittern",
         has_terminal_release_group=True,
     )
     comparison = _clip(
@@ -333,19 +333,19 @@ def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
     )
 
     report_data = captured["report_data"]
-    assert "2160p · ATV WEB-DL · DV HDR10+ · Kitsune" in report_data.clips[0].display.control
+    assert "2160p · ATV WEB-DL · DV HDR10+ · Bittern" in report_data.clips[0].display.control
     for clip in report_data.clips:
         assert " · " in clip.display.primary
         assert " · " in clip.display.control
         assert "|" not in clip.display.release
 
     default_separator = format_micro_descriptor(identity)
-    assert default_separator == "ATV WEB-DL | DV HDR10+ | Kitsune"
+    assert default_separator == "ATV WEB-DL | DV HDR10+ | Bittern"
 
     upload_clips = phase_post_render._slowpics_upload_clips(ctx)
     assert [clip.image_name for clip in upload_clips] == [
-        "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
-        "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Bittern",
+        "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Bittern",
     ]
     for upload_clip in upload_clips:
         assert " · " not in upload_clip.image_name

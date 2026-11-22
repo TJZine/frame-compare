@@ -48,8 +48,8 @@ _BROWSER_NAMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium
 _MAC_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 _REFERENCE_LABEL = "Movie.Title.2026.2160p.WEB-DL.Service-GROUP.with-an-extremely-long-source-name-that-must-stay-on-the-left"
 _COMPARISON_LABEL = "Movie.Title.2026.1080p.WEB-DL.Service-ENCODE.with-an-equally-long-source-name-that-must-stay-on-the-right"
-_REFERENCE_PRIMARY = "Movie Title (2026) | 2160p | PMTP WEB-DL | DV HDR10+ | REPACK | Kitsune"
-_REFERENCE_RELEASE = "2160p | PMTP WEB-DL | DV HDR10+ | REPACK | Kitsune"
+_REFERENCE_PRIMARY = "Movie Title (2026) | 2160p | PMTP WEB-DL | DV HDR10+ | REPACK | Bittern"
+_REFERENCE_RELEASE = "2160p | PMTP WEB-DL | DV HDR10+ | REPACK | Bittern"
 _COMPARISON_PRIMARY = "Encode A"
 _COMPARISON_RELEASE = "1080p | ATV WEB-DL | HDR10 | ENCODE"
 _FIXTURE_SIZE_BYTES = 17 * 1024**3
@@ -657,7 +657,7 @@ document.addEventListener('DOMContentLoaded', () => {
             && inspectorText.includes(__REFERENCE_FILENAME__)
             && inspectorText.includes(__REFERENCE_RELEASE__)
             && inspectorText.includes('1920×1080')
-            && ['2160p', 'PMTP', 'WEB-DL', 'DV HDR10+', 'REPACK', 'Kitsune']
+            && ['2160p', 'PMTP', 'WEB-DL', 'DV HDR10+', 'REPACK', 'Bittern']
                 .every(fact => inspectorText.includes(fact))
             && inspectorCards.every(card => {
                 const primary = card.querySelector('.rv-inspector-clip-primary');

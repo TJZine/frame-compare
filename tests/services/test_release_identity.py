@@ -24,12 +24,12 @@ from frame_compare.services.types import ParsedMetadata
     ("filename", "expected"),
     [
         (
-            "Avatar.Aang.The.Last.Airbender.2026.2160p.PMTP.WEB-DL.DV.HDR10+.H.265-Kitsune.mkv",
-            ("PMTP", "WEB-DL", ("DV", "HDR10+"), (), "Kitsune"),
+            "Copper.Kite.The.Last.Lamplight.2026.2160p.PMTP.WEB-DL.DV.HDR10+.H.265-Bittern.mkv",
+            ("PMTP", "WEB-DL", ("DV", "HDR10+"), (), "Bittern"),
         ),
         (
-            "Avatar.Aang.The.Last.Airbender.2026.2160p.ATV.WEB-DL.DV.HDR10+.REPACK.H.265-Kitsune.mkv",
-            ("ATV", "WEB-DL", ("DV", "HDR10+"), ("REPACK",), "Kitsune"),
+            "Copper.Kite.The.Last.Lamplight.2026.2160p.ATV.WEB-DL.DV.HDR10+.REPACK.H.265-Bittern.mkv",
+            ("ATV", "WEB-DL", ("DV", "HDR10+"), ("REPACK",), "Bittern"),
         ),
         (
             "Movie.2024.2160p.NF.WEB-DL.HDR10.REPACK2-GROUP.mkv",
@@ -243,14 +243,14 @@ def test_combined_parse_preserves_canonical_fallback_and_merged_release_facts(
 
 
 def test_formatters_and_common_content() -> None:
-    content = ContentIdentity("Avatar Aang The Last Airbender", 2026)
+    content = ContentIdentity("Copper Kite The Last Lamplight", 2026)
     first = ReleaseIdentity(
         content,
         "2160p",
         "PMTP",
         "WEB-DL",
         ("DV", "HDR10+"),
-        "Kitsune",
+        "Bittern",
         has_terminal_release_group=True,
     )
     second = ReleaseIdentity(
@@ -259,18 +259,18 @@ def test_formatters_and_common_content() -> None:
         "ATV",
         "WEB-DL",
         ("DV", "HDR10+"),
-        "Kitsune",
+        "Bittern",
         ("REPACK",),
         has_terminal_release_group=True,
     )
     assert (
         format_release_descriptor(first, short_name="")
-        == "2160p | PMTP WEB-DL | DV HDR10+ | Kitsune"
+        == "2160p | PMTP WEB-DL | DV HDR10+ | Bittern"
     )
     assert format_compact_identity(second, short_name="").startswith(
-        "Avatar Aang The Last Airbender (2026) | 2160p"
+        "Copper Kite The Last Lamplight (2026) | 2160p"
     )
-    assert format_micro_descriptor(second) == "ATV WEB-DL | DV HDR10+ | REPACK | Kitsune"
+    assert format_micro_descriptor(second) == "ATV WEB-DL | DV HDR10+ | REPACK | Bittern"
     assert unique_presentation_names(["same", "same"], roles=["Reference", "Comparison 1"]) == [
         "Reference | same",
         "Comparison 1 | same",
@@ -290,17 +290,17 @@ def test_separator_keyword_applies_to_inner_and_outer_joins() -> None:
         service="ATV",
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
-        release_group="Kitsune",
+        release_group="Bittern",
         has_terminal_release_group=True,
     )
     assert format_release_descriptor(identity, separator=" · ", short_name="") == (
-        "2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
+        "2160p · ATV WEB-DL · DV HDR10+ · Bittern"
     )
     assert format_micro_descriptor(identity, separator=" · ") == (
-        "ATV WEB-DL · DV HDR10+ · Kitsune"
+        "ATV WEB-DL · DV HDR10+ · Bittern"
     )
     compact = format_compact_identity(identity, separator=" · ", short_name="")
-    assert compact == "Example (2026) · 2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
+    assert compact == "Example (2026) · 2160p · ATV WEB-DL · DV HDR10+ · Bittern"
     assert "|" not in compact
 
 
