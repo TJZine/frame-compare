@@ -405,51 +405,51 @@ def test_short_names(sources: list[ShortNameSource], expected: list[str]) -> Non
     assert short_source_names(sources) == expected
 
 
-_EBP = "Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv"
-_GNOME = "Black.Sails.S01E08.VIII.1080p.AMZN.WEB-DL.DDP.5.1.H.264-GNOME.mkv"
-_NOGRP = "Black.Sails.S01E08.VIII.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-NOGRP.mkv"
-_DEMON_SLAYER = "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv"
-_DEMON_SLAYER_COPY = "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv"
+_OWL = "Amber.Reach.S02E05.1080p.Bluray.DD5.1.x264-OwL.mkv"
+_HERON = "Amber.Reach.S02E05.Tide.1080p.AMZN.WEB-DL.DDP.5.1.H.264-HERON.mkv"
+_EGRET = "Amber.Reach.S02E05.Tide.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-EGRET.mkv"
+_DUB = "Constructed.LanternMoth-Wagtail.english-dub-only.mkv"
+_DUB_COPY = "Constructed.LanternMoth-Wagtail.english-dub-only-copy.mkv"
 
 
 @pytest.mark.parametrize(
     ("filenames", "expected", "long_labels"),
     [
         (
-            [_EBP, _GNOME, _NOGRP],
-            ["EbP", "GNOME", "NOGRP"],
+            [_OWL, _HERON, _EGRET],
+            ["OwL", "HERON", "EGRET"],
             [
-                "Black Sails S01E08 · 1080p · BluRay · EbP",
-                "Black Sails S01E08 · 1080p · AMZN WEB-DL · GNOME",
-                "Black Sails S01E08 · 1080p · BluRay REMUX · NOGRP",
+                "Amber Reach S02E05 · 1080p · BluRay · OwL",
+                "Amber Reach S02E05 · 1080p · AMZN WEB-DL · HERON",
+                "Amber Reach S02E05 · 1080p · BluRay REMUX · EGRET",
             ],
         ),
         (
-            [_EBP, _DEMON_SLAYER],
-            ["EbP", "english-dub-only"],
+            [_OWL, _DUB],
+            ["OwL", "english-dub-only"],
             [
-                "Black Sails S01E08 · 1080p · BluRay · EbP",
-                "Constructed DemonSlayer Kitsune · english-dub-only",
+                "Amber Reach S02E05 · 1080p · BluRay · OwL",
+                "Constructed LanternMoth Wagtail · english-dub-only",
             ],
         ),
         (
-            [_EBP, _DEMON_SLAYER_COPY, _DEMON_SLAYER],
-            ["EbP", "english-dub-only-copy", "english-dub-only"],
+            [_OWL, _DUB_COPY, _DUB],
+            ["OwL", "english-dub-only-copy", "english-dub-only"],
             [
-                "Black Sails S01E08 · 1080p · BluRay · EbP",
-                "Constructed DemonSlayer Kitsune · english-dub-only-copy",
-                "Constructed DemonSlayer Kitsune · english-dub-only",
+                "Amber Reach S02E05 · 1080p · BluRay · OwL",
+                "Constructed LanternMoth Wagtail · english-dub-only-copy",
+                "Constructed LanternMoth Wagtail · english-dub-only",
             ],
         ),
         (
             [
-                "Constructed.Witch-Kira.audio-delay-500ms.mkv",
-                "Constructed.Witch-Kira.audio-starts-500ms-in-sync.mkv",
+                "Constructed.Grove-Ibis.audio-delay-500ms.mkv",
+                "Constructed.Grove-Ibis.audio-starts-500ms-in-sync.mkv",
             ],
             ["delay-500ms", "starts-500ms-in-sync"],
             [
-                "Constructed Witch Kira · delay-500ms",
-                "Constructed Witch Kira · starts-500ms-in-sync",
+                "Constructed Grove Ibis · delay-500ms",
+                "Constructed Grove Ibis · starts-500ms-in-sync",
             ],
         ),
         (
@@ -458,9 +458,9 @@ _DEMON_SLAYER_COPY = "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv"
             ["Movie · Group", "Movie · 1080p · BluRay · Group-copy"],
         ),
         (
-            ["Movie.1080p.BluRay.x264-D-Z0N3.mkv", "Movie.1080p.x264-EbP.mkv"],
-            ["D-Z0N3", "EbP"],
-            ["Movie · 1080p · BluRay · D-Z0N3", "Movie · 1080p · EbP"],
+            ["Movie.1080p.BluRay.x264-S-W1FT.mkv", "Movie.1080p.x264-OwL.mkv"],
+            ["S-W1FT", "OwL"],
+            ["Movie · 1080p · BluRay · S-W1FT", "Movie · 1080p · OwL"],
         ),
         (
             ["Movie.cutA.final.mkv", "Movie.cutB.final.mkv"],
@@ -484,13 +484,13 @@ _DEMON_SLAYER_COPY = "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv"
         ),
         (
             [
-                "Movie.2010.crf18.2160p.AMZN.WEB-DL.H.265-FLUX.mkv",
-                "Movie.2010.crf20.2160p.AMZN.WEB-DL.H.265-FLUX.mkv",
+                "Movie.2010.crf18.2160p.AMZN.WEB-DL.H.265-LARK.mkv",
+                "Movie.2010.crf20.2160p.AMZN.WEB-DL.H.265-LARK.mkv",
             ],
             ["crf18", "crf20"],
             [
-                "Movie (2010) · 2160p · AMZN WEB-DL · FLUX",
-                "Movie (2010) · 2160p · AMZN WEB-DL · FLUX",
+                "Movie (2010) · 2160p · AMZN WEB-DL · LARK",
+                "Movie (2010) · 2160p · AMZN WEB-DL · LARK",
             ],
         ),
     ],

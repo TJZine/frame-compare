@@ -26,14 +26,14 @@ notes used by the guarded publication workflow.
 - Provision the required Python 3.13 build interpreter directly for Windows
   source installs without first installing the project's development dependencies.
 - Name each run folder after what is compared and the sources' short names, for
-  example `Black Sails S01E08 - EbP, GNOME, NOGRP`. When that name already exists,
+  example `Amber Reach S02E05 - OwL, HERON, EGRET`. When that name already exists,
   the date and time are added. Existing run folders keep their names.
-- Title the HTML report by what is compared, for example `Black Sails S01E08`,
+- Title the HTML report by what is compared, for example `Amber Reach S02E05`,
   instead of the reference filename. Movie titles from TMDB include the year.
 - Take a source's short name from the part of its filename that differs from the
   other sources when it has no usable release group, for example
   `english-dub-only`, or `crf18` and `crf20` for two of your own encodes. Release
-  groups that contain a hyphen, such as `D-Z0N3`, are recognized.
+  groups that contain a hyphen, such as `S-W1FT`, are recognized.
 - Show `history list` as a table with the run name, time, sources, frames, status,
   and whether a report exists. Interrupted runs show `interrupted`. JSON output is
   unchanged.

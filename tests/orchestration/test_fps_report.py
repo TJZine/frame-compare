@@ -441,7 +441,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    dub = "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv"
+    dub = "Constructed.LanternMoth-Wagtail.english-dub-only.mkv"
     clips = [
         _fps_report_clip(
             path=Path("ref.mkv"),

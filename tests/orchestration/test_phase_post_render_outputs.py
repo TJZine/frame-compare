@@ -356,9 +356,9 @@ def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path
     paths = [
         ctx.workspace.input_dir / name
         for name in (
-            "Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv",
-            "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv",
-            "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv",
+            "Amber.Reach.S02E05.1080p.Bluray.DD5.1.x264-OwL.mkv",
+            "Constructed.LanternMoth-Wagtail.english-dub-only.mkv",
+            "Constructed.LanternMoth-Wagtail.english-dub-only-copy.mkv",
         )
     ]
     ctx.reference, *ctx.comparisons = [
@@ -387,10 +387,10 @@ def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path
     assert output.report_path is not None
     html = output.report_path.read_text(encoding="utf-8")
     payload = script_payload(html)
-    short_names = ["EbP", "english-dub-only", "english-dub-only-copy"]
+    short_names = ["OwL", "english-dub-only", "english-dub-only-copy"]
     assert [clip["display"]["micro"] for clip in payload["clips"]] == short_names
     assert [clip["display"]["control"] for clip in payload["clips"]] == [
-        "1080p · BluRay · EbP",
+        "1080p · BluRay · OwL",
         "english-dub-only",
         "english-dub-only-copy",
     ]
@@ -400,7 +400,7 @@ def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path
     assert [clip["label"] for clip in payload["clips"]] == [path.stem for path in paths]
 
     assert [clip.image_name for clip in phase_post_render._slowpics_upload_clips(ctx)] == [
-        "1080p | BluRay | EbP",
+        "1080p | BluRay | OwL",
         *short_names[1:],
     ]
     parser = SelectParser()
@@ -408,7 +408,7 @@ def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path
     for select_id in ("left-select", "right-select", "active-select"):
         options = parser.selects[select_id].options
         assert [option.text for option in options] == [
-            "EbP · 1080p · BluRay",
+            "OwL · 1080p · BluRay",
             *short_names[1:],
         ]
         assert [option.attrs["value"] for option in options] == ["0", "1", "2"]

@@ -42,7 +42,7 @@ def test_cli_history_list_json_isolates_oversized_record(
     record: Callable[..., None],
 ) -> None:
     root = workspace()
-    valid_name = "Valid S01E08 - EbP, GNOME (2026-07-14 12.00)"
+    valid_name = "Valid S02E05 - OwL, HERON (2026-07-14 12.00)"
     valid = root.generated_dir / valid_name
     broken = root.generated_dir / "Broken"
     valid.mkdir()

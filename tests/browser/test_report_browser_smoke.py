@@ -1808,7 +1808,7 @@ def test_report_toolbar_controls_stay_reachable_with_filter_and_offset(tmp_path:
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable")
-    title = "Black Sails Comparison Reference!"
+    title = "Amber Reach Comparison Reference!"
     report_path = _generated_report(
         tmp_path,
         frames=(10, 12),
@@ -2056,7 +2056,7 @@ def test_report_labels_clear_viewport_controls(tmp_path: Path, width: int, heigh
     browser = _browser_executable()
     if browser is None:
         pytest.skip("Chrome/Chromium is unavailable")
-    title = "Black Sails Comparison Reference!"
+    title = "Amber Reach Comparison Reference!"
     report_path = _generated_report(
         tmp_path,
         third_source=True,
