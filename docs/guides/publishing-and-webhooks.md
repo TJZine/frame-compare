@@ -71,13 +71,15 @@ manager instead.
     rewrites, `run --write-config`, `preset save`, and `preset apply`.
 
 The webhook payload is the Discord-compatible `content` JSON shape containing the
-slow.pics URL. The endpoint must be external HTTPS. Delivery follows no redirects,
-uses a 10-second absolute deadline per attempt, and makes at most three attempts.
+slow.pics URL. The endpoint must be an HTTPS URL. Local-network and loopback
+endpoints work when the system trust store trusts their certificate. Delivery
+follows no redirects, uses a 10-second timeout per network operation, and makes
+at most three attempts. An attempt has no overall time limit.
 
-Pre-send connection failures and server errors use bounded backoff; HTTP 429 is
-retried only for a valid `Retry-After` of at most 10 seconds. Once transmission starts,
-an uncertain outcome is not retried because a second POST could duplicate the
-notification.
+Pre-send connection failures and HTTP 5xx responses use bounded backoff.
+HTTP 429 is retried only for a valid numeric `Retry-After` of at most 10 seconds.
+When a transport error leaves the delivery outcome uncertain, delivery stops to
+avoid a duplicate notification.
 
 Delivery failures are warnings and do not fail a completed comparison;
 URL details remain redacted from diagnostics.

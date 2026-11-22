@@ -15,7 +15,7 @@ from tests.render_test_support import selections
 def _request() -> ScreenshotBatchRequest:
     return ScreenshotBatchRequest(
         clip_path=Path("source.mkv"),
-        label="CtrlHD",
+        label="WrenHD",
         frames=selections([1855], [1842], ["Bright"]),
         size_bytes=int(17.42 * 1024**3),
         source_resolution=(3840, 2160),
@@ -51,12 +51,12 @@ def test_overlay_config_contains_structured_facts_and_original_diagnostic_source
     assert request.clip is prepared_graph
     assert request.diagnostic_source is original
     assert request.overlay is not None
-    assert request.overlay.label == "CtrlHD"
+    assert request.overlay.label == "WrenHD"
     assert request.overlay.comparison_frame == 1842
     assert request.overlay.source_frame == 1855
     assert request.overlay.source_total_frames == 143892
     assert request.overlay.file_size_bytes == int(17.42 * 1024**3)
-    assert request.overlay.geometry is facts["CtrlHD"].geometry
+    assert request.overlay.geometry is facts["WrenHD"].geometry
 
 
 @patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
@@ -136,11 +136,11 @@ def test_actual_preparation_preserves_mixed_applied_facts_and_fallback_graph(
         )
         requests = [request for job in jobs for request in job.requests]
         facts = {job.label: job.clip_facts for job in jobs}
-    assert facts["CtrlHD"].tonemap is not None
+    assert facts["WrenHD"].tonemap is not None
     assert facts["Fallback"].tonemap is not None
     assert requests[1].overlay is not None
-    assert isinstance(facts["CtrlHD"].tonemap.transform, LibplaceboTonemap)
-    assert facts["CtrlHD"].tonemap.transform.frame_policy == "independent_frames"
+    assert isinstance(facts["WrenHD"].tonemap.transform, LibplaceboTonemap)
+    assert facts["WrenHD"].tonemap.transform.frame_policy == "independent_frames"
     assert isinstance(facts["Fallback"].tonemap.transform, FallbackTonemap)
     assert facts["Fallback"].tonemap.transform.cause.value == "runtime_call_failed"
     assert facts["Fallback"].tonemap.transform.source_peak.nits == 609

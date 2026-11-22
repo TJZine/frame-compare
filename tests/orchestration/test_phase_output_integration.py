@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -10,9 +9,15 @@ import httpx
 import pytest
 
 from frame_compare.analysis.selection import select_frames
-from frame_compare.orchestration import phase_alignment, phase_post_render, phase_render
-from frame_compare.orchestration.execution_types import ExecutionState, RunArtifacts
-from frame_compare.orchestration.phase_output_application import apply_phase_output
+from frame_compare.orchestration import execution, phase_alignment, phase_post_render, phase_render
+from frame_compare.orchestration.context import RunContext
+from frame_compare.orchestration.execution import RunSteps
+from frame_compare.orchestration.execution_types import (
+    AnalyzePhaseOutput,
+    ExecutionState,
+    FramePlanPhaseOutput,
+)
+from frame_compare.orchestration.types import RunDependencies
 from frame_compare.render.types import RenderedClip
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.slowpics_post_upload import (
@@ -20,14 +25,33 @@ from frame_compare.services.slowpics_post_upload import (
 )
 from frame_compare.services.types import AlignmentOperationOutcome, AlignmentResult
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
+from frame_compare.utils.progress import NullProgressReporter
 from tests.orchestration.execute_run_helpers import FakeVSLoader, install_fake_frame_render
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
     _frame_metrics,
     _render_artifacts,
-    _run_align_phase,
+    prep_for_context,
 )
+from tests.run_request_support import make_run_request
+
+
+async def _run_selection_and_output(ctx: RunContext, *, skip_analysis: bool) -> ExecutionState:
+    state = ExecutionState()
+    ctx.config.report.enable = True
+    ctx.config.slowpics.auto_upload = False
+    request = make_run_request(
+        root=ctx.workspace.root, config=ctx.config, skip_analysis=skip_analysis, skip_metadata=True
+    )
+    prep = prep_for_context(ctx, state)
+    steps = RunSteps(reporter=NullProgressReporter(), state=state, monotonic_timer=lambda: 0.0)
+    deps = RunDependencies(vs_loader=FakeVSLoader())
+    await execution.run_selection_steps(
+        ctx, steps, request=request, prep=prep, state=state, deps=deps
+    )
+    await execution.run_output_steps(ctx, steps, request=request, prep=prep, state=state, deps=deps)
+    return state
 
 
 @pytest.fixture
@@ -61,7 +85,7 @@ def render_capture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str,
     return render_capture
 
 
-def test_output_phases_use_reselected_metric_metadata_after_real_initial_selection(
+async def test_output_phases_use_reselected_metric_metadata_after_real_initial_selection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, render_capture: dict[str, Any]
 ) -> None:
     install_fake_frame_render(monkeypatch)
@@ -75,26 +99,15 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     luminance[1] = 0.01
     luminance[50] = 0.99
     luminance[60] = 1.0
-    ctx.selection = replace(
-        ctx.selection,
-        analysis_metrics=_frame_metrics(
-            luminance=luminance,
-            motion=[0.0 for _ in range(100)],
-            frame_count=100,
-            fps=ctx.reference.effective_fps,
-        ),
+    metrics = _frame_metrics(
+        luminance=luminance,
+        motion=[0.0 for _ in range(100)],
+        frame_count=100,
+        fps=ctx.reference.effective_fps,
     )
-    assert ctx.selection.analysis_metrics is not None
-    initial_selection = select_frames(
-        metrics=ctx.selection.analysis_metrics,
-        config=ctx.config.analysis,
-    )
-    ctx.selection = replace(ctx.selection, breakdown=initial_selection.breakdown)
-    ctx.selection = replace(
-        ctx.selection, details_by_source_frame=dict(initial_selection.selection_details)
-    )
+    initial_selection = select_frames(metrics=metrics, config=ctx.config.analysis)
 
-    def _fake_align_clips_from_request(
+    async def _fake_align_clips_from_request(
         *_args: object, **_kwargs: object
     ) -> AlignmentOperationOutcome:
         return AlignmentOperationOutcome(
@@ -125,26 +138,23 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
-    align_output = _run_align_phase(
-        ctx,
-        selected_frames=list(initial_selection.frames),
+    monkeypatch.setattr(
+        execution,
+        "select_initial_frame_plan",
+        lambda *a, **kw: FramePlanPhaseOutput(list(initial_selection.frames)),
     )
-    state = ExecutionState(artifacts=RunArtifacts())
-    apply_phase_output(ctx=ctx, state=state, output=align_output)
-
-    render_output = phase_render.run_render_phase(
-        ctx,
-        frames=list(ctx.selection.frames),
-        vs_loader=FakeVSLoader(),
+    monkeypatch.setattr(
+        execution,
+        "run_analyze_phase",
+        lambda *a, **kw: AnalyzePhaseOutput(
+            selected_frames=list(initial_selection.frames),
+            selection_breakdown=initial_selection.breakdown,
+            metrics_cache_hit=False,
+            analysis_metrics=metrics,
+            selection_details_by_source_frame=dict(initial_selection.selection_details),
+        ),
     )
-    apply_phase_output(ctx=ctx, state=state, output=render_output)
-    report_output = phase_post_render.run_report_phase(
-        ctx,
-        frames=list(ctx.selection.frames),
-        render=state.artifacts.render,
-        metadata=None,
-        slowpics_url=None,
-    )
+    state = await _run_selection_and_output(ctx, skip_analysis=False)
 
     assert list(ctx.selection.frames) == [0, 1]
     assert [
@@ -154,7 +164,7 @@ def test_output_phases_use_reselected_metric_metadata_after_real_initial_selecti
     assert [
         selection.selection_label for selection in render_capture["batch_requests"][0].frames
     ] == ["Dark", "Dark"]
-    assert report_output.report_path == expected_report_path
+    assert state.artifacts.report_path == expected_report_path
     report_data = report_capture["report_data"]
     assert [
         (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
@@ -259,7 +269,7 @@ async def test_unresolved_comparison_remains_in_render_report_and_slowpics_membe
     assert captured["slowpics_clip_labels"] == ["Reference", "Encode 1", "Encode 2"]
 
 
-def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_frame(
+async def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_frame(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, render_capture: dict[str, Any]
 ) -> None:
     install_fake_frame_render(monkeypatch)
@@ -269,7 +279,7 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
         update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
 
-    def _fake_align_clips_from_request(
+    async def _fake_align_clips_from_request(
         *_args: object, **_kwargs: object
     ) -> AlignmentOperationOutcome:
         return AlignmentOperationOutcome(
@@ -300,23 +310,10 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
     monkeypatch.setattr(phase_post_render, "generate_report", _fake_generate_report)
 
-    align_output = _run_align_phase(ctx, selected_frames=[0, 66])
-    state = ExecutionState(artifacts=RunArtifacts())
-    apply_phase_output(ctx=ctx, state=state, output=align_output)
-
-    render_output = phase_render.run_render_phase(
-        ctx,
-        frames=list(ctx.selection.frames),
-        vs_loader=FakeVSLoader(),
+    monkeypatch.setattr(
+        execution, "select_initial_frame_plan", lambda *a, **kw: FramePlanPhaseOutput([0, 66])
     )
-    apply_phase_output(ctx=ctx, state=state, output=render_output)
-    output = phase_post_render.run_report_phase(
-        ctx,
-        frames=list(ctx.selection.frames),
-        render=state.artifacts.render,
-        metadata=None,
-        slowpics_url=None,
-    )
+    state = await _run_selection_and_output(ctx, skip_analysis=True)
 
     assert list(ctx.selection.frames) == [16]
     assert [
@@ -324,7 +321,7 @@ def test_run_report_phase_labels_skipped_analysis_alignment_fallback_random_fram
         for request in render_capture["batch_requests"]
     ] == [[96], [16]]
     report_data = captured["report_data"]
-    assert output.report_path == expected_path
+    assert state.artifacts.report_path == expected_path
     assert [
         (detail.label, detail.detail, detail.category) for detail in report_data.frame_details
     ] == [("Frame 16", "Selected comparison frame", "random")]

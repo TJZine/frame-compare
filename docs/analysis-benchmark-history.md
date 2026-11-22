@@ -71,8 +71,8 @@ and successful writes, and benchmark-only sparse candidates bypassed persistence
 
 | Corpus | Analysis source facts | Active rectangle | Diagnostic frame types in the benchmark interval |
 | --- | --- | --- | --- |
-| Witch 4K HDR | HEVC Main 10, `yuv420p10le`, 3840x2160, 24000/1001 fps, 7,116 source frames | Dimension-derived 3600x2160 at `(120, 0)` | 2,006 B, 22 I, 369 P across 2,397 reported frames |
-| Dan Da Dan S02E01 | H.264 High, `yuv420p`, 1920x1080, 24000/1001 fps, 34,502 source frames | Full frame | 1,406 B, 119 I, 875 P across 2,400 frames |
+| 4K HDR film | HEVC Main 10, `yuv420p10le`, 3840x2160, 24000/1001 fps, 7,116 source frames | Dimension-derived 3600x2160 at `(120, 0)` | 2,006 B, 22 I, 369 P across 2,397 reported frames |
+| 1080p animation | H.264 High, `yuv420p`, 1920x1080, 24000/1001 fps, 34,502 source frames | Full frame | 1,406 B, 119 I, 875 P across 2,400 frames |
 
 The NVIDIA diagnostic additionally recorded a GeForce RTX 5080 with driver
 610.62, but it did not prove that CUVID was the effective decoder.
@@ -83,18 +83,20 @@ not combined.
 
 ## Decision ledger
 
+Report file names in this ledger use the case names “4K HDR film” and “1080p animation”, and the evidence commits stored those reports under the source titles.
+
 | Evidence commit | Evidence | Material result | Decision |
 | --- | --- | --- | --- |
 | Historical June record | `analysis-tier-benchmark-warm-index.json` (raw report removed) | Old NumPy quality was 430.34s; dense 320px performance was 130.27s, or 3.30x faster. Bright/motion exact overlap was 10/10; dark was 7/10. | Established the first practical performance direction; superseded by PlaneStats quality and temporal sampling. |
-| `5202aa65` | `analysis-tier-benchmark-witch-baseline.json` (raw report removed) | Old quality median 232.491s versus old performance 115.031s, about 2.02x faster. | Baseline only; schema and both production implementations have since changed. |
+| `5202aa65` | `analysis-tier-benchmark-hdr-film-baseline.json` (raw report removed) | Old quality median 232.491s versus old performance 115.031s, about 2.02x faster. | Baseline only; schema and both production implementations have since changed. |
 | `5866c15f` | combined synchronous/concurrent reports (raw reports removed) | Combined PlaneStats preserved top-50 sets; concurrent traversal did not provide a useful normalized gain. | Kept one synchronous metric traversal; rejected concurrency as a performance lever. |
-| `661c37de` | `quality-planestats-candidate-witch-4k-hdr.json` (raw report removed) | Full-resolution PlaneStats was 64.009s versus NumPy's 235.086s: 3.67x faster. Selected frames and top-50 orderings were exact; maximum motion drift was `8.80e-9`. | Accepted PlaneStats as quality under the practical-equivalence contract. |
-| `00cd9dfd` | `analysis-decoder-candidates-witch-4k-hdr.json` (raw report removed) | Skip-loop-filter was 1.056x and forced max threads 1.029x relative to the dense comparison reference. | Rejected: neither reached the 1.5x minimum and each added complexity or approximation. |
-| `6df04266` | `analysis-all-candidates-witch-4k-hdr.json` (raw report removed) | Normal 25%, 12.5%, and 6.25% sparse candidates measured 2.075x, 3.207x, and 3.735x relative to that report's quality reference. The 6.25% modes retained only 60% of motion selections. | Rejected 6.25% and skip-loop variants; narrowed the final run to normal-decoder 25% and 12.5%. |
-| `6df04266` | `analysis-nvidia-cuvid-request-witch-4k-hdr.json` (raw report removed) | NVIDIA request was 1.204x with 100% category-pool retention, but GPU presence/utilization could not prove the effective decoder. | Diagnostic only; never promoted. |
-| `4f6b4108` | final Witch sparse decision run (raw report removed) | Quality was 27.793s. The 25% candidate was 13.507s (2.058x; 51.40% reduction) with 100% category-pool retention. Exact bright/dark/motion overlap was 1/10, 0/10, and 3/10. The 12.5% candidate was 2.468x but retained only 90% of bright selections. | Accepted 25% as the balanced performance contract; rejected 12.5% as a public mode. |
-| `4f6b4108` | `analysis-nvidia-cuvid-final-witch-4k-hdr.json` (raw report removed) | NVIDIA request was 1.239x with exact selections, but `effective_decoder_proven` remained false. | Rejected from production; the ledger is sufficient evidence. |
-| `7dec388e` | final Dan Da Dan sparse decision run (raw report removed) | Quality was 4.317s. The 25% candidate was 1.717s (2.514x; 60.22% reduction) with 100% category-pool retention but only 1/10 exact overlap in each metric category. The 12.5% candidate was 3.817x with 100% pool retention. | Confirmed that 25% creates a meaningful speed tier on a second corpus. The faster 12.5% result did not outweigh its Witch miss or the cost of another public tradeoff. |
+| `661c37de` | `quality-planestats-candidate-4k-hdr-film.json` (raw report removed) | Full-resolution PlaneStats was 64.009s versus NumPy's 235.086s: 3.67x faster. Selected frames and top-50 orderings were exact; maximum motion drift was `8.80e-9`. | Accepted PlaneStats as quality under the practical-equivalence contract. |
+| `00cd9dfd` | `analysis-decoder-candidates-4k-hdr-film.json` (raw report removed) | Skip-loop-filter was 1.056x and forced max threads 1.029x relative to the dense comparison reference. | Rejected: neither reached the 1.5x minimum and each added complexity or approximation. |
+| `6df04266` | `analysis-all-candidates-4k-hdr-film.json` (raw report removed) | Normal 25%, 12.5%, and 6.25% sparse candidates measured 2.075x, 3.207x, and 3.735x relative to that report's quality reference. The 6.25% modes retained only 60% of motion selections. | Rejected 6.25% and skip-loop variants; narrowed the final run to normal-decoder 25% and 12.5%. |
+| `6df04266` | `analysis-nvidia-cuvid-request-4k-hdr-film.json` (raw report removed) | NVIDIA request was 1.204x with 100% category-pool retention, but GPU presence/utilization could not prove the effective decoder. | Diagnostic only; never promoted. |
+| `4f6b4108` | final 4K HDR film sparse decision run (raw report removed) | Quality was 27.793s. The 25% candidate was 13.507s (2.058x; 51.40% reduction) with 100% category-pool retention. Exact bright/dark/motion overlap was 1/10, 0/10, and 3/10. The 12.5% candidate was 2.468x but retained only 90% of bright selections. | Accepted 25% as the balanced performance contract; rejected 12.5% as a public mode. |
+| `4f6b4108` | `analysis-nvidia-cuvid-final-4k-hdr-film.json` (raw report removed) | NVIDIA request was 1.239x with exact selections, but `effective_decoder_proven` remained false. | Rejected from production; the ledger is sufficient evidence. |
+| `7dec388e` | final 1080p animation sparse decision run (raw report removed) | Quality was 4.317s. The 25% candidate was 1.717s (2.514x; 60.22% reduction) with 100% category-pool retention but only 1/10 exact overlap in each metric category. The 12.5% candidate was 3.817x with 100% pool retention. | Confirmed that 25% creates a meaningful speed tier on a second corpus. The faster 12.5% result did not outweigh its 4K HDR film miss or the cost of another public tradeoff. |
 
 The evidence commits above identify when each report first entered version
 control. The historical JSON schema did not embed the benchmark checkout commit
@@ -109,12 +111,12 @@ decision does not rely on a single central value.
 
 | Corpus | Coverage | Samples | Min / median / max | Population SD | Speedup | Time reduction | Faster pairs |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Witch | Quality, 100% | 2,400 | 27.209 / 27.793 / 28.204 | 0.408 | Reference | Reference | — |
-| Witch | Sparse 25% | 600 | 13.481 / 13.507 / 14.579 | 0.511 | 2.058x | 51.40% | 3/3 |
-| Witch | Sparse 12.5% | 300 | 11.162 / 11.260 / 12.176 | 0.457 | 2.468x | 59.49% | 3/3 |
-| Dan Da Dan | Quality, 100% | 2,400 | 4.142 / 4.317 / 4.353 | 0.092 | Reference | Reference | — |
-| Dan Da Dan | Sparse 25% | 600 | 1.645 / 1.717 / 1.735 | 0.039 | 2.514x | 60.22% | 3/3 |
-| Dan Da Dan | Sparse 12.5% | 300 | 1.127 / 1.131 / 1.169 | 0.019 | 3.817x | 73.80% | 3/3 |
+| 4K HDR film | Quality, 100% | 2,400 | 27.209 / 27.793 / 28.204 | 0.408 | Reference | Reference | — |
+| 4K HDR film | Sparse 25% | 600 | 13.481 / 13.507 / 14.579 | 0.511 | 2.058x | 51.40% | 3/3 |
+| 4K HDR film | Sparse 12.5% | 300 | 11.162 / 11.260 / 12.176 | 0.457 | 2.468x | 59.49% | 3/3 |
+| 1080p animation | Quality, 100% | 2,400 | 4.142 / 4.317 / 4.353 | 0.092 | Reference | Reference | — |
+| 1080p animation | Sparse 25% | 600 | 1.645 / 1.717 / 1.735 | 0.039 | 2.514x | 60.22% | 3/3 |
+| 1080p animation | Sparse 12.5% | 300 | 1.127 / 1.131 / 1.169 | 0.019 | 3.817x | 73.80% | 3/3 |
 
 ## Final sparse selection measurements
 
@@ -124,18 +126,18 @@ and maximum absolute source-frame distance to the closest quality selection.
 
 | Corpus | Coverage | Category | Quality-pool retention | Exact overlap | Miss rate | Tolerance | Nearest distance median / max |
 | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
-| Witch | 25% | Dark | 100% | 0/10 | 90% | 2 frames | 35.5 / 64 |
-| Witch | 25% | Bright | 100% | 1/10 | 90% | 2 frames | 9.5 / 25 |
-| Witch | 25% | Motion | 100% | 3/10 | 70% | 3 frames | 17.0 / 1,202 |
-| Witch | 12.5% | Dark | 100% | 2/10 | 70% | 2 frames | 17.0 / 70 |
-| Witch | 12.5% | Bright | 90% | 0/10 | 100% | 2 frames | 10.5 / 30 |
-| Witch | 12.5% | Motion | 100% | 0/10 | 100% | 3 frames | 25.5 / 1,209 |
-| Dan Da Dan | 25% | Dark | 100% | 1/10 | 80% | 2 frames | 11.0 / 80 |
-| Dan Da Dan | 25% | Bright | 100% | 1/10 | 90% | 2 frames | 35.5 / 87 |
-| Dan Da Dan | 25% | Motion | 100% | 1/10 | 90% | 3 frames | 80.5 / 261 |
-| Dan Da Dan | 12.5% | Dark | 100% | 0/10 | 90% | 2 frames | 56.0 / 80 |
-| Dan Da Dan | 12.5% | Bright | 100% | 0/10 | 80% | 2 frames | 43.5 / 75 |
-| Dan Da Dan | 12.5% | Motion | 100% | 0/10 | 100% | 3 frames | 124.0 / 261 |
+| 4K HDR film | 25% | Dark | 100% | 0/10 | 90% | 2 frames | 35.5 / 64 |
+| 4K HDR film | 25% | Bright | 100% | 1/10 | 90% | 2 frames | 9.5 / 25 |
+| 4K HDR film | 25% | Motion | 100% | 3/10 | 70% | 3 frames | 17.0 / 1,202 |
+| 4K HDR film | 12.5% | Dark | 100% | 2/10 | 70% | 2 frames | 17.0 / 70 |
+| 4K HDR film | 12.5% | Bright | 90% | 0/10 | 100% | 2 frames | 10.5 / 30 |
+| 4K HDR film | 12.5% | Motion | 100% | 0/10 | 100% | 3 frames | 25.5 / 1,209 |
+| 1080p animation | 25% | Dark | 100% | 1/10 | 80% | 2 frames | 11.0 / 80 |
+| 1080p animation | 25% | Bright | 100% | 1/10 | 90% | 2 frames | 35.5 / 87 |
+| 1080p animation | 25% | Motion | 100% | 1/10 | 90% | 3 frames | 80.5 / 261 |
+| 1080p animation | 12.5% | Dark | 100% | 0/10 | 90% | 2 frames | 56.0 / 80 |
+| 1080p animation | 12.5% | Bright | 100% | 0/10 | 80% | 2 frames | 43.5 / 75 |
+| 1080p animation | 12.5% | Motion | 100% | 0/10 | 100% | 3 frames | 124.0 / 261 |
 
 For both corpora and both sparse candidates, luminance and motion values on
 sampled frames had zero maximum absolute error against quality at `1e-12`
@@ -147,10 +149,10 @@ The sampled share of quality's wider extreme pools also favored 25% coverage:
 
 | Corpus | Coverage | Dark / bright / motion extreme frames sampled | Maximum distance to a sample, dark / bright / motion |
 | --- | ---: | ---: | ---: |
-| Witch | 25% | 30.17% / 20.83% / 28.33% | 113 / 113 / 113 frames |
-| Witch | 12.5% | 14.33% / 9.00% / 18.13% | 132 / 131 / 131 frames |
-| Dan Da Dan | 25% | 29.33% / 35.50% / 26.88% | 113 / 112 / 113 frames |
-| Dan Da Dan | 12.5% | 15.67% / 20.00% / 13.75% | 132 / 131 / 132 frames |
+| 4K HDR film | 25% | 30.17% / 20.83% / 28.33% | 113 / 113 / 113 frames |
+| 4K HDR film | 12.5% | 14.33% / 9.00% / 18.13% | 132 / 131 / 131 frames |
+| 1080p animation | 25% | 29.33% / 35.50% / 26.88% | 113 / 112 / 113 frames |
+| 1080p animation | 12.5% | 15.67% / 20.00% / 13.75% | 132 / 131 / 132 frames |
 
 ## Evidence retention policy
 

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import nullcontext, suppress
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import datetime
 
@@ -15,10 +16,12 @@ from frame_compare.orchestration.alignment_report import (
 )
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.execution import (
-    build_execution_phase_plan,
+    RunSteps,
+    progress_step_names,
+    run_output_steps,
+    run_selection_steps,
 )
 from frame_compare.orchestration.execution_types import (
-    ExecutionPhasePlan,
     ExecutionState,
     RunArtifacts,
 )
@@ -30,7 +33,6 @@ from frame_compare.orchestration.phase_selection import (
     shared_range_drop_warning,
     user_frames_outside_shared_range,
 )
-from frame_compare.orchestration.phases import PhaseStatus, execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import (
     rich_phase_label,
@@ -49,6 +51,7 @@ from frame_compare.orchestration.types import (
     RunRequest,
     RunResult,
 )
+from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.utils.cancellation import (
     _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
     cancellation_checkpoint,
@@ -61,6 +64,38 @@ from frame_compare.utils.terminal_theme import WARN, glyphs_for_console, human_c
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = ["RunDependencies", "RunRequest", "RunResult", "execute_run"]
+
+
+@asynccontextmanager
+async def _run_http_client(deps: RunDependencies) -> AsyncGenerator[httpx.AsyncClient]:
+    if deps.http_client is not None:
+        yield deps.http_client
+        return
+
+    client = httpx.AsyncClient()
+    deps.http_client = client
+    try:
+        yield client
+    except BaseException:
+        deps.http_client = None
+        # Preserve the run error. A cancel delivered during close still leaves
+        # the task cancelling for _interrupt_outcome.
+        with suppress(Exception, asyncio.CancelledError):
+            await client.aclose()
+        raise
+    deps.http_client = None
+    with suppress(Exception):
+        await client.aclose()
+
+
+def _interrupt_outcome(error: BaseException) -> BaseException:
+    if isinstance(error, _RunInterrupt) or (
+        isinstance(error, Exception)
+        and is_cancelling()
+        and not isinstance(error, AudioAlignmentCleanupError)
+    ):
+        return asyncio.CancelledError()
+    return error
 
 
 def _emit_dropped_frames_notice(request: RunRequest, frames: tuple[int, ...]) -> None:
@@ -81,6 +116,14 @@ def _combine_shared_range_warnings(warnings: list[RunWarning]) -> tuple[int, ...
             shared_range_drop_warning(frames),
         ]
     return frames
+
+
+def _interrupted_step_label(steps: RunSteps | None) -> str | None:
+    if steps is None:
+        return "Setup"
+    if steps.interrupted_step is None:
+        return None
+    return rich_phase_label(steps.interrupted_step)
 
 
 def _assemble_run_result(
@@ -134,8 +177,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     phase_timings: dict[str, float] = {}
     clip_count = 0
     selected_frame_count: int | None = None
-    phase_plan: ExecutionPhasePlan | None = None
     context: RunContext | None = None
+    steps: RunSteps | None = None
     artifacts: RunArtifacts | None = None
     preflight_warnings: list[RunWarning] = []
     current_preflight_warnings: list[RunWarning] | None = None
@@ -166,7 +209,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         nonlocal artifacts, clip_count, phase_timings, preflight_warnings, run_start
         nonlocal current_preflight_warnings
         nonlocal run_timer_start
-        nonlocal context, phase_plan, selected_frame_count
+        nonlocal context, selected_frame_count, steps
         run_start = local_deps.clock()
         run_timer_start = local_deps.monotonic_timer()
         reporter = local_deps.progress
@@ -231,28 +274,11 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         if prep.config.slowpics.auto_upload and prep.config.slowpics.confirm_upload_after_report:
             state.phase_timings["confirm_slowpics_upload"] = 0.0
 
-        phase_plan = build_execution_phase_plan(
-            request=request,
-            deps=local_deps,
-            prep=prep,
-            state=state,
+        steps = RunSteps(reporter=reporter, state=state, monotonic_timer=local_deps.monotonic_timer)
+        reporter.set_phase_steps(progress_step_names(request, prep.config))
+        await run_selection_steps(
+            context, steps, request=request, prep=prep, state=state, deps=local_deps
         )
-
-        # Publish can be skipped later by confirmation or availability; only its
-        # config switch excludes it from the initial run map.
-        reporter.set_phase_steps(
-            [
-                rich_phase_label(phase.name)
-                for phase in [*phase_plan.before_align, *phase_plan.after_align]
-                if phase.name in {"analyze", "align", "render", "report", "publish"}
-                and (
-                    prep.config.slowpics.auto_upload
-                    if phase.name == "publish"
-                    else phase.skip_condition is None or not phase.skip_condition(prep.config)
-                )
-            ]
-        )
-        await execute_phases(phase_plan.before_align, context, reporter)
         dropped_frames = _combine_shared_range_warnings(state.warnings)
         if prep.config.audio_alignment.enable:
             _emit_dropped_frames_notice(request, dropped_frames)
@@ -289,7 +315,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             no_color=request.no_color,
             verbose=request.verbose,
         )
-        await execute_phases(phase_plan.after_align, context, reporter)
+        await run_output_steps(
+            context, steps, request=request, prep=prep, state=state, deps=local_deps
+        )
         duration_seconds = max(0.0, local_deps.monotonic_timer() - run_timer_start)
         run_end = local_deps.clock()
         result = _assemble_run_result(
@@ -304,51 +332,19 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         return result, run_start, run_end
 
     try:
-        execution_error: Exception | asyncio.CancelledError | None = None
-        owns_client = local_deps.http_client is None
-        client_context = httpx.AsyncClient() if owns_client else nullcontext()
-        try:
-            async with client_context as owned_client:
-                if owned_client is not None:
-                    local_deps.http_client = owned_client
-                try:
-                    result, started_at, completed_at = await _execute_with_deps()
-                    await cancellation_checkpoint()
-                except (_RunInterrupt, asyncio.CancelledError):
-                    # Deliver the queued interrupt before awaited client cleanup.
-                    with suppress(asyncio.CancelledError):
-                        await cancellation_checkpoint()
-                    execution_error = asyncio.CancelledError()
-                    raise execution_error from None
-                except Exception as exc:
-                    execution_error = exc
-                    if is_cancelling():
-                        with suppress(asyncio.CancelledError):
-                            await cancellation_checkpoint()
-                    raise
-        except (Exception, asyncio.CancelledError) as cleanup_error:
-            # Client close can fail while a run failure is already unwinding.
-            if execution_error is not None and cleanup_error is not execution_error:
-                raise execution_error from None
-            raise
-        finally:
-            if owns_client:
-                local_deps.http_client = None
-
-        try:
-            await cancellation_checkpoint()
-            recorded_result = record_completed_run_result(
-                workspace=reserved_workspace,
-                result=result,
-                started_at=started_at,
-                completed_at=completed_at,
-            )
-            await cancellation_checkpoint()
-        except _RunInterrupt:
-            await cancellation_checkpoint()
-            raise asyncio.CancelledError() from None
-        return recorded_result
-    except BaseException as original_error:
+        async with _run_http_client(local_deps):
+            result, started_at, completed_at = await _execute_with_deps()
+        recorded = record_completed_run_result(
+            workspace=reserved_workspace,
+            result=result,
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+        # An interrupt after the completed record is written still fails the run.
+        await cancellation_checkpoint()
+        return recorded
+    except BaseException as error:
+        outcome = _interrupt_outcome(error)
         duration_seconds = (
             0.0
             if run_timer_start is None
@@ -356,7 +352,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         )
         record_failed_run_best_effort(
             workspace=reserved_workspace,
-            error=original_error,
+            error=outcome,
             started_at=run_start,
             completed_at=local_deps.clock,
             duration_seconds=duration_seconds,
@@ -374,20 +370,18 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             local_deps.on_failed_alignment_diagnostics is not None
             and artifacts is not None
             and artifacts.alignment_diagnostics_dir is not None
-            and isinstance(original_error, Exception)
+            and isinstance(outcome, Exception)
         ):
             with suppress(Exception):
                 local_deps.on_failed_alignment_diagnostics(artifacts.alignment_diagnostics_dir)
-        if local_deps.on_interrupted is not None and is_run_interruption(original_error):
-            phase_label = _interrupted_phase_label(phase_plan)
+        if local_deps.on_interrupted is not None and is_run_interruption(outcome):
             planned_frames = selected_frame_count
             if planned_frames is None:
-                analysis = request.inputs.config.analysis
-                planned_frames = analysis.requested_frame_count
+                planned_frames = request.inputs.config.analysis.requested_frame_count
             with suppress(Exception):
                 local_deps.on_interrupted(
                     InterruptedRun(
-                        phase=phase_label,
+                        phase=_interrupted_step_label(steps),
                         workspace=reserved_workspace,
                         planned_screenshots=planned_frames * clip_count,
                         analysis_cache_written=(
@@ -398,13 +392,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                         ),
                     )
                 )
-        raise
-
-
-def _interrupted_phase_label(plan: ExecutionPhasePlan | None) -> str | None:
-    if plan is None:
-        return "Setup"
-    for phase in (*plan.before_align, *plan.after_align):
-        if phase.status == PhaseStatus.INTERRUPTED:
-            return rich_phase_label(phase.name)
-    return None
+        if outcome is error:
+            raise
+        raise outcome from None

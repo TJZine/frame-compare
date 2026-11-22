@@ -87,10 +87,7 @@ from frame_compare.services.types import (
     AlignmentResult,
     ComparisonResolution,
 )
-from frame_compare.utils.cancellation import (
-    _RunInterrupt,  # pyright: ignore[reportPrivateUsage] - private coroutine-boundary marker
-    cancellation_checkpoint,
-)
+from frame_compare.utils.cancellation import cancellation_checkpoint
 from frame_compare.utils.progress import LogProgressReporter
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.run_warnings import RunWarning
@@ -1029,170 +1026,157 @@ async def align_clips_from_request(
     on_diagnostics_written: Callable[[Path], None] | None = None,
 ) -> AlignmentOperationOutcome:
     """Align clips from the typed request seam with shared previous-offset reuse."""
-    try:
-        await cancellation_checkpoint()
-        reference = request.reference.path
-        comparisons = [comparison.path for comparison in request.comparisons]
-        _check_duplicate_stems(comparisons)
-        validate_previous_offsets_policy(request, config)
+    reference = request.reference.path
+    comparisons = [comparison.path for comparison in request.comparisons]
+    _check_duplicate_stems(comparisons)
+    validate_previous_offsets_policy(request, config)
 
-        if progress:
-            progress.set_description("Align · checking saved offsets")
+    if progress:
+        progress.set_description("Align · checking saved offsets")
 
-        fps_reference = Fraction(
-            request.reference.effective_fps_num,
-            request.reference.effective_fps_den,
-        )
-        resolutions, completed_confirmed_reuse = apply_shared_reuse(
-            request=request,
-            unresolved_comparisons=request.comparisons,
-            cache_results=config.cache_results,
+    fps_reference = Fraction(
+        request.reference.effective_fps_num,
+        request.reference.effective_fps_den,
+    )
+    resolutions, completed_confirmed_reuse = apply_shared_reuse(
+        request=request,
+        unresolved_comparisons=request.comparisons,
+        cache_results=config.cache_results,
+        progress=progress,
+        no_color=config.no_color,
+        verbose=verbose,
+    )
+
+    requested_comparisons = [
+        comparison
+        for comparison in request.comparisons
+        if alignment_key(reference, comparison.path) not in resolutions
+    ]
+    if requested_comparisons:
+        _record_resolved_alignment_request_progress(
             progress=progress,
-            no_color=config.no_color,
-            verbose=verbose,
-        )
-
-        requested_comparisons = [
-            comparison
-            for comparison in request.comparisons
-            if alignment_key(reference, comparison.path) not in resolutions
-        ]
-        if requested_comparisons:
-            _record_resolved_alignment_request_progress(
-                progress=progress,
-                request=request,
-                resolutions=resolutions,
-            )
-            computed = await _await_audio_computation(
-                request=request,
-                requested_comparisons=requested_comparisons,
-                fps_reference=fps_reference,
-                progress=progress,
-                vs_loader=vs_loader,
-            )
-            resolutions.update(computed)
-            if isinstance(progress, LogProgressReporter):
-                descriptions = _request_progress_descriptions(request)
-                for comparison in requested_comparisons:
-                    _record_alignment_progress(
-                        progress=progress,
-                        result=resolutions[alignment_key(reference, comparison.path)].result,
-                        description=descriptions[comparison.path],
-                    )
-        else:
-            _record_resolved_alignment_request_progress(
-                progress=progress,
-                request=request,
-                resolutions=resolutions,
-                cached_audio_evidence_only=True,
-            )
-
-        initial_outcome: AlignmentReviewOutcome = (
-            "pending"
-            if (config.use_vsview or config.force_interactive) and not completed_confirmed_reuse
-            else "not_requested"
-        )
-        diagnostic_keys = _write_run_diagnostics(
             request=request,
             resolutions=resolutions,
-            review_outcome=initial_outcome,
-            emit_success_log=json_output,
         )
-        if (
-            diagnostic_keys
-            and on_diagnostics_written is not None
-            and request.alignment_diagnostics_dir is not None
-        ):
-            on_diagnostics_written(request.alignment_diagnostics_dir)
-        present_alignment_evidence(
+        computed = await _await_audio_computation(
             request=request,
-            resolutions=resolutions,
-            config=config,
+            requested_comparisons=requested_comparisons,
+            fps_reference=fps_reference,
             progress=progress,
-            verbose=verbose,
-            quiet=quiet,
-            json_output=json_output,
-            review_pending=initial_outcome == "pending",
-        )
-        if completed_confirmed_reuse and not requested_comparisons:
-            return AlignmentOperationOutcome(
-                ordered_results(request, resolutions),
-                resolutions=tuple(
-                    resolutions[alignment_key(reference, comp.path)] for comp in request.comparisons
-                ),
-            )
-
-        audio_review_by_key = (
-            _build_audio_review_map(
-                reference=reference,
-                comparisons=comparisons,
-                resolutions=resolutions,
-            )
-            if initial_outcome == "pending"
-            else {}
-        )
-        review = maybe_launch_alignment_vsview(
-            reference=request.reference,
-            comparisons=request.comparisons,
-            audio_review_by_key=audio_review_by_key,
-            cache_dir=request.generated_dir,
-            config=config,
-            progress=progress,
-            frame_props_by_stem=frame_props_by_stem,
             vs_loader=vs_loader,
-            verbose=verbose,
         )
-        confirmed_offsets = review.confirmed_offsets
-        if confirmed_offsets:
-            for comparison in request.comparisons:
-                key = alignment_key(reference, comparison.path)
-                if key in confirmed_offsets:
-                    resolutions[key] = confirm_manual(
-                        resolutions[key],
-                        frame_offset=confirmed_offsets[key],
-                        fps_reference=fps_reference,
-                        reference_clip=reference,
-                        comparison_clip=comparison.path,
-                    )
+        resolutions.update(computed)
+        if isinstance(progress, LogProgressReporter):
+            descriptions = _request_progress_descriptions(request)
+            for comparison in requested_comparisons:
+                _record_alignment_progress(
+                    progress=progress,
+                    result=resolutions[alignment_key(reference, comparison.path)].result,
+                    description=descriptions[comparison.path],
+                )
+    else:
+        _record_resolved_alignment_request_progress(
+            progress=progress,
+            request=request,
+            resolutions=resolutions,
+            cached_audio_evidence_only=True,
+        )
 
-        if initial_outcome == "pending":
-            _write_run_diagnostics(
-                request=request,
-                resolutions=resolutions,
-                review_outcome=review.review_outcome,
-                emit_success_log=json_output,
-                only_keys=diagnostic_keys,
-                confirmed_frame_pairs=review.confirmed_frame_pairs,
-            )
-
-        # Observe cancellation first, after the worker has completed owned cleanup.
-        await cancellation_checkpoint()
-        if config.cache_results:
-            candidate = prepare_reusable_source_set(request, resolutions)
-            if candidate is not None:
-                written = save_reusable_offsets(request, candidate)
-                if (
-                    written
-                    and on_reusable_cache_written is not None
-                    and can_reuse_written_offsets_without_confirmation(
-                        request, candidate.resolutions
-                    )
-                ):
-                    on_reusable_cache_written()
-
+    initial_outcome: AlignmentReviewOutcome = (
+        "pending"
+        if (config.use_vsview or config.force_interactive) and not completed_confirmed_reuse
+        else "not_requested"
+    )
+    diagnostic_keys = _write_run_diagnostics(
+        request=request,
+        resolutions=resolutions,
+        review_outcome=initial_outcome,
+        emit_success_log=json_output,
+    )
+    if (
+        diagnostic_keys
+        and on_diagnostics_written is not None
+        and request.alignment_diagnostics_dir is not None
+    ):
+        on_diagnostics_written(request.alignment_diagnostics_dir)
+    present_alignment_evidence(
+        request=request,
+        resolutions=resolutions,
+        config=config,
+        progress=progress,
+        verbose=verbose,
+        quiet=quiet,
+        json_output=json_output,
+        review_pending=initial_outcome == "pending",
+    )
+    if completed_confirmed_reuse and not requested_comparisons:
         return AlignmentOperationOutcome(
             ordered_results(request, resolutions),
-            review.summary,
             resolutions=tuple(
                 resolutions[alignment_key(reference, comp.path)] for comp in request.comparisons
             ),
         )
-    except _RunInterrupt:
-        await cancellation_checkpoint()
-        raise asyncio.CancelledError() from None
-    except (AudioAlignmentCleanupError, AudioAlignmentCancellationError):
-        raise
-    except Exception:
-        # Any ordinary alignment failure can become a warning at orchestration.
-        await cancellation_checkpoint()
-        raise
+
+    audio_review_by_key = (
+        _build_audio_review_map(
+            reference=reference,
+            comparisons=comparisons,
+            resolutions=resolutions,
+        )
+        if initial_outcome == "pending"
+        else {}
+    )
+    review = maybe_launch_alignment_vsview(
+        reference=request.reference,
+        comparisons=request.comparisons,
+        audio_review_by_key=audio_review_by_key,
+        cache_dir=request.generated_dir,
+        config=config,
+        progress=progress,
+        frame_props_by_stem=frame_props_by_stem,
+        vs_loader=vs_loader,
+        verbose=verbose,
+    )
+    confirmed_offsets = review.confirmed_offsets
+    if confirmed_offsets:
+        for comparison in request.comparisons:
+            key = alignment_key(reference, comparison.path)
+            if key in confirmed_offsets:
+                resolutions[key] = confirm_manual(
+                    resolutions[key],
+                    frame_offset=confirmed_offsets[key],
+                    fps_reference=fps_reference,
+                    reference_clip=reference,
+                    comparison_clip=comparison.path,
+                )
+
+    if initial_outcome == "pending":
+        _write_run_diagnostics(
+            request=request,
+            resolutions=resolutions,
+            review_outcome=review.review_outcome,
+            emit_success_log=json_output,
+            only_keys=diagnostic_keys,
+            confirmed_frame_pairs=review.confirmed_frame_pairs,
+        )
+
+    # Observe cancellation first, after the worker has completed owned cleanup.
+    await cancellation_checkpoint()
+    if config.cache_results:
+        candidate = prepare_reusable_source_set(request, resolutions)
+        if candidate is not None:
+            written = save_reusable_offsets(request, candidate)
+            if (
+                written
+                and on_reusable_cache_written is not None
+                and can_reuse_written_offsets_without_confirmation(request, candidate.resolutions)
+            ):
+                on_reusable_cache_written()
+
+    return AlignmentOperationOutcome(
+        ordered_results(request, resolutions),
+        review.summary,
+        resolutions=tuple(
+            resolutions[alignment_key(reference, comp.path)] for comp in request.comparisons
+        ),
+    )

@@ -40,7 +40,7 @@ async def test_cache_preserves_order_and_separates_search_and_alias_entries(
 ) -> None:
     cache = TmdbCache(tmp_path / "cache" / "tmdb.toml")
     endpoint = "https://api.example.test/search/movie"
-    params = _search_params("The Witch")
+    params = _search_params("The Wexmoor")
 
     await cache.store_search(endpoint, params, [_movie(2, "Second"), _movie(1, "First")])
     await cache.store_alternative_titles(
@@ -49,7 +49,7 @@ async def test_cache_preserves_order_and_separates_search_and_alias_entries(
         ["Zed", "Alpha", "Zed"],
     )
 
-    assert cache.get_search(endpoint, _search_params("The Witch", "b" * 32)) == [
+    assert cache.get_search(endpoint, _search_params("The Wexmoor", "b" * 32)) == [
         _movie(2, "Second"),
         _movie(1, "First"),
     ]

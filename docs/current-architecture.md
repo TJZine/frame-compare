@@ -70,22 +70,21 @@ only the post-render ordering:
 `frame_plan -> analyze -> align -> render -> metadata -> report -> confirm_slowpics_upload -> publish -> post_report_cleanup`.
 The non-confirmed flow keeps the normal ordering above.
 
-`frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
-Phase task functions return explicit phase-output DTOs. `execution.py` owns phase
-plan construction and timed phase execution, while
-`frame_compare.orchestration.phase_output_application` applies phase outputs
-back to `ExecutionState`, `RunContext`, or collected artifacts at phase
-boundaries. `frame_compare.orchestration.types` owns the public run request,
+`frame_compare.orchestration.context.RunContext` carries the shared run state across steps.
+`execution.py` runs the steps in order through `RunSteps`, which handles progress,
+timing and warning-only errors. Each step returns an explicit output, and
+`execution.py` applies it to the run state or collected artifacts after the step
+returns. `frame_compare.orchestration.types` owns the public run request,
 dependency, result, and callback DTO contract; internal phase outputs and
 mutable preparation/execution carriers live in
 `frame_compare.orchestration.execution_types`.
 
 `RunContext.selection` is one frozen `SelectionSnapshot`: comparison-relative frame
 indices, reference-source breakdown/details, and analysis-source metric evidence.
-`apply_phase_output` is its only production writer. FramePlan clears metric evidence,
-Analyze replaces the full snapshot, and Align replaces frames/evidence together with
+`execution.py` is its only production writer. FramePlan clears metric evidence,
+Analyze replaces the full snapshot, and Align updates the selection together with
 the reference/comparison trims. Align, render, publish, and report read the current
-snapshot when they execute; phase construction does not capture a mutable frame list.
+snapshot when they execute.
 `selection_rows` maps comparison frames through the current reference trim and supplies
 the same source-detail/label lookup to render overlays and report frame details.
 
@@ -119,11 +118,13 @@ Current phase-family owners are intentionally explicit:
 - `frame_compare.orchestration.phase_post_render`: metadata, publish, report, confirmation, and cleanup phase bodies
 
 Run cancellation stays on the main task. `utils.cancellation` supplies synchronous
-admission/publication checks and asynchronous checkpoints; synchronous owners raise
-a private control-flow marker, and their async boundaries deliver task cancellation
-before awaited cleanup. `utils.terminal` temporarily restores interruptible input
-only for a main-thread TTY using the asyncio Runner's SIGINT handler, then restores
-that exact handler. Persistence owners pass guards to atomic writes and abort checks
+admission and publication checks and asynchronous checkpoints. Synchronous owners
+raise a private control-flow marker. The coordinator converts that marker or an
+ordinary error that escapes while the run is cancelling into task cancellation
+once. An `AudioAlignmentCleanupError` keeps its own failure outcome.
+`utils.terminal` temporarily restores interruptible input only for a main-thread
+TTY using the asyncio Runner's SIGINT handler, then restores that exact handler.
+Persistence owners pass guards to atomic writes and abort checks
 to lock polling; generic utilities do not inspect the ambient task. Failure records
 remain writable. Main-task metric, active-rectangle sampling and source-benchmark
 loops check before each frame request. Render expansion checks admission before
@@ -150,12 +151,10 @@ stateless libplacebo node for still preparation. Quality mode continues to use f
 per-frame mapper state, and fast mode never routes through the experimental
 `independent=1` path. The speed setting is an ordinary persisted color field, but it
 does not change preset values or output encoding. Each parallel render batch owns one
-`threading.Event`: its main-thread 50 ms future-wait poll sets it on cancellation
-or a real failure, and workers check it before each render frame. Stopped units
-retain completed frame results as cleanup outcomes; real-failure ordering remains authoritative.
-The accepted admission bound is one poll interval plus 100 ms scheduling slack
-after main-thread interrupt observation; additional frame counts inside that
-window are observations rather than acceptance limits.
+`threading.Event`. The main thread sets it on cancellation or a real failure, and
+workers check it before each render frame. PNGs already written by a stopped
+unit stay on disk. The scheduler discards the unit's partial results, so a
+partial clip is never published. Real-failure ordering remains authoritative.
 Sequential render frames also check admission. VSView polls its blocking waits
 and reaps owned work.
 A native frame request already in flight has no guaranteed finite drain deadline;
@@ -1128,26 +1127,17 @@ final resolved upload title;
 it does not independently fall back through metadata or screenshot directories.
 
 `frame_compare.services.slowpics_webhook` owns isolated outbound webhook
-delivery for successful slow.pics uploads. It validates strict external HTTPS
-targets, rejects disallowed IP literals and DNS answers, connects to a
-prevalidated pinned address while preserving TLS verification for the original
-hostname, sends the JSON `content` payload without redirects, and does not reuse
-slow.pics client cookies, headers, proxy/environment trust, or transport state.
-It identifies the versioned client, applies an absolute per-attempt deadline and
-bounded pre-send/5xx backoff, fails permanent certificate-verification errors,
-honors only short valid `Retry-After` rate-limit delays, and does not retry after
-request transmission when the delivery outcome is unknown so it does not knowingly
-create duplicate notifications.
-Default hostname resolution runs fixed standard-library code in an owned
-current-interpreter subprocess. Its Python runtime and packaged startup
-configuration are trusted: portable `._pth` configuration can enable `site` even
-with `-S`. The child environment excludes application configuration and secrets;
-only required operating-system startup values are retained. It receives the hostname and port,
-never the webhook URL or payload, and returns bounded address data for the parent's
-existing public-address validation. Resolution has a separate ten-second deadline;
-cancellation polls the stop signal and terminates, escalates, and boundedly reaps
-the resolver before the owning task returns. Injected callables remain caller-owned
-and must provide their own blocking-operation deadlines.
+delivery for successful slow.pics uploads. It validates the HTTPS URL and sends
+the JSON `content` payload with a versioned `User-Agent`. Each delivery creates a
+fresh `httpx.AsyncClient` with redirects disabled, `trust_env=False`, system
+certificate verification and a 10-second timeout per network operation. The
+client reads only response status and headers. Delivery makes at most three
+attempts. Pre-send connection errors and timeouts and HTTP 5xx responses use
+bounded backoff. HTTP 429 retries require a valid numeric `Retry-After` of at most
+10 seconds. When a transport error leaves the delivery outcome uncertain, delivery
+stops to avoid a duplicate notification. The CLI contract's
+[slow.pics Webhook Policy](current-cli-contract.md#slowpics-webhook-policy)
+defines URL validation and retry behavior.
 Webhook failures are warning-only and redact configured URL details. Typed safe
 failure categories and optional HTTP status codes feed structured diagnostics without
 retaining the configured endpoint.
@@ -1555,7 +1545,7 @@ frame. There are no flattened request ranges or label-map reconstruction steps.
 
 The scheduler runs at most two clip jobs at once. Each clip renders its frames
 in order. Each completed frame advances the screenshot count under a lock.
-Parallel cancellation polls every 50 ms, closes admission to new frames,
+During parallel cancellation the scheduler closes admission to new frames,
 cancels unstarted work, and drains owned work before returning. Real failures
 are selected by lowest clip-job index.
 
@@ -1641,11 +1631,14 @@ reconstructing or validating parallel path/fact maps.
 - Keep CLI import time light; do not eagerly import VS-dependent runtime code in `cli/entry.py`.
 - Keep config/env loading centralized; do not add ad hoc env reads deep in domain logic.
 - The orchestration coordinator creates and closes the default shared HTTP client
-  when no client is injected through `RunDependencies`; injected clients remain
-  caller-owned. `runner` bridges sync callers to async orchestration. Doctor checks
+  when no client is injected through `RunDependencies`. Injected clients remain
+  caller-owned. An ordinary error closing the owned client leaves the run outcome intact.
+  An interrupt can cut the close short, and the run ends as interrupted or with
+  the alignment cleanup error.
+  `runner` bridges sync callers to async orchestration. Doctor checks
   runtime availability and local TMDB configuration without HTTP requests;
   slow.pics connectivity belongs to the browser-compatible publishing flow.
-  Webhook delivery keeps its isolated pinned HTTPS transport.
+  Webhook delivery uses an isolated `httpx` client.
 - Keep persistence deterministic: stable ordering, stable JSON/TOML output, atomic writes where owners already use them.
 - Respect the layered import contracts and sibling-domain independence.
 - Treat Docker and Windows portable flows as first-class runtime surfaces, not optional afterthoughts.

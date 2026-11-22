@@ -465,14 +465,14 @@ def test_emit_frame_alignment_report_uses_short_names_in_normal_mode_and_canonic
 ) -> None:
     comparison = AlignmentReportComparison(
         label="Canonical Encode",
-        presentation_name="2160p | ATV WEB-DL | DV | Kitsune",
+        presentation_name="2160p | ATV WEB-DL | DV | Bittern",
         alignment_source="computed",
         relative_offset_frames=2,
         reference_row_zero_source_frame=2,
         comparison_row_zero_source_frame=0,
         reference_trim_range=(2, 99),
         comparison_trim_range=(0, 97),
-        short_name="Kitsune",
+        short_name="Bittern",
         reference_short_name="SCOPE",
     )
 
@@ -486,9 +486,9 @@ def test_emit_frame_alignment_report_uses_short_names_in_normal_mode_and_canonic
         no_color=True,
     )
     normal = capsys.readouterr().err
-    assert "Kitsune" in normal
-    assert "SCOPE 2..99 · Kitsune 0..97" in normal
-    assert "2160p | ATV WEB-DL | DV | Kitsune" not in normal
+    assert "Bittern" in normal
+    assert "SCOPE 2..99 · Bittern 0..97" in normal
+    assert "2160p | ATV WEB-DL | DV | Bittern" not in normal
     assert "Canonical Encode" not in normal
 
     emit_frame_alignment_report(
@@ -503,7 +503,7 @@ def test_emit_frame_alignment_report_uses_short_names_in_normal_mode_and_canonic
     )
     verbose = capsys.readouterr().err
     assert "Canonical Encode" in verbose
-    assert "SCOPE 2..99 · Kitsune 0..97" in verbose
+    assert "SCOPE 2..99 · Bittern 0..97" in verbose
 
 
 @pytest.mark.parametrize("columns", [60, 80, 120, 240])

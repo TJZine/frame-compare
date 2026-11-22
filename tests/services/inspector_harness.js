@@ -278,10 +278,10 @@ async function inspectorContracts() {
 
     const tonemappedClip = {
         display: {
-            primary: 'Example (2026) · 2160p · ATV WEB-DL · DV HDR10+ · Kitsune',
-            release: '2160p · ATV WEB-DL · DV HDR10+ · Kitsune',
-            control: '2160p · ATV WEB-DL · DV HDR10+ · Kitsune',
-            micro: 'ATV WEB-DL · DV HDR10+ · Kitsune',
+            primary: 'Example (2026) · 2160p · ATV WEB-DL · DV HDR10+ · Bittern',
+            release: '2160p · ATV WEB-DL · DV HDR10+ · Bittern',
+            control: '2160p · ATV WEB-DL · DV HDR10+ · Bittern',
+            micro: 'ATV WEB-DL · DV HDR10+ · Bittern',
             filename: 'example.mkv',
         },
         resolution: [3840, 2160],
@@ -408,7 +408,7 @@ async function inspectorContracts() {
         assert.equal(tableStub.dom.inspectorFrameDetailRow.hidden, true);
         const rows = tableStub.dom.inspectorSourceFrames.children;
         assert.equal(rows.length, 2);
-        assert.equal(rows[0].children[0].children[0].textContent, 'ATV WEB-DL · DV HDR10+ · Kitsune');
+        assert.equal(rows[0].children[0].children[0].textContent, 'ATV WEB-DL · DV HDR10+ · Bittern');
         assert.equal(rows[0].children[0].children[1].textContent, 'Shown left');
         assert.equal(rows[0].children[1].textContent, '8987 / 143487');
         assert.equal(rows[0].children[2].textContent, 'B · DV RPU');
@@ -422,7 +422,7 @@ async function inspectorContracts() {
         assert.equal(cards.length, 2);
         assert.equal(cards[0].children[0].children[0].textContent, 'Reference · shown left');
         assert.equal(cards[0].children[0].children[1].textContent, 'DV HDR');
-        assert.equal(cards[0].children[1].textContent, '2160p · ATV WEB-DL · DV HDR10+ · Kitsune');
+        assert.equal(cards[0].children[1].textContent, '2160p · ATV WEB-DL · DV HDR10+ · Bittern');
         assert.equal(cards[0].children[2].textContent, 'example.mkv');
         const cardRows = cards[0].children[3].children.map(row => ([
             row.children[0].textContent,
@@ -549,7 +549,7 @@ async function inspectorContracts() {
         assert.equal(info.infoOpensIn.textContent, 'Slider');
         assert.deepEqual(
             info.infoDefaultPair.children.map(line => line.textContent),
-            ['ATV WEB-DL · DV HDR10+ · Kitsune', 'My Explicit'],
+            ['ATV WEB-DL · DV HDR10+ · Bittern', 'My Explicit'],
         );
         assert.equal(info.infoClipsShared.hidden, true);
         assert.equal(info.infoClipsShared.textContent, '');
@@ -580,7 +580,7 @@ async function inspectorContracts() {
         assert.equal(tableStub.dom.infoOpensIn.textContent, 'Single');
         assert.deepEqual(
             tableStub.dom.infoDefaultPair.children.map(line => line.textContent),
-            ['My Explicit', 'ATV WEB-DL · DV HDR10+ · Kitsune'],
+            ['My Explicit', 'ATV WEB-DL · DV HDR10+ · Bittern'],
         );
     }
 

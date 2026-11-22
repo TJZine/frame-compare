@@ -139,13 +139,13 @@ async def test_resolve_metadata_returns_none_for_unresolved_results_without_call
     monkeypatch: pytest.MonkeyPatch,
     async_client: httpx.AsyncClient,
 ) -> None:
-    candidates = [_movie(10, "The Witch", 2015), _movie(11, "The Witch", 2016)]
+    candidates = [_movie(10, "The Wexmoor", 2015), _movie(11, "The Wexmoor", 2016)]
     config = MetadataConfig(api_key="a" * 32)
 
     monkeypatch.setattr(
         metadata,
         "parse_filename",
-        Mock(return_value=ParsedMetadata(title="The Witch", year=2015)),
+        Mock(return_value=ParsedMetadata(title="The Wexmoor", year=2015)),
     )
     monkeypatch.setattr(
         metadata,
@@ -153,7 +153,7 @@ async def test_resolve_metadata_returns_none_for_unresolved_results_without_call
         AsyncMock(return_value=ResolutionOutcome(selected=None, candidates=candidates)),
     )
 
-    result = await resolve_metadata(["The.Witch.2015.mkv"], config, async_client)
+    result = await resolve_metadata(["The.Wexmoor.2015.mkv"], config, async_client)
 
     assert result is None
 

@@ -19,7 +19,7 @@ comparison_videos/
 └── hlg10-comparison.ts
 ```
 
-The terminal samples below use three releases of the same Black Sails episode.
+The terminal samples below use three releases of the same TV episode.
 
 Supported extensions are `.mkv`, `.mp4`, `.avi`, `.m2ts`, and `.ts`, matched
 case-insensitively.
@@ -111,10 +111,10 @@ open anything.
 Will use
   Workspace: /workspace
   Input directory: comparison_videos
-  Sources (3): Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv,
-Black.Sails.S01E08.VIII.1080p.AMZN.WEB-DL.DDP.5.1.H.264-GNOME.mkv,
-Black.Sails.S01E08.VIII.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-NOGRP.mkv
-  Reference: Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv -> Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv
+  Sources (3): Amber.Reach.S02E05.1080p.Bluray.DD5.1.x264-OwL.mkv,
+Amber.Reach.S02E05.Tide.1080p.AMZN.WEB-DL.DDP.5.1.H.264-HERON.mkv,
+Amber.Reach.S02E05.Tide.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-EGRET.mkv
+  Reference: Amber.Reach.S02E05.1080p.Bluray.DD5.1.x264-OwL.mkv -> Amber.Reach.S02E05.1080p.Bluray.DD5.1.x264-OwL.mkv
   Frame selection: specific frames, random frames, dark frames, bright frames, motion frames
   Specific frames: 0, 120
   Frame counts: specific=2, random=4, dark=2, bright=2, motion=2
@@ -163,10 +163,10 @@ Use the report and screenshot paths in the completed-run summary.
 
 ``` { .text .fc-output title="Output · frame-compare run" }
 ╭─ ! Comparison complete · 1 warning
-│ report          generated/Black Sails S01E08 - EbP, GNOME, NOGRP/report.html
-│ screenshots     generated/Black Sails S01E08 - EbP, GNOME, NOGRP/screenshots  30 files
-│ alignment       GNOME +147f · NOGRP +0f · audio
-│ diagnostics     generated/Black Sails S01E08 - EbP, GNOME, NOGRP/alignment_diagnostics
+│ report          generated/Amber Reach S02E05 - OwL, HERON, EGRET/report.html
+│ screenshots     generated/Amber Reach S02E05 - OwL, HERON, EGRET/screenshots  30 files
+│ alignment       HERON +147f · EGRET +0f · audio
+│ diagnostics     generated/Amber Reach S02E05 - OwL, HERON, EGRET/alignment_diagnostics
 │
 │ run             10 of 12 frames · 3 sources · analysis computed
 │ time            8m 56s total

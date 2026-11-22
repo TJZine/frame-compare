@@ -100,18 +100,18 @@ def test_report_payload_v14_preserves_comparison_and_source_frame_domains(
     assert payload["rendering"]["overlay_mode"] == "diagnostic"
 
 
-_EBP = "Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv"
-_GNOME = "Black.Sails.S01E08.VIII.1080p.AMZN.WEB-DL.DDP.5.1.H.264-GNOME.mkv"
-_DUB = "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv"
+_OWL = "Amber.Reach.S02E05.1080p.Bluray.DD5.1.x264-OwL.mkv"
+_HERON = "Amber.Reach.S02E05.Tide.1080p.AMZN.WEB-DL.DDP.5.1.H.264-HERON.mkv"
+_DUB = "Constructed.LanternMoth-Wagtail.english-dub-only.mkv"
 
 
 @pytest.mark.parametrize(
     ("filenames", "tmdb_title", "expected"),
     [
-        ([_EBP, _GNOME], "Les Voiles Noires", "Les Voiles Noires S01E08"),
-        ([_EBP, _GNOME], None, "Black Sails S01E08"),
-        ([_EBP, _DUB], None, "EbP vs english-dub-only"),
-        ([_EBP, _DUB, _GNOME], None, "EbP vs english-dub-only +1 more"),
+        ([_OWL, _HERON], "Bernsteinbucht", "Bernsteinbucht S02E05"),
+        ([_OWL, _HERON], None, "Amber Reach S02E05"),
+        ([_OWL, _DUB], None, "OwL vs english-dub-only"),
+        ([_OWL, _DUB, _HERON], None, "OwL vs english-dub-only +1 more"),
     ],
     ids=["tmdb-with-episode", "common-content", "mixed-content", "mixed-content-with-more"],
 )
@@ -134,9 +134,9 @@ def test_report_payload_title(
                 micro=(
                     "english-dub-only"
                     if filename == _DUB
-                    else "GNOME"
-                    if filename == _GNOME
-                    else "EbP"
+                    else "HERON"
+                    if filename == _HERON
+                    else "OwL"
                 ),
             ),
         )
@@ -149,7 +149,7 @@ def test_report_payload_title(
             base.rendering, geometry_by_label={filename: _geometry() for filename in filenames}
         ),
         metadata=(
-            TmdbMetadata(123, tmdb_title, "Black Sails", 2014, "tv")
+            TmdbMetadata(123, tmdb_title, "Amber Reach", 2014, "tv")
             if tmdb_title is not None
             else None
         ),

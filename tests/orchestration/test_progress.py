@@ -1,15 +1,14 @@
 import asyncio
 import sys
 from io import StringIO
-from pathlib import Path
 
 import pytest
 from rich.console import Console
 from rich.text import Text
 
 import frame_compare.utils.progress as progress_module
-from frame_compare.orchestration.context import RunContext
-from frame_compare.orchestration.phases import Phase, execute_phases
+from frame_compare.orchestration.execution import RunSteps, StepCompletion
+from frame_compare.orchestration.execution_types import ExecutionState
 from frame_compare.orchestration.progress import (
     select_reporter,
 )
@@ -55,11 +54,7 @@ def test_select_reporter_no_color_uses_rich_for_detected_tty(
     assert "\x1b[" not in output.getvalue()
 
 
-def test_fast_successful_align_keeps_its_phase_line(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from .phase_task_helpers import _context
-
+def test_fast_successful_align_keeps_its_phase_line(monkeypatch: pytest.MonkeyPatch) -> None:
     output = StringIO()
     monkeypatch.setattr(
         progress_module,
@@ -69,11 +64,17 @@ def test_fast_successful_align_keeps_its_phase_line(
     monkeypatch.setattr(progress_module, "monotonic", lambda: 0.0)
     reporter = RichProgressReporter()
 
-    async def align(_context: RunContext) -> None:
-        return
-
-    phase = Phase("align", align, success_summary="source +0f · reused from last run")
-    asyncio.run(execute_phases([phase], _context(tmp_path), reporter))
+    steps = RunSteps(reporter=reporter, state=ExecutionState(), monotonic_timer=lambda: 0.0)
+    asyncio.run(
+        steps.run(
+            "align",
+            lambda: None,
+            warning_source="alignment",
+            describe=lambda _out, _elapsed: StepCompletion(
+                summary="source +0f · reused from last run"
+            ),
+        )
+    )
     assert Text.from_ansi(output.getvalue()).plain.strip() == (
         "✓ Align           source +0f · reused from last run · 0.0 s"
     )

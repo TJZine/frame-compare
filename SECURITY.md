@@ -54,7 +54,7 @@ Frame Compare handles local video files and optional network operations. Key sec
   to the desktop broker and the browser or clipboard handlers it launches.
   The Windows launch and assignment limits are described under
   [external boundaries](docs/current-architecture.md#external-boundaries).
-- **Network Operations**: slow.pics upload and webhook delivery are opt-in, and TMDB lookups run only when an API key is configured. Webhook delivery requires an external HTTPS endpoint, follows no redirects, and keeps the URL out of diagnostics.
+- **Network Operations**: slow.pics upload and webhook delivery are opt-in, and TMDB lookups run only when an API key is configured. Webhook delivery requires an HTTPS URL, follows no redirects, and keeps the URL out of diagnostics.
 - **Release integrity.** The Windows release path independently rebuilds and
   compares the portable ZIP, scans the verified artifact before signing the
   canonical update manifest, and separates signing from publication. See the

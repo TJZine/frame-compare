@@ -191,9 +191,9 @@ def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
         request,
         reference=replace(
             request.reference,
-            presentation_name="2160p | PMTP WEB-DL | DV HDR10+ | Kitsune",
+            presentation_name="2160p | PMTP WEB-DL | DV HDR10+ | Bittern",
         ),
-        presentation_content="Avatar Aang The Last Airbender (2026)",
+        presentation_content="Copper Kite The Last Lamplight (2026)",
     )
     prompt_input = _prompt_input(request)
     prompt_input = replace(
@@ -202,7 +202,7 @@ def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
         rows=(
             replace(
                 prompt_input.rows[0],
-                short_name="Kitsune",
+                short_name="Bittern",
             ),
         ),
     )
@@ -215,9 +215,9 @@ def test_prompt_renders_prebuilt_compact_identity_with_cache_provenance(
     )
     output = stderr.getvalue()
     assert "Reuse previous offsets?" in output
-    assert "Avatar Aang The Last Airbender (2026)" not in output
+    assert "Copper Kite The Last Lamplight (2026)" not in output
     assert "PMTP WEB-DL" not in output
-    assert "Kitsune" in output
+    assert "Bittern" in output
     assert "ATV WEB-DL" not in output
     assert str(request.reference.path) not in output
     assert str(request.comparisons[0].path) not in output

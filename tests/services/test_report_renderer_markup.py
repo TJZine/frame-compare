@@ -105,9 +105,9 @@ def test_build_html_report_information_content_counts_frames(
     [
         ("Reference micro", "Reference control", "Reference micro · Reference control"),
         (
-            "AMZN WEB-DL · DV HDR · FLUX",
-            "2160p · AMZN WEB-DL · DV HDR · FLUX",
-            "AMZN WEB-DL · DV HDR · FLUX · 2160p",
+            "AMZN WEB-DL · DV HDR · LARK",
+            "2160p · AMZN WEB-DL · DV HDR · LARK",
+            "AMZN WEB-DL · DV HDR · LARK · 2160p",
         ),
         ("Custom · Cut", "custom · cut", "Custom · Cut"),
     ],
@@ -360,7 +360,7 @@ def test_build_html_generated_timestamp(report_payload: ReportPayload, timestamp
 
 
 def test_build_html_renders_header_metadata(report_payload: ReportPayload) -> None:
-    title = "EbP vs english-dub-only +1 more"
+    title = "OwL vs english-dub-only +1 more"
     html = build_html({**report_payload, "title": title})
     tags = parse_start_tags(html)
     info_modal = parse_info_modal(html)

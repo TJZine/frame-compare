@@ -36,7 +36,7 @@ def _geometry(*, transformed: bool = False) -> RenderedGeometryFacts:
 def _config(
     mode: OverlayMode,
     *,
-    label: str = "CtrlHD",
+    label: str = "WrenHD",
     comparison_frame: int = 1842,
     source_frame: int = 1842,
     source_total_frames: int | None = 143892,
@@ -93,7 +93,7 @@ def _hdr_config(*, dovi: bool = False) -> OverlayConfig:
     )
     return _config(
         OverlayMode.DIAGNOSTIC,
-        label="UHD Blu-ray" if dovi else "CtrlHD",
+        label="UHD Blu-ray" if dovi else "WrenHD",
         source_frame=1855,
         file_size_bytes=int((54.72 if dovi else 17.42) * 1024**3),
         signal=signal,
@@ -124,7 +124,7 @@ def test_file_size_uses_iec_boundaries(size: int, expected: str) -> None:
             "B",
             None,
             None,
-            ["CtrlHD", "Frame 1842 • B-frame • 17.42 GiB"],
+            ["WrenHD", "Frame 1842 • B-frame • 17.42 GiB"],
             id="required_minimal_example-0",
         ),
         pytest.param(
@@ -133,7 +133,7 @@ def test_file_size_uses_iec_boundaries(size: int, expected: str) -> None:
             None,
             None,
             [
-                "CtrlHD",
+                "WrenHD",
                 "Frame 1842/143892 • B-frame",
                 "Selection: Bright",
                 "Source: 3840×2160 • 17.42 GiB",
@@ -181,7 +181,7 @@ def test_file_size_uses_iec_boundaries(size: int, expected: str) -> None:
             None,
             None,
             [
-                "CtrlHD",
+                "WrenHD",
                 "Comparison 1842 → source 1855/143892 • B-frame",
                 "Selection: Bright",
                 "Source: 3840×2160 • 17.42 GiB",
@@ -221,7 +221,7 @@ def test_file_size_uses_iec_boundaries(size: int, expected: str) -> None:
             None,
             None,
             None,
-            ["CtrlHD", "Frame 1842/143892", "Signal: HDR • tonemap off"],
+            ["WrenHD", "Frame 1842/143892", "Signal: HDR • tonemap off"],
             id="unknown_optional_values_are_omitted_without_dangling_separators-0",
         ),
         pytest.param(
@@ -229,7 +229,7 @@ def test_file_size_uses_iec_boundaries(size: int, expected: str) -> None:
             "B",
             None,
             2,
-            ["CtrlHD", "B-frame"],
+            ["WrenHD", "B-frame"],
             id="frame_numbers_can_be_disabled_while_picture_type_remains-0",
         ),
         pytest.param(
@@ -237,7 +237,7 @@ def test_file_size_uses_iec_boundaries(size: int, expected: str) -> None:
             None,
             0,
             2,
-            ["CtrlHD", "Selection: Bright"],
+            ["WrenHD", "Selection: Bright"],
             id="frame_numbers_can_be_disabled_while_picture_type_remains-1",
         ),
     ],

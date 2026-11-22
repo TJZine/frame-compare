@@ -13,12 +13,12 @@ from frame_compare.services.release_identity import ShortNameSource
 from frame_compare.services.run_folder import reserve_run_folder
 from frame_compare.services.types import TmdbMetadata
 
-_EBP = "Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv"
-_GNOME = "Black.Sails.S01E08.VIII.1080p.AMZN.WEB-DL.DDP.5.1.H.264-GNOME.mkv"
-_NOGRP = "Black.Sails.S01E08.VIII.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-NOGRP.mkv"
-_DUB = "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv"
+_OWL = "Amber.Reach.S02E05.1080p.Bluray.DD5.1.x264-OwL.mkv"
+_HERON = "Amber.Reach.S02E05.Tide.1080p.AMZN.WEB-DL.DDP.5.1.H.264-HERON.mkv"
+_EGRET = "Amber.Reach.S02E05.Tide.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-EGRET.mkv"
+_DUB = "Constructed.LanternMoth-Wagtail.english-dub-only.mkv"
 _NOW = datetime(2026, 11, 16, 13, 25, 42).astimezone()
-_BASE = "Black Sails S01E08 - EbP, GNOME"
+_BASE = "Amber Reach S02E05 - OwL, HERON"
 _MINUTE = " (2026-11-16 13.25)"
 _SECOND = " (2026-11-16 13.25.42)"
 _SOURCE = [ShortNameSource(None, "source", True, "source")]
@@ -66,11 +66,11 @@ def test_reserve_run_folder_sanitizes_names(tmp_path: Path, label: str, expected
 
 
 def test_reserve_run_folder_uses_tmdb_series_title_and_reference_episode(tmp_path: Path) -> None:
-    metadata = TmdbMetadata(123, "Les Voiles Noires", "Black Sails", 2014, "tv")
+    metadata = TmdbMetadata(123, "Bernsteinbucht", "Amber Reach", 2014, "tv")
 
-    result = reserve_run_folder(tmp_path, _sources(_EBP, _GNOME), metadata, now=_NOW)
+    result = reserve_run_folder(tmp_path, _sources(_OWL, _HERON), metadata, now=_NOW)
 
-    assert result.path == tmp_path / "Les Voiles Noires S01E08 - EbP, GNOME"
+    assert result.path == tmp_path / "Bernsteinbucht S02E05 - OwL, HERON"
     assert result.naming_source == "tmdb"
     assert result.path.is_dir()
 
@@ -78,10 +78,10 @@ def test_reserve_run_folder_uses_tmdb_series_title_and_reference_episode(tmp_pat
 @pytest.mark.parametrize(
     ("filenames", "name", "naming_source"),
     [
-        ((_EBP, _GNOME, _NOGRP), f"{_BASE}, NOGRP", "parsed_metadata"),
+        ((_OWL, _HERON, _EGRET), f"{_BASE}, EGRET", "parsed_metadata"),
         (
-            (_EBP, _DUB),
-            "Black Sails S01E08 + Constructed DemonSlayer Kitsune - EbP +1",
+            (_OWL, _DUB),
+            "Amber Reach S02E05 + Constructed LanternMoth Wagtail - OwL +1",
             "filename_stems",
         ),
     ],
@@ -106,7 +106,7 @@ def test_reserve_run_folder_preserves_explicit_labels_when_no_title_parses(tmp_p
 @pytest.mark.parametrize(
     ("labels", "name"),
     [
-        (("???", "GNOME"), "Reference, GNOME"),
+        (("???", "HERON"), "Reference, HERON"),
         (("???", "Reference"), "Reference Reference, Comparison 1 Reference"),
     ],
 )
@@ -124,9 +124,9 @@ def test_reserve_run_folder_counts_role_label_omitted_for_length(tmp_path: Path)
     title = "A Motion Picture With An Unusually Long Name"
     metadata = TmdbMetadata(1, title, "Original", 2026, "movie")
 
-    result = reserve_run_folder(tmp_path, _explicit("GNOME", "???"), metadata, now=_NOW)
+    result = reserve_run_folder(tmp_path, _explicit("HERON", "???"), metadata, now=_NOW)
 
-    assert result.folder_name == f"{title} (2026) - GNOME +1"
+    assert result.folder_name == f"{title} (2026) - HERON +1"
     assert result.path.is_dir()
 
 
@@ -157,7 +157,7 @@ def test_reserve_run_folder_claims_timestamp_then_uuid_after_collisions(
 
     monkeypatch.setattr("frame_compare.services.run_folder.uuid.uuid4", lambda: FixedUuid())
 
-    result = reserve_run_folder(tmp_path, _sources(_EBP, _GNOME), now=_NOW)
+    result = reserve_run_folder(tmp_path, _sources(_OWL, _HERON), now=_NOW)
 
     assert result.path == tmp_path / f"{_BASE}{suffix}"
     assert result.base_name == _BASE

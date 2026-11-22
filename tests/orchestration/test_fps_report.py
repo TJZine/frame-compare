@@ -99,9 +99,9 @@ def _fps_report_clip(
 def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts_separate(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    content = ContentIdentity("Avatar Aang The Last Airbender", year=2026)
+    content = ContentIdentity("Copper Kite The Last Lamplight", year=2026)
     reference = _make_clip_state(
-        "Avatar.Aang.PMTP.Kitsune.mkv",
+        "Copper.Kite.PMTP.Bittern.mkv",
         "Reference label",
         Fraction(24),
         Fraction(24),
@@ -111,13 +111,13 @@ def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts
             service="PMTP",
             source_type="WEB-DL",
             dynamic_range_claims=("DV", "HDR10+"),
-            release_group="Kitsune",
+            release_group="Bittern",
             has_terminal_release_group=True,
         ),
         label_is_explicit=True,
     )
     comparison = _make_clip_state(
-        "Avatar.Aang.ATV.REPACK.Kitsune.mkv",
+        "Copper.Kite.ATV.REPACK.Bittern.mkv",
         "Generated label",
         Fraction(24),
         Fraction(24),
@@ -128,7 +128,7 @@ def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts
             source_type="WEB-DL",
             dynamic_range_claims=("DV", "HDR10+"),
             revision_tags=("REPACK",),
-            release_group="Kitsune",
+            release_group="Bittern",
             has_terminal_release_group=True,
         ),
     )
@@ -145,10 +145,10 @@ def test_sources_factors_reliable_content_and_keeps_release_file_and_probe_facts
     output = capsys.readouterr().err
     assert "Reference label" in output
     assert "PMTP WEB-DL" not in output
-    assert output.count("Avatar Aang The Last Airbender (2026)") == 1
-    assert "2160p · ATV WEB-DL · DV HDR10+ · REPACK · Kitsune" in output
-    assert output.count("Avatar.Aang.PMTP.Kitsune.mkv") == 1
-    assert output.count("Avatar.Aang.ATV.REPACK.Kitsune.mkv") == 1
+    assert output.count("Copper Kite The Last Lamplight (2026)") == 1
+    assert "2160p · ATV WEB-DL · DV HDR10+ · REPACK · Bittern" in output
+    assert output.count("Copper.Kite.PMTP.Bittern.mkv") == 1
+    assert output.count("Copper.Kite.ATV.REPACK.Bittern.mkv") == 1
     assert "1920×1080" in output
 
 
@@ -441,7 +441,7 @@ def test_emit_consolidated_fps_report_renders_human_table_to_stderr(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    dub = "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv"
+    dub = "Constructed.LanternMoth-Wagtail.english-dub-only.mkv"
     clips = [
         _fps_report_clip(
             path=Path("ref.mkv"),

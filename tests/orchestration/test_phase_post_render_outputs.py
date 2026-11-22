@@ -16,17 +16,16 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration import phase_post_render
-from frame_compare.orchestration.execution import build_phases_after_align
+from frame_compare.orchestration.execution import RunSteps, run_output_steps
 from frame_compare.orchestration.execution_types import (
     ExecutionState,
-    MetadataPrefetch,
     PublishPhaseOutput,
     ReportPhaseOutput,
     RunArtifacts,
 )
-from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.source_labels import resolve_source_label_details
 from frame_compare.orchestration.types import (
+    RunDependencies,
     SlowpicsUploadConfirmationDecision,
     SlowpicsUploadConfirmationRequest,
 )
@@ -53,6 +52,7 @@ from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
     _render_artifacts,
+    prep_for_context,
 )
 from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
@@ -105,7 +105,7 @@ async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit
         service="ATV",
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
-        release_group="Kitsune",
+        release_group="Bittern",
         has_terminal_release_group=True,
     )
     comparison = _clip(
@@ -176,8 +176,8 @@ async def test_slowpics_upload_plan_uses_unique_release_descriptors_and_explicit
         for row in cast(SlowpicsUploadPlan, captured_upload_plan).rows
     ] == [
         [
-            "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
-            "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+            "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Bittern",
+            "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Bittern",
             "My Encode",
         ]
     ]
@@ -192,7 +192,7 @@ def test_run_report_phase_builds_report_data_and_records_path(
         service="ATV",
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
-        release_group="Kitsune",
+        release_group="Bittern",
         has_terminal_release_group=True,
     )
     comparison = _clip(
@@ -258,8 +258,8 @@ def test_run_report_phase_builds_report_data_and_records_path(
         "Encode 1"
     ]
     assert [clip.display.control for clip in report_data.clips] == [
-        "Reference | 2160p · ATV WEB-DL · DV HDR10+ · Kitsune",
-        "Comparison 1 | 2160p · ATV WEB-DL · DV HDR10+ · Kitsune",
+        "Reference | 2160p · ATV WEB-DL · DV HDR10+ · Bittern",
+        "Comparison 1 | 2160p · ATV WEB-DL · DV HDR10+ · Bittern",
         "My Explicit",
     ]
     assert [clip.display.micro for clip in report_data.clips] == [
@@ -267,7 +267,7 @@ def test_run_report_phase_builds_report_data_and_records_path(
         "encode",
         "My Explicit",
     ]
-    assert report_data.clips[2].display.release == "2160p · ATV WEB-DL · DV HDR10+ · Kitsune"
+    assert report_data.clips[2].display.release == "2160p · ATV WEB-DL · DV HDR10+ · Bittern"
     assert report_data.clips[2].display.filename == "explicit.mkv"
     assert report_data.slowpics_url == "https://slow.pics/c/example"
     assert report_data.rendering.overlay_mode == ctx.config.screenshots.overlay_mode
@@ -296,7 +296,7 @@ def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
         service="ATV",
         source_type="WEB-DL",
         dynamic_range_claims=("DV", "HDR10+"),
-        release_group="Kitsune",
+        release_group="Bittern",
         has_terminal_release_group=True,
     )
     comparison = _clip(
@@ -332,19 +332,19 @@ def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
     )
 
     report_data = captured["report_data"]
-    assert "2160p · ATV WEB-DL · DV HDR10+ · Kitsune" in report_data.clips[0].display.control
+    assert "2160p · ATV WEB-DL · DV HDR10+ · Bittern" in report_data.clips[0].display.control
     for clip in report_data.clips:
         assert " · " in clip.display.primary
         assert " · " in clip.display.control
         assert "|" not in clip.display.release
 
     default_separator = format_micro_descriptor(identity)
-    assert default_separator == "ATV WEB-DL | DV HDR10+ | Kitsune"
+    assert default_separator == "ATV WEB-DL | DV HDR10+ | Bittern"
 
     upload_clips = phase_post_render._slowpics_upload_clips(ctx)
     assert [clip.image_name for clip in upload_clips] == [
-        "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
-        "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Kitsune",
+        "Reference | 2160p | ATV WEB-DL | DV HDR10+ | Bittern",
+        "Comparison 1 | 2160p | ATV WEB-DL | DV HDR10+ | Bittern",
     ]
     for upload_clip in upload_clips:
         assert " · " not in upload_clip.image_name
@@ -355,9 +355,9 @@ def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path
     paths = [
         ctx.workspace.input_dir / name
         for name in (
-            "Black.Sails.S01E08.1080p.Bluray.DD5.1.x264-EbP.mkv",
-            "Constructed.DemonSlayer-Kitsune.english-dub-only.mkv",
-            "Constructed.DemonSlayer-Kitsune.english-dub-only-copy.mkv",
+            "Amber.Reach.S02E05.1080p.Bluray.DD5.1.x264-OwL.mkv",
+            "Constructed.LanternMoth-Wagtail.english-dub-only.mkv",
+            "Constructed.LanternMoth-Wagtail.english-dub-only-copy.mkv",
         )
     ]
     ctx.reference, *ctx.comparisons = [
@@ -386,10 +386,10 @@ def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path
     assert output.report_path is not None
     html = output.report_path.read_text(encoding="utf-8")
     payload = script_payload(html)
-    short_names = ["EbP", "english-dub-only", "english-dub-only-copy"]
+    short_names = ["OwL", "english-dub-only", "english-dub-only-copy"]
     assert [clip["display"]["micro"] for clip in payload["clips"]] == short_names
     assert [clip["display"]["control"] for clip in payload["clips"]] == [
-        "1080p · BluRay · EbP",
+        "1080p · BluRay · OwL",
         "english-dub-only",
         "english-dub-only-copy",
     ]
@@ -399,7 +399,7 @@ def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path
     assert [clip["label"] for clip in payload["clips"]] == [path.stem for path in paths]
 
     assert [clip.image_name for clip in phase_post_render._slowpics_upload_clips(ctx)] == [
-        "1080p | BluRay | EbP",
+        "1080p | BluRay | OwL",
         *short_names[1:],
     ]
     parser = SelectParser()
@@ -407,7 +407,7 @@ def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path
     for select_id in ("left-select", "right-select", "active-select"):
         options = parser.selects[select_id].options
         assert [option.text for option in options] == [
-            "EbP · 1080p · BluRay",
+            "OwL · 1080p · BluRay",
             *short_names[1:],
         ]
         assert [option.attrs["value"] for option in options] == ["0", "1", "2"]
@@ -769,6 +769,10 @@ async def test_run_publish_phase_rejects_duplicate_clip_labels_at_translation_se
             )
 
 
+def _reject_step_request(_request: httpx.Request) -> httpx.Response:
+    raise AssertionError("unexpected network request")
+
+
 async def test_report_confirmed_available_report_confirms_then_publishes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -779,7 +783,7 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
     ctx.config.report.enable = True
     report_path = tmp_path / "report.html"
     ctx.selection = replace(ctx.selection, frames=(10,))
-    state = ExecutionState(artifacts=RunArtifacts(report_path=report_path, report_succeeded=True))
+    state = ExecutionState()
     reporter = _RecordingProgressReporter()
     ctx.reporter = reporter
     publish_calls = 0
@@ -800,21 +804,21 @@ async def test_report_confirmed_available_report_confirms_then_publishes(
         _fake_publish,
     )
 
-    async with httpx.AsyncClient() as client:
-        phases = build_phases_after_align(
-            request=make_run_request(root=tmp_path),
-            monotonic_timer=lambda: 0.0,
-            vs_loader=FakeVSLoader(),
-            http_client=client,
+    monkeypatch.setattr(
+        "frame_compare.orchestration.execution.run_report_phase",
+        lambda *a, **kw: ReportPhaseOutput(report_path, report_succeeded=True),
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_reject_step_request)) as client:
+        await run_output_steps(
+            ctx,
+            RunSteps(reporter=reporter, state=state, monotonic_timer=lambda: 0.0),
+            request=make_run_request(root=tmp_path, skip_metadata=True),
+            prep=prep_for_context(ctx, state),
             state=state,
-            metadata_prefetch=MetadataPrefetch(None, False),
-            config=ctx.config,
-            confirm_slowpics_upload=_confirm,
+            deps=RunDependencies(
+                vs_loader=FakeVSLoader(), http_client=client, confirm_slowpics_upload=_confirm
+            ),
         )
-        selected_phases = [
-            phase for phase in phases if phase.name in {"confirm_slowpics_upload", "publish"}
-        ]
-        await execute_phases(selected_phases, ctx, reporter)
 
     assert publish_calls == 1
     assert state.artifacts.slowpics_upload_confirmation_status == "confirmed"
@@ -861,23 +865,19 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
         _unexpected_publish,
     )
 
-    async with httpx.AsyncClient() as client:
-        phases = build_phases_after_align(
-            request=make_run_request(root=tmp_path),
-            monotonic_timer=lambda: 0.0,
-            vs_loader=FakeVSLoader(),
-            http_client=client,
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_reject_step_request)) as client:
+        await run_output_steps(
+            ctx,
+            RunSteps(reporter=reporter, state=state, monotonic_timer=lambda: 0.0),
+            request=make_run_request(root=tmp_path, skip_metadata=True),
+            prep=prep_for_context(ctx, state),
             state=state,
-            metadata_prefetch=MetadataPrefetch(None, False),
-            config=ctx.config,
-            confirm_slowpics_upload=_unexpected_confirm,
+            deps=RunDependencies(
+                vs_loader=FakeVSLoader(),
+                http_client=client,
+                confirm_slowpics_upload=_unexpected_confirm,
+            ),
         )
-        selected_phases = [
-            phase
-            for phase in phases
-            if phase.name in {"report", "confirm_slowpics_upload", "publish"}
-        ]
-        await execute_phases(selected_phases, ctx, reporter)
 
     assert state.artifacts.slowpics_upload_confirmation_status == "report_unavailable"
     assert state.artifacts.slowpics_url is None
@@ -891,7 +891,9 @@ async def test_report_confirmed_report_failure_skips_prompt_and_publish(
 
     assert _warning_presentations([state.warnings[-1]], ())[0].severity == "skipped"
     assert [event for event in reporter.events if event in {"suspend", "resume"}] == []
-    assert (ProgressPhaseStatus.SKIPPED, None) in reporter.completions
+    assert reporter.events.index("start:REPORT") < reporter.events.index("start:CONFIRM")
+    assert "start:PUBLISH  Report unavailable" in reporter.events
+    assert reporter.completions[-2] == (ProgressPhaseStatus.SKIPPED, None)
     assert (ProgressPhaseStatus.COMPLETED, True) not in reporter.completions
 
 
@@ -917,17 +919,16 @@ async def test_report_confirmed_report_payload_uses_no_slowpics_url(
         _capture_report,
     )
 
-    phases = build_phases_after_align(
-        request=make_run_request(root=tmp_path),
-        monotonic_timer=lambda: 0.0,
-        vs_loader=FakeVSLoader(),
-        http_client=None,
+    await run_output_steps(
+        ctx,
+        RunSteps(reporter=NullProgressReporter(), state=state, monotonic_timer=lambda: 0.0),
+        request=make_run_request(root=tmp_path, skip_metadata=True),
+        prep=prep_for_context(ctx, state),
         state=state,
-        metadata_prefetch=MetadataPrefetch(None, False),
-        config=ctx.config,
+        deps=RunDependencies(
+            vs_loader=FakeVSLoader(), confirm_slowpics_upload=lambda request: "confirmed"
+        ),
     )
-    report_phase = next(phase for phase in phases if phase.name == "report")
-    await execute_phases([report_phase], ctx, NullProgressReporter())
 
     assert captured_slowpics_url is None
 
@@ -1038,51 +1039,47 @@ async def test_warn_only_publish_phase_keeps_sanitized_service_error_in_warning_
     ctx = _context(tmp_path, comparisons=[comparison])
     ctx.config.slowpics.auto_upload = True
     sanitized_error = SlowpicsError("Image upload failed with status 400")
-    warning_events: list[str] = []
+    warning_events: list[tuple[str, dict[str, object]]] = []
 
     async def _fake_run_publish_phase(*_args: object, **_kwargs: object) -> object:
         raise sanitized_error
 
     def _capture_warning(event: str, **kwargs: object) -> None:
-        del kwargs
-        warning_events.append(event)
+        warning_events.append((event, kwargs))
 
     monkeypatch.setattr(
         "frame_compare.orchestration.execution.run_publish_phase",
         _fake_run_publish_phase,
     )
-    monkeypatch.setattr("frame_compare.orchestration.phases.log.warning", _capture_warning)
+    monkeypatch.setattr("frame_compare.orchestration.execution.log.warning", _capture_warning)
 
     ctx.selection = replace(ctx.selection, frames=(10,))
-    state = ExecutionState(
-        artifacts=RunArtifacts(
-            render=_render_artifacts(
-                screenshots_by_label={
-                    "Reference": [tmp_path / "screenshots" / "reference.png"],
-                    "Encode 1": [tmp_path / "screenshots" / "encode.png"],
-                },
-                screenshot_dir=tmp_path / "screenshots",
-            )
-        )
-    )
-    async with httpx.AsyncClient() as client:
-        phases = build_phases_after_align(
-            request=make_run_request(root=tmp_path),
-            monotonic_timer=lambda: 0.0,
-            vs_loader=FakeVSLoader(),
-            http_client=client,
+    state = ExecutionState()
+    ctx.config.slowpics.confirm_upload_after_report = False
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_reject_step_request)) as client:
+        await run_output_steps(
+            ctx,
+            RunSteps(reporter=LogProgressReporter(), state=state, monotonic_timer=lambda: 0.0),
+            request=make_run_request(root=tmp_path, skip_metadata=True),
+            prep=prep_for_context(ctx, state),
             state=state,
-            metadata_prefetch=MetadataPrefetch(None, False),
-            config=ctx.config,
+            deps=RunDependencies(vs_loader=FakeVSLoader(), http_client=client),
         )
-        publish_phase = next(phase for phase in phases if phase.name == "publish")
-
-        await execute_phases([publish_phase], ctx, LogProgressReporter())
 
     assert len(state.warnings) == 1
     assert "publish:" in state.warnings[0].text
     assert "Image upload failed with status 400" in state.warnings[0].text
-    assert warning_events == ["phase_warned"]
+    assert warning_events == [
+        (
+            "phase_warned",
+            {
+                "phase": "publish",
+                "error_type": "SlowpicsError",
+                "error": str(sanitized_error),
+                "exc_info": sanitized_error,
+            },
+        )
+    ]
 
 
 @pytest.mark.parametrize("violation", ["label", "count"])

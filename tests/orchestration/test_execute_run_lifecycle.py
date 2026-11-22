@@ -18,7 +18,7 @@ from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
-from frame_compare.orchestration import coordinator
+from frame_compare.orchestration import coordinator, execution
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.errors import MixedSourceFpsError
@@ -30,7 +30,9 @@ from frame_compare.orchestration.execution_types import (
     RunArtifacts,
 )
 from frame_compare.orchestration.selection_domain import PreparedSelectionDomain
-from frame_compare.orchestration.types import ReservedRunCapture, RunResult
+from frame_compare.orchestration.types import InterruptedRun, ReservedRunCapture, RunResult
+from frame_compare.render.errors import RenderError
+from frame_compare.services.errors import AudioAlignmentCleanupError
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.run_result_record import read_run_result
 from frame_compare.services.slowpics_upload_plan import SlowpicsUploadPlan
@@ -51,7 +53,7 @@ from .execute_run_helpers import (
     install_fake_frame_render,
 )
 from .phase_task_helpers import _render_artifacts, _workspace
-from .preparation_test_support import create_config
+from .preparation_test_support import ALIGNMENT_CONFIG, create_config
 
 
 def _zero_monotonic_timer() -> float:
@@ -143,11 +145,12 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
     async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
         return prep
 
-    async def fake_execute_phases(*_args: object, **_kwargs: object) -> None:
+    async def fake_run_steps(*_args: object, **_kwargs: object) -> None:
         return None
 
     monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
-    monkeypatch.setattr(coordinator, "execute_phases", fake_execute_phases)
+    monkeypatch.setattr(coordinator, "run_selection_steps", fake_run_steps)
+    monkeypatch.setattr(coordinator, "run_output_steps", fake_run_steps)
     monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda *a, **kw: None)
 
     result = asyncio.run(
@@ -392,11 +395,11 @@ def test_execute_run_initializes_enabled_step_map_before_phase_failure(
     async def _execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
         return prep
 
-    async def _execute_phases(*_args: object, **_kwargs: object) -> None:
+    async def _fail_selection_steps(*_args: object, **_kwargs: object) -> None:
         raise phase_error
 
     monkeypatch.setattr(coordinator, "execute_prep", _execute_prep)
-    monkeypatch.setattr(coordinator, "execute_phases", _execute_phases)
+    monkeypatch.setattr(coordinator, "run_selection_steps", _fail_selection_steps)
     monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda **_kwargs: None)
     with pytest.raises(RuntimeError) as exc_info:
         asyncio.run(
@@ -721,13 +724,12 @@ enable = false
 
     captured: dict[str, object] = {}
 
-    async def _capture_execute_phases(
-        _phases: object, context: RunContext, _reporter: object
+    async def _capture_selection_config(
+        context: RunContext, _steps: object, **_kwargs: object
     ) -> None:
-        if "config" not in captured:
-            captured["config"] = context.config
+        captured["config"] = context.config
 
-    monkeypatch.setattr(coordinator, "execute_phases", _capture_execute_phases)
+    monkeypatch.setattr(coordinator, "run_selection_steps", _capture_selection_config)
 
     asyncio.run(execute_run(request, deps=deps))
 
@@ -854,11 +856,12 @@ def test_execute_run_mixed_source_fps_rejects_before_phase_execution(
 
     phases_started = False
 
-    async def _unexpected_execute_phases(*_args: object, **_kwargs: object) -> None:
+    async def _unexpected_run_steps(*_args: object, **_kwargs: object) -> None:
         nonlocal phases_started
         phases_started = True
 
-    monkeypatch.setattr(coordinator, "execute_phases", _unexpected_execute_phases)
+    monkeypatch.setattr(coordinator, "run_selection_steps", _unexpected_run_steps)
+    monkeypatch.setattr(coordinator, "run_output_steps", _unexpected_run_steps)
 
     request = make_run_request(
         root=tmp_path,
@@ -886,11 +889,8 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
     from typer.testing import CliRunner
 
     from frame_compare.cli.entry import app
-    from frame_compare.orchestration import execution
-    from frame_compare.orchestration.execution_types import ExecutionState, PhaseOutput
     from frame_compare.orchestration.types import ReservedRunCapture
     from frame_compare.render.batch import orchestrator as batch
-    from frame_compare.render.errors import RenderError
     from frame_compare.render.types import EncoderSettings, RenderedFrameResult, RenderRequest
     from frame_compare.services.run_result_record import RUN_RESULT_FILENAME, read_run_result
     from frame_compare.utils.media_facts import RenderedFrameFacts
@@ -907,9 +907,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
     ready = threading.Event()
     interrupted = threading.Event()
     release_render = threading.Event()
-    close_completed: list[bool] = []
     calls: list[int] = []
-    applied: list[str] = []
     children: list[subprocess.Popen[Any]] = []
     later: list[str] = []
 
@@ -949,12 +947,9 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
     class DelayedCloseTransport(httpx.AsyncBaseTransport):
         async def aclose(self) -> None:
             await asyncio.sleep(0)
-            close_completed.append(True)
 
     def render_frame(request: RenderRequest) -> RenderedFrameResult:
         calls.append(request.frame_number)
-        if owner == "failure" and request.frame_number == 0:
-            raise RenderError("render failed before interrupt")
         ready.set()
         assert release_render.wait(3)
         if owner == "render":
@@ -1012,24 +1007,6 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
             )
         )
 
-    real_wait = batch.wait
-    failure_interrupted: list[bool] = []
-
-    def wait_for_failure(*args: Any, **kwargs: Any) -> Any:
-        done, pending = real_wait(*args, **kwargs)
-        if done and not failure_interrupted:
-            failure_interrupted.append(True)
-            signal.raise_signal(signal.SIGINT)
-            release_render.set()
-        return done, pending
-
-    real_apply = execution.apply_phase_output
-
-    def apply(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
-        if isinstance(output, RenderPhaseOutput):
-            applied.append("render")
-        real_apply(ctx=ctx, state=state, output=output)
-
     def report(*_args: object, **_kwargs: object) -> Never:
         later.append("report")
         raise AssertionError("later phase admitted")
@@ -1039,16 +1016,12 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
         patch.setattr(coordinator, "execute_prep", prep)
         patch.setattr(execution, "run_render_phase", render)
         patch.setattr(execution, "run_report_phase", report)
-        patch.setattr(execution, "apply_phase_output", apply)
         patch.setattr(batch, "render_frame_detailed", render_frame)
         patch.setattr(adapter.subprocess, "Popen", popen)
-        if owner in {"httpx", "failure"}:
+        if owner == "httpx":
             client = httpx.AsyncClient(transport=DelayedCloseTransport())
             patch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
-        if owner == "failure":
-            patch.setattr(batch, "wait", wait_for_failure)
-        else:
-            sender.start()
+        sender.start()
         result = CliRunner().invoke(
             app,
             [
@@ -1061,8 +1034,7 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                 "--no-upload",
             ],
         )
-        if owner != "failure":
-            sender.join(3)
+        sender.join(3)
     record = read_run_result(workspace.run_dir / RUN_RESULT_FILENAME)
     print(
         json.dumps(
@@ -1070,12 +1042,12 @@ def first_sigint_lifecycle_probe(root: Path, owner: str) -> None:
                 "exit": result.exit_code,
                 "stderr": result.stderr,
                 "status": record.status,
+                "was_interrupted": record.was_interrupted,
                 "calls": sorted(calls),
                 "later": later,
-                "applied": applied,
+                "render_applied": artifacts.render is not None,
                 "reaped": all(child.poll() is not None for child in children),
                 "children": len(children),
-                "close_completed": close_completed,
             }
         )
     )
@@ -1103,8 +1075,9 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
     assert result.returncode == 130, result.stderr
     observed = json.loads(result.stdout)
     assert observed["status"] == "failed"
+    assert observed["was_interrupted"] is True
     assert observed["later"] == []
-    assert observed["applied"] == []
+    assert observed["render_applied"] is False
     assert observed["reaped"] is True
     if owner in {"vsview", "startup"}:
         assert observed["children"] == 1
@@ -1116,8 +1089,6 @@ def test_first_sigint_stops_admission_and_records_failure(tmp_path: Path, owner:
         assert f"{len(observed['calls'])} of 10 screenshots" in stderr
         assert "[FAIL] RENDER" not in stderr
         assert "next run" not in stderr
-    else:
-        assert observed["close_completed"] == [True]
 
 
 async def test_first_cancellation_during_owned_client_close_records_only_failure(
@@ -1138,6 +1109,7 @@ async def test_first_cancellation_during_owned_client_close_records_only_failure
 
     client = httpx.AsyncClient(transport=InterruptingCloseTransport())
     monkeypatch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
+    interrupted: list[InterruptedRun] = []
     worker = asyncio.create_task(
         execute_run(
             make_run_request(
@@ -1146,7 +1118,7 @@ async def test_first_cancellation_during_owned_client_close_records_only_failure
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader()),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), on_interrupted=interrupted.append),
         )
     )
     with pytest.raises(asyncio.CancelledError):
@@ -1155,7 +1127,9 @@ async def test_first_cancellation_during_owned_client_close_records_only_failure
     assert records_at_close == [[]]
     records = list(tmp_path.glob("generated/*/run_result.toml"))
     assert len(records) == 1
-    assert read_run_result(records[0]).status == "failed"
+    assert read_run_result(records[0]).was_interrupted
+    # Every step had finished, so the notice names no step.
+    assert [run.phase for run in interrupted] == [None]
 
 
 async def test_cancellation_at_completed_record_guard_records_only_failure(
@@ -1185,6 +1159,7 @@ async def test_cancellation_at_completed_record_guard_records_only_failure(
         )
 
     monkeypatch.setattr(coordinator, "record_completed_run_result", cancel_before_publication)
+    interrupted: list[InterruptedRun] = []
     worker = asyncio.create_task(
         execute_run(
             make_run_request(
@@ -1193,7 +1168,7 @@ async def test_cancellation_at_completed_record_guard_records_only_failure(
                 skip_metadata=True,
                 overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader()),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), on_interrupted=interrupted.append),
         )
     )
     with pytest.raises(asyncio.CancelledError):
@@ -1202,7 +1177,8 @@ async def test_cancellation_at_completed_record_guard_records_only_failure(
     assert client_closed_at_publication == [True]
     records = list(tmp_path.glob("generated/*/run_result.toml"))
     assert len(records) == 1
-    assert read_run_result(records[0]).status == "failed"
+    assert read_run_result(records[0]).was_interrupted
+    assert [run.phase for run in interrupted] == [None]
 
 
 def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failure(
@@ -1225,6 +1201,7 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
             task.cancel()
             return source
 
+    interrupted: list[InterruptedRun] = []
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             execute_run(
@@ -1235,9 +1212,10 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
                     skip_metadata=True,
                     overrides=CLIConfigOverrides(no_upload=True),
                 ),
-                RunDependencies(vs_loader=InterruptedLoader()),
+                RunDependencies(vs_loader=InterruptedLoader(), on_interrupted=interrupted.append),
             )
         )
+    assert [run.phase for run in interrupted] == ["Setup"]
     assert len(calls) == 1
     assert list((tmp_path / "generated").rglob("clip_probe.toml")) == []
     records = list((tmp_path / "generated").rglob(RUN_RESULT_FILENAME))
@@ -1247,32 +1225,120 @@ def test_interrupt_after_native_source_load_skips_probe_cache_and_records_failur
     assert record.was_interrupted
 
 
-def test_real_render_failure_wins_over_queued_sigint_and_client_close(tmp_path: Path) -> None:
-    import json
-    import subprocess
-    import sys
+async def test_interrupt_takes_precedence_over_render_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_config(tmp_path)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
 
-    code = (
-        "from pathlib import Path; import sys; "
-        "from tests.orchestration.test_execute_run_lifecycle import first_sigint_lifecycle_probe; "
-        "first_sigint_lifecycle_probe(Path(sys.argv[1]), 'failure')"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code, str(tmp_path)],
-        cwd=Path(__file__).parents[2],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    from frame_compare.cli.errors import ExitCode
+    def interrupt_render(ctx: RunContext, *_args: object, **_kwargs: object) -> Never:
+        # The notice reports the caches this run actually wrote.
+        ctx.reusable_cache_writes.add("analysis")
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        raise RenderError("render failed during interrupt")
 
-    assert result.returncode == int(ExitCode.PROCESSING_ERROR), result.stderr
-    observed = json.loads(result.stdout)
-    assert observed["status"] == "failed"
-    assert observed["later"] == []
-    assert observed["applied"] == []
-    assert observed["close_completed"] == [True]
-    assert observed["calls"] in ([0], [0, 1])
+    monkeypatch.setattr(execution, "run_render_phase", interrupt_render)
+    interrupted: list[InterruptedRun] = []
+    diagnostics: list[Path] = []
+    worker = asyncio.create_task(
+        execute_run(
+            make_run_request(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                overrides=CLIConfigOverrides(no_upload=True),
+            ),
+            deps=RunDependencies(
+                vs_loader=FakeVSLoader(),
+                on_interrupted=interrupted.append,
+                on_failed_alignment_diagnostics=diagnostics.append,
+            ),
+        )
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(worker, 3)
+
+    records = list(tmp_path.glob("generated/*/run_result.toml"))
+    assert len(records) == 1
+    record = read_run_result(records[0])
+    assert record.status == "failed"
+    assert record.was_interrupted
+    assert record.failure is not None
+    assert record.failure.category == "internal"
+    [run] = interrupted
+    assert run.phase == "Render"
+    assert (run.analysis_cache_written, run.alignment_cache_written) == (True, False)
+    assert run.workspace is not None and run.workspace.run_dir == records[0].parent
+    assert diagnostics == []
+
+
+@pytest.mark.parametrize("cleanup_error", [True, False], ids=["cleanup-error", "other-error"])
+async def test_alignment_cleanup_error_survives_interrupt_during_client_close(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cleanup_error: bool
+) -> None:
+    create_config(tmp_path, ALIGNMENT_CONFIG)
+    create_video_files(tmp_path / "comparison_videos", "a_reference.mkv", "b_comparison.mkv")
+    close_events: list[str] = []
+
+    class YieldingCloseTransport(httpx.AsyncBaseTransport):
+        async def aclose(self) -> None:
+            close_events.append("started")
+            await asyncio.sleep(0)
+            close_events.append("completed")
+
+    diagnostics_dir = tmp_path / "alignment diagnostics"
+
+    async def interrupt_align(
+        *_args: object, on_diagnostics_written: Callable[[Path], None], **_kwargs: object
+    ) -> Never:
+        on_diagnostics_written(diagnostics_dir)
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        if cleanup_error:
+            raise AudioAlignmentCleanupError("alignment resource could not be released")
+        raise RuntimeError("alignment failed during interrupt")
+
+    client = httpx.AsyncClient(transport=YieldingCloseTransport())
+    monkeypatch.setattr(coordinator.httpx, "AsyncClient", lambda: client)
+    monkeypatch.setattr(execution, "run_align_phase", interrupt_align)
+    interrupted: list[InterruptedRun] = []
+    diagnostics: list[Path] = []
+    worker = asyncio.create_task(
+        execute_run(
+            make_run_request(
+                root=tmp_path,
+                skip_analysis=True,
+                skip_metadata=True,
+                overrides=CLIConfigOverrides(no_upload=True),
+            ),
+            deps=RunDependencies(
+                vs_loader=FakeVSLoader(),
+                on_interrupted=interrupted.append,
+                on_failed_alignment_diagnostics=diagnostics.append,
+            ),
+        )
+    )
+    with pytest.raises(AudioAlignmentCleanupError if cleanup_error else asyncio.CancelledError):
+        await asyncio.wait_for(worker, 3)
+
+    assert close_events == ["started"]
+    records = list(tmp_path.glob("generated/*/run_result.toml"))
+    assert len(records) == 1
+    record = read_run_result(records[0])
+    assert record.status == "failed"
+    assert record.failure is not None
+    if cleanup_error:
+        assert record.failure.code == "FC-4005"
+        assert not record.was_interrupted
+        assert interrupted == []
+        assert diagnostics == [diagnostics_dir]
+    else:
+        assert record.was_interrupted
+        assert [run.phase for run in interrupted] == ["Align"]
+        assert diagnostics == []
 
 
 def test_reservation_is_captured_before_interrupted_run_info_writer(
@@ -1333,12 +1399,8 @@ async def test_confirmed_upload_facts_survive_cancellation(
     confirm_after_report: bool,
     outcome: str,
 ) -> None:
-    from threading import Event
-
     from frame_compare.orchestration import execution, phase_post_render
     from frame_compare.orchestration.execution_types import (
-        ExecutionState,
-        PhaseOutput,
         PostReportCleanupPhaseOutput,
         ReportPhaseOutput,
     )
@@ -1379,10 +1441,8 @@ async def test_confirmed_upload_facts_survive_cancellation(
     )
     known_url = "https://slow.pics/c/confirmed-offline"
     uploaded_paths: tuple[Path, ...] = ()
-    connector_started = Event()
-    connector_finished = Event()
-    release_connector = Event()
-    applied_publish: list[bool] = []
+    connector_started = asyncio.Event()
+    connector_finished = asyncio.Event()
     post_upload_started: list[bool] = []
     cleanup_started: list[bool] = []
     image_uploads: set[str] = set()
@@ -1478,14 +1538,12 @@ async def test_confirmed_upload_facts_survive_cancellation(
             uploaded_file_paths=uploaded_paths,
         )
 
-    def connector(
-        _request: slowpics_webhook.WebhookDeliveryRequest,
-    ) -> slowpics_webhook.WebhookResponse:
+    async def webhook_handler(_request: httpx.Request) -> httpx.Response:
         connector_started.set()
         try:
             if outcome == "webhook_cancel":
-                assert release_connector.wait(5), "test did not release webhook worker"
-            return slowpics_webhook.WebhookResponse(status_code=204)
+                await asyncio.Event().wait()
+            return httpx.Response(204)
         finally:
             connector_finished.set()
 
@@ -1493,8 +1551,7 @@ async def test_confirmed_upload_facts_survive_cancellation(
         return await slowpics_webhook.deliver_slowpics_webhook(
             webhook_url=webhook_url,
             slowpics_url=slowpics_url,
-            resolver=lambda _host, _port: ("8.8.8.8",),
-            connector=connector,
+            transport=httpx.MockTransport(webhook_handler),
         )
 
     real_post_upload = phase_post_render.run_slowpics_post_upload_actions
@@ -1507,13 +1564,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
             task.cancel()
             return ()
         return await real_post_upload(request)
-
-    real_apply = execution.apply_phase_output
-
-    def apply(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
-        if isinstance(output, PublishPhaseOutput):
-            applied_publish.append(True)
-        real_apply(ctx=ctx, state=state, output=output)
 
     real_cleanup = execution.run_post_report_cleanup_phase
 
@@ -1537,7 +1587,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
         monkeypatch.setattr(coordinator, name, lambda *a, **kw: None)
     monkeypatch.setattr(execution, "run_render_phase", fake_render)
     monkeypatch.setattr(execution, "run_report_phase", fake_report)
-    monkeypatch.setattr(execution, "apply_phase_output", apply)
     monkeypatch.setattr(execution, "run_post_report_cleanup_phase", cleanup)
     if outcome != "final_image_progress":
         monkeypatch.setattr(phase_post_render, "publish_to_slowpics", fake_publish)
@@ -1584,11 +1633,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
                             await worker
                         await asyncio.sleep(0.005)
                 worker.cancel()
-                await asyncio.sleep(0)
-                worker.cancel()
-                await asyncio.sleep(0)
-                assert not worker.done(), "cancellation abandoned the blocked webhook worker"
-                release_connector.set()
             if cancelled:
                 with pytest.raises(asyncio.CancelledError):
                     await asyncio.wait_for(worker, 3)
@@ -1597,7 +1641,6 @@ async def test_confirmed_upload_facts_survive_cancellation(
                 assert result.success
                 assert result.slowpics_url == (None if outcome == "upload_failure" else known_url)
         finally:
-            release_connector.set()
             if not worker.done():
                 worker.cancel()
                 await asyncio.gather(worker, return_exceptions=True)
@@ -1611,7 +1654,7 @@ async def test_confirmed_upload_facts_survive_cancellation(
     assert record.slowpics_url == (known_url if confirmed else None)
     assert artifacts.slowpics_url == record.slowpics_url
     assert artifacts.uploaded_slowpics_file_paths == uploaded_paths
-    assert bool(applied_publish) == (outcome == "success")
+    assert bool(artifacts.post_upload_actions) == (outcome == "success")
     assert bool(cleanup_started) == (not cancelled)
     assert bool(post_upload_started) == (
         outcome not in {"publisher_handoff", "upload_failure", "final_image_progress"}

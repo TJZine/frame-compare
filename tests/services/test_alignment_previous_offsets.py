@@ -167,12 +167,12 @@ def test_typed_alignment_passes_presentation_names_without_changing_vsview_keys(
         request,
         reference=replace(
             request.reference,
-            presentation_name="PMTP WEB-DL | DV HDR10+ | Kitsune",
+            presentation_name="PMTP WEB-DL | DV HDR10+ | Bittern",
         ),
         comparisons=[
             replace(
                 request.comparisons[0],
-                presentation_name="ATV WEB-DL | DV HDR10+ | Kitsune",
+                presentation_name="ATV WEB-DL | DV HDR10+ | Bittern",
             )
         ],
     )
@@ -192,10 +192,10 @@ def test_typed_alignment_passes_presentation_names_without_changing_vsview_keys(
         for key, review in reviews.items()
     } == {"raw-reference-stem:raw-comparison-stem": 0}
     assert launch.call_args.kwargs["reference"].presentation_name == (
-        "PMTP WEB-DL | DV HDR10+ | Kitsune"
+        "PMTP WEB-DL | DV HDR10+ | Bittern"
     )
     assert [clip.presentation_name for clip in launch.call_args.kwargs["comparisons"]] == [
-        "ATV WEB-DL | DV HDR10+ | Kitsune"
+        "ATV WEB-DL | DV HDR10+ | Bittern"
     ]
     assert results[0].reference_clip == reference.name
     assert results[0].comparison_clip == comparison.name
