@@ -1370,14 +1370,11 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
     return bundle
 
 
-@pytest.fixture
-def inventory_source_repo(repo_root: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Give inventory checks committed source provenance independent of the worktree."""
-    source_repo = tmp_path_factory.mktemp("portable-inventory-source")
+def _inventory_source_paths(repo_root: Path) -> tuple[str, ...]:
     tree = ast.parse(
         _read_text_or_fail(repo_root / "tools/windows_portable/write_bundle_inventory.py")
     )
-    source_paths = next(
+    return next(
         ast.literal_eval(node.value)
         for node in tree.body
         if isinstance(node, ast.Assign)
@@ -1386,14 +1383,36 @@ def inventory_source_repo(repo_root: Path, tmp_path_factory: pytest.TempPathFact
             for target in node.targets
         )
     )
+
+
+@pytest.fixture
+def inventory_source_repo(repo_root: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Give inventory checks committed source provenance independent of the worktree."""
+    source_repo = tmp_path_factory.mktemp("portable-inventory-source")
+    source_paths = _inventory_source_paths(repo_root)
     for relative_path in source_paths:
         destination = source_repo / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(repo_root / relative_path, destination)
-    for args in (
-        ("init", "--quiet"),
-        ("add", "."),
-        (
+    subprocess.run(
+        ["git", "-C", str(source_repo), "init", "--quiet"],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    _commit_inventory_fixture(source_repo, "source fixture")
+    return source_repo
+
+
+def _commit_inventory_fixture(repo: Path, message: str) -> str:
+    subprocess.run(
+        ["git", "-C", str(repo), "add", "."], check=True, capture_output=True, timeout=30
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
             "-c",
             "user.name=Portable test",
             "-c",
@@ -1403,13 +1422,13 @@ def inventory_source_repo(repo_root: Path, tmp_path_factory: pytest.TempPathFact
             "commit",
             "--quiet",
             "-m",
-            "source fixture",
-        ),
-    ):
-        subprocess.run(
-            ["git", "-C", str(source_repo), *args], check=True, capture_output=True, timeout=30
-        )
-    return source_repo
+            message,
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    return _source_commit(repo)
 
 
 def _source_commit(repo: Path) -> str:
@@ -1425,6 +1444,7 @@ def _run_bundle_inventory(
     source_repo: Path,
     manifest: Path | None = None,
     commit_sha: str | None = None,
+    require_clean_repo: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     if commit_sha is None:
         commit_sha = _source_commit(source_repo)
@@ -1442,6 +1462,7 @@ def _run_bundle_inventory(
             commit_sha,
             "--output",
             str(bundle / "bundle_inventory.json"),
+            *(["--require-clean-repo"] if require_clean_repo else []),
         ],
         check=False,
         capture_output=True,
@@ -1457,7 +1478,10 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
 ) -> None:
     bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
     result = _run_bundle_inventory(
-        bundle=bundle, repo_root=repo_root, source_repo=inventory_source_repo
+        bundle=bundle,
+        repo_root=repo_root,
+        source_repo=inventory_source_repo,
+        require_clean_repo=True,
     )
     assert result.returncode == 0, f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
 
@@ -1512,9 +1536,7 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
         for source in inventory["corresponding_sources"]
     )
     assert "tools/windows_portable/runtime_smoke.py" in inventory["source_build_install_scripts"]
-    assert inventory["source_build_install_scripts"] == sorted(
-        inventory["source_build_install_scripts"]
-    )
+    assert inventory["source_build_install_scripts"] == sorted(_inventory_source_paths(repo_root))
 
     license_paths = [license_entry["path"] for license_entry in inventory["licenses"]]
     assert license_paths == sorted(license_paths)
@@ -1535,6 +1557,7 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     )
     source_urls = (bundle / "licenses" / "SOURCE_URLS.txt").read_text(encoding="utf-8")
     assert inventory["bundle"]["commit_sha"] in source_urls
+    assert "live worktree" not in source_urls
     assert "qt-everywhere-src-6.12.0.tar.xz" in source_urls
     assert "Inter 4.1: https://github.com/rsms/inter/releases/tag/v4.1" in source_urls
     assert qt_ffmpeg["source_url"] in source_urls and qt_ffmpeg["build_source_url"] in source_urls
@@ -1545,6 +1568,22 @@ def test_windows_portable_bundle_inventory_is_sorted_exact_and_path_safe(
     notices = (bundle / "licenses" / "THIRD_PARTY_NOTICES.txt").read_text(encoding="utf-8")
     assert "Inter 4.1 (OFL-1.1)" in notices
     assert f"{qt_ffmpeg['name']} 9.1 (LGPL-3.0-or-later)" in notices
+
+    installer = inventory_source_repo / "tools/windows_portable/install.ps1"
+    installer.write_bytes(installer.read_bytes() + b"\n# Local tooling edit\n")
+    dirty = _run_bundle_inventory(
+        bundle=bundle, repo_root=repo_root, source_repo=inventory_source_repo
+    )
+    assert dirty.returncode == 0, _normalized_process_output(dirty)
+    assert "the live worktree" in (bundle / "licenses/SOURCE_URLS.txt").read_text(encoding="utf-8")
+    strict = _run_bundle_inventory(
+        bundle=bundle,
+        repo_root=repo_root,
+        source_repo=inventory_source_repo,
+        require_clean_repo=True,
+    )
+    assert strict.returncode != 0
+    assert "requires a clean, exact source checkout" in strict.stderr
 
 
 @pytest.mark.parametrize(
@@ -1577,21 +1616,34 @@ def test_windows_portable_inventory_requires_each_manifest_notice(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell build semantics required")
-@pytest.mark.parametrize("custom", [False, True], ids=["committed-default", "explicit-custom"])
+@pytest.mark.parametrize("mode", ["committed-default", "explicit-custom", "historical-v2"])
 def test_windows_portable_builder_uses_one_manifest_for_notices_and_inventory(
-    tmp_path: Path, repo_root: Path, inventory_source_repo: Path, custom: bool
+    tmp_path: Path, repo_root: Path, inventory_source_repo: Path, mode: str
 ) -> None:
     pwsh = shutil.which("pwsh")
     if pwsh is None:
         pytest.skip("PowerShell 7 is required")
+    custom = mode == "explicit-custom"
+    historical = mode == "historical-v2"
     source = inventory_source_repo
     owner = source / "tools/windows_portable"
     original = repo_root / "tools/windows_portable"
     shutil.copytree(original / "licenses", owner / "licenses")
 
     manifest_path = owner / "manifest.windows-x64.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    activation = owner / "portable_activation.ps1"
+    activation_bytes = (original / activation.name).read_bytes()
+    if historical:
+        manifest["manifest_version"] = 2
+        manifest["artifacts"] = [
+            item
+            for item in manifest["artifacts"]
+            if item["install"]["type"] != "qt_multimedia_ffmpeg"
+        ]
+        manifest_path.write_bytes(json.dumps(manifest).encode())
+        activation.unlink()
     committed_manifest = manifest_path.read_bytes()
-    manifest = json.loads(committed_manifest)
     artifact = next(
         item for item in manifest["artifacts"] if len(item["license"].get("files", [])) == 1
     )
@@ -1601,13 +1653,28 @@ def test_windows_portable_builder_uses_one_manifest_for_notices_and_inventory(
     destination = f"{artifact['id']}-{artifact['license']['spdx']}{notice.suffix}"
 
     seed = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
-    for path in (seed / "licenses").iterdir():
-        if path.name != "frame-compare-LICENSE.txt":
-            path.unlink()
+    shutil.rmtree(seed / "licenses")
     (seed / "requirements.lock.txt").write_text("fixture requirements", encoding="utf-8")
-    (seed / "app/src/frame_compare/__init__.py").write_text(
-        '__version__ = "0.1.0"\n', encoding="utf-8"
+    app_source = source / "src/frame_compare"
+    app_source.parent.mkdir()
+    shutil.move(seed / "app/src/frame_compare", app_source)
+    (seed / "app/src").rmdir()
+    (app_source / "__init__.py").write_text('__version__ = "0.1.0"\n', encoding="utf-8")
+    (source / "pyproject.toml").write_text(
+        """
+[project]
+name = "frame-compare"
+version = "0.1.0"
+requires-python = ">=3.13"
+[project.scripts]
+frame-compare = "frame_compare.cli.entry:console_main"
+[project.entry-points.vsview]
+frame-compare-alignment-review = "frame_compare.vsview.alignment_review_panel"
+""",
+        encoding="utf-8",
     )
+    shutil.copyfile(repo_root / "LICENSE", source / "LICENSE")
+    shutil.copyfile(original / "README.txt", owner / "README.txt")
     script = owner / "build_portable.ps1"
     script.write_text(
         script.read_text(encoding="utf-8").rsplit("\nMain", 1)[0]
@@ -1618,8 +1685,6 @@ function Initialize-PortableRuntime {
   Get-ChildItem -LiteralPath $env:FIXTURE_LAYOUT | Copy-Item -Destination $BundleRoot -Recurse
   Copy-Item -LiteralPath $SelectedManifestPath -Destination (Join-Path $BundleRoot "manifest.json")
 }
-function Copy-RepoApp {}
-function Copy-InstallerFiles {}
 function Assert-RequiredPySideLicenseMetadata {}
 function Assert-BundleRuntime {}
 Main
@@ -1627,34 +1692,13 @@ Main
         encoding="utf-8",
     )
 
-    def commit(message: str) -> str:
-        for args in (
-            ("add", "."),
-            (
-                "-c",
-                "user.name=Portable test",
-                "-c",
-                "user.email=portable@example.invalid",
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "--quiet",
-                "-m",
-                message,
-            ),
-        ):
-            subprocess.run(
-                ["git", "-C", str(source), *args], check=True, capture_output=True, timeout=30
-            )
-        return _source_commit(source)
-
     subprocess.run(
         ["git", "-C", str(source), "config", "core.autocrlf", "false"],
         check=True,
         capture_output=True,
         timeout=30,
     )
-    selected = commit("selected manifest and notices")
+    selected = _commit_inventory_fixture(source, "selected manifest and notices")
     newer_notice = b"changed live notice\r\n"
     # Give this artifact its own notice so other pins for the common file still agree.
     pin["path"] = f"licenses/fixture-notice{notice.suffix}"
@@ -1663,7 +1707,14 @@ Main
     manifest["bundle"]["runtime_fingerprints"]["full"] = "b" * 64
     newer_manifest = json.dumps(manifest).encode()
     manifest_path.write_bytes(newer_manifest)
-    assert commit("newer manifest and notices") != selected
+    if historical:
+        activation.write_bytes(activation_bytes)
+        (app_source / "__init__.py").write_text('__version__ = "0.2.0"\n', encoding="utf-8")
+    assert _commit_inventory_fixture(source, "newer manifest and notices") != selected
+    installer = owner / "install.ps1"
+    edited_installer = installer.read_bytes() + b"\r\n# Uncommitted installer fixture edit\r\n"
+    if historical:
+        installer.write_bytes(edited_installer)
 
     command = [
         pwsh,
@@ -1713,6 +1764,16 @@ Main
         )
         assert not (tmp_path / "out").exists()
         assert not (tmp_path / "cache").exists()
+    if historical:
+        activation.unlink()
+        missing = subprocess.run(
+            command, env=env, check=False, capture_output=True, text=True, timeout=90
+        )
+        assert missing.returncode != 0
+        missing_output = _normalized_process_output(missing)
+        assert "Installer file not found" in missing_output and activation.name in missing_output
+        assert not (tmp_path / "out").exists()
+        activation.write_bytes(activation_bytes)
     result = subprocess.run(
         command,
         env=env,
@@ -1726,7 +1787,8 @@ Main
     out = tmp_path / "out"
     assert (out / "manifest.json").read_bytes() == expected_manifest
     bundle_info = json.loads((out / "bundle_info.json").read_bytes())
-    assert bundle_info["manifest_version"] == (2 if custom else 3)
+    assert bundle_info["manifest_version"] == (2 if custom or historical else 3)
+    assert bundle_info["app_version"] == "0.1.0"
     assert (out / "licenses" / destination).read_bytes() == expected_notice
     inventory = json.loads((out / "bundle_inventory.json").read_text(encoding="utf-8"))
     assert inventory["bundle"]["commit_sha"] == selected
@@ -1738,6 +1800,27 @@ Main
         "path": f"licenses/{destination}",
         "sha256": hashlib.sha256(expected_notice).hexdigest(),
     } in inventory["licenses"]
+
+    if historical:
+        source_url = f"https://github.com/TJZine/frame-compare/archive/{selected}.tar.gz"
+        assert inventory["bundle"]["source_archive_url"] == source_url
+        assert inventory["source_build_install_scripts"] == sorted(
+            set(_inventory_source_paths(repo_root))
+            - {"tools/windows_portable/portable_activation.ps1"}
+        )
+        source_urls = (out / "licenses/SOURCE_URLS.txt").read_text(encoding="utf-8")
+        assert source_url in source_urls
+        assert "The SHA identifies the application source." in source_urls
+        assert "the live worktree" in source_urls
+        assert "archive.files entries in bundle_inventory.json hash the" in source_urls
+        assert str(source) not in source_urls
+        archive_files = {entry["path"]: entry for entry in inventory["archive"]["files"]}
+        for name, shipped_bytes in (
+            (activation.name, activation_bytes),
+            (installer.name, edited_installer),
+        ):
+            assert (out / name).read_bytes() == shipped_bytes
+            assert archive_files[name]["sha256"] == hashlib.sha256(shipped_bytes).hexdigest()
 
 
 def test_windows_portable_inventory_uses_dotfile_notice_extension(
@@ -1784,43 +1867,107 @@ def test_windows_portable_inventory_uses_dotfile_notice_extension(
     assert not inventory_path.exists()
 
 
+@pytest.mark.parametrize("historical_entry", ["missing", "symlink", "tree"])
 def test_windows_portable_inventory_records_the_captured_commit(
-    tmp_path: Path, repo_root: Path, inventory_source_repo: Path
+    tmp_path: Path,
+    repo_root: Path,
+    inventory_source_repo: Path,
+    historical_entry: str,
 ) -> None:
     bundle = _write_fake_inventory_bundle(tmp_path=tmp_path, repo_root=repo_root)
-    captured = _source_commit(inventory_source_repo)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(inventory_source_repo),
-            "-c",
-            "user.name=Portable test",
-            "-c",
-            "user.email=portable@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "--quiet",
-            "--allow-empty",
-            "-m",
-            "later checkout",
-        ],
-        check=True,
-        capture_output=True,
-        timeout=30,
+    source = inventory_source_repo
+    helper_path = "tools/windows_portable/portable_activation.ps1"
+    helper = source / helper_path
+    helper_bytes = helper.read_bytes()
+    helper.unlink()
+    if historical_entry == "symlink":
+        # Model the checkout of a Git symlink without requiring OS symlink privileges.
+        subprocess.run(
+            ["git", "-C", str(source), "config", "core.symlinks", "false"],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        helper.write_text("install.ps1", encoding="utf-8")
+        target = subprocess.check_output(
+            ["git", "-C", str(source), "hash-object", "-w", helper_path],
+            text=True,
+            timeout=10,
+        ).strip()
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(source),
+                "update-index",
+                "--cacheinfo",
+                f"120000,{target},{helper_path}",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+    elif historical_entry == "tree":
+        helper.mkdir()
+        (helper / "nested.ps1").write_bytes(helper_bytes)
+    captured = _commit_inventory_fixture(source, "historical scripts")
+
+    for require_clean in (False, True):
+        strict = _run_bundle_inventory(
+            bundle=bundle,
+            repo_root=repo_root,
+            source_repo=source,
+            require_clean_repo=require_clean,
+        )
+        assert strict.returncode != 0
+        assert (
+            f"source commit lacks required regular build/install scripts: {helper_path}"
+            in strict.stderr
+        )
+
+    if historical_entry == "tree":
+        shutil.rmtree(helper)
+    helper.write_bytes(helper_bytes)
+    if historical_entry == "symlink":
+        subprocess.run(
+            ["git", "-C", str(source), "update-index", "--force-remove", helper_path],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+    assert _commit_inventory_fixture(source, "current scripts") != captured
+    strict = _run_bundle_inventory(
+        bundle=bundle,
+        repo_root=repo_root,
+        source_repo=source,
+        commit_sha=captured,
+        require_clean_repo=True,
     )
-    assert _source_commit(inventory_source_repo) != captured
+    assert strict.returncode != 0
+    assert "requires a clean, exact source checkout" in strict.stderr
 
     result = _run_bundle_inventory(
-        bundle=bundle, repo_root=repo_root, source_repo=inventory_source_repo, commit_sha=captured
+        bundle=bundle, repo_root=repo_root, source_repo=source, commit_sha=captured
     )
-
     assert result.returncode == 0, _normalized_process_output(result)
     inventory = json.loads((bundle / "bundle_inventory.json").read_text(encoding="utf-8"))
     assert inventory["bundle"]["commit_sha"] == captured
     assert inventory["bundle"]["source_archive_url"].endswith(f"/{captured}.tar.gz")
-    assert captured in (bundle / "licenses/SOURCE_URLS.txt").read_text(encoding="utf-8")
+    assert inventory["source_build_install_scripts"] == sorted(
+        set(_inventory_source_paths(repo_root)) - {helper_path}
+    )
+    source_urls = (bundle / "licenses/SOURCE_URLS.txt").read_text(encoding="utf-8")
+    assert captured in source_urls
+    assert "the live worktree" in source_urls
+
+    if historical_entry == "missing":
+        (bundle / "bundle_inventory.json").unlink()
+        unreadable = _run_bundle_inventory(
+            bundle=bundle, repo_root=repo_root, source_repo=source, commit_sha="0" * 40
+        )
+        assert unreadable.returncode != 0
+        assert "ls-tree" in unreadable.stderr
+        assert not (bundle / "bundle_inventory.json").exists()
 
 
 def test_windows_portable_requirements_export_uses_the_captured_commit(

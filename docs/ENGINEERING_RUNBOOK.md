@@ -628,8 +628,11 @@ artifact from changes in the advisory feed.
 
 #### Release candidate
 
-1. Merge the active version branch (`vX.Y.Z`) into `pre-release` with a merge commit.
-   The maintainer performs the merge using an identity that triggers push workflows.
+1. Before merging the active version branch (`vX.Y.Z`) into `pre-release`, complete
+   the third-party notice, license text, and distributor-controlled corresponding-source
+   requirements in the [release acceptance records](#release-acceptance-records).
+   The maintainer then merges the branch with a merge commit using an identity
+   that triggers push workflows.
    Merges made with `GITHUB_TOKEN` do not trigger the RC workflow.
 2. On the push, the RC workflow reads the live `pre-release` head. If its stable
    version is already published, the run waits for the next version. Otherwise the
@@ -722,7 +725,10 @@ complete release can still repair the Release Please label.
      docs jobs outside the universal required checks.
    - Confirm the release workflows can create `v*` tags and that
      `RELEASE_PLEASE_TOKEN` is configured.
-4. Check for existing `v0.7.0-rc.*` tags. Merge `v0.7.0` into `pre-release`
+4. Before merging, complete the third-party notice, license text, and
+   distributor-controlled corresponding-source requirements in the
+   [release acceptance records](#release-acceptance-records).
+   Check for existing `v0.7.0-rc.*` tags. Merge `v0.7.0` into `pre-release`
    with a maintainer-created merge commit and expect `v0.7.0-rc.1` when there are
    no prior tags. Check the two assets and verify the downloaded ZIP with
    `sha256sum --check`. Follow [Published RC acceptance](media-runtime-windows-validation.md#published-rc-acceptance).

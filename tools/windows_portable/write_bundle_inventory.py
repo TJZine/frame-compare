@@ -84,6 +84,26 @@ def _run_git(repo_root: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def _source_scripts(repo_root: Path, commit_sha: str, *, exact: bool) -> list[str]:
+    entries = _run_git(
+        repo_root, "ls-tree", "-z", f"{commit_sha}^{{commit}}", "--", *SOURCE_SCRIPTS
+    )
+    regular_files: set[str] = set()
+    for entry in entries.split("\0"):
+        if entry:
+            metadata, path = entry.split("\t", 1)
+            mode, kind, _ = metadata.split()
+            if kind == "blob" and mode in {"100644", "100755"}:
+                regular_files.add(path)
+    allowlist = set(SOURCE_SCRIPTS)
+    missing = sorted(allowlist - regular_files)
+    if exact and missing:
+        raise ValueError(
+            f"source commit lacks required regular build/install scripts: {', '.join(missing)}"
+        )
+    return sorted(allowlist & regular_files)
+
+
 def _require_dict(value: object, context: str) -> JsonObject:
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
         raise ValueError(f"{context} must be an object")
@@ -391,16 +411,28 @@ def _write_source_urls(
     artifacts: list[JsonObject],
     corresponding_sources: list[JsonObject],
     distributions: list[JsonObject],
+    local_tooling: bool = False,
 ) -> None:
     source_archive = f"https://github.com/TJZine/frame-compare/archive/{commit_sha}.tar.gz"
-    lines = [
-        f"Frame Compare {app_version} source ({commit_sha}): {source_archive}",
-        "",
-        "Bundled application assets:",
-        f"- Inter {_INTER_VERSION}: {_INTER_SOURCE_URL}",
-        "",
-        "Manifest-provided runtime sources:",
-    ]
+    lines = [f"Frame Compare {app_version} source ({commit_sha}): {source_archive}"]
+    if local_tooling:
+        lines.extend(
+            (
+                "",
+                "The SHA identifies the application source. Build and install tooling comes from",
+                "the live worktree. The archive.files entries in bundle_inventory.json hash the",
+                "actual shipped files.",
+            )
+        )
+    lines.extend(
+        (
+            "",
+            "Bundled application assets:",
+            f"- Inter {_INTER_VERSION}: {_INTER_SOURCE_URL}",
+            "",
+            "Manifest-provided runtime sources:",
+        )
+    )
     for artifact in artifacts:
         lines.append(f"- {artifact['name']} {artifact['version']}: {artifact['source_url']}")
         build_source_url = artifact.get("build_source_url")
@@ -472,12 +504,24 @@ def main() -> int:
     commit_sha = args.commit_sha
     if not re.fullmatch(r"[a-f0-9]{40}", commit_sha):
         raise ValueError("--commit-sha must be a complete lowercase 40-character commit SHA")
-    if args.require_clean_repo and _run_git(
-        repo_root, "status", "--porcelain", "--untracked-files=all"
-    ):
-        raise ValueError("release bundle inventory requires a clean repository")
-    for source_path in SOURCE_SCRIPTS:
-        _run_git(repo_root, "cat-file", "-e", f"{commit_sha}:{source_path}")
+    exact = commit_sha == _run_git(repo_root, "rev-parse", "HEAD")
+    status_args = ("status", "--porcelain", "--untracked-files=all")
+    if args.require_clean_repo and (not exact or _run_git(repo_root, *status_args)):
+        raise ValueError("release bundle inventory requires a clean, exact source checkout")
+    source_scripts = _source_scripts(repo_root, commit_sha, exact=exact)
+    local_tooling = not exact or (
+        not args.require_clean_repo
+        and bool(
+            _run_git(
+                repo_root,
+                *status_args,
+                "--",
+                "tools/windows_portable",
+                ".github/actions/windows-portable-build",
+                ".github/workflows/windows-portable.yml",
+            )
+        )
+    )
 
     manifest = _require_dict(
         json.loads(manifest_path.read_text(encoding="utf-8")),
@@ -542,6 +586,7 @@ def main() -> int:
         bundle_root=bundle_root,
         app_version=app_version,
         commit_sha=commit_sha,
+        local_tooling=local_tooling,
         artifacts=artifacts,
         corresponding_sources=corresponding_sources,
         distributions=distributions,
@@ -575,7 +620,7 @@ def main() -> int:
         "manifest_artifacts": artifacts,
         "python_distributions": distributions,
         "schema_version": 2,
-        "source_build_install_scripts": sorted(SOURCE_SCRIPTS),
+        "source_build_install_scripts": source_scripts,
     }
     output_path.write_text(
         json.dumps(inventory, indent=2, sort_keys=True) + "\n",

@@ -221,7 +221,7 @@ function Copy-InstallerFiles([string]$BundleRoot) {
 
   foreach ($file in @("install.ps1", "uninstall.ps1", "install.cmd", "uninstall.cmd", "README.txt", "portable_activation.ps1", "path_safety.ps1")) {
     $src = Join-Path $sourceDir $file
-    if (!(Test-Path -LiteralPath $src)) {
+    if (!(Test-Path -LiteralPath $src -PathType Leaf)) {
       throw "Installer file not found: $src"
     }
     Copy-Item -Force -LiteralPath $src -Destination (Join-Path $BundleRoot $file)
