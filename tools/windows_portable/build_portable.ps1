@@ -12,12 +12,9 @@ Param(
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\\..")).Path,
 
   [Parameter(Mandatory = $false)]
-  [switch]$RequireReleasePublicKey,
+  [switch]$ReleaseBuild,
 
-  [string]$ExpectedCommitSha,
-
-  [switch]$AssemblyOnly,
-  [string]$RequirementsPath
+  [string]$ExpectedCommitSha
 )
 
 $ErrorActionPreference = "Stop"
@@ -201,17 +198,10 @@ function Assert-LastExitCode([string]$CommandLabel) {
   }
 }
 
-function Assert-ReleasePublicKey() {
-  $validator = Join-Path $PSScriptRoot "validate_update_public_key.ps1"
-  $publicKey = Join-Path $PSScriptRoot "update_public_key.xml"
-  & $validator -PublicKeyPath $publicKey
-}
-
 function Copy-InstallerFiles([string]$BundleRoot) {
   $sourceDir = $PSScriptRoot
   $shimSource = Join-Path $sourceDir "shim"
   $shimDest = Join-Path $BundleRoot "shim"
-  $publicKeySource = Join-Path $sourceDir "update_public_key.xml"
 
   foreach ($file in @("install.ps1", "uninstall.ps1", "install.cmd", "uninstall.cmd", "README.txt", "portable_activation.ps1", "path_safety.ps1")) {
     $src = Join-Path $sourceDir $file
@@ -224,14 +214,17 @@ function Copy-InstallerFiles([string]$BundleRoot) {
   if (!(Test-Path -LiteralPath $shimSource)) {
     throw "Shim directory not found: $shimSource"
   }
-  if (!(Test-Path -LiteralPath $publicKeySource)) {
-    throw "Update public key not found: $publicKeySource"
-  }
   if (Test-Path -LiteralPath $shimDest) {
     Remove-Item -Recurse -Force -LiteralPath $shimDest
   }
-  Copy-Item -Recurse -Force -LiteralPath $shimSource -Destination $shimDest
-  Copy-Item -Force -LiteralPath $publicKeySource -Destination (Join-Path $shimDest "update_public_key.xml")
+  Ensure-Directory -Path $shimDest
+  foreach ($name in @("frame-compare.ps1", "frame-compare.cmd")) {
+    $shim = Join-Path $shimSource $name
+    if (!(Test-Path -LiteralPath $shim -PathType Leaf)) {
+      throw "Shim file not found: $shim"
+    }
+    Copy-Item -Force -LiteralPath $shim -Destination (Join-Path $shimDest $name)
+  }
 }
 
 function Copy-RepoApp([string]$BundleRoot, [string]$CommitSha) {
@@ -252,7 +245,7 @@ function Copy-RepoApp([string]$BundleRoot, [string]$CommitSha) {
       "Uncommitted changes exist under src/frame_compare or pyproject.toml; the portable bundle " +
       "packages commit $CommitSha and builds wheel dist-info metadata from it, so it will exclude them."
     )
-    if ($RequireReleasePublicKey) {
+    if ($ReleaseBuild) {
       throw $dirtySourceMessage
     }
     Write-Warning $dirtySourceMessage
@@ -269,9 +262,6 @@ function Initialize-PortableRuntime([string]$BundleRoot, [string]$CommitSha, [st
     "assemble", "--repo", $RepoRoot, "--cache", $CacheDir, "--output", $BundleRoot,
     "--commit-sha", $CommitSha, "--manifest", $SelectedManifestPath
   )
-  if ($RequirementsPath) {
-    $arguments += @("--requirements", $RequirementsPath)
-  }
   & $HostPython -B -I -S (Join-Path $PSScriptRoot "portable_runtime.py") @arguments
   Assert-LastExitCode -CommandLabel "portable runtime projection"
 }
@@ -643,7 +633,7 @@ function Write-BundleInventory([string]$BundleRoot, [string]$CommitSha) {
     "--commit-sha", $CommitSha,
     "--output", (Join-Path $BundleRoot "bundle_inventory.json")
   )
-  if ($RequireReleasePublicKey) {
+  if ($ReleaseBuild) {
     $arguments += "--require-clean-repo"
   }
   & $HostPython -B -I -S @arguments
@@ -651,10 +641,6 @@ function Write-BundleInventory([string]$BundleRoot, [string]$CommitSha) {
 }
 
 function Main() {
-  if ($RequireReleasePublicKey) {
-    Assert-ReleasePublicKey
-  }
-
   Assert-BuildPathAncestry
   $useCommittedManifest = $ManifestPath -eq (Join-Path $PSScriptRoot "manifest.windows-x64.json")
   $selectedManifestPath = $ManifestPath
@@ -664,7 +650,7 @@ function Main() {
   }
   Assert-BuildOutputPath
   $commitSha = $ExpectedCommitSha
-  if (!$hasExpectedCommitSha -or $RequireReleasePublicKey) {
+  if (!$hasExpectedCommitSha -or $ReleaseBuild) {
     $headSha = & git -C $RepoRoot rev-parse HEAD
     Assert-LastExitCode -CommandLabel "resolve portable source commit"
     if (!$hasExpectedCommitSha) {
@@ -674,7 +660,7 @@ function Main() {
   if ($commitSha -cnotmatch '\A[a-f0-9]{40}\z') {
     throw "Expected a complete lowercase 40-character source commit SHA."
   }
-  if ($RequireReleasePublicKey) {
+  if ($ReleaseBuild) {
     if ($commitSha -cne $headSha) {
       throw "Portable release source commit must match the live checkout: expected=$commitSha actual=$headSha"
     }
@@ -721,10 +707,8 @@ function Main() {
     Assert-RequiredPySideLicenseMetadata -BundleRoot $OutDir
     Write-BundleInventory -BundleRoot $OutDir -CommitSha $commitSha
 
-    if (!$AssemblyOnly) {
-      Assert-BundleRuntime -BundleRoot $OutDir
-      Remove-PythonBytecodeCaches -BundleRoot $OutDir
-    }
+    Assert-BundleRuntime -BundleRoot $OutDir
+    Remove-PythonBytecodeCaches -BundleRoot $OutDir
 
     Write-Host "OK: portable bundle assembled at $OutDir"
   } catch {

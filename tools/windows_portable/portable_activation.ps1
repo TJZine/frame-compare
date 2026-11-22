@@ -205,10 +205,35 @@ function Write-RecoveryLocations([string]$PointerPath, [object[]]$Folders) {
 }
 
 function Get-PortableShimNames() {
-  return @(
-    "frame-compare.ps1", "frame-compare.cmd", "frame-compare-update.ps1",
-    "frame-compare-update.cmd", "frame-compare-version.ps1", "update_public_key.xml"
-  )
+  return @("frame-compare.ps1", "frame-compare.cmd")
+}
+
+function Remove-LegacyUpdaterLeaves([string]$StateDirectory) {
+  $binDir = Join-Path (Split-Path -Parent $StateDirectory) "bin"
+  try {
+    Assert-NoReparsePointAncestor -Path $binDir -Label "Installed shims"
+  } catch {
+    Write-Warning "The new installation is active. Could not inspect legacy leaves in ${binDir}: $($_.Exception.Message)"
+    return
+  }
+
+  foreach ($name in @(
+    "frame-compare-update.ps1", "frame-compare-update.cmd", "frame-compare-version.ps1",
+    "update_public_key.xml"
+  )) {
+    $path = Join-Path $binDir $name
+    try {
+      $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+      if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Expected a regular file."
+      }
+      [IO.File]::Delete($path)
+    } catch [System.Management.Automation.ItemNotFoundException] {
+      # The old installer may not have installed this leaf.
+    } catch {
+      Write-Warning "The new installation is active. Could not remove legacy file ${path}: $($_.Exception.Message)"
+    }
+  }
 }
 
 function Get-PortableUserPath() {
@@ -496,6 +521,8 @@ function Invoke-PortableActivation(
     }
     if ($null -ne $failure) { throw $failure }
 
+    Remove-LegacyUpdaterLeaves -StateDirectory $StateDirectory
+
     if ($markerWritten) {
       try { Remove-Item -LiteralPath $pendingMigrationPath -Force }
       catch { throw "The new installation is active at $BundleRoot, but the pending migration marker could not be removed: $pendingMigrationPath. $($_.Exception.Message)" }
@@ -508,7 +535,6 @@ function Invoke-PortableActivation(
     }
     Write-Host "Installed Frame Compare shim."
     Write-Host "Open a new terminal, then run: frame-compare --help"
-    Write-Host "Updater command: frame-compare-update --help"
   } finally {
     if ($ownsLock) { $ActivationLock.Dispose() }
   }

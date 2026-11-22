@@ -43,7 +43,7 @@ product requirement:
   bounded operations, and cleanup. Respect caller-owned injected resources. Keep
   webhook transport isolated from the publishing client's state.
 - Packaged Docker and Windows runtimes are distinct support profiles. Native
-  source tests, GUI proof, unsigned artifact proof, signing, and physical-host
+  source tests, GUI proof, packaged runtime proof, scanning, and physical-host
   acceptance establish different claims.
 
 Current module boundaries are starting evidence for design. A justified redesign
@@ -128,7 +128,7 @@ or the routing quality of a new skill.
 
 For wheel/sdist changes use the existing distribution recipe and
 `scripts/verify_distribution.py`. For native media, VSView, Windows portable,
-updater, or signing changes load the corresponding complete runbook procedure.
+or release changes load the corresponding complete runbook procedure.
 Do not shorten those procedures into this profile or infer their result from
 native pytest. No build or verification command grants release/publication authority.
 

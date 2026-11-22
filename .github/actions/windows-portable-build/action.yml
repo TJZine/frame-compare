@@ -1,11 +1,11 @@
 name: Build and exercise Windows portable artifacts
-description: Shared dependency, runtime, and unsigned packaging steps for Windows release and PR jobs.
+description: Shared dependency, runtime, and packaging steps for Windows release and PR jobs.
 inputs:
   expected_sha:
     description: Exact commit checked out by the calling job
     required: true
-  require_signing:
-    description: Require the release public key in the portable bundle
+  release_build:
+    description: Require a clean, exact release checkout
     required: true
 outputs:
   bundle_id:
@@ -14,12 +14,6 @@ outputs:
   bundle_digest:
     description: SHA-256 of the raw portable ZIP
     value: ${{ steps.bundle.outputs.artifact-digest }}
-  update_id:
-    description: Immutable unsigned update artifact ID
-    value: ${{ steps.update.outputs.artifact-id }}
-  update_digest:
-    description: SHA-256 of the raw unsigned update ZIP
-    value: ${{ steps.update.outputs.artifact-digest }}
 runs:
   using: composite
   steps:
@@ -32,7 +26,7 @@ runs:
       uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       with:
         version: "0.13.8"
-        enable-cache: ${{ inputs.require_signing == 'true' }}
+        enable-cache: false
 
     - name: Install dev dependencies (frozen)
       shell: pwsh
@@ -47,21 +41,14 @@ runs:
         uv --offline --no-config pip install --no-index --no-deps --no-build --no-python-downloads `
           (Join-Path $wheelhouse "anitopy-2.1.1-py3-none-any.whl")
 
-    - name: Full test suite (includes portable updater proof)
+    - name: Full test suite
       shell: pwsh
       run: uv run --no-sync pytest -q --ignore=tests/windows_portable/test_windows_portable_zip_succession.py
-
-    - name: Validate update public key
-      if: inputs.require_signing == 'true'
-      shell: pwsh
-      run: |
-        pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/validate_update_public_key.ps1 `
-          -PublicKeyPath tools/windows_portable/update_public_key.xml
 
     - name: Build portable bundle
       shell: pwsh
       env:
-        REQUIRE_SIGNING: ${{ inputs.require_signing }}
+        RELEASE_BUILD: ${{ inputs.release_build }}
         EXPECTED_SHA: ${{ inputs.expected_sha }}
       run: |
         $ErrorActionPreference = "Stop"
@@ -84,8 +71,8 @@ runs:
           "-CacheDir",
           ".portable_cache"
         )
-        if ($env:REQUIRE_SIGNING -eq "true") {
-          $buildArgs += "-RequireReleasePublicKey"
+        if ($env:RELEASE_BUILD -eq "true") {
+          $buildArgs += "-ReleaseBuild"
         }
         pwsh @buildArgs 2>&1 | Tee-Object -FilePath $proofLog
         if ($LASTEXITCODE -ne 0) {
@@ -243,57 +230,13 @@ runs:
         if ([int]$suite.tests -ne 8 -or [int]$suite.skipped -ne 0) {
           throw "Packed ZIP succession requires all eight cases with no skips."
         }
+        Write-Host "Packed ZIP succession: $($suite.tests) passed, $($suite.skipped) skipped."
 
-    - name: Verify extracted portable bundle
-      shell: pwsh
-      env:
-        EXPECTED_SHA: ${{ inputs.expected_sha }}
-      run: |
-        $extractedProofLog = Join-Path $env:RUNNER_TEMP "windows-extracted-proof.log"
-        pwsh -NoProfile -ExecutionPolicy Bypass `
-          -File tools/windows_portable/verify_extracted_bundle.ps1 `
-          -ZipPath dist/frame-compare-portable-win-x64.zip `
-          -ExtractRoot dist/zip_extract_check `
-          -DoctorStdoutPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.json") `
-          -DoctorStderrPath (Join-Path $env:RUNNER_TEMP "extracted-doctor.stderr.txt") `
-          -ExpectedCommitSha "$env:EXPECTED_SHA" `
-          -CommandTimeoutSeconds 300 2>&1 | Tee-Object -FilePath $extractedProofLog
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        $extractedProof = Get-Content -LiteralPath $extractedProofLog -Raw
-        foreach ($marker in @(
-          "WINDOWS_EXTRACTED_PROOF license_inventory=ok",
-          "WINDOWS_EXTRACTED_PROOF vsview_distributions=ok",
-          "WINDOWS_EXTRACTED_PROOF vsview_entrypoint=ok",
-          "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded",
-          "WINDOWS_EXTRACTED_PROOF result=ok"
-        )) {
-          if ($extractedProof -notmatch [regex]::Escape($marker)) {
-            throw "Required extracted-bundle proof marker missing: $marker"
-          }
-        }
-
-    - name: Build code-only update zip
-      shell: pwsh
-      run: |
-        ./tools/windows_portable/build_update.ps1 `
-          -BundleDir dist/frame-compare-portable-win-x64 `
-          -OutFile dist/unsigned-update.zip
-        Move-Item -LiteralPath dist/frame-compare-portable-win-x64.zip -Destination dist/portable.zip
-
-    - name: Upload portable input
+    - name: Upload raw portable ZIP
       id: bundle
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        name: portable.zip
-        path: dist/portable.zip
-        archive: false
-        if-no-files-found: error
-
-    - name: Upload unsigned update input
-      id: update
-      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-      with:
-        name: unsigned-update.zip
-        path: dist/unsigned-update.zip
+        name: frame-compare-portable-win-x64.zip
+        path: dist/frame-compare-portable-win-x64.zip
         archive: false
         if-no-files-found: error

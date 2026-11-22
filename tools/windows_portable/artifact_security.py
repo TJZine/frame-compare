@@ -75,18 +75,10 @@ def _stage(args: argparse.Namespace) -> None:
     if args.output.exists():
         raise ValueError("Portable scan output directory must not already exist")
 
-    receipt = _read_json(args.verification, MAX_RECEIPT)
+    expected_digest = _require_digest(args.expected_digest, "producer ZIP")
     archive_digest = digest_file(args.archive)
-    if (
-        receipt.get("schema") != 2
-        or receipt.get("portable_reproduced") is not True
-        or receipt.get("commit") != args.expected_sha
-        or receipt.get("portable_artifact_id") != args.expected_artifact_id
-        or receipt.get("bundle_sha256") != archive_digest
-    ):
-        raise ValueError("Portable artifact does not match its verification receipt")
-    _require_digest(receipt.get("requirements_sha256"), "requirements")
-    _require_digest(receipt.get("manifest_sha256"), "manifest")
+    if archive_digest != expected_digest:
+        raise ValueError("Portable artifact does not match the producer ZIP digest")
 
     args.output.mkdir(parents=True)
     file_count = directory_count = expanded_bytes = 0
@@ -118,11 +110,8 @@ def _stage(args: argparse.Namespace) -> None:
         {
             "schema": 1,
             "commit": args.expected_sha,
-            "tag": receipt.get("tag"),
             "portable_artifact_id": args.expected_artifact_id,
             "portable_sha256": archive_digest,
-            "verification_sha256": digest_file(args.verification),
-            "portable_reproduced": True,
             "files": file_count,
             "directories": directory_count,
             "expanded_bytes": expanded_bytes,
@@ -207,14 +196,12 @@ def _policy(args: argparse.Namespace) -> None:
     scan_input = _read_json(args.scan_input, MAX_RECEIPT)
     if (
         scan_input.get("schema") != 1
-        or scan_input.get("portable_reproduced") is not True
         or COMMIT.fullmatch(str(scan_input.get("commit", ""))) is None
         or ARTIFACT_ID.fullmatch(str(scan_input.get("portable_artifact_id", ""))) is None
     ):
         raise ValueError("Scan input receipt is malformed")
 
     _require_digest(scan_input.get("portable_sha256"), "portable")
-    _require_digest(scan_input.get("verification_sha256"), "verification receipt")
     syft = _read_json(args.syft, MAX_SCAN_DOCUMENT)
     _require_scanner(syft, "syft", args.expected_syft_version)
     package_count = _inventory_count(syft, "artifacts", "Syft")
@@ -253,7 +240,7 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     stage = subparsers.add_parser("stage", help="validate and safely extract the portable ZIP")
     stage.add_argument("--archive", type=Path, required=True)
-    stage.add_argument("--verification", type=Path, required=True)
+    stage.add_argument("--expected-digest", required=True)
     stage.add_argument("--expected-sha", required=True)
     stage.add_argument("--expected-artifact-id", required=True)
     stage.add_argument("--output", type=Path, required=True)

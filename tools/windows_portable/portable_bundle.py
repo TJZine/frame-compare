@@ -13,7 +13,7 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from portable_archive import PathIndex, checked_zip, copy_exact, digest_file
+from portable_archive import PathIndex, copy_exact
 from portable_runtime import SITE, Layout, _unpack_archive, git_blob, record_bytes
 
 PREFIX = "frame-compare-portable-win-x64/"
@@ -96,33 +96,6 @@ def bundle_tree(root: Path) -> PathIndex:
     return index
 
 
-def assert_bundle(archive_path: Path, root: Path) -> None:
-    expected = bundle_tree(root)
-    actual = PathIndex()
-    with checked_zip(archive_path) as archive:
-        for entry in archive.infolist():
-            if not entry.filename.startswith(PREFIX):
-                raise ValueError("Portable archive member outside its canonical root")
-            name = entry.filename.removeprefix(PREFIX).removesuffix("/")
-            if not name and entry.is_dir():
-                continue
-            actual.add(name, directory=entry.is_dir())
-            if entry.is_dir():
-                if name not in expected.directories:
-                    raise ValueError(f"Unexpected portable archive directory: {name}")
-                continue
-            target = root / name
-            if name not in expected.files or entry.file_size != target.stat().st_size:
-                raise ValueError(f"Unexpected portable member or wrong size: {name}")
-            with archive.open(entry) as source:
-                if copy_exact(source, entry.file_size) != digest_file(target):
-                    raise ValueError(
-                        f"Portable member does not match independently derived bytes: {name}"
-                    )
-    if actual.files != expected.files or actual.directories != expected.directories:
-        raise ValueError("Portable archive omits independently derived files or directories")
-
-
 def write_bundle(root: Path, destination: Path) -> None:
     index = bundle_tree(root)
     with zipfile.ZipFile(
@@ -145,11 +118,10 @@ def write_bundle(root: Path, destination: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("install-project", "pack", "verify-and-pack"))
+    parser.add_argument("mode", choices=("install-project", "pack"))
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--commit-sha")
-    parser.add_argument("--candidate", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.mode == "install-project":
@@ -161,16 +133,7 @@ def main() -> None:
         return
     if args.output is None:
         parser.error("portable packaging requires --output")
-    if args.mode == "verify-and-pack":
-        if args.candidate is None:
-            parser.error("verify-and-pack requires --candidate")
-        assert_bundle(args.candidate, args.root)
-        write_bundle(args.root, args.output)
-        if digest_file(args.candidate) != digest_file(args.output):
-            args.output.unlink()
-            raise ValueError("Portable ZIP differs from the independently rebuilt canonical bytes")
-    else:
-        write_bundle(args.root, args.output)
+    write_bundle(args.root, args.output)
 
 
 if __name__ == "__main__":

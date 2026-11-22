@@ -7,7 +7,7 @@
     "python_version": "3.14.10",
     "ffmpeg_policy": "lgpl-only",
     "plugin_layout": "R74+ site-packages/vapoursynth/plugins only",
-    "notes": "Deterministic Windows media runtime contract. VapourSynth plugins are installed only in the canonical site-packages/vapoursynth/plugins directory; native media components are not present in code-only update ZIPs, so installations crossing this runtime fingerprint require a complete portable bundle refresh. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
+    "notes": "Deterministic Windows media runtime contract. VapourSynth plugins are installed only in the canonical site-packages/vapoursynth/plugins directory. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
     "runtime_fingerprints": {
       "analysis": "b9c8c9d3c7937e1e3219d6b3c22d323b89e8ecd277606be26fe94e3fcfffda28",
       "probe": "b411643a70b6777974e141274614df896cf742d932fe02038e26e247dc846982",
@@ -644,5 +644,5 @@
       "bytes": 1566911
     }
   ],
-  "notes": "Windows FFMS2 remains deliberately excluded. Native media artifacts require a full bundle refresh when the media-runtime fingerprint changes; code-only updates are limited to installations already carrying the same fingerprint."
+  "notes": "Windows FFMS2 remains deliberately excluded."
 }

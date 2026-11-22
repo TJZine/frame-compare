@@ -87,11 +87,6 @@ Open a new terminal; if needed, rerun `install.cmd` from the bundle’s current 
 
 Rerun `install.cmd` from the new bundle location to update installed state.
 
-### Code-only update reports a runtime fingerprint mismatch
-
-Install the complete portable ZIP for that release; code-only updates cannot replace
-native media components.
-
 ### Report opens without images
 
 Keep `report.html` beside its `screenshots/` directory or rerun the comparison with

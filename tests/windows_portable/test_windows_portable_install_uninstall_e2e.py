@@ -96,14 +96,7 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
         shutil.copy2(source_dir / name, bundle_dir / name)
     (bundle_dir / "frame-compare.ps1").write_text("exit 0\n", encoding="utf-8")
 
-    managed_bin_files = (
-        "frame-compare.ps1",
-        "frame-compare.cmd",
-        "frame-compare-update.ps1",
-        "frame-compare-version.ps1",
-        "frame-compare-update.cmd",
-        "update_public_key.xml",
-    )
+    managed_bin_files = ("frame-compare.ps1", "frame-compare.cmd")
     for index, filename in enumerate(managed_bin_files):
         (shim_dir / filename).write_bytes(f"managed-{index}\r\n".encode("ascii"))
     (config_dir / "config.toml").write_bytes(b'[paths]\r\ninput_dir = "initial"\r\n')

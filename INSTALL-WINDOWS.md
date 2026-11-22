@@ -2,7 +2,7 @@
 
 See the canonical [Windows portable guide](docs/getting-started/windows-portable.md) for release
 and source installation, portable directory layout, optional dependencies,
-first-run commands, updates, backups, rollback, uninstalling, and troubleshooting.
+first-run commands, ZIP reinstall, uninstalling, and troubleshooting.
 
 Source builds require PowerShell 7 or newer. Published-bundle installation, launch,
 and updates support Windows PowerShell 5.1 as well as PowerShell 7.

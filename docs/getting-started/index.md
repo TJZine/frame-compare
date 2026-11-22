@@ -11,8 +11,7 @@ by operating system and by how much of the media runtime you want to manage.
 
 - [Windows portable](windows-portable.md)
 
-    Complete runtime, VSView alignment panel, installer, and signed code-only
-    updates. Use this on Windows 10 or 11.
+    Complete runtime, VSView alignment panel, and a ZIP installer. Use this on Windows 10 or 11.
 
 - [Docker](docker.md)
 
@@ -47,7 +46,7 @@ by operating system and by how much of the media runtime you want to manage.
 | HDR tonemapping | Host Vulkan driver | Software Vulkan | Host Vulkan driver |
 | VSView alignment panel | Included | Not included | Optional `vsview` extra |
 | Opening the report and slow.pics URL automatically | Interactive desktop session | No; use the host helper | Interactive desktop session |
-| Signed code-only updates and rollback | Yes | No | No |
+| ZIP reinstall with user-data carry-over | Yes | No | No |
 | History and caches that persist | Yes | Yes, through the host `generated/` mount | Yes |
 
 Browser and clipboard actions need an interactive desktop session; headless, SSH,

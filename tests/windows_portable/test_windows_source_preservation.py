@@ -106,12 +106,6 @@ def test_builder_preserves_existing_state(
         "manifest.schema.json",
     ):
         shutil.copyfile(repo_root / "tools/windows_portable" / name, owner / name)
-        if name == "version_utils.ps1":
-            (owner / "shim").mkdir(exist_ok=True)
-            shutil.copyfile(
-                repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
-                owner / "shim/frame-compare-version.ps1",
-            )
     manifest = json.loads(
         (repo_root / "tools/windows_portable/manifest.windows-x64.json").read_text()
     )
@@ -241,10 +235,6 @@ def source_fixture(tmp_path: Path, repo_root: Path) -> tuple[Path, Path, Path]:
     for name in (
         "frame-compare.ps1",
         "frame-compare.cmd",
-        "frame-compare-update.ps1",
-        "frame-compare-version.ps1",
-        "frame-compare-update.cmd",
-        "update_public_key.xml",
     ):
         shim = previous / "shim" / name
         shim.parent.mkdir(exist_ok=True)
@@ -315,7 +305,7 @@ Set-Content -LiteralPath (Join-Path $OutDir 'frame-compare.ps1') -Value '# launc
 foreach ($name in @('portable_activation.ps1', 'path_safety.ps1')) {
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $OutDir
 }
-foreach ($name in @('frame-compare.ps1', 'frame-compare.cmd', 'frame-compare-update.ps1', 'frame-compare-version.ps1', 'frame-compare-update.cmd', 'update_public_key.xml')) {
+foreach ($name in @('frame-compare.ps1', 'frame-compare.cmd')) {
   Set-Content -LiteralPath (Join-Path $OutDir "shim/$name") -Value "new $name"
 }
 $global:LASTEXITCODE = 0
@@ -399,11 +389,6 @@ def test_source_install_skip_still_requires_builder_python_lookup(
         "manifest.windows-x64.json",
     ):
         shutil.copyfile(repo_root / "tools/windows_portable" / name, owner / name)
-    (owner / "shim").mkdir()
-    shutil.copyfile(
-        repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
-        owner / "shim/frame-compare-version.ps1",
-    )
     _initialize_builder_fixture_repo(script.parents[2])
     before = _snapshot(previous)
     pointer_before = pointer.read_bytes()
@@ -642,12 +627,6 @@ def test_builder_uses_committed_version_and_empty_workspace(
         "manifest.windows-x64.json",
     ):
         shutil.copyfile(repo_root / "tools/windows_portable" / name, owner / name)
-        if name == "version_utils.ps1":
-            (owner / "shim").mkdir(exist_ok=True)
-            shutil.copyfile(
-                repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
-                owner / "shim/frame-compare-version.ps1",
-            )
     shutil.copytree(repo_root / "tools/windows_portable/licenses", owner / "licenses")
     init = root / "src/frame_compare/__init__.py"
     init.parent.mkdir(parents=True)
@@ -669,7 +648,6 @@ function Initialize-PortableRuntime {
   Set-Content -LiteralPath (Join-Path $BundleRoot 'requirements.lock.txt') -Value $CommitSha
   git -C $env:REPO update-ref HEAD $env:LATER_SHA
 }
-function Assert-ReleasePublicKey {}
 function Assert-BundleRuntime {}
 function Remove-PythonBytecodeCaches {}
 function Write-LauncherFiles {}
@@ -728,7 +706,7 @@ Main
         command += " -ExpectedCommitSha $env:CAPTURED_SHA"
     if mode == "mismatched-release":
         assert git("status", "--porcelain", "--untracked-files=all") == ""
-        command += " -RequireReleasePublicKey"
+        command += " -ReleaseBuild"
     cache = tmp_path / "cache"
     result = _run(
         pwsh,
@@ -1323,12 +1301,6 @@ def test_builder_refuses_junction_ancestry_before_mutation(
         "manifest.windows-x64.json",
     ):
         shutil.copyfile(repo_root / "tools/windows_portable" / name, owner / name)
-        if name == "version_utils.ps1":
-            (owner / "shim").mkdir(exist_ok=True)
-            shutil.copyfile(
-                repo_root / "tools/windows_portable/shim/frame-compare-version.ps1",
-                owner / "shim/frame-compare-version.ps1",
-            )
     cache = tmp_path / "cache"
     cache.mkdir()
     sentinel = cache / "sentinel"
@@ -1416,10 +1388,6 @@ def test_bundle_activation_coordinates_with_source_install_lock(
     names = (
         "frame-compare.ps1",
         "frame-compare.cmd",
-        "frame-compare-update.ps1",
-        "frame-compare-version.ps1",
-        "frame-compare-update.cmd",
-        "update_public_key.xml",
     )
     for name in names:
         (bundle / "shim" / name).write_bytes(f"candidate {name}".encode())

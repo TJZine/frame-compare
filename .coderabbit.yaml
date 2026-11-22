@@ -39,7 +39,7 @@ reviews:
         Review Antigravity rules as thin pointers to AGENTS.md and .agents/project.md. Flag stale discovery names, conflicting authority, and duplicated workflow policy.
     - path: "docs/ENGINEERING_RUNBOOK.md"
       instructions: |
-        Review complete specialist verification and release procedures. Preserve required Docker, Windows, distribution, signing, and platform claims and their evidence. Generic methodology belongs to shared skills; local facts and test selection belong to .agents/project.md. Flag gaps that permit unverified claims or conflicting command ownership.
+        Review complete specialist verification and release procedures. Preserve required Docker, Windows, distribution, scan, and platform claims and their evidence. Generic methodology belongs to shared skills; local facts and test selection belong to .agents/project.md. Flag gaps that permit unverified claims or conflicting command ownership.
     - path: "docs/current-architecture.md"
       instructions: |
         Review as present-day architecture truth. Check composition roots, import layers, persistence owners, external integration owners, runtime phase ordering, and hotspot lists. Flag ownership claims the change makes stale, or changes that would let hotspots absorb new responsibilities.
@@ -117,7 +117,7 @@ reviews:
         Review integration tests for honest runtime requirements, markers, skips, fixture isolation, and real FFmpeg/VapourSynth behavior where the changed surface requires it.
     - path: "tools/windows_portable/**"
       instructions: |
-        Review Windows portable/update changes as release-path code. Flag signing/key handling risks, path quoting issues, partial update failure modes, missing PowerShell verification, and docs/CI drift.
+        Review Windows portable changes for path quoting, partial activation failures, required PowerShell verification, and docs/CI drift.
     - path: ".github/workflows/**"
       instructions: |
         Review CI changes for parity with documented local verification, Python/uv cache safety, Docker/runtime gates, Windows portable paths, and release artifact integrity.

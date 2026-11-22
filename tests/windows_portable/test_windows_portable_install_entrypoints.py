@@ -73,7 +73,6 @@ def test_windows_cmd_launchers_have_absolute_powershell_fallbacks(repo_root: Pat
         "tools/windows_portable/install.cmd",
         "tools/windows_portable/uninstall.cmd",
         "tools/windows_portable/shim/frame-compare.cmd",
-        "tools/windows_portable/shim/frame-compare-update.cmd",
     ):
         source = _read_text_or_fail(repo_root / relative_path).lower()
         assert "%programfiles%\\powershell\\7\\pwsh.exe" in source

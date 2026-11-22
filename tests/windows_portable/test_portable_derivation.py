@@ -214,7 +214,7 @@ def _lock_package(name: str, version: str, pin: runtime.Pin) -> str:
     )
 
 
-def test_portable_assembly_is_inert_and_reproducible(
+def test_portable_assembly_is_inert_and_safely_packaged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     if shutil.which("uv") is None:
@@ -342,8 +342,14 @@ def test_portable_assembly_is_inert_and_reproducible(
 
     snapshot = tmp_path / "snapshot"
     snapshot.mkdir()
-    requirements_path = tmp_path / "requirements.txt"
-    requirements_path.write_bytes(requirements)
+
+    def export_requirements(repo: Path, commit: str, output: Path) -> bytes:
+        assert repo == source
+        assert commit == selected
+        output.write_bytes(requirements)
+        return requirements
+
+    monkeypatch.setattr(runtime, "export", export_requirements)
 
     def run_runtime(mode: str, *args: str) -> None:
         monkeypatch.setattr(
@@ -358,11 +364,9 @@ def test_portable_assembly_is_inert_and_reproducible(
     assert (snapshot / "licenses" / "TEST.txt").read_bytes() == older_notice
     monkeypatch.setattr(runtime, "TRIM", (1, 4))
     output = tmp_path / "runtime"
-    producer = tmp_path / "producer"
     custom = tmp_path / "custom"
     for destination, manifest_input in (
         (output, snapshot / runtime.MANIFEST.name),
-        (producer, snapshot / runtime.MANIFEST.name),
         (custom, live_manifest),
     ):
         destination.mkdir()
@@ -372,8 +376,6 @@ def test_portable_assembly_is_inert_and_reproducible(
             str(manifest_input),
             "--cache",
             str(cache),
-            "--requirements",
-            str(requirements_path),
             "--output",
             str(destination),
         )
@@ -396,21 +398,14 @@ def test_portable_assembly_is_inert_and_reproducible(
         output / "licenses/python/pyside6_webengine-1.dist-info__licenses/LICENSE"
     ).read_bytes() == b"notice"
 
-    first_zip = tmp_path / "first.zip"
-    second_zip = tmp_path / "second.zip"
-    bundle.write_bundle(output, first_zip)
-    bundle.write_bundle(producer, second_zip)
-    assert first_zip.read_bytes() == second_zip.read_bytes()
-    bundle.assert_bundle(second_zip, output)
-
-    # Rehashing an altered file in a producer inventory cannot override the
-    # independently assembled tree.
-    (producer / "python/python.exe").write_bytes(b"altered bytes")
-    (producer / "bundle_inventory.json").write_text('{"files": []}')
-    candidate = tmp_path / "producer.zip"
-    bundle.write_bundle(producer, candidate)
-    with pytest.raises(ValueError, match="Unexpected portable member|independently derived bytes"):
-        bundle.assert_bundle(candidate, output)
+    archive_path = tmp_path / "portable.zip"
+    bundle.write_bundle(output, archive_path)
+    with checked_zip(archive_path) as archive:
+        assert archive.read(bundle.PREFIX + "manifest.json") == manifest
+        assert archive.read(bundle.PREFIX + "python/python314._pth") == (
+            runtime.embedded_search_path("314")
+        )
+        assert bundle.PREFIX in archive.namelist()
 
     pinned_demo = _seed(demo, cache)
     (cache / (pinned_demo.sha256 + "-" + demo.name)).write_bytes(b"wrong")

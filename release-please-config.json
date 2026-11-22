@@ -12,6 +12,10 @@
           "type": "toml",
           "path": "uv.lock",
           "jsonpath": "$.package[?(@.name.value == 'frame-compare')].version"
+        },
+        {
+          "type": "generic",
+          "path": "src/frame_compare/__init__.py"
         }
       ]
     }

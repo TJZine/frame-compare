@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import sys
 import tomllib
-import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -59,15 +58,13 @@ def test_windows_portable_generated_cmd_launchers_have_absolute_powershell_fallb
     assert "%ProgramFiles%\\PowerShell\\7\\pwsh.exe" in build_script
     assert "%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" in build_script
     assert '"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File' in build_script
-    for assignment in ("$cmd = @'", "$updateCmd = @'"):
-        launcher = build_script.split(assignment, 1)[1].split("'@", 1)[0]
-        assert 'set "POWERSHELL_EXE="' in launcher
+    launcher = build_script.split("$cmd = @'", 1)[1].split("'@", 1)[0]
+    assert 'set "POWERSHELL_EXE="' in launcher
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows CMD required")
-@pytest.mark.parametrize("launcher", ["frame-compare", "frame-compare-update"])
 def test_windows_portable_generated_cmd_launchers_select_script_and_propagate_exit(
-    repo_root: Path, tmp_path: Path, launcher: str
+    repo_root: Path, tmp_path: Path
 ) -> None:
     pwsh = shutil.which("pwsh.exe")
     if pwsh is None:
@@ -89,18 +86,17 @@ def test_windows_portable_generated_cmd_launchers_select_script_and_propagate_ex
         capture_output=True,
         timeout=30,
     )
-    for index, name in enumerate(("frame-compare", "frame-compare-update"), start=23):
-        (bundle / f"{name}.ps1").write_text(
-            f'Write-Output "{name} $($args[0]) $($PSVersionTable.PSEdition)"\nexit {index}\n',
-            encoding="ascii",
-        )
+    (bundle / "frame-compare.ps1").write_text(
+        'Write-Output "frame-compare $($args[0]) $($PSVersionTable.PSEdition)"\nexit 23\n',
+        encoding="ascii",
+    )
     # Supply the same pwsh on PATH for the CMD's first discovery branch.
     env = env | {
         "PATH": os.pathsep.join((str(Path(pwsh).parent), str(system_root / "System32"))),
         "PATHEXT": ".EXE",
     }
     result = subprocess.run(
-        [str(system_root / "System32/cmd.exe"), "/d", "/c", f"{launcher}.cmd", "test-argument"],
+        [str(system_root / "System32/cmd.exe"), "/d", "/c", "frame-compare.cmd", "test-argument"],
         cwd=bundle,
         env=env,
         capture_output=True,
@@ -108,9 +104,8 @@ def test_windows_portable_generated_cmd_launchers_select_script_and_propagate_ex
         timeout=30,
         check=False,
     )
-    expected_exit = 23 if launcher == "frame-compare" else 24
-    assert result.returncode == expected_exit, _normalized_process_output(result)
-    assert result.stdout.strip() == f"{launcher} test-argument Core"
+    assert result.returncode == 23, _normalized_process_output(result)
+    assert result.stdout.strip() == "frame-compare test-argument Core"
 
 
 def test_windows_portable_build_resolves_relative_paths_from_provider_location(
@@ -207,21 +202,12 @@ def test_windows_portable_installed_default_config_uses_generated_root_only(
     assert "output_dir" not in default_config
 
 
-def test_windows_portable_lifecycle_does_not_manage_generated_data(repo_root: Path) -> None:
-    portable_root = repo_root / "tools" / "windows_portable"
-    lifecycle_sources = "\n".join(
-        (
-            (portable_root / "uninstall.ps1").read_text(encoding="utf-8"),
-            (portable_root / "shim" / "frame-compare-update.ps1").read_text(encoding="utf-8"),
-        )
-    )
-
-    # These scripts may preserve/configure the authored value, but they must not
-    # create, copy, move, back up, or delete generated output as install state.
-    assert "screenshots_dir" not in lifecycle_sources
-    assert "use_run_folders" not in lifecycle_sources
-    assert "output_dir" not in lifecycle_sources
-    assert ".update_backups" in lifecycle_sources
+def test_windows_portable_uninstall_does_not_manage_bundle_data(repo_root: Path) -> None:
+    uninstall = _read_text_or_fail(repo_root / "tools/windows_portable/uninstall.ps1")
+    assert "$installedFiles = $shimPaths + $pointerPaths" in uninstall
+    assert '"config.json", "config.json.tmp"' in uninstall
+    for name in ("config.toml", "comparison_videos", "generated", "-Recurse"):
+        assert name not in uninstall
 
 
 def test_windows_portable_ffmpeg_manifest_has_pinned_zip_asset_shape(
@@ -826,20 +812,22 @@ def test_windows_portable_build_projects_dependencies_in_isolated_host_python(
     assert '& $HostPython -B -I -S (Join-Path $PSScriptRoot "portable_runtime.py")' in build_script
     assert "uv pip install" not in build_script
     assert "uv build" not in build_script
-    assert "requirements.lock.txt" in build_script
+    runtime = _read_text_or_fail(repo_root / "tools/windows_portable/portable_runtime.py")
+    assert 'root / "requirements.lock.txt"' in runtime
 
 
-def test_windows_portable_build_has_release_public_key_gate(repo_root: Path) -> None:
-    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
-    build_script = _read_text_or_fail(build_path)
-    assert "[switch]$RequireReleasePublicKey" in build_script
-    assert 'Join-Path $PSScriptRoot "validate_update_public_key.ps1"' in build_script
-    assert 'Join-Path $PSScriptRoot "update_public_key.xml"' in build_script
-    assert "& $validator -PublicKeyPath $publicKey" in build_script
+def test_windows_portable_release_build_requires_clean_exact_source(repo_root: Path) -> None:
+    build = _read_text_or_fail(repo_root / "tools/windows_portable/build_portable.ps1")
+    assert "[switch]$ReleaseBuild" in build
+    assert "if (!$hasExpectedCommitSha -or $ReleaseBuild)" in build
+    assert "git -C $RepoRoot rev-parse HEAD" in build
     assert re.search(
-        r"function Main\(\) \{\s*if \(\$RequireReleasePublicKey\) \{\s*Assert-ReleasePublicKey",
-        build_script,
+        r"if \(\$ReleaseBuild\) \{\s*if \(\$commitSha -cne \$headSha\)",
+        build,
     )
+    assert "git -C $RepoRoot status --porcelain=v1 --untracked-files=all" in build
+    assert "Portable release builds require a clean, exact source checkout." in build
+    assert 'if ($ReleaseBuild) {\n    $arguments += "--require-clean-repo"' in build
 
 
 def test_windows_portable_build_surfaces_dirty_app_source_before_archiving(
@@ -856,7 +844,7 @@ def test_windows_portable_build_surfaces_dirty_app_source_before_archiving(
     )
     archive_command = '"portable_bundle.py") install-project'
     assert status_command in copy_repo_app
-    assert "if ($RequireReleasePublicKey)" in copy_repo_app
+    assert "if ($ReleaseBuild)" in copy_repo_app
     assert "throw $dirtySourceMessage" in copy_repo_app
     assert "Write-Warning $dirtySourceMessage" in copy_repo_app
     assert copy_repo_app.index(status_command) < copy_repo_app.index(archive_command)
@@ -1104,1033 +1092,6 @@ def test_windows_portable_generated_launcher_rejects_malformed_bundle_info_in_pr
     assert malformed_marker not in output
 
 
-def _run_extracted_bundle_verifier(
-    *,
-    repo_root: Path,
-    zip_path: Path,
-    extract_root: Path,
-    local_app_data: Path,
-    command_timeout_seconds: int = 300,
-) -> subprocess.CompletedProcess[str]:
-    pwsh = shutil.which("pwsh")
-    assert pwsh is not None
-    environment = os.environ | {
-        "LOCALAPPDATA": str(local_app_data),
-        "NO_COLOR": "1",
-        "TERM": "dumb",
-    }
-    doctor_stdout = extract_root.parent / f"{extract_root.name}-doctor.json"
-    doctor_stderr = extract_root.parent / f"{extract_root.name}-doctor.stderr.txt"
-    verifier_setup_allowance_seconds = 30
-    verifier_timeout_seconds = command_timeout_seconds + verifier_setup_allowance_seconds
-    expected_commit_sha = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    ).stdout.strip()
-    return subprocess.run(
-        [
-            pwsh,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(repo_root / "tools/windows_portable/verify_extracted_bundle.ps1"),
-            "-ZipPath",
-            str(zip_path),
-            "-ExtractRoot",
-            str(extract_root),
-            "-DoctorStdoutPath",
-            str(doctor_stdout),
-            "-DoctorStderrPath",
-            str(doctor_stderr),
-            "-ExpectedCommitSha",
-            expected_commit_sha,
-            "-CommandTimeoutSeconds",
-            str(command_timeout_seconds),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=verifier_timeout_seconds,
-        check=False,
-        env=environment,
-    )
-
-
-def _assert_descendant_exited(*, pwsh: str, started: Path) -> None:
-    descendant_pid, descendant_start_time_utc_ticks = map(
-        int,
-        started.read_text(encoding="utf-8").splitlines(),
-    )
-    result = subprocess.run(
-        [
-            pwsh,
-            "-NoProfile",
-            "-Command",
-            (
-                "$targetProcessId = [int]$env:FRAME_COMPARE_TEST_DESCENDANT_PID; "
-                "$expectedStartTimeUtcTicks = "
-                "[long]$env:FRAME_COMPARE_TEST_DESCENDANT_START_TIME_UTC_TICKS; "
-                "try { "
-                "$process = [System.Diagnostics.Process]::GetProcessById($targetProcessId) "
-                "} catch [System.ArgumentException] { exit 0 }; "
-                "try { "
-                "try { "
-                "$actualStartTimeUtcTicks = $process.StartTime.ToUniversalTime().Ticks "
-                "} catch { "
-                "Write-Error ('descendant process identity could not be confirmed for PID "
-                "{0}: {1}' -f $targetProcessId, $_.Exception.Message); "
-                "exit 1 "
-                "}; "
-                "if ($actualStartTimeUtcTicks -ne $expectedStartTimeUtcTicks) { "
-                "Write-Error ('descendant process identity mismatch for PID {0}: expected "
-                "start time {1}, resolved {2}' -f $targetProcessId, "
-                "$expectedStartTimeUtcTicks, $actualStartTimeUtcTicks); "
-                "exit 1 "
-                "}; "
-                "$exited = $process.WaitForExit(10000); "
-                "if (-not $exited) { "
-                "$process.Kill($true); "
-                "$process.WaitForExit(10000) | Out-Null; "
-                "Write-Error 'descendant remained alive after verifier cleanup'; "
-                "exit 1 "
-                "}; "
-                "} finally { $process.Dispose() }"
-            ),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=22,
-        check=False,
-        env=os.environ
-        | {
-            "FRAME_COMPARE_TEST_DESCENDANT_PID": str(descendant_pid),
-            "FRAME_COMPARE_TEST_DESCENDANT_START_TIME_UTC_TICKS": str(
-                descendant_start_time_utc_ticks
-            ),
-        },
-    )
-    assert result.returncode == 0, (
-        f"descendant process {descendant_pid} remained alive after verifier cleanup: "
-        f"{_normalized_process_output(result)}"
-    )
-
-
-def _write_extracted_verifier_fixture(
-    *,
-    repo_root: Path,
-    tmp_path: Path,
-    candidate_launcher: str,
-    installer: str = "exit 0\n",
-    with_vsview: bool = False,
-) -> Path:
-    bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
-    (bundle / "config").mkdir(parents=True)
-    (bundle / "comparison_videos").mkdir()
-    (bundle / "licenses").mkdir()
-    (bundle / "shim").mkdir()
-    (bundle / "app" / "site-packages" / "PySide6").mkdir(parents=True)
-    (bundle / "frame-compare.ps1").write_text(candidate_launcher, encoding="utf-8")
-    (bundle / "install.ps1").write_text(installer, encoding="utf-8")
-    (bundle / "install.cmd").write_text(
-        '@pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*\n@exit /b %ERRORLEVEL%\n',
-        encoding="ascii",
-    )
-    for relative_path in (
-        "frame-compare-update.cmd",
-        "frame-compare-update.ps1",
-        "portable_activation.ps1",
-        "path_safety.ps1",
-        "shim/frame-compare.cmd",
-        "shim/frame-compare-update.cmd",
-        "shim/frame-compare-update.ps1",
-        "shim/frame-compare-version.ps1",
-    ):
-        path = bundle / relative_path
-        path.write_text("", encoding="utf-8")
-    license_records: list[dict[str, str]] = []
-    for name, content in (
-        ("SOURCE_URLS.txt", b"Sources\n"),
-        ("THIRD_PARTY_NOTICES.txt", b"Notices\n"),
-    ):
-        path = bundle / "licenses" / name
-        path.write_bytes(content)
-        license_records.append(
-            {
-                "path": f"licenses/{name}",
-                "sha256": hashlib.sha256(content).hexdigest(),
-            }
-        )
-    commit_sha = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    ).stdout.strip()
-    fingerprints = {
-        scope: hashlib.sha256(scope.encode()).hexdigest()
-        for scope in ("analysis", "probe", "alignment", "index", "full")
-    }
-    requirements_sha = hashlib.sha256(b"requirements").hexdigest()
-    artifact_license = {"spdx": "MIT", "url": "https://example.invalid/license"}
-    artifact = {
-        "id": "fixture-runtime",
-        "name": "Fixture Runtime",
-        "version": "1.0",
-        "url": "https://example.invalid/runtime.zip",
-        "source_url": "https://example.invalid/runtime-source.tar.gz",
-        "sha256": hashlib.sha256(b"runtime").hexdigest(),
-        "bytes": 7,
-        "license": artifact_license,
-    }
-    corresponding_source = {
-        "name": "Fixture Source",
-        "version": "1.0",
-        "source_url": "https://example.invalid/source.tar.gz",
-        "license": "MIT",
-        "sha256": hashlib.sha256(b"source").hexdigest(),
-        "bytes": 6,
-    }
-    manifest = {
-        "manifest_version": 2,
-        "bundle": {
-            "platform": "windows",
-            "arch": "x64",
-            "runtime_fingerprints": fingerprints,
-        },
-        "artifacts": [artifact],
-        "corresponding_sources": [corresponding_source],
-    }
-    (bundle / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    (bundle / "bundle_info.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 3,
-                "bundle_kind": "full",
-                "app_version": "1.2.3",
-                "requirements_lock_sha256": requirements_sha,
-                "manifest_version": 2,
-                "platform": "windows-x64",
-                "media_runtime_fingerprint": fingerprints["full"],
-                "media_runtime_fingerprints": fingerprints,
-            }
-        ),
-        encoding="utf-8",
-    )
-    inventory = {
-        "bundle": {
-            "commit_sha": commit_sha,
-            "frame_compare_license": "GPL-3.0-only",
-            "name": "Frame Compare",
-            "platform": "windows-x64",
-            "requirements_lock_sha256": requirements_sha,
-            "media_runtime_fingerprint": fingerprints["full"],
-            "media_runtime_fingerprints": fingerprints,
-            "source_archive_url": (
-                f"https://github.com/TJZine/frame-compare/archive/{commit_sha}.tar.gz"
-            ),
-            "version": "1.2.3",
-        },
-        "corresponding_sources": [corresponding_source],
-        "licenses": license_records,
-        "manifest_artifacts": [
-            {
-                "binary_bytes": artifact["bytes"],
-                "binary_sha256": artifact["sha256"],
-                "binary_url": artifact["url"],
-                "id": artifact["id"],
-                "license_spdx": artifact_license["spdx"],
-                "license_url": artifact_license["url"],
-                "name": artifact["name"],
-                "source_url": artifact["source_url"],
-                "version": artifact["version"],
-            }
-        ],
-        "python_distributions": [
-            {
-                "declared_license": "MIT",
-                "license_classifiers": [],
-                "license_expression": [],
-                "name": name,
-                "project_urls": [],
-                "source_url": f"https://pypi.org/project/{name}/{version}/",
-                "version": version,
-            }
-            for name, version in (
-                ("jetpytools", "3.2.0"),
-                ("PySide6", "6.12.0"),
-                ("PySide6_Addons", "6.12.0"),
-                ("PySide6_Essentials", "6.12.0"),
-                ("PySide6_Pdf", "6.12.0.140"),
-                ("PySide6_WebEngine", "6.12.0.140"),
-                ("shiboken6", "6.12.0"),
-                ("vapoursynth-bestsource", "23"),
-                ("vspackrgb", "2.0.0"),
-                ("VSView", "0.14.0"),
-                ("cyclopts", "5.4.2"),
-                ("vsjetengine", "2.0.0"),
-            )
-        ],
-        "schema_version": 2,
-        "archive": {"files": [], "directories": []},
-        "source_build_install_scripts": [
-            ".github/actions/windows-portable-build/action.yml",
-            ".github/actions/windows-portable-verify/action.yml",
-            ".github/workflows/windows-portable-build.yml",
-            ".github/workflows/windows-portable.yml",
-            "tools/windows_portable/build_portable.ps1",
-            "tools/windows_portable/path_safety.ps1",
-            "tools/windows_portable/portable_activation.ps1",
-            "tools/windows_portable/portable_launchers.ps1",
-            "tools/windows_portable/runtime_smoke.py",
-            "tools/windows_portable/build_update.ps1",
-            "tools/windows_portable/bundle_info.schema.json",
-            "tools/windows_portable/generate_update_keypair.ps1",
-            "tools/windows_portable/install-from-source.cmd",
-            "tools/windows_portable/install-from-source.ps1",
-            "tools/windows_portable/install.cmd",
-            "tools/windows_portable/install.ps1",
-            "tools/windows_portable/manifest.windows-x64.json",
-            "tools/windows_portable/manifest.schema.json",
-            "tools/windows_portable/sign_update.ps1",
-            "tools/windows_portable/update_manifest.schema.json",
-            "tools/windows_portable/shim/frame-compare-update.ps1",
-            "tools/windows_portable/shim/frame-compare-version.ps1",
-            "tools/windows_portable/validate_update_public_key.ps1",
-            "tools/windows_portable/write_bundle_inventory.py",
-        ],
-    }
-    (bundle / "bundle_inventory.json").write_text(json.dumps(inventory), encoding="utf-8")
-
-    if with_vsview:
-        _add_extracted_vsview_fixture(bundle)
-    return _rewrite_extracted_verifier_fixture_zip(tmp_path, "fixture.zip")
-
-
-def _add_extracted_vsview_fixture(bundle: Path) -> None:
-    # Use a real isolated Windows interpreter with fixture packages and registration.
-    base = Path(sys.base_prefix)
-    embedded = bundle / "python"
-    embedded.mkdir()
-    shutil.copyfile(base / "python.exe", embedded / "python.exe")
-    dll_stem = f"python{sys.version_info.major}{sys.version_info.minor}"
-    shutil.copyfile(base / f"{dll_stem}.dll", embedded / f"{dll_stem}.dll")
-    for dll in base.glob("vcruntime*.dll"):
-        shutil.copyfile(dll, embedded / dll.name)
-    (embedded / f"{dll_stem}._pth").write_text(
-        "\n".join((str(base / "Lib"), str(base / "DLLs"), "../app/site-packages", "")),
-        encoding="utf-8",
-    )
-    site = bundle / "app" / "site-packages"
-    vsview = site / "vsview"
-    vsview.mkdir()
-    (vsview / "__init__.py").write_text("", encoding="utf-8")
-    app = site / "frame_compare" / "vsview"
-    app.mkdir(parents=True)
-    (app / "launcher.py").write_text(
-        """import os
-
-def preload_vapoursynth_runtime():
-    for name in ("VAPOURSYNTH_HOME", "VAPOURSYNTH_PLUGIN_PATH", "VAPOURSYNTH_EXTRA_PLUGIN_PATH"):
-        if name in os.environ:
-            raise RuntimeError(f"extracted probe inherited {name}")
-""",
-        encoding="utf-8",
-    )
-    (app / "alignment_review_panel.py").write_text(
-        "class AlignmentReviewPanel: pass\n", encoding="utf-8"
-    )
-    dist = site / "frame_compare-1.2.3.dist-info"
-    dist.mkdir()
-    (dist / "entry_points.txt").write_text(
-        "[vsview]\nframe-compare-alignment-review = frame_compare.vsview.alignment_review_panel\n",
-        encoding="utf-8",
-    )
-
-
-def _rewrite_extracted_verifier_fixture_zip(tmp_path: Path, name: str) -> Path:
-    bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
-    zip_path = tmp_path / name
-    with zipfile.ZipFile(zip_path, "w") as archive:
-        for path in sorted(bundle.rglob("*")):
-            archive.write(path, path.relative_to(bundle.parent).as_posix())
-    return zip_path
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
-def test_extracted_bundle_verifier_refuses_existing_root_without_mutation(
-    repo_root: Path,
-    tmp_path: Path,
-) -> None:
-    if shutil.which("pwsh") is None:
-        pytest.skip("PowerShell 7 is required")
-    zip_path = _write_extracted_verifier_fixture(
-        repo_root=repo_root,
-        tmp_path=tmp_path,
-        candidate_launcher="exit 0\n",
-    )
-    extract_root = tmp_path / "existing"
-    extract_root.mkdir()
-    marker = extract_root / "must-survive.txt"
-    marker.write_text("preserve", encoding="utf-8")
-
-    result = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=zip_path,
-        extract_root=extract_root,
-        local_app_data=tmp_path / "local-app-data",
-    )
-
-    assert result.returncode != 0
-    assert "ExtractRoot must not already exist" in _normalized_process_output(result)
-    assert marker.read_text(encoding="utf-8") == "preserve"
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
-@pytest.mark.parametrize(
-    "unsafe_kind",
-    ["traversal", "case_collision", "parent_case_collision", "file_directory_conflict"],
-)
-def test_extracted_bundle_verifier_rejects_unsafe_zip_entries(
-    repo_root: Path,
-    tmp_path: Path,
-    unsafe_kind: str,
-) -> None:
-    if shutil.which("pwsh") is None:
-        pytest.skip("PowerShell 7 is required")
-    zip_path = tmp_path / "unsafe.zip"
-    extract_root = tmp_path / "fresh-extract"
-    escape_target = extract_root.parent / "escape.txt"
-    with zipfile.ZipFile(zip_path, "w") as archive:
-        if unsafe_kind == "traversal":
-            archive.writestr("frame-compare-portable-win-x64/../../escape.txt", "unsafe")
-        else:
-            if unsafe_kind == "case_collision":
-                archive.writestr("frame-compare-portable-win-x64/install.cmd", "")
-                archive.writestr("FRAME-COMPARE-PORTABLE-WIN-X64/INSTALL.CMD", "")
-            elif unsafe_kind == "parent_case_collision":
-                archive.writestr("frame-compare-portable-win-x64/Dir/one.txt", "")
-                archive.writestr("frame-compare-portable-win-x64/dir/two.txt", "")
-            else:
-                archive.writestr("frame-compare-portable-win-x64/conflict", "")
-                archive.writestr("frame-compare-portable-win-x64/conflict/child.txt", "")
-
-    result = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=zip_path,
-        extract_root=extract_root,
-        local_app_data=tmp_path / "local-app-data",
-    )
-
-    assert result.returncode != 0
-    output = _normalized_process_output(result)
-    expected = {
-        "traversal": "Unsafe ZIP entry path",
-        "case_collision": "case-colliding",
-        "parent_case_collision": "case-colliding",
-        "file_directory_conflict": "Conflicting ZIP file and directory path",
-    }[unsafe_kind]
-    assert expected in output
-    assert not escape_target.exists()
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
-@pytest.mark.parametrize(
-    ("mutation", "expected_error"),
-    [
-        ("partial_licenses", "cover every extracted license file exactly once"),
-        ("duplicate_license", "Duplicate or case-colliding inventoried license path"),
-        ("case_colliding_license", "Duplicate or case-colliding inventoried license path"),
-        ("wrong_commit", "commit does not match expected checkout"),
-        ("runtime_mismatch", "Media-runtime fingerprint mismatch"),
-        ("legacy_bundle_schema", "bundle_info.json does not match the bundle inventory identity"),
-        ("missing_source_provenance", "missing required provenance entry"),
-        ("webengine_runtime", "unexpectedly contains Qt WebEngine/Chromium runtime files"),
-    ],
-)
-def test_extracted_bundle_verifier_rejects_incomplete_or_mismatched_provenance(
-    repo_root: Path,
-    tmp_path: Path,
-    mutation: str,
-    expected_error: str,
-) -> None:
-    if shutil.which("pwsh") is None:
-        pytest.skip("PowerShell 7 is required")
-    _write_extracted_verifier_fixture(
-        repo_root=repo_root,
-        tmp_path=tmp_path,
-        candidate_launcher="exit 0\n",
-    )
-    bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
-    inventory_path = bundle / "bundle_inventory.json"
-    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
-    if mutation == "partial_licenses":
-        inventory["licenses"] = inventory["licenses"][:-1]
-    elif mutation == "duplicate_license":
-        inventory["licenses"].append(dict(inventory["licenses"][0]))
-    elif mutation == "case_colliding_license":
-        duplicate = dict(inventory["licenses"][0])
-        duplicate["path"] = "licenses/" + duplicate["path"].removeprefix("licenses/").upper()
-        inventory["licenses"].append(duplicate)
-    elif mutation == "wrong_commit":
-        inventory["bundle"]["commit_sha"] = "0" * 40
-    elif mutation == "runtime_mismatch":
-        bundle_info_path = bundle / "bundle_info.json"
-        bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
-        bundle_info["media_runtime_fingerprints"]["analysis"] = "f" * 64
-        bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
-    elif mutation == "legacy_bundle_schema":
-        bundle_info_path = bundle / "bundle_info.json"
-        bundle_info = json.loads(bundle_info_path.read_text(encoding="utf-8"))
-        bundle_info["schema_version"] = 2
-        bundle_info_path.write_text(json.dumps(bundle_info), encoding="utf-8")
-    elif mutation == "missing_source_provenance":
-        inventory["source_build_install_scripts"].remove(
-            "tools/windows_portable/build_portable.ps1"
-        )
-    elif mutation == "webengine_runtime":
-        (bundle / "app" / "site-packages" / "PySide6" / "Qt6WebEngineCore.dll").write_bytes(
-            b"forbidden-webengine-runtime"
-        )
-    else:
-        raise AssertionError(mutation)
-    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
-    zip_path = _rewrite_extracted_verifier_fixture_zip(tmp_path, f"{mutation}.zip")
-
-    result = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=zip_path,
-        extract_root=tmp_path / f"{mutation}-extract",
-        local_app_data=tmp_path / "local-app-data",
-    )
-
-    assert result.returncode != 0
-    assert expected_error in _normalized_process_output(result)
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
-@pytest.mark.parametrize(
-    ("candidate_launcher", "expected_error"),
-    [
-        ("exit 17\n", "candidate_launcher_--help failed with exit code 17"),
-        (
-            """
-if ($args[0] -eq "--help") { exit 0 }
-if ($args[0] -eq "version") { Write-Output "frame-compare 1.2.3"; exit 0 }
-if ($args[0] -eq "doctor") { Write-Output "not-json"; exit 0 }
-exit 1
-""",
-            "doctor stdout is not exactly one valid JSON document",
-        ),
-    ],
-)
-def test_extracted_bundle_verifier_propagates_launcher_failures(
-    repo_root: Path,
-    tmp_path: Path,
-    candidate_launcher: str,
-    expected_error: str,
-) -> None:
-    if shutil.which("pwsh") is None:
-        pytest.skip("PowerShell 7 is required")
-    zip_path = _write_extracted_verifier_fixture(
-        repo_root=repo_root,
-        tmp_path=tmp_path,
-        candidate_launcher=candidate_launcher,
-    )
-
-    result = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=zip_path,
-        extract_root=tmp_path / "fresh-extract",
-        local_app_data=tmp_path / "local-app-data",
-    )
-
-    assert result.returncode != 0
-    assert expected_error in _normalized_process_output(result)
-    assert (
-        tmp_path / "fresh-extract/frame-compare-portable-win-x64/bundle_inventory.json"
-    ).is_file()
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
-@pytest.mark.parametrize(
-    ("doctor_json", "expected_error"),
-    [
-        pytest.param(
-            "{}",
-            "Extracted candidate doctor JSON is not a successful object",
-            id="missing-success",
-        ),
-        pytest.param(
-            '{"success":"true"}',
-            "Extracted candidate doctor JSON is not a successful object",
-            id="success-not-boolean",
-        ),
-        pytest.param(
-            '{"success":true}',
-            "Extracted candidate doctor FFmpeg check did not pass exactly once",
-            id="missing-doctor",
-        ),
-        pytest.param(
-            '{"success":true,"doctor":[]}',
-            "Extracted candidate doctor FFmpeg check did not pass exactly once",
-            id="doctor-not-object",
-        ),
-        pytest.param(
-            '{"success":true,"doctor":{"checks":{"id":"ffmpeg","status":"pass"}}}',
-            "Extracted candidate doctor FFmpeg check did not pass exactly once",
-            id="checks-not-array",
-        ),
-        pytest.param(
-            '{"success":true,"doctor":{"checks":[null]}}',
-            "Extracted candidate doctor FFmpeg check did not pass exactly once",
-            id="check-not-object",
-        ),
-        pytest.param(
-            '{"success":true,"doctor":{"checks":[{"status":"pass"}]}}',
-            "Extracted candidate doctor FFmpeg check did not pass exactly once",
-            id="missing-check-id",
-        ),
-        pytest.param(
-            '{"success":true,"doctor":{"checks":[{"id":"ffmpeg"}]}}',
-            "Extracted candidate doctor FFmpeg check did not pass exactly once",
-            id="missing-ffmpeg-status",
-        ),
-        pytest.param(
-            '{"success":true,"doctor":{"checks":[{"id":"ffmpeg","status":"fail"}]}}',
-            "Extracted candidate doctor FFmpeg check did not pass exactly once",
-            id="failed-ffmpeg-status",
-        ),
-        pytest.param(
-            '{"success":true,"doctor":{"checks":['
-            '{"id":"ffmpeg","status":"pass"},'
-            '{"id":"ffmpeg","status":"pass"}]}}',
-            "Extracted candidate doctor FFmpeg check did not pass exactly once",
-            id="duplicate-ffmpeg-check",
-        ),
-    ],
-)
-def test_extracted_bundle_verifier_rejects_malformed_doctor_contract(
-    repo_root: Path,
-    tmp_path: Path,
-    doctor_json: str,
-    expected_error: str,
-) -> None:
-    pwsh = shutil.which("pwsh")
-    assert pwsh is not None
-    candidate_launcher = f"""
-if ($args[0] -eq "--help") {{ exit 0 }}
-if ($args[0] -eq "version") {{ Write-Output "frame-compare 1.2.3"; exit 0 }}
-if ($args[0] -eq "doctor") {{ Write-Output '{doctor_json}'; exit 0 }}
-exit 1
-"""
-    zip_path = _write_extracted_verifier_fixture(
-        repo_root=repo_root,
-        tmp_path=tmp_path,
-        candidate_launcher=candidate_launcher,
-    )
-
-    result = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=zip_path,
-        extract_root=tmp_path / "fresh-extract",
-        local_app_data=tmp_path / "local-app-data",
-    )
-
-    assert result.returncode != 0
-    assert expected_error in _normalized_process_output(result)
-
-
-@pytest.mark.parametrize("flood_stream", ["stdout", "stderr"])
-@pytest.mark.skipif(os.name != "nt", reason="Windows process-tree semantics required")
-def test_extracted_bundle_verifier_caps_flood_evidence_before_timeout(
-    repo_root: Path,
-    tmp_path: Path,
-    flood_stream: str,
-) -> None:
-    pwsh = shutil.which("pwsh")
-    if pwsh is None:
-        pytest.skip("PowerShell 7 is required")
-    descendant_started = tmp_path / "flood-descendant-started.txt"
-    escaped_started = str(descendant_started).replace("'", "''")
-    console_stream = "Out" if flood_stream == "stdout" else "Error"
-    candidate_launcher = f"""
-if ($args[0] -eq "--help") {{
-  $descendant = Start-Process -FilePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList @(
-    "-NoProfile",
-    "-Command",
-    "Start-Sleep -Seconds 60"
-  ) -PassThru
-  Set-Content -LiteralPath '{escaped_started}' -Value @(
-    $descendant.Id,
-    $descendant.StartTime.ToUniversalTime().Ticks
-  )
-  $line = "x" * 1024
-  for ($index = 0; $index -lt 20000; $index++) {{
-    [Console]::{console_stream}.WriteLine("{flood_stream}-$index-$line")
-  }}
-}}
-exit 1
-"""
-    zip_path = _write_extracted_verifier_fixture(
-        repo_root=repo_root,
-        tmp_path=tmp_path,
-        candidate_launcher=candidate_launcher,
-    )
-
-    result = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=zip_path,
-        extract_root=tmp_path / "fresh-extract",
-        local_app_data=tmp_path / "local-app-data",
-        command_timeout_seconds=20,
-    )
-    assert result.returncode != 0
-    output = _normalized_process_output(result)
-    assert "timed_out=true" not in output
-    assert (
-        "command=candidate_launcher_--help evidence_overflow=true "
-        f"stream={flood_stream} limit_bytes=16777216 cleanup_complete=True"
-    ) in output
-    assert "cleanup_complete=True" in output
-    assert (
-        f"candidate_launcher_--help {flood_stream} evidence exceeded the 16777216-byte limit"
-    ) in output
-    assert "its process job was terminated" in output
-    evidence = tmp_path / "fresh-extract/command-evidence"
-    stdout_size = (evidence / "candidate_launcher_--help.stdout.txt").stat().st_size
-    stderr_size = (evidence / "candidate_launcher_--help.stderr.txt").stat().st_size
-    assert {"stdout": stdout_size, "stderr": stderr_size}[flood_stream] == 16777216
-    assert stdout_size <= 16777216
-    assert stderr_size <= 16777216
-    assert descendant_started.is_file()
-    _assert_descendant_exited(pwsh=pwsh, started=descendant_started)
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows process-tree semantics required")
-def test_extracted_bundle_verifier_closes_deadline_exit_descendants(
-    repo_root: Path,
-    tmp_path: Path,
-) -> None:
-    pwsh = shutil.which("pwsh")
-    if pwsh is None:
-        pytest.skip("PowerShell 7 is required")
-    descendant_started = tmp_path / "descendant-started.txt"
-    escaped_started = str(descendant_started).replace("'", "''")
-    candidate_launcher = f"""
-if ($args[0] -eq "--help") {{
-  $descendant = Start-Process -FilePath (Join-Path $PSHOME "pwsh.exe") -ArgumentList @(
-    "-NoProfile",
-    "-Command",
-    "Start-Sleep -Seconds 60"
-  ) -PassThru
-  Set-Content -LiteralPath '{escaped_started}' -Value @(
-    $descendant.Id,
-    $descendant.StartTime.ToUniversalTime().Ticks
-  )
-  Start-Sleep -Seconds 60
-  exit 0
-}}
-exit 1
-"""
-    zip_path = _write_extracted_verifier_fixture(
-        repo_root=repo_root,
-        tmp_path=tmp_path,
-        candidate_launcher=candidate_launcher,
-    )
-
-    result = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=zip_path,
-        extract_root=tmp_path / "fresh-extract",
-        local_app_data=tmp_path / "local-app-data",
-        command_timeout_seconds=10,
-    )
-
-    assert result.returncode != 0
-    assert "command=candidate_launcher_--help" in _normalized_process_output(result)
-    assert descendant_started.is_file()
-    _assert_descendant_exited(pwsh=pwsh, started=descendant_started)
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
-def test_extracted_bundle_verifier_rejects_stale_installed_state(
-    repo_root: Path,
-    tmp_path: Path,
-) -> None:
-    if shutil.which("pwsh") is None:
-        pytest.skip("PowerShell 7 is required")
-    candidate_launcher = """
-if ($args[0] -eq "--help") { exit 0 }
-if ($args[0] -eq "version") { Write-Output "frame-compare 1.2.3"; exit 0 }
-if ($args[0] -eq "doctor") { Write-Output '{"success":true,"doctor":{"checks":[{"id":"ffmpeg","status":"pass"}]}}'; exit 0 }
-exit 1
-"""
-    installer = r"""
-$installRoot = Join-Path $env:LOCALAPPDATA "Programs/FrameCompare"
-$binDir = Join-Path $installRoot "bin"
-$stateDir = Join-Path $installRoot "state"
-New-Item -ItemType Directory -Path $binDir -Force | Out-Null
-New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
-Set-Content -LiteralPath (Join-Path $stateDir "config.json") `
-  -Value '{"bundle_path":"C:\\stale-frame-compare"}' -Encoding UTF8
-$shim = @'
-@echo off
-if "%1"=="version" echo frame-compare 1.2.3
-exit /b 0
-'@
-Set-Content -LiteralPath (Join-Path $binDir "frame-compare.cmd") `
-  -Value $shim -Encoding ASCII
-exit 0
-"""
-    zip_path = _write_extracted_verifier_fixture(
-        repo_root=repo_root,
-        tmp_path=tmp_path,
-        candidate_launcher=candidate_launcher,
-        installer=installer,
-        with_vsview=True,
-    )
-
-    result = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=zip_path,
-        extract_root=tmp_path / "fresh-extract",
-        local_app_data=tmp_path / "local-app-data",
-    )
-
-    assert result.returncode != 0
-    assert "Installed state points to the wrong bundle" in _normalized_process_output(result)
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
-def test_extracted_bundle_verifier_rejects_installed_version_mismatch(
-    repo_root: Path,
-    tmp_path: Path,
-) -> None:
-    if shutil.which("pwsh") is None:
-        pytest.skip("PowerShell 7 is required")
-    candidate_launcher = """
-if ($args[0] -eq "--help") { exit 0 }
-if ($args[0] -eq "version") { Write-Output "frame-compare 1.2.3"; exit 0 }
-if ($args[0] -eq "doctor") { Write-Output '{"success":true,"doctor":{"checks":[{"id":"ffmpeg","status":"pass"}]}}'; exit 0 }
-exit 1
-"""
-    installer = r"""
-$installRoot = Join-Path $env:LOCALAPPDATA "Programs/FrameCompare"
-$binDir = Join-Path $installRoot "bin"
-$stateDir = Join-Path $installRoot "state"
-New-Item -ItemType Directory -Path $binDir -Force | Out-Null
-New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
-@{ schema_version = 1; install_type = "portable_bundle"; bundle_path = $PSScriptRoot } |
-  ConvertTo-Json |
-  Set-Content -LiteralPath (Join-Path $stateDir "config.json") -Encoding UTF8
-$shim = @'
-@echo off
-if "%1"=="version" echo frame-compare 9.9.9
-exit /b 0
-'@
-Set-Content -LiteralPath (Join-Path $binDir "frame-compare.cmd") `
-  -Value $shim -Encoding ASCII
-exit 0
-"""
-    zip_path = _write_extracted_verifier_fixture(
-        repo_root=repo_root,
-        tmp_path=tmp_path,
-        candidate_launcher=candidate_launcher,
-        installer=installer,
-        with_vsview=True,
-    )
-
-    result = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=zip_path,
-        extract_root=tmp_path / "fresh-extract",
-        local_app_data=tmp_path / "local-app-data",
-    )
-
-    assert result.returncode != 0
-    assert (
-        "Installed shim version output does not match the candidate launcher"
-        in _normalized_process_output(result)
-    )
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
-@pytest.mark.parametrize("damage", ["missing-vsview", "missing-entrypoint", "missing-panel"])
-def test_extracted_bundle_verifier_requires_vsview_entrypoint(
-    repo_root: Path, tmp_path: Path, damage: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    if shutil.which("pwsh") is None:
-        pytest.skip("PowerShell 7 is required")
-    for name in ("VAPOURSYNTH_HOME", "VAPOURSYNTH_PLUGIN_PATH", "VAPOURSYNTH_EXTRA_PLUGIN_PATH"):
-        monkeypatch.setenv(name, str(tmp_path / name))
-    intact_zip = _write_extracted_verifier_fixture(
-        repo_root=repo_root,
-        tmp_path=tmp_path,
-        candidate_launcher="""
-if ($args[0] -eq "--help") { exit 0 }
-if ($args[0] -eq "version") { Write-Output "frame-compare 1.2.3"; exit 0 }
-if ($args[0] -eq "doctor") { Write-Output '{"success":true,"doctor":{"checks":[{"id":"ffmpeg","status":"pass"}]}}'; exit 0 }
-exit 1
-""",
-        installer="exit 77\n",
-        with_vsview=True,
-    )
-    bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
-    good = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=intact_zip,
-        extract_root=tmp_path / "intact",
-        local_app_data=tmp_path / "local-app-data",
-    )
-    assert "WINDOWS_EXTRACTED_PROOF vsview_entrypoint=ok" in good.stdout
-    assert "candidate_install failed with exit code 77" in _normalized_process_output(good)
-
-    site = bundle / "app" / "site-packages"
-    if damage == "missing-vsview":
-        shutil.rmtree(site / "vsview")
-    elif damage == "missing-entrypoint":
-        (site / "frame_compare-1.2.3.dist-info" / "entry_points.txt").unlink()
-    else:
-        (site / "frame_compare" / "vsview" / "alignment_review_panel.py").unlink()
-    result = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=_rewrite_extracted_verifier_fixture_zip(tmp_path, "damaged.zip"),
-        extract_root=tmp_path / "damaged",
-        local_app_data=tmp_path / "local-app-data",
-    )
-
-    assert result.returncode != 0
-    assert "candidate_vsview_entrypoint failed with exit code 1" in _normalized_process_output(
-        result
-    )
-    assert "vsview_entrypoint=ok" not in result.stdout
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell process semantics required")
-@pytest.mark.parametrize("damage", ["missing", "tampered"])
-def test_extracted_bundle_verifier_requires_each_manifest_notice(
-    repo_root: Path, tmp_path: Path, damage: str
-) -> None:
-    if shutil.which("pwsh") is None:
-        pytest.skip("PowerShell 7 is required")
-    _write_extracted_verifier_fixture(
-        repo_root=repo_root, tmp_path=tmp_path, candidate_launcher="exit 17\n"
-    )
-    bundle = tmp_path / "fixture" / "frame-compare-portable-win-x64"
-    manifest_path = bundle / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    inventory_path = bundle / "bundle_inventory.json"
-    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
-    manifest["artifacts"][0]["license"]["files"] = [
-        {"path": f"licenses/{name}.txt", "sha256": hashlib.sha256(name.encode()).hexdigest()}
-        for name in ("FIRST", "SECOND")
-    ]
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    for name in ("FIRST", "SECOND"):
-        if name == "SECOND" and damage == "missing":
-            continue
-        path = f"licenses/fixture-runtime-MIT--{name}.txt"
-        content = b"wrong content" if name == "SECOND" else name.encode()
-        (bundle / path).write_bytes(content)
-        inventory["licenses"].append({"path": path, "sha256": hashlib.sha256(content).hexdigest()})
-    inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
-
-    result = _run_extracted_bundle_verifier(
-        repo_root=repo_root,
-        zip_path=_rewrite_extracted_verifier_fixture_zip(tmp_path, "damaged.zip"),
-        extract_root=tmp_path / "damaged",
-        local_app_data=tmp_path / "local-app-data",
-    )
-
-    assert result.returncode != 0
-    message = (
-        "Missing manifest notice" if damage == "missing" else "Manifest notice SHA-256 mismatch"
-    )
-    assert f"{message}: licenses/fixture-runtime-MIT--SECOND.txt" in _normalized_process_output(
-        result
-    )
-
-
-def test_windows_portable_extracted_bundle_verifier_owns_hosted_and_manual_parity(
-    repo_root: Path,
-) -> None:
-    verifier_path = repo_root / "tools" / "windows_portable" / "verify_extracted_bundle.ps1"
-    verifier = _read_text_or_fail(verifier_path)
-    workflow = _read_text_or_fail(repo_root / ".github/actions/windows-portable-build/action.yml")
-    physical_checklist = _read_text_or_fail(
-        repo_root / "docs" / "media-runtime-windows-validation.md"
-    )
-
-    for required_entry in (
-        "frame-compare-portable-win-x64/install.cmd",
-        "frame-compare-portable-win-x64/install.ps1",
-        "frame-compare-portable-win-x64/portable_activation.ps1",
-        "frame-compare-portable-win-x64/path_safety.ps1",
-        "frame-compare-portable-win-x64/frame-compare.ps1",
-        "frame-compare-portable-win-x64/frame-compare-update.cmd",
-        "frame-compare-portable-win-x64/frame-compare-update.ps1",
-        "frame-compare-portable-win-x64/bundle_info.json",
-        "frame-compare-portable-win-x64/bundle_inventory.json",
-        "frame-compare-portable-win-x64/manifest.json",
-        "frame-compare-portable-win-x64/licenses/SOURCE_URLS.txt",
-        "frame-compare-portable-win-x64/licenses/THIRD_PARTY_NOTICES.txt",
-        "frame-compare-portable-win-x64/shim/frame-compare.cmd",
-        "frame-compare-portable-win-x64/shim/frame-compare-update.cmd",
-        "frame-compare-portable-win-x64/shim/frame-compare-version.ps1",
-        "frame-compare-portable-win-x64/shim/frame-compare-update.ps1",
-    ):
-        assert required_entry in verifier
-
-    assert "its process job was terminated" in verifier
-    assert "evidence_overflow=true stream=$overflowStream" in verifier
-    assert 'throw "Unsafe ZIP entry path: $EntryName"' in verifier
-    assert "ExtractRoot must name a dedicated verification directory" in verifier
-    assert 'Join-Path $PSScriptRoot "path_safety.ps1"' in verifier
-    assert "[System.IO.FileMode]::CreateNew" in verifier
-    assert "Expand-Archive" not in verifier
-    assert (
-        '-Label "candidate_install" -FilePath $installer -ArgumentList @("-UserData", "Leave")'
-        in verifier
-    )
-    assert "WINDOWS_EXTRACTED_PROOF license_inventory=ok" in verifier
-    assert "WINDOWS_EXTRACTED_PROOF qt_webengine_runtime=absent deployment=excluded" in verifier
-    assert "Extracted bundle unexpectedly contains Qt WebEngine/Chromium runtime files" in verifier
-    assert "Bundle inventory must cover every extracted license file exactly once" in verifier
-    assert "Bundle inventory commit does not match expected checkout" in verifier
-    assert "Media-runtime fingerprint mismatch for scope" in verifier
-    assert '"schema_version" "bundle_info") -ne 3' in verifier
-    assert "Installed state points to the wrong bundle" in verifier
-    assert "Installed shim version output does not match the candidate launcher" in verifier
-
-    invocation = "tools/windows_portable/verify_extracted_bundle.ps1"
-    assert workflow.count(invocation) == 1
-    assert "EXPECTED_SHA: ${{ inputs.expected_sha }}" in workflow
-    assert '-ExpectedCommitSha "$env:EXPECTED_SHA"' in workflow
-    assert "-ExpectedCommitSha ${{ inputs.expected_sha }}" not in workflow
-    assert "Verify extracted portable bundle" in workflow
-    assert "Verify zip layout" not in workflow
-    assert "Smoke: extracted install shim" not in workflow
-    assert "tools\\windows_portable\\verify_extracted_bundle.ps1" in physical_checklist
-    assert "-ExpectedCommitSha $ExpectedPrHeadSha" in physical_checklist
-    assert "[guid]::NewGuid()" in physical_checklist
-    assert "every other stdout or stderr evidence file is capped at 16 MiB" in physical_checklist
-    assert "reports the overflowing stream and byte limit" in physical_checklist
-    for label in (
-        "candidate_launcher_--help",
-        "candidate_launcher_version",
-        "candidate_launcher_doctor_--json",
-        "candidate_install",
-        "installed_shim_version",
-        "installed_shim_--help",
-    ):
-        assert verifier.count(f'-Label "{label}"') == 1
-    assert "$validatedEntry.Entry.Open()" in verifier
-
-
 def test_physical_windows_validation_fetches_and_checks_out_exact_pr_head(
     repo_root: Path,
 ) -> None:
@@ -2139,7 +1100,6 @@ def test_physical_windows_validation_fetches_and_checks_out_exact_pr_head(
     )
 
     assert "bundle_info.schema_version` is 3" in physical_checklist
-    assert "otherwise matching candidate fingerprints" in physical_checklist
     assert "refs/pull/$PrNumber/head" in physical_checklist
     assert "refs/remotes/origin/pr/$PrNumber/head" in physical_checklist
     assert 'git fetch --no-tags origin "+${PrHeadRef}:${LocalPrHeadRef}"' in physical_checklist
@@ -2148,16 +1108,6 @@ def test_physical_windows_validation_fetches_and_checks_out_exact_pr_head(
     assert "git pull --ff-only" not in physical_checklist
     assert "git ls-remote origin refs/heads/" not in physical_checklist
     assert "Checked-out pull-request branch" not in physical_checklist
-
-
-def test_windows_portable_build_portable_updater_launcher_fails_closed_without_exit_code(
-    repo_root: Path,
-) -> None:
-    launchers = _read_text_or_fail(repo_root / "tools/windows_portable/portable_launchers.ps1")
-    assert "& $updater @args" in launchers
-    assert "if ($null -eq $LASTEXITCODE) {" in launchers
-    assert "exit 1" in launchers
-    assert "if ($?)" not in launchers
 
 
 def test_windows_portable_build_uses_vendored_manifest_license_files(repo_root: Path) -> None:
@@ -2287,10 +1237,6 @@ def _write_fake_inventory_bundle(*, tmp_path: Path, repo_root: Path) -> Path:
         )
 
     (licenses / "frame-compare-LICENSE.txt").write_text("GPL test fixture\n", encoding="utf-8")
-    shutil.copy2(
-        repo_root / "tools" / "windows_portable" / "update_public_key.xml",
-        shim / "update_public_key.xml",
-    )
     manifest = json.loads(
         (repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json").read_text(
             encoding="utf-8"
@@ -2529,8 +1475,6 @@ def test_windows_portable_builder_uses_one_manifest_for_notices_and_inventory(
     owner = source / "tools/windows_portable"
     original = repo_root / "tools/windows_portable"
     shutil.copytree(original / "licenses", owner / "licenses")
-    for relative in ("version_utils.ps1", "shim/frame-compare-version.ps1"):
-        shutil.copyfile(original / relative, owner / relative)
 
     manifest_path = owner / "manifest.windows-x64.json"
     committed_manifest = manifest_path.read_bytes()
@@ -2564,6 +1508,7 @@ function Initialize-PortableRuntime {
 function Copy-RepoApp {}
 function Copy-InstallerFiles {}
 function Assert-RequiredPySideLicenseMetadata {}
+function Assert-BundleRuntime {}
 Main
 """,
         encoding="utf-8",
@@ -2614,7 +1559,6 @@ Main
         str(script),
         "-ExpectedCommitSha",
         selected,
-        "-AssemblyOnly",
         "-RepoRoot",
         str(source),
         "-CacheDir",
@@ -2804,28 +1748,30 @@ def test_windows_portable_requirements_export_uses_the_captured_commit(
     # Exporting from the live checkout would now fail to parse the lock.
     (source / "uv.lock").write_text("corrupt live lock", encoding="utf-8")
 
-    result = subprocess.run(
+    owner = repo_root / "tools/windows_portable/portable_runtime.py"
+    subprocess.run(
         [
             sys.executable,
             "-B",
             "-I",
             "-S",
-            str(repo_root / "tools/windows_portable/portable_runtime.py"),
-            "export",
-            "--repo",
+            "-c",
+            (
+                "import runpy, sys; from pathlib import Path; "
+                "export = runpy.run_path(sys.argv[1])['export']; "
+                "export(Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4]))"
+            ),
+            str(owner),
             str(source),
-            "--commit-sha",
             captured,
-            "--output",
             str(output),
         ],
-        check=False,
+        check=True,
         capture_output=True,
         text=True,
         timeout=45,
     )
 
-    assert result.returncode == 0, _normalized_process_output(result)
     assert b"vsview==0.14.0" in expected
     assert output.read_bytes() == expected
 

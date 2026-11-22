@@ -30,11 +30,13 @@ REQUIRED_DISTRIBUTIONS = {
 }
 SOURCE_SCRIPTS = (
     ".github/actions/windows-portable-build/action.yml",
-    ".github/actions/windows-portable-verify/action.yml",
-    ".github/workflows/windows-portable-build.yml",
-    ".github/workflows/windows-portable-unsigned.yml",
     ".github/workflows/windows-portable.yml",
     "tools/windows_portable/build_portable.ps1",
+    "tools/windows_portable/version_utils.ps1",
+    "tools/windows_portable/shim/frame-compare.cmd",
+    "tools/windows_portable/shim/frame-compare.ps1",
+    "tools/windows_portable/uninstall.cmd",
+    "tools/windows_portable/uninstall.ps1",
     "tools/windows_portable/path_safety.ps1",
     "tools/windows_portable/portable_activation.ps1",
     "tools/windows_portable/portable_launchers.ps1",
@@ -42,28 +44,15 @@ SOURCE_SCRIPTS = (
     "tools/windows_portable/portable_bundle.py",
     "tools/windows_portable/portable_runtime.py",
     "tools/windows_portable/runtime_smoke.py",
-    "tools/windows_portable/build_update.ps1",
     "tools/windows_portable/bundle_info.schema.json",
-    "tools/windows_portable/generate_update_keypair.ps1",
     "tools/windows_portable/install-from-source.cmd",
     "tools/windows_portable/install-from-source.ps1",
     "tools/windows_portable/install.cmd",
     "tools/windows_portable/install.ps1",
     "tools/windows_portable/manifest.windows-x64.json",
     "tools/windows_portable/manifest.schema.json",
-    "tools/windows_portable/sign_update.ps1",
-    "tools/windows_portable/release_update.ps1",
-    "tools/windows_portable/release_portable_authority.ps1",
-    "tools/windows_portable/release_update_contract.ps1",
-    "tools/windows_portable/sign_verified_manifest.ps1",
-    "tools/windows_portable/update_manifest_bytes.ps1",
-    "tools/windows_portable/update_manifest.schema.json",
-    "tools/windows_portable/shim/frame-compare-update.ps1",
-    "tools/windows_portable/shim/frame-compare-version.ps1",
-    "tools/windows_portable/validate_update_public_key.ps1",
     "tools/windows_portable/write_bundle_inventory.py",
 )
-PRIVATE_RSA_FIELDS = ("P", "Q", "DP", "DQ", "InverseQ", "D")
 PROHIBITED_BUNDLE_FILENAMES = frozenset({".env", "config.toml", "report.html"})
 _INTER_VERSION = "4.1"
 _INTER_LICENSE_SPDX = "OFL-1.1"
@@ -392,12 +381,6 @@ def _assert_safe_bundle(bundle_root: Path) -> None:
             "prohibited local/generated files found in bundle: "
             + ", ".join(sorted(set(prohibited)))
         )
-
-    public_key = bundle_root / "shim" / "update_public_key.xml"
-    public_text = public_key.read_text(encoding="utf-8")
-    for field in PRIVATE_RSA_FIELDS:
-        if f"<{field}>" in public_text:
-            raise ValueError(f"bundle public key contains private RSA field: {field}")
 
 
 def _write_source_urls(

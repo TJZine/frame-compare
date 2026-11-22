@@ -1,12 +1,12 @@
 ---
-description: Download, verify, and install the Windows portable bundle, then update, back up, or remove it.
+description: Download, verify, and install the Windows portable bundle, then install a newer ZIP or remove the registration.
 ---
 
 # Windows portable
 
 The Windows portable bundle is the complete Frame Compare distribution for Windows
 10 and 11 (x64). It includes Python, the media runtime, VSView with the alignment
-panel, an installer, and signed code-only updates.
+panel and an installer.
 
 ## Install
 
@@ -23,44 +23,18 @@ panel, an installer, and signed code-only updates.
 
 2.  **Verify the download.**
 
-    On an internet-connected machine with the GitHub CLI installed,
-    confirm that this repository's Windows build workflow produced the ZIP, then
-    compare its SHA-256 checksum.
+    Download the ZIP and its matching `.zip.sha256` file from the same release.
+    Compare the SHA-256 checksum before extracting the ZIP.
 
-    ??? fc-disclosure "Show the verification commands"
-
-        ```powershell title="PowerShell · release provenance"
-        $tag = "<tag>"
-        $zip = ".\frame-compare-portable-win-x64-$tag.zip"
-        # Resolve the selected lightweight refs/tags/<tag> ref through GitHub.
-        $tagSha = @(gh api "repos/TJZine/frame-compare/git/ref/tags/$tag" --jq ".object.sha")
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not resolve release tag $tag. Do not install this download."
-        }
-        if ($tagSha.Count -ne 1) {
-            throw "Release tag $tag did not resolve to exactly one commit SHA. Do not install this download."
-        }
-        $tagSha = $tagSha[0].Trim()
-        if ($tagSha -notmatch "^[0-9a-f]{40}$") {
-            throw "Release tag $tag resolved to an invalid commit SHA. Do not install this download."
-        }
-        gh attestation verify $zip `
-          --repo TJZine/frame-compare `
-          --signer-workflow TJZine/frame-compare/.github/workflows/windows-portable-build.yml `
-          --source-digest $tagSha
-        if ($LASTEXITCODE -ne 0) {
-            throw "Release provenance verification failed. Do not install this download."
-        }
-        ```
-
-        Then verify the ZIP checksum before extracting it:
+    ??? fc-disclosure "Show the checksum commands"
 
         ```powershell title="PowerShell · SHA-256 checksum"
+        $tag = "<tag>"
         $zip = ".\frame-compare-portable-win-x64-$tag.zip"
         $checksumFile = "$zip.sha256"
-        $expected = ((Get-Content -LiteralPath $checksumFile -Raw).Trim() -split "\s+")[0].ToLowerInvariant()
-        $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actual -ne $expected) {
+        $expected = ((Get-Content -LiteralPath $checksumFile -Raw -Encoding ASCII -ErrorAction Stop).Trim() -split "\s+")[0].ToLowerInvariant()
+        $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        if ($expected -notmatch "^[a-f0-9]{64}$" -or $actual -ne $expected) {
             throw "SHA-256 mismatch. Do not install this download."
         }
         "SHA-256 verified: $actual"
@@ -104,8 +78,8 @@ configuration.
 The default generated-data location is the bundle’s `generated/` directory. In the
 wizard, set **Generated data location** to a normal external folder when reports,
 screenshots, history, run state, and reusable caches must survive bundle replacement.
-The installed fallback configuration retains that choice. The updater, rollback flow,
-reinstall path, and uninstaller leave that external root untouched.
+The installed fallback configuration retains that choice. Installation and
+uninstallation leave external user data in place.
 
 A top-level bundle `screenshots/` directory is not a runtime output root. Every executed
 comparison writes its canonical `report.html`, sibling `screenshots/`, run records, and
@@ -137,6 +111,8 @@ review checklist.
 
 ## VSView alignment review
 
+To upgrade from pre-native-panel schema-2 bundles, install the current full ZIP.
+
 The bundle includes VSView, PySide6, and the packaged `frame-compare-alignment-review`
 panel entry point in one self-contained Python environment; Frame Compare launches
 VSView from that same environment.
@@ -161,62 +137,30 @@ normal run.
 
 ## Update behavior
 
-Frame Compare has two Windows update boundaries:
-
-| Update type | Replaces | Use it when |
-| --- | --- | --- |
-| Complete portable ZIP | Application plus Python, FFmpeg, VapourSynth, VSView/PySide6, plugins, manifests, and native license payloads | The release changes the media-runtime/dependency fingerprint or a clean reinstall is required |
-| Signed code-only ZIP | Application code and packaged Python project files only | The installed complete bundle already carries the exact required media-runtime fingerprint |
-
-Apply a code-only update:
-
-```powershell
-frame-compare-update apply .\frame-compare-update-win-x64-<tag>.zip
-```
-
-??? fc-disclosure "Why an update can be refused"
-
-    The updater bounds the archive and its two fixed authentication entries, then verifies
-    the signature before parsing the manifest or inspecting and extracting payload entries.
-    It verifies every payload hash before replacement. Unsigned packages have no interactive
-    bypass. Archive compressed size, entry count, per-entry and total
-    uncompressed size, and compression ratio are bounded before extraction.
-
-    It accepts only
-    a native-panel-capable full bundle (`bundle_info.schema_version` 3) and refuses
-    pre-native-panel schema-2 bundles, as well as missing, malformed, or different
-    media-runtime fingerprints, before applying any change. That refusal cannot be
-    overridden safely because a code-only ZIP does not carry replacement native media
-    components. An unavailable installed app version also fails closed instead of skipping
-    the signed source-version range; install the complete portable ZIP instead.
-
-When the fingerprint differs, install the complete portable ZIP for that release into a
-fresh, empty folder. Overlaying a full ZIP onto an existing bundle root is unsupported.
+Close running comparisons before switching bundles. Extract the complete portable
+ZIP into a fresh, empty folder. Overlaying a full ZIP onto an existing bundle root is unsupported.
 
 Run `install.cmd` from the fresh extraction. It moves the previous active bundle's
 non-empty `config/`, `comparison_videos/`, and `generated/` folders into the new
-bundle. Application code, runtime files, and update backups stay in the old bundle.
+bundle. Application code and runtime files stay in the old bundle.
 
 Run `install.cmd -UserData Leave` to keep the data in the old bundle or to copy
 selected user files to the new bundle yourself.
 
 The installed AppData fallback configuration and external user data are preserved.
 
-## Backup and rollback
+### Reactivate a previous bundle
 
-```powershell
-frame-compare-update list-backups
-frame-compare-update rollback <backup-id>
-frame-compare-update purge-backups --keep 5
-```
+Run `install.cmd` from the bundle you want to reactivate. Installers from
+v0.7.0 onward move the same user folders back by default. If you reactivate
+a bundle from before v0.7.0, its installer restores that version and its legacy
+update command. Data you moved stays in the newer bundle. Copy the folders
+you need back to the older bundle yourself.
 
-Each code-update backup records the media-runtime and requirements-lock identity of
-the bundle that created it. `list-backups` marks backups with missing, malformed, or
-different identity as unavailable. `rollback` refuses those backups before changing any
-file. Identity-less legacy backups cannot be restored or migrated.
-
-Compatible backups restore only application code; rollback is not a substitute for a
-complete bundle reinstall across different runtime or dependency fingerprints.
+Moving source folders can cause path-keyed caches to recompute. If your
+configuration contains absolute paths into the previous bundle, update those
+paths after the move. If the installer reports a pending migration, use the
+paths it reports to locate and recover your files before retrying.
 
 ## Uninstall
 
@@ -224,11 +168,12 @@ Run `uninstall.cmd` from the current portable bundle root. It removes the instal
 shim and managed `PATH` entry. It preserves the installed state configuration, unknown
 files, the portable bundle, source videos, and any external generated-data root.
 
-## Bundle provenance and licenses
+## Bundle inventory and licenses
 
 Each complete bundle includes:
 
-- `bundle_info.json` with application and coordinated runtime identity;
+- `bundle_info.json` with application and coordinated runtime identity.
+  A full bundle with the native panel uses `bundle_info.schema_version` 3;
 - `bundle_inventory.json` with exact source commit, runtime artifacts, package versions,
   hashes, byte counts, and license metadata;
 - `licenses/SOURCE_URLS.txt` with corresponding-source locations;
@@ -338,8 +283,7 @@ through L-SMASH-Works and Frame Compare-owned indexes.
 | No videos are discovered | Put at least two supported video files in `comparison_videos/` or select another contained input directory in the wizard |
 | Doctor reports an optional/network warning | Review it against the intended workflow; disabled integrations need no setup |
 | Doctor reports a required media component failure | Reinstall the complete bundle rather than mixing unmanaged replacement DLLs into it |
-| Code-only update reports a runtime mismatch | Install the complete portable ZIP for that release |
 | The alignment panel is missing, stays inactive, or rejects a result | See [VSView alignment review](../guides/vsview-review.md#troubleshooting) |
-| Reports disappeared after replacing the bundle | Configure an external generated-data root and restore the prior run folders from backup if available |
+| Reports disappeared after replacing the bundle | Check the previous bundle and the configured generated-data location for the run folders |
 
 For broader diagnosis, see [Troubleshooting](../guides/troubleshooting.md).

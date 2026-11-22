@@ -89,10 +89,7 @@ notes used by the guarded publication workflow.
   `sources.match_fps` to compare with their standard-rate counterparts.
 - Support stable and release-candidate versions in Windows code updates, with exact
   target verification and journaled source replacement for both apply and rollback.
-  Complete backup inventories prevent restoring truncated backups. Existing RC
-  installations need one full bundle reinstall to obtain the new updater and shared
-  version helper: code-only ZIPs do not replace the AppData `bin` updater. Use a
-  fresh bundle folder and preserve user configuration, media, and generated data.
+  Complete backup inventories prevent restoring truncated backups.
   Same-line stable/RC transitions and signed-range downgrades remain supported.
 - Keep release labels, slow.pics image names, and report source selectors from
   ending in a stray word taken from the filename, such as `only`.

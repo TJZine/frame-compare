@@ -132,7 +132,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 This is the canonical manifest-based build command. The builder uses the supplied
 commit for the projected application source, dependency lock and source inventory.
 A local invocation without `-ExpectedCommitSha` resolves `HEAD` once at the start. For a release run, add
-`-RequireReleasePublicKey` to this same invocation; do not rebuild a second candidate.
+`-ReleaseBuild` to this invocation and use the resulting bundle for all checks.
 All evidence, packaging, and digest verification must use this exact `$Candidate`.
 
 Required evidence:
@@ -144,7 +144,7 @@ Required evidence:
 - The bundle contains `bundle_info.json`, `bundle_inventory.json`,
   `licenses/SOURCE_URLS.txt`, and `licenses/THIRD_PARTY_NOTICES.txt`.
 - `bundle_info.schema_version` is 3, identifying a native-panel-capable full bundle;
-  schema-2 pre-native-panel bundles are not eligible for code-only updates.
+  this schema identifies the layout used by the runtime and installer.
 - The recorded source SHA equals the tested pull-request SHA.
 - The direct libplacebo frame proof reports a separate result before and after
   Qt initialization. The hosted skip is reserved for Windows exit code
@@ -155,61 +155,39 @@ Required evidence:
 - FFmpeg is the LGPL-only artifact; no GPL or nonfree build is present.
 - FFMS2 is not present in the Windows bundle or plugin manifests.
 - PySide6 Addons and Qt Multimedia remain present, while Qt WebEngine/Chromium runtime
-  files are absent and both build/extraction verifiers report the required exclusion
-  markers.
+  files are absent. Record the build runtime proof and verify the absence in the ZIP.
 - L-SMASH-Works and vs-placebo license/source records include their statically bundled
   dependency notices.
 - Native plugins do not depend on unbundled DLLs outside the documented Windows/UCRT
   system surface.
 
-Package `dist/frame-compare-portable-win-x64` as
-`dist/frame-compare-portable-win-x64.zip`, record its SHA-256, verify that digest, and
-verify the ZIP layout before extraction.
+Pack the tested build and record its SHA-256 before extraction:
+
+```powershell
+$Zip = "$Candidate.zip"
+python -B -I -S tools/windows_portable/portable_bundle.py pack --root $Candidate --output $Zip
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Get-FileHash -LiteralPath $Zip -Algorithm SHA256
+```
 
 ## 3. Extracted-bundle smoke tests
 
-Extract the candidate ZIP into a new path that is not the repository checkout and is
-not the previous installation. Run commands through the bundle's own shim/runtime,
-not a globally installed Frame Compare environment.
-
-The focused verifier below is also invoked by the hosted workflow's
-`Verify extracted portable bundle` step. It owns ZIP containment/layout, extraction,
-default workspace directories, candidate launcher and doctor checks, installation,
-and installed-shim parity. It verifies the extracted manifest-pinned notices against
-the inventory and extracted files. Before installation, the extracted Python must
-import VSView and load the registered Frame Compare alignment panel. Every command it reports must exit `0`; a thrown assertion
-is a failed check. The verifier atomically reserves the fresh extraction root, writes
-without overwrite, and retains extracted evidence after any later failure. Its
-expected commit argument must be the recorded detached pull-request head used to build
-the candidate. Each external command is assigned to a kill-on-close Windows Job Object
-before its gated payload starts. Its stdout and stderr streams are independently copied
-to capped evidence files rather than retained in verifier memory. Version stdout is
-capped at 64 KiB and doctor JSON at 4 MiB so successful output cannot exceed its reread
-limit; every other stdout or stderr evidence file is capped at 16 MiB. Exceeding either
-cap preserves that stream's exact capped prefix, immediately terminates the complete
-job, reports the overflowing stream and byte limit, and fails without waiting for the
-command deadline. Each command also has a five-minute deadline; a timeout terminates
-the complete job, fails the verifier, and retains the capped output written so far
-under the extraction root's `command-evidence` directory (with doctor output kept at
-the exact paths supplied below).
+Extract the checked ZIP into a fresh directory outside the repository and the
+previous installation. Check that it contains one portable root and that
+its `bundle_inventory.json` records the expected source commit. Verify the
+manifest-pinned notices in the extracted bundle against the inventory. From
+the extracted root, run:
 
 ```powershell
-$Zip = (Resolve-Path 'dist\frame-compare-portable-win-x64.zip').Path
-$ExtractRoot = Join-Path $env:TEMP `
-  ("frame-compare-pr{0}-zip-{1}" -f $PrNumber, [guid]::NewGuid().ToString('N'))
-$DoctorStdout = Join-Path $ExtractRoot 'doctor-candidate.json'
-$DoctorStderr = Join-Path $ExtractRoot 'doctor-candidate.stderr.log'
-
-pwsh -NoProfile -ExecutionPolicy Bypass `
-  -File tools\windows_portable\verify_extracted_bundle.ps1 `
-  -ZipPath $Zip `
-  -ExtractRoot $ExtractRoot `
-  -DoctorStdoutPath $DoctorStdout `
-  -DoctorStderrPath $DoctorStderr `
-  -ExpectedCommitSha $ExpectedPrHeadSha `
-  -CommandTimeoutSeconds 300
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+.\frame-compare.ps1 --help
+.\frame-compare.ps1 version
+.\frame-compare.ps1 doctor --json 1> doctor-candidate.json 2> doctor-candidate.stderr.log
 ```
+
+Require exit 0 from each command and the exact `frame-compare X.Y.Z` version from
+the candidate. After installing the extracted bundle, open a new terminal and
+check the installed `frame-compare --help` and `frame-compare version`. Use the
+bundled Python and VSView for the native-panel check in section 10.
 
 Inspect `doctor-candidate.json`. Required results:
 
@@ -223,9 +201,8 @@ Inspect `doctor-candidate.json`. Required results:
 - No plugin DLL is loaded from the standalone FFmpeg directory.
 - No missing shared-library or recursive DLL-probing warning appears.
 
-Retain the verifier's `WINDOWS_EXTRACTED_PROOF` lines. Record its resolved candidate
-launcher, installed shim, doctor stdout/stderr, ZIP and digest artifact paths, every
-reported command exit code, and the hosted `Verify extracted portable bundle` step.
+Record the ZIP digest, launcher paths, exit codes, doctor stdout and stderr, and
+the build and packed ZIP succession job results.
 
 ## 4. Deterministic generated fixtures
 
@@ -372,31 +349,15 @@ Verify with old and newly generated data:
 - Repeated candidate runs produce valid cache hits without changing selected frames.
 - Unrelated cache scopes are not invalidated without a documented reason.
 
-## 8. Portable update boundary
+## 8. ZIP installation over the previous release
 
-Keep one untouched installation of the immediate predecessor to this R82 candidate.
-Use the R81 / VSView 0.13.0 / CPython 3.13.17 / September 2026 FFmpeg bundle with
-full runtime fingerprint
-`3ba680493a218e486baabbff812ad5047c50b471be742d420e721579fc8eaad0`.
-Retain an older schema-2 installation separately when available for the
-pre-native-panel refusal case.
-
-Required cases:
-
-1. Build the candidate code-only update ZIP and its manifest.
-2. Attempt to apply it to the previous bundle.
-3. Confirm refusal occurs before file replacement because the previous bundle's
-   full media-runtime fingerprint differs from the candidate's.
-4. With otherwise matching candidate fingerprints, confirm a schema-2 bundle still
-   refuses before file replacement.
-5. Confirm an unsafe Python-dependency override does not bypass that refusal.
-6. Confirm the error directs the user to install the complete portable bundle.
-7. Install/extract the complete candidate bundle and confirm generated data stored
-   outside the bundle remains available.
-8. Apply a code-only update whose required fingerprint matches the candidate bundle.
-9. Verify backup creation, successful apply, rollback, and hash restoration.
-10. Test missing, malformed, and legacy runtime-fingerprint metadata; each must fail
-   closed without partially updating the installation.
+Keep a separate installation of v0.6.1 with test data in the bundle's config,
+input, and generated folders. Verify the candidate ZIP's checksum. Extract it
+into a fresh directory and run `install.cmd` before uninstalling anything. Use
+the installed shim to confirm the candidate version, existing config and run
+history. Verify that the previous bundle's application, fallback configuration
+and external generated-data roots are preserved. Check the opt-out with
+`install.cmd -UserData Leave` using a separate test installation.
 
 ## 9. End-to-end comparisons
 
@@ -457,7 +418,7 @@ Summarize the physical pass in the pull request with:
 - Passed, failed, skipped, and unavailable cases.
 - Exact real-media categories exercised.
 - Source-loader behavior changes and their classifications.
-- Cache/index and updater migration results.
+- Cache/index and ZIP installation results.
 - HDR/Dolby Vision objective and perceptual findings.
 - Residual risks or platform-specific limitations.
 - Independent final reviewer identity/session, reviewed commit SHA, verdict, and any

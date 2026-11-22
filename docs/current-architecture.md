@@ -966,7 +966,7 @@ External runtime boundaries:
 - default browser open for slow.pics URLs in interactive CLI runs
 - clipboard integration for slow.pics URLs in interactive CLI runs
 - Docker build/test runtime
-- Windows PowerShell installer and updater scripts
+- Windows PowerShell installer and launcher scripts
 - VSView public plugin API and event-loop/threading contract
 
 Current runtime capability contract:

@@ -574,15 +574,12 @@ def export(repo: Path, commit: str, output: Path) -> bytes:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "mode", choices=("assemble", "export", "anitopy-wheel", "snapshot-manifest")
-    )
+    parser.add_argument("mode", choices=("assemble", "anitopy-wheel", "snapshot-manifest"))
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--requirements", type=Path)
     args = parser.parse_args()
     repo = args.repo.resolve(strict=True)
     commit = args.commit_sha
@@ -593,12 +590,6 @@ def main() -> None:
             parser.error("snapshot-manifest requires an empty reserved output directory")
         snapshot_manifest(repo, commit, args.output)
         return
-    if args.mode == "export":
-        if args.output is None:
-            parser.error("export requires --output")
-        export(repo, commit, args.output)
-        return
-
     lock = git_blob(repo, commit, Path("uv.lock"))
     if args.mode == "anitopy-wheel":
         if args.cache is None or args.output is None:
@@ -626,11 +617,7 @@ def main() -> None:
         parser.error("assembly needs a manifest, a cache and an empty reserved output directory")
     manifest = args.manifest.read_bytes()
     requirement_file = root / "requirements.lock.txt"
-    if args.requirements is None:
-        requirements = export(repo, commit, requirement_file)
-    else:
-        requirements = args.requirements.read_bytes()
-        requirement_file.write_bytes(requirements)
+    requirements = export(repo, commit, requirement_file)
     assemble(root, manifest, lock, requirements, args.cache)
     (root / "manifest.json").write_bytes(manifest)
 

@@ -20,7 +20,7 @@ as a preset.
 - run-local generated state.
 
 For Windows portable installs, choose a normal directory outside the replaceable bundle
-when reports and reusable state must survive a reinstall, update rollback, or bundle
+when reports and reusable state must survive a reinstall or bundle
 move.
 
 ```toml
@@ -28,7 +28,7 @@ move.
 generated_dir = "D:/FrameCompareData"
 ```
 
-Use a normal user-writable directory. The Windows updater and uninstaller leave an
+Use a normal user-writable directory. The Windows installer and uninstaller leave an
 external generated-data root outside their replacement boundary.
 
 Environment variables and platform-specific path rules are documented in the

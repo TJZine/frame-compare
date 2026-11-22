@@ -87,6 +87,3 @@ generated
 **/secrets*.yml
 **/config.local.*
 **/config.private.*
-
-# The updater's public verification key is safe to include.
-!tools/windows_portable/update_public_key.xml

@@ -1,8 +1,6 @@
 function Write-LauncherFiles([string]$BundleRoot) {
   $ps1Path = Join-Path $BundleRoot "frame-compare.ps1"
   $cmdPath = Join-Path $BundleRoot "frame-compare.cmd"
-  $updatePs1Path = Join-Path $BundleRoot "frame-compare-update.ps1"
-  $updateCmdPath = Join-Path $BundleRoot "frame-compare-update.cmd"
 
   $ps1 = @'
 $ErrorActionPreference = "Stop"
@@ -138,49 +136,10 @@ if not defined POWERSHELL_EXE (
 exit /b %ERRORLEVEL%
 '@
 
-  $updatePs1 = @'
-$ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
-
-$bundleRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$updater = Join-Path $bundleRoot "shim\\frame-compare-update.ps1"
-
-if (!(Test-Path -LiteralPath $updater)) {
-  throw "Updater shim not found: $updater"
-}
-
-& $updater @args
-if ($null -eq $LASTEXITCODE) {
-  exit 1
-}
-exit $LASTEXITCODE
-'@
-
-  $updateCmd = @'
-@echo off
-setlocal
-set "SCRIPT_DIR=%~dp0"
-set "POWERSHELL_EXE="
-where pwsh >nul 2>nul
-if %ERRORLEVEL% EQU 0 (
-  set "POWERSHELL_EXE=pwsh"
-)
-if not defined POWERSHELL_EXE if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "POWERSHELL_EXE=%ProgramFiles%\PowerShell\7\pwsh.exe"
-if not defined POWERSHELL_EXE if exist "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-if not defined POWERSHELL_EXE (
-  echo PowerShell was not found. Install PowerShell 7 or restore Windows PowerShell. 1>&2
-  exit /b 9009
-)
-"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%frame-compare-update.ps1" %*
-exit /b %ERRORLEVEL%
-'@
-
-  # Use the same CRLF bytes when assembling or independently verifying the bundle.
+  # Use the same CRLF bytes for both launcher entrypoints.
   foreach ($launcher in @{
     $ps1Path = $ps1
     $cmdPath = $cmd
-    $updatePs1Path = $updatePs1
-    $updateCmdPath = $updateCmd
   }.GetEnumerator()) {
     $text = ($launcher.Value -replace "\r?\n", "`r`n") + "`r`n"
     [IO.File]::WriteAllText($launcher.Key, $text, [Text.UTF8Encoding]::new($false))

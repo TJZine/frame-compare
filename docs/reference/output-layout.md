@@ -91,8 +91,7 @@ fresh metadata requests; Frame Compare recreates it as successful lookups occur.
 ## Windows portable persistence
 
 The default generated-data root can be inside the bundle. Choose an external normal
-user directory when results must survive bundle replacement. The updater, rollback,
-reinstall flow, and uninstaller preserve that external root.
+user directory when results must survive bundle replacement. Installation and uninstallation preserve that external root.
 
 Moving source media or the bundle can change path-based cache identity. Existing reports
 remain viewable as long as their run folder is intact.

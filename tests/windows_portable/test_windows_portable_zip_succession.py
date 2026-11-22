@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import zipfile
+from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -21,6 +22,12 @@ from .test_windows_portable_install_uninstall_e2e import _get_user_path, _set_us
 _ZIP = os.environ.get("FRAME_COMPARE_TEST_PORTABLE_ZIP")
 _BUNDLE_ROOT = "frame-compare-portable-win-x64"
 _DATA_DIRS = ("config", "comparison_videos", "generated")
+_LEGACY_LEAVES = (
+    "frame-compare-update.ps1",
+    "frame-compare-update.cmd",
+    "update_public_key.xml",
+    "frame-compare-version.ps1",
+)
 _RUN = "zip-succession-sentinel"
 _SHOT = "screenshots/frame.png"
 _PNG = base64.b64decode(
@@ -77,7 +84,7 @@ def _install(
     env: dict[str, str],
     outside: Path,
     user_data_args: tuple[str, ...] = (),
-) -> None:
+) -> str:
     if interpreter == "pwsh":
         result = _cmd(env, bundle, "install.cmd", *user_data_args)
         version_prefix = "7."
@@ -105,6 +112,7 @@ def _install(
     print(result.stdout, end="", flush=True)
     versions = re.findall(r"^Portable installer PowerShell version: (.+)$", result.stdout, re.M)
     assert len(versions) == 1 and versions[0].startswith(version_prefix), result.stdout
+    return result.stdout
 
 
 def _seed(bundle: Path, external_root: Path | None) -> None:
@@ -191,6 +199,10 @@ def test_packed_zip_succession(tmp_path: Path, interpreter: str, case: str) -> N
                 archive.extractall(root)
                 (root / _BUNDLE_ROOT).rename(bundle)
         first_app = _application_tree(first)
+        for bundle in (first, second):
+            for name in _LEGACY_LEAVES:
+                assert not (bundle / name).exists()
+                assert not (bundle / "shim" / name).exists()
         original_user_path = _get_user_path()
         try:
             _set_user_path((controlled_user_path, winreg.REG_SZ))
@@ -202,13 +214,46 @@ def test_packed_zip_succession(tmp_path: Path, interpreter: str, case: str) -> N
             data_before = {name: snapshot_bytes(first / name) for name in _DATA_DIRS}
             external_before = snapshot_bytes(external_root) if external_root else {}
 
-            _install(
-                second,
-                interpreter=interpreter,
-                env=env,
-                outside=outside,
-                user_data_args=("-UserData", "Leave") if case == "leave" else (),
+            # Cover all four historical leaves and v0.6.1's three-file layout.
+            names = _LEGACY_LEAVES[:-1] if case == "leave" else _LEGACY_LEAVES
+            legacy = {name: bin_dir / name for name in names}
+            unknown = bin_dir / "unknown-user-file.bin"
+            unknown.write_bytes(b"keep unknown sibling")
+            blocked = legacy.get(_LEGACY_LEAVES[-1]) if case in {"reactivate", "external"} else None
+            for path in legacy.values():
+                if path == blocked and case == "external":
+                    path.mkdir()
+                    (path / "nested.bin").write_bytes(b"keep nested file")
+                else:
+                    path.write_bytes(b"legacy installed file")
+
+            lock = (
+                blocked.open("rb")
+                if blocked is not None and case == "reactivate"
+                else nullcontext()
             )
+            with lock:
+                output = _install(
+                    second,
+                    interpreter=interpreter,
+                    env=env,
+                    outside=outside,
+                    user_data_args=("-UserData", "Leave") if case == "leave" else (),
+                )
+                for path in legacy.values():
+                    assert path.exists() == (path == blocked)
+                if blocked is None:
+                    assert "Could not remove legacy file" not in output
+                else:
+                    assert "Could not remove legacy file" in output
+                    assert f"{blocked.name}:" in "".join(output.split())
+                    assert "The new installation is active." in output
+                    if case == "external":
+                        assert (blocked / "nested.bin").read_bytes() == b"keep nested file"
+                    else:
+                        assert blocked.read_bytes() == b"legacy installed file"
+                assert unknown.read_bytes() == b"keep unknown sibling"
+
             _assert_active(pointer, second, expected_user_path)
 
             owner, other = (first, second) if case == "leave" else (second, first)

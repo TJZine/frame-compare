@@ -186,7 +186,7 @@ revisions and native source hashes. It is experimental provenance, not an
 upstream wheel identity or accepted deployment fingerprint. Distribution still
 requires an honestly identified downstream/upstream wheel, matching sources and
 licenses, full runtime identity and artifact/physical-Windows acceptance. A native
-replacement cannot be delivered through an unchanged code-only update identity.
+replacement is delivered in a complete portable ZIP.
 
 ### vs-placebo 2.0.5
 
@@ -233,16 +233,9 @@ the installed decoder ABI. Legacy media-adjacent indexes remain inert. See
 
 ## Portable update boundary
 
-A code-only update ZIP does not contain VapourSynth, L-SMASH-Works, vs-placebo,
-FFmpeg, native manifests, or their licenses. The updater therefore compares the
-installed bundle's full runtime fingerprint with the signed update manifest before
-changing files. A missing, legacy, malformed, or different fingerprint blocks the update.
-
-A pre-native-panel portable bundle may have matching runtime fingerprints but lacks
-the native-panel capability recorded by `bundle_info.schema_version` 3. It requires
-a complete portable bundle reinstall; a code-only update must fail closed rather than
-mix the old dependency graph with the new application code.
-Generated data should remain outside the bundle when it must survive replacement.
+Install the complete Windows portable ZIP when the native runtime changes.
+The manifest and bundle inventory identify the runtime pins and fingerprints
+for the resulting installation.
 
 ## Licensing and corresponding source
 
@@ -290,7 +283,7 @@ and the exact [Debian Trixie package copyright record](https://sources.debian.or
 ## Validation boundary
 
 GitHub-hosted Linux, Docker on AMD64 and ARM64, and Windows validation cover packaging,
-plugin loading, generated fixtures, runtime identities, updater compatibility, and
+plugin loading, generated fixtures, runtime identities, portable ZIP installation, and
 deterministic layout. For generated HDR fixtures, `ffprobe` is the encoded
 stream-signal authority;
 the Docker gate separately proves that both source plugins retain at least 10-bit
