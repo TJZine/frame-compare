@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portable_archive import checked_zip, copy_exact, digest_file
 
 PREFIX = "frame-compare-portable-win-x64/"
+MAX_BUNDLE_INVENTORY = 16 * 1024**2
 MAX_RECEIPT = 16 * 1024
 MAX_SCAN_DOCUMENT = 512 * 1024**2
 # The observed Grype v6 database is about 3.2 GiB. Allow growth while bounding the hash read.
@@ -80,9 +81,24 @@ def _stage(args: argparse.Namespace) -> None:
     if archive_digest != expected_digest:
         raise ValueError("Portable artifact does not match the producer ZIP digest")
 
-    args.output.mkdir(parents=True)
     file_count = directory_count = expanded_bytes = 0
     with checked_zip(args.archive) as archive:
+        try:
+            inventory_entry = archive.getinfo(f"{PREFIX}bundle_inventory.json")
+        except KeyError as error:
+            raise ValueError(
+                "Portable ZIP is missing its canonical bundle_inventory.json"
+            ) from error
+        if not 0 < inventory_entry.file_size <= MAX_BUNDLE_INVENTORY:
+            raise ValueError("Portable bundle_inventory.json has an invalid size")
+        inventory = json.loads(archive.read(inventory_entry))
+        bundle = inventory.get("bundle") if isinstance(inventory, dict) else None
+        if not isinstance(bundle, dict) or bundle.get("commit_sha") != args.expected_sha:
+            raise ValueError(
+                "Portable bundle_inventory.json commit does not match the expected SHA"
+            )
+
+        args.output.mkdir(parents=True)
         for entry in archive.infolist():
             name = entry.filename
             if not name.startswith(PREFIX):

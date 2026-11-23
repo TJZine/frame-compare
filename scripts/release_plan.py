@@ -174,8 +174,29 @@ class GitHub:
     def release(self, tag: str) -> dict[str, Any] | None:
         return self._optional(f"releases/tags/{quote(tag, safe='')}")
 
+    def _tag_ref(self, tag: str) -> dict[str, Any] | None:
+        return self._optional(f"git/ref/tags/{quote(tag, safe='')}")
+
     def tag_exists(self, tag: str) -> bool:
-        return self._optional(f"git/ref/tags/{quote(tag, safe='')}") is not None
+        return self._tag_ref(tag) is not None
+
+    def tag_commit(self, tag: str) -> str | None:
+        ref = self._tag_ref(tag)
+        target = ref.get("object") if ref is not None else None
+        # Annotated tags can refer to other tags. Bound the chain of API reads.
+        for remaining in range(8, -1, -1):
+            if not isinstance(target, dict):
+                return None
+            sha = target.get("sha")
+            if not isinstance(sha, str) or not SHA_RE.fullmatch(sha):
+                return None
+            if target.get("type") == "commit":
+                return sha
+            if target.get("type") != "tag" or remaining == 0:
+                return None
+            annotation = self._optional(f"git/tags/{sha}")
+            target = annotation.get("object") if annotation is not None else None
+        return None
 
     def asset_bytes(self, asset_id: int) -> bytes:
         with self._request(
@@ -294,7 +315,6 @@ def tested_rc(
 
 @dataclass(frozen=True)
 class Plan:
-    channel: str
     sha: str
     version: str
     tag: str
@@ -310,7 +330,6 @@ def plan_rc(github: GitHub, history: GitHistory, event_sha: str) -> Plan:
     stable = github.release(stable_tag)
     if stable is not None and stable["draft"] is False and _right_channel(stable, stable_tag):
         return Plan(
-            "rc",
             sha,
             version,
             stable_tag,
@@ -346,7 +365,6 @@ def plan_rc(github: GitHub, history: GitHistory, event_sha: str) -> Plan:
                     "The RC for this head is published but incomplete; repair it by hand."
                 )
         return Plan(
-            "rc",
             sha,
             version,
             matching_rcs[0]["tag_name"],
@@ -357,7 +375,7 @@ def plan_rc(github: GitHub, history: GitHistory, event_sha: str) -> Plan:
     for release in releases:
         if release["draft"] is True:
             github.api(f"releases/{release['id']}", method="DELETE")
-    return Plan("rc", sha, version, f"{stable_tag}-rc.{next_rc(version, history.tags())}")
+    return Plan(sha, version, f"{stable_tag}-rc.{next_rc(version, history.tags())}")
 
 
 def plan_stable(github: GitHub, history: GitHistory, event_sha: str) -> Plan:
@@ -369,7 +387,7 @@ def plan_stable(github: GitHub, history: GitHistory, event_sha: str) -> Plan:
     if stable is not None and stable["draft"] is False:
         if not complete(github, stable, tag):
             raise ReleaseContractError(f"{tag} is published but incomplete; repair it by hand.")
-        return Plan("stable", sha, version, tag, "complete", f"{tag} is already published.")
+        return Plan(sha, version, tag, "complete", f"{tag} is already published.")
     # The by-tag endpoint does not expose unpublished drafts.
     releases = list(github.pages("releases"))
     for release in releases:
@@ -379,7 +397,7 @@ def plan_stable(github: GitHub, history: GitHistory, event_sha: str) -> Plan:
         raise ReleaseContractError(
             f"Promote a tested RC: no complete RC of {version} matches main's tree."
         )
-    return Plan("stable", sha, version, tag)
+    return Plan(sha, version, tag)
 
 
 def release_please_enabled(github: GitHub, history: GitHistory) -> bool:
@@ -404,13 +422,26 @@ def _require_unpublished(github: GitHub, tag: str) -> None:
 
 
 def publish(
-    github: GitHub, history: GitHistory, sha: str, tag: str, archive: Path, digest: str
+    github: GitHub,
+    history: GitHistory,
+    sha: str,
+    tag: str,
+    archive: Path,
+    digest: str,
+    *,
+    rc_writer: GitHub | None = None,
 ) -> None:
     if not SHA_RE.fullmatch(sha):
         raise ReleaseContractError("Publication requires an exact source commit SHA.")
     version, notes = history.version_and_notes(sha)
-    if tag != f"v{version}" and _rc_serial(version, tag) is None:
-        raise ReleaseContractError(f"Tag {tag} does not match the source version {version}.")
+    if tag != f"v{version}":
+        if _rc_serial(version, tag) is None:
+            raise ReleaseContractError(f"Tag {tag} does not match the source version {version}.")
+        if rc_writer is None:
+            raise ReleaseContractError("RC publication requires the RELEASE_PUBLISH_TOKEN secret.")
+        writer = rc_writer
+    else:
+        writer = github
     if not DIGEST.fullmatch(digest):
         raise ReleaseContractError("Publication requires the raw ZIP's SHA-256.")
     with archive.open("rb") as stream:
@@ -429,7 +460,7 @@ def publish(
     )
 
     _require_unpublished(github, tag)
-    draft = github.api(
+    draft = writer.api(
         "releases",
         method="POST",
         body={
@@ -460,9 +491,15 @@ def publish(
     ):
         raise ReleaseContractError(f"GitHub draft assets did not verify for {tag}.")
     _require_unpublished(github, tag)
-    result = github.api(endpoint, method="PATCH", body={"draft": False})
+    result = writer.api(endpoint, method="PATCH", body={"draft": False})
     if result["draft"] is not False or not _right_channel(result, tag):
         raise ReleaseContractError(f"GitHub did not publish {tag} on the requested channel.")
+    actual = github.tag_commit(tag)
+    if actual != sha:
+        raise ReleaseContractError(
+            f"Repair required: published tag {tag} resolves to {actual or 'no commit'}, "
+            f"expected {sha}."
+        )
 
 
 def label_release_pr(github: GitHub, version: str) -> None:
@@ -516,7 +553,15 @@ def main() -> None:
     history = GitHistory()
     try:
         if args.command == "publish":
-            publish(github, history, args.sha, args.tag, args.archive, args.digest)
+            # Creating a tag at an RC commit can require GitHub's Workflows write permission.
+            rc_writer = None
+            if "-rc." in args.tag:
+                token = os.environ.pop("RELEASE_PUBLISH_TOKEN", "").strip()
+                if token:
+                    rc_writer = GitHub(github.repository, token)
+            publish(
+                github, history, args.sha, args.tag, args.archive, args.digest, rc_writer=rc_writer
+            )
         elif args.command == "label":
             label_release_pr(github, args.version)
         elif args.command == "release-please-guard":
@@ -532,13 +577,10 @@ def main() -> None:
                 else plan_stable(github, history, event_sha)
             )
             print(plan.message or f"Build {plan.tag} from {plan.sha}")
-            _outputs(
-                channel=plan.channel,
-                sha=plan.sha,
-                version=plan.version,
-                tag=plan.tag,
-                status=plan.status,
-            )
+            outputs = {"sha": plan.sha, "tag": plan.tag, "status": plan.status}
+            if args.command == "plan-stable":
+                outputs["version"] = plan.version
+            _outputs(**outputs)
     except (
         ReleaseContractError,
         OSError,

@@ -46,7 +46,8 @@ def test_workflows_pin_actions_to_full_commit_shas(repo_root: Path) -> None:
 def test_release_workflows_plan_the_live_head_and_require_windows_scan(
     repo_root: Path, channel: str, branch: str, workflow_name: str
 ) -> None:
-    workflow = _load_workflow(repo_root / ".github/workflows" / workflow_name)
+    path = repo_root / ".github/workflows" / workflow_name
+    workflow = _load_workflow(path)
     assert workflow["on"] == {"push": {"branches": [branch]}}
     assert workflow["concurrency"] == {"group": f"release-{channel}", "cancel-in-progress": "false"}
     assert workflow["permissions"] == {}
@@ -76,7 +77,8 @@ def test_release_workflows_plan_the_live_head_and_require_windows_scan(
     assert publish["permissions"] == {"contents": "write"}
     assert publish["needs"] == ["plan", "source-security", "windows"]
     assert _step_by_name(publish, "Checkout exact release source")["with"]["ref"] == sha
-    assert _step_by_name(publish, "Download the scanned ZIP")["with"] == {
+    download = _step_by_name(publish, "Download the scanned ZIP")
+    assert download["with"] == {
         "artifact-ids": "${{ needs.windows.outputs.bundle_id }}",
         "path": "${{ runner.temp }}/release-assets",
         "skip-decompress": "true",
@@ -91,11 +93,16 @@ def test_release_workflows_plan_the_live_head_and_require_windows_scan(
     assert owner["env"]["RELEASE_SHA"] == sha
     assert "python3 -B -m scripts.release_plan publish" in owner["run"]
     assert '--digest "$BUNDLE_DIGEST"' in owner["run"]
-    assert [step["name"] for step in publish["steps"]][-3:] == [
-        "Require the exact build artifact",
-        "Download the scanned ZIP",
-        "Upload and verify the draft before publishing",
-    ]
+    assert owner["env"]["GH_TOKEN"] == plan_step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert owner["env"].get("RELEASE_PUBLISH_TOKEN") == (
+        "${{ secrets.RELEASE_PUBLISH_TOKEN }}" if channel == "rc" else None
+    )
+    assert path.read_text(encoding="utf-8").count("secrets.RELEASE_PUBLISH_TOKEN") == (
+        1 if channel == "rc" else 0
+    )
+    steps = publish["steps"]
+    assert steps.index(proof) < steps.index(download) < steps.index(owner)
+    assert all("continue-on-error" not in step for step in (proof, download, owner))
     assert "label" not in jobs if channel == "rc" else "label" in jobs
 
 

@@ -677,12 +677,13 @@ artifact from changes in the advisory feed.
    `autorelease: pending` to `autorelease: tagged`. An already tagged PR
    satisfies this check.
 
-Use **Re-run all jobs** on the applicable push run after a failure. This reruns the
-plan against the live head. Rerunning only failed jobs can reuse an earlier
-planned SHA. Each publication path clears its stale drafts before trying again
-and verifies its new draft before publishing. A published release with missing
-or mismatched assets requires manual repair. A stable rerun that finds a
-complete release can still repair the Release Please label.
+Use **Re-run all jobs** on the applicable push run after a failure. If the release
+definitions changed, rerun the push run for the current head. Only a full replan
+checks the live head, clears stale drafts for a new attempt, and recognizes a
+completed publication. Rerunning only failed jobs bypasses that recovery.
+A published release with missing or mismatched assets or a missing or incorrect
+tag target requires manual repair. A stable rerun that finds a complete release
+can still repair the Release Please label.
 
 #### Start the next release cycle
 

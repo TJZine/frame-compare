@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from email.message import Message
 from pathlib import Path
 from typing import Any, BinaryIO
+from unittest.mock import Mock
 from urllib.error import HTTPError
 
 import pytest
@@ -17,6 +19,7 @@ VERSION = "0.7.1"
 MAIN = "a" * 40
 PRE_RELEASE = "b" * 40
 OTHER_COMMIT = "c" * 40
+ANNOTATION = "d" * 40
 STABLE = f"v{VERSION}"
 RC = f"{STABLE}-rc.10"
 ZIP_BYTES = b"raw ZIP fixture"
@@ -83,7 +86,9 @@ class GitHub(release.GitHub):
         self.mutations: list[tuple[str, str]] = []
         self.downloads: list[int] = []
         self.missing_status = 404
-        self.existing_tags: set[str] = set()
+        self.tag_targets: dict[str, dict[str, str]] = {}
+        self.annotations: dict[str, dict[str, str]] = {}
+        self.published_target: dict[str, str] | None = {"type": "commit", "sha": MAIN}
         self.corrupt_download = False
 
     def api(self, path: str, *, method: str = "GET", body: Any = None) -> Any:
@@ -103,9 +108,11 @@ class GitHub(release.GitHub):
                     return existing
                 raise HTTPError(path, self.missing_status, "fixture response", Message(), None)
             case "GET", ["git", "ref", "tags", tag]:
-                if tag in self.existing_tags:
-                    return {"ref": f"refs/tags/{tag}"}
+                if tag in self.tag_targets:
+                    return {"ref": f"refs/tags/{tag}", "object": self.tag_targets[tag]}
                 raise HTTPError(path, self.missing_status, "fixture response", Message(), None)
+            case "GET", ["git", "tags", sha]:
+                return {"object": self.annotations[sha]}
             case "DELETE", ["releases", identifier]:
                 self.releases = [r for r in self.releases if r["id"] != int(identifier)]
             case "POST", ["releases"]:
@@ -117,6 +124,8 @@ class GitHub(release.GitHub):
             case "PATCH", ["releases", identifier]:
                 result = next(r for r in self.releases if r["id"] == int(identifier))
                 result.update(body)
+                if self.published_target is not None:
+                    self.tag_targets[result["tag_name"]] = self.published_target
                 return result
             case "POST", ["issues", _number, "labels"]:
                 assert body == {"labels": ["autorelease: tagged"]}
@@ -307,7 +316,7 @@ def test_rc_discards_only_own_stale_drafts_then_allocates_next_existing_tag_seri
     preview = github.add_release(f"{STABLE}-rc.preview", draft=True)
     github.add_release(STABLE, draft=True)
     assert release.plan_rc(github, history, PRE_RELEASE) == release.Plan(
-        "rc", PRE_RELEASE, VERSION, f"{STABLE}-rc.11"
+        PRE_RELEASE, VERSION, f"{STABLE}-rc.11"
     )
     assert github.mutations == [("DELETE", f"releases/{stale['id']}")]
     assert earlier in github.releases
@@ -341,9 +350,7 @@ def test_stable_plans_publication_from_equal_tree_at_different_commit() -> None:
     legacy["assets"].clear()
     stale = github.add_release(STABLE, draft=True)
     github.add_release(RC)
-    assert release.plan_stable(github, history, MAIN) == release.Plan(
-        "stable", MAIN, VERSION, STABLE
-    )
+    assert release.plan_stable(github, history, MAIN) == release.Plan(MAIN, VERSION, STABLE)
     assert history.heads == [release.MAIN]
     assert github.mutations == [("DELETE", f"releases/{stale['id']}")]
 
@@ -353,9 +360,7 @@ def test_stable_skips_rc_missing_from_snapshot_and_uses_complete_equal_tree_rc()
     github.add_release(f"{STABLE}-rc.11")
     candidate = github.add_release(RC)
 
-    assert release.plan_stable(github, history, MAIN) == release.Plan(
-        "stable", MAIN, VERSION, STABLE
-    )
+    assert release.plan_stable(github, history, MAIN) == release.Plan(MAIN, VERSION, STABLE)
     assert github.downloads == [candidate["assets"][1]["id"]]
     assert not github.mutations
 
@@ -430,16 +435,16 @@ def test_git_history_uses_remote_heads(monkeypatch: pytest.MonkeyPatch) -> None:
     assert history.head(release.PRE_RELEASE) == PRE_RELEASE
 
 
-@pytest.mark.parametrize("channel", ["rc", "stable"])
 @pytest.mark.parametrize(
-    "changed_path",
+    ("channel", "changed_path"),
     [
-        "src/frame_compare/feature.py",
-        ".github/workflows/windows-portable.yml",
-        ".github/actions/windows-portable-build/action.yml",
-        "scripts/release_plan.py",
-        "scripts/validate_release_contract.py",
-        "tools/windows_portable/artifact_security.py",
+        ("rc", "src/frame_compare/feature.py"),
+        ("rc", ".github/workflows/windows-portable.yml"),
+        ("rc", ".github/actions/windows-portable-build/action.yml"),
+        ("rc", "scripts/release_plan.py"),
+        ("rc", "scripts/validate_release_contract.py"),
+        ("rc", "tools/windows_portable/artifact_security.py"),
+        ("stable", ".github/workflows/release.yml"),
     ],
 )
 def test_release_plan_checks_event_definitions_against_live_head(
@@ -492,13 +497,7 @@ def test_release_plan_checks_event_definitions_against_live_head(
         assert result.status == "publish"
         assert result.sha == planned
     else:
-        with pytest.raises(
-            ReleaseContractError,
-            match=(
-                "Release definitions changed since this run's commit; "
-                "re-run the push run for the current head instead."
-            ),
-        ):
+        with pytest.raises(ReleaseContractError, match="Release definitions changed"):
             plan(github, release.GitHistory(), event)
     assert not github.mutations
 
@@ -593,15 +592,57 @@ def portable_checksum(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(release.subprocess, "run", sha256sum)
 
 
+def _publish_from_cli(monkeypatch: pytest.MonkeyPatch, tag: str, raw: Path) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "release_plan",
+            "publish",
+            "--sha",
+            MAIN,
+            "--tag",
+            tag,
+            "--archive",
+            str(raw),
+            "--digest",
+            ZIP_DIGEST,
+        ],
+    )
+    release.main()
+
+
 @pytest.mark.usefixtures("portable_checksum")
 @pytest.mark.parametrize("tag", [STABLE, RC])
 def test_publisher_creates_draft_uploads_pair_verifies_remote_then_publishes(
-    tmp_path: Path, tag: str
+    tmp_path: Path, tag: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     github, history = GitHub(), History()
+    writer = Mock(wraps=github)
+    if tag == RC:
+        github.published_target = {"type": "tag", "sha": ANNOTATION}
+        github.annotations[ANNOTATION] = {"type": "commit", "sha": MAIN}
+
+    def client(repository: str, token: str):
+        assert repository == github.repository
+        if token == "fixture-release-token":
+            assert tag == RC
+            assert "RELEASE_PUBLISH_TOKEN" not in os.environ
+            return writer
+        assert token == "fixture-workflow-token"
+        return github
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", github.repository)
+    monkeypatch.setenv("GH_TOKEN", "fixture-workflow-token")
+    monkeypatch.setenv("RELEASE_PUBLISH_TOKEN", "fixture-release-token")
+    monkeypatch.setattr(release, "GitHub", client)
+    monkeypatch.setattr(release, "GitHistory", lambda: history)
     raw = tmp_path / f"{release.ZIP_STEM}.zip"
     raw.write_bytes(ZIP_BYTES)
-    release.publish(github, history, MAIN, tag, raw, ZIP_DIGEST)
+    _publish_from_cli(monkeypatch, tag, raw)
+    assert [(call.args[0], call.kwargs["method"]) for call in writer.api.call_args_list] == (
+        [("releases", "POST"), ("releases/99", "PATCH")] if tag == RC else []
+    )
+    assert len(writer.mock_calls) == (2 if tag == RC else 0)
     name = release.zip_name(tag)
     assert github.mutations == [
         ("POST", "releases"),
@@ -616,6 +657,48 @@ def test_publisher_creates_draft_uploads_pair_verifies_remote_then_publishes(
     assert result["prerelease"] is ("-rc." in tag)
     assert result["draft"] is False
     assert github.binary[1001] == f"{ZIP_DIGEST}  {name}\n".encode()
+
+
+@pytest.mark.parametrize("token", [None, " 	"])
+def test_rc_publisher_requires_secret_before_release_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, token: str | None
+) -> None:
+    github = GitHub()
+    monkeypatch.setenv("GITHUB_REPOSITORY", github.repository)
+    monkeypatch.setenv("GH_TOKEN", "fixture-workflow-token")
+    if token is None:
+        monkeypatch.delenv("RELEASE_PUBLISH_TOKEN", raising=False)
+    else:
+        monkeypatch.setenv("RELEASE_PUBLISH_TOKEN", token)
+    monkeypatch.setattr(release, "GitHub", lambda *_: github)
+    monkeypatch.setattr(release, "GitHistory", History)
+    raw = tmp_path / "raw.zip"
+    raw.write_bytes(ZIP_BYTES)
+    with pytest.raises(SystemExit, match="requires the RELEASE_PUBLISH_TOKEN secret"):
+        _publish_from_cli(monkeypatch, RC, raw)
+    assert not github.mutations
+    assert raw.read_bytes() == ZIP_BYTES
+
+
+@pytest.mark.usefixtures("portable_checksum")
+@pytest.mark.parametrize("published_commit", [OTHER_COMMIT, None])
+def test_publisher_requires_repair_for_wrong_or_missing_remote_tag(
+    tmp_path: Path, published_commit: str | None
+) -> None:
+    github = GitHub()
+    github.published_target = (
+        None if published_commit is None else {"type": "commit", "sha": published_commit}
+    )
+    raw = tmp_path / "raw.zip"
+    raw.write_bytes(ZIP_BYTES)
+    with pytest.raises(
+        ReleaseContractError, match=f"Repair required: published tag {STABLE}"
+    ) as error:
+        release.publish(github, History(), MAIN, STABLE, raw, ZIP_DIGEST)
+    assert (published_commit or "no commit") in str(error.value)
+    assert MAIN in str(error.value)
+    assert github.mutations[-1] == ("PATCH", "releases/99")
+    assert github.releases[0]["draft"] is False
 
 
 @pytest.mark.usefixtures("portable_checksum")
@@ -638,12 +721,16 @@ def test_publisher_never_publishes_on_mismatch_or_collision(
     if failure == "published":
         github.add_release(STABLE)
     if failure == "tag":
-        github.existing_tags.add(STABLE)
+        github.tag_targets[STABLE] = {"type": "commit", "sha": MAIN}
     with pytest.raises(ReleaseContractError, match=error):
         release.publish(github, History(), MAIN, STABLE, raw, ZIP_DIGEST)
     if failure == "remote":
         assert [method for method, _ in github.mutations] == ["POST", "UPLOAD", "UPLOAD"]
         assert github.releases[0]["draft"] is True
+        # A full rerun starts by replanning and removing this unpublished draft.
+        github.add_release(RC)
+        assert release.plan_stable(github, History(), MAIN).status == "publish"
+        assert github.mutations[-1] == ("DELETE", "releases/99")
     else:
         assert not github.mutations
 

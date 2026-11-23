@@ -35,7 +35,7 @@ def _run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _portable(path: Path, *, member: str = "app/example.txt") -> None:
+def _portable(path: Path, *, member: str, inventory_commit: str | None) -> None:
     prefix = "frame-compare-portable-win-x64/"
     with ZipFile(path, "w", ZIP_DEFLATED, allowZip64=False) as archive:
         for directory in (prefix, f"{prefix}app/"):
@@ -48,6 +48,11 @@ def _portable(path: Path, *, member: str = "app/example.txt") -> None:
         info.external_attr = (stat.S_IFREG | 0o644) << 16
         info.compress_type = ZIP_DEFLATED
         archive.writestr(info, b"safe inventory input\n")
+        if inventory_commit is not None:
+            archive.writestr(
+                f"{prefix}bundle_inventory.json",
+                json.dumps({"bundle": {"commit_sha": inventory_commit}}),
+            )
 
 
 def _stage(
@@ -58,9 +63,10 @@ def _stage(
     artifact_id: str = "123",
     digest: str | None = None,
     member: str = "app/example.txt",
+    inventory_commit: str | None = "a" * 40,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     archive = tmp_path / "portable.zip"
-    _portable(archive, member=member)
+    _portable(archive, member=member, inventory_commit=inventory_commit)
     output = tmp_path / "portable-tree"
     scan_input = tmp_path / "scan-input.json"
     result = _run(
@@ -93,9 +99,12 @@ def test_artifact_security_stages_only_producer_bound_portable(
     assert evidence["portable_artifact_id"] == "123"
     assert evidence["commit"] == "a" * 40
     assert evidence["portable_sha256"] == _digest(tmp_path / "portable.zip")
-    assert evidence["files"] == 1
+    assert evidence["files"] == 2
     assert evidence["directories"] == 1
-    assert evidence["expanded_bytes"] == len(b"safe inventory input\n")
+    assert evidence["expanded_bytes"] == (
+        (output / "app/example.txt").stat().st_size
+        + (output / "bundle_inventory.json").stat().st_size
+    )
 
 
 @pytest.mark.parametrize(
@@ -133,7 +142,24 @@ def test_artifact_security_refuses_unsafe_zip_even_with_the_expected_digest(
     assert result.returncode != 0
     assert "Unsafe portable member path" in result.stderr
     assert not receipt.exists()
-    assert not any(staged.iterdir())
+    assert not staged.exists()
+
+
+@pytest.mark.parametrize(
+    ("inventory_commit", "error"),
+    [
+        ("b" * 40, "commit does not match the expected SHA"),
+        (None, "missing its canonical bundle_inventory.json"),
+    ],
+)
+def test_artifact_security_requires_the_embedded_commit_to_match(
+    repo_root: Path, tmp_path: Path, inventory_commit: str | None, error: str
+) -> None:
+    result, staged, receipt = _stage(repo_root, tmp_path, inventory_commit=inventory_commit)
+    assert result.returncode != 0
+    assert error in result.stderr
+    assert not staged.exists()
+    assert not receipt.exists()
 
 
 def _write_json(path: Path, value: object) -> None:

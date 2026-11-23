@@ -19,9 +19,7 @@ jobs:
     outputs:
       status: ${{ steps.plan.outputs.status }}
       sha: ${{ steps.plan.outputs.sha }}
-      version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
-      channel: ${{ steps.plan.outputs.channel }}
     steps:
       - name: Fetch live branch heads and tags
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -92,6 +90,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_PUBLISH_TOKEN: ${{ secrets.RELEASE_PUBLISH_TOKEN }}
           RELEASE_SHA: ${{ needs.plan.outputs.sha }}
           RELEASE_TAG: ${{ needs.plan.outputs.tag }}
           BUNDLE_DIGEST: ${{ needs.windows.outputs.bundle_digest }}

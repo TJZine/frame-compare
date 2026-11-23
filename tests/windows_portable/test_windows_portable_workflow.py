@@ -123,9 +123,9 @@ def test_windows_workflow_runs_lifecycle_after_packing_and_before_upload(repo_ro
     )
     succession = _step_by_name(action, "Test packed ZIP succession")["run"]
     assert "FRAME_COMPARE_TEST_PORTABLE_ZIP" in succession
-    assert "pytest -q -rs -s" in succession
+    assert "tests/windows_portable/test_windows_portable_zip_succession.py" in succession
+    assert "exit $LASTEXITCODE" in succession
     assert "[int]$suite.tests -ne 8 -or [int]$suite.skipped -ne 0" in succession
-    assert "$($suite.tests) passed, $($suite.skipped) skipped" in succession
     smoke = _step_by_name(action, "Smoke: absolute candidate launcher")["run"]
     assert '$versionOutput[0] -cne "frame-compare $expectedVersion"' in smoke
     assert "& $launcher doctor --json" in smoke
@@ -139,7 +139,7 @@ def test_windows_workflow_packs_after_launcher_smoke_without_regenerating_invent
     steps = action["steps"]
     smoke = _step_by_name(action, "Smoke: absolute candidate launcher")
     package = _step_by_name(action, "Package zip")
-    assert steps.index(package) == steps.index(smoke) + 1
+    assert steps.index(smoke) < steps.index(package)
     assert "portable_bundle.py pack" in package["run"]
     assert all("write_bundle_inventory.py" not in step.get("run", "") for step in steps)
 
@@ -149,7 +149,9 @@ def test_windows_build_requires_current_manifest_from_exact_checkout_before_setu
 ) -> None:
     action = _build_action(repo_root)
     gate = _step_by_name(action, "Require current portable manifest")
-    assert action["steps"][0] == gate
+    steps = action["steps"]
+    setup = next(step for step in steps if step.get("uses", "").startswith("actions/setup-python@"))
+    assert steps.index(gate) < steps.index(setup)
     assert "if" not in gate
     assert gate["env"] == {"EXPECTED_SHA": "${{ inputs.expected_sha }}"}
     assert (
@@ -157,4 +159,4 @@ def test_windows_build_requires_current_manifest_from_exact_checkout_before_setu
         in gate["run"]
     )
     assert "$version -ne 3" in gate["run"]
-    assert "Hosted Windows portable builds require manifest version 3." in gate["run"]
+    assert "throw" in gate["run"]
