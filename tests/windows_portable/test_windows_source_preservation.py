@@ -1519,6 +1519,7 @@ if ($null -ne $child) {
   Stop-Process -InputObject $child -Force
   throw 'Version probe descendant survived the timeout'
 }
+exit 0
 """,
                 tmp_path,
                 PROBE_CHILD_PID=str(child_pid),
