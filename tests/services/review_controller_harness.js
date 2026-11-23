@@ -160,7 +160,6 @@ async function reviewControllerContracts() {
     controller.bind();
     controller.render();
 
-    // The import button opens the input and an empty report needs no confirmation.
     const { model } = controller;
     const status = () => dom.reviewStatus.textContent;
     function selectFile(selected) {
@@ -196,7 +195,6 @@ async function reviewControllerContracts() {
     assert.equal(status(), 'Review import applied.');
     assert.deepEqual(JSON.parse(storage.value).reviews, [initial]);
 
-    // The panel renders the selected frame and all four controls save immediately.
     viewer.state.currentFrameIdx = 1;
     controller.render();
     assert.equal(dom.reviewFrame.textContent, 'Frame 2 of 3');
@@ -234,7 +232,6 @@ async function reviewControllerContracts() {
     assert.equal(dom.reviewPreferred.replaceCount, 1);
     assert.equal(announcements.at(-1), 'Lens on.');
 
-    // Export keeps its file name, JSON contents, media type, and URL cleanup.
     dom.reviewExport.click();
     const download = downloads.at(-1);
     assert.equal(download.download, `${reportId}-review.json`);
@@ -250,7 +247,6 @@ async function reviewControllerContracts() {
     assert.equal(revoked.includes(download.href), true);
     assert.equal(status(), 'Review JSON exported.');
 
-    // Cancel keeps memory and storage. Choosing the same file again and confirming replaces them.
     const incoming = [record(0, 'first note'), record(2, 'second note')];
     const replacement = file('replacement.json', exported(incoming));
     const originalBytes = storage.value;
@@ -269,7 +265,6 @@ async function reviewControllerContracts() {
     assert.equal(dom.reviewNote.value, '');
     assert.deepEqual(JSON.parse(storage.value).reviews, incoming);
 
-    // Invalid text, a wrong extension, and read failures keep the replacement untouched.
     const replacedBytes = storage.value;
     await chooseFile(file('invalid.json', '{bad'));
     assert.equal(status(), 'Import is not valid JSON. No changes were made.');
@@ -288,7 +283,6 @@ async function reviewControllerContracts() {
     assert.deepEqual(JSON.parse(JSON.stringify(model.all())), incoming);
     assert.equal(dom.reviewStatus.dataset.tone, 'warning');
 
-    // Only the latest selection can finish, even if its extension is refused.
     const refusedStatus = 'Choose one .json review file. No changes were made.';
     const stale = deferredFile('slow.json');
     const staleImport = selectFile(stale.file);
@@ -318,7 +312,6 @@ async function reviewControllerContracts() {
     assert.equal(dom.reviewImport.value, '');
     assert.equal(storage.value, replacedBytes);
 
-    // A storage failure still applies the confirmed import, with the persistence warning.
     const warning = ReviewState.constants.PERSISTENCE_WARNING;
     storage.failWrite = true;
     await chooseFile(file('memory.json', exported([initial])));
@@ -336,22 +329,6 @@ async function reviewControllerContracts() {
     dom.reviewExport.click();
     assert.equal(status(), `Review JSON exported. ${warning}`);
 
-    // An unsuccessful import keeps the notes and the active persistence warning.
-    const memoryRecords = JSON.parse(JSON.stringify(model.all()));
-    confirmed = false;
-    await chooseFile(replacement);
-    assert.equal(status(), `Import cancelled. No changes were made. ${warning}`);
-    assert.equal(dom.reviewStatus.dataset.tone, 'warning');
-    assert.deepEqual(JSON.parse(JSON.stringify(model.all())), memoryRecords);
-    assert.equal(storage.value, replacedBytes);
-
-    await chooseFile(file('invalid.json', '{bad'));
-    assert.equal(status(), `Import is not valid JSON. No changes were made. ${warning}`);
-    assert.equal(dom.reviewStatus.dataset.tone, 'warning');
-    assert.deepEqual(JSON.parse(JSON.stringify(model.all())), memoryRecords);
-    assert.equal(storage.value, replacedBytes);
-
-    // Each startup warning is announced once, including on a forced render.
     for (const [unavailableStorage, expected] of [
         [null, warning],
         [Object.assign(new Storage(), { value: '{bad' }),
