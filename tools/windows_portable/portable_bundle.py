@@ -110,14 +110,15 @@ def write_bundle(root: Path, destination: Path) -> None:
             f"Bundle files differ from inventory: unlisted={sorted(actual - listed)}, "
             f"missing={sorted(listed - actual)}"
         )
-    if "directories" in inventory:
-        directories = set(inventory["directories"])
-        if directories != index.directories:
-            raise ValueError(
-                "Bundle directories differ from inventory: "
-                f"unlisted={sorted(index.directories - directories)}, "
-                f"missing={sorted(directories - index.directories)}"
-            )
+    if "directories" not in inventory:
+        raise ValueError("Bundle inventory is missing archive.directories")
+    directories = set(inventory["directories"])
+    if directories != index.directories:
+        raise ValueError(
+            "Bundle directories differ from inventory: "
+            f"unlisted={sorted(index.directories - directories)}, "
+            f"missing={sorted(directories - index.directories)}"
+        )
 
     temporary_path: Path | None = None
     try:
@@ -148,9 +149,11 @@ def write_bundle(root: Path, destination: Path) -> None:
                     record = records[name]
                     if info.file_size != record["bytes"] or digest != record["sha256"]:
                         raise ValueError(f"Bundle file contents differ from inventory: {name}")
-        if destination.exists() or destination.is_symlink():
-            raise FileExistsError(destination)
-        temporary_path.replace(destination)
+        if sys.platform == "win32":
+            temporary_path.rename(destination)
+        else:
+            # POSIX rename replaces an existing destination. A hard link fails if it exists.
+            destination.hardlink_to(temporary_path)
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)

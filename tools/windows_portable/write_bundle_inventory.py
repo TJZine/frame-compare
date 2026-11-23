@@ -411,7 +411,7 @@ def _write_source_urls(
     artifacts: list[JsonObject],
     corresponding_sources: list[JsonObject],
     distributions: list[JsonObject],
-    local_tooling: bool = False,
+    local_tooling: bool,
 ) -> None:
     source_archive = f"https://github.com/TJZine/frame-compare/archive/{commit_sha}.tar.gz"
     lines = [f"Frame Compare {app_version} source ({commit_sha}): {source_archive}"]
@@ -419,8 +419,9 @@ def _write_source_urls(
         lines.extend(
             (
                 "",
-                "The SHA identifies the application source. Build and install tooling comes from",
-                "the live worktree. The archive.files entries in bundle_inventory.json hash the",
+                "The SHA identifies the application source. The source_build_install_scripts list",
+                "in bundle_inventory.json records scripts from that commit. This local build uses",
+                "tooling from the live worktrees. The inventory's archive.files entries hash the",
                 "actual shipped files.",
             )
         )
@@ -505,23 +506,11 @@ def main() -> int:
     if not re.fullmatch(r"[a-f0-9]{40}", commit_sha):
         raise ValueError("--commit-sha must be a complete lowercase 40-character commit SHA")
     exact = commit_sha == _run_git(repo_root, "rev-parse", "HEAD")
-    status_args = ("status", "--porcelain", "--untracked-files=all")
-    if args.require_clean_repo and (not exact or _run_git(repo_root, *status_args)):
+    if args.require_clean_repo and (
+        not exact or _run_git(repo_root, "status", "--porcelain", "--untracked-files=all")
+    ):
         raise ValueError("release bundle inventory requires a clean, exact source checkout")
     source_scripts = _source_scripts(repo_root, commit_sha, exact=exact)
-    local_tooling = not exact or (
-        not args.require_clean_repo
-        and bool(
-            _run_git(
-                repo_root,
-                *status_args,
-                "--",
-                "tools/windows_portable",
-                ".github/actions/windows-portable-build",
-                ".github/workflows/windows-portable.yml",
-            )
-        )
-    )
 
     manifest = _require_dict(
         json.loads(manifest_path.read_text(encoding="utf-8")),
@@ -586,7 +575,7 @@ def main() -> int:
         bundle_root=bundle_root,
         app_version=app_version,
         commit_sha=commit_sha,
-        local_tooling=local_tooling,
+        local_tooling=not args.require_clean_repo,
         artifacts=artifacts,
         corresponding_sources=corresponding_sources,
         distributions=distributions,

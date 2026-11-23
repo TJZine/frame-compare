@@ -218,12 +218,15 @@ Required evidence:
 - Native plugins do not depend on unbundled DLLs outside the documented Windows/UCRT
   system surface.
 
-Pack the tested build and record its SHA-256 before extraction:
+Pack the tested build with the same host Python 3.13 lookup as the builder. Use a
+fresh ZIP path on each run and record its SHA-256 before extraction.
 
 ```powershell
 $ExpectedBundleCommit = $ExpectedPrHeadSha
-$Zip = "$Candidate.zip"
-python -B -I -S tools/windows_portable/portable_bundle.py pack --root $Candidate --output $Zip
+$HostPython = (& uv python find --system --no-project --no-python-downloads 3.13).Trim()
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$Zip = "$Candidate-$([guid]::NewGuid()).zip"
+& $HostPython -B -I -S tools/windows_portable/portable_bundle.py pack --root $Candidate --output $Zip
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Get-FileHash -LiteralPath $Zip -Algorithm SHA256
 ```

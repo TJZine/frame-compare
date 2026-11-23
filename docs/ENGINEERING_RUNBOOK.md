@@ -103,11 +103,12 @@ toolchain. `build_portable.ps1` uses one commit for the application source,
 wheel metadata, dependency lock, default portable manifest, vendored
 notices, and source inventory. Use `-ExpectedCommitSha` to select it, or let
 the builder capture `HEAD` once. A custom `-ManifestPath` supplies its own
-manifest and adjacent notices. The installer and shims come from the live
-worktree. Record the selected SHA and worktree differences for a local build
-of an older commit. Version 2 manifests remain available for local builds with
-matching application source, the original embedded Python files and wheel-provided
-Qt FFmpeg. Version 3 omits the optional Python SQLite binaries and Qt's FFmpeg
+manifest and adjacent notices. Local builds use live tooling, including the
+installer and shims. The inventory lists scripts from the selected commit and
+hashes the files actually shipped. Record the selected SHA and worktree
+differences for a local build of an older commit. Version 2 manifests remain
+available for local builds with matching application source, the original
+embedded Python files and wheel-provided Qt FFmpeg. Version 3 omits the optional Python SQLite binaries and Qt's FFmpeg
 plugin and DLLs. It selects Qt's native Windows media backend. Hosted builds
 require version 3. `-ReleaseBuild` also requires
 a clean worktree at the selected commit before reserving output.

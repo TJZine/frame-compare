@@ -529,6 +529,7 @@ def test_invalid_manifest_version_fails_before_runtime_inputs(
         ("changed-contents", r"Bundle file contents differ from inventory: launcher\.ps1"),
         ("wrong-byte-count", r"Bundle file contents differ from inventory: launcher\.ps1"),
         ("extra-directory", r"Bundle directories differ from inventory: unlisted=\['empty'\]"),
+        ("missing-directories", r"Bundle inventory is missing archive\.directories"),
     ],
 )
 def test_portable_pack_rejects_inventory_drift(tmp_path: Path, drift: str, expected: str) -> None:
@@ -537,7 +538,10 @@ def test_portable_pack_rejects_inventory_drift(tmp_path: Path, drift: str, expec
     listed_file = root / "launcher.ps1"
     listed_file.write_bytes(b"launcher")
     inventory = root / "bundle_inventory.json"
-    inventory.write_text(json.dumps({"archive": _archive_inventory(root, inventory)}))
+    archive_inventory = _archive_inventory(root, inventory)
+    if drift == "missing-directories":
+        del archive_inventory["directories"]
+    inventory.write_text(json.dumps({"archive": archive_inventory}))
     if drift == "unlisted":
         (root / "smoke-output.txt").write_text("unexpected")
     elif drift == "missing":
@@ -548,10 +552,51 @@ def test_portable_pack_rejects_inventory_drift(tmp_path: Path, drift: str, expec
         recorded = json.loads(inventory.read_text())
         recorded["archive"]["files"][0]["bytes"] += 1
         inventory.write_text(json.dumps(recorded))
-    else:
+    elif drift == "extra-directory":
         (root / "empty").mkdir()
     destination = tmp_path / "output.zip"
     with pytest.raises(ValueError, match=expected):
         bundle.write_bundle(root, destination)
     assert not destination.exists()
     assert list(tmp_path.iterdir()) == [root]
+
+
+def test_portable_pack_preserves_competing_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "bundle"
+    root.mkdir()
+    launcher = b"launcher"
+    (root / "launcher.ps1").write_bytes(launcher)
+    inventory = root / "bundle_inventory.json"
+    inventory.write_text(json.dumps({"archive": _archive_inventory(root, inventory)}))
+    destination = tmp_path / "output.zip"
+    competing_bytes = b"another writer's output"
+
+    def occupy_destination(temporary: Path) -> None:
+        with checked_zip(temporary) as archive:
+            assert archive.read(bundle.PREFIX + "launcher.ps1") == launcher
+        with destination.open("xb") as competing:
+            competing.write(competing_bytes)
+
+    if sys.platform == "win32":
+        rename = Path.rename
+
+        def compete_at_rename(temporary: Path, target: Path) -> Path:
+            occupy_destination(temporary)
+            return rename(temporary, target)
+
+        monkeypatch.setattr(Path, "rename", compete_at_rename)
+    else:
+        hardlink_to = Path.hardlink_to
+
+        def compete_at_hardlink(target: Path, temporary: Path) -> None:
+            occupy_destination(temporary)
+            hardlink_to(target, temporary)
+
+        monkeypatch.setattr(Path, "hardlink_to", compete_at_hardlink)
+
+    with pytest.raises(FileExistsError):
+        bundle.write_bundle(root, destination)
+    assert destination.read_bytes() == competing_bytes
+    assert set(tmp_path.iterdir()) == {root, destination}
