@@ -29,7 +29,7 @@ from frame_compare.vsview.alignment_review_contract import (
     write_alignment_review_result,
 )
 from frame_compare.vsview.errors import VSViewError
-from tests.alignment_review_test_support import trusted_audio_attempt
+from tests.alignment_review_test_support import provisional_audio_attempt, trusted_audio_attempt
 from tests.services.alignment_request_test_support import (
     VSVIEW_SESSION_ID as _SESSION_ID,
 )
@@ -37,7 +37,6 @@ from tests.services.alignment_request_test_support import alignment_request
 from tests.services.alignment_request_test_support import (
     vsview_session as _session,
 )
-from tests.services.test_alignment_diagnostics import audio_attempt
 
 
 def _clip(path: Path, *, frame_count: int = 200) -> AlignmentClipRequest:
@@ -117,7 +116,7 @@ def test_audio_review_envelopes_distinguish_current_attempt_and_reused_offset() 
     reference = Path("ref")
     fresh = Path("fresh")
     reused = Path("reused")
-    attempt = audio_attempt()
+    attempt = provisional_audio_attempt(frame_offset=0, chunk_count=5)
     fresh_result = AlignmentResult(
         reference.name,
         fresh.name,
@@ -340,7 +339,7 @@ def test_pending_review_without_launch_marks_review_unresolved(
         "_current_tty_status",
         lambda: SimpleNamespace(stdin=False, stdout=True, stderr=False),
     )
-    attempt = audio_attempt()
+    attempt = provisional_audio_attempt(frame_offset=0, chunk_count=5)
     unapplied = AlignmentResult(
         reference_clip="reference.mkv",
         comparison_clip="comparison.mkv",

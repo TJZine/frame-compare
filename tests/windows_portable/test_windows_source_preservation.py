@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from ._helpers import get_user_path, set_user_path
+
 
 def _run(
     pwsh: str, command: str, root: Path, **environment: str
@@ -2014,8 +2016,6 @@ def test_uninstall_refuses_before_any_registration_mutation_with_pending_marker(
 ) -> None:
     import winreg
 
-    from .test_windows_portable_install_uninstall_e2e import _get_user_path, _set_user_path
-
     _, previous, pointer = source_fixture
     bin_dir = pointer.parent.parent / "bin"
     configured_path = (rf"C:\FrameCompare-E2E\preserve-me;{bin_dir}", winreg.REG_EXPAND_SZ)
@@ -2038,9 +2038,9 @@ def test_uninstall_refuses_before_any_registration_mutation_with_pending_marker(
         encoding="utf-8",
     )
     before = _snapshot(pointer.parent.parent)
-    original_path = _get_user_path()
+    original_path = get_user_path()
     try:
-        _set_user_path(configured_path)
+        set_user_path(configured_path)
         result = _run(
             pwsh,
             "& $env:UNINSTALL",
@@ -2050,7 +2050,7 @@ def test_uninstall_refuses_before_any_registration_mutation_with_pending_marker(
         assert result.returncode != 0
         output = result.stdout + result.stderr
         assert "pending source migration" in output and str(marker) in output
-        assert _get_user_path() == configured_path
+        assert get_user_path() == configured_path
         assert (pointer.parent / "source-install.lock").is_file()
         assert {
             name: content
@@ -2058,7 +2058,7 @@ def test_uninstall_refuses_before_any_registration_mutation_with_pending_marker(
             if name != "state/source-install.lock"
         } == before
     finally:
-        _set_user_path(original_path)
+        set_user_path(original_path)
 
 
 @pytest.mark.xdist_group("windows-install-lifecycle")
@@ -2066,8 +2066,6 @@ def test_uninstall_refuses_managed_file_path_that_is_a_directory(
     pwsh: str, tmp_path: Path, repo_root: Path, source_fixture: tuple[Path, Path, Path]
 ) -> None:
     import winreg
-
-    from .test_windows_portable_install_uninstall_e2e import _get_user_path, _set_user_path
 
     _, _, pointer = source_fixture
     install_root = pointer.parent.parent
@@ -2077,9 +2075,9 @@ def test_uninstall_refuses_managed_file_path_that_is_a_directory(
     (managed_directory / "child").write_bytes(b"preserve me")
     before = _snapshot(install_root)
     configured_path = (rf"C:\FrameCompare-E2E\preserve-me;{bin_dir}", winreg.REG_EXPAND_SZ)
-    original_path = _get_user_path()
+    original_path = get_user_path()
     try:
-        _set_user_path(configured_path)
+        set_user_path(configured_path)
         result = _run(
             pwsh,
             "& $env:UNINSTALL",
@@ -2089,7 +2087,7 @@ def test_uninstall_refuses_managed_file_path_that_is_a_directory(
         assert result.returncode != 0
         output = result.stdout + result.stderr
         assert "Expected a regular installed file" in output and str(managed_directory) in output
-        assert _get_user_path() == configured_path
+        assert get_user_path() == configured_path
         assert managed_directory.is_dir()
         assert {
             name: content
@@ -2097,7 +2095,7 @@ def test_uninstall_refuses_managed_file_path_that_is_a_directory(
             if name != "state/source-install.lock"
         } == before
     finally:
-        _set_user_path(original_path)
+        set_user_path(original_path)
 
 
 @pytest.mark.xdist_group("windows-install-lifecycle")
@@ -2106,15 +2104,13 @@ def test_uninstall_removes_read_only_managed_config(
 ) -> None:
     import winreg
 
-    from .test_windows_portable_install_uninstall_e2e import _get_user_path, _set_user_path
-
     _, _, pointer = source_fixture
     bin_dir = pointer.parent.parent / "bin"
     retained_path = r"C:\FrameCompare-E2E\preserve-me"
-    original_path = _get_user_path()
+    original_path = get_user_path()
     try:
         pointer.chmod(stat.S_IREAD)
-        _set_user_path((f"{retained_path};{bin_dir}", winreg.REG_EXPAND_SZ))
+        set_user_path((f"{retained_path};{bin_dir}", winreg.REG_EXPAND_SZ))
         result = _run(
             pwsh,
             "& $env:UNINSTALL",
@@ -2124,8 +2120,8 @@ def test_uninstall_removes_read_only_managed_config(
         assert result.returncode == 0, result.stdout + result.stderr
         assert not pointer.exists()
         assert not bin_dir.exists()
-        assert _get_user_path() == (retained_path, winreg.REG_EXPAND_SZ)
+        assert get_user_path() == (retained_path, winreg.REG_EXPAND_SZ)
     finally:
-        _set_user_path(original_path)
+        set_user_path(original_path)
         if pointer.exists():
             pointer.chmod(stat.S_IWRITE)

@@ -14,10 +14,10 @@ from frame_compare.utils.types import AlignmentRequest
 from frame_compare.vs.loader import VSLoader
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.alignment_synthetic_audio import make_program
-from tests.services.test_alignment_workflow import (
-    _DURATION_SECONDS,
-    _media,
-    _stub_transport,
+from tests.services.alignment_transport_support import (
+    DURATION_SECONDS,
+    stub_pcm_transport,
+    write_media_pair,
 )
 
 
@@ -42,9 +42,9 @@ def test_missing_loader_is_a_video_unavailable_provisional_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    reference, comparison = _media(tmp_path)
-    program = make_program(11, _DURATION_SECONDS)
-    _stub_transport(
+    reference, comparison = write_media_pair(tmp_path)
+    program = make_program(11, DURATION_SECONDS)
+    stub_pcm_transport(
         monkeypatch,
         tmp_path,
         reference_samples=program,

@@ -92,3 +92,44 @@ def setup_install_layout(*, tmp_path: Path, repo_root: Path) -> tuple[Path, Path
     shim_path = shim_dir / "frame-compare.ps1"
     shim_path.write_text(repo_shim.read_text(encoding="utf-8"), encoding="utf-8")
     return install_root, shim_path, state_dir, bundle_dir
+
+
+type _RegistryPath = tuple[str | list[str] | int | bytes | None, int]
+
+
+def get_user_path() -> _RegistryPath | None:
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            value, kind = winreg.QueryValueEx(key, "Path")
+    except FileNotFoundError:
+        return None
+    return value, kind
+
+
+def set_user_path(state: _RegistryPath | None) -> None:
+    import ctypes
+    import winreg
+
+    if get_user_path() == state:
+        return
+    with winreg.CreateKeyEx(
+        winreg.HKEY_CURRENT_USER, "Environment", access=winreg.KEY_SET_VALUE
+    ) as key:
+        if state is None:
+            winreg.DeleteValue(key, "Path")
+        else:
+            value, kind = state
+            winreg.SetValueEx(key, "Path", 0, kind, value)
+    # Restore the environment seen by applications as well as the registry bytes.
+    result = ctypes.c_size_t()
+    ctypes.windll.user32.SendMessageTimeoutW(
+        ctypes.c_void_p(0xFFFF),
+        0x001A,
+        ctypes.c_size_t(),
+        ctypes.c_wchar_p("Environment"),
+        0x0002,
+        1000,
+        ctypes.byref(result),
+    )

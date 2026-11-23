@@ -43,6 +43,9 @@ jobs:
       - name: Run Ruff
         run: uv run --no-sync ruff check .
 
+      - name: Check test helper imports
+        run: uv run --no-sync python scripts/check_test_imports.py
+
       - name: Check formatting
         run: uv run --no-sync ruff format --check .
 

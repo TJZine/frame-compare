@@ -17,8 +17,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
-from ._helpers import snapshot_bytes
-from .test_windows_portable_install_uninstall_e2e import _get_user_path, _set_user_path
+from ._helpers import get_user_path, set_user_path, snapshot_bytes
 
 _ZIP = os.environ.get("FRAME_COMPARE_TEST_PORTABLE_ZIP")
 _BUNDLE_ROOT = "frame-compare-portable-win-x64"
@@ -162,7 +161,7 @@ def _application_tree(bundle: Path) -> dict[str, str | None]:
 def _assert_active(pointer: Path, bundle: Path, expected_path: tuple[str, int]) -> None:
     payload = json.loads(pointer.read_text(encoding="utf-8"))
     assert Path(payload["bundle_path"]) == bundle
-    assert _get_user_path() == expected_path
+    assert get_user_path() == expected_path
     assert not (pointer.parent / "source-migration.pending.json").exists()
 
 
@@ -253,9 +252,9 @@ def test_packed_zip_succession(tmp_path: Path, interpreter: str, case: str) -> N
             for name in _LEGACY_LEAVES:
                 assert not (bundle / name).exists()
                 assert not (bundle / "shim" / name).exists()
-        original_user_path = _get_user_path()
+        original_user_path = get_user_path()
         try:
-            _set_user_path((controlled_user_path, winreg.REG_SZ))
+            set_user_path((controlled_user_path, winreg.REG_SZ))
             _install(first, interpreter=interpreter, env=env, outside=outside)
             _assert_active(pointer, first, expected_user_path)
             fallback_before = fallback.read_bytes()
@@ -345,4 +344,4 @@ def test_packed_zip_succession(tmp_path: Path, interpreter: str, case: str) -> N
                 assert runs[0]["status"] == "completed"
                 assert runs[0]["report_available"] is True
         finally:
-            _set_user_path(original_user_path)
+            set_user_path(original_user_path)

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from ._helpers import get_user_path, set_user_path
 from ._helpers import snapshot_bytes as _snapshot_bytes
 
 windows_install_uninstall_e2e = pytest.mark.skipif(
@@ -25,47 +26,6 @@ def _run_script(*, exe: str, script: Path, env: dict[str, str]) -> subprocess.Co
         capture_output=True,
         text=True,
         timeout=30,
-    )
-
-
-type _RegistryPath = tuple[str | list[str] | int | bytes | None, int]
-
-
-def _get_user_path() -> _RegistryPath | None:
-    import winreg
-
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-            value, kind = winreg.QueryValueEx(key, "Path")
-    except FileNotFoundError:
-        return None
-    return value, kind
-
-
-def _set_user_path(state: _RegistryPath | None) -> None:
-    import ctypes
-    import winreg
-
-    if _get_user_path() == state:
-        return
-    with winreg.CreateKeyEx(
-        winreg.HKEY_CURRENT_USER, "Environment", access=winreg.KEY_SET_VALUE
-    ) as key:
-        if state is None:
-            winreg.DeleteValue(key, "Path")
-        else:
-            value, kind = state
-            winreg.SetValueEx(key, "Path", 0, kind, value)
-    # Restore the environment seen by applications as well as the registry bytes.
-    result = ctypes.c_size_t()
-    ctypes.windll.user32.SendMessageTimeoutW(
-        ctypes.c_void_p(0xFFFF),
-        0x001A,
-        ctypes.c_size_t(),
-        ctypes.c_wchar_p("Environment"),
-        0x0002,
-        1000,
-        ctypes.byref(result),
     )
 
 
@@ -126,7 +86,7 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
     state_dir = install_root / "state"
     expected_bin_path = str(bin_dir)
 
-    original_user_path = _get_user_path()
+    original_user_path = get_user_path()
     env["FC_TEST_LOCAL_ROOT"] = str(local_app_data)
     tokenized_entry = r'"%FC_TEST_LOCAL_ROOT%\PROGRAMS\FRAMECOMPARE\BIN\"'
     unrelated = r' %SystemRoot%\System32 ;;"C:\FrameCompare-E2E\preserve-me" ;'
@@ -159,18 +119,18 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
     }
 
     try:
-        _set_user_path(seed_path)
+        set_user_path(seed_path)
         if path_case in {"absent", "empty"}:
             inactive = _run_script(exe=exe, script=uninstall_script, env=env)
             assert inactive.returncode == 0, (inactive.stdout, inactive.stderr)
-            assert _get_user_path() == seed_path
+            assert get_user_path() == seed_path
 
         installed = _run_script(exe=exe, script=install_script, env=env)
         assert installed.returncode == 0, (
             f"stdout:\n{installed.stdout}\n\nstderr:\n{installed.stderr}"
         )
 
-        assert _get_user_path() == installed_path
+        assert get_user_path() == installed_path
         for filename in managed_bin_files:
             assert (bin_dir / filename).read_bytes() == (shim_dir / filename).read_bytes()
 
@@ -190,7 +150,7 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
         for filename in managed_bin_files:
             assert not (bin_dir / filename).exists()
         assert not (state_dir / "config.json").exists()
-        assert _get_user_path() == removed_path
+        assert get_user_path() == removed_path
         assert _snapshot_bytes(external_generated_root) == external_snapshot
 
         replacement_bundle = tmp_path / "bundle-replacement"
@@ -259,7 +219,7 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
                     replacement_config_bytes,
                 )
                 env["FC_TEST_PREVIOUS_DATA"] = str(previous_generated)
-            _set_user_path(seed_path)
+            set_user_path(seed_path)
             env["FC_TEST_PATH_DRIFT"] = (
                 json.dumps({"Value": drift[0], "Kind": drift[1]}) if drift else ""
             )
@@ -272,7 +232,7 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
                 "Value": installed_path[0],
                 "Kind": installed_path[1],
             }
-            assert _get_user_path() == (drift if drift else seed_path)
+            assert get_user_path() == (drift if drift else seed_path)
             assert not (state_dir / "source-migration.pending.json").exists()
             if migration_snapshot is not None:
                 original_pointer, previous_data, replacement_config_bytes = migration_snapshot
@@ -284,14 +244,14 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
                 replacement_config.write_bytes(replacement_config_bytes)
                 for filename in managed_bin_files:
                     assert (bin_dir / filename).read_bytes() == (shim_dir / filename).read_bytes()
-                _set_user_path(seed_path)
+                set_user_path(seed_path)
                 cleaned = _run_script(exe=exe, script=uninstall_script, env=env)
                 assert cleaned.returncode == 0, (cleaned.stdout, cleaned.stderr)
             else:
                 assert not pointer.exists()
                 for filename in managed_bin_files:
                     assert not (bin_dir / filename).exists()
-        _set_user_path(seed_path)
+        set_user_path(seed_path)
         activation.write_bytes(original_activation)
 
         reinstalled = _run_script(exe=exe, script=replacement_install, env=env)
@@ -307,9 +267,9 @@ def test_windows_portable_uninstall_preserves_user_files_across_reinstall(
                 replacement_bundle / "shim" / filename
             ).read_bytes()
         assert (state_dir / "config.json").is_file()
-        assert _get_user_path() == installed_path
+        assert get_user_path() == installed_path
         config_json = json.loads((state_dir / "config.json").read_text(encoding="utf-8"))
         assert config_json["bundle_path"] == str(replacement_bundle)
         assert _snapshot_bytes(external_generated_root) == external_snapshot
     finally:
-        _set_user_path(original_user_path)
+        set_user_path(original_user_path)

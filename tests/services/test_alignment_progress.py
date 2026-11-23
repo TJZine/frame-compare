@@ -26,7 +26,11 @@ from frame_compare.utils.progress import NullProgressReporter, RichProgressRepor
 from frame_compare.vs.loader import VSLoader
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.alignment_synthetic_audio import make_program
-from tests.services.test_alignment_workflow import _DURATION_SECONDS, _media, _stub_transport
+from tests.services.alignment_transport_support import (
+    DURATION_SECONDS,
+    stub_pcm_transport,
+    write_media_pair,
+)
 
 
 class RecordingProgress(NullProgressReporter):
@@ -74,7 +78,7 @@ def test_staged_progress_excludes_cache_and_counts_streamed_chunks(
     fresh_count: int,
     origin: AlignmentWriteProvenance,
 ) -> None:
-    reference, comparison = _media(tmp_path)
+    reference, comparison = write_media_pair(tmp_path)
     comparison = comparison.rename(tmp_path / "Encode [red].mkv")
     fresh = [comparison]
     if fresh_count == 2:
@@ -83,10 +87,10 @@ def test_staged_progress_excludes_cache_and_counts_streamed_chunks(
         fresh.append(extra)
     cached = tmp_path / "cached.mkv"
     cached.touch()
-    program = make_program(11, _DURATION_SECONDS)
+    program = make_program(11, DURATION_SECONDS)
     if silent:
         program = np.zeros_like(program)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
+    stub_pcm_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
     request = alignment_request(
         reference=reference,
         comparisons=[cached, *fresh],
