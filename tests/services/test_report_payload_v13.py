@@ -22,6 +22,7 @@ from frame_compare.utils.media_facts import (
     RenderedGeometryFacts,
     SourceSignalFacts,
 )
+from tests.public_media_examples import HERON, OWL
 
 
 def _geometry() -> RenderedGeometryFacts:
@@ -100,18 +101,16 @@ def test_report_payload_v14_preserves_comparison_and_source_frame_domains(
     assert payload["rendering"]["overlay_mode"] == "diagnostic"
 
 
-_OWL = "Amber.Reach.S02E05.1080p.Bluray.DD5.1.x264-OwL.mkv"
-_HERON = "Amber.Reach.S02E05.Tide.1080p.AMZN.WEB-DL.DDP.5.1.H.264-HERON.mkv"
 _DUB = "Constructed.LanternMoth-Wagtail.english-dub-only.mkv"
 
 
 @pytest.mark.parametrize(
     ("filenames", "tmdb_title", "expected"),
     [
-        ([_OWL, _HERON], "Bernsteinbucht", "Bernsteinbucht S02E05"),
-        ([_OWL, _HERON], None, "Amber Reach S02E05"),
-        ([_OWL, _DUB], None, "OwL vs english-dub-only"),
-        ([_OWL, _DUB, _HERON], None, "OwL vs english-dub-only +1 more"),
+        ([OWL, HERON], "Bernsteinbucht", "Bernsteinbucht S02E05"),
+        ([OWL, HERON], None, "Amber Reach S02E05"),
+        ([OWL, _DUB], None, "OwL vs english-dub-only"),
+        ([OWL, _DUB, HERON], None, "OwL vs english-dub-only +1 more"),
     ],
     ids=["tmdb-with-episode", "common-content", "mixed-content", "mixed-content-with-more"],
 )
@@ -135,7 +134,7 @@ def test_report_payload_title(
                     "english-dub-only"
                     if filename == _DUB
                     else "HERON"
-                    if filename == _HERON
+                    if filename == HERON
                     else "OwL"
                 ),
             ),
