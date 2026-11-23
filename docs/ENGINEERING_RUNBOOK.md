@@ -511,11 +511,13 @@ Canonical verification path:
    physical Windows GPU proof. See
    [acceptance records](#release-acceptance-records).
 5. Pack the built tree with `tools/windows_portable/portable_bundle.py pack`.
-   Run the packed ZIP succession test with `FRAME_COMPARE_TEST_PORTABLE_ZIP`
-   set to the exact ZIP. Require all eight cases and zero skips, and record
-   Windows PowerShell 5.1 and PowerShell 7 versions. Keep the actual installed
-   shim, user-data movement and reactivation, external data, legacy leaf cleanup,
-   and uninstall evidence. Upload the original raw ZIP after the post-pack proof.
+   Run `tests/windows_portable/test_windows_portable_zip_succession.py` with
+   `FRAME_COMPARE_TEST_PORTABLE_ZIP` set to the exact ZIP. Its archive checks
+   include the WebEngine and Qt FFmpeg exclusions. Require all eight cases and
+   zero skips, and record Windows PowerShell 5.1 and PowerShell 7 versions.
+   Keep the actual installed shim, user-data movement and reactivation, external
+   data, legacy leaf cleanup, and uninstall evidence. Upload the original raw ZIP
+   after the post-pack proof.
 6. Run the downstream [final-artifact scan](#final-artifact-security-evidence).
    Confirm the immutable producer artifact ID, source commit and SHA-256.
 7. Complete [pre-merge physical Windows validation](media-runtime-windows-validation.md#1-exact-source-and-repository-gates)
@@ -523,7 +525,7 @@ Canonical verification path:
    [published RC acceptance procedure](media-runtime-windows-validation.md#published-rc-acceptance).
    Both routes require real runtime, HDR, and native-panel proof.
 
-The [Windows portable workflow](../.github/workflows/windows-portable.yml) runs
+The Windows portable workflow (`.github/workflows/windows-portable.yml`) runs
 the Windows build and Linux scan on all pull requests. Release workflows call
 the same jobs with their planned SHA and `release_build: true`.
 
@@ -564,10 +566,8 @@ unreachable proof leaves the corresponding gate open.
   has no waiver.
 - Verify the shipped Qt/PySide6 subset, including the native Windows media
   backend and the exclusions of WebEngine and Qt's FFmpeg plugin and DLLs.
-  Retain matching third-party notices, license texts and a distributor-controlled
-  corresponding-source offer for the exact shipped binaries. Resolve native
-  provenance and license coverage for both Windows and Docker with the
-  release maintainer and legal reviewer before public distribution.
+  Record the [native binary publication prerequisite](#native-binary-publication-prerequisite)
+  for the binaries in the release.
 - Retain the [final-artifact SBOM and advisory evidence](#final-artifact-security-evidence)
   for each distributable runtime.
 
@@ -633,13 +633,21 @@ artifact from changes in the advisory feed.
 
 ### Pre-release and stable publication
 
+#### Native binary publication prerequisite
+
+Before any update to `pre-release` that can publish changed native binaries,
+verify native provenance and license coverage with the release maintainer and
+legal reviewer. Retain matching third-party notices, license texts and a
+distributor-controlled corresponding-source offer for the exact binaries to be
+distributed. Apply this prerequisite to both Windows and Docker before public
+distribution, and record the evidence for the candidate.
+
 #### Release candidate
 
 1. Before merging the active version branch (`vX.Y.Z`) into `pre-release`, complete
-   the third-party notice, license text, and distributor-controlled corresponding-source
-   requirements in the [release acceptance records](#release-acceptance-records).
-   The maintainer then merges the branch with a merge commit using an identity
-   that triggers push workflows.
+   the [native binary publication prerequisite](#native-binary-publication-prerequisite)
+   when applicable. The maintainer then uses a merge commit and an identity that
+   triggers push workflows.
    Merges made with `GITHUB_TOKEN` do not trigger the RC workflow.
 2. On the push, the RC workflow reads the live `pre-release` head. If its stable
    version is already published, the run waits for the next version. Otherwise the
@@ -689,10 +697,11 @@ can still repair the Release Please label.
 #### Start the next release cycle
 
 1. Resolve the published stable tag via `refs/tags/vX.Y.Z` and start the next
-   version branch at its exact commit. Merge that branch into `pre-release`
-   with a merge commit before the next preparation cycle. This brings the
-   stable commit into `pre-release` history while preserving the promotion's
-   ancestry.
+   version branch at its exact commit. Before merging the branch into
+   `pre-release`, apply the [native binary publication prerequisite](#native-binary-publication-prerequisite)
+   when applicable. Use a merge commit to bring the stable commit into
+   `pre-release` history before the next preparation cycle while preserving the
+   promotion's ancestry.
 2. Release Please observes pushes to `pre-release` and prepares version and
    changelog PRs there. Its guard waits for a published stable release of the
    manifest version and for the stable tag's commit to be in the branch history.
@@ -700,9 +709,11 @@ can still repair the Release Please label.
    the run. The Release Please action leaves publication to the release workflows.
 3. Review the preparation PR for agreement across the manifest, `pyproject.toml`,
    package `__version__`, and editable lock entry. Check for one matching
-   `## [X.Y.Z]` changelog section. Merge using an identity that triggers push
-   workflows so the new version can produce an RC. Verify the stable label after
-   promotion.
+   `## [X.Y.Z]` changelog section. Before merging, apply the
+   [native binary publication prerequisite](#native-binary-publication-prerequisite)
+   to any changed native binaries that the RC would publish, including changes
+   already on `pre-release`. Merge using an identity that triggers push workflows.
+   Verify the stable label after promotion.
 
 #### First 0.7.0 cutover checklist
 
@@ -733,16 +744,19 @@ can still repair the Release Please label.
      docs jobs outside the universal required checks.
    - Confirm the release workflows can create `v*` tags and that
      `RELEASE_PLEASE_TOKEN` is configured.
-4. Before merging, complete the third-party notice, license text, and
-   distributor-controlled corresponding-source requirements in the
-   [release acceptance records](#release-acceptance-records).
-   Check for existing `v0.7.0-rc.*` tags. Merge `v0.7.0` into `pre-release`
-   with a maintainer-created merge commit and expect `v0.7.0-rc.1` when there are
-   no prior tags. Check the two assets and verify the downloaded ZIP with
-   `sha256sum --check`. Follow [Published RC acceptance](media-runtime-windows-validation.md#published-rc-acceptance).
-   Run the issued ZIP's `install.cmd` over an active v0.6.1 test installation
-   and check comparisons, run history, and config after carry-over. Follow the RC acceptance freeze and repeat testing
-   if the accepted candidate changes.
+   - Create a fine-grained personal access token scoped to this repository only
+     with **Contents** and **Workflows** both set to **Read and write**. Save it
+     as the Actions repository secret `RELEASE_PUBLISH_TOKEN` before the first RC.
+     Record its expiration date when creating it. Before that date, create a
+     replacement with the same scope and permissions, update the secret, and
+     revoke the old token. The RC workflow uses this secret for GitHub release
+     creation and publication. Stable publication uses the workflow token.
+4. Complete the [native binary publication prerequisite](#native-binary-publication-prerequisite).
+   Check for existing `v0.7.0-rc.*` tags, then follow the [release candidate
+   procedure](#release-candidate) to merge `v0.7.0` into `pre-release`, verify the
+   issued ZIP and accept the RC. Expect `v0.7.0-rc.1` when there are no prior tags.
+   As part of acceptance, run the issued ZIP's `install.cmd` over an active v0.6.1
+   test installation and check comparisons, run history, and config after carry-over.
 5. Promote `pre-release` into `main` with a merge commit. Check that `v0.7.0`
    is published with two assets and the 0.7.0 notes. The label job accepts
    the absence of a Release Please PR for this manually prepared version.
@@ -755,9 +769,8 @@ can still repair the Release Please label.
    the `BRANCH_MAINTENANCE_CLIENT_ID` variable, the
    `BRANCH_MAINTENANCE_PRIVATE_KEY` secret, and the branch-maintenance App
    bypass. Keep historical release and archive tags.
-7. Start the next cycle at the commit of `refs/tags/v0.7.0` and merge the new
-   integration branch into `pre-release`. Check the first Release Please PR
-   and its eventual stable label as described above.
+7. [Start the next release cycle](#start-the-next-release-cycle) from
+   `refs/tags/v0.7.0`. Check the first Release Please PR and its eventual stable label.
 
 Local workflow checks:
 

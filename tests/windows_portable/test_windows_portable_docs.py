@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ._helpers import read_text_or_fail as _read_text_or_fail
@@ -10,9 +11,9 @@ def test_windows_portable_docs_check_the_matching_zip_checksum(repo_root: Path) 
     assert '$tag = "<tag>"' in docs
     assert '$zip = ".\\frame-compare-portable-win-x64-$tag.zip"' in docs
     assert '$checksumFile = "$zip.sha256"' in docs
+    assert "Get-Content -LiteralPath $checksumFile" in docs
     assert "Get-FileHash -LiteralPath $zip -Algorithm SHA256" in docs
-    assert "$actual -ne $expected" in docs
-    assert "SHA-256 mismatch. Do not install this download." in docs
+    assert re.search(r"\$actual -ne \$expected\) \{\s+throw\b", docs)
 
 
 def test_windows_portable_docs_do_not_promote_removed_path_fields(repo_root: Path) -> None:
@@ -57,6 +58,4 @@ def test_windows_docs_distinguish_source_prerequisite_and_fresh_reinstall(repo_r
     assert "Windows PowerShell 5.1 remains supported" in docs
     assert "fresh, empty folder" in docs
     assert "Overlaying a full ZIP onto an existing bundle root is unsupported" in docs
-    assert "AppData fallback configuration and external user data are preserved" in docs
     assert "install.cmd -UserData Leave" in docs
-    assert "Data you moved stays in the newer bundle." in docs

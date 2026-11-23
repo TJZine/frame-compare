@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
+from tests.workflow_helpers import dockerfile_stages, read_text_or_fail
 from tests.workflow_helpers import load_workflow as _load_workflow
-from tests.workflow_helpers import read_text_or_fail
 from tests.workflow_helpers import step_by_name as _step_by_name
 
 
@@ -173,20 +174,54 @@ def test_ci_and_docker_workflows_keep_required_triggers_and_permissions(
     assert "paths-ignore" not in docker["on"]["pull_request"]
 
 
-def test_default_compose_services_run_headless(repo_root: Path) -> None:
+def test_compose_services_run_headless(repo_root: Path) -> None:
     compose = yaml.safe_load(read_text_or_fail(repo_root / "docker-compose.yml"))
     services = compose["services"]
+    assert set(services) == {
+        "frame-compare",
+        "frame-compare-test",
+        "frame-compare-run",
+        "frame-compare-wizard",
+    }
 
-    for name in ("frame-compare", "frame-compare-test", "frame-compare-run"):
-        service = services[name]
-        assert "profiles" not in service, name
+    dockerfile = read_text_or_fail(repo_root / "Dockerfile")
+    stages = dockerfile_stages(dockerfile)
+    default_target = stages[-1][1]
+    assert default_target == "default-runtime"
+    software_rendering = {}
+    for base, stage, body in stages:
+        value = software_rendering.get(base)
+        for instruction in re.findall(r"^ENV[ \t]+(.+)$", body.replace("\\\n", " "), re.MULTILINE):
+            for assignment in shlex.split(instruction):
+                key, _, setting = assignment.partition("=")
+                if key == "LIBGL_ALWAYS_SOFTWARE":
+                    value = setting
+        software_rendering[stage] = value
+
+    for name, service in services.items():
+        if name == "frame-compare-wizard":
+            assert service["profiles"] == ["setup"]
+        else:
+            assert "profiles" not in service, name
         assert "gpus" not in service, name
+        assert service.get("runtime") != "nvidia", name
+        assert not service.get("devices"), name
+        assert (
+            not service.get("deploy", {})
+            .get("resources", {})
+            .get("reservations", {})
+            .get("devices")
+        ), name
 
+        build = service["build"]
+        assert build["context"] == "." and build["dockerfile"] == "Dockerfile", name
+        inherited = software_rendering[build.get("target", default_target)]
+        assert inherited == "1", name
         environment = service.get("environment", {})
         if isinstance(environment, list):
             entries = (entry.partition("=") for entry in environment)
             environment = {key: value for key, _, value in entries}
-        assert str(environment.get("LIBGL_ALWAYS_SOFTWARE", "1")) == "1", name
+        assert str(environment.get("LIBGL_ALWAYS_SOFTWARE", inherited)) == "1", name
         assert not any(key.startswith("NVIDIA_") for key in environment), name
 
 

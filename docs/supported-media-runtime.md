@@ -275,9 +275,9 @@ VSView uses Qt Multimedia from the PySide6 Addons distribution to play PCM audio
 The Windows portable build verifies that Qt loads the bundled native Windows
 backend and can query audio outputs. The current bundle excludes Qt's FFmpeg
 plugin and DLLs, plus the Qt WebEngine and Chromium runtime files. The standalone
-BtbN FFmpeg executable is unchanged. The build checks the assembled tree, and the
-[post-pack ZIP succession test](https://github.com/TJZine/frame-compare/blob/main/tests/windows_portable/test_windows_portable_zip_succession.py)
-checks the exact ZIP before upload.
+BtbN FFmpeg executable is unchanged. These exclusions are checked in the assembled
+tree and in the exact ZIP before upload. See the
+[packed ZIP proof in the engineering runbook](ENGINEERING_RUNBOOK.md#windows-portable-release-path-verification).
 
 The deployed Qt subset requires matching third-party notices, SBOM and provenance
 records, a distributor-controlled corresponding-source offer, and legal review.

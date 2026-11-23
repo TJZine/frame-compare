@@ -165,8 +165,30 @@ you need back to the older bundle yourself.
 
 Moving source folders can cause path-keyed caches to recompute. If your
 configuration contains absolute paths into the previous bundle, update those
-paths after the move. If the installer reports a pending migration, use the
-paths it reports to locate and recover your files before retrying.
+paths after the move. The installer keeps previous bundles. Remove them manually
+only after you have accepted the new installation. A missing or stale active pointer
+is treated as a first install.
+
+<a id="recover-a-pending-migration"></a>
+
+### Pending migration recovery
+
+If a move or activation fails or is interrupted by Ctrl+C, the installer reverses
+completed moves and restores empty placeholders, the previous pointer, and its shims.
+If recovery fails, the installer stops and reports the pointer and every folder
+location for manual repair. If `state\source-migration.pending.json` remains after
+an interruption, the next run refuses installation and reports those locations.
+Empty candidate placeholders count as unmoved.
+
+Publishing the candidate pointer and moving the folders can precede configuration
+and PATH setup. Leave that data in the candidate bundle
+and retain the marker while checking the candidate's configuration, installed shim,
+and user PATH. In a new terminal, confirm `frame-compare` launches the candidate;
+only after those checks succeed may you remove the marker before retrying.
+When the pointer still names the previous bundle, follow the listed folder-restoration
+steps. Conflicting or unreadable pointer state requires a manual check before moving
+anything or deleting the marker. If activation succeeds but marker cleanup fails,
+the installer reports a cleanup error without reversing data or the pointer.
 
 ## Uninstall
 
@@ -222,44 +244,23 @@ Run a direct source `.ps1` installer with
 launch, and updates.
 
 Each rerun builds and verifies a fresh folder before switching the active-bundle
-pointer. The installed shim always selects that active bundle. By default,
-non-empty `config/`, `comparison_videos/`, and `generated/` folders move from the
-previous active bundle with same-volume renames. Use `.\install.cmd -UserData Leave`
-to activate without moving them. Leave keeps data in the previous bundle and may
-select an older AppData fallback config if the new bundle has no `config/config.toml`.
+pointer. The installed shim selects the active bundle. Source installs follow
+the same [user-data movement rules](#update-behavior) as ZIP installs. With
+`-UserData Leave`, the new bundle may use an older AppData fallback config if it
+has no `config/config.toml`.
 
 Before Python provisioning and building, the source installer acquires an exclusive
-activation lock and refuses a pending source-migration marker. It re-reads the active
-pointer as one byte snapshot after the build. A source install or current bundle
-installer already activating causes a refusal with the lock path and retry guidance.
+activation lock and refuses to proceed if a pending migration marker exists.
+Follow the [pending migration recovery steps](#recover-a-pending-migration)
+before retrying. The installer re-reads the active pointer as one byte snapshot
+after the build. An installer that encounters an active lock reports the lock
+path and retry guidance.
 The lock file may remain after success or a crash; only its open process handle
 prevents another activation.
 
 Junctions, symlinks, and mount points in build or previous-bundle ancestry are refused;
 choose physical paths so containment can be checked. Stored active pointers must use
 fully qualified absolute paths. Drive-relative and root-relative values are malformed.
-
-<a id="recover-a-pending-migration"></a>
-
-Move is all-or-nothing for failures and Ctrl+C: a move or activation failure restores
-completed moves, empty placeholders, the previous pointer, and its shims. If recovery
-fails, the installer stops and reports the pointer and every folder location for manual
-repair. After an interrupted migration, the next run refuses installation and reports
-the pointer and folder locations; empty candidate placeholders count as unmoved.
-A candidate pointer and moved folders do not prove activation finished: configuration
-and PATH setup follow pointer publication. Leave that data in the candidate bundle
-and retain the marker while checking the candidate's configuration, installed shim,
-and user PATH. In a new terminal, confirm `frame-compare` launches the candidate;
-only after those checks succeed may you remove the marker before retrying.
-When the pointer still names the previous bundle, follow the listed folder-restoration
-steps. Conflicting or unreadable pointer state requires a manual check before moving
-anything or deleting the marker. If activation succeeds but marker cleanup fails,
-the installer reports a cleanup error without reversing data or the pointer.
-Cross-volume moves refuse activation; use Leave and relocate data manually.
-Moving media makes path-keyed caches recompute once. Absolute paths in config are
-not rewritten. Previous bundles are never deleted; remove them manually only once
-you have accepted the new installation. A missing or stale active pointer is treated
-as a first install.
 
 The direct `build_portable.ps1` command refuses occupied and unsafe output paths.
 Remove only disposable build output explicitly before reusing a build path.
