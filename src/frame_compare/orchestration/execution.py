@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, cast, overload
@@ -80,6 +81,35 @@ class StepCompletion:
     duration_text: str | None = None
     success_status: ProgressPhaseStatus | None = None
 
+    def write(
+        self,
+        reporter: ProgressReporter,
+        name: str,
+        status: ProgressPhaseStatus,
+        retain: bool | None,
+    ) -> None:
+        if self.retain is not None:
+            retain = self.retain
+        if uses_rich_progress(reporter):
+            if status == ProgressPhaseStatus.COMPLETED and self.success_status is not None:
+                status = self.success_status
+            if name == "align":
+                retain = True
+        if self.alignment_summary is not None:
+            reporter.complete_phase(
+                status,
+                retain=retain,
+                summary=self.summary,
+                duration_text=self.duration_text,
+                alignment_summary=self.alignment_summary,
+            )
+        elif retain is None:
+            reporter.complete_phase(status, summary=self.summary, duration_text=self.duration_text)
+        else:
+            reporter.complete_phase(
+                status, retain=retain, summary=self.summary, duration_text=self.duration_text
+            )
+
 
 class RunSteps:
     """Progress, timing and warn-only handling for the run's fixed steps."""
@@ -94,7 +124,6 @@ class RunSteps:
         self._reporter = reporter
         self._state = state
         self._monotonic_timer = monotonic_timer
-        # The step that ended interrupted, for the run's interruption notice.
         self.interrupted_step: str | None = None
 
     def _interrupted(self, name: str) -> ProgressPhaseStatus:
@@ -102,8 +131,6 @@ class RunSteps:
         return ProgressPhaseStatus.INTERRUPTED
 
     def _raised_status(self, name: str, error: BaseException) -> ProgressPhaseStatus:
-        # An error that coincides with Ctrl+C ends the run as an interruption
-        # (exit 130), except an alignment cleanup failure, so the step reads the same.
         if is_run_interruption(error) or (
             isinstance(error, Exception)
             and is_cancelling()
@@ -174,92 +201,57 @@ class RunSteps:
         )
         start = self._monotonic_timer()
         completion = StepCompletion()
-        status = ProgressPhaseStatus.FAILED
-        raising = False
         try:
-            # Starting progress can request cancellation before the body runs.
-            raise_if_cancelling()
-            pending = call()
-            output = (
-                await cast(Awaitable[T], pending)
-                if inspect.isawaitable(pending)
-                else cast(T, pending)
-            )
-            await cancellation_checkpoint()
-        except BaseException as exc:
-            self._state.phase_timings[name] = max(0.0, self._monotonic_timer() - start)
-            cancelling = is_cancelling()
-            if warn_only and isinstance(exc, Exception) and not cancelling:
-                self._state.warnings.append(RunWarning(warning_source, "warning", f"{name}: {exc}"))
-            if (
-                not warn_only
-                or isinstance(exc, fatal)
-                or cancelling
-                or not isinstance(exc, Exception)
-            ):
-                status = self._raised_status(name, exc)
-                raising = True
-                raise
-            status = ProgressPhaseStatus.WARNED
-            if isinstance(reporter, LogProgressReporter):
-                log.warning(
-                    "phase_warned",
-                    phase=name,
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                    exc_info=exc,
-                )
-            return None
-        else:
-            elapsed = max(0.0, self._monotonic_timer() - start)
-            self._state.phase_timings[name] = elapsed
-            success_completion = describe(output, elapsed) if describe is not None else completion
-            # The timer and description can run after the last await.
-            if is_cancelling():
-                status = self._interrupted(name)
-                raising = True
-                raise_if_cancelling()
-            completion = success_completion
-            status = ProgressPhaseStatus.COMPLETED
-            reporter.advance(1)
-            return output
-        finally:
             try:
-                if completion.retain is not None:
-                    retain = completion.retain
-                if uses_rich_progress(reporter):
-                    if (
-                        status == ProgressPhaseStatus.COMPLETED
-                        and completion.success_status is not None
-                    ):
-                        status = completion.success_status
-                    if name == "align":
-                        retain = True
-                if completion.alignment_summary is not None:
-                    reporter.complete_phase(
-                        status,
-                        retain=retain,
-                        summary=completion.summary,
-                        duration_text=completion.duration_text,
-                        alignment_summary=completion.alignment_summary,
+                raise_if_cancelling()
+                pending = call()
+                output = (
+                    await cast(Awaitable[T], pending)
+                    if inspect.isawaitable(pending)
+                    else cast(T, pending)
+                )
+                await cancellation_checkpoint()
+            except BaseException as exc:
+                self._state.phase_timings[name] = max(0.0, self._monotonic_timer() - start)
+                cancelling = is_cancelling()
+                if warn_only and isinstance(exc, Exception) and not cancelling:
+                    self._state.warnings.append(
+                        RunWarning(warning_source, "warning", f"{name}: {exc}")
                     )
-                elif retain is None:
-                    reporter.complete_phase(
-                        status, summary=completion.summary, duration_text=completion.duration_text
-                    )
-                else:
-                    reporter.complete_phase(
-                        status,
-                        retain=retain,
-                        summary=completion.summary,
-                        duration_text=completion.duration_text,
-                    )
-            except Exception:
-                # The coordinator classifies the run from the step's own error.
-                # A failed progress write must preserve it, including the exit
-                # code for an AudioAlignmentCleanupError.
-                if not raising:
+                if (
+                    not warn_only
+                    or isinstance(exc, fatal)
+                    or cancelling
+                    or not isinstance(exc, Exception)
+                ):
                     raise
+                if isinstance(reporter, LogProgressReporter):
+                    log.warning(
+                        "phase_warned",
+                        phase=name,
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                        exc_info=exc,
+                    )
+                status = ProgressPhaseStatus.WARNED
+                output = None
+            else:
+                elapsed = max(0.0, self._monotonic_timer() - start)
+                self._state.phase_timings[name] = elapsed
+                success_completion = (
+                    describe(output, elapsed) if describe is not None else completion
+                )
+                raise_if_cancelling()
+                reporter.advance(1)
+                completion = success_completion
+                status = ProgressPhaseStatus.COMPLETED
+        except BaseException as error:
+            status = self._raised_status(name, error)
+            with suppress(Exception):
+                completion.write(reporter, name, status, retain)
+            raise
+        completion.write(reporter, name, status, retain)
+        return output
 
 
 def _skip_analysis(request: RunRequest, config: ConfigSchema) -> bool:
