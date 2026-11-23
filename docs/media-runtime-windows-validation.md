@@ -42,9 +42,9 @@ The expected candidate profile is:
 | VSView / CLI parser | 0.14.0 / Cyclopts 5.4.2 |
 | vspackrgb | 2.0.0 (Rust extension) |
 | PySide6 family | 6.12.0; WebEngine/PDF distribution metadata 6.12.0.140 |
-| Qt Multimedia FFmpeg | System233 9.1 LGPL-3.0-or-later shared build, five DLLs loaded from the bundled PySide6 directory |
-| FFmpeg | `n8.1.3-27-g8dca1586f4`, BtbN win64 LGPL 8.1 build `autobuild-2026-10-31-12-59` |
-| Full runtime fingerprint | `21c1821c05cc947e4af19807826e5ff1aaeb4187f5c0cf43640f306b4d2a3f51` |
+| Qt Multimedia | Qt's native Windows backend, with the Qt FFmpeg plugin and DLLs excluded |
+| Standalone FFmpeg | `n8.1.3-27-g8dca1586f4`, BtbN win64 LGPL 8.1 build `autobuild-2026-10-31-12-59` |
+| Full runtime fingerprint | `59b7ca351512938b4da41e5d7b3a06c7c5b37de84c899604c7b8d8b9bba4cd4d` |
 | L-SMASH index token | `lsw1310-47d07506e489` |
 
 ## Published RC acceptance
@@ -207,9 +207,12 @@ Required evidence:
 - FFMS2 is not present in the Windows bundle or plugin manifests.
 - PySide6 Addons and Qt Multimedia remain present, while Qt WebEngine/Chromium runtime
   files are absent. Record the build runtime proof and verify the absence in the ZIP.
-- The Qt Multimedia runtime proof decodes the generated 64×64 frame with the
-  FFmpeg backend. Record the proof that all five loaded FFmpeg DLLs came from
-  the bundled PySide6 directory.
+- Record the `WINDOWS_BUNDLE_PROOF qt_multimedia_backend=windows` line, including
+  the audio-device status and output count. The smoke verifies that Qt loaded the
+  bundled Windows media plugin and constructs a stereo 48 kHz Int16 audio sink
+  when a default output exists. A hosted runner can report `audio_device=none`.
+  Verify the Qt FFmpeg plugin and all five Qt FFmpeg DLLs are absent from the ZIP.
+  The standalone BtbN FFmpeg executable is unchanged.
 - L-SMASH-Works and vs-placebo license/source records include their statically bundled
   dependency notices.
 - Native plugins do not depend on unbundled DLLs outside the documented Windows/UCRT
@@ -458,6 +461,8 @@ passes, record these remaining interactive checks on a physical Windows 10/11 x6
 system:
 
 - open a real Frame Compare-generated session through the installed portable launcher;
+- verify audible VSView playback through the Windows output device with the
+  [alignment-review audio fixture](#alignment-review-audio-fixture);
 - verify the panel is discoverable from VSView's Tool Panel and remains inert in an
   ordinary VSView session;
 - verify one `Reference` and ordered `Comparison N` tabs, current-frame context, bounded
@@ -478,6 +483,34 @@ system:
 Record exact bundle SHA, OS/GPU/driver/runtime facts, commands, logs, sidecar fixtures,
 screenshots, and pass/fail results. Hosted or macOS offscreen proof must not be reported
 as physical Windows desktop acceptance.
+
+### Alignment-review audio fixture
+
+The generated session registers video outputs. To check audio playback with the
+alignment panel open, use disposable inputs and give the reference a known audible
+track. Copy the generated script to a separate directory, keeping its filename,
+and append this after the existing `run_session(...)` call:
+
+```python
+import vapoursynth as vs
+from vsview import set_output
+
+audio = vs.core.bs.AudioSource(SESSION_DATA["reference"]["path"], cachemode=0)
+set_output(audio, "Reference audio")
+```
+
+From the extracted candidate root, open the copied script in a fresh PowerShell
+session. Substitute its absolute path:
+
+```powershell
+$env:QT_MEDIA_BACKEND = 'windows'
+$env:FRAME_COMPARE_RUNTIME_KIND = 'windows-portable'
+.\python\python.exe -m frame_compare.vsview.launcher --no-settings '<copied session script>'
+```
+
+Open the alignment panel, select **Reference audio**, and play the reference. Record
+whether the sound is audible. Close the fixture without saving an alignment result.
+Use the original generated session for the production panel and result checks.
 
 ## 11. Completion record
 

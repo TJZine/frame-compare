@@ -14,7 +14,7 @@ A version shown here is supported only as part of the complete profile described
 | VSView | 0.13.0 | **0.14.0** | 2026-10-26 | Stable Python release | Retains named outputs and the base dependency graph. The Frame Compare alignment panel uses the version-gated workspace bridge. |
 | PySide6 | Previous Qt binding | **6.12.0** | 2026-10-08 | Locked Python resolution | VSView's documented Qt backend. The portable bundle pins the matching Qt runtime and requires native startup proof before release. |
 | Qt PDF (Windows) | Qt 6.11.2 source bundle | **6.140.0**, source commit `d505fc23640d2bd6345e6483eb73daf4e19f5829` | SDK build 2026-09-28 | Paired installer source commit | PySide6-Pdf 6.12.0.140 uses the separately versioned Qt PDF product. PDF remains in the portable profile; WebEngine runtime files remain excluded. |
-| Qt Multimedia FFmpeg (Windows) | 7.1.5 | **9.1** | 2026-11-20 | System233 Windows x64 shared build, LGPL-3.0-or-later | The bundle installs five DLLs beside Qt Multimedia 6.12.0. Standalone BtbN FFmpeg and the L-SMASH decoder retain their own builds. |
+| Qt Multimedia (Windows) | FFmpeg backend | **Native Windows backend** in Qt 6.12.0 | Paired with PySide6 6.12.0 | PySide6 Addons Windows wheel | VSView plays PCM audio through `QAudioSink`. The bundle excludes Qt's FFmpeg plugin and DLLs. |
 | VSJetEngine | 1.8.1 | **2.0.0** | 2026-10-26 | Stable Python release | Required by VSView 0.14.0. |
 | VSView support graph | Cyclopts 5.3.0; vsjetengine 1.8.1; BestSource 22 | **Cyclopts 5.4.2; jetpytools 3.2.0; vsjetengine 2.0.0; BestSource 23 (tag `R23`, commit `bca32dac44794d93f3e580f9573c58c4a0e7671f`); vspackrgb 2.0.0** | BestSource 2026-10-28 | Locked Python resolution | BestSource 23 requires VapourSynth R81 or newer. Its published Intel and Apple Silicon wheels require macOS 15 or newer. |
 | L-SMASH-Works | 1296.0.0.0 | **1310.0.0.0**, commit `7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67` | 2026-08-23 | Formal native release | Latest stable native release. It preserves the API 4 video source surface and adds audio source filters plus audio-gap corrections. |
@@ -82,7 +82,8 @@ and Frame Compare-owned indexes before reuse.
   remains UI-only; generated Frame Compare sessions continue to load media through
   L-SMASH-Works.
 - Standalone BtbN FFmpeg 8.1-branch Windows x64 LGPL-only artifact.
-- Five pinned LGPL FFmpeg 9.1 DLLs for the Qt Multimedia backend.
+- Qt Multimedia with Qt's native Windows backend. The portable launcher selects it
+  with `QT_MEDIA_BACKEND=windows`.
 - FFMS2 intentionally excluded.
 - Plugins load from the deterministic canonical VapourSynth package path; the
   standalone FFmpeg directory is not used for recursive DLL discovery.
@@ -261,7 +262,6 @@ FFmpeg components.
 | VSView | EUPL-1.2 plus the bundled MIT/Apache-2.0/ISC/OFL-1.1 components declared by its distribution metadata |
 | PySide6 family | LGPL-3.0-only or GPL-2.0-only or GPL-3.0-only, as advertised by the distribution metadata |
 | Windows BtbN FFmpeg | LGPL-only |
-| Windows Qt Multimedia FFmpeg | LGPL-3.0-or-later |
 | Docker Debian FFmpeg | GPL-2.0-or-later |
 
 The Windows manifest vendors exact notices for the selected binaries and records the
@@ -271,21 +271,18 @@ inventory records installed distributions, native artifacts, source URLs, licens
 paths, and hashes. The Docker image also retains Debian FFmpeg's package copyright
 file and records its GPL-2.0-or-later profile in runtime provenance.
 
-VSView requires Qt Multimedia from the PySide6 Addons distribution.
-The Windows portable bundle excludes the pinned wheel's Qt WebEngine and Chromium
-runtime files. The build checks the assembled tree, and the
+VSView uses Qt Multimedia from the PySide6 Addons distribution to play PCM audio.
+The Windows portable build verifies that Qt loads the bundled native Windows
+backend and can query audio outputs. The current bundle excludes Qt's FFmpeg
+plugin and DLLs, plus the Qt WebEngine and Chromium runtime files. The standalone
+BtbN FFmpeg executable is unchanged. The build checks the assembled tree, and the
 [post-pack ZIP succession test](https://github.com/TJZine/frame-compare/blob/main/tests/windows_portable/test_windows_portable_zip_succession.py)
-checks the exact ZIP before upload. The deployed Qt subset also requires matching
-third-party notices and SBOM/provenance, complete Qt Multimedia FFmpeg lineage, a
-distributor-controlled corresponding-source offer, and legal adjudication. See the
-[final-artifact security evidence](ENGINEERING_RUNBOOK.md#final-artifact-security-evidence)
-release gate for native advisory coverage and the retained evidence.
+checks the exact ZIP before upload.
 
-The Qt Multimedia FFmpeg manifest pins the n9.1 source archive, the provider's build
-recipe and patches, and the vcpkg 2026.06.01 ports used by that build. The bundle
-inventory records the provider archive and the deployed DLL hashes. Windows smoke
-tests decode a generated frame with Qt's FFmpeg backend and verify the loaded DLL
-paths.
+The deployed Qt subset requires matching third-party notices, SBOM and provenance
+records, a distributor-controlled corresponding-source offer, and legal review.
+The [final-artifact security evidence](ENGINEERING_RUNBOOK.md#final-artifact-security-evidence)
+gate specifies native advisory coverage and the retained evidence.
 
 This classification follows [FFmpeg's GPL configuration rule](https://ffmpeg.org/doxygen/7.1/md_LICENSE.html)
 and the exact [Debian Trixie package copyright record](https://sources.debian.org/copyright/license/ffmpeg/7%3A7.1.5-0%2Bdeb13u1/).

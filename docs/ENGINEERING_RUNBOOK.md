@@ -107,8 +107,9 @@ manifest and adjacent notices. The installer and shims come from the live
 worktree. Record the selected SHA and worktree differences for a local build
 of an older commit. Version 2 manifests remain available for local builds with
 matching application source, the original embedded Python files and wheel-provided
-Qt FFmpeg. Version 3 omits the optional Python SQLite binaries and requires one
-Qt FFmpeg overlay. Hosted builds require version 3. `-ReleaseBuild` also requires
+Qt FFmpeg. Version 3 omits the optional Python SQLite binaries and Qt's FFmpeg
+plugin and DLLs. It selects Qt's native Windows media backend. Hosted builds
+require version 3. `-ReleaseBuild` also requires
 a clean worktree at the selected commit before reserving output.
 
 Locked dependency audit (PowerShell):
@@ -492,6 +493,11 @@ Canonical verification path:
    the panel offscreen, round-trip the generated
    metadata/result sidecar, and reject a malformed result. BestSource is VSView/UI-only
    and does not replace Frame Compare's generated-session source loader.
+   The Qt Multimedia proof must report `qt_multimedia_backend=windows` after
+   confirming that Qt loaded the bundled Windows plugin and queried audio outputs.
+   A hosted runner without a default output reports `audio_device=none`.
+   The extracted bundle and packed ZIP checks require the Qt FFmpeg plugin and
+   DLLs to be absent. The standalone BtbN FFmpeg executable is unchanged.
    The repository-owned `tools/windows_portable/runtime_smoke.py` supplies this
    bundled Python proof. The builder copies it to temporary `runtime-smoke.py`,
    runs every required phase with the bundled interpreter and environment, and
@@ -555,9 +561,9 @@ unreachable proof leaves the corresponding gate open.
   proof. A waiver expires at the earlier of its stated date or any candidate
   change. CI capability preflights otherwise fail closed. An unexplained skip
   has no waiver.
-- Verify the shipped Qt/PySide6 subset, including WebEngine exclusion and the
-  source and build configuration of Qt Multimedia's FFmpeg libraries. Retain
-  matching third-party notices, license texts and a distributor-controlled
+- Verify the shipped Qt/PySide6 subset, including the native Windows media
+  backend and the exclusions of WebEngine and Qt's FFmpeg plugin and DLLs.
+  Retain matching third-party notices, license texts and a distributor-controlled
   corresponding-source offer for the exact shipped binaries. Resolve native
   provenance and license coverage for both Windows and Docker with the
   release maintainer and legal reviewer before public distribution.
@@ -602,7 +608,7 @@ counts and policy result. Reconcile coverage against the bundle
 inventory and native runtime pins for Windows, and against the native provenance
 records for Docker.
 Manually account for packages or files a scanner cannot identify, including
-embedded Python, Qt Multimedia FFmpeg, standalone FFmpeg, VapourSynth and native
+embedded Python, Qt Multimedia, standalone FFmpeg, VapourSynth and native
 decoder/plugin libraries. Record the exact version or commit, license, source and
 advisory coverage for each missing native component using upstream advisories.
 An empty inventory, scanner error, invalid or stale database, or unresolved

@@ -11,13 +11,13 @@ import types
 from contextlib import redirect_stderr
 from pathlib import Path
 
-QT_FFMPEG_DLLS = (
+QT_FFMPEG_DLLS = {
     "avcodec-63.dll",
     "avformat-63.dll",
     "avutil-61.dll",
     "swresample-7.dll",
     "swscale-10.dll",
-)
+}
 
 
 def assert_true(condition: object, message: str) -> None:
@@ -735,95 +735,60 @@ def prove_generated_vsview_session(media_path: Path) -> None:
     )
 
 
-def prove_qt_ffmpeg_loaded_from(pyside_root: Path) -> None:
+def assert_qt_ffmpeg_excluded(bundle_root: Path) -> None:
+    forbidden_names = QT_FFMPEG_DLLS | {"ffmpegmediaplugin.dll"}
+    forbidden = [
+        path.relative_to(bundle_root)
+        for path in bundle_root.rglob("*")
+        if path.name.casefold() in forbidden_names and path.is_file()
+    ]
+    assert_true(not forbidden, f"Qt Multimedia FFmpeg files remain: {forbidden}")
+
+
+def assert_windows_media_plugin_loaded(bundle_root: Path) -> None:
     import ctypes
     from ctypes import wintypes
 
+    plugin = bundle_root / "app/site-packages/PySide6/plugins/multimedia/windowsmediaplugin.dll"
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    current_process = kernel32.GetCurrentProcess
-    current_process.argtypes = []
-    current_process.restype = wintypes.HANDLE
-    list_modules = kernel32.K32EnumProcessModules
-    list_modules.argtypes = [
-        wintypes.HANDLE,
-        ctypes.POINTER(wintypes.HMODULE),
-        wintypes.DWORD,
-        ctypes.POINTER(wintypes.DWORD),
-    ]
-    list_modules.restype = wintypes.BOOL
-    module_path = kernel32.GetModuleFileNameW
-    module_path.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
-    module_path.restype = wintypes.DWORD
+    get_module = kernel32.GetModuleHandleW
+    get_module.argtypes = [wintypes.LPCWSTR]
+    get_module.restype = wintypes.HMODULE
+    get_module_path = kernel32.GetModuleFileNameW
+    get_module_path.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+    get_module_path.restype = wintypes.DWORD
 
-    modules = (wintypes.HMODULE * 2048)()
-    needed = wintypes.DWORD()
-    if not list_modules(current_process(), modules, ctypes.sizeof(modules), ctypes.byref(needed)):
-        raise ctypes.WinError(ctypes.get_last_error())
-    assert_true(needed.value <= ctypes.sizeof(modules), "module inventory exceeded its bound")
-
-    observed: dict[str, set[Path]] = {name: set() for name in QT_FFMPEG_DLLS}
+    # Audio APIs can still work without a multimedia backend. Check what Qt
+    # actually loaded without loading the plugin ourselves.
+    handle = get_module(plugin.name)
+    assert_true(handle, f"Qt did not load the Windows media plugin: {plugin.name}")
     buffer = ctypes.create_unicode_buffer(32768)
-    for handle in modules[: needed.value // ctypes.sizeof(wintypes.HMODULE)]:
-        length = module_path(handle, buffer, len(buffer))
-        assert_true(0 < length < len(buffer), "could not resolve a loaded Windows module path")
-        path = Path(buffer.value)
-        if path.name.casefold() in observed:
-            observed[path.name.casefold()].add(path.resolve())
-    for name, paths in observed.items():
-        expected = (pyside_root / name).resolve()
-        assert_true(
-            paths == {expected}, f"Qt FFmpeg DLL {name}: expected {expected}, loaded {paths}"
-        )
-
-
-def prove_qt_ffmpeg_runtime(media_path: Path) -> None:
-    from PySide6.QtCore import QEventLoop, QTimer, QUrl
-    from PySide6.QtMultimedia import QMediaPlayer, QVideoFrame, QVideoSink
-
-    from frame_compare.vs.runtime_contract import WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE
-
-    player = QMediaPlayer()
-    sink = QVideoSink()
-    loop = QEventLoop()
-    timer = QTimer()
-    timer.setSingleShot(True)
-    timer.timeout.connect(loop.quit)
-    dimensions: tuple[int, int] | None = None
-    failure: str | None = None
-
-    def receive_frame(frame: QVideoFrame) -> None:
-        nonlocal dimensions
-        if frame.isValid():
-            dimensions = (frame.width(), frame.height())
-            loop.quit()
-
-    def receive_error(error: QMediaPlayer.Error, message: str) -> None:
-        nonlocal failure
-        failure = f"{error}: {message}"
-        loop.quit()
-
-    sink.videoFrameChanged.connect(receive_frame)
-    player.errorOccurred.connect(receive_error)
-    player.setVideoSink(sink)
-    try:
-        player.setSource(QUrl.fromLocalFile(str(media_path.resolve(strict=True))))
-        player.play()
-        if dimensions is None and failure is None:
-            timer.start(15000)
-            loop.exec()
-        assert_true(failure is None, f"Qt Multimedia FFmpeg failed: {failure}")
-        assert_true(
-            dimensions == (64, 64), f"Qt Multimedia did not decode the 64x64 frame: {dimensions}"
-        )
-        bundle_root = Path(sys.executable).resolve().parent.parent
-        prove_qt_ffmpeg_loaded_from(bundle_root / "app" / "site-packages" / "PySide6")
-    finally:
-        timer.stop()
-        player.stop()
-    proof(
-        "qt_ffmpeg_runtime=ok backend=ffmpeg decoded_frame=64x64 dlls=5 "
-        f"lineage={WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE}"
+    length = get_module_path(handle, buffer, len(buffer))
+    assert_true(0 < length < len(buffer), "could not resolve the loaded Windows media plugin")
+    assert_true(
+        Path(buffer.value).resolve() == plugin.resolve(),
+        f"Qt loaded the Windows media plugin from {buffer.value}, expected {plugin}",
     )
+
+
+def prove_qt_windows_media_backend(bundle_root: Path) -> None:
+    assert_true(os.environ.get("QT_MEDIA_BACKEND") == "windows", "Qt media backend mismatch")
+    assert_qt_ffmpeg_excluded(bundle_root)
+    from PySide6 import QtMultimedia
+
+    devices = QtMultimedia.QMediaDevices()
+    outputs = devices.audioOutputs()
+    assert_windows_media_plugin_loaded(bundle_root)
+    default_device = devices.defaultAudioOutput()
+    audio_device = "none"
+    if not default_device.isNull():
+        audio_format = QtMultimedia.QAudioFormat()
+        audio_format.setSampleRate(48000)
+        audio_format.setChannelCount(2)
+        audio_format.setSampleFormat(QtMultimedia.QAudioFormat.SampleFormat.Int16)
+        QtMultimedia.QAudioSink(default_device, audio_format, devices)
+        audio_device = "default"
+    proof(f"qt_multimedia_backend=windows audio_device={audio_device} audio_outputs={len(outputs)}")
 
 
 def prove_vsview_runtime(media_path: Path) -> None:
@@ -835,8 +800,6 @@ def prove_vsview_runtime(media_path: Path) -> None:
     bundle_root = Path(sys.executable).resolve().parent.parent
     manifest_version = read_bundle_manifest(bundle_root)["manifest_version"]
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    if manifest_version == 3:
-        os.environ["QT_MEDIA_BACKEND"] = "ffmpeg"
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
@@ -844,6 +807,8 @@ def prove_vsview_runtime(media_path: Path) -> None:
     QTimer.singleShot(0, app.quit)
     assert_true(app.exec() == 0, "controlled Qt event loop failed")
     proof("pyside6_event_loop=ok platform=offscreen")
+    if manifest_version == 3:
+        prove_qt_windows_media_backend(bundle_root)
 
     import vspackrgb.rust  # noqa: F401, I001
     import vsview
@@ -854,11 +819,9 @@ def prove_vsview_runtime(media_path: Path) -> None:
     proof("vsview_deep_imports=ok modules=vsview.app.main,vsview.cli,vspackrgb.rust")
     importlib.import_module("PySide6.QtPdf")
     proof("qt_pdf_runtime=ok deployment=retained")
-    if manifest_version == 3:
-        prove_qt_ffmpeg_runtime(media_path)
-    else:
+    if manifest_version == 2:
         pyside_root = bundle_root / "app" / "site-packages" / "PySide6"
-        dlls = [pyside_root / name for name in QT_FFMPEG_DLLS]
+        dlls = [pyside_root / name for name in sorted(QT_FFMPEG_DLLS)]
         assert_true(all(path.is_file() for path in dlls), f"Qt FFmpeg DLL set incomplete: {dlls}")
         proof(
             "qt_ffmpeg_runtime=ok lineage=9.0.1 "

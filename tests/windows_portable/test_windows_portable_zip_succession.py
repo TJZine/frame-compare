@@ -209,10 +209,23 @@ def test_packed_zip_succession(tmp_path: Path, interpreter: str, case: str) -> N
                 "v8_context_snapshot.bin",
                 "v8_context_snapshot.debug.bin",
             }
+            qt_ffmpeg_names = {
+                "avcodec-63.dll",
+                "avformat-63.dll",
+                "avutil-61.dll",
+                "swresample-7.dll",
+                "swscale-10.dll",
+                "ffmpegmediaplugin.dll",
+            }
             webengine_files = []
+            qt_ffmpeg_files = []
             for member in archive.infolist():
                 name = member.filename.casefold()
-                if member.is_dir() or not name.startswith(pyside_prefix):
+                if member.is_dir():
+                    continue
+                if name.rsplit("/", 1)[-1] in qt_ffmpeg_names:
+                    qt_ffmpeg_files.append(member.filename)
+                if not name.startswith(pyside_prefix):
                     continue
                 relative = PurePosixPath(name.removeprefix(pyside_prefix))
                 if "webengine" in relative.as_posix() or (
@@ -220,6 +233,7 @@ def test_packed_zip_succession(tmp_path: Path, interpreter: str, case: str) -> N
                 ):
                     webengine_files.append(member.filename)
             assert not webengine_files, f"Qt WebEngine deployment files in ZIP: {webengine_files}"
+            assert not qt_ffmpeg_files, f"Qt Multimedia FFmpeg files in ZIP: {qt_ffmpeg_files}"
             for bundle in (first, second):
                 archive.extractall(root)
                 (root / _BUNDLE_ROOT).rename(bundle)

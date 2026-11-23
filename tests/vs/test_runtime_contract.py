@@ -30,7 +30,6 @@ from frame_compare.vs.runtime_contract import (
     WINDOWS_FFMPEG_RELEASE,
     WINDOWS_PYSIDE6_RELEASE,
     WINDOWS_QT_DEPLOYMENT_PROFILE,
-    WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE,
     index_cache_token,
     media_runtime_fingerprint,
     media_runtime_identity,
@@ -204,7 +203,7 @@ def test_windows_full_runtime_tracks_qt_deployment_profile_only() -> None:
         "binding": "PySide6",
         "binding_release": WINDOWS_PYSIDE6_RELEASE,
         "required_addon": "QtMultimedia",
-        "multimedia_ffmpeg_release": WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE,
+        "multimedia_backend": "windows",
         "webengine": "excluded",
     }
     assert "qt_deployment" not in cast(

@@ -26,10 +26,10 @@ notes used by the release workflows.
   identify the candidate. Release Please prepares version and changelog changes.
   Version integration and stable promotion use merge commits.
 - Use manifest v3 for the shipped Windows runtime. Bundle official CPython 3.15.2
-  with the unused SQLite extension and DLL omitted, plus five pinned LGPL FFmpeg
-  9.1 DLLs for Qt Multimedia. Standalone BtbN FFmpeg, PySide6 6.12.0, and VSView
-  remain included. Local builds with version 2 manifests retain their original
-  runtime layout.
+  with the unused SQLite extension and DLL omitted. Qt Multimedia uses Qt's native
+  Windows backend, and the bundle excludes Qt's FFmpeg plugin and DLLs. The
+  standalone BtbN FFmpeg executable remains unchanged. Local builds with historical
+  version 2 manifests retain their original runtime layout.
 - Default the BT.2390 knee to 1.0, so HDR screenshots keep more separation in
   bright areas and look slightly different from earlier versions.
 - Reject unsupported or changing video dimensions before native indexing. The

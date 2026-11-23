@@ -112,9 +112,8 @@ WINDOWS_FFMPEG_EXECUTABLE_TOKEN: Final = (
 )
 WINDOWS_FFMPEG_SOURCE_COMMIT: Final = "8dca1586f468bfcbb78ae3ed618af1361d9f140a"
 WINDOWS_FFMPEG_BUILD_SOURCE_COMMIT: Final = "5031c6f1082414e53688d39e521849905071070d"
-WINDOWS_QT_DEPLOYMENT_PROFILE: Final = "pyside6-addons-no-webengine-v1"
+WINDOWS_QT_DEPLOYMENT_PROFILE: Final = "pyside6-addons-no-webengine-no-ffmpeg-v1"
 WINDOWS_PYSIDE6_RELEASE: Final = "6.12.0"
-WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE: Final = "9.1"
 DEBIAN_FFMPEG_PACKAGE_VERSION: Final = "7:7.1.5-0+deb13u1"
 
 _FINGERPRINT_RE: Final = re.compile(r"[0-9a-f]{64}")
@@ -289,7 +288,7 @@ def _windows_qt_deployment_identity() -> dict[str, JSONValue]:
         "binding": "PySide6",
         "binding_release": WINDOWS_PYSIDE6_RELEASE,
         "required_addon": "QtMultimedia",
-        "multimedia_ffmpeg_release": WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE,
+        "multimedia_backend": "windows",
         "webengine": "excluded",
     }
 
@@ -486,7 +485,6 @@ __all__ = [
     "WINDOWS_FFMPEG_SOURCE_COMMIT",
     "WINDOWS_PYSIDE6_RELEASE",
     "WINDOWS_QT_DEPLOYMENT_PROFILE",
-    "WINDOWS_QT_MULTIMEDIA_FFMPEG_RELEASE",
     "index_cache_token",
     "media_runtime_fingerprint",
     "media_runtime_identity",

@@ -86,7 +86,6 @@ function Assert-BuildManifest([object]$Manifest) {
   $artifacts = @(Get-RequiredProperty $Manifest "artifacts" "manifest")
   if ($artifacts.Count -eq 0) { throw "Manifest artifacts must not be empty." }
   $ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-  $qtOverlays = 0
   foreach ($artifact in $artifacts) {
     foreach ($field in @("id", "url", "sha256")) {
       $null = Get-RequiredStringProperty $artifact $field "artifact"
@@ -109,13 +108,7 @@ function Assert-BuildManifest([object]$Manifest) {
     $null = Get-RequiredStringProperty $license "url" "artifact.license"
     $install = Get-RequiredProperty $artifact "install" "artifact"
     $type = Get-RequiredStringProperty $install "type" "artifact.install"
-    if ($type -cnotin @("extract", "python_wheel", "qt_multimedia_ffmpeg")) { throw "Unknown install.type: $type" }
-    if ($type -ceq "qt_multimedia_ffmpeg") {
-      $qtOverlays++
-      if (@($install.PSObject.Properties).Count -ne 1 -or !$uri.AbsolutePath.EndsWith(".zip")) {
-        throw "Qt Multimedia FFmpeg installation requires a ZIP and no additional install fields."
-      }
-    }
+    if ($type -cnotin @("extract", "python_wheel")) { throw "Unknown install.type: $type" }
     $destination = Get-OptionalStringProperty $install "destination"
     if ($type -eq "extract" -or $destination -ne "") {
       if ([string]::IsNullOrWhiteSpace($destination) -or
@@ -132,12 +125,6 @@ function Assert-BuildManifest([object]$Manifest) {
         }
       }
     }
-  }
-  if ($manifestVersion -eq 2 -and $qtOverlays -ne 0) {
-    throw "Portable manifest v2 forbids a Qt Multimedia FFmpeg overlay."
-  }
-  if ($manifestVersion -eq 3 -and $qtOverlays -ne 1) {
-    throw "Portable manifest v3 requires exactly one Qt Multimedia FFmpeg ZIP overlay."
   }
 }
 
@@ -304,6 +291,9 @@ function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
   $env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT = [string]$runtimeFingerprintProperty.Value
   $env:FRAME_COMPARE_RUNTIME_KIND = "windows-portable"
+  if ($bundleInfo.manifest_version -eq 3) {
+    $env:QT_MEDIA_BACKEND = "windows"
+  }
   $env:FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED = "0"
   $env:FRAME_COMPARE_FFMPEG_EXECUTABLE = "$BundleRoot\ffmpeg\bin\ffmpeg.exe"
   $env:FRAME_COMPARE_FFPROBE_EXECUTABLE = "$BundleRoot\ffmpeg\bin\ffprobe.exe"
@@ -477,6 +467,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
   $originalVsPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
   $originalMediaRuntimeFingerprint = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"
   $originalRuntimeKind = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_KIND"
+  $originalQtMediaBackend = Get-ProcessEnvironmentValue -Name "QT_MEDIA_BACKEND"
   $originalRuntimeFfms2Required = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"
   $originalFfmpegExecutable = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE"
   $originalFfprobeExecutable = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE"
@@ -537,6 +528,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT" -Value $originalMediaRuntimeFingerprint
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_KIND" -Value $originalRuntimeKind
+    Restore-ProcessEnvironmentValue -Name "QT_MEDIA_BACKEND" -Value $originalQtMediaBackend
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED" -Value $originalRuntimeFfms2Required
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE" -Value $originalFfmpegExecutable
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE" -Value $originalFfprobeExecutable

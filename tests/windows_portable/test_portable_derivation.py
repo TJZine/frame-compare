@@ -20,13 +20,14 @@ from tools.windows_portable import portable_runtime as runtime
 from tools.windows_portable.portable_archive import checked_zip
 from tools.windows_portable.write_bundle_inventory import _archive_inventory
 
-_QT_FFMPEG_DLLS = (
+_QT_FFMPEG_FILES = {
     "avcodec-63.dll",
     "avformat-63.dll",
     "avutil-61.dll",
     "swresample-7.dll",
     "swscale-10.dll",
-)
+    "plugins/multimedia/ffmpegmediaplugin.dll",
+}
 
 
 def _zip(path: Path, files: dict[str, bytes]) -> Path:
@@ -258,9 +259,10 @@ def test_portable_assembly_is_inert_and_safely_packaged(
         "pyside6-addons",
         "1",
         {
-            **{f"PySide6/{name}": b"original wheel DLL" for name in _QT_FFMPEG_DLLS},
+            **{f"PySide6/{name}": b"excluded Qt FFmpeg file" for name in _QT_FFMPEG_FILES},
             "PySide6/QtMultimedia.pyd": b"retained binding",
-            "PySide6/plugins/multimedia/ffmpegmediaplugin.dll": b"retained Qt plugin",
+            "PySide6/Qt6Multimedia.dll": b"retained Qt library",
+            "PySide6/plugins/multimedia/windowsmediaplugin.dll": b"retained Windows plugin",
         },
     )
     marker = tmp_path / "executed"
@@ -302,27 +304,6 @@ def test_portable_assembly_is_inert_and_safely_packaged(
                 "install": {"type": "extract", "destination": destination},
             }
         )
-    qt_ffmpeg = _seed(
-        _zip(
-            tmp_path / "qt-ffmpeg.zip",
-            {
-                **{f"bin/{name}": name.encode() for name in _QT_FFMPEG_DLLS},
-                "bin/ffmpeg.exe": b"excluded CLI",
-                "bin/avutil-61.pdb": b"excluded symbol file",
-                "include/ffmpeg.h": b"excluded SDK",
-            },
-        ),
-        cache,
-    )
-    overlay_record = {
-        "id": "qt-ffmpeg",
-        "url": qt_ffmpeg.url,
-        "bytes": qt_ffmpeg.bytes,
-        "sha256": qt_ffmpeg.sha256,
-        "install": {"type": "qt_multimedia_ffmpeg"},
-    }
-    if manifest_version == 3:
-        manifest_records.append(overlay_record)
     packages = [
         ("vapoursynth", "81", vs_wheel),
         ("vapoursynth-lsmas", "1", lsmas),
@@ -389,7 +370,6 @@ def test_portable_assembly_is_inert_and_safely_packaged(
     if manifest_version == 2:
         # The live checkout moves on to v3 while replay still takes v2 from Git.
         newer_manifest["manifest_version"] = 3
-        newer_manifest["artifacts"].append(overlay_record | {"license": {}})
     live_manifest.write_text(json.dumps(newer_manifest), encoding="utf-8")
     assert commit("newer runtime") != selected
     custom_manifest_path = tmp_path / "custom-manifest.json"
@@ -461,17 +441,19 @@ def test_portable_assembly_is_inert_and_safely_packaged(
                 (projection / runtime.SITE / record_path).read_text().splitlines()
             )
         }
-        for name in _QT_FFMPEG_DLLS:
+        for name in _QT_FFMPEG_FILES:
             relative = f"PySide6/{name}"
-            expected_dll = name.encode() if manifest_version == 3 else b"original wheel DLL"
-            assert (projection / runtime.SITE / relative).read_bytes() == expected_dll
+            projected = projection / runtime.SITE / relative
             if manifest_version == 3:
+                assert not projected.exists()
                 assert relative not in addons_record
             else:
+                assert projected.read_bytes() == b"excluded Qt FFmpeg file"
                 assert addons_record[relative] == original_record[relative]
         for relative in (
             "PySide6/QtMultimedia.pyd",
-            "PySide6/plugins/multimedia/ffmpegmediaplugin.dll",
+            "PySide6/Qt6Multimedia.dll",
+            "PySide6/plugins/multimedia/windowsmediaplugin.dll",
         ):
             assert addons_record[relative] == original_record[relative]
     assert (output / "python/python315._pth").read_bytes() == runtime.embedded_search_path("315")
@@ -509,15 +491,16 @@ def test_portable_assembly_is_inert_and_safely_packaged(
             else:
                 assert archive.read(member) == data
         pyside_prefix = bundle.PREFIX + "app/site-packages/PySide6/"
-        for name in _QT_FFMPEG_DLLS:
-            expected_dll = name.encode() if manifest_version == 3 else b"original wheel DLL"
-            assert archive.read(pyside_prefix + name) == expected_dll
+        for name in _QT_FFMPEG_FILES:
+            member = pyside_prefix + name
+            if manifest_version == 3:
+                assert member not in archive.namelist()
+            else:
+                assert archive.read(member) == b"excluded Qt FFmpeg file"
         assert archive.read(pyside_prefix + "QtMultimedia.pyd") == b"retained binding"
-        assert archive.read(pyside_prefix + "plugins/multimedia/ffmpegmediaplugin.dll") == (
-            b"retained Qt plugin"
-        )
-        assert not any(
-            name.endswith(("/avutil-61.pdb", "/ffmpeg.h")) for name in archive.namelist()
+        assert archive.read(pyside_prefix + "Qt6Multimedia.dll") == b"retained Qt library"
+        assert archive.read(pyside_prefix + "plugins/multimedia/windowsmediaplugin.dll") == (
+            b"retained Windows plugin"
         )
         assert archive.read(bundle.PREFIX + "ffmpeg/bin/ffmpeg.exe") == b"never execute"
         assert bundle.PREFIX in archive.namelist()
@@ -528,79 +511,12 @@ def test_portable_assembly_is_inert_and_safely_packaged(
         runtime.assemble(tmp_path / "tampered", manifest, lock, requirements, cache)
 
 
-@pytest.mark.parametrize(
-    ("defect", "expected_error"),
-    [
-        ("missing_archive_dll", "lacks one or more required DLLs"),
-        ("missing_wheel_record", "RECORD must own the exact"),
-        ("missing_wheel_dll", "Missing or unsafe PySide6 Addons DLL"),
-        ("unowned_wheel_bytes", "RECORD does not match"),
-    ],
-)
-def test_qt_ffmpeg_rejects_incomplete_or_misattributed_projection(
-    tmp_path: Path, defect: str, expected_error: str
+@pytest.mark.parametrize("version", [1, "3"])
+def test_invalid_manifest_version_fails_before_runtime_inputs(
+    tmp_path: Path, version: int | str
 ) -> None:
-    site = tmp_path / "site"
-    original = {f"PySide6/{name}": b"original wheel DLL" for name in _QT_FFMPEG_DLLS}
-    record_inputs = original.copy()
-    selected_path = "PySide6/avformat-63.dll"
-    if defect == "missing_wheel_record":
-        del record_inputs[selected_path]
-    record = site / "pyside6_addons-1.dist-info/RECORD"
-    record.parent.mkdir(parents=True)
-    record.write_bytes(runtime.record_bytes(record_inputs, "pyside6_addons-1.dist-info/RECORD"))
-
-    (site / "PySide6").mkdir()
-    for name, content in original.items():
-        if name != selected_path or defect != "missing_wheel_dll":
-            (site / name).write_bytes(content)
-    if defect == "unowned_wheel_bytes":
-        (site / selected_path).write_bytes(b"wrong wheel bytes")
-    untouched = {path.name: path.read_bytes() for path in (site / "PySide6").iterdir()}
-    replacements = {f"bin/{name}": name.encode() for name in _QT_FFMPEG_DLLS}
-    if defect == "missing_archive_dll":
-        del replacements["bin/avformat-63.dll"]
-    archive = _zip(tmp_path / "qt-ffmpeg.zip", replacements)
-
-    with pytest.raises(ValueError, match=expected_error):
-        runtime._replace_qt_multimedia_ffmpeg(site, archive, "1")
-
-    assert {path.name: path.read_bytes() for path in (site / "PySide6").iterdir()} == untouched
-
-
-@pytest.mark.parametrize(
-    ("version", "overlay_count", "install", "url", "error"),
-    [
-        (1, 0, {}, "", "Unsupported portable manifest version"),
-        ("3", 0, {}, "", "Unsupported portable manifest version"),
-        (2, 1, {"type": "qt_multimedia_ffmpeg"}, "overlay.zip", "v2 forbids"),
-        (3, 0, {}, "", "v3 requires exactly one"),
-        (3, 2, {"type": "qt_multimedia_ffmpeg"}, "overlay.zip", "v3 requires exactly one"),
-        (
-            3,
-            1,
-            {"type": "qt_multimedia_ffmpeg", "destination": "app"},
-            "overlay.zip",
-            "v3 requires exactly one",
-        ),
-        (3, 1, {"type": "qt_multimedia_ffmpeg"}, "overlay.whl", "v3 requires exactly one"),
-    ],
-)
-def test_invalid_manifest_version_and_overlay_fail_before_runtime_inputs(
-    tmp_path: Path,
-    version: int | str,
-    overlay_count: int,
-    install: dict[str, str],
-    url: str,
-    error: str,
-) -> None:
-    manifest = json.dumps(
-        {
-            "manifest_version": version,
-            "artifacts": [{"install": install, "url": url}] * overlay_count,
-        }
-    ).encode()
-    with pytest.raises(ValueError, match=error):
+    manifest = json.dumps({"manifest_version": version, "artifacts": []}).encode()
+    with pytest.raises(ValueError, match="Unsupported portable manifest version"):
         runtime.assemble(tmp_path / "out", manifest, b"", b"", tmp_path / "cache")
     assert not list(tmp_path.iterdir())
 

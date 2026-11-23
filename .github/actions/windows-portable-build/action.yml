@@ -114,7 +114,7 @@ runs:
         foreach ($marker in @(
           "pyside6_event_loop=ok",
           "vsview_deep_imports=ok",
-          "qt_ffmpeg_runtime=ok backend=ffmpeg decoded_frame=64x64 dlls=5",
+          "qt_multimedia_backend=windows audio_device=(?:default|none) audio_outputs=\d+",
           "qt_webengine_runtime=absent deployment=excluded",
           "project_entrypoint=ok source=app/src",
           "alignment_panel=ok state=inactive platform=offscreen",

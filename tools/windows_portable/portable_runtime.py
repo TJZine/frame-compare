@@ -59,13 +59,14 @@ EXPORT = (
 TRIM = (125, 359295997)
 NATIVE_DESTINATIONS = {"ffmpeg", "python", "vs/core"}
 PYTHON_SQLITE_BINARIES = frozenset({"_sqlite3.pyd", "sqlite3.dll"})
-QT_FFMPEG_DLLS = (
+QT_FFMPEG_FILES = {
     "avcodec-63.dll",
     "avformat-63.dll",
     "avutil-61.dll",
     "swresample-7.dll",
     "swscale-10.dll",
-)
+    "ffmpegmediaplugin.dll",
+}
 _SHA = re.compile(r"[a-f0-9]{64}")
 _REQUIREMENT = re.compile(r"([a-z0-9-]+)==([0-9][a-z0-9.]*)(?: ; (.+))? \\")
 _COMPATIBLE_WHEEL = re.compile(
@@ -408,38 +409,6 @@ def _install_runtime_wheels(
         )
 
 
-def _replace_qt_multimedia_ffmpeg(site: Path, archive_path: Path, addons_version: str) -> set[str]:
-    original_paths = {f"PySide6/{name}" for name in QT_FFMPEG_DLLS}
-    record = site / f"pyside6_addons-{addons_version}.dist-info/RECORD"
-    with record.open(encoding="utf-8", newline="") as stream:
-        rows = [
-            row for row in csv.reader(stream) if row and row[0].replace("\\", "/") in original_paths
-        ]
-    if (
-        len(rows) != len(original_paths)
-        or {row[0].replace("\\", "/") for row in rows} != original_paths
-    ):
-        raise ValueError("PySide6 Addons RECORD must own the exact Qt FFmpeg DLL set")
-
-    for row in rows:
-        path = site / row[0].replace("\\", "/")
-        if not path.is_file() or path.is_symlink():
-            raise ValueError(f"Missing or unsafe PySide6 Addons DLL: {path.name}")
-        digest = base64.urlsafe_b64encode(bytes.fromhex(digest_file(path))).decode().rstrip("=")
-        if row[1:] != [f"sha256={digest}", str(path.stat().st_size)]:
-            raise ValueError(f"PySide6 Addons RECORD does not match {path.name}")
-
-    with checked_zip(archive_path) as archive:
-        files = {entry.filename: entry for entry in archive.infolist() if not entry.is_dir()}
-        if any(f"bin/{name}" not in files for name in QT_FFMPEG_DLLS):
-            raise ValueError("Qt Multimedia FFmpeg ZIP lacks one or more required DLLs")
-        for name in QT_FFMPEG_DLLS:
-            entry = files[f"bin/{name}"]
-            with archive.open(entry) as source, (site / "PySide6" / name).open("wb") as target:
-                copy_exact(source, entry.file_size, target)
-    return original_paths
-
-
 def _trim_webengine(site: Path) -> list[Path]:
     qt = site / "PySide6"
     chromium = {"icudtl.dat", "v8_context_snapshot.bin", "v8_context_snapshot.debug.bin"}
@@ -463,7 +432,7 @@ def _trim_webengine(site: Path) -> list[Path]:
     return excluded
 
 
-def _trim_site_packages(site: Path, replaced: set[str]) -> None:
+def _trim_site_packages(site: Path, *, exclude_qt_ffmpeg: bool) -> None:
     # uv's dependency entry-point launchers refer to the build interpreter.
     # Frame Compare ships its own relocatable launchers at the bundle root.
     # The Qt wheels also contain bytecode for a different Python version.
@@ -481,10 +450,16 @@ def _trim_site_packages(site: Path, replaced: set[str]) -> None:
     for directory in [*script_dirs, *site.rglob("__pycache__")]:
         shutil.rmtree(directory)
     excluded = _trim_webengine(site)
+    if exclude_qt_ffmpeg:
+        excluded.extend(
+            path
+            for path in (site / "PySide6").rglob("*")
+            if path.name.casefold() in QT_FFMPEG_FILES and path.is_file()
+        )
     for path in excluded:
         path.unlink()
 
-    removed_names = replaced | {path.relative_to(site).as_posix() for path in removed + excluded}
+    removed_names = {path.relative_to(site).as_posix() for path in removed + excluded}
     for record in site.glob("*.dist-info/RECORD"):
         with record.open(encoding="utf-8", newline="") as stream:
             rows = list(csv.reader(stream))
@@ -528,21 +503,6 @@ def _read_portable_manifest(manifest: bytes) -> dict:
     version = configuration.get("manifest_version")
     if type(version) is not int or version not in (2, 3):
         raise ValueError("Unsupported portable manifest version (expected 2 or 3)")
-    overlays = [
-        artifact
-        for artifact in configuration["artifacts"]
-        if artifact["install"]["type"] == "qt_multimedia_ffmpeg"
-    ]
-    if version == 2 and overlays:
-        raise ValueError("Portable manifest v2 forbids a Qt Multimedia FFmpeg overlay")
-    if version == 3 and (
-        len(overlays) != 1
-        or overlays[0]["install"] != {"type": "qt_multimedia_ffmpeg"}
-        or not urlsplit(overlays[0]["url"]).path.endswith(".zip")
-    ):
-        raise ValueError(
-            "Portable manifest v3 requires exactly one Qt Multimedia FFmpeg ZIP overlay"
-        )
     return configuration
 
 
@@ -560,7 +520,6 @@ def assemble(root: Path, manifest: bytes, lock: bytes, requirements: bytes, cach
     destinations = set()
     manifest_wheels = set()
     artifact_ids = set()
-    qt_ffmpeg: Pin | None = None
     for artifact in artifacts:
         pin = Pin(artifact["url"], artifact["bytes"], artifact["sha256"])
         install = artifact["install"]
@@ -591,8 +550,6 @@ def assemble(root: Path, manifest: bytes, lock: bytes, requirements: bytes, cach
             if name in manifest_wheels or name not in pinned or pin != pinned[name][1]:
                 raise ValueError(f"Manifest wheel does not agree with the frozen lock: {name}")
             manifest_wheels.add(name)
-        elif install["type"] == "qt_multimedia_ffmpeg":
-            qt_ffmpeg = pin
         else:
             raise ValueError(f"Unsupported manifest installation for {artifact_id}")
 
@@ -607,12 +564,7 @@ def assemble(root: Path, manifest: bytes, lock: bytes, requirements: bytes, cach
     site = root / SITE
     if not (site / "vapoursynth/libvapoursynth.dll").is_file():
         raise ValueError("VapourSynth wheel lacks the managed package DLL")
-    replaced = set()
-    if qt_ffmpeg is not None:
-        replaced = _replace_qt_multimedia_ffmpeg(
-            site, download(qt_ffmpeg, cache), pinned["pyside6-addons"][0]
-        )
-    _trim_site_packages(site, replaced)
+    _trim_site_packages(site, exclude_qt_ffmpeg=manifest_version == 3)
     _python_licenses(root)
     for source, name in (("ffmpeg/LICENSE.txt", "ffmpeg"), ("python/LICENSE.txt", "python")):
         shutil.copyfile(root / source, root / f"licenses/{name}-LICENSE.txt")
