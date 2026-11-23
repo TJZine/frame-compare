@@ -5,9 +5,9 @@ description: Check Windows portable migration rollback and retry guidance when a
 
 # Verify portable folder recovery
 
-A failed install can clear its migration marker only after each planned user folder
-has returned to the previous bundle. Clearing it too early lets the next install
-proceed while user data still needs recovery.
+A failed install can clear its migration marker only when each planned source
+folder is populated and its candidate folder is absent or empty. Clearing it too
+early lets the next install proceed while user data still needs recovery.
 
 From the repo root on Windows with PowerShell 7 and the locked dev environment, run
 
@@ -32,7 +32,9 @@ read real files and the pointer after a failure at the registration boundary.
 The first-rename case interrupts immediately after a real rename. The retry cases
 terminate the installer process at selected points, rerun installation, and check
 which manual actions it recommends. The model assumes stable observations during
-rollback and successful same-volume renames. File locks, reparse points, sharing
+rollback and successful same-volume renames. Folder occupancy establishes location
+under that assumption. A concurrent writer can replace a populated folder's contents
+without changing its occupancy. File locks, reparse points, sharing
 violations, and external changes between an observation and a rename use the
 separate platform tests in the same module.
 
