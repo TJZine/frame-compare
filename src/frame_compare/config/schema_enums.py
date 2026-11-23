@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-# Most enums use lowercase string values (Pydantic accepts lowercase only).
-# Exception: LogLevel uses uppercase values per standard Python logging convention.
-
 
 class OverlayMode(StrEnum):
     """Overlay verbosity level for rendered screenshots."""

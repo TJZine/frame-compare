@@ -331,9 +331,7 @@ def detect_plugins(core: vs.Core) -> dict[str, bool]:
     Returns dict of plugin_name -> is_available.
     """
     return {
-        # L-SMASH Works (lsmas) - source loading
         "lsmas": hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"),
-        # libplacebo - tonemapping
         "libplacebo": hasattr(core, "placebo") and hasattr(core.placebo, "Tonemap"),
     }
 

@@ -114,9 +114,6 @@ def load_config(
     if config_path is None:
         settings_cls = ConfigSchema
     else:
-        # Create a dynamic subclass to override the toml_file
-        # This is the standard way in Pydantic V2 settings to override config location at runtime
-        # We cast the config dict to Any to satisfy Pyright strict mode
         config_dict = cast(dict[str, Any], ConfigSchema.model_config)
         new_config_dict = config_dict.copy()
         new_config_dict["toml_file"] = str(config_path)
@@ -154,8 +151,6 @@ def _load_settings(
 ) -> ConfigSchema:
     parse_path = source_path or Path("config/config.toml")
     try:
-        # Pydantic validates inputs at runtime, so we cast to Any to bypass static checks
-        # on kwargs unpacking.
         return settings_cls(**cast(Any, overrides))
     except tomllib.TOMLDecodeError as exc:
         raise ConfigParseError(parse_path, format_toml_syntax_error(exc)) from None
@@ -173,7 +168,6 @@ def _load_settings(
     except OSError:
         raise ConfigParseError(parse_path, "could not read configuration file") from None
     except ValidationError as exc:
-        # pydantic errors are compatible with our normalizer but require a cast for strict typing
         normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
         raise ConfigValidationError(
             normalized, source_path=source_path, schema=settings_cls, effective=True

@@ -668,7 +668,6 @@ const Viewport = {
         this.viewer.dom.alignX.value = this.viewer.state.rawAlignX ?? alignment.alignX;
         this.viewer.dom.alignY.value = this.viewer.state.rawAlignY ?? alignment.alignY;
 
-        // Visual indicator on gear button if offset is non-zero
         const isOffset = alignment.alignX !== 0 || alignment.alignY !== 0;
         this.viewer.dom.btnAlignToggle.classList.toggle('has-offset', isOffset);
         this.updateAlignmentStatus();

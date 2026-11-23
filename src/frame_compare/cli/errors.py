@@ -39,7 +39,6 @@ def get_exit_code(error: FrameCompareError) -> ExitCode:
             return ExitCode.PROCESSING_ERROR
         if category == "5":
             return ExitCode.NETWORK_ERROR
-    # Unknown FrameCompareError values map to 1
     return ExitCode.GENERAL_ERROR
 
 

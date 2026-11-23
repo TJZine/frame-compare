@@ -225,8 +225,6 @@ def _parsed_metadata(filename: str, fields: _ParsedFilenameFields) -> ParsedMeta
     """Build the historical canonical filename metadata shape."""
 
     title = fields.title or Path(filename).stem
-
-    # Normalization
     title = re.sub(r"[._\-]", " ", title).strip()
 
     return ParsedMetadata(
