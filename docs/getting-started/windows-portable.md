@@ -173,6 +173,8 @@ paths it reports to locate and recover your files before retrying.
 Run `uninstall.cmd` from the current portable bundle root. It removes the installed user
 shim and managed `PATH` entry. It preserves the installed state configuration, unknown
 files, the portable bundle, source videos, and any external generated-data root.
+If uninstall reports `state\source-migration.pending.json`, follow the
+[pending migration recovery steps](#recover-a-pending-migration) before retrying.
 
 ## Bundle inventory and licenses
 
@@ -236,6 +238,8 @@ prevents another activation.
 Junctions, symlinks, and mount points in build or previous-bundle ancestry are refused;
 choose physical paths so containment can be checked. Stored active pointers must use
 fully qualified absolute paths. Drive-relative and root-relative values are malformed.
+
+<a id="recover-a-pending-migration"></a>
 
 Move is all-or-nothing for failures and Ctrl+C: a move or activation failure restores
 completed moves, empty placeholders, the previous pointer, and its shims. If recovery

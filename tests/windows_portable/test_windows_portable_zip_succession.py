@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import zipfile
 from contextlib import nullcontext
@@ -275,6 +276,8 @@ def test_packed_zip_succession(tmp_path: Path, interpreter: str, case: str) -> N
                     (path / "nested.bin").write_bytes(b"keep nested file")
                 else:
                     path.write_bytes(b"legacy installed file")
+            if case == "move":
+                legacy[_LEGACY_LEAVES[0]].chmod(stat.S_IREAD)
 
             lock = (
                 blocked.open("rb")

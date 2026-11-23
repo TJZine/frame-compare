@@ -15,25 +15,13 @@ try {
   $pointerPaths = @("config.json", "config.json.tmp" | ForEach-Object { Join-Path $stateDir $_ })
   $installedFiles = $shimPaths + $pointerPaths
   foreach ($path in $installedFiles) {
-    Assert-NoReparsePointAncestor -Path $path -Label "Install state"
-    try {
-      $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-      if ($item -isnot [IO.FileInfo]) { throw "Expected a regular installed file: $path" }
-    } catch [System.Management.Automation.ItemNotFoundException] {
-      # An absent managed file needs no cleanup.
-    }
+    $null = Get-OptionalPortableRegularFile $path
   }
 
   Update-PortableUserPath -BinDir $binDir -Remove
 
   foreach ($path in $installedFiles) {
-    if ([IO.File]::Exists($path)) {
-      $attributes = [IO.File]::GetAttributes($path)
-      if ($attributes -band [IO.FileAttributes]::ReadOnly) {
-        [IO.File]::SetAttributes($path, ($attributes -band (-bnot [IO.FileAttributes]::ReadOnly)))
-      }
-      [IO.File]::Delete($path)
-    }
+    Remove-OptionalPortableRegularFile $path
   }
 
   if ([IO.Directory]::Exists($binDir) -and

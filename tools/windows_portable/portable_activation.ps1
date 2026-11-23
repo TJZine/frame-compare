@@ -208,6 +208,34 @@ function Get-PortableShimNames() {
   return @("frame-compare.ps1", "frame-compare.cmd")
 }
 
+function Get-OptionalPortableRegularFile([string]$Path) {
+  Assert-NoReparsePointAncestor -Path $Path -Label "Install state"
+  try {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item -isnot [IO.FileInfo] -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+      throw "Expected a regular installed file: $Path"
+    }
+    return $item
+  } catch [System.Management.Automation.ItemNotFoundException] {
+    return $null
+  }
+}
+
+function Clear-PortableReadOnly([IO.FileInfo]$File) {
+  $attributes = $File.Attributes
+  if ($attributes -band [IO.FileAttributes]::ReadOnly) {
+    [IO.File]::SetAttributes($File.FullName, ($attributes -band (-bnot [IO.FileAttributes]::ReadOnly)))
+  }
+}
+
+function Remove-OptionalPortableRegularFile([string]$Path) {
+  $item = Get-OptionalPortableRegularFile $Path
+  if ($null -ne $item) {
+    Clear-PortableReadOnly $item
+    [IO.File]::Delete($Path)
+  }
+}
+
 function Remove-LegacyUpdaterLeaves([string]$StateDirectory) {
   $binDir = Join-Path (Split-Path -Parent $StateDirectory) "bin"
   try {
@@ -223,13 +251,7 @@ function Remove-LegacyUpdaterLeaves([string]$StateDirectory) {
   )) {
     $path = Join-Path $binDir $name
     try {
-      $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-      if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw "Expected a regular file."
-      }
-      [IO.File]::Delete($path)
-    } catch [System.Management.Automation.ItemNotFoundException] {
-      # The old installer may not have installed this leaf.
+      Remove-OptionalPortableRegularFile $path
     } catch {
       Write-Warning "The new installation is active. Could not remove legacy file ${path}: $($_.Exception.Message)"
     }
@@ -359,6 +381,8 @@ function Set-PortableRegistration(
   foreach ($shim in $shims) {
     $Changes.Files.Add($shim)
     if (Test-PortableBytesEqual $shim.OriginalBytes $shim.WrittenBytes) { continue }
+    $installed = Get-OptionalPortableRegularFile $shim.Path
+    if ($null -ne $installed) { Clear-PortableReadOnly $installed }
     Write-PortableFile -Path $shim.Path -Bytes $shim.WrittenBytes
   }
   $Changes.PointerWriteStarted = $true
@@ -583,8 +607,6 @@ function Invoke-PortableActivation(
             $unreconciled = @()
             for ($index = $folders.Count - 1; $index -ge 0; $index--) {
               $folder = $folders[$index]
-              Assert-NoReparsePointAncestor -Path $folder.Source -Label "Previous user folder"
-              Assert-NoReparsePointAncestor -Path $folder.Target -Label "Moved user folder"
               $sourceHasData = Test-NonEmptyDirectory $folder.Source
               $targetHasData = Test-NonEmptyDirectory $folder.Target
               if ($sourceHasData -and !$targetHasData) { continue }

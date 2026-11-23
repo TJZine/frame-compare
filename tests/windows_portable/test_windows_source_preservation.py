@@ -191,6 +191,16 @@ _POINTER_WRITE = "  Write-PortableFile -Path $PointerPath -Bytes $CandidatePoint
 _COMMIT = "      $committed = $true"
 _VERSION_LAUNCHER = "Write-Output 'frame-compare 0.1.0'; exit 0"
 _RENAME = "          try { [IO.Directory]::Move($folder.Source, $folder.Target) }"
+_RENAME_TRIPWIRE = """          [IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'rename-attempted'), $folder.Name)
+          throw 'Unexpected user data move'"""
+_STOP = "throw [System.Management.Automation.PipelineStoppedException]::new()"
+
+
+def _interrupt(witness: str) -> str:
+    return (
+        "[IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'interrupted-at'), "
+        f"'{witness}'); {_STOP}"
+    )
 
 
 @pytest.fixture
@@ -291,7 +301,7 @@ if ($env:FAILURE -eq 'build') { throw 'injected build failure' }
 if (Test-Path -LiteralPath $OutDir) { throw "occupied: $OutDir" }
 New-Item -ItemType Directory -Path $OutDir | Out-Null
 foreach ($name in @('config', 'comparison_videos', 'shim')) { New-Item -ItemType Directory -Path (Join-Path $OutDir $name) | Out-Null }
-if ($env:FAILURE -eq 'occupied-target') { Set-Content -LiteralPath (Join-Path $OutDir 'config/unexpected') -Value 'preserve new data' }
+if ($env:FAILURE -eq 'occupied-target') { Set-Content -LiteralPath (Join-Path $OutDir 'comparison_videos/unexpected') -Value 'preserve new data' }
 Set-Content -LiteralPath (Join-Path $OutDir 'bundle_info.json') -Value '{}'
 Set-Content -LiteralPath (Join-Path $OutDir 'frame-compare.ps1') -Value "Write-Output 'frame-compare 0.1.0'; exit 0"
 foreach ($name in @('portable_activation.ps1', 'path_safety.ps1')) {
@@ -478,6 +488,8 @@ def test_source_install_failure_restores_data_and_pointer(
             "[IO.Directory]::Move($folder.Source, $folder.Target)",
             f"if ($folder.Name -eq '{failing_folder}') {{ {injected_error} }}; [IO.Directory]::Move($folder.Source, $folder.Target)",
         )
+    elif failure == "occupied-target":
+        _inject(_activation_helper(script), _RENAME, _RENAME_TRIPWIRE)
     result = _run(
         pwsh,
         "function uv {}; & $env:INSTALL -SkipSync",
@@ -495,7 +507,13 @@ def test_source_install_failure_restores_data_and_pointer(
         "cross-volume": "injected cross-volume failure",
         "occupied-target": "New user folder is occupied",
     }[failure]
-    assert expected_boundary in result.stdout + result.stderr
+    output = result.stdout + result.stderr
+    assert expected_boundary in output
+    if failure == "cross-volume":
+        assert "-UserData Leave" in output
+    if failure == "occupied-target":
+        assert not (tmp_path / "appdata/rename-attempted").exists()
+        assert not pointer.with_name("source-migration.pending.json").exists()
     assert _snapshot(previous) == before
     assert pointer.read_bytes() == pointer_before
     assert _snapshot(pointer.parent.parent / "bin") == bin_before
@@ -510,11 +528,13 @@ def test_source_install_failure_restores_data_and_pointer(
     if failure == "after-registration":
         assert (tmp_path / "appdata/test-user-path").read_text() == r"C:\fixture-path"
     for new in candidates:
+        assert not list((new / "config").iterdir())
         if failure == "occupied-target":
-            assert (new / "config/unexpected").read_text().strip() == "preserve new data"
+            occupied = new / "comparison_videos"
+            assert str(occupied) in output
+            assert (occupied / "unexpected").read_text().strip() == "preserve new data"
         else:
-            assert not list((new / "config").iterdir())
-        assert not list((new / "comparison_videos").iterdir())
+            assert not list((new / "comparison_videos").iterdir())
         assert not (new / "generated").exists()
 
 
@@ -759,6 +779,9 @@ def test_source_install_reversal_failure_retains_and_reports_locations(
         assert str(previous / name) in result.stdout + result.stderr
     assert "Recovery stopped" in result.stdout + result.stderr
     assert "Recovery failed" in result.stderr
+    assert "injected reversal failure" in result.stderr
+    marker = pointer.with_name("source-migration.pending.json")
+    assert Path(json.loads(marker.read_text())["candidate_bundle"]) == new
 
 
 @pytest.mark.parametrize("failure", ["", "after-pointer"])
@@ -880,6 +903,8 @@ def test_source_install_locked_pointer_still_reports_every_recovery_location(
     assert len(candidates) == 1
     candidate = candidates[0]
     assert Path(json.loads(pointer.read_text())["bundle_path"]) == candidate
+    marker = pointer.with_name("source-migration.pending.json")
+    assert Path(json.loads(marker.read_text())["candidate_bundle"]) == candidate
     for name in ("config", "comparison_videos", "generated"):
         assert str(previous / name) in output and str(candidate / name) in output
         assert (candidate / name).is_dir() and not (previous / name).exists()
@@ -1243,7 +1268,7 @@ def test_source_install_pipeline_stop_reverses_data_and_removes_marker(
     _inject(
         _activation_helper(script),
         _REGISTRATION,
-        "throw [System.Management.Automation.PipelineStoppedException]::new()",
+        f"      {_interrupt('before-registration')}",
     )
     result = _run(
         pwsh,
@@ -1252,6 +1277,7 @@ def test_source_install_pipeline_stop_reverses_data_and_removes_marker(
         INSTALL=str(script),
     )
     assert result.returncode != 0
+    assert (tmp_path / "appdata/interrupted-at").read_text() == "before-registration"
     assert _snapshot(previous) == before
     assert pointer.read_bytes() == pointer_before
     assert not (pointer.parent / "source-migration.pending.json").exists()
@@ -1272,11 +1298,11 @@ def test_source_install_pipeline_stop_after_first_rename_restores_planned_folder
     _inject(
         _activation_helper(script),
         _RENAME,
-        _RENAME.removesuffix(" }")
-        + "; throw [System.Management.Automation.PipelineStoppedException]::new() }",
+        _RENAME.removesuffix(" }") + f"; {_interrupt('after-first-rename')} }}",
     )
     result = _run(pwsh, "function uv {}; & $env:INSTALL -SkipSync", tmp_path, INSTALL=str(script))
     assert result.returncode != 0
+    assert (tmp_path / "appdata/interrupted-at").read_text() == "after-first-rename"
     assert _snapshot(previous) == before
     assert pointer.read_bytes() == pointer_before
     assert not (pointer.parent / "source-migration.pending.json").exists()
@@ -1348,13 +1374,14 @@ def test_source_install_pipeline_stop_during_shim_registration(
     pointer_before = pointer.read_bytes()
     before = _snapshot(previous)
     write = "    Write-PortableFile -Path $shim.Path -Bytes $shim.WrittenBytes"
-    stop = "    throw [System.Management.Automation.PipelineStoppedException]::new()"
+    stop = f"    {_interrupt(stop_at)}"
     lines = (write, stop) if stop_at == "after-write" else (stop, write)
     _inject(_activation_helper(script), write, "\n".join(lines))
 
     result = _run(pwsh, "function uv {}; & $env:INSTALL -SkipSync", tmp_path, INSTALL=str(script))
 
     assert result.returncode != 0
+    assert (tmp_path / "appdata/interrupted-at").read_text() == stop_at
     assert "Registration rollback conflict" not in result.stdout + result.stderr
     assert _snapshot(bin_dir) == bin_before
     assert pointer.read_bytes() == pointer_before
@@ -1364,9 +1391,14 @@ def test_source_install_pipeline_stop_during_shim_registration(
     assert _snapshot(previous) == before
 
 
+@pytest.mark.parametrize("identical", [True, False], ids=["identical-shim", "different-shim"])
 @pytest.mark.parametrize("failure", ["", "after-pointer"], ids=["success", "rollback"])
-def test_source_install_preserves_identical_read_only_shim(
-    pwsh: str, tmp_path: Path, source_fixture: tuple[Path, Path, Path], failure: str
+def test_source_install_over_read_only_shim(
+    pwsh: str,
+    tmp_path: Path,
+    source_fixture: tuple[Path, Path, Path],
+    failure: str,
+    identical: bool,
 ) -> None:
     script, previous, pointer = source_fixture
     candidate = script.parents[2] / "dist/candidate"
@@ -1376,13 +1408,14 @@ def test_source_install_preserves_identical_read_only_shim(
     pointer_before = pointer.read_bytes()
     previous_before = _snapshot(previous)
     bin_before = _snapshot(bin_dir)
-    _inject(
-        script.with_name("build_portable.ps1"),
-        "$global:LASTEXITCODE = 0",
-        "[IO.File]::WriteAllBytes((Join-Path $OutDir 'shim/frame-compare.ps1'), "
-        "[IO.File]::ReadAllBytes($env:INSTALLED_SHIM))\n"
-        "$global:LASTEXITCODE = 0",
-    )
+    if identical:
+        _inject(
+            script.with_name("build_portable.ps1"),
+            "$global:LASTEXITCODE = 0",
+            "[IO.File]::WriteAllBytes((Join-Path $OutDir 'shim/frame-compare.ps1'), "
+            "[IO.File]::ReadAllBytes($env:INSTALLED_SHIM))\n"
+            "$global:LASTEXITCODE = 0",
+        )
 
     shim.chmod(stat.S_IREAD)
     try:
@@ -1396,9 +1429,11 @@ def test_source_install_preserves_identical_read_only_shim(
             FAILURE=failure,
         )
         output = result.stdout + result.stderr
-        assert (candidate / "shim" / shim.name).read_bytes() == shim_before
-        assert shim.read_bytes() == shim_before
-        assert not shim.stat().st_mode & stat.S_IWRITE
+        candidate_bytes = (candidate / "shim" / shim.name).read_bytes()
+        assert (candidate_bytes == shim_before) == identical
+        if identical:
+            assert shim.read_bytes() == shim_before
+            assert not shim.stat().st_mode & stat.S_IWRITE
         assert not pointer.with_name("source-migration.pending.json").exists(), output
 
         if failure:
@@ -1431,7 +1466,7 @@ def test_source_install_preserves_identical_read_only_shim(
         ("missing-info", "Bundle runtime identity not found"),
         ("nonzero-version", "Bundle launcher version check failed"),
         ("invalid-version-output", "Bundle launcher version check failed"),
-        ("slow-version", "Version probe timed out after 2000 ms"),
+        ("slow-version", "Version probe timed out after 5000 ms"),
     ],
 )
 def test_source_install_rejects_invalid_candidate_before_moving_data(
@@ -1451,18 +1486,50 @@ def test_source_install_rejects_invalid_candidate_before_moving_data(
         "-Value \"Write-Output 'frame-compare 0.1.0'; exit 1\"",
         "invalid-version-output": "Set-Content -LiteralPath (Join-Path $OutDir 'frame-compare.ps1') "
         "-Value \"Write-Output 'unrecognised'; exit 0\"",
-        "slow-version": "Set-Content -LiteralPath (Join-Path $OutDir 'frame-compare.ps1') "
-        "-Value \"Start-Sleep -Seconds 10; Write-Output 'frame-compare 0.1.0'; exit 0\"",
+        "slow-version": r"""Set-Content -LiteralPath (Join-Path $OutDir 'frame-compare.ps1') -Value @'
+$child = Start-Process -FilePath (Join-Path $PSHOME 'pwsh.exe') -ArgumentList '-NoProfile -Command Start-Sleep -Seconds 45' -WindowStyle Hidden -PassThru
+[IO.File]::WriteAllText($env:PROBE_CHILD_PID, [string]$child.Id)
+$child.WaitForExit()
+'@""",
     }[defect]
     if defect == "slow-version":
         _inject(
-            _activation_helper(script), "$versionTimeoutMs = 120000", "$versionTimeoutMs = 2000"
+            _activation_helper(script), "$versionTimeoutMs = 120000", "$versionTimeoutMs = 5000"
         )
-        _inject(_activation_helper(script), _RENAME, "          throw 'Unexpected user data move'")
+    _inject(_activation_helper(script), _RENAME, _RENAME_TRIPWIRE)
     _inject(builder, "$global:LASTEXITCODE = 0", f"{change}\n$global:LASTEXITCODE = 0")
-    result = _run(pwsh, "function uv {}; & $env:INSTALL -SkipSync", tmp_path, INSTALL=str(script))
+    child_pid = tmp_path / "probe-child-pid"
+    try:
+        result = _run(
+            pwsh,
+            "function uv {}; & $env:INSTALL -SkipSync",
+            tmp_path,
+            INSTALL=str(script),
+            PROBE_CHILD_PID=str(child_pid),
+        )
+    finally:
+        if child_pid.is_file():
+            descendant = _run(
+                pwsh,
+                """
+$childId = [int][IO.File]::ReadAllText($env:PROBE_CHILD_PID)
+Wait-Process -Id $childId -Timeout 5 -ErrorAction SilentlyContinue
+$child = Get-Process -Id $childId -ErrorAction SilentlyContinue
+if ($null -ne $child) {
+  Stop-Process -InputObject $child -Force
+  throw 'Version probe descendant survived the timeout'
+}
+""",
+                tmp_path,
+                PROBE_CHILD_PID=str(child_pid),
+            )
+            assert descendant.returncode == 0, descendant.stdout + descendant.stderr
+    if defect == "slow-version":
+        assert int(child_pid.read_text()) > 0
+    output = result.stdout + result.stderr
     assert result.returncode != 0
-    assert message in result.stdout + result.stderr
+    assert message in output
+    assert not (tmp_path / "appdata/rename-attempted").exists()
     assert _snapshot(previous) == before
     assert {
         path: data
@@ -1517,8 +1584,9 @@ def test_bundle_activation_respects_managed_install_paths(
     assert not (tmp_path / "appdata/test-user-path").exists()
 
 
-def test_source_install_rollback_preserves_edited_fallback_config(
-    pwsh: str, tmp_path: Path, source_fixture: tuple[Path, Path, Path]
+@pytest.mark.parametrize("stop_at", ["before-write", "after-write", "after-edit"])
+def test_source_install_rolls_back_owned_fallback_config_only(
+    pwsh: str, tmp_path: Path, source_fixture: tuple[Path, Path, Path], stop_at: str
 ) -> None:
     script, previous, pointer = source_fixture
     fallback = pointer.with_name("config.toml")
@@ -1527,16 +1595,27 @@ def test_source_install_rollback_preserves_edited_fallback_config(
     pointer_before = pointer.read_bytes()
     bin_before = _snapshot(pointer.parent.parent / "bin")
     edited = tmp_path / "updated-config.toml"
-    edited.write_bytes(b'[paths]\r\ngenerated_dir = "updated"\r\n')
-    _inject(
-        _activation_helper(script),
-        _COMMIT,
-        """      $fallback = Join-Path $StateDirectory 'config.toml'
+    if stop_at == "after-edit":
+        edited.write_bytes(b'[paths]\r\ngenerated_dir = "updated"\r\n')
+        _inject(
+            _activation_helper(script),
+            _COMMIT,
+            """      $fallback = Join-Path $StateDirectory 'config.toml'
       if (!(Test-Path -LiteralPath $fallback -PathType Leaf)) { throw 'fallback was not initialised' }
       [IO.File]::WriteAllBytes($fallback, [IO.File]::ReadAllBytes($env:EDITED_CONFIG))
       throw 'injected failure after fallback edit'
 """,
-    )
+        )
+    else:
+        write = "      Write-PortableFile -Path $portableConfigToml -Bytes $fallback -NewOnly"
+        expected_exists = "$true" if stop_at == "after-write" else "$false"
+        stop = (
+            f"      if ([IO.File]::Exists($portableConfigToml) -ne {expected_exists}) "
+            "{ throw 'Unexpected fallback state at interruption' }\n"
+            f"      {_interrupt(stop_at)}"
+        )
+        lines = (write, stop) if stop_at == "after-write" else (stop, write)
+        _inject(_activation_helper(script), write, "\n".join(lines))
     result = _run(
         pwsh,
         "function uv {}; & $env:INSTALL -SkipSync",
@@ -1546,14 +1625,20 @@ def test_source_install_rollback_preserves_edited_fallback_config(
     )
     assert result.returncode != 0
     output = result.stdout + result.stderr
-    assert "injected failure after fallback edit" in output
-    assert f"Registration rollback conflict: preserving changed file {fallback}" in output
-    assert fallback.read_bytes() == edited.read_bytes()
+    if stop_at == "after-edit":
+        assert "injected failure after fallback edit" in output
+        assert f"Registration rollback conflict: preserving changed file {fallback}" in output
+        assert fallback.read_bytes() == edited.read_bytes()
+        assert (tmp_path / "appdata/test-user-path").read_text() == r"C:\fixture-path"
+    else:
+        assert (tmp_path / "appdata/interrupted-at").read_text() == stop_at
+        assert not fallback.exists()
+        assert not (tmp_path / "appdata/test-user-path").exists()
+        assert "Registration rollback conflict" not in output
     assert _snapshot(previous) == before
     assert pointer.read_bytes() == pointer_before
     assert _snapshot(pointer.parent.parent / "bin") == bin_before
     assert not (pointer.parent / "source-migration.pending.json").exists()
-    assert (tmp_path / "appdata/test-user-path").read_text() == r"C:\fixture-path"
 
 
 def _junction(pwsh: str, root: Path, alias: Path, target: Path) -> None:
@@ -1708,8 +1793,12 @@ if ($env:OWNERSHIP -ne 'own') {
 }
 try {
   try {
-    if ($env:OWNERSHIP -eq 'borrow') { & $env:INSTALL -ActivationLock $held }
-    else { & $env:INSTALL }
+    if ($env:OWNERSHIP -eq 'borrow') {
+      $ErrorActionPreference = 'Stop'
+      Set-StrictMode -Version Latest
+      . $env:HELPER
+      Invoke-PortableActivation -BundleRoot $env:BUNDLE -StateDirectory (Get-PortableStateDirectory) -ActivationLock $held
+    } else { & $env:INSTALL }
     throw 'installer unexpectedly completed'
   } catch { Write-Host $_.Exception.Message }
   if ($null -eq $held) {
@@ -1727,6 +1816,8 @@ try {
 """,
         tmp_path,
         INSTALL=str(installer),
+        HELPER=str(_activation_helper(installer)),
+        BUNDLE=str(bundle),
         LOCK=str(state / "source-install.lock"),
         OWNERSHIP=ownership,
         PUBLISHED=str(tmp_path / "published-pointer"),

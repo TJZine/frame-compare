@@ -9,6 +9,8 @@ INSTALL (enables `frame-compare` globally for current user):
 
 UNINSTALL:
   Run `uninstall.cmd` from the portable bundle root.
+  If uninstall reports state\source-migration.pending.json, follow the recovery steps:
+    https://tjzine.github.io/frame-compare/getting-started/windows-portable/#recover-a-pending-migration
 
 NOTES:
   - Installation uses a shim under:
