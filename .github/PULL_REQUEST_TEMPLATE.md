@@ -44,7 +44,7 @@ Closes #
 ## PR Title Format
 
 <!-- Ensure your PR title follows Conventional Commits format -->
-<!-- This becomes the squash commit message -->
+<!-- For feature PRs, this becomes the squash commit message -->
 
 Examples:
 

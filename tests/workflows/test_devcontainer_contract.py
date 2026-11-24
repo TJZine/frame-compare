@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-import re
 import shlex
 from pathlib import Path
 from typing import Any
+
+from tests.workflow_helpers import dockerfile_stages
 
 
 def _load_devcontainer(repo_root: Path) -> dict[str, Any]:
@@ -18,26 +19,6 @@ def _parse_mount(mount: str) -> dict[str, str]:
         key, separator, value = part.partition("=")
         parsed[key] = value if separator else ""
     return parsed
-
-
-def _dockerfile_stages(dockerfile: str) -> list[tuple[str, str, str]]:
-    matches = list(
-        re.finditer(
-            r"^FROM\s+(?P<base>\S+)\s+AS\s+(?P<name>\S+)\s*$",
-            dockerfile,
-            re.MULTILINE,
-        )
-    )
-    return [
-        (
-            match.group("base"),
-            match.group("name"),
-            dockerfile[
-                match.end() : matches[index + 1].start() if index + 1 < len(matches) else None
-            ],
-        )
-        for index, match in enumerate(matches)
-    ]
 
 
 def test_devcontainer_uses_isolated_locked_backend_environment(repo_root: Path) -> None:
@@ -85,13 +66,12 @@ def test_devcontainer_uses_isolated_locked_backend_environment(repo_root: Path) 
 
 def test_devcontainer_docker_stage_only_owns_the_venv_mount_target(repo_root: Path) -> None:
     dockerfile = (repo_root / "Dockerfile").read_text(encoding="utf-8")
-    stages = _dockerfile_stages(dockerfile)
+    stages = dockerfile_stages(dockerfile)
     stage_names = [name for _, name, _ in stages]
     stage_by_name = {name: (base, body) for base, name, body in stages}
 
     assert stage_names[-1] == "default-runtime"
     assert stage_by_name["devcontainer"][0] == "runtime"
-    assert stage_by_name["gui-linux"][0] == "runtime"
     assert stage_by_name["default-runtime"][0] == "runtime"
 
     instructions = [

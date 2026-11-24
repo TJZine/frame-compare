@@ -55,15 +55,15 @@ Frame Compare handles local video files and optional network operations. Key sec
   The Windows launch and assignment limits are described under
   [external boundaries](docs/current-architecture.md#external-boundaries).
 - **Network Operations**: slow.pics upload and webhook delivery are opt-in, and TMDB lookups run only when an API key is configured. Webhook delivery requires an HTTPS URL, follows no redirects, and keeps the URL out of diagnostics.
-- **Release integrity.** The Windows release path independently rebuilds and
-  compares the portable ZIP, scans the verified artifact before signing the
-  canonical update manifest, and separates signing from publication. See the
-  [final-artifact gate](docs/ENGINEERING_RUNBOOK.md#final-artifact-security-evidence).
+- **Release integrity.** Windows CI runs Syft and Grype on the producer ZIP.
+  The scanner and publisher each fetch that artifact by ID and check its SHA-256
+  against the build output. Compare your download with the matching `.zip.sha256`
+  from the same GitHub release. The checksum verifies byte equality and relies on
+  the release page as the source of the expected hash. The
+  [final-artifact gate](docs/ENGINEERING_RUNBOOK.md#final-artifact-security-evidence)
+  describes scanner coverage and review.
 
 For implementation details, see [Current architecture](docs/current-architecture.md).
-
-For a suspected update-signing key compromise, report it privately and follow the
-[signer compromise response](docs/ENGINEERING_RUNBOOK.md#signer-compromise-response).
 
 ## Security-Related Error Codes
 

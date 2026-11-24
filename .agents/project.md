@@ -17,8 +17,8 @@ The installed command is `frame-compare`, owned by `frame_compare.cli.entry:cons
 the reusable Typer application remains `frame_compare.cli.entry:app`.
 
 The supported public surfaces are documented CLI/config behavior, streams, exit
-codes, persisted/output contracts, distribution contents, and installer/update
-behavior. Importable modules are convenience surfaces unless an explicit supported
+codes, persisted/output contracts, distribution contents, and Windows ZIP installation
+and reinstallation behavior. Importable modules are convenience surfaces unless an explicit supported
 contract says otherwise; generated API documentation alone does not create a stable
 API promise. Remove obsolete internal paths when replacing a design, after checking
 real callers, plugin entry points, persisted consumers, and the authorized scope.
@@ -42,9 +42,10 @@ product requirement:
 - Subprocesses, native handles, files, and HTTP clients have explicit lifetimes,
   bounded operations, and cleanup. Respect caller-owned injected resources. Keep
   webhook transport isolated from the publishing client's state.
-- Packaged Docker and Windows runtimes are distinct support profiles. Native
-  source tests, GUI proof, unsigned artifact proof, signing, and physical-host
-  acceptance establish different claims.
+- Docker runs headless. Windows portable ZIP and source installs share activation
+  and bundle-local data carry-over. Native source tests, packaged runtime smoke,
+  packed ZIP installation under PowerShell 5.1 and 7, the immutable ZIP scan, and
+  physical Windows acceptance each establish different claims.
 
 Current module boundaries are starting evidence for design. A justified redesign
 may change them together with their callers, checks, and documentation. Do not use
@@ -128,7 +129,7 @@ or the routing quality of a new skill.
 
 For wheel/sdist changes use the existing distribution recipe and
 `scripts/verify_distribution.py`. For native media, VSView, Windows portable,
-updater, or signing changes load the corresponding complete runbook procedure.
+or release changes load the corresponding complete runbook procedure.
 Do not shorten those procedures into this profile or infer their result from
 native pytest. No build or verification command grants release/publication authority.
 

@@ -94,6 +94,7 @@ def test_windows_portable_inventory_documents_inter_source_and_license(
         artifacts=[],
         corresponding_sources=[],
         distributions=[],
+        local_tooling=False,
     )
     write_notices(
         bundle_root=bundle,

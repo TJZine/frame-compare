@@ -14,7 +14,7 @@ verification, platform, release, and durable-plan procedures.
 | `uv` | Repository-selected compatible version | Locked dependency and command execution |
 | Git | Recent release | Version control |
 | Docker | Optional for ordinary work; required for Docker/runtime changes | Integration proof |
-| PowerShell on Windows | Required for portable packaging changes | Windows build, install, update, and verification paths |
+| PowerShell on Windows | Required for portable packaging changes | Windows build, ZIP installation, and verification |
 
 ## Development setup
 
@@ -49,9 +49,14 @@ tracked `.codanna/settings.toml.in` template; never commit the rendered
 
 ## Branch and pull request workflow
 
+```text
+feature branch --squash--> vX.Y.Z --merge commit--> pre-release --merge commit--> main
+                                                   release candidate             stable
+```
+
 1. Start from the base branch named in the issue, handoff, or maintainer request.
-   Otherwise start from and target `pre-release` for normal development. `main`
-   receives the reviewed squash promotion of a complete release.
+   For release integration work, start from and target the active version branch.
+   Dependabot and Release Please target `pre-release`.
 2. Create a focused branch:
 
    ```bash
@@ -64,19 +69,14 @@ tracked `.codanna/settings.toml.in` template; never commit the rendered
 5. Run applicable verification from the repository profile and specialist runbook.
 6. Open a pull request against the intended integration branch.
 
-Delete completed development branches after merging. Freeze `pre-release` during
-release acceptance; after successful stable publication, approved branch maintenance
-archives its accepted head and starts it again from the published `main` commit.
-Start new-cycle branches from the refreshed `pre-release`. Unmerged or local-only
-work must be carried forward explicitly before approving that operation. See the
-[release branch procedure](docs/ENGINEERING_RUNBOOK.md#pre-release-staging-and-dependency-update-flow).
-
-Do not assume `main`, `staging`, `cleanup`, or a version-development branch is the
-correct target when the task names another base explicitly.
+Squash feature PRs and delete their branches after merging. Use merge commits for
+version branch integration and stable promotion. Follow the
+[release branch procedure](docs/ENGINEERING_RUNBOOK.md#pre-release-and-stable-publication)
+for RC testing and promotion.
 
 ## Pull request titles
 
-Use Conventional Commit format because the squash title becomes release history:
+Use Conventional Commit format. Feature PR titles become squash commit messages.
 
 | Type | Use |
 | --- | --- |
@@ -574,10 +574,7 @@ they have the right to submit the work under those terms.
 
 ## Releases
 
-Release Please owns reviewed version and changelog pull requests after project
-initialization. The guarded Windows release workflow owns exact-commit publication,
-mandatory assets, checksums, update signing, and final release creation.
-
-Maintainer procedure and current branch policy live exclusively in the
-[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md). Historical initial-release steps
-belong in release evidence, not this contributor onboarding guide.
+Release Please prepares version and changelog PRs on `pre-release`. The RC and
+stable workflows publish the scanned Windows ZIP and its SHA-256 file. Follow the
+[maintainer release procedure](docs/ENGINEERING_RUNBOOK.md#pre-release-and-stable-publication)
+for acceptance, promotion, and opening the next release cycle.

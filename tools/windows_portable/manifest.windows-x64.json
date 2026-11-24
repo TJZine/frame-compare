@@ -1,19 +1,19 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "bundle": {
     "platform": "windows",
     "arch": "x64",
     "vs_ref": "R82",
-    "python_version": "3.14.10",
+    "python_version": "3.15.2",
     "ffmpeg_policy": "lgpl-only",
     "plugin_layout": "R74+ site-packages/vapoursynth/plugins only",
-    "notes": "Deterministic Windows media runtime contract. VapourSynth plugins are installed only in the canonical site-packages/vapoursynth/plugins directory; native media components are not present in code-only update ZIPs, so installations crossing this runtime fingerprint require a complete portable bundle refresh. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
+    "notes": "Deterministic Windows media runtime contract. VapourSynth plugins are installed only in the canonical site-packages/vapoursynth/plugins directory. BtbN FFmpeg remains an immutable retained end-of-month LGPL-only release-branch artifact.",
     "runtime_fingerprints": {
       "analysis": "b9c8c9d3c7937e1e3219d6b3c22d323b89e8ecd277606be26fe94e3fcfffda28",
       "probe": "b411643a70b6777974e141274614df896cf742d932fe02038e26e247dc846982",
       "alignment": "1da95673a8315f0be8d14ded7b889b0c6ec3ae55618e4c1bc75b96315da4b324",
       "index": "47d07506e489fb708e6a6baf07eed55d50f241e91c7a011b6dbd5074aae024c3",
-      "full": "50c72cd2078e6909b28b0ea9bcf576c4c06899f186a78d62435dda7f2a199db4"
+      "full": "59b7ca351512938b4da41e5d7b3a06c7c5b37de84c899604c7b8d8b9bba4cd4d"
     }
   },
   "artifacts": [
@@ -50,11 +50,11 @@
     {
       "id": "python-embed-amd64",
       "name": "Python embeddable package (amd64)",
-      "version": "3.14.10",
-      "url": "https://www.python.org/ftp/python/3.14.10/python-3.14.10-embed-amd64.zip",
-      "source_url": "https://www.python.org/ftp/python/3.14.10/Python-3.14.10.tgz",
-      "sha256": "90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159",
-      "bytes": 12619664,
+      "version": "3.15.2",
+      "url": "https://www.python.org/ftp/python/3.15.2/python-3.15.2-embed-amd64.zip",
+      "source_url": "https://www.python.org/ftp/python/3.15.2/Python-3.15.2.tgz",
+      "sha256": "d012f3aa29cf07436dae8aea1fec0fd195c2612a0b059b1f915ae0afb9ad1f62",
+      "bytes": 13740486,
       "license": {
         "spdx": "Python-2.0",
         "url": "https://docs.python.org/3/license.html"
@@ -65,9 +65,10 @@
       },
       "release_date": "2026-10-25",
       "source_kind": "release",
-      "source_ref": "3.14.10",
-      "source_sha256": "9e4996c19ae5a3df31f10c37723661f71d3455d73bd005f79df7098e5cc13192",
-      "source_bytes": 31671453
+      "source_ref": "3.15.2",
+      "source_sha256": "f74e1db0eabd651cd01e4e2a00201bd41866abe74869ab716f9bf33cbbaa0943",
+      "source_bytes": 35882840,
+      "notes": "The Windows application runtime omits the optional _sqlite3 extension and its SQLite DLL. The CPython license is retained."
     },
     {
       "id": "vapoursynth-portable-r82",
@@ -92,7 +93,7 @@
         "type": "extract",
         "destination": "vs/core"
       },
-      "notes": "R82 stable portable runtime with core API R4.3. The archive contains the same CPython 3.12 ABI3 wheel as the frozen lock and supports the selected CPython 3.14 runtime.",
+      "notes": "R82 stable portable runtime with core API R4.3. The archive contains the same CPython 3.12 ABI3 wheel as the frozen lock and supports the selected CPython 3.15 runtime.",
       "release_date": "2026-11-01",
       "source_kind": "release",
       "source_ref": "R82",
@@ -309,14 +310,9 @@
           "path": "licenses/common/LGPL-3.0.txt",
           "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
           "source_url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/pyside-setup-everywhere-src-6.12.0.tar.xz"
-        },
-        {
-          "path": "licenses/lsmash-works/dependencies/FFmpeg-COPYING.LGPLv2.1.txt",
-          "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30",
-          "source_url": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz"
-        }],
-        "notes": "The Windows wheel bundles Qt 6.12.0 multimedia and FFmpeg 9.0.1 DLLs; both corresponding sources and license texts are inventoried."
+        }]
       },
+      "notes": "The portable profile keeps Qt Multimedia and its native Windows backend. It excludes the wheel's FFmpeg DLLs and FFmpeg plugin because VSView plays PCM audio through QAudioSink.",
       "install": { "type": "python_wheel" },
       "source_kind": "release",
       "source_ref": "6.12.0",
@@ -613,17 +609,6 @@
       "bytes": 18211772
     },
     {
-      "name": "FFmpeg (Qt Multimedia 6.12.0 build)",
-      "version": "9.0.1",
-      "selection_kind": "release",
-      "source_ref": "n9.0.1",
-      "license": "LGPL-2.1-or-later",
-      "source_url": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz",
-      "sha256": "cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635",
-      "bytes": 12036420,
-      "notes": "The PySide6 Addons Windows wheel contains avcodec-63.dll, avformat-63.dll, avutil-61.dll, and Qt's FFmpeg multimedia plugin; embedded build paths identify FFmpeg n9.0.1."
-    },
-    {
       "name": "xxHash",
       "version": "0.8.3",
       "selection_kind": "tag",
@@ -644,5 +629,5 @@
       "bytes": 1566911
     }
   ],
-  "notes": "Windows FFMS2 remains deliberately excluded. Native media artifacts require a full bundle refresh when the media-runtime fingerprint changes; code-only updates are limited to installations already carrying the same fingerprint."
+  "notes": "Windows FFMS2 remains deliberately excluded."
 }

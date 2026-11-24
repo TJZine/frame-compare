@@ -586,25 +586,36 @@ Selected-video identity is not persisted.
   path is reported as unreadable.
 - screenshot output directories and generated HTML reports
 - Windows source installs build verified bundles under
-  `dist/frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z` (UTC); the AppData
-  active-bundle pointer selects the workspace. The builder validates inputs before
-  atomically reserving the final output path, refuses occupied/unsafe paths, and
-  cleans up only its own reservation on failure. Building at the final path keeps
-  the requirements-lock fingerprint unchanged for CI's fixed build location.
-  Source reinstalls move non-empty `config/`, `comparison_videos/`, and `generated/`
-  folders by default (`-UserData Leave` opts out), reverse moves on activation
-  failure even after pointer replacement, and restore previous shims. A fresh
-  pointer byte snapshot after building owns migration and rollback under an
-  exclusive activation lock shared with current bundle installation. Reparse-point
-  ancestry is refused where physical containment is unproven; stored pointers must
-  be fully qualified. They never delete previous bundles. Recovery diagnostics
-  preserve and report all known paths even when the pointer cannot be read.
-  A pending migration blocks another source install. Candidate-pointer and folder
-  state establish data locations, not completed activation: configuration and PATH
-  setup follow pointer publication. Candidate data stays in place while activation,
-  configuration, installed shims, and PATH are verified before marker removal.
-  Marker-cleanup failure after successful activation reports a nonzero cleanup
-  error without reversing the candidate pointer or data.
+  `dist/frame-compare-portable-win-x64-<yyyyMMdd-HHmmss>Z` (UTC). The builder validates
+  inputs before atomically reserving the final output path, refuses occupied or
+  unsafe paths, and cleans up only its own reservation on failure. Building at the
+  final path keeps the requirements-lock fingerprint stable for CI's fixed location.
+- The bundle's `portable_activation.ps1` owns activation for both ZIP and source
+  installs. Source installation holds the exclusive `state/source-install.lock`
+  handle across provisioning and building, then passes it to the built bundle's
+  helper. ZIP installation acquires the same lock directly. Uninstallation takes
+  the lock before removing the managed shims, pointer, and PATH entry. All three
+  refuse to proceed while a pending migration marker exists.
+- Activation reads the previous pointer as exact bytes, with explicit UTF-8
+  decoding for pointer and marker interpretation. A fully qualified existing
+  bundle other than the candidate can supply user data. The helper checks
+  reparse-point ancestry and moves non-empty `config/`, `comparison_videos/`, and
+  `generated/` by same-volume rename after recording the planned moves.
+  `-UserData Leave` skips the moves. The helper retains both bundle directories
+  and leaves external generated-data roots in place.
+- Activation commits after the helper writes the shims and pointer, initializes
+  any missing fallback config, and completes user PATH registration. The installed
+  shim selects the workspace using the AppData pointer and prefers the bundle's
+  `config/config.toml` to the AppData fallback. Activation preserves any existing
+  fallback config.
+- Before commit, recovery restores the exact original pointer bytes or its
+  absence, restores the installer's registration changes, and reverses completed
+  moves. If the pointer changes unexpectedly or recovery cannot proceed safely,
+  the helper stops and reports the pointer state and folder locations. A
+  candidate pointer may appear before registration completes. After commit,
+  failure to remove a legacy updater file yields a warning. Failure to remove
+  the pending migration marker returns a nonzero exit and leaves the new
+  installation active.
 
 `frame_compare.vs.runtime_contract` is the sole component-identity owner for the
 coordinated media stack. It emits narrow analysis, probe, alignment, and index
@@ -966,18 +977,16 @@ External runtime boundaries:
 - default browser open for slow.pics URLs in interactive CLI runs
 - clipboard integration for slow.pics URLs in interactive CLI runs
 - Docker build/test runtime
-- Windows PowerShell installer and updater scripts
+- Windows PowerShell installer and launcher scripts
 - VSView public plugin API and event-loop/threading contract
 
-Current Docker capability contract:
+Current runtime capability contract:
 
 | Environment | Current posture |
 | --- | --- |
-| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap through the default headless software-Vulkan path only; Docker-based VSView GUI launch is unsupported beyond those backend features, and macOS Docker is not a native GPU or native Qt desktop surface |
-| Linux Docker, CPU/software Vulkan | Canonical Docker default; deterministic, headless, CI-safe software Vulkan path |
-| Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` compose override/profile plus `tools/verify_docker_gpu.sh`; documented-only/unverified until separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` compose override/profile plus `tools/verify_docker_gui.sh`; the 2026-10-07 dependency-refresh handoff records reported Linux-container offscreen proof on macOS Docker Desktop for a production-generated three-source session, panel, frame-0 outputs, sidecar, and cleanup. The current Linux X11 host wrapper, visible launch, and physical native acceptance remain unverified |
-| Native Windows portable | First-class native runtime with backend rendering, reports, and VSView GUI support outside Docker |
+| macOS Docker Desktop and Linux Docker | Headless backend rendering, reports, and software-Vulkan tonemapping |
+| Native Linux with `--extra vsview` | Desktop alignment review through the [native installation](getting-started/native.md#install-with-uv) |
+| Native Windows portable | Backend rendering, reports, and VSView desktop alignment review |
 
 Keep these integrations at their current owners:
 
@@ -1010,56 +1019,12 @@ streams directed to the null device. The CLI waits up to 10 seconds for the brok
 and kills and reaps it on timeout. Desktop handlers and clipboard selection owners
 can outlive the broker, including after a broker failure or timeout.
 
-The default Docker behavior is intentionally narrower than the native Windows
-portable runtime: it preserves deterministic headless software Vulkan for backend
-rendering and report generation. Optional Docker GPU or GUI profiles are
-host-dependent runtime variants and must be documented and verified separately from
-the default Docker gate. When those variants are discussed, use the official Docker
-GPU/container, Docker Desktop GPU support, Compose profiles, and Compose `gpus`
-documentation as the external contract reference.
-
-Current Docker owner seams for optional profiles remain explicit:
-
-- `docker-compose.yml`: default headless software-Vulkan services, including a
-  configuration-writable `frame-compare-wizard` setup service and a
-  configuration-read-only `frame-compare-run` service with the single persistent
-  generated-data mount
-- `docker-compose.gpu-nvidia.yml`: opt-in NVIDIA GPU override/profile only
-- `docker-compose.gui-linux.yml`: opt-in Linux X11/VSView override/profile only
-- `tools/verify_docker_integration.sh`: canonical default Docker gate
-- `tools/verify_docker_gpu.sh`: optional NVIDIA visibility/Vulkan/placebo proof
-- `tools/verify_docker_gui.sh`: optional Linux X11/VSView dependency and session-script proof
-- `tools/open_docker_host_target.py`: host-side helper for default compose output mounts and explicit `https://slow.pics/...` URLs only
-
-The GUI profile stays container-boundary aware rather than changing CLI/runtime
-owners. Its explicit X11 contract is:
-
-- host `DISPLAY`
-- host `/tmp/.X11-unix` mounted into the container
-- optional host `XAUTHORITY` cookie file mount when required by the desktop
-- container process UID/GID aligned to the host user for narrow local-user X11 permission flows
-
-CI runs the optional GUI image's offscreen proof on native AMD64 and ARM64.
-The visible X11 launch remains a separate host check. The verifier requires the
-`gui-linux` image to discover and load the exact Frame Compare VSView entry point,
-construct the panel in its inert ordinary-session state, load a production-generated
-L-SMASH session with VSView 0.14.0, register one `Reference` and ordered comparison
-outputs, render frame 0 for each output, exercise complete source readiness plus the
-whole-set positions and keep-current actions, and round-trip/validate the sibling
-result sidecar. The 2026-10-07 dependency-refresh handoff records a reported
-inside-container offscreen pass on macOS Docker Desktop for this contract, including
-a production-generated three-source L-SMASH session, frame-0 rendering, sidecar
-round-trip, and cleanup. This is historical reported evidence for that refresh,
-not a current GUI run; raw historical logs were not independently authenticated
-in this checkout. Execution through the current Linux/X11 host wrapper remains
-unavailable/unverified until a compatible Linux/X11 host runs it. The contract covers dependency
-availability, plugin discovery, panel construction, generated metadata/result
-integration, named-output registration, and offscreen rendering without requiring a
-real desktop launch. It does not prove visible X11 launch, Qt ergonomics, native
-Windows behavior, or physical-Windows acceptance. Any real UI launch remains a manual
-Linux desktop action outside the default Docker verification gate.
-macOS offscreen or synthetic-panel checks are UI/plugin proof only; if the host lacks
-`core.lsmas`, they do not prove native L-SMASH media loading.
+Docker uses headless software Vulkan for backend rendering and report generation.
+The [Compose services](getting-started/docker.md#compose-services) include the
+configuration-writable setup wizard, the read-only-configuration run service, the
+development shell, and the real-dependency test service. They share the persistent
+generated-data mount. `tools/verify_docker_integration.sh` owns the Docker runtime gate,
+which runs on hosted AMD64 and ARM64.
 
 The host open helper is also container-boundary aware rather than a CLI contract
 change. It does not alter in-container report auto-open or slow.pics browser

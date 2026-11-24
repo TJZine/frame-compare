@@ -18,6 +18,16 @@ import pytest
 from tools.windows_portable import portable_bundle as bundle
 from tools.windows_portable import portable_runtime as runtime
 from tools.windows_portable.portable_archive import checked_zip
+from tools.windows_portable.write_bundle_inventory import _archive_inventory
+
+_QT_FFMPEG_FILES = {
+    "avcodec-63.dll",
+    "avformat-63.dll",
+    "avutil-61.dll",
+    "swresample-7.dll",
+    "swscale-10.dll",
+    "plugins/multimedia/ffmpegmediaplugin.dll",
+}
 
 
 def _zip(path: Path, files: dict[str, bytes]) -> Path:
@@ -214,8 +224,9 @@ def _lock_package(name: str, version: str, pin: runtime.Pin) -> str:
     )
 
 
-def test_portable_assembly_is_inert_and_reproducible(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("manifest_version", [2, 3], ids=["historical", "current"])
+def test_portable_assembly_is_inert_and_safely_packaged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, manifest_version: int
 ) -> None:
     if shutil.which("uv") is None:
         pytest.skip("uv is required to exercise the offline wheel install")
@@ -243,6 +254,17 @@ def test_portable_assembly_is_inert_and_reproducible(
             "pyside6_webengine-1.dist-info/licenses/LICENSE": b"notice",
         },
     )
+    qt_addons = _wheel(
+        tmp_path / "pyside6_addons-1-py3-none-win_amd64.whl",
+        "pyside6-addons",
+        "1",
+        {
+            **{f"PySide6/{name}": b"excluded Qt FFmpeg file" for name in _QT_FFMPEG_FILES},
+            "PySide6/QtMultimedia.pyd": b"retained binding",
+            "PySide6/Qt6Multimedia.dll": b"retained Qt library",
+            "PySide6/plugins/multimedia/windowsmediaplugin.dll": b"retained Windows plugin",
+        },
+    )
     marker = tmp_path / "executed"
     demo = _wheel(
         tmp_path / "sample-1-py3-none-any.whl",
@@ -262,9 +284,12 @@ def test_portable_assembly_is_inert_and_reproducible(
             "python",
             {
                 "LICENSE.txt": b"license",
-                "python314.zip": b"stdlib",
-                "python314._pth": b"original",
+                "python315.zip": b"stdlib",
+                "python315._pth": b"original",
                 "python.exe": b"never execute",
+                "_sqlite3.pyd": b"optional extension",
+                "sqlite3.dll": b"optional native library",
+                "_ssl.pyd": b"retained extension",
             },
         ),
         ("vs", "vs/core", {f"wheel/{vs_wheel.name}": vs_wheel.read_bytes()}),
@@ -283,6 +308,7 @@ def test_portable_assembly_is_inert_and_reproducible(
         ("vapoursynth", "81", vs_wheel),
         ("vapoursynth-lsmas", "1", lsmas),
         ("pyside6-webengine", "1", qt),
+        ("pyside6-addons", "1", qt_addons),
         ("sample", "1", demo),
     ]
     lock = "".join(
@@ -303,9 +329,12 @@ def test_portable_assembly_is_inert_and_reproducible(
         record["license"] = {
             "files": [{"path": "licenses/TEST.txt", "sha256": runtime.sha(older_notice)}]
         }
-    manifest = json.dumps(
-        {"bundle": {"python_version": "3.14.10"}, "artifacts": manifest_records}
-    ).encode()
+    manifest_data = {
+        "manifest_version": manifest_version,
+        "bundle": {"python_version": "3.15.2"},
+        "artifacts": manifest_records,
+    }
+    manifest = json.dumps(manifest_data).encode()
     live_manifest.write_bytes(manifest)
     (source / "uv.lock").write_bytes(lock)
 
@@ -334,16 +363,28 @@ def test_portable_assembly_is_inert_and_reproducible(
     selected = commit("selected runtime")
     newer_notice = b"newer notice\n"
     live_notice.write_bytes(newer_notice)
-    newer_manifest = manifest.replace(
+    custom_manifest = manifest.replace(
         runtime.sha(older_notice).encode(), runtime.sha(newer_notice).encode()
     )
-    live_manifest.write_bytes(newer_manifest)
+    newer_manifest = json.loads(custom_manifest)
+    if manifest_version == 2:
+        # The live checkout moves on to v3 while replay still takes v2 from Git.
+        newer_manifest["manifest_version"] = 3
+    live_manifest.write_text(json.dumps(newer_manifest), encoding="utf-8")
     assert commit("newer runtime") != selected
+    custom_manifest_path = tmp_path / "custom-manifest.json"
+    custom_manifest_path.write_bytes(custom_manifest)
 
     snapshot = tmp_path / "snapshot"
     snapshot.mkdir()
-    requirements_path = tmp_path / "requirements.txt"
-    requirements_path.write_bytes(requirements)
+
+    def export_requirements(repo: Path, commit: str, output: Path) -> bytes:
+        assert repo == source
+        assert commit == selected
+        output.write_bytes(requirements)
+        return requirements
+
+    monkeypatch.setattr(runtime, "export", export_requirements)
 
     def run_runtime(mode: str, *args: str) -> None:
         monkeypatch.setattr(
@@ -358,12 +399,10 @@ def test_portable_assembly_is_inert_and_reproducible(
     assert (snapshot / "licenses" / "TEST.txt").read_bytes() == older_notice
     monkeypatch.setattr(runtime, "TRIM", (1, 4))
     output = tmp_path / "runtime"
-    producer = tmp_path / "producer"
     custom = tmp_path / "custom"
     for destination, manifest_input in (
         (output, snapshot / runtime.MANIFEST.name),
-        (producer, snapshot / runtime.MANIFEST.name),
-        (custom, live_manifest),
+        (custom, custom_manifest_path),
     ):
         destination.mkdir()
         run_runtime(
@@ -372,14 +411,12 @@ def test_portable_assembly_is_inert_and_reproducible(
             str(manifest_input),
             "--cache",
             str(cache),
-            "--requirements",
-            str(requirements_path),
             "--output",
             str(destination),
         )
         assert (destination / "manifest.json").read_bytes() == manifest_input.read_bytes()
     assert (output / "manifest.json").read_bytes() == manifest
-    assert (custom / "manifest.json").read_bytes() == newer_manifest
+    assert (custom / "manifest.json").read_bytes() == custom_manifest
 
     site = output / runtime.SITE
     assert not marker.exists()
@@ -391,28 +428,175 @@ def test_portable_assembly_is_inert_and_reproducible(
     assert not list(site.rglob("*.pyc"))
     assert not (site / "PySide6/QtWebEngine.dll").exists()
     assert "QtWebEngine.dll" not in (site / "pyside6_webengine-1.dist-info/RECORD").read_text()
-    assert (output / "python/python314._pth").read_bytes() == runtime.embedded_search_path("314")
+    record_path = "pyside6_addons-1.dist-info/RECORD"
+    with zipfile.ZipFile(qt_addons) as original_wheel:
+        original_record = {
+            row[0]: row[1:]
+            for row in csv.reader(original_wheel.read(record_path).decode().splitlines())
+        }
+    for projection in (output, custom):
+        addons_record = {
+            row[0]: row[1:]
+            for row in csv.reader(
+                (projection / runtime.SITE / record_path).read_text().splitlines()
+            )
+        }
+        for name in _QT_FFMPEG_FILES:
+            relative = f"PySide6/{name}"
+            projected = projection / runtime.SITE / relative
+            if manifest_version == 3:
+                assert not projected.exists()
+                assert relative not in addons_record
+            else:
+                assert projected.read_bytes() == b"excluded Qt FFmpeg file"
+                assert addons_record[relative] == original_record[relative]
+        for relative in (
+            "PySide6/QtMultimedia.pyd",
+            "PySide6/Qt6Multimedia.dll",
+            "PySide6/plugins/multimedia/windowsmediaplugin.dll",
+        ):
+            assert addons_record[relative] == original_record[relative]
+    assert (output / "python/python315._pth").read_bytes() == runtime.embedded_search_path("315")
+    sqlite_files = {
+        "python/_sqlite3.pyd": b"optional extension",
+        "python/sqlite3.dll": b"optional native library",
+    }
+    for projection in (output, custom):
+        for name, data in sqlite_files.items():
+            if manifest_version == 3:
+                assert not (projection / name).exists()
+            else:
+                assert (projection / name).read_bytes() == data
+    assert (output / "python/_ssl.pyd").read_bytes() == b"retained extension"
+    assert (output / "licenses/python-LICENSE.txt").read_bytes() == b"license"
     assert (
         output / "licenses/python/pyside6_webengine-1.dist-info__licenses/LICENSE"
     ).read_bytes() == b"notice"
 
-    first_zip = tmp_path / "first.zip"
-    second_zip = tmp_path / "second.zip"
-    bundle.write_bundle(output, first_zip)
-    bundle.write_bundle(producer, second_zip)
-    assert first_zip.read_bytes() == second_zip.read_bytes()
-    bundle.assert_bundle(second_zip, output)
-
-    # Rehashing an altered file in a producer inventory cannot override the
-    # independently assembled tree.
-    (producer / "python/python.exe").write_bytes(b"altered bytes")
-    (producer / "bundle_inventory.json").write_text('{"files": []}')
-    candidate = tmp_path / "producer.zip"
-    bundle.write_bundle(producer, candidate)
-    with pytest.raises(ValueError, match="Unexpected portable member|independently derived bytes"):
-        bundle.assert_bundle(candidate, output)
+    inventory = output / "bundle_inventory.json"
+    inventory.write_text(json.dumps({"archive": _archive_inventory(output, inventory)}))
+    archive_path = tmp_path / "portable.zip"
+    bundle.write_bundle(output, archive_path)
+    with checked_zip(archive_path) as archive:
+        assert archive.read(bundle.PREFIX + "manifest.json") == manifest
+        assert archive.read(bundle.PREFIX + "python/python315._pth") == (
+            runtime.embedded_search_path("315")
+        )
+        assert archive.read(bundle.PREFIX + "licenses/python-LICENSE.txt") == b"license"
+        assert archive.read(bundle.PREFIX + "python/_ssl.pyd") == b"retained extension"
+        for name, data in sqlite_files.items():
+            member = bundle.PREFIX + name
+            if manifest_version == 3:
+                assert member not in archive.namelist()
+            else:
+                assert archive.read(member) == data
+        pyside_prefix = bundle.PREFIX + "app/site-packages/PySide6/"
+        for name in _QT_FFMPEG_FILES:
+            member = pyside_prefix + name
+            if manifest_version == 3:
+                assert member not in archive.namelist()
+            else:
+                assert archive.read(member) == b"excluded Qt FFmpeg file"
+        assert archive.read(pyside_prefix + "QtMultimedia.pyd") == b"retained binding"
+        assert archive.read(pyside_prefix + "Qt6Multimedia.dll") == b"retained Qt library"
+        assert archive.read(pyside_prefix + "plugins/multimedia/windowsmediaplugin.dll") == (
+            b"retained Windows plugin"
+        )
+        assert archive.read(bundle.PREFIX + "ffmpeg/bin/ffmpeg.exe") == b"never execute"
+        assert bundle.PREFIX in archive.namelist()
 
     pinned_demo = _seed(demo, cache)
     (cache / (pinned_demo.sha256 + "-" + demo.name)).write_bytes(b"wrong")
     with pytest.raises(ValueError, match="Cached size or SHA-256 mismatch"):
         runtime.assemble(tmp_path / "tampered", manifest, lock, requirements, cache)
+
+
+@pytest.mark.parametrize("version", [1, "3"])
+def test_invalid_manifest_version_fails_before_runtime_inputs(
+    tmp_path: Path, version: int | str
+) -> None:
+    manifest = json.dumps({"manifest_version": version, "artifacts": []}).encode()
+    with pytest.raises(ValueError, match="Unsupported portable manifest version"):
+        runtime.assemble(tmp_path / "out", manifest, b"", b"", tmp_path / "cache")
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("drift", "expected"),
+    [
+        ("unlisted", r"unlisted=\['smoke-output\.txt'\]"),
+        ("missing", r"missing=\['launcher\.ps1'\]"),
+        ("changed-contents", r"Bundle file contents differ from inventory: launcher\.ps1"),
+        ("wrong-byte-count", r"Bundle file contents differ from inventory: launcher\.ps1"),
+        ("extra-directory", r"Bundle directories differ from inventory: unlisted=\['empty'\]"),
+        ("missing-directories", r"Bundle inventory is missing archive\.directories"),
+    ],
+)
+def test_portable_pack_rejects_inventory_drift(tmp_path: Path, drift: str, expected: str) -> None:
+    root = tmp_path / "bundle"
+    root.mkdir()
+    listed_file = root / "launcher.ps1"
+    listed_file.write_bytes(b"launcher")
+    inventory = root / "bundle_inventory.json"
+    archive_inventory = _archive_inventory(root, inventory)
+    if drift == "missing-directories":
+        del archive_inventory["directories"]
+    inventory.write_text(json.dumps({"archive": archive_inventory}))
+    if drift == "unlisted":
+        (root / "smoke-output.txt").write_text("unexpected")
+    elif drift == "missing":
+        listed_file.unlink()
+    elif drift == "changed-contents":
+        listed_file.write_bytes(b"LAUNCHER")
+    elif drift == "wrong-byte-count":
+        recorded = json.loads(inventory.read_text())
+        recorded["archive"]["files"][0]["bytes"] += 1
+        inventory.write_text(json.dumps(recorded))
+    elif drift == "extra-directory":
+        (root / "empty").mkdir()
+    destination = tmp_path / "output.zip"
+    with pytest.raises(ValueError, match=expected):
+        bundle.write_bundle(root, destination)
+    assert not destination.exists()
+    assert list(tmp_path.iterdir()) == [root]
+
+
+def test_portable_pack_preserves_competing_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "bundle"
+    root.mkdir()
+    launcher = b"launcher"
+    (root / "launcher.ps1").write_bytes(launcher)
+    inventory = root / "bundle_inventory.json"
+    inventory.write_text(json.dumps({"archive": _archive_inventory(root, inventory)}))
+    destination = tmp_path / "output.zip"
+    competing_bytes = b"another writer's output"
+
+    def occupy_destination(temporary: Path) -> None:
+        with checked_zip(temporary) as archive:
+            assert archive.read(bundle.PREFIX + "launcher.ps1") == launcher
+        with destination.open("xb") as competing:
+            competing.write(competing_bytes)
+
+    if sys.platform == "win32":
+        rename = Path.rename
+
+        def compete_at_rename(temporary: Path, target: Path) -> Path:
+            occupy_destination(temporary)
+            return rename(temporary, target)
+
+        monkeypatch.setattr(Path, "rename", compete_at_rename)
+    else:
+        hardlink_to = Path.hardlink_to
+
+        def compete_at_hardlink(target: Path, temporary: Path) -> None:
+            occupy_destination(temporary)
+            hardlink_to(target, temporary)
+
+        monkeypatch.setattr(Path, "hardlink_to", compete_at_hardlink)
+
+    with pytest.raises(FileExistsError):
+        bundle.write_bundle(root, destination)
+    assert destination.read_bytes() == competing_bytes
+    assert set(tmp_path.iterdir()) == {root, destination}

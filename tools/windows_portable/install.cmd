@@ -11,5 +11,5 @@ if not defined POWERSHELL_EXE (
   echo PowerShell was not found. Install PowerShell 7 or restore Windows PowerShell. 1>&2
   exit /b 9009
 )
-"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
+"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
 exit /b %ERRORLEVEL%

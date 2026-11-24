@@ -22,12 +22,15 @@ def test_release_contract_shared_validity_vectors() -> None:
 
 
 @pytest.mark.parametrize("interpreter", ["powershell", "pwsh"])
-def test_powershell_shared_version_vectors(repo_root: Path, interpreter: str) -> None:
+def test_powershell_shared_version_vectors(
+    repo_root: Path, tmp_path: Path, interpreter: str
+) -> None:
     exe = shutil.which(interpreter)
     if exe is None:
         pytest.skip(f"{interpreter} not available for shared version vectors")
     vectors = Path(__file__).with_name("version_vectors.json")
     cases = json.loads(vectors.read_text(encoding="utf-8"))
+    (tmp_path / "src/frame_compare").mkdir(parents=True)
     result = subprocess.run(
         [
             exe,
@@ -38,24 +41,24 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . $env:OWNER
 $table = Get-Content -LiteralPath $env:VECTORS -Raw -Encoding UTF8 | ConvertFrom-Json
+$source = Join-Path $env:FIXTURE 'src/frame_compare/__init__.py'
 foreach ($case in $table.validity) {
-  $expected = $case.valid
-  if ($null -ne $case.PSObject.Properties['powershell_valid']) { $expected = $case.powershell_valid }
-  if (($null -ne (ConvertTo-FrameCompareVersion $case.value)) -ne $expected) { throw "validity: $($case.value)" }
+  [IO.File]::WriteAllText($source, ('__version__ = "' + $case.value + '"'))
+  try { $actual = Get-AppVersionFromSource -RepoRootPath $env:FIXTURE }
+  catch {
+    if ($case.valid) { throw }
+    continue
+  }
+  if (!$case.valid -or $actual -cne $case.value) { throw "validity: $($case.value)" }
 }
-foreach ($case in $table.ordering) {
-  if ((Compare-FrameCompareVersion $case.left $case.right) -ne $case.order) { throw "ordering: $($case.left), $($case.right)" }
-}
-foreach ($case in $table.ranges) {
-  if ((Test-FrameCompareVersionInRange $case.value $case.min $case.max) -ne $case.allowed) { throw "range: $($case.value)" }
-}
-@{validity=$table.validity.Count; ordering=$table.ordering.Count; ranges=$table.ranges.Count} | ConvertTo-Json -Compress
+@{validity=$table.validity.Count} | ConvertTo-Json -Compress
 """,
         ],
         env=os.environ
         | {
-            "OWNER": str(repo_root / "tools/windows_portable/shim/frame-compare-version.ps1"),
+            "OWNER": str(repo_root / "tools/windows_portable/version_utils.ps1"),
             "VECTORS": str(vectors),
+            "FIXTURE": str(tmp_path),
         },
         capture_output=True,
         text=True,

@@ -21,7 +21,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           # Keep this intentionally lenient to avoid “format churn” CI failures.
-          # Squash-merge should use the PR title as the final commit message.
+          # Squash merges of feature PRs use the PR title as the final commit message.
           types: |
             feat
             fix

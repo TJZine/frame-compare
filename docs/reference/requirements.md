@@ -10,7 +10,7 @@ provides that stack differently.
 
 | Route | Operating system | You install | The route provides |
 | --- | --- | --- | --- |
-| [Windows portable](../getting-started/windows-portable.md) | Windows 10 or 11, x64 | Nothing else to run Frame Compare; verifying the download uses the GitHub CLI | Python, the media stack, VSView with the alignment panel, the installer, and the updater |
+| [Windows portable](../getting-started/windows-portable.md) | Windows 10 or 11, x64 | Nothing else to run Frame Compare | Python, the media stack, VSView with the alignment panel, and the installer |
 | [Docker](../getting-started/docker.md) | macOS or Linux | Docker with Docker Compose, and a clone of the repository | Python and the media stack, with software Vulkan for HDR |
 | [Native source](../getting-started/native.md) | Any system the media stack supports | Python, FFmpeg, VapourSynth, L-SMASH-Works, vs-placebo with Vulkan, and uv or pip | Frame Compare and its Python dependencies |
 
@@ -27,11 +27,9 @@ install uses the host's Vulkan driver.
 
 ## Alignment review
 
-The VSView alignment panel ships with the Windows bundle. A native install adds it with
-the `vsview` extra. The default Docker services do not include it, and Docker on macOS
-does not run VSView. [Docker profiles](../getting-started/docker-profiles.md) describes
-an optional Linux X11 profile for the panel; that profile is not yet verified on a
-visible desktop.
+The VSView alignment panel ships with the Windows bundle. For visual review on Linux,
+follow the [native installation instructions](../getting-started/native.md#install-with-uv)
+with `--extra vsview`. Docker runs headless.
 
 ## Exact versions
 

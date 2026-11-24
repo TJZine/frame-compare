@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from portable_archive import checked_zip, copy_exact, digest_file
 
 PREFIX = "frame-compare-portable-win-x64/"
+MAX_BUNDLE_INVENTORY = 16 * 1024**2
 MAX_RECEIPT = 16 * 1024
 MAX_SCAN_DOCUMENT = 512 * 1024**2
 # The observed Grype v6 database is about 3.2 GiB. Allow growth while bounding the hash read.
@@ -75,22 +76,29 @@ def _stage(args: argparse.Namespace) -> None:
     if args.output.exists():
         raise ValueError("Portable scan output directory must not already exist")
 
-    receipt = _read_json(args.verification, MAX_RECEIPT)
+    expected_digest = _require_digest(args.expected_digest, "producer ZIP")
     archive_digest = digest_file(args.archive)
-    if (
-        receipt.get("schema") != 2
-        or receipt.get("portable_reproduced") is not True
-        or receipt.get("commit") != args.expected_sha
-        or receipt.get("portable_artifact_id") != args.expected_artifact_id
-        or receipt.get("bundle_sha256") != archive_digest
-    ):
-        raise ValueError("Portable artifact does not match its verification receipt")
-    _require_digest(receipt.get("requirements_sha256"), "requirements")
-    _require_digest(receipt.get("manifest_sha256"), "manifest")
+    if archive_digest != expected_digest:
+        raise ValueError("Portable artifact does not match the producer ZIP digest")
 
-    args.output.mkdir(parents=True)
     file_count = directory_count = expanded_bytes = 0
     with checked_zip(args.archive) as archive:
+        try:
+            inventory_entry = archive.getinfo(f"{PREFIX}bundle_inventory.json")
+        except KeyError as error:
+            raise ValueError(
+                "Portable ZIP is missing its canonical bundle_inventory.json"
+            ) from error
+        if not 0 < inventory_entry.file_size <= MAX_BUNDLE_INVENTORY:
+            raise ValueError("Portable bundle_inventory.json has an invalid size")
+        inventory = json.loads(archive.read(inventory_entry))
+        bundle = inventory.get("bundle") if isinstance(inventory, dict) else None
+        if not isinstance(bundle, dict) or bundle.get("commit_sha") != args.expected_sha:
+            raise ValueError(
+                "Portable bundle_inventory.json commit does not match the expected SHA"
+            )
+
+        args.output.mkdir(parents=True)
         for entry in archive.infolist():
             name = entry.filename
             if not name.startswith(PREFIX):
@@ -118,11 +126,8 @@ def _stage(args: argparse.Namespace) -> None:
         {
             "schema": 1,
             "commit": args.expected_sha,
-            "tag": receipt.get("tag"),
             "portable_artifact_id": args.expected_artifact_id,
             "portable_sha256": archive_digest,
-            "verification_sha256": digest_file(args.verification),
-            "portable_reproduced": True,
             "files": file_count,
             "directories": directory_count,
             "expanded_bytes": expanded_bytes,
@@ -207,14 +212,12 @@ def _policy(args: argparse.Namespace) -> None:
     scan_input = _read_json(args.scan_input, MAX_RECEIPT)
     if (
         scan_input.get("schema") != 1
-        or scan_input.get("portable_reproduced") is not True
         or COMMIT.fullmatch(str(scan_input.get("commit", ""))) is None
         or ARTIFACT_ID.fullmatch(str(scan_input.get("portable_artifact_id", ""))) is None
     ):
         raise ValueError("Scan input receipt is malformed")
 
     _require_digest(scan_input.get("portable_sha256"), "portable")
-    _require_digest(scan_input.get("verification_sha256"), "verification receipt")
     syft = _read_json(args.syft, MAX_SCAN_DOCUMENT)
     _require_scanner(syft, "syft", args.expected_syft_version)
     package_count = _inventory_count(syft, "artifacts", "Syft")
@@ -253,7 +256,7 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     stage = subparsers.add_parser("stage", help="validate and safely extract the portable ZIP")
     stage.add_argument("--archive", type=Path, required=True)
-    stage.add_argument("--verification", type=Path, required=True)
+    stage.add_argument("--expected-digest", required=True)
     stage.add_argument("--expected-sha", required=True)
     stage.add_argument("--expected-artifact-id", required=True)
     stage.add_argument("--output", type=Path, required=True)

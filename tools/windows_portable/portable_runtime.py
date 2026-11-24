@@ -58,6 +58,15 @@ EXPORT = (
 )
 TRIM = (125, 359295997)
 NATIVE_DESTINATIONS = {"ffmpeg", "python", "vs/core"}
+PYTHON_SQLITE_BINARIES = frozenset({"_sqlite3.pyd", "sqlite3.dll"})
+QT_FFMPEG_FILES = {
+    "avcodec-63.dll",
+    "avformat-63.dll",
+    "avutil-61.dll",
+    "swresample-7.dll",
+    "swscale-10.dll",
+    "ffmpegmediaplugin.dll",
+}
 _SHA = re.compile(r"[a-f0-9]{64}")
 _REQUIREMENT = re.compile(r"([a-z0-9-]+)==([0-9][a-z0-9.]*)(?: ; (.+))? \\")
 _COMPATIBLE_WHEEL = re.compile(
@@ -229,7 +238,14 @@ def _locked_inputs(lock: bytes, requirements: bytes, python_tag: str) -> dict[st
     return result
 
 
-def _unpack_archive(layout: Layout, archive_path: Path, destination: str, prefix: str) -> None:
+def _unpack_archive(
+    layout: Layout,
+    archive_path: Path,
+    destination: str,
+    prefix: str,
+    *,
+    omit_files: frozenset[str] = frozenset(),
+) -> None:
     check_path(destination)
     if prefix:
         check_path(prefix.removesuffix("/"))
@@ -240,6 +256,8 @@ def _unpack_archive(layout: Layout, archive_path: Path, destination: str, prefix
             if not entry.filename.startswith(prefix):
                 raise ValueError(f"ZIP member is outside its pinned strip prefix: {entry.filename}")
             relative = entry.filename[len(prefix) :].removesuffix("/")
+            if not entry.is_dir() and relative.casefold() in omit_files:
+                continue
             if entry.is_dir():
                 layout.directory(f"{destination}/{relative}" if relative else destination)
             else:
@@ -414,7 +432,7 @@ def _trim_webengine(site: Path) -> list[Path]:
     return excluded
 
 
-def _trim_site_packages(site: Path) -> None:
+def _trim_site_packages(site: Path, *, exclude_qt_ffmpeg: bool) -> None:
     # uv's dependency entry-point launchers refer to the build interpreter.
     # Frame Compare ships its own relocatable launchers at the bundle root.
     # The Qt wheels also contain bytecode for a different Python version.
@@ -432,6 +450,12 @@ def _trim_site_packages(site: Path) -> None:
     for directory in [*script_dirs, *site.rglob("__pycache__")]:
         shutil.rmtree(directory)
     excluded = _trim_webengine(site)
+    if exclude_qt_ffmpeg:
+        excluded.extend(
+            path
+            for path in (site / "PySide6").rglob("*")
+            if path.name.casefold() in QT_FFMPEG_FILES and path.is_file()
+        )
     for path in excluded:
         path.unlink()
 
@@ -474,9 +498,18 @@ def _unique_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
+def _read_portable_manifest(manifest: bytes) -> dict:
+    configuration = json.loads(manifest, object_pairs_hook=_unique_json_keys)
+    version = configuration.get("manifest_version")
+    if type(version) is not int or version not in (2, 3):
+        raise ValueError("Unsupported portable manifest version (expected 2 or 3)")
+    return configuration
+
+
 def assemble(root: Path, manifest: bytes, lock: bytes, requirements: bytes, cache: Path) -> None:
     layout = Layout(root)
-    configuration = json.loads(manifest, object_pairs_hook=_unique_json_keys)
+    configuration = _read_portable_manifest(manifest)
+    manifest_version = configuration["manifest_version"]
     python_version = configuration["bundle"]["python_version"]
     version = re.fullmatch(r"(3)\.(\d{1,2})\.\d+", python_version)
     if version is None:
@@ -504,8 +537,13 @@ def assemble(root: Path, manifest: bytes, lock: bytes, requirements: bytes, cach
             _unpack_archive(
                 layout,
                 download(pin, cache),
-                install["destination"],
+                destination,
                 install.get("strip_prefix", ""),
+                omit_files=(
+                    PYTHON_SQLITE_BINARIES
+                    if manifest_version == 3 and destination == "python"
+                    else frozenset()
+                ),
             )
         elif install["type"] == "python_wheel" and pin.filename.endswith(".whl"):
             name = normalize(pin.filename.split("-")[0])
@@ -526,7 +564,7 @@ def assemble(root: Path, manifest: bytes, lock: bytes, requirements: bytes, cach
     site = root / SITE
     if not (site / "vapoursynth/libvapoursynth.dll").is_file():
         raise ValueError("VapourSynth wheel lacks the managed package DLL")
-    _trim_site_packages(site)
+    _trim_site_packages(site, exclude_qt_ffmpeg=manifest_version == 3)
     _python_licenses(root)
     for source, name in (("ffmpeg/LICENSE.txt", "ffmpeg"), ("python/LICENSE.txt", "python")):
         shutil.copyfile(root / source, root / f"licenses/{name}-LICENSE.txt")
@@ -541,7 +579,7 @@ def git_blob(repo: Path, commit: str, path: Path) -> bytes:
 def snapshot_manifest(repo: Path, commit: str, root: Path) -> None:
     """Project the selected manifest and its vendored notices as exact Git bytes."""
     manifest = git_blob(repo, commit, MANIFEST)
-    artifacts = json.loads(manifest, object_pairs_hook=_unique_json_keys)["artifacts"]
+    artifacts = _read_portable_manifest(manifest)["artifacts"]
     layout = Layout(root)
     layout.generate(MANIFEST.name, manifest)
     for artifact in artifacts:
@@ -574,15 +612,12 @@ def export(repo: Path, commit: str, output: Path) -> bytes:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "mode", choices=("assemble", "export", "anitopy-wheel", "snapshot-manifest")
-    )
+    parser.add_argument("mode", choices=("assemble", "anitopy-wheel", "snapshot-manifest"))
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--requirements", type=Path)
     args = parser.parse_args()
     repo = args.repo.resolve(strict=True)
     commit = args.commit_sha
@@ -593,12 +628,6 @@ def main() -> None:
             parser.error("snapshot-manifest requires an empty reserved output directory")
         snapshot_manifest(repo, commit, args.output)
         return
-    if args.mode == "export":
-        if args.output is None:
-            parser.error("export requires --output")
-        export(repo, commit, args.output)
-        return
-
     lock = git_blob(repo, commit, Path("uv.lock"))
     if args.mode == "anitopy-wheel":
         if args.cache is None or args.output is None:
@@ -626,11 +655,7 @@ def main() -> None:
         parser.error("assembly needs a manifest, a cache and an empty reserved output directory")
     manifest = args.manifest.read_bytes()
     requirement_file = root / "requirements.lock.txt"
-    if args.requirements is None:
-        requirements = export(repo, commit, requirement_file)
-    else:
-        requirements = args.requirements.read_bytes()
-        requirement_file.write_bytes(requirements)
+    requirements = export(repo, commit, requirement_file)
     assemble(root, manifest, lock, requirements, args.cache)
     (root / "manifest.json").write_bytes(manifest)
 

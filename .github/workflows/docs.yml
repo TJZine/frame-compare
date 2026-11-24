@@ -2,7 +2,7 @@ name: Documentation
 
 on:
   pull_request:
-    branches: [main, pre-release, staging]
+    branches: [main, pre-release]
     paths: &docs-paths
       - docs/**
       - README.md
@@ -16,7 +16,7 @@ on:
       - .github/ISSUE_TEMPLATE/config.yml
       - tests/workflows/test_docs_workflow.py
   push:
-    branches: [main, pre-release, staging]
+    branches: [main, pre-release]
     paths: *docs-paths
   workflow_dispatch:
 

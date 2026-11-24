@@ -9,12 +9,12 @@ A version shown here is supported only as part of the complete profile described
 
 | Component | Previous baseline | Selected component | Upstream date | Selection kind | Why this selection |
 | --- | --- | --- | --- | --- | --- |
-| Python | 3.13.17 | **3.13.18** (Docker), **3.14.10** (Windows portable) | 2026-10-25 | Stable security releases | Docker retains Python 3.13. Python.org distributes 3.13.18 as source and provides the official Windows embeddable ZIP for 3.14.10. |
+| Python | 3.13.17 | **3.13.18** (Docker), **3.15.2** (Windows portable) | 2026-10-25 | Stable security releases | Docker retains Python 3.13. Python.org distributes 3.13.18 as source and provides the official Windows embeddable ZIP for 3.15.2. |
 | VapourSynth | R81 | **R82**, commit `e0fadcc1c8977e99b11ce2e478996a867a939874` | 2026-11-01 | Formal stable release | Retains API R4.3 and CPython 3.12 ABI3 wheels. Includes Matroska output metadata and GPU interoperability fixes. |
 | VSView | 0.13.0 | **0.14.0** | 2026-10-26 | Stable Python release | Retains named outputs and the base dependency graph. The Frame Compare alignment panel uses the version-gated workspace bridge. |
 | PySide6 | Previous Qt binding | **6.12.0** | 2026-10-08 | Locked Python resolution | VSView's documented Qt backend. The portable bundle pins the matching Qt runtime and requires native startup proof before release. |
 | Qt PDF (Windows) | Qt 6.11.2 source bundle | **6.140.0**, source commit `d505fc23640d2bd6345e6483eb73daf4e19f5829` | SDK build 2026-09-28 | Paired installer source commit | PySide6-Pdf 6.12.0.140 uses the separately versioned Qt PDF product. PDF remains in the portable profile; WebEngine runtime files remain excluded. |
-| Qt Multimedia FFmpeg (Windows) | 7.1.5 | **9.0.1** | PySide6 6.12.0 build | Wheel-bundled LGPL build | Distinct from the standalone BtbN FFmpeg and the L-SMASH decoder library lineage. |
+| Qt Multimedia (Windows) | FFmpeg backend | **Native Windows backend** in Qt 6.12.0 | Paired with PySide6 6.12.0 | PySide6 Addons Windows wheel | VSView plays PCM audio through `QAudioSink`. The bundle excludes Qt's FFmpeg plugin and DLLs. |
 | VSJetEngine | 1.8.1 | **2.0.0** | 2026-10-26 | Stable Python release | Required by VSView 0.14.0. |
 | VSView support graph | Cyclopts 5.3.0; vsjetengine 1.8.1; BestSource 22 | **Cyclopts 5.4.2; jetpytools 3.2.0; vsjetengine 2.0.0; BestSource 23 (tag `R23`, commit `bca32dac44794d93f3e580f9573c58c4a0e7671f`); vspackrgb 2.0.0** | BestSource 2026-10-28 | Locked Python resolution | BestSource 23 requires VapourSynth R81 or newer. Its published Intel and Apple Silicon wheels require macOS 15 or newer. |
 | L-SMASH-Works | 1296.0.0.0 | **1310.0.0.0**, commit `7e65185d3f08ba4ad191e9a5cbba3e2c6fd3bb67` | 2026-08-23 | Formal native release | Latest stable native release. It preserves the API 4 video source surface and adds audio source filters plus audio-gap corrections. |
@@ -67,8 +67,10 @@ and Frame Compare-owned indexes before reuse.
 
 ### Windows x64 portable
 
-- CPython 3.14.10 embeddable runtime.
-- VapourSynth R82 portable runtime with the CPython 3.14 wheel layout.
+- CPython 3.15.2 embeddable runtime. The bundle includes the Python license and
+  omits the optional `_sqlite3.pyd` and `sqlite3.dll` files. Frame Compare and
+  packaged VSView use this interpreter for the application runtime.
+- VapourSynth R82 portable runtime with its CPython ABI3 wheel.
 - L-SMASH-Works 1310 through the official `vapoursynth-lsmas 1310.0.0.0`
   Windows wheel.
 - vs-placebo 2.0.5 Windows wheel with its selected libplacebo and libdovi
@@ -79,7 +81,9 @@ and Frame Compare-owned indexes before reuse.
   from the same environment; a PATH-only VSView executable is unsupported. BestSource
   remains UI-only; generated Frame Compare sessions continue to load media through
   L-SMASH-Works.
-- Retained BtbN FFmpeg 8.1-branch Windows x64 LGPL-only artifact.
+- Standalone BtbN FFmpeg 8.1-branch Windows x64 LGPL-only artifact.
+- Qt Multimedia with Qt's native Windows backend. The portable launcher selects it
+  with `QT_MEDIA_BACKEND=windows`.
 - FFMS2 intentionally excluded.
 - Plugins load from the deterministic canonical VapourSynth package path; the
   standalone FFmpeg directory is not used for recursive DLL discovery.
@@ -99,7 +103,7 @@ and Frame Compare-owned indexes before reuse.
 - Debian Trixie FFmpeg runtime package `7:7.1.5-0+deb13u1`.
 - Software Vulkan through Mesa is the canonical headless validation path.
 
-VSView and the native Frame Compare alignment panel are optional for native and Docker
+VSView and the native Frame Compare alignment panel are optional for native
 workflows. Its base package is the supported choice; the upstream `recommended` and
 `full` extras add unrelated graph features and are intentionally excluded. Install
 `frame-compare[vsview]` in the same environment as Frame Compare so the exact
@@ -186,7 +190,7 @@ revisions and native source hashes. It is experimental provenance, not an
 upstream wheel identity or accepted deployment fingerprint. Distribution still
 requires an honestly identified downstream/upstream wheel, matching sources and
 licenses, full runtime identity and artifact/physical-Windows acceptance. A native
-replacement cannot be delivered through an unchanged code-only update identity.
+replacement is delivered in a complete portable ZIP.
 
 ### vs-placebo 2.0.5
 
@@ -233,16 +237,10 @@ the installed decoder ABI. Legacy media-adjacent indexes remain inert. See
 
 ## Portable update boundary
 
-A code-only update ZIP does not contain VapourSynth, L-SMASH-Works, vs-placebo,
-FFmpeg, native manifests, or their licenses. The updater therefore compares the
-installed bundle's full runtime fingerprint with the signed update manifest before
-changing files. A missing, legacy, malformed, or different fingerprint blocks the update.
-
-A pre-native-panel portable bundle may have matching runtime fingerprints but lacks
-the native-panel capability recorded by `bundle_info.schema_version` 3. It requires
-a complete portable bundle reinstall; a code-only update must fail closed rather than
-mix the old dependency graph with the new application code.
-Generated data should remain outside the bundle when it must survive replacement.
+Install a fresh extraction of the complete Windows portable ZIP when the native
+runtime changes. Follow the [Windows reinstall steps](getting-started/windows-portable.md#update-behavior)
+to carry bundle-local data forward or leave it in the active bundle. The manifest
+and bundle inventory identify the runtime pins and fingerprints for each bundle.
 
 ## Licensing and corresponding source
 
@@ -273,16 +271,18 @@ inventory records installed distributions, native artifacts, source URLs, licens
 paths, and hashes. The Docker image also retains Debian FFmpeg's package copyright
 file and records its GPL-2.0-or-later profile in runtime provenance.
 
-The VSView Windows candidate is not release-ready solely because these top-level
-expressions and source URLs are recorded. VSView requires Qt Multimedia from the
-PySide6 Addons distribution, but does not use Qt WebEngine; the portable deployment
-therefore excludes the pinned wheel's WebEngine/Chromium files and verifies their
-absence from both the built and extracted bundle. Release remains blocked until that
-absence is proved in the canonical ZIP and the deployed Qt subset has matching
-third-party notices and SBOM/provenance, complete Qt Multimedia FFmpeg lineage, a
-distributor-controlled corresponding-source offer, and legal adjudication. See the
-[final-artifact security evidence](ENGINEERING_RUNBOOK.md#final-artifact-security-evidence)
-release gate for native advisory coverage and the retained evidence.
+VSView uses Qt Multimedia from the PySide6 Addons distribution to play PCM audio.
+The Windows portable build verifies that Qt loads the bundled native Windows
+backend and can query audio outputs. The current bundle excludes Qt's FFmpeg
+plugin and DLLs, plus the Qt WebEngine and Chromium runtime files. The standalone
+BtbN FFmpeg executable is unchanged. These exclusions are checked in the assembled
+tree and in the exact ZIP before upload. See the
+[packed ZIP proof in the engineering runbook](ENGINEERING_RUNBOOK.md#windows-portable-release-path-verification).
+
+The deployed Qt subset requires matching third-party notices, SBOM and provenance
+records, a distributor-controlled corresponding-source offer, and legal review.
+The [final-artifact security evidence](ENGINEERING_RUNBOOK.md#final-artifact-security-evidence)
+gate specifies native advisory coverage and the retained evidence.
 
 This classification follows [FFmpeg's GPL configuration rule](https://ffmpeg.org/doxygen/7.1/md_LICENSE.html)
 and the exact [Debian Trixie package copyright record](https://sources.debian.org/copyright/license/ffmpeg/7%3A7.1.5-0%2Bdeb13u1/).
@@ -290,20 +290,14 @@ and the exact [Debian Trixie package copyright record](https://sources.debian.or
 ## Validation boundary
 
 GitHub-hosted Linux, Docker on AMD64 and ARM64, and Windows validation cover packaging,
-plugin loading, generated fixtures, runtime identities, updater compatibility, and
+plugin loading, generated fixtures, runtime identities, portable ZIP installation, and
 deterministic layout. For generated HDR fixtures, `ffprobe` is the encoded
 stream-signal authority;
 the Docker gate separately proves that both source plugins retain at least 10-bit
 decoded precision because L-SMASH-Works does not expose every stream color tag as a
-frame property. The Linux GUI verifier contract requires the VSView 0.14.0 image to
-discover and load the exact native panel entry point, construct its inactive panel
-offscreen, load a production-generated L-SMASH session, register named
-`Reference`/`Comparison 1` outputs, render frame 0 for both outputs, and round-trip a
-typed sibling result while rejecting malformed data. The R81 dependency refresh
-passed the inside-container offscreen proof with real L-SMASH media on macOS
-Docker Desktop; its evidence is recorded in the
-[Windows 10 handoff](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-07-dependency-refresh-windows10-handoff.md).
-The Linux X11 host wrapper and visible desktop launch remain unverified.
+frame property. Visual alignment review on Linux uses the
+[native installation](getting-started/native.md#install-with-uv) with `--extra vsview`.
+
 Offscreen proof does not replace final validation on the supported physical Windows system.
 macOS offscreen or synthetic-panel proof exercises the Python/Qt/plugin contract only;
 when the host does not provide `core.lsmas`, it is not native L-SMASH media proof and

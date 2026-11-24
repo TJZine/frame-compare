@@ -1,142 +1,183 @@
 name: Windows portable
 
 on:
-  push:
-    branches: [main, pre-release]
   pull_request:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      operation:
-        description: Verify, release, or perform the one-time signing-key migration
+      sha:
+        description: Exact source commit to build and scan
         required: true
-        default: verify
-        type: choice
-        options:
-          - verify
-          - release
-          - migrate-signing-key
-      channel:
-        description: Approval channel for signed verification or publication
-        required: true
-        default: rc
-        type: choice
-        options:
-          - rc
-          - stable
-      version:
-        description: Exact repository version (release operation only)
-        required: false
         type: string
-      tag:
-        description: Exact new tag (release operation only)
-        required: false
-        type: string
-      expected_sha:
-        description: Exact 40-character source commit SHA (required for release or migration)
-        required: false
-        type: string
+      release_build:
+        description: Require a clean, exact release checkout
+        default: false
+        type: boolean
+    outputs:
+      bundle_id:
+        description: Immutable raw portable ZIP artifact ID
+        value: ${{ jobs.build_test.outputs.bundle_id }}
+      bundle_digest:
+        description: SHA-256 of the raw portable ZIP
+        value: ${{ jobs.build_test.outputs.bundle_digest }}
 
 permissions: {}
 
+env:
+  EXPECTED_SHA: ${{ inputs.sha || (github.event_name == 'pull_request' && github.sha) }}
+
 jobs:
-  migrate_signing_key:
-    name: Migrate signing key after production approval
-    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'migrate-signing-key'
+  build_test:
+    runs-on: windows-latest
+    timeout-minutes: 90
     permissions:
       contents: read
-    uses: ./.github/workflows/migrate-signing-key.yml
-    with:
-      expected_sha: ${{ inputs.expected_sha }}
-    secrets:
-      SOURCE_SIGNING_KEY: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}
-      SIGNING_KEY_MIGRATION_TOKEN: ${{ secrets.SIGNING_KEY_MIGRATION_TOKEN }}
-
-  verify_pull_request:
-    name: Verify unsigned Windows portable artifacts
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
-    permissions:
-      contents: read
-    uses: ./.github/workflows/windows-portable-unsigned.yml
-    with:
-      expected_sha: ${{ github.sha }}
-
-  validate_manual:
-    name: Validate signed verification request
-    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'verify'
-    permissions: {}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
     outputs:
-      expected_sha: ${{ steps.validate.outputs.expected_sha }}
+      bundle_id: ${{ steps.build.outputs.bundle_id }}
+      bundle_digest: ${{ steps.build.outputs.bundle_digest }}
     steps:
-      - name: Bind expected SHA to the selected ref head
-        id: validate
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:EXPECTED_SHA -cnotmatch '\A[0-9a-f]{40}\z' -or (git rev-parse HEAD).Trim() -cne $env:EXPECTED_SHA) {
+            throw "Checkout did not resolve to the exact expected commit."
+          }
+
+      - name: Build and exercise Windows portable inputs
+        id: build
+        uses: ./.github/actions/windows-portable-build
+        with:
+          expected_sha: ${{ env.EXPECTED_SHA }}
+          release_build: ${{ inputs.release_build }}
+
+  artifact_security:
+    name: Inventory and scan portable ZIP
+    needs: build_test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPECTED_SHA }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact checkout
         shell: bash
-        env:
-          DISPATCH_REF_NAME: ${{ github.ref_name }}
-          DISPATCH_REF_PROTECTED: ${{ github.ref_protected }}
-          DISPATCH_REF_TYPE: ${{ github.ref_type }}
-          VERIFY_CHANNEL: ${{ inputs.channel }}
-          DISPATCH_SHA: ${{ github.sha }}
-          EXPECTED_SHA: ${{ inputs.expected_sha || github.sha }}
         run: |
           set -euo pipefail
-          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "expected_sha must be an exact 40-character lowercase commit SHA." >&2
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$(git rev-parse HEAD)" != "$EXPECTED_SHA" ]]; then
+            echo "Artifact security checkout did not resolve to the exact expected commit." >&2
             exit 1
           fi
-          expected_branch="pre-release"
-          if [[ "$VERIFY_CHANNEL" == "stable" ]]; then
-            expected_branch="main"
-          fi
-          if [[ "$DISPATCH_REF_TYPE" != "branch" || "$DISPATCH_REF_NAME" != "$expected_branch" ]]; then
-            echo "Signed verification must use the channel's stable integration branch: $expected_branch." >&2
-            exit 1
-          fi
-          if [[ "$DISPATCH_REF_PROTECTED" != "true" ]]; then
-            echo "Signed verification refs must be protected by a branch or tag rule." >&2
-            exit 1
-          fi
-          if [[ "$EXPECTED_SHA" != "$DISPATCH_SHA" ]]; then
-            echo "The selected workflow ref head must equal expected_sha." >&2
-            exit 1
-          fi
-          printf 'expected_sha=%s\n' "$EXPECTED_SHA" >> "$GITHUB_OUTPUT"
 
-  verify_manual:
-    name: Verify signed Windows portable artifacts
-    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'verify'
-    needs: validate_manual
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    uses: ./.github/workflows/windows-portable-build.yml
-    with:
-      expected_sha: ${{ needs.validate_manual.outputs.expected_sha }}
-      release_tag: ""
-      require_signing: true
-      environment_name: ${{ inputs.channel == 'stable' && 'production' || 'release-candidate' }}
-      prepare_release_assets: false
-    secrets:
-      WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}
+      - name: Setup isolated host Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13.18"
 
-  release:
-    name: Run guarded release
-    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'release'
-    permissions:
-      attestations: write
-      contents: write
-      id-token: write
-      pull-requests: read
-    concurrency:
-      group: frame-compare-release-${{ inputs.tag }}
-      cancel-in-progress: false
-    uses: ./.github/workflows/release.yml
-    with:
-      channel: ${{ inputs.channel }}
-      version: ${{ inputs.version }}
-      tag: ${{ inputs.tag }}
-      expected_sha: ${{ inputs.expected_sha }}
-    secrets:
-      WINDOWS_UPDATE_SIGNING_KEY_XML: ${{ secrets.WINDOWS_UPDATE_SIGNING_KEY_XML }}
+      - name: Require immutable build output
+        shell: bash
+        env:
+          BUNDLE_ID: ${{ needs.build_test.outputs.bundle_id }}
+          BUNDLE_DIGEST: ${{ needs.build_test.outputs.bundle_digest }}
+        run: |
+          set -euo pipefail
+          [[ "$BUNDLE_ID" =~ ^[1-9][0-9]*$ && "$BUNDLE_DIGEST" =~ ^[a-f0-9]{64}$ ]]
+
+      - name: Download exact portable ZIP
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build_test.outputs.bundle_id }}
+          path: ${{ runner.temp }}/portable-security-inputs
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Verify producer digest and safely stage the portable tree
+        shell: bash
+        env:
+          BUNDLE_ID: ${{ needs.build_test.outputs.bundle_id }}
+          BUNDLE_DIGEST: ${{ needs.build_test.outputs.bundle_digest }}
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/portable-security-evidence"
+          mkdir "$evidence"
+          python -B -I -S tools/windows_portable/artifact_security.py stage \
+            --archive "$RUNNER_TEMP/portable-security-inputs/frame-compare-portable-win-x64.zip" \
+            --expected-digest "$BUNDLE_DIGEST" \
+            --expected-sha "$EXPECTED_SHA" \
+            --expected-artifact-id "$BUNDLE_ID" \
+            --output "$RUNNER_TEMP/portable-security-tree" \
+            --scan-input "$evidence/scan-input.json"
+
+      - name: Install checksum-pinned scanners
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/portable-security-tools"
+          mkdir "$tools"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+            --output "$tools/syft.tar.gz" \
+            https://github.com/anchore/syft/releases/download/v1.57.1/syft_1.57.1_linux_amd64.tar.gz
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+            --output "$tools/grype.tar.gz" \
+            https://github.com/anchore/grype/releases/download/v0.121.3/grype_0.121.3_linux_amd64.tar.gz
+          (
+            cd "$tools"
+            echo "bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c  syft.tar.gz" | sha256sum --check
+            echo "e9da18cc1429e786722e32161288103600efffd8e483c90761f90485bd1bec85  grype.tar.gz" | sha256sum --check
+            tar --extract --gzip --file syft.tar.gz --no-same-owner syft
+            tar --extract --gzip --file grype.tar.gz --no-same-owner grype
+          )
+          printf 'SYFT_BIN=%s\n' "$tools/syft" >> "$GITHUB_ENV"
+          printf 'GRYPE_BIN=%s\n' "$tools/grype" >> "$GITHUB_ENV"
+
+      - name: Generate SBOMs and unsuppressed advisory evidence
+        shell: bash
+        env:
+          GRYPE_DB_AUTO_UPDATE: "true"
+          GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/grype-db
+          GRYPE_DB_MAX_ALLOWED_BUILT_AGE: 120h
+          GRYPE_DB_MAX_UPDATE_CHECK_FREQUENCY: "0"
+          GRYPE_DB_REQUIRE_UPDATE_CHECK: "true"
+          GRYPE_DB_VALIDATE_AGE: "true"
+          GRYPE_DB_VALIDATE_BY_HASH_ON_START: "true"
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/portable-security-evidence"
+          config="$RUNNER_TEMP/portable-scanner.yaml"
+          printf '{}\n' > "$config"
+          "$SYFT_BIN" --config "$config" scan "dir:$RUNNER_TEMP/portable-security-tree" \
+            -o "syft-json=$evidence/windows-portable.syft.json" \
+            -o "cyclonedx-json=$evidence/windows-portable.cyclonedx.json"
+          "$GRYPE_BIN" --config "$config" "sbom:$evidence/windows-portable.syft.json" \
+            --output json > "$evidence/windows-portable.grype.json"
+          "$GRYPE_BIN" --config "$config" db status --output json > "$evidence/grype-db-status.json"
+          python -B -I -S tools/windows_portable/artifact_security.py policy \
+            --scan-input "$evidence/scan-input.json" \
+            --syft "$evidence/windows-portable.syft.json" \
+            --cyclonedx "$evidence/windows-portable.cyclonedx.json" \
+            --grype "$evidence/windows-portable.grype.json" \
+            --db-status "$evidence/grype-db-status.json" \
+            --expected-syft-version 1.57.1 \
+            --expected-grype-version 0.121.3 \
+            --output "$evidence/artifact-security.json"
+
+      - name: Retain final-artifact security evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-portable-security-evidence
+          path: ${{ runner.temp }}/portable-security-evidence
+          if-no-files-found: error
+          retention-days: 90

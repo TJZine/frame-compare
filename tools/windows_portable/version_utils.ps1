@@ -1,5 +1,3 @@
-. (Join-Path $PSScriptRoot "shim/frame-compare-version.ps1")
-
 function Get-AppVersionFromSource([string]$RepoRootPath) {
   $initPy = Join-Path $RepoRootPath "src\\frame_compare\\__init__.py"
   if (!(Test-Path -LiteralPath $initPy)) {
@@ -11,6 +9,8 @@ function Get-AppVersionFromSource([string]$RepoRootPath) {
     throw "Could not parse __version__ from $initPy"
   }
   $version = $match.Groups[1].Value
-  if ($null -eq (ConvertTo-FrameCompareVersion $version)) { throw "Malformed app version '$version' in $initPy" }
+  if ($version -cnotmatch '\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:rc[1-9][0-9]*)?\z') {
+    throw "Malformed app version '$version' in $initPy"
+  }
   return $version
 }

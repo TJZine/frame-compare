@@ -2,11 +2,13 @@
 
 See the canonical [Windows portable guide](docs/getting-started/windows-portable.md) for release
 and source installation, portable directory layout, optional dependencies,
-first-run commands, updates, backups, rollback, uninstalling, and troubleshooting.
+first-run commands, ZIP reinstall, uninstalling, and troubleshooting.
 
-Source builds require PowerShell 7 or newer. Published-bundle installation, launch,
-and updates support Windows PowerShell 5.1 as well as PowerShell 7.
+Source builds require PowerShell 7 or newer. Published bundles support Windows
+PowerShell 5.1 and PowerShell 7 for installation and launch.
 
-Install a complete portable ZIP into a fresh, empty folder; overlaying it onto an
-existing bundle root is unsupported. Preserve user configuration and data as described
-in the guide before pointing the installed shim at the new bundle.
+To update, close running comparisons and extract the complete ZIP into a fresh,
+empty folder. Run the new bundle's `install.cmd` while the old bundle is still
+active. It moves your bundle-local config, sources, and generated data by default.
+See the [same-volume and empty-folder requirements](docs/getting-started/windows-portable.md#update-behavior).
+Use `install.cmd -UserData Leave` to keep those folders in the old bundle.

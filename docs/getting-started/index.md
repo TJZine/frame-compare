@@ -11,8 +11,7 @@ by operating system and by how much of the media runtime you want to manage.
 
 - [Windows portable](windows-portable.md)
 
-    Complete runtime, VSView alignment panel, installer, and signed code-only
-    updates. Use this on Windows 10 or 11.
+    Complete runtime, VSView alignment panel, and a ZIP installer. Use this on Windows 10 or 11.
 
 - [Docker](docker.md)
 
@@ -33,7 +32,7 @@ by operating system and by how much of the media runtime you want to manage.
 | Windows user who wants the broadest supported feature set | Windows portable |
 | macOS user who wants a reproducible backend | Docker |
 | Linux user who wants the canonical headless route | Docker |
-| Linux user who needs NVIDIA acceleration or an X11 desktop | Docker, then the matching [Docker profile](docker-profiles.md) |
+| Linux user who needs hardware Vulkan or visual alignment review | [Native source](native.md#install-with-uv), with `--extra vsview` for visual review |
 | Existing native VapourSynth environment | Native source with `uv` |
 | Embedding Frame Compare in an existing Python environment | Native source with pip, with host runtime validation |
 | Contributor changing application code | [Contributor environment](https://github.com/TJZine/frame-compare/blob/main/CONTRIBUTING.md) |
@@ -47,7 +46,7 @@ by operating system and by how much of the media runtime you want to manage.
 | HDR tonemapping | Host Vulkan driver | Software Vulkan | Host Vulkan driver |
 | VSView alignment panel | Included | Not included | Optional `vsview` extra |
 | Opening the report and slow.pics URL automatically | Interactive desktop session | No; use the host helper | Interactive desktop session |
-| Signed code-only updates and rollback | Yes | No | No |
+| ZIP reinstall with user-data carry-over | Yes | No | No |
 | History and caches that persist | Yes | Yes, through the host `generated/` mount | Yes |
 
 Browser and clipboard actions need an interactive desktop session; headless, SSH,

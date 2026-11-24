@@ -35,7 +35,7 @@ def _run(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _portable(path: Path, *, member: str = "app/example.txt") -> None:
+def _portable(path: Path, *, member: str, inventory_commit: str | None) -> None:
     prefix = "frame-compare-portable-win-x64/"
     with ZipFile(path, "w", ZIP_DEFLATED, allowZip64=False) as archive:
         for directory in (prefix, f"{prefix}app/"):
@@ -48,27 +48,25 @@ def _portable(path: Path, *, member: str = "app/example.txt") -> None:
         info.external_attr = (stat.S_IFREG | 0o644) << 16
         info.compress_type = ZIP_DEFLATED
         archive.writestr(info, b"safe inventory input\n")
+        if inventory_commit is not None:
+            archive.writestr(
+                f"{prefix}bundle_inventory.json",
+                json.dumps({"bundle": {"commit_sha": inventory_commit}}),
+            )
 
 
 def _stage(
-    repo_root: Path, tmp_path: Path, *, receipt_update: dict[str, object] | None = None
+    repo_root: Path,
+    tmp_path: Path,
+    *,
+    expected_sha: str = "a" * 40,
+    artifact_id: str = "123",
+    digest: str | None = None,
+    member: str = "app/example.txt",
+    inventory_commit: str | None = "a" * 40,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
-    archive = tmp_path / "verified-portable.zip"
-    _portable(archive)
-    sha = "a" * 40
-    receipt: dict[str, object] = {
-        "schema": 2,
-        "commit": sha,
-        "tag": "v1.2.3",
-        "bundle_sha256": _digest(archive),
-        "portable_artifact_id": "123",
-        "portable_reproduced": True,
-        "requirements_sha256": "c" * 64,
-        "manifest_sha256": "d" * 64,
-    }
-    receipt.update(receipt_update or {})
-    verification = tmp_path / "verification.json"
-    verification.write_text(json.dumps(receipt), encoding="utf-8")
+    archive = tmp_path / "portable.zip"
+    _portable(archive, member=member, inventory_commit=inventory_commit)
     output = tmp_path / "portable-tree"
     scan_input = tmp_path / "scan-input.json"
     result = _run(
@@ -76,12 +74,12 @@ def _stage(
         "stage",
         "--archive",
         str(archive),
-        "--verification",
-        str(verification),
+        "--expected-digest",
+        _digest(archive) if digest is None else digest,
         "--expected-sha",
-        sha,
+        expected_sha,
         "--expected-artifact-id",
-        "123",
+        artifact_id,
         "--output",
         str(output),
         "--scan-input",
@@ -90,7 +88,7 @@ def _stage(
     return result, output, scan_input
 
 
-def test_artifact_security_stages_only_receipt_bound_portable(
+def test_artifact_security_stages_only_producer_bound_portable(
     repo_root: Path, tmp_path: Path
 ) -> None:
     result, output, scan_input = _stage(repo_root, tmp_path)
@@ -99,33 +97,69 @@ def test_artifact_security_stages_only_receipt_bound_portable(
     assert (output / "app/example.txt").read_bytes() == b"safe inventory input\n"
     evidence = json.loads(scan_input.read_bytes())
     assert evidence["portable_artifact_id"] == "123"
-    assert evidence["files"] == 1
+    assert evidence["commit"] == "a" * 40
+    assert evidence["portable_sha256"] == _digest(tmp_path / "portable.zip")
+    assert evidence["files"] == 2
     assert evidence["directories"] == 1
-    assert evidence["expanded_bytes"] == len(b"safe inventory input\n")
+    assert evidence["expanded_bytes"] == (
+        (output / "app/example.txt").stat().st_size
+        + (output / "bundle_inventory.json").stat().st_size
+    )
 
 
 @pytest.mark.parametrize(
-    "receipt_update, expected",
+    "expected_sha, artifact_id, digest, expected",
     [
-        ({"bundle_sha256": "0" * 64}, "does not match"),
-        ({"portable_artifact_id": "456"}, "does not match"),
-        ({"portable_reproduced": False}, "does not match"),
-        ({"commit": "f" * 40}, "does not match"),
+        ("a" * 40, "123", "0" * 64, "does not match the producer ZIP digest"),
+        ("a" * 40, "123", "invalid", "producer ZIP"),
+        ("a" * 40, "invalid", None, "immutable numeric ID"),
+        ("invalid", "123", None, "full lowercase commit SHA"),
     ],
 )
 def test_artifact_security_rejects_unbound_inputs(
     repo_root: Path,
     tmp_path: Path,
-    receipt_update: dict[str, object],
+    expected_sha: str,
+    artifact_id: str,
+    digest: str | None,
     expected: str,
 ) -> None:
-    result, output, scan_input = _stage(repo_root, tmp_path, receipt_update=receipt_update)
+    result, output, scan_input = _stage(
+        repo_root, tmp_path, expected_sha=expected_sha, artifact_id=artifact_id, digest=digest
+    )
 
     assert result.returncode != 0
     assert expected in result.stderr
     assert not scan_input.exists()
     if output.exists():
         assert not any(output.rglob("*"))
+
+
+def test_artifact_security_refuses_unsafe_zip_even_with_the_expected_digest(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    result, staged, receipt = _stage(repo_root, tmp_path, member="app/../outside.txt")
+    assert result.returncode != 0
+    assert "Unsafe portable member path" in result.stderr
+    assert not receipt.exists()
+    assert not staged.exists()
+
+
+@pytest.mark.parametrize(
+    ("inventory_commit", "error"),
+    [
+        ("b" * 40, "commit does not match the expected SHA"),
+        (None, "missing its canonical bundle_inventory.json"),
+    ],
+)
+def test_artifact_security_requires_the_embedded_commit_to_match(
+    repo_root: Path, tmp_path: Path, inventory_commit: str | None, error: str
+) -> None:
+    result, staged, receipt = _stage(repo_root, tmp_path, inventory_commit=inventory_commit)
+    assert result.returncode != 0
+    assert error in result.stderr
+    assert not staged.exists()
+    assert not receipt.exists()
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -161,8 +195,6 @@ def _policy(
             "commit": "a" * 40,
             "portable_artifact_id": "123",
             "portable_sha256": "b" * 64,
-            "verification_sha256": "c" * 64,
-            "portable_reproduced": True,
         },
         "syft": {
             "artifacts": [{"name": "demo"}] if syft_artifacts is None else syft_artifacts,
@@ -222,7 +254,9 @@ def test_artifact_security_accepts_complete_lower_severity_evidence(
     assert receipt["inventory_packages"] == 1
     assert receipt["advisory_severities"] == {"medium": 1}
     assert receipt["policy"] == "passed"
-    assert receipt["verification_sha256"] == "c" * 64
+    assert receipt["portable_artifact_id"] == "123"
+    assert receipt["portable_sha256"] == "b" * 64
+    assert receipt["commit"] == "a" * 40
     assert receipt["database"]["database_sha256"] == _digest(tmp_path / "vulnerability.db")
 
 

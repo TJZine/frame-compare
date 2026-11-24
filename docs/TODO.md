@@ -9,7 +9,7 @@ search:
 > current product contracts. Update or remove an item when its work is completed,
 > rejected, or promoted into an active plan.
 
-- Consider adding a dedicated packaging/release workflow skill if Python packaging, Docker, Windows portable, or updater/signing work becomes frequent.
+- Consider adding a dedicated packaging/release workflow skill if Python packaging, Docker, Windows portable, or release work becomes frequent.
 
 ## Release Identity Presentation Follow-Ups
 

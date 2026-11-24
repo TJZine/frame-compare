@@ -135,8 +135,7 @@ the media libraries.
 
 - [Windows portable](getting-started/windows-portable.md)
 
-    Complete runtime, VSView alignment panel, installer, and signed code-only
-    updates. Use this on Windows 10 or 11.
+    Complete runtime, VSView alignment panel, and a ZIP installer. Use this on Windows 10 or 11.
 
 - [Docker](getting-started/docker.md)
 

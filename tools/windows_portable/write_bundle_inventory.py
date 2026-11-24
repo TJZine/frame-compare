@@ -30,39 +30,29 @@ REQUIRED_DISTRIBUTIONS = {
 }
 SOURCE_SCRIPTS = (
     ".github/actions/windows-portable-build/action.yml",
-    ".github/actions/windows-portable-verify/action.yml",
-    ".github/workflows/windows-portable-build.yml",
-    ".github/workflows/windows-portable-unsigned.yml",
     ".github/workflows/windows-portable.yml",
     "tools/windows_portable/build_portable.ps1",
+    "tools/windows_portable/version_utils.ps1",
+    "tools/windows_portable/shim/frame-compare.cmd",
+    "tools/windows_portable/shim/frame-compare.ps1",
+    "tools/windows_portable/uninstall.cmd",
+    "tools/windows_portable/uninstall.ps1",
     "tools/windows_portable/path_safety.ps1",
+    "tools/windows_portable/portable_activation.ps1",
     "tools/windows_portable/portable_launchers.ps1",
     "tools/windows_portable/portable_archive.py",
     "tools/windows_portable/portable_bundle.py",
     "tools/windows_portable/portable_runtime.py",
     "tools/windows_portable/runtime_smoke.py",
-    "tools/windows_portable/build_update.ps1",
     "tools/windows_portable/bundle_info.schema.json",
-    "tools/windows_portable/generate_update_keypair.ps1",
     "tools/windows_portable/install-from-source.cmd",
     "tools/windows_portable/install-from-source.ps1",
     "tools/windows_portable/install.cmd",
     "tools/windows_portable/install.ps1",
     "tools/windows_portable/manifest.windows-x64.json",
     "tools/windows_portable/manifest.schema.json",
-    "tools/windows_portable/sign_update.ps1",
-    "tools/windows_portable/release_update.ps1",
-    "tools/windows_portable/release_portable_authority.ps1",
-    "tools/windows_portable/release_update_contract.ps1",
-    "tools/windows_portable/sign_verified_manifest.ps1",
-    "tools/windows_portable/update_manifest_bytes.ps1",
-    "tools/windows_portable/update_manifest.schema.json",
-    "tools/windows_portable/shim/frame-compare-update.ps1",
-    "tools/windows_portable/shim/frame-compare-version.ps1",
-    "tools/windows_portable/validate_update_public_key.ps1",
     "tools/windows_portable/write_bundle_inventory.py",
 )
-PRIVATE_RSA_FIELDS = ("P", "Q", "DP", "DQ", "InverseQ", "D")
 PROHIBITED_BUNDLE_FILENAMES = frozenset({".env", "config.toml", "report.html"})
 _INTER_VERSION = "4.1"
 _INTER_LICENSE_SPDX = "OFL-1.1"
@@ -92,6 +82,26 @@ def _run_git(repo_root: Path, *args: str) -> str:
         timeout=30.0,
     )
     return result.stdout.strip()
+
+
+def _source_scripts(repo_root: Path, commit_sha: str, *, exact: bool) -> list[str]:
+    entries = _run_git(
+        repo_root, "ls-tree", "-z", f"{commit_sha}^{{commit}}", "--", *SOURCE_SCRIPTS
+    )
+    regular_files: set[str] = set()
+    for entry in entries.split("\0"):
+        if entry:
+            metadata, path = entry.split("\t", 1)
+            mode, kind, _ = metadata.split()
+            if kind == "blob" and mode in {"100644", "100755"}:
+                regular_files.add(path)
+    allowlist = set(SOURCE_SCRIPTS)
+    missing = sorted(allowlist - regular_files)
+    if exact and missing:
+        raise ValueError(
+            f"source commit lacks required regular build/install scripts: {', '.join(missing)}"
+        )
+    return sorted(allowlist & regular_files)
 
 
 def _require_dict(value: object, context: str) -> JsonObject:
@@ -392,12 +402,6 @@ def _assert_safe_bundle(bundle_root: Path) -> None:
             + ", ".join(sorted(set(prohibited)))
         )
 
-    public_key = bundle_root / "shim" / "update_public_key.xml"
-    public_text = public_key.read_text(encoding="utf-8")
-    for field in PRIVATE_RSA_FIELDS:
-        if f"<{field}>" in public_text:
-            raise ValueError(f"bundle public key contains private RSA field: {field}")
-
 
 def _write_source_urls(
     *,
@@ -407,16 +411,29 @@ def _write_source_urls(
     artifacts: list[JsonObject],
     corresponding_sources: list[JsonObject],
     distributions: list[JsonObject],
+    local_tooling: bool,
 ) -> None:
     source_archive = f"https://github.com/TJZine/frame-compare/archive/{commit_sha}.tar.gz"
-    lines = [
-        f"Frame Compare {app_version} source ({commit_sha}): {source_archive}",
-        "",
-        "Bundled application assets:",
-        f"- Inter {_INTER_VERSION}: {_INTER_SOURCE_URL}",
-        "",
-        "Manifest-provided runtime sources:",
-    ]
+    lines = [f"Frame Compare {app_version} source ({commit_sha}): {source_archive}"]
+    if local_tooling:
+        lines.extend(
+            (
+                "",
+                "The SHA identifies the application source. The source_build_install_scripts list",
+                "in bundle_inventory.json records scripts from that commit. This local build uses",
+                "tooling from the live worktrees. The inventory's archive.files entries hash the",
+                "actual shipped files.",
+            )
+        )
+    lines.extend(
+        (
+            "",
+            "Bundled application assets:",
+            f"- Inter {_INTER_VERSION}: {_INTER_SOURCE_URL}",
+            "",
+            "Manifest-provided runtime sources:",
+        )
+    )
     for artifact in artifacts:
         lines.append(f"- {artifact['name']} {artifact['version']}: {artifact['source_url']}")
         build_source_url = artifact.get("build_source_url")
@@ -488,12 +505,12 @@ def main() -> int:
     commit_sha = args.commit_sha
     if not re.fullmatch(r"[a-f0-9]{40}", commit_sha):
         raise ValueError("--commit-sha must be a complete lowercase 40-character commit SHA")
-    if args.require_clean_repo and _run_git(
-        repo_root, "status", "--porcelain", "--untracked-files=all"
+    exact = commit_sha == _run_git(repo_root, "rev-parse", "HEAD")
+    if args.require_clean_repo and (
+        not exact or _run_git(repo_root, "status", "--porcelain", "--untracked-files=all")
     ):
-        raise ValueError("release bundle inventory requires a clean repository")
-    for source_path in SOURCE_SCRIPTS:
-        _run_git(repo_root, "cat-file", "-e", f"{commit_sha}:{source_path}")
+        raise ValueError("release bundle inventory requires a clean, exact source checkout")
+    source_scripts = _source_scripts(repo_root, commit_sha, exact=exact)
 
     manifest = _require_dict(
         json.loads(manifest_path.read_text(encoding="utf-8")),
@@ -558,6 +575,7 @@ def main() -> int:
         bundle_root=bundle_root,
         app_version=app_version,
         commit_sha=commit_sha,
+        local_tooling=not args.require_clean_repo,
         artifacts=artifacts,
         corresponding_sources=corresponding_sources,
         distributions=distributions,
@@ -591,7 +609,7 @@ def main() -> int:
         "manifest_artifacts": artifacts,
         "python_distributions": distributions,
         "schema_version": 2,
-        "source_build_install_scripts": sorted(SOURCE_SCRIPTS),
+        "source_build_install_scripts": source_scripts,
     }
     output_path.write_text(
         json.dumps(inventory, indent=2, sort_keys=True) + "\n",

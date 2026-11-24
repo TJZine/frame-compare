@@ -71,15 +71,3 @@ jobs:
           -m pytest
           -o cache_dir=/tmp/frame-compare-resource-pytest-cache
           tests/integration/test_alignment_streaming_resources.py -rsx -s
-
-      - name: Verify the Docker GUI runtime offscreen
-        run: |
-          docker build --target gui-linux --tag frame-compare:gui-linux .
-          docker run --rm \
-            -e QT_QPA_PLATFORM=offscreen \
-            -e HOME=/tmp/framecompare-home \
-            -e PYTHONUSERBASE=/home/framecompare/.local \
-            -e XDG_RUNTIME_DIR=/tmp/framecompare-runtime \
-            --mount "type=bind,source=$PWD/tools/verify_docker_gui.sh,target=/tmp/verify_docker_gui.sh,readonly" \
-            --entrypoint /bin/bash frame-compare:gui-linux \
-            /tmp/verify_docker_gui.sh --inside-container

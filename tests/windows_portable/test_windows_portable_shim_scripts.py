@@ -20,9 +20,8 @@ def test_windows_portable_shim_source_recognizes_equals_config_flag(
 
 
 def test_published_shims_read_install_state_as_utf8(repo_root: Path) -> None:
-    for name in ("frame-compare.ps1", "frame-compare-update.ps1"):
-        shim = _read_text_or_fail(repo_root / "tools/windows_portable/shim" / name)
-        assert "Get-Content -LiteralPath $configPath -Raw -Encoding UTF8" in shim
+    shim = _read_text_or_fail(repo_root / "tools/windows_portable/shim/frame-compare.ps1")
+    assert "Get-Content -LiteralPath $configPath -Raw -Encoding UTF8" in shim
 
 
 def test_windows_51_shims_read_bomless_nonascii_bundle_state(
@@ -59,21 +58,14 @@ def test_windows_51_shims_read_bomless_nonascii_bundle_state(
     (bundle_dir / "frame-compare.ps1").write_text(
         'Write-Output "frame-compare 1.0.0"; exit 0', encoding="utf-8"
     )
-    (shim_dir / "frame-compare-version.ps1").write_bytes(
-        (repo_root / "tools/windows_portable/shim/frame-compare-version.ps1").read_bytes()
+    shim = shim_dir / "frame-compare.ps1"
+    shim.write_bytes((repo_root / "tools/windows_portable/shim/frame-compare.ps1").read_bytes())
+    proc = subprocess.run(
+        [str(exe), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(shim), "version"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
-    for name, args, expected in (
-        ("frame-compare.ps1", ["version"], "frame-compare 1.0.0"),
-        ("frame-compare-update.ps1", ["list-backups"], "No backups found."),
-    ):
-        shim = shim_dir / name
-        shim.write_bytes((repo_root / "tools/windows_portable/shim" / name).read_bytes())
-        proc = subprocess.run(
-            [str(exe), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(shim), *args],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        assert proc.returncode == 0, proc.stderr
-        assert expected in proc.stdout
+    assert proc.returncode == 0, proc.stderr
+    assert "frame-compare 1.0.0" in proc.stdout

@@ -336,45 +336,7 @@ RUN install -d -m 0777 -o framecompare -g framecompare /workspace/frame-compare/
 USER framecompare
 WORKDIR /workspace/frame-compare
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Stage 5: Optional Linux X11/VSView GUI runtime
-# ─────────────────────────────────────────────────────────────────────────────
-FROM runtime AS gui-linux
-
-USER root
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        libdbus-1-3 \
-        libegl1 \
-        libfontconfig1 \
-        libgl1 \
-        libopengl0 \
-        libx11-xcb1 \
-        libxcb-cursor0 \
-        libxcb-image0 \
-        libxcb-keysyms1 \
-        libxcb-render-util0 \
-        libxcb-xinerama0 \
-        libxkbcommon-x11-0 \
-        && \
-    rm -rf /var/lib/apt/lists/*
-
-USER framecompare
-WORKDIR /home/framecompare/frame-compare
-
-RUN uv export --frozen --no-dev --extra vsview --no-emit-project --format requirements.txt \
-        --output-file /tmp/requirements.vsview.lock.txt && \
-    python -m pip install --no-cache-dir --user --require-hashes \
-        -r /tmp/requirements.vsview.lock.txt
-
-USER root
-RUN rm -f /usr/local/bin/uv /usr/local/bin/uvx
-USER framecompare
-
-# Keep the default image target headless and CI-safe. The gui-linux target above is
-# opt-in via docker-compose.gui-linux.yml and should not become the implicit result
-# of `docker build .` or default compose builds.
+# The final stage is the headless image used by Docker and Compose builds.
 FROM runtime AS default-runtime
 
 USER root

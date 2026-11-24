@@ -9,6 +9,8 @@ INSTALL (enables `frame-compare` globally for current user):
 
 UNINSTALL:
   Run `uninstall.cmd` from the portable bundle root.
+  If uninstall reports state\source-migration.pending.json, follow the recovery steps:
+    https://tjzine.github.io/frame-compare/getting-started/windows-portable/#recover-a-pending-migration
 
 NOTES:
   - Installation uses a shim under:
@@ -29,8 +31,7 @@ NOTES:
     "Generated data location" prompt to select a normal folder outside the bundle
     when reports, screenshots, run state, and caches must survive bundle replacement.
     Run diagnostics, execution, and history use the same selected location. The
-    installed updater, rollback, reinstall, and uninstall never manage that
-    external data. A moved bundle can change cache identity for source clips moved
+    installer and uninstaller leave that external data in place. A moved bundle can change cache identity for source clips moved
     with it because their source paths changed.
   - Source builds require PowerShell 7 or newer before bootstrap or output changes.
     For source builds (`tools\windows_portable\install-from-source.cmd`), use:
@@ -58,11 +59,13 @@ NOTES:
     after accepting the new installation.
     The direct builder refuses occupied or unsafe output folders. Maintainers
     must explicitly remove disposable build output before reusing its path.
-  - A complete runtime reinstall requires a fresh, empty folder. Overlaying a full
-    ZIP onto an existing bundle root is unsupported. Preserve user configuration,
-    input clips, and generated data; copy only those user files to the new bundle
-    if they were bundle-local. AppData fallback configuration and external data
-    remain preserved. Do not copy application/runtime files or old update backups.
+  - Extract the complete portable ZIP into a fresh, empty folder and run
+    install.cmd. Overlaying a full ZIP onto an existing bundle root is
+    unsupported. The installer moves non-empty config\, comparison_videos\,
+    and generated\ folders from the previous active bundle. Run
+    install.cmd -UserData Leave to keep the folders in the old bundle or to copy
+    selected user files yourself. AppData fallback configuration and external
+    data stay in place. The previous bundle retains its application and runtime.
   - If the bundle is moved, run `install.cmd` again from the new location.
 
 QUICK START:
@@ -101,97 +104,11 @@ OPTIONAL (Native VSView Alignment Review):
   timeout. This is a native runtime gate, not a substitute for later visible-UI
   acceptance on Windows; no hosted result is claimed by this local proof.
 
-UPDATING (Code-Only Update Package):
-  Apply an update zip:
-    frame-compare-update apply .\frame-compare-update-win-x64-0.7.0.zip
-
-  List and restore backups:
-    frame-compare-update list-backups
-    frame-compare-update rollback <backup-id>
-    frame-compare-update purge-backups --keep 5
-
-  Safety behavior:
-    - Each backup has compatibility.json (media-runtime and requirements-lock identity)
-      and backup.json (schema, app version, exact source-file paths/sizes/SHA-256).
-      backup.json is written last beside frame_compare\ as the completeness marker.
-      list-backups marks missing/invalid/mismatched identity or incomplete inventories
-      unavailable; rollback refuses them before creating its update lock. Legacy
-      backups missing either record cannot be restored or migrated. Backup IDs must
-      be fresh. Failed backup copies are removed; purge retains five complete,
-      compatible backups, so incomplete backups cannot displace usable ones.
-    - Stable/RC grammar is MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCHrcN (ASCII digits,
-      no leading zeroes, N >= 1, components at most nine digits). RCs precede their
-      final release. Updates stay in the signed minimum's major.minor line. A stable
-      minimum admits its base's RCs; an RC minimum uses strict ordering; max is
-      inclusive. Same-line stable-to-RC updates and downgrades remain allowed when
-      the signed installed-version range admits them. The target smoke check must
-      report exactly the target version, with a successful launcher.
-    - Both apply and rollback use one stage/verify/rename/smoke/commit transaction.
-      app\.frame_compare_replacement.json records staging/promoting/committed with
-      atomic replacement. The next apply or rollback repairs interrupted work under
-      the update lock before reading the installed version. The lock file stays
-      in place; only its exclusive process handle owns the lock, so retry works
-      immediately after a terminated updater releases that handle. Unjournaled .old/.new
-      trees are refused with paths. Recovery failures retain trees and the journal
-      with manual-repair guidance. Failed promoted trees remain as
-      app\src\frame_compare.failed-*; a successful commit keeps only the newest.
-    - The updater/helper in the AppData bin folder is replaced only by a full bundle
-      installation, never by a code-only ZIP. Existing RC installs with the old
-      updater need one full bundle reinstall to obtain RC support and safe rollback.
-      Install into a fresh folder and preserve user data; never overlay a runtime.
-    - Signature verification is mandatory. Missing or invalid signatures are always
-      refused; the updater has no interactive unsigned bypass.
-    - Archive processing is bounded before extraction by compressed size, entry count,
-      per-entry and total uncompressed size, and compression-ratio limits.
-    - If the installed app version cannot be established, the updater fails closed and
-      requires a complete portable reinstall rather than skipping the signed range.
-    - Pre-native-panel bundles with bundle_info schema_version 2 are refused and
-      require a complete portable reinstall; there is no bypass.
-    - Dependency fingerprint mismatch always refuses a code-only update and requires
-      a complete portable reinstall; there is no bypass.
-
-RELEASE SIGNING (Maintainers):
-  One-time key generation is MAINTAINER-ONLY. Run it in a separate, ordinary
-  PowerShell 7.3+ window. The private path must be an encrypted location outside the
-  repository, task terminals, caches, and release artifacts:
-    $keyId = "frame-compare-update-2026-01"
-    pwsh -NoProfile -ExecutionPolicy Bypass `
-      -File .\tools\windows_portable\generate_update_keypair.ps1 `
-      -PublicKeyPath .\tools\windows_portable\update_public_key.xml `
-      -PrivateKeyPath "<encrypted-location-outside-the-repository>" `
-      -KeyId $keyId `
-      -KeySize 3072 `
-      -ReplacePlaceholderPublicKey
-
-    Use physical paths for the repository and the private output. The generator
-    refuses junctions, symlinks, or mount points in either path. It also refuses
-    repository-contained or existing private outputs, replaces only the known
-    public-key placeholder, applies a current-user-only private-file
-    ACL on Windows or owner-read/write-only permissions on POSIX, and reports only
-    public metadata and a public-key fingerprint.
-    Commit only tools\windows_portable\update_public_key.xml. Never paste private
-    XML into a command line, task, log, issue, PR, commit, or release artifact.
-
-  Build + sign update zip:
-    Run with pwsh (PowerShell 7+) on CI / modern Windows. Signing and verification use
-    PKCS#1/SHA256 with RSA XML keys; the scripts import XML keys through cross-platform
-    RSA parameters and keep a Windows PowerShell 5.1-compatible legacy fallback.
-    pwsh -File .\tools\windows_portable\build_update.ps1 -BundleDir .\dist\frame-compare-portable-win-x64 -OutFile .\dist\frame-compare-update-win-x64-0.7.0.zip
-    $env:SIGNING_KEY_XML_PATH = "<secure-private-key.xml>"
-    pwsh -File .\tools\windows_portable\sign_update.ps1 -UpdateZip .\dist\frame-compare-update-win-x64-0.7.0.zip -ExpectedPublicKeyPath .\tools\windows_portable\update_public_key.xml
-
-    CI guidance:
-      - Prefer injecting the signing key path via a masked secret into SIGNING_KEY_XML_PATH.
-      - Avoid passing the key path on the command line to reduce exposure in shell history / process listings.
-      - GitHub release/manual bundle workflow signs the code-only update zip when the
-        WINDOWS_UPDATE_SIGNING_KEY_XML secret exists only in the approved
-        release-candidate and production environments.
-
-  The updater does not apply unsigned zips, including local/development packages.
-  Build-update refuses dirty application/version sources and packages committed HEAD,
-  matching the source-selection rule used by the complete portable bundle builder. It
-  also refuses a supplied full bundle whose app version or packaged application source
-  differs from that commit before borrowing the bundle's compatibility fingerprints.
+REACTIVATING AN EARLIER BUNDLE:
+  Run install.cmd from the bundle you want to use. Installers from version
+  0.7.0 onward move the same user folders back by default. An older installer
+  restores its own app and legacy update command. The moved folders stay in
+  the newer bundle, where you can find them to copy back manually.
 
 THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
   - The build outputs:
@@ -204,12 +121,13 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
       tools\windows_portable\licenses\
     The build SHA256-verifies those vendored license texts before copying them
     into the bundle.
-  - PySide6/Qt LGPL-3.0 and Qt-bundled FFmpeg LGPL notices are copied from
-    manifest-declared, SHA256-verified repository files. Wheel-specific notices
-    under *.dist-info\licenses are copied as well.
-  - VSView requires Qt Multimedia from PySide6 Addons. The portable deployment
-    excludes unused Qt WebEngine/Chromium files and verifies their absence; it does
-    not claim to distribute those excluded components.
+  - PySide6/Qt LGPL-3.0 notices are copied from manifest-declared, SHA256-verified
+    repository files. Wheel-specific notices under *.dist-info\licenses are
+    copied as well.
+  - VSView plays audio through Qt Multimedia's native Windows backend. The
+    portable deployment excludes Qt's FFmpeg plugin and DLLs and the unused Qt
+    WebEngine/Chromium runtime files. It includes the standalone BtbN FFmpeg
+    executable.
   - Deterministic component versions, declared license metadata, copied
     license/notice hashes, requirements-lock fingerprint, exact Frame Compare
     source commit/archive, and build/install script inventory are shipped in:

@@ -12,22 +12,15 @@ Param(
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\\..")).Path,
 
   [Parameter(Mandatory = $false)]
-  [switch]$RequireReleasePublicKey,
+  [switch]$ReleaseBuild,
 
-  [string]$ExpectedCommitSha,
-
-  [switch]$AssemblyOnly,
-  [string]$RequirementsPath
+  [string]$ExpectedCommitSha
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $true
 $hasExpectedCommitSha = $PSBoundParameters.ContainsKey("ExpectedCommitSha")
-
-. (Join-Path $PSScriptRoot "version_utils.ps1")
-. (Join-Path $PSScriptRoot "path_safety.ps1")
-. (Join-Path $PSScriptRoot "portable_launchers.ps1")
 
 # Convert caller-supplied relative paths once, before they are embedded in
 # runtime environment variables or passed across process working directories.
@@ -41,6 +34,14 @@ $OutDir = [System.IO.Path]::TrimEndingDirectorySeparator($OutDir)
 $CacheDir = [System.IO.Path]::TrimEndingDirectorySeparator($CacheDir)
 $RepoRoot = [System.IO.Path]::TrimEndingDirectorySeparator($RepoRoot)
 $currentLocation = [System.IO.Path]::TrimEndingDirectorySeparator($currentLocation)
+
+if ($ReleaseBuild -and $PSScriptRoot -ne (Join-Path $RepoRoot "tools\windows_portable")) {
+  throw "Portable release builder must run from tools\windows_portable in the selected checkout."
+}
+
+. (Join-Path $PSScriptRoot "version_utils.ps1")
+. (Join-Path $PSScriptRoot "path_safety.ps1")
+. (Join-Path $PSScriptRoot "portable_launchers.ps1")
 
 function Assert-BuildPathAncestry() {
   foreach ($path in @($OutDir, $CacheDir, $RepoRoot, $currentLocation, $PSScriptRoot, (Split-Path -Parent $ManifestPath))) {
@@ -70,8 +71,11 @@ function Assert-BuildOutputPath() {
 
 function Assert-BuildManifest([object]$Manifest) {
   $manifestVersion = Get-RequiredProperty $Manifest "manifest_version" "manifest"
-  if (($manifestVersion -isnot [int] -and $manifestVersion -isnot [long]) -or $manifestVersion -ne 2) {
-    throw "Unsupported portable manifest version (expected 2)."
+  if (($manifestVersion -isnot [int] -and $manifestVersion -isnot [long]) -or $manifestVersion -notin @(2, 3)) {
+    throw "Unsupported portable manifest version (expected 2 or 3)."
+  }
+  if ($ReleaseBuild -and $manifestVersion -ne 3) {
+    throw "Portable release builds require manifest version 3."
   }
   $bundle = Get-RequiredProperty $Manifest "bundle" "manifest"
   $fingerprints = Get-RequiredProperty $bundle "runtime_fingerprints" "manifest.bundle"
@@ -104,7 +108,7 @@ function Assert-BuildManifest([object]$Manifest) {
     $null = Get-RequiredStringProperty $license "url" "artifact.license"
     $install = Get-RequiredProperty $artifact "install" "artifact"
     $type = Get-RequiredStringProperty $install "type" "artifact.install"
-    if ($type -notin @("extract", "python_wheel")) { throw "Unknown install.type: $type" }
+    if ($type -cnotin @("extract", "python_wheel")) { throw "Unknown install.type: $type" }
     $destination = Get-OptionalStringProperty $install "destination"
     if ($type -eq "extract" -or $destination -ne "") {
       if ([string]::IsNullOrWhiteSpace($destination) -or
@@ -201,21 +205,14 @@ function Assert-LastExitCode([string]$CommandLabel) {
   }
 }
 
-function Assert-ReleasePublicKey() {
-  $validator = Join-Path $PSScriptRoot "validate_update_public_key.ps1"
-  $publicKey = Join-Path $PSScriptRoot "update_public_key.xml"
-  & $validator -PublicKeyPath $publicKey
-}
-
 function Copy-InstallerFiles([string]$BundleRoot) {
   $sourceDir = $PSScriptRoot
   $shimSource = Join-Path $sourceDir "shim"
   $shimDest = Join-Path $BundleRoot "shim"
-  $publicKeySource = Join-Path $sourceDir "update_public_key.xml"
 
-  foreach ($file in @("install.ps1", "uninstall.ps1", "install.cmd", "uninstall.cmd", "README.txt")) {
+  foreach ($file in @("install.ps1", "uninstall.ps1", "install.cmd", "uninstall.cmd", "README.txt", "portable_activation.ps1", "path_safety.ps1")) {
     $src = Join-Path $sourceDir $file
-    if (!(Test-Path -LiteralPath $src)) {
+    if (!(Test-Path -LiteralPath $src -PathType Leaf)) {
       throw "Installer file not found: $src"
     }
     Copy-Item -Force -LiteralPath $src -Destination (Join-Path $BundleRoot $file)
@@ -224,14 +221,17 @@ function Copy-InstallerFiles([string]$BundleRoot) {
   if (!(Test-Path -LiteralPath $shimSource)) {
     throw "Shim directory not found: $shimSource"
   }
-  if (!(Test-Path -LiteralPath $publicKeySource)) {
-    throw "Update public key not found: $publicKeySource"
-  }
   if (Test-Path -LiteralPath $shimDest) {
     Remove-Item -Recurse -Force -LiteralPath $shimDest
   }
-  Copy-Item -Recurse -Force -LiteralPath $shimSource -Destination $shimDest
-  Copy-Item -Force -LiteralPath $publicKeySource -Destination (Join-Path $shimDest "update_public_key.xml")
+  Ensure-Directory -Path $shimDest
+  foreach ($name in @("frame-compare.ps1", "frame-compare.cmd")) {
+    $shim = Join-Path $shimSource $name
+    if (!(Test-Path -LiteralPath $shim -PathType Leaf)) {
+      throw "Shim file not found: $shim"
+    }
+    Copy-Item -Force -LiteralPath $shim -Destination (Join-Path $shimDest $name)
+  }
 }
 
 function Copy-RepoApp([string]$BundleRoot, [string]$CommitSha) {
@@ -252,7 +252,7 @@ function Copy-RepoApp([string]$BundleRoot, [string]$CommitSha) {
       "Uncommitted changes exist under src/frame_compare or pyproject.toml; the portable bundle " +
       "packages commit $CommitSha and builds wheel dist-info metadata from it, so it will exclude them."
     )
-    if ($RequireReleasePublicKey) {
+    if ($ReleaseBuild) {
       throw $dirtySourceMessage
     }
     Write-Warning $dirtySourceMessage
@@ -269,9 +269,6 @@ function Initialize-PortableRuntime([string]$BundleRoot, [string]$CommitSha, [st
     "assemble", "--repo", $RepoRoot, "--cache", $CacheDir, "--output", $BundleRoot,
     "--commit-sha", $CommitSha, "--manifest", $SelectedManifestPath
   )
-  if ($RequirementsPath) {
-    $arguments += @("--requirements", $RequirementsPath)
-  }
   & $HostPython -B -I -S (Join-Path $PSScriptRoot "portable_runtime.py") @arguments
   Assert-LastExitCode -CommandLabel "portable runtime projection"
 }
@@ -294,6 +291,9 @@ function Set-BundleRuntimeEnvironment([string]$BundleRoot) {
   Remove-Item Env:VAPOURSYNTH_PLUGIN_PATH -ErrorAction SilentlyContinue
   $env:FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT = [string]$runtimeFingerprintProperty.Value
   $env:FRAME_COMPARE_RUNTIME_KIND = "windows-portable"
+  if ($bundleInfo.manifest_version -eq 3) {
+    $env:QT_MEDIA_BACKEND = "windows"
+  }
   $env:FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED = "0"
   $env:FRAME_COMPARE_FFMPEG_EXECUTABLE = "$BundleRoot\ffmpeg\bin\ffmpeg.exe"
   $env:FRAME_COMPARE_FFPROBE_EXECUTABLE = "$BundleRoot\ffmpeg\bin\ffprobe.exe"
@@ -336,9 +336,6 @@ function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion, [object]$Man
   }
 
   $manifestVersion = [int](Get-RequiredProperty -Object $manifest -Name "manifest_version" -Context "manifest")
-  if ($manifestVersion -ne 2) {
-    throw "Unsupported portable manifest version '$manifestVersion' (expected 2)."
-  }
   $bundleContract = Get-RequiredProperty -Object $manifest -Name "bundle" -Context "manifest"
   $manifestFingerprints = Get-RequiredProperty -Object $bundleContract -Name "runtime_fingerprints" -Context "manifest.bundle"
   $runtimeFingerprints = [ordered]@{}
@@ -470,6 +467,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
   $originalVsPluginPath = Get-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH"
   $originalMediaRuntimeFingerprint = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT"
   $originalRuntimeKind = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_KIND"
+  $originalQtMediaBackend = Get-ProcessEnvironmentValue -Name "QT_MEDIA_BACKEND"
   $originalRuntimeFfms2Required = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED"
   $originalFfmpegExecutable = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE"
   $originalFfprobeExecutable = Get-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE"
@@ -530,9 +528,23 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     Restore-ProcessEnvironmentValue -Name "VAPOURSYNTH_PLUGIN_PATH" -Value $originalVsPluginPath
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_MEDIA_RUNTIME_FINGERPRINT" -Value $originalMediaRuntimeFingerprint
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_KIND" -Value $originalRuntimeKind
+    Restore-ProcessEnvironmentValue -Name "QT_MEDIA_BACKEND" -Value $originalQtMediaBackend
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_RUNTIME_FFMS2_REQUIRED" -Value $originalRuntimeFfms2Required
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFMPEG_EXECUTABLE" -Value $originalFfmpegExecutable
     Restore-ProcessEnvironmentValue -Name "FRAME_COMPARE_FFPROBE_EXECUTABLE" -Value $originalFfprobeExecutable
+  }
+
+  $leftoverSmokePaths = @(
+    $smokePath
+    $mediaPath
+    $comparisonOneMediaPath
+    $comparisonTwoMediaPath
+    (Join-Path $BundleRoot "runtime-smoke-vsview.stdout.log")
+    (Join-Path $BundleRoot "runtime-smoke-vsview.stderr.log")
+    (Join-Path $BundleRoot "runtime-smoke-cache")
+  ) | Where-Object { Test-Path -LiteralPath $_ -ErrorAction Stop }
+  if ($leftoverSmokePaths) {
+    throw "Runtime smoke left files in the bundle: $($leftoverSmokePaths -join ', ')"
   }
 }
 
@@ -643,7 +655,7 @@ function Write-BundleInventory([string]$BundleRoot, [string]$CommitSha) {
     "--commit-sha", $CommitSha,
     "--output", (Join-Path $BundleRoot "bundle_inventory.json")
   )
-  if ($RequireReleasePublicKey) {
+  if ($ReleaseBuild) {
     $arguments += "--require-clean-repo"
   }
   & $HostPython -B -I -S @arguments
@@ -651,20 +663,19 @@ function Write-BundleInventory([string]$BundleRoot, [string]$CommitSha) {
 }
 
 function Main() {
-  if ($RequireReleasePublicKey) {
-    Assert-ReleasePublicKey
-  }
-
   Assert-BuildPathAncestry
   $useCommittedManifest = $ManifestPath -eq (Join-Path $PSScriptRoot "manifest.windows-x64.json")
   $selectedManifestPath = $ManifestPath
   if (!$useCommittedManifest) {
     $manifest = Get-Manifest -Path $selectedManifestPath
     Assert-BuildManifest -Manifest $manifest
+    if ($ReleaseBuild) {
+      throw "Portable release builds require the selected checkout's committed manifest.windows-x64.json."
+    }
   }
   Assert-BuildOutputPath
   $commitSha = $ExpectedCommitSha
-  if (!$hasExpectedCommitSha -or $RequireReleasePublicKey) {
+  if (!$hasExpectedCommitSha -or $ReleaseBuild) {
     $headSha = & git -C $RepoRoot rev-parse HEAD
     Assert-LastExitCode -CommandLabel "resolve portable source commit"
     if (!$hasExpectedCommitSha) {
@@ -674,7 +685,7 @@ function Main() {
   if ($commitSha -cnotmatch '\A[a-f0-9]{40}\z') {
     throw "Expected a complete lowercase 40-character source commit SHA."
   }
-  if ($RequireReleasePublicKey) {
+  if ($ReleaseBuild) {
     if ($commitSha -cne $headSha) {
       throw "Portable release source commit must match the live checkout: expected=$commitSha actual=$headSha"
     }
@@ -719,12 +730,9 @@ function Main() {
     $artifacts = @(Get-RequiredProperty -Object $manifest -Name "artifacts" -Context "manifest")
     Copy-Licenses -BundleRoot $OutDir -ManifestDir (Split-Path -Parent $selectedManifestPath) -Artifacts $artifacts
     Assert-RequiredPySideLicenseMetadata -BundleRoot $OutDir
+    Assert-BundleRuntime -BundleRoot $OutDir
+    Remove-PythonBytecodeCaches -BundleRoot $OutDir
     Write-BundleInventory -BundleRoot $OutDir -CommitSha $commitSha
-
-    if (!$AssemblyOnly) {
-      Assert-BundleRuntime -BundleRoot $OutDir
-      Remove-PythonBytecodeCaches -BundleRoot $OutDir
-    }
 
     Write-Host "OK: portable bundle assembled at $OutDir"
   } catch {

@@ -19,17 +19,20 @@ as a preset.
 - shared analysis, probe, and alignment caches;
 - run-local generated state.
 
-For Windows portable installs, choose a normal directory outside the replaceable bundle
-when reports and reusable state must survive a reinstall, update rollback, or bundle
-move.
+A Windows portable reinstall moves the bundle's non-empty `generated/` folder by
+default. Use `install.cmd -UserData Leave` to keep it in the active bundle when you
+switch. To use one generated-data root across bundles, set an external path in the
+config you use with both.
 
 ```toml
 [paths]
 generated_dir = "D:/FrameCompareData"
 ```
 
-Use a normal user-writable directory. The Windows updater and uninstaller leave an
-external generated-data root outside their replacement boundary.
+Choose a user-writable directory. The Windows installer and uninstaller leave
+external generated-data roots in place. Review the
+[Windows reinstall steps](../getting-started/windows-portable.md#update-behavior)
+before switching bundles.
 
 Environment variables and platform-specific path rules are documented in the
 [CLI behavioral contract](../current-cli-contract.md#shared-path-resolution-rules).

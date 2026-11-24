@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import stat
 import subprocess
@@ -13,7 +14,7 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from portable_archive import PathIndex, checked_zip, copy_exact, digest_file
+from portable_archive import PathIndex, copy_exact
 from portable_runtime import SITE, Layout, _unpack_archive, git_blob, record_bytes
 
 PREFIX = "frame-compare-portable-win-x64/"
@@ -96,60 +97,74 @@ def bundle_tree(root: Path) -> PathIndex:
     return index
 
 
-def assert_bundle(archive_path: Path, root: Path) -> None:
-    expected = bundle_tree(root)
-    actual = PathIndex()
-    with checked_zip(archive_path) as archive:
-        for entry in archive.infolist():
-            if not entry.filename.startswith(PREFIX):
-                raise ValueError("Portable archive member outside its canonical root")
-            name = entry.filename.removeprefix(PREFIX).removesuffix("/")
-            if not name and entry.is_dir():
-                continue
-            actual.add(name, directory=entry.is_dir())
-            if entry.is_dir():
-                if name not in expected.directories:
-                    raise ValueError(f"Unexpected portable archive directory: {name}")
-                continue
-            target = root / name
-            if name not in expected.files or entry.file_size != target.stat().st_size:
-                raise ValueError(f"Unexpected portable member or wrong size: {name}")
-            with archive.open(entry) as source:
-                if copy_exact(source, entry.file_size) != digest_file(target):
-                    raise ValueError(
-                        f"Portable member does not match independently derived bytes: {name}"
-                    )
-    if actual.files != expected.files or actual.directories != expected.directories:
-        raise ValueError("Portable archive omits independently derived files or directories")
-
-
 def write_bundle(root: Path, destination: Path) -> None:
     index = bundle_tree(root)
-    with zipfile.ZipFile(
-        destination, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=False
-    ) as archive:
-        for name in ["", *sorted(index.directories)]:
-            info = zipfile.ZipInfo(PREFIX + (name + "/" if name else ""))
-            info.create_system = 3
-            info.external_attr = stat.S_IFDIR << 16 | 0x10
-            archive.writestr(info, b"")
-        for name in sorted(index.files):
-            info = zipfile.ZipInfo(PREFIX + name)
-            info.create_system = 3
-            info.external_attr = (stat.S_IFREG | 0o644) << 16
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.compress_level = 6
-            with (root / name).open("rb") as source, archive.open(info, "w") as target:
-                copy_exact(source, (root / name).stat().st_size, target)
+    inventory_name = "bundle_inventory.json"
+    inventory_bytes = (root / inventory_name).read_bytes()
+    inventory = json.loads(inventory_bytes.decode("utf-8"))["archive"]
+    records = {entry["path"]: entry for entry in inventory["files"]}
+    listed = set(records)
+    actual = set(index.files) - {inventory_name}
+    if listed != actual:
+        raise ValueError(
+            f"Bundle files differ from inventory: unlisted={sorted(actual - listed)}, "
+            f"missing={sorted(listed - actual)}"
+        )
+    if "directories" not in inventory:
+        raise ValueError("Bundle inventory is missing archive.directories")
+    directories = set(inventory["directories"])
+    if directories != index.directories:
+        raise ValueError(
+            "Bundle directories differ from inventory: "
+            f"unlisted={sorted(index.directories - directories)}, "
+            f"missing={sorted(directories - index.directories)}"
+        )
+
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent, suffix=".tmp", delete=False
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            with zipfile.ZipFile(
+                temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=False
+            ) as archive:
+                for name in ["", *sorted(index.directories)]:
+                    info = zipfile.ZipInfo(PREFIX + (name + "/" if name else ""))
+                    info.create_system = 3
+                    info.external_attr = stat.S_IFDIR << 16 | 0x10
+                    archive.writestr(info, b"")
+                for name in sorted(index.files):
+                    info = zipfile.ZipInfo(PREFIX + name)
+                    info.create_system = 3
+                    info.external_attr = (stat.S_IFREG | 0o644) << 16
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    info.compress_level = 6
+                    if name == inventory_name:
+                        archive.writestr(info, inventory_bytes)
+                        continue
+                    member = root / name
+                    with member.open("rb") as source, archive.open(info, "w") as target:
+                        digest = copy_exact(source, member.stat().st_size, target)
+                    record = records[name]
+                    if info.file_size != record["bytes"] or digest != record["sha256"]:
+                        raise ValueError(f"Bundle file contents differ from inventory: {name}")
+        if sys.platform == "win32":
+            temporary_path.rename(destination)
+        else:
+            # POSIX rename replaces an existing destination. A hard link fails if it exists.
+            destination.hardlink_to(temporary_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("install-project", "pack", "verify-and-pack"))
+    parser.add_argument("mode", choices=("install-project", "pack"))
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--commit-sha")
-    parser.add_argument("--candidate", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.mode == "install-project":
@@ -161,16 +176,7 @@ def main() -> None:
         return
     if args.output is None:
         parser.error("portable packaging requires --output")
-    if args.mode == "verify-and-pack":
-        if args.candidate is None:
-            parser.error("verify-and-pack requires --candidate")
-        assert_bundle(args.candidate, args.root)
-        write_bundle(args.root, args.output)
-        if digest_file(args.candidate) != digest_file(args.output):
-            args.output.unlink()
-            raise ValueError("Portable ZIP differs from the independently rebuilt canonical bytes")
-    else:
-        write_bundle(args.root, args.output)
+    write_bundle(args.root, args.output)
 
 
 if __name__ == "__main__":
