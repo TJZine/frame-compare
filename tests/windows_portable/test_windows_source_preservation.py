@@ -1315,53 +1315,85 @@ def test_source_install_pipeline_stop_after_first_rename_restores_planned_folder
     assert not (candidate / "generated").exists()
 
 
-@pytest.mark.parametrize("state", ["both-populated", "absent-source-empty-target", "empty-source"])
-def test_source_install_rollback_retains_marker_for_unreconciled_folders(
-    pwsh: str, tmp_path: Path, source_fixture: tuple[Path, Path, Path], state: str
+_FOLDER_STATES = ("absent", "empty", "populated")
+
+
+@pytest.mark.parametrize("source_state", _FOLDER_STATES)
+@pytest.mark.parametrize("target_state", _FOLDER_STATES)
+def test_source_install_rollback_folder_model(
+    pwsh: str,
+    tmp_path: Path,
+    source_fixture: tuple[Path, Path, Path],
+    source_state: str,
+    target_state: str,
 ) -> None:
     script, previous, pointer = source_fixture
     pointer_before = pointer.read_bytes()
     original_config = (previous / "config/config.toml").read_bytes()
     clips = _snapshot(previous / "comparison_videos")
     generated = _snapshot(previous / "generated")
-    clear_target = "      [IO.File]::Delete((Join-Path $BundleRoot 'config/config.toml'))"
-    change = {
-        "both-populated": """      $newSource = Join-Path $previousBundle 'config'
-      [IO.Directory]::CreateDirectory($newSource) | Out-Null
-      [IO.File]::WriteAllText((Join-Path $newSource 'config.toml'), 'concurrent edit')""",
-        "absent-source-empty-target": clear_target,
-        "empty-source": clear_target
-        + "\n      [IO.Directory]::CreateDirectory((Join-Path $previousBundle 'config')) | Out-Null",
-    }[state]
     _inject(
         _activation_helper(script),
         _COMMIT,
-        change + "\n      throw 'injected conflict during rollback'",
+        """      $oldConfig = Join-Path $previousBundle 'config'
+      $newConfig = Join-Path $BundleRoot 'config'
+      if ($env:SOURCE_STATE -ne 'absent') {
+        [IO.Directory]::CreateDirectory($oldConfig) | Out-Null
+        if ($env:SOURCE_STATE -eq 'populated') {
+          [IO.File]::WriteAllText((Join-Path $oldConfig 'config.toml'), 'concurrent edit')
+        }
+      }
+      if ($env:TARGET_STATE -ne 'populated') {
+        [IO.File]::Delete((Join-Path $newConfig 'config.toml'))
+        if ($env:TARGET_STATE -eq 'absent') { [IO.Directory]::Delete($newConfig) }
+      }
+      throw 'injected activation failure'""",
     )
-    result = _run(pwsh, "function uv {}; & $env:INSTALL -SkipSync", tmp_path, INSTALL=str(script))
-    assert result.returncode != 0
+    result = _run(
+        pwsh,
+        "function uv {}; try { & $env:INSTALL -SkipSync } "
+        "catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }",
+        tmp_path,
+        INSTALL=str(script),
+        SOURCE_STATE=source_state,
+        TARGET_STATE=target_state,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode != 0 and "injected activation failure" in output, output
     assert pointer.read_bytes() == pointer_before
+    candidate = next((script.parents[2] / "dist").iterdir())
     marker = pointer.parent / "source-migration.pending.json"
-    assert marker.is_file()
-    candidate = Path(json.loads(marker.read_text())["candidate_bundle"])
-    if state == "both-populated":
-        assert (previous / "config/config.toml").read_text() == "concurrent edit"
-        assert (candidate / "config/config.toml").read_bytes() == original_config
+
+    rename_trace = (("populated", "empty"), ("populated", "absent"), ("absent", "populated"))
+    observed = (source_state, target_state)
+    if observed in rename_trace:
+        assert not marker.exists(), observed
     else:
-        assert (candidate / "config").is_dir()
-        assert not list((candidate / "config").iterdir())
-        if state == "empty-source":
-            assert (previous / "config").is_dir()
-            assert not list((previous / "config").iterdir())
-        else:
-            assert not (previous / "config").exists()
+        assert marker.is_file(), f"Rollback discarded the marker for {observed}"
+        assert Path(json.loads(marker.read_text())["candidate_bundle"]) == candidate
+        assert "Could not reconcile user folders: config" in output
+        assert str(previous / "config") in output and str(candidate / "config") in output
+
+    old_config = previous / "config"
+    new_config = candidate / "config"
+    assert new_config.is_dir()
+    if observed == rename_trace[-1]:
+        assert _snapshot(old_config) == {"config.toml": original_config}
+        assert not list(new_config.iterdir())
+    else:
+        assert old_config.is_dir() == (source_state != "absent")
+        expected_source = {"config.toml": b"concurrent edit"} if source_state == "populated" else {}
+        assert _snapshot(old_config) == expected_source
+        if source_state == "empty":
+            assert not list(old_config.iterdir())
+        expected_target = {"config.toml": original_config} if target_state == "populated" else {}
+        assert _snapshot(new_config) == expected_target
+        if target_state != "populated":
+            assert not list(new_config.iterdir())
     assert _snapshot(previous / "comparison_videos") == clips
     assert _snapshot(previous / "generated") == generated
     assert not list((candidate / "comparison_videos").iterdir())
     assert not (candidate / "generated").exists()
-    output = result.stdout + result.stderr
-    assert "Could not reconcile user folders: config" in output
-    assert str(previous / "config") in output and str(candidate / "config") in output
 
 
 @pytest.mark.parametrize("stop_at", ["before-write", "after-write"])

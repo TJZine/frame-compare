@@ -80,13 +80,25 @@ function Get-PortableMoveSource([byte[]]$PointerBytes, [string]$BundleRoot) {
   return $previous
 }
 
-function Test-NonEmptyDirectory([string]$Path) {
+function Get-PortableUserFolderState([string]$Path) {
   Assert-NoReparsePointAncestor -Path $Path -Label "User data location"
-  if (!(Test-Path -LiteralPath $Path)) { return $false }
-  if (!(Test-Path -LiteralPath $Path -PathType Container)) {
-    throw "User data location is not a folder: $Path"
+  try { $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop }
+  catch [System.Management.Automation.ItemNotFoundException] { return "absent" }
+  if (!$item.PSIsContainer) { throw "User data location is not a folder: $Path" }
+  if (@(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop).Count -gt 0) { return "populated" }
+  return "empty"
+}
+
+function Get-PortableMigrationLocation($Folder) {
+  $source = Get-PortableUserFolderState $Folder.Source
+  $target = Get-PortableUserFolderState $Folder.Target
+  $state = "conflict"
+  if ($source -eq "populated" -and $target -ne "populated") { $state = "in place" }
+  elseif ($source -eq "absent" -and $target -eq "populated") { $state = "moved" }
+  return [pscustomobject]@{
+    Name = $Folder.Name; Source = $Folder.Source; Target = $Folder.Target
+    SourceExists = $source -ne "absent"; TargetExists = $target -ne "absent"; State = $state
   }
-  return @((Get-ChildItem -LiteralPath $Path -Force)).Count -gt 0
 }
 
 function Write-PendingMigrationRefusal([string]$MarkerPath, [string]$PointerPath) {
@@ -99,17 +111,7 @@ function Write-PendingMigrationRefusal([string]$MarkerPath, [string]$PointerPath
     try { $active = Get-PortablePointerBundle (Read-OptionalPortableFile $PointerPath) }
     catch { Write-Warning "Active pointer unavailable: $($_.Exception.Message)" }
     $locations = @(foreach ($folder in @($pending.folders)) {
-      $sourceExists = Test-Path -LiteralPath $folder.source
-      $targetExists = Test-Path -LiteralPath $folder.target
-      $sourceHasData = Test-NonEmptyDirectory $folder.source
-      $targetHasData = Test-NonEmptyDirectory $folder.target
-      $state = "conflict"
-      if ($sourceHasData -and !$targetHasData) { $state = "in place" }
-      elseif ($targetHasData -and !$sourceExists) { $state = "moved" }
-      [pscustomobject]@{
-        Name = $folder.name; Source = $folder.source; Target = $folder.target
-        SourceExists = $sourceExists; TargetExists = $targetExists; State = $state
-      }
+      Get-PortableMigrationLocation $folder
     })
     if ($locations.Count -eq 0) { throw "Marker contains no user folders" }
     Write-Warning "Previous bundle: $previous"
@@ -552,7 +554,7 @@ function Invoke-PortableActivation(
     if ($UserData -eq "Move" -and $null -ne $previousBundle) {
       $folders = @(foreach ($name in @("config", "comparison_videos", "generated")) {
         $source = Join-Path $previousBundle $name
-        if (Test-NonEmptyDirectory $source) {
+        if ((Get-PortableUserFolderState $source) -eq "populated") {
           [pscustomobject]@{ Name = $name; Source = $source; Target = (Join-Path $BundleRoot $name) }
         }
       })
@@ -572,14 +574,15 @@ function Invoke-PortableActivation(
     try {
       if ($folders.Count -gt 0) {
         foreach ($folder in $folders) {
-          if (Test-NonEmptyDirectory $folder.Target) { throw "New user folder is occupied: $($folder.Target)" }
+          if ((Get-PortableUserFolderState $folder.Target) -eq "populated") { throw "New user folder is occupied: $($folder.Target)" }
         }
         Write-PendingMigrationMarker -Path $pendingMigrationPath -PreviousBundle $previousBundle -BundleRoot $BundleRoot -Folders $folders -PointerBytes $originalPointer
         $markerWritten = $true
         foreach ($folder in $folders) {
-          if (!(Test-NonEmptyDirectory $folder.Source)) { throw "User folder changed: $($folder.Source)" }
-          if (Test-NonEmptyDirectory $folder.Target) { throw "New user folder is occupied: $($folder.Target)" }
-          if ([IO.Directory]::Exists($folder.Target)) {
+          if ((Get-PortableUserFolderState $folder.Source) -ne "populated") { throw "User folder changed: $($folder.Source)" }
+          $targetState = Get-PortableUserFolderState $folder.Target
+          if ($targetState -eq "populated") { throw "New user folder is occupied: $($folder.Target)" }
+          if ($targetState -eq "empty") {
             $placeholders.Add($folder.Target)
             [IO.Directory]::Delete($folder.Target)
           }
@@ -607,10 +610,9 @@ function Invoke-PortableActivation(
             $unreconciled = @()
             for ($index = $folders.Count - 1; $index -ge 0; $index--) {
               $folder = $folders[$index]
-              $sourceHasData = Test-NonEmptyDirectory $folder.Source
-              $targetHasData = Test-NonEmptyDirectory $folder.Target
-              if ($sourceHasData -and !$targetHasData) { continue }
-              if ($targetHasData -and !(Test-Path -LiteralPath $folder.Source)) {
+              $location = Get-PortableMigrationLocation $folder
+              if ($location.State -eq "in place") { continue }
+              if ($location.State -eq "moved") {
                 [IO.Directory]::Move($folder.Target, $folder.Source)
                 continue
               }
